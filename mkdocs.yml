@@ -95,6 +95,7 @@ nav:
     - Build Output Schema: reference/build-output-schema.md
     - Project Targets Schema: reference/project-targets-schema.md
     - resolve-baseline Action: reference/resolve-baseline.md
+    - check-target Action: reference/check-target.md
     - Configuration File: reference/config-file.md
     - Environment Variables: reference/environment.md
     - Platforms: reference/platforms.md

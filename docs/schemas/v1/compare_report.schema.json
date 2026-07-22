@@ -63,6 +63,77 @@
       "type": "string",
       "description": "Schema 2.12 (ADR-047 §7). Which baseline channel (e.g. \"accepted-main\", a release tag) old_file/old_version was resolved from. Reserved for G30 P1; not yet populated."
     },
+    "compatibility_verdict": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). Mirrors verdict's exact casing/enum -- a separate field name so aggregate.py's existing verdict/severity parsing stays untouched while richer consumers (PR comment, SARIF, humans) read this one. Populated by actions/check-target; omitted when the underlying report has no verdict in Verdict's five-value enum (e.g. an operational-failure or bootstrap report, which stay verdict: \"ERROR\"/\"NO_BASELINE\" instead).",
+      "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+    },
+    "policy_gate_decision": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). \"pass\" or \"fail\" -- this check's own real gate decision, computed from the report's real severity/exit_code before any gate-mode: advisory neutralization of the legacy severity block. New vocabulary, not a Verdict mirror.",
+      "enum": ["pass", "fail"]
+    },
+    "check_evidence_coverage": {
+      "type": "object",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). Not layer_coverage (a different, existing per-L0-L5-layer array) -- this is check-target's own state/reasons summary of whether requested_depth was actually achieved.",
+      "additionalProperties": true,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["complete", "degraded", "bootstrap", "unknown"]
+        },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "operational_errors": {
+      "type": "array",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). Non-empty exactly when this check hit an infrastructure/config problem (e.g. a resolve-baseline failure) rather than -- or in addition to -- a compatibility finding. Empty means clean.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["kind", "message"],
+        "properties": {
+          "kind": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      }
+    },
+    "publication": {
+      "type": "object",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). Whether/where this report was actually published -- distinct from whether it was computed, so a downstream consumer can tell \"no publication happened\" apart from \"no report was produced at all.\"",
+      "additionalProperties": true,
+      "properties": {
+        "state": { "type": "string", "enum": ["published", "skipped", "failed"] },
+        "channels": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "baseline_bootstrap": {
+      "type": "boolean",
+      "description": "Schema 2.13 (ADR-047 §6/§7, G30 P1.3). True only on a bootstrap \"no baseline published yet\" advisory pass (required: false with no baseline set yet) -- the explicit report field ADR-047 §6 requires for that case."
+    },
+    "project": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). The project identifier (e.g. \"owner/repo\") this check ran for."
+    },
+    "head_sha": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). The candidate commit SHA this check analyzed."
+    },
+    "base_ref": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). The base ref this check's candidate was compared against, when known (e.g. a PR's target branch)."
+    },
+    "tool_version": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). The abicheck version that produced this report."
+    },
+    "action_version": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). The abicheck/abicheck Action ref (e.g. \"abicheck/abicheck@v1\") that ran this check."
+    },
     "old_file": { "$ref": "#/$defs/fileMetadata" },
     "new_file": { "$ref": "#/$defs/fileMetadata" },
     "summary": { "$ref": "#/$defs/summary" },

@@ -376,7 +376,7 @@ bundle resolution, and archive extraction (flat and one-level-nested).
 `docs/reference/resolve-baseline.md` (new, linked from mkdocs nav)
 documents the Action's contract.
 
-### P1.3 — `actions/check-target`
+### P1.3 — `actions/check-target` — **done**
 
 **Scope note, required by review — this item is not done until the S22/S23
 root-action gap is resolved, not merely acknowledged.** ADR-047 §4 flags
@@ -505,6 +505,107 @@ already exercises the root action per AGENTS.md's tag-pinning note on that
 file — extend it, don't create a parallel test harness); add a
 multi-profile-same-target fixture case asserting `aggregate` does not
 collide/error.
+
+**Status:** implemented. **First required sub-task (S22/S23 root-action
+gap) — resolved, correcting the ADR's own stale premise:** re-reading
+`action.yml`/`action/run.sh` as they exist today (not as ADR-047 §3/§4
+describe them) shows `used-by`/`verify-runtime`/`required-symbol`/
+`required-symbols` are already declared inputs, already forwarded to
+`compare --used-by`/`--required-symbol`/`--required-symbols`
+(`action/run.sh:377-386`) — added by #570/#579, both landed *before*
+ADR-047 (#610) was written. The ADR's "the root action.yml cannot express
+`--used-by`/`--required-symbols` today" finding (§3) was already false at
+the time it was written; neither of its two proposed fixes (extend
+`action.yml`, or have `check-target` call the CLI directly) was needed.
+`check-target` simply exposes its own `target-kind: library|app-consumer|
+plugin-contract` input and forwards `consumer-binary`/`contract-file` to
+the root Action's existing `used-by`/`required-symbols` inputs when
+building its nested `Run analysis` step. The *other* gap ADR-047 §3
+correctly identifies — the "library redirect" (an `app-consumer`/
+`plugin-contract` target's baseline/candidate lookup must resolve through
+its `library` field, while the check's own identity stays the contract
+target's name) — is real and is implemented via a separate
+`baseline-target` input (defaults to `name`; the caller sets it to the
+referenced library's id), keeping `resolve-baseline`'s lookup key and the
+report envelope's `check_id`/`target_id` deliberately distinct, per §3.
+**Second required sub-task (`baseline: none` bypass) — implemented as a
+real branch, not documentation:** `action.yml`'s `Resolve baseline` step
+carries `if: inputs.baseline-channel != 'none'`, and every downstream step
+(`Run analysis`, the two `collect-facts` steps) conditions on
+`inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome ==
+'resolved'` — a skipped `resolve` step's outputs are empty strings, so this
+expression evaluates correctly with no separate branch needed.
+`baseline-channel: none` runs `mode: scan` (no `--against`) instead of
+`compare`, matching S5's audit path exactly; `tests/test_action_check_target.py::
+TestFinalizeAugmentMode::test_baseline_channel_none_skips_resolve_and_still_augments`
+covers it end-to-end at the shell level, and `test-check-target` in
+`.github/workflows/test-action.yml` exercises the full YAML composition
+(including this bypass's sibling branches) against a real `abicheck
+compare` run. **Third/fourth required sub-tasks (unconditional depth-suffixed
+`check_id`/`target_id`, dual-write, `gate-mode`-aware neutralization,
+`continue-on-error` + trailing finalize step) — all implemented exactly as
+specified,** in a new pure module, `abicheck/buildsource/check_report.py`
+(`build_check_id`, `resolve_effective_depth`, `augment_report`,
+`build_operational_error_report`, `build_bootstrap_report`,
+`final_exit_code`), backing a thin CLI wrapper
+(`actions/check-target/report_envelope.py`, mirroring
+`resolve_baseline.py`'s pattern) that `run.sh` drives. **A real gap found
+and closed during implementation, not anticipated by the ADR:** the root
+Action's *legacy* (no `--severity-*` flag) compare exit scheme omits the
+`severity` JSON block entirely — confirmed by running `abicheck compare`
+directly — which would leave `gate-mode: advisory` with nothing to
+neutralize and let `abicheck/aggregate.py`'s `GateInfo.from_report_data`
+fall back to `legacy_from_verdict(verdict)`, still deriving a blocking gate
+from the real `BREAKING`/`API_BREAK` verdict regardless of `gate-mode`.
+Fixed by giving `check-target`'s own `severity-preset` input a `'default'`
+default (root `action.yml`'s own input is deliberately left unset) instead
+of leaving it unset, so the nested `Run analysis` step always requests the
+severity-aware scheme and a `severity` block is always present to dual-write
+and (for `advisory`) neutralize. `deferred` reports keep that block's real
+`exit_code`/`blocking` untouched by design — `check-project.yml`'s future
+trailing `aggregate` job (P1.4) needs the real value to compute the gate
+centrally; only `advisory` zeroes it. Verified end-to-end by hand (not only
+via the test suite): staged a real `manifest.json` + snapshot, ran
+`actions/resolve-baseline/run.sh`, then a real `abicheck compare
+--severity-preset default`, then `actions/check-target/run.sh`'s finalize
+step, for all three `gate-mode` values, confirming the exit
+codes/persisted-severity behavior documented above. The S14 bundle-scoped
+path is implemented as ADR-047 §8's correction actually resolves it: no
+separate "bundle compare" CLI command exists (`compare-release` is
+intentionally unregistered on `main`, invoked only by `compare`'s own
+directory-operand fan-out per ADR-037 D7), so `kind: bundle` simply hands
+`resolve-baseline`'s `binaries-dir` output to the same nested `Run analysis`
+step as a directory `old-library` — `compare`'s existing directory fan-out
+handles the rest. `actions/baseline` still doesn't stage a `binaries/`
+directory (G30 P1.6, not built here), so this path is exercised against a
+hand-authored fixture in the same "defines the contract, no producer yet"
+scoping P1.1/P1.2 already used. **The multi-profile-same-target `aggregate`
+non-collision fixture is deferred to P1.4, not skipped:** `check-target` on
+its own never invokes `aggregate` or produces more than one report per
+call, so there is nothing to fan in yet; `build_check_id`'s own uniqueness
+across `requested_depth` is unit-tested here
+(`tests/test_check_report.py::TestBuildCheckId::
+test_unconditional_depth_suffix_disambiguates_shadow_checks`), and the real
+multi-check `aggregate` fixture belongs with P1.4's `run-plan.json`
+generator, which is what actually produces more than one `check-target`
+call to fan in. `abicheck/schemas/compare_report.schema.json` gained
+`compatibility_verdict`/`policy_gate_decision`/`check_evidence_coverage`/
+`operational_errors`/`publication`/`baseline_bootstrap`/`project`/
+`head_sha`/`base_ref`/`tool_version`/`action_version` as additive/optional
+properties (`report_schema_version` bumped `2.12` → `2.13`,
+`scan_schema_version` `1.1` → `1.2`, both documented in
+`abicheck/schemas/__init__.py`); `docs/reference/check-target.md` (new,
+linked from mkdocs nav) documents the full contract, and
+`docs/reference/resolve-baseline.md`'s "not built yet" status note is
+updated to point at it. `tests/test_check_report.py` (35 cases) covers the
+pure logic; `tests/test_action_check_target.py` (22 cases) covers
+`validate-inputs.sh`/`run.sh`'s bash orchestration end-to-end, including
+every `gate-mode` × outcome (resolved/operational-error/bootstrap)
+combination and the evidence-degradation branch; `test-check-target` in
+`.github/workflows/test-action.yml` is the required end-to-end fixture job,
+exercising the real nested `uses:` composition (`resolve-baseline` → the
+root Action → the finalize step) against real `abicheck compare` output,
+not simulated env vars.
 
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
