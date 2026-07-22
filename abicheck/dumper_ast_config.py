@@ -208,7 +208,18 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
             content = p.read_bytes()
         except OSError:
             continue
-        content = re.sub(rb"/\*.*?\*/", b"", content, flags=re.DOTALL)
+        # Blank string/char literals first so a literal containing comment-like
+        # text ("/* not a comment */") is never mistaken for a real comment.
+        content = _strip_literals(content)
+        # Strip real block comments, but preserve the embedded newline count so
+        # later-reported line numbers stay accurate for code following a
+        # multi-line comment (CodeRabbit review).
+        content = re.sub(
+            rb"/\*.*?\*/",
+            lambda m: b"\n" * m.group(0).count(b"\n"),
+            content,
+            flags=re.DOTALL,
+        )
         for start_no, logical in _iter_logical_lines(content):
             if _is_preprocessor_directive(logical):
                 continue

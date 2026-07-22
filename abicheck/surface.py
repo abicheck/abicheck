@@ -831,7 +831,32 @@ def _classify_hidden_friend_surface(
     """
     owner = change.caused_by_type
     if owner:
-        reason = _origin_reason(surf_old, surf_new, owner)
+        # RecordType.name stays deliberately bare (model.py) — a namespaced
+        # owner ("ns::Foo", from castxml/clang's qualified-name walk) would
+        # never match origin_by_key's bare-name keys directly. Resolve both
+        # the qualified spelling and its trailing ``::`` segment, exactly
+        # like every other type-name lookup in this module (Codex review),
+        # and filter to identifiers the surface actually knows about before
+        # requiring unanimous agreement — an unindexed candidate must not
+        # poison _confident_header_reason's "every implicated type agrees"
+        # check into never demoting (mirrors _classify_type_level).
+        known = {
+            c
+            for c in _type_identifiers(owner)
+            if c in surf_old.all_types or c in surf_new.all_types
+        }
+        if any(
+            surf_old.origin_by_key.get(c, ScopeOrigin.UNKNOWN)
+            == ScopeOrigin.PUBLIC_HEADER
+            or surf_new.origin_by_key.get(c, ScopeOrigin.UNKNOWN)
+            == ScopeOrigin.PUBLIC_HEADER
+            for c in known
+        ):
+            # Owner confidently public on either side — never let a
+            # possibly-inconsistent friend-own-origin record (the fallback
+            # below) override that signal (CodeRabbit review).
+            return True, None
+        reason = _confident_header_reason(known, surf_old, surf_new) if known else None
         if reason is not None:
             return False, reason
     sym = change.symbol or ""

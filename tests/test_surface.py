@@ -1042,11 +1042,16 @@ class TestProvenanceReasons:
 
 class TestHiddenFriendSurface:
     def _surf_with_owner(self, owner_origin):
+        # RecordType.name stays deliberately bare (model.py) — castxml/clang
+        # only ever populate the qualified spelling on hidden_friend_owner /
+        # RecordType.qualified_name, never on RecordType.name itself. Using
+        # a bare "point" here (not "mylib::point") reproduces the real shape
+        # a namespaced owner has in a genuine snapshot (Codex review).
         snap = AbiSnapshot(
             library="l",
             version="1",
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
-            types=[_rec("mylib::point", origin=owner_origin)],
+            types=[_rec("point", origin=owner_origin)],
         )
         return compute_public_surface(snap)
 
@@ -1072,6 +1077,35 @@ class TestHiddenFriendSurface:
 
     def test_public_project_hidden_friend_retained(self):
         s = self._surf_with_owner(ScopeOrigin.PUBLIC_HEADER)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (True, None)
+
+    def test_confidently_public_owner_overrides_divergent_friend_own_origin(self):
+        """Regression (CodeRabbit review): the owner's confident PUBLIC_HEADER
+        verdict must short-circuit before the symbol-level fallback runs — a
+        friend function whose *own* recorded origin happens to disagree
+        (e.g. system-header) must not override an owner already confirmed
+        public, matching this module's anti-hiding "either side public blocks
+        demotion" convention elsewhere (_origin_reason)."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "mylib::operator==",
+                    mangled="_ZN5mylibeqERKNS_5pointES2_",
+                    origin=ScopeOrigin.SYSTEM_HEADER,
+                ),
+            ],
+            types=[_rec("point", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s = compute_public_surface(snap)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1106,6 +1140,31 @@ class TestHiddenFriendSurface:
             description="",
         )
         assert classify_change_surface(c, s, s) == (True, None)
+
+    def test_namespaced_owner_resolves_via_bare_tail(self):
+        """Regression (Codex review): hidden_friend_owner is the fully
+        qualified owner name ("ns::Foo") from castxml/clang's qualified-name
+        walk, but RecordType.name stays bare ("Foo") by design — a direct
+        _origin_reason(..., "ns::Foo") lookup would never match origin_by_key
+        (keyed by the bare name), silently keeping every namespaced-owner
+        hidden friend in the public surface regardless of its real origin.
+        Uses a qualified caused_by_type against a bare-named record, exactly
+        the real-world shape (unlike _surf_with_owner's other callers, which
+        already exercise this via the shared bare-name fixture)."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("point", origin=ScopeOrigin.SYSTEM_HEADER)],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
 
     def test_owner_unresolved_falls_back_to_function_own_origin(self):
         # No caused_by_type, but the friend function's own recorded origin

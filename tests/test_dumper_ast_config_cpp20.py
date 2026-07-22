@@ -121,3 +121,34 @@ def test_cpp20_detector_reports_source_location(tmp_path):
     assert len(reqs) == 1
     assert reqs[0].line == 2
     assert reqs[0].path.endswith("a.h")
+
+
+def test_cpp20_detector_reports_correct_line_after_multiline_comment(tmp_path):
+    """Regression (CodeRabbit review): stripping /* */ comments before line
+    splitting used to delete their embedded newlines too, so any reported
+    line number after a multi-line block comment was too low relative to
+    the real file."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "/*\n"
+        "  a multi-line\n"
+        "  block comment\n"
+        "*/\n"
+        "template<class T> concept C = true;\n",
+    )
+    reqs = _find_cpp20_requirements(headers)
+    assert len(reqs) == 1
+    assert reqs[0].line == 5
+
+
+def test_cpp20_detector_ignores_comment_like_text_in_string(tmp_path):
+    """A string literal containing comment-like text ("/* ... */") must not
+    be mistaken for a real comment and blindly stripped before the
+    literal-aware requires/concept check runs (CodeRabbit review)."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        'const char* s = "/* not a comment */ requires Concept<T>";\n',
+    )
+    assert _detect_cpp20_headers(headers) is False

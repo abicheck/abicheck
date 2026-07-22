@@ -786,7 +786,7 @@ class _CastxmlParser:
         """
         owner_by_id: dict[str, str] = {}
         for el in self._record_els:
-            if el.tag not in ("Class", "Struct"):
+            if el.tag not in ("Class", "Struct", "Union"):
                 continue
             befriending = el.get("befriending", "")
             if not befriending:

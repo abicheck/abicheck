@@ -157,3 +157,48 @@ class TestHiddenFriendDumper:
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         funcs = parser.parse_functions()
         assert all(f.name.startswith("operator") for f in funcs)
+
+    def test_hidden_friend_owner_resolved_to_qualified_class_name(self) -> None:
+        """``hidden_friend_owner`` is resolved from the befriending class's
+        ``context`` chain — the class ``point`` is nested in namespace
+        ``mylib``, so the owner must be the qualified ``mylib::point``."""
+        root = _make_root_with_hidden_friend()
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        funcs = parser.parse_functions()
+        assert funcs[0].is_hidden_friend is True
+        assert funcs[0].hidden_friend_owner == "mylib::point"
+
+    def test_union_befriending_marks_hidden_friend_and_owner(self) -> None:
+        """A ``friend`` declared inside a union must be tracked the same as
+        one declared inside a class/struct (Codex review: _record_els
+        already includes Union elements, but the owner-resolution filter
+        previously excluded them)."""
+        root = Element("CastXML", attrib={"format": "1.4.0"})
+        SubElement(root, "File", attrib={"id": "f1", "name": "mylib.h"})
+        SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+        SubElement(root, "FundamentalType", attrib={"id": "_b", "name": "bool"})
+
+        un = SubElement(root, "Union")
+        un.set("id", "_14")
+        un.set("name", "variant")
+        un.set("context", "_1")
+        un.set("file", "f1")
+        un.set("location", "f1:3")
+        un.set("befriending", "_34")
+        un.set("size", "64")
+        un.set("align", "32")
+
+        op = SubElement(root, "OperatorFunction")
+        op.set("id", "_34")
+        op.set("name", "==")
+        op.set("returns", "_b")
+        op.set("context", "_1")
+        op.set("file", "f1")
+        op.set("location", "f1:9")
+        op.set("mangled", "_ZeqRK7variantS0_")
+
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        funcs = parser.parse_functions()
+        assert len(funcs) == 1
+        assert funcs[0].is_hidden_friend is True
+        assert funcs[0].hidden_friend_owner == "variant"
