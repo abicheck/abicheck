@@ -1,3 +1,14 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: intermediate
+canonical_for:
+  - platform-support-matrix
+lifecycle: active
+generated: false
+---
+
 # Limitations & Known Boundaries
 
 `abicheck` is designed to catch real ABI and API breaks with high accuracy, but has specific

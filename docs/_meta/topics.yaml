@@ -81,3 +81,8 @@ topics:
       - abicheck/change_registry.py
       - abicheck/checker_policy.py
     reference_page: reference/detector-spec.md
+
+  platform-support-matrix:
+    canonical_page: concepts/limitations.md
+    allowed_summaries:
+      - concepts/architecture.md
