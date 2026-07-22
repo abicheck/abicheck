@@ -85,6 +85,15 @@ information beyond the all-defaults case** — a plain finding with no
 reachability/impact evidence at all won't have this key, only
 `reachability_state: "unknown"`.
 
+Both fields appear everywhere a finding is serialized: the full `changes[]`
+list, `--report-mode leaf`'s `leaf_changes[]`/`changes[]` union (root type
+changes route through a separate builder that mirrors the same fields), and
+each entry in `suppression.suppressed_changes[]` — a suppressed finding's
+`decision.state` is always `"suppressed"` there, so its `impact_assessment`
+is always present. SARIF carries the same two fields as `properties.reachabilityState`/
+`properties.impactAssessment`. JUnit does not — see ADR-050 / ADR-048 for
+why.
+
 ## What this does not cover yet
 
 `impact_assessment` does not (yet) include which consumers or use cases are

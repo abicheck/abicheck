@@ -342,6 +342,16 @@ def _to_json_leaf(
             proof_path = getattr(c, "reachability_proof_path", None)
             if proof_path:
                 entry["reachability_proof_path"] = proof_path
+        # G29 Phase 3 slice 1 (ADR-050, Codex review): _leaf_entry duplicates
+        # _change_to_dict's reachability fields rather than routing through
+        # it (see the ADR-044 block above) -- reachability_state/
+        # impact_assessment follow the same precedent so a root TYPE_*
+        # change (exactly the category the layout-reachability walk tags
+        # most often) doesn't lose them in --report-mode leaf.
+        assessment = assess_change(c)
+        entry["reachability_state"] = assessment.reachability_state.value
+        if assessment.has_signal():
+            entry["impact_assessment"] = assessment.to_dict()
         return entry
 
     leaf_changes_list = [_leaf_entry(c) for c in type_changes]
@@ -552,18 +562,32 @@ def _add_show_only_filter(
     }
 
 
+def _suppressed_change_entry(c: Change) -> dict[str, object]:
+    """Minimal audit-trail entry for one suppressed change, plus the
+    impact-assessment decision it was actually suppressed with (G29 Phase 3
+    slice 1, ADR-050 follow-up, Codex review: this is the one call site that
+    passes ``suppressed=True`` -- without it, ``decision.state:
+    "suppressed"`` was advertised but never actually reachable from
+    production reporting)."""
+    entry: dict[str, object] = {
+        "kind": c.kind.value,
+        "symbol": c.symbol,
+        "description": c.description,
+    }
+    assessment = assess_change(c, suppressed=True)
+    entry["reachability_state"] = assessment.reachability_state.value
+    if assessment.has_signal():
+        entry["impact_assessment"] = assessment.to_dict()
+    return entry
+
+
 def _add_suppression(d: dict[str, object], result: DiffResult) -> None:
     """Add suppression block (file flag, count, suppressed change list)."""
     d["suppression"] = {
         "file_provided": result.suppression_file_provided,
         "suppressed_count": result.suppressed_count,
         "suppressed_changes": [
-            {
-                "kind": c.kind.value,
-                "symbol": c.symbol,
-                "description": c.description,
-            }
-            for c in result.suppressed_changes
+            _suppressed_change_entry(c) for c in result.suppressed_changes
         ],
     }
 

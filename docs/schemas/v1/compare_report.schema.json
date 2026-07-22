@@ -108,7 +108,15 @@
             "properties": {
               "kind": { "type": "string" },
               "symbol": { "type": "string" },
-              "description": { "type": "string" }
+              "description": { "type": "string" },
+              "reachability_state": {
+                "type": "string",
+                "enum": ["reachable", "unreachable", "unknown"],
+                "description": "G29 Phase 3 slice 1 (ADR-050, schema 2.13): always present. This is the one call site that passes suppressed=True to assess_change, so decision.state below is always \"suppressed\"."
+              },
+              "impact_assessment": {
+                "$ref": "#/$defs/change/properties/impact_assessment"
+              }
             }
           }
         }

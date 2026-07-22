@@ -141,12 +141,22 @@ both is the accepted cost of offering one object a consumer can query
 without stitching six separate keys together — the entire point of
 "unified" in this initiative's name.
 
-Not touched: `_to_json_leaf` (the summarized leaf-mode report) and
-`junit_report.py`, matching the exact scope boundary ADR-048 already drew for
-JUnit (a structured node/edge object is a poor fit for JUnit's
-`<properties>` text-value model) and extending it to leaf mode, whose whole
-purpose is a smaller summary, not a second place for the same structured
-detail to live.
+`_to_json_leaf` (`--report-mode leaf`)'s own `_leaf_entry()` helper builds its
+dict independently of `_change_to_dict` rather than routing through it — the
+same "smaller summary" reasoning ADR-048 used for excluding JUnit initially
+looked like it applied here too. It does not: `_leaf_entry()` already
+duplicates the ADR-044 P1 reachability fields (`public_reachable`/
+`reachability_kind`/`reachability_proof_path`) for exactly this reason —
+root `TYPE_*` changes are the category the layout-reachability walk tags
+most often, and leaf mode's `changes[]` union is documented as
+backward-compatible with full mode. Omitting `reachability_state`/
+`impact_assessment` there would have silently dropped these two fields for
+every `TYPE_*` finding under `--report-mode leaf` alone (caught by Codex
+review — see "Follow-up fixes" below); `_leaf_entry()` now adds both,
+following the same existing duplication pattern. **`junit_report.py` remains
+untouched** — that exclusion's rationale (a structured node/edge object is a
+poor fit for JUnit's `<properties>` text-value model) is a genuine format
+difference, not a "smaller summary" argument, and still holds.
 
 ### D4. SARIF surface
 
@@ -169,7 +179,7 @@ the synced copy under `docs/schemas/v1/`.
 
 ## Follow-up fixes (Codex review)
 
-Four gaps in the initial slice-1 landing, each caught by automated review on
+Six gaps in the initial slice-1 landing, each caught by automated review on
 the same PR and fixed before merge:
 
 - **`has_signal()` missed three of `ImpactAssessment`'s own non-default
@@ -213,6 +223,31 @@ the same PR and fixed before merge:
   `verdict_override` — a neutral name that carries `effective_verdict`'s
   value regardless of direction — before this slice reached any release, so
   no compatibility shim was needed.
+- **`_leaf_entry()` (`--report-mode leaf`) omitted both new fields for root
+  `TYPE_*` changes.** D3 above only updated `_change_to_dict`; `_leaf_entry()`
+  builds its own dict for root type changes rather than routing through it,
+  so leaf mode's `leaf_changes[]` (and the backward-compatible `changes[]`
+  union) silently dropped `reachability_state`/`impact_assessment` for
+  exactly the finding category (`TYPE_SIZE_CHANGED` et al.) the
+  layout-reachability walk tags most often — the same category `_leaf_entry()`
+  already special-cases to keep the *older* ADR-044 P1 reachability fields in
+  sync with full mode. Fixed by adding the same two fields there, following
+  that existing precedent — see the D3 update above for why this reverses
+  the original "not touched" framing.
+- **`_add_suppression()`'s `suppressed_changes` list never called
+  `assess_change(suppressed=True)` at all.** The `suppressed` parameter
+  existed and was tested directly, but no production call site ever passed
+  it — `_add_suppression` still emitted `kind`/`symbol`/`description` only,
+  so `decision.state: "suppressed"` was advertised (in this ADR's own D1
+  text and in `docs/concepts/impact-analysis.md`) but unreachable from any
+  real report. Fixed by routing each suppressed change through
+  `assess_change(c, suppressed=True)` (new `reporter._suppressed_change_entry`)
+  and adding `reachability_state`/`impact_assessment` to each
+  `suppressed_changes[]` entry — `impact_assessment` is now unconditionally
+  present there (a suppressed decision is never the default `"kept"` state,
+  so `has_signal()` always fires), which is the intended outcome, not a
+  regression of D3's "only when it carries signal" gate for the main
+  `changes[]` list.
 
 ## Deliberately not implemented this slice
 

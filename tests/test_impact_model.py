@@ -17,8 +17,11 @@
 
 from __future__ import annotations
 
+import json
+
+from abicheck import reporter
 from abicheck.checker_policy import ChangeKind, Confidence, ReachabilityState, Verdict
-from abicheck.checker_types import Change
+from abicheck.checker_types import Change, DiffResult
 from abicheck.impact import FindingDecision, GraphProofPath, ImpactAssessment, ProofStep
 from abicheck.impact.engine import assess_change
 
@@ -335,3 +338,41 @@ class TestAssessChange:
         assessment = assess_change(Bare())
         assert assessment.reachability_state == ReachabilityState.UNKNOWN
         assert assessment.has_signal() is False
+
+
+class TestReporterIntegration:
+    """Codex review: two production call sites this slice initially missed --
+    --report-mode leaf's own _leaf_entry() builds its dict independently of
+    _change_to_dict, and _add_suppression()'s suppressed_changes list was
+    never routed through assess_change(suppressed=True) at all, so the
+    advertised decision.state == "suppressed" was unreachable in practice."""
+
+    def test_leaf_mode_type_change_carries_reachability_state(self) -> None:
+        change = _change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::internal::Foo",
+            old_value="4",
+            new_value="8",
+            reachability_state=ReachabilityState.PROVEN_UNREACHABLE,
+        )
+        result = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so", changes=[change]
+        )
+        payload = json.loads(reporter.to_json(result, report_mode="leaf"))
+        entry = payload["leaf_changes"][0]
+        assert entry["reachability_state"] == "unreachable"
+        assert entry["impact_assessment"]["reachability_state"] == "unreachable"
+
+    def test_suppressed_changes_carry_suppressed_decision_state(self) -> None:
+        change = _change()
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            suppressed_changes=[change],
+            suppressed_count=1,
+        )
+        payload = json.loads(reporter.to_json(result))
+        entry = payload["suppression"]["suppressed_changes"][0]
+        assert entry["reachability_state"] == "unknown"
+        assert entry["impact_assessment"]["decision"]["state"] == "suppressed"
