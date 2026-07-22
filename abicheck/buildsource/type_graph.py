@@ -72,6 +72,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from .. import deadline
+from .graph_facts import register_fact
 from .source_graph import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -1418,8 +1419,17 @@ def augment_graph_with_types(
                 and not existing.attrs.get("defined_in_project")
                 and not existing.attrs.get("visibility")
             ):
-                existing.attrs["defined_in_project"] = True
-                existing.attrs["def_file"] = e.dst_file
+                # ADR-046 D2: route through register_fact, not a direct
+                # existing.attrs[...] mutation — see source_graph.py's
+                # identical fix (fold_source_edges) for why a direct
+                # mutation is silently lost on the next to_dict()/from_dict()
+                # round-trip.
+                register_fact(
+                    existing,
+                    "type_graph",
+                    e.confidence,
+                    {"defined_in_project": True, "def_file": e.dst_file},
+                )
         before = len(graph.edges)
         edge_attrs: dict[str, Any] = {}
         if e.role:

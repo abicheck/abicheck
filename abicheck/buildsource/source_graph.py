@@ -196,10 +196,10 @@ def _conf_from_build(conf: Confidence) -> str:
 class GraphNode:
     """A single ABI/API-relevant graph node (ADR-031 D2).
 
-    ``facts``/``resolved``/``conflicts`` are the ADR-046 D2 evidence-preserving
-    merge: ``attrs``/``provenance``/``confidence`` stay real fields (v1
-    read-compat), but are (re)populated from the merged facts at write time
-    (``add_node``) instead of frozen at first registration.
+    ``facts``/``resolved``/``conflicts``: the ADR-046 D2 evidence-preserving
+    merge. ``attrs``/``provenance``/``confidence`` stay real fields (v1
+    read-compat), (re)populated from the merged facts, not frozen at
+    first registration.
     """
 
     id: str
@@ -265,11 +265,10 @@ class GraphEdge:
     conflicts: list[FactConflict] = field(default_factory=list)
 
     def key(self) -> tuple[str, str, str]:
-        """Identity of an edge for diffing/de-duplication: (src, dst, kind).
-
-        The ADR-046 D1 *coarsest* (role-blind) projection — the v1 shape
-        every existing caller already keys on; D1's finer ``relation_key``/
-        ``occurrence_id`` split is not implemented by this slice.
+        """Identity for diffing/de-dup: (src, dst, kind) — ADR-046 D1's
+        *coarsest* (role-blind) projection, the v1 shape every caller already
+        keys on; D1's finer ``relation_key``/``occurrence_id`` split is not
+        implemented by this slice.
         """
         return (self.src, self.dst, self.kind)
 
@@ -1713,8 +1712,10 @@ def fold_source_edges(
                 and not existing.attrs.get("defined_in_project")
                 and not existing.attrs.get("visibility")
             ):
-                existing.attrs["defined_in_project"] = True
-                existing.attrs["def_file"] = dst_file
+                # ADR-046 D2: route through register_fact (a direct
+                # existing.attrs[...] mutation is dropped on the next round-trip).
+                backfill = {"defined_in_project": True, "def_file": dst_file}
+                register_fact(existing, provenance, confidence, backfill)
         before = len(graph.edges)
         graph.add_edge(
             GraphEdge(

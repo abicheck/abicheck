@@ -1349,6 +1349,35 @@ def test_augment_graph_backfills_provenance_onto_earlier_created_node() -> None:
     assert node.attrs.get("def_file") == "src/detail/impl.h"
 
 
+def test_augment_graph_backfill_survives_serialization_round_trip() -> None:
+    # ADR-046 D2 regression (Codex review on PR #620): the backfill above must
+    # go through register_fact, not a direct existing.attrs[...] mutation --
+    # a direct mutation is invisible to facts/resolved, so
+    # ensure_facts_and_resolve silently drops it on the next
+    # to_dict()/from_dict() round-trip (a persisted pack reload).
+    graph = SourceGraphSummary()
+    edges = [
+        TypeEdge(
+            "ns::detail::Impl", "ns::detail::Base", "TYPE_INHERITS", CONF_HIGH, "base"
+        ),
+        TypeEdge(
+            "ns::Widget",
+            "ns::detail::Impl",
+            "TYPE_HAS_FIELD_TYPE",
+            CONF_HIGH,
+            "field",
+            dst_file="src/detail/impl.h",
+        ),
+    ]
+    project_files = frozenset({"src/detail/impl.h"})
+    augment_graph_with_types(graph, edges, project_files)
+
+    reloaded = SourceGraphSummary.from_dict(graph.to_dict())
+    node = next(n for n in reloaded.nodes if n.id == "type://ns::detail::Impl")
+    assert node.attrs.get("defined_in_project") is True
+    assert node.attrs.get("def_file") == "src/detail/impl.h"
+
+
 def test_augment_graph_never_overrides_l4_visibility() -> None:
     # A node already carrying real L4 evidence (visibility) must never be
     # overwritten by this best-effort AST-only marker, even if a later edge

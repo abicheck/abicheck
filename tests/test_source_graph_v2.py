@@ -27,6 +27,7 @@ from abicheck.buildsource.source_graph import (
     GraphFact,
     GraphNode,
     SourceGraphSummary,
+    fold_source_edges,
 )
 
 
@@ -269,3 +270,38 @@ class TestSerializationRoundTrip:
             losing_producer="b",
         )
         assert FactConflict.from_dict(conflict.to_dict()) == conflict
+
+
+class TestPostRegistrationBackfillSurvivesRoundTrip:
+    """Regression (Codex review on PR #620): a producer that backfills an
+    already-registered node's attrs (``fold_source_edges``'s/
+    ``augment_graph_with_types``'s ``defined_in_project``/``def_file``
+    marker) must go through ``register_fact``, not a direct
+    ``existing.attrs[...] = ...`` mutation — a direct mutation is invisible
+    to ``facts``/``resolved``, so ``ensure_facts_and_resolve`` silently drops
+    it on the next ``to_dict()``/``from_dict()`` round-trip (a persisted pack
+    reload)."""
+
+    def test_fold_source_edges_backfill_survives_round_trip(self) -> None:
+        g = SourceGraphSummary()
+        g.add_node(GraphNode(id="decl://b", kind="source_decl", provenance="earlier"))
+        fold_source_edges(
+            g,
+            [
+                {
+                    "edge": "DECL_CALLS_DECL",
+                    "src": "a",
+                    "dst": "b",
+                    "attrs": {"dst_file": "src/detail/helper.h"},
+                }
+            ],
+            frozenset({"src/detail/helper.h"}),
+        )
+        before = next(n for n in g.nodes if n.id == "decl://b")
+        assert before.attrs.get("defined_in_project") is True
+        assert before.attrs.get("def_file") == "src/detail/helper.h"
+
+        reloaded = SourceGraphSummary.from_dict(g.to_dict())
+        after = next(n for n in reloaded.nodes if n.id == "decl://b")
+        assert after.attrs.get("defined_in_project") is True
+        assert after.attrs.get("def_file") == "src/detail/helper.h"

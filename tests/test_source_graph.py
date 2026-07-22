@@ -1823,23 +1823,39 @@ def _collect_graph_pack(
     merged = BuildEvidence()
     extractors: list[ExtractorRecord] = []
     _run_adapters(
-        merged, extractors,
-        compile_db=cdb, build_dir=None, cmake=False, ninja=False,
-        ninja_compdb=None, bazel_cquery=None, bazel_aquery=None,
-        make_dry_run=None, binary=None, read_compiler_record=False,
-        build_system="generic", record_bazel_inputs=False, verbose=False,
+        merged,
+        extractors,
+        compile_db=cdb,
+        build_dir=None,
+        cmake=False,
+        ninja=False,
+        ninja_compdb=None,
+        bazel_cquery=None,
+        bazel_aquery=None,
+        make_dry_run=None,
+        binary=None,
+        read_compiler_record=False,
+        build_system="generic",
+        record_bazel_inputs=False,
+        verbose=False,
     )
     has_build = bool(merged.compile_units or merged.targets)
     graph, graph_detail = _collect_source_graph(
-        merged, extractors,
-        source_graph=source_graph, changed_paths=(),
-        kythe_entries=None, codeql_results=None, codeql_extends_results=None,
-        surface=None, clang_bin="clang",
+        merged,
+        extractors,
+        source_graph=source_graph,
+        changed_paths=(),
+        kythe_entries=None,
+        codeql_results=None,
+        codeql_extends_results=None,
+        surface=None,
+        clang_bin="clang",
     )
 
     out = tmp_path / f"{name}.evidence"
     pack = BuildSourcePack.empty(
-        out, abicheck_version=_abicheck_version,
+        out,
+        abicheck_version=_abicheck_version,
         created_at=_dt.datetime.now(_dt.timezone.utc).isoformat(),
     )
     pack.manifest.extractors = extractors
@@ -1965,10 +1981,15 @@ def test_collect_evidence_summary_without_build_is_partial(tmp_path) -> None:
     merged = BuildEvidence()
     extractors: list[ExtractorRecord] = []
     graph, graph_detail = _collect_source_graph(
-        merged, extractors,
-        source_graph="summary", changed_paths=(),
-        kythe_entries=None, codeql_results=None, codeql_extends_results=None,
-        surface=None, clang_bin="clang",
+        merged,
+        extractors,
+        source_graph="summary",
+        changed_paths=(),
+        kythe_entries=None,
+        codeql_results=None,
+        codeql_extends_results=None,
+        surface=None,
+        clang_bin="clang",
     )
     coverage = _build_coverage(merged, False, None, "", graph, graph_detail)
     l5 = next(c for c in coverage if c.layer == DataLayer.L5_SOURCE_GRAPH.value)
