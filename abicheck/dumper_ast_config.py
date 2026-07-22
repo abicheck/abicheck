@@ -180,32 +180,77 @@ _CPP20_STD_RANGES_CONCEPT_NAMES = (
     rb"forward_range|bidirectional_range|random_access_range|"
     rb"contiguous_range|common_range|viewable_range|constant_range"
 )
-_CPP20_CONSTRAINED_TEMPLATE_PARAM_PATTERN = re.compile(
-    rb"\bstd::(?:" + _CPP20_STD_CONCEPT_NAMES + rb")\b\s*(?:<[^<>]*>)?\s+\w+\s*[,>]"
-)  # template <std::integral T>  /  template <std::convertible_to<int> T, ...>
-_CPP20_CONSTRAINED_TEMPLATE_PARAM_RANGES_PATTERN = re.compile(
-    rb"\bstd::ranges::(?:"
+# Matches just the qualified concept name itself (``std::integral`` /
+# ``std::ranges::range``) — the optional ``<...>`` argument list and what
+# follows it are handled separately by :func:`_has_constrained_param_syntax`,
+# since a naive single-level ``(?:<[^<>]*>)?`` here cannot match a concept
+# argument that itself contains a template-id, e.g.
+# ``std::same_as<std::vector<int>>`` (Codex review, third round).
+_CPP20_CONSTRAINED_PARAM_CONCEPT_PATTERN = re.compile(
+    rb"\bstd::(?:ranges::(?:"
     + _CPP20_STD_RANGES_CONCEPT_NAMES
-    + rb")\b\s*(?:<[^<>]*>)?\s+\w+\s*[,>]"
-)  # template <std::ranges::range R>
-
-# Abbreviated function templates (Codex review): a constrained parameter can
-# also appear directly in a function's *parameter list* with no
-# ``template<...>`` header at all — ``void f(std::integral auto x);`` is
-# exactly equivalent to ``template<std::integral T> void f(T x);``. Unlike
-# the template-parameter-list form above (which needs the trailing
-# ","/">" disambiguation since a bare identifier there could be an NTTP
-# name), a concept name directly followed by the literal keyword ``auto``
-# has no other valid pre-C++20 reading at all — "TypeName auto" is not
-# parseable pre-C++20 in any other construct — so no further
-# disambiguation is needed here.
-_CPP20_ABBREVIATED_CONSTRAINED_PARAM_PATTERN = re.compile(
-    rb"\bstd::(?:"
+    + rb")|(?:"
     + _CPP20_STD_CONCEPT_NAMES
-    + rb"|ranges::(?:"
-    + _CPP20_STD_RANGES_CONCEPT_NAMES
-    + rb"))\b\s*(?:<[^<>]*>)?\s+auto\b"
-)  # void f(std::integral auto x)  /  void f(std::ranges::range auto&& r)
+    + rb"))\b"
+)
+
+
+def _find_matching_close_angle(text: bytes, open_angle_pos: int) -> int | None:
+    """Return the index of the ``>`` matching the ``<`` at *open_angle_pos*
+    in *text* (tracking nesting), or ``None`` if unbalanced/not found.
+    Mirrors :func:`_find_matching_close_paren` — regex alone cannot match
+    an arbitrarily-nested template-id argument list."""
+    depth = 0
+    for idx in range(open_angle_pos, len(text)):
+        ch = text[idx : idx + 1]
+        if ch == b"<":
+            depth += 1
+        elif ch == b">":
+            depth -= 1
+            if depth == 0:
+                return idx
+    return None
+
+
+def _has_constrained_param_syntax(lookahead: bytes) -> bool:
+    """True if *lookahead* contains a constrained template parameter
+    (``template <std::integral T>``, with the concept argument list — if
+    any — tolerating arbitrary nesting, e.g.
+    ``std::same_as<std::vector<int>>``) or an abbreviated constrained
+    function parameter (``std::integral auto x`` — Codex review: a
+    concept name directly followed by the literal keyword ``auto`` has no
+    other valid pre-C++20 reading, so no disambiguation is needed there).
+    Deliberately scoped to the fixed, well-known set of concepts in
+    <concepts>/<iterator>/<ranges> rather than "any bare or qualified
+    identifier in a template parameter list": an arbitrary identifier
+    there is *routinely* a valid pre-C++20 non-type template parameter's
+    type (``template<MyEnum E>``, ``template<Traits::value_type V>``), so
+    matching on identifier shape alone would trade this false-negative
+    for a much broader false-positive risk. A `std::`-qualified name from
+    this exact, finite standard list has no such ambiguity."""
+    for m in _CPP20_CONSTRAINED_PARAM_CONCEPT_PATTERN.finditer(lookahead):
+        pos = m.end()
+        ws = re.match(rb"\s*", lookahead[pos:])
+        if ws:
+            pos += ws.end()
+        if lookahead[pos : pos + 1] == b"<":
+            close = _find_matching_close_angle(lookahead, pos)
+            if close is None:
+                continue
+            pos = close + 1
+            ws = re.match(rb"\s*", lookahead[pos:])
+            if ws:
+                pos += ws.end()
+        # Whitespace before this point was already consumed above (either
+        # directly after the concept name, or after its <...> argument
+        # list), so what remains needs no further leading \s+ — only the
+        # \b at the concept-name pattern's own end guarantees *some*
+        # non-word separator existed there in the first place.
+        rest = lookahead[pos:]
+        if re.match(rb"auto\b", rest) or re.match(rb"\w+\s*[,>]", rest):
+            return True
+    return False
+
 
 # "requires" only became a reserved keyword in C++20 — any earlier standard
 # allows it as an ordinary identifier, e.g. ``bool requires(int x) { ... }``
@@ -567,11 +612,7 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 lookahead, clause_match.start(), prev_nonblank_code
             ):
                 found.append(Cpp20Requirement("requires-clause", str(p), start_no))
-            elif (
-                _CPP20_CONSTRAINED_TEMPLATE_PARAM_PATTERN.search(lookahead)
-                or _CPP20_CONSTRAINED_TEMPLATE_PARAM_RANGES_PATTERN.search(lookahead)
-                or _CPP20_ABBREVIATED_CONSTRAINED_PARAM_PATTERN.search(lookahead)
-            ):
+            elif _has_constrained_param_syntax(lookahead):
                 found.append(
                     Cpp20Requirement("constrained-template-parameter", str(p), start_no)
                 )

@@ -548,6 +548,25 @@ def test_cpp20_detector_ignores_plain_auto_parameter(tmp_path):
     assert not any(r.reason == "constrained-template-parameter" for r in reqs)
 
 
+def test_cpp20_detector_detects_nested_concept_argument(tmp_path):
+    """Regression (Codex review, fourth round): the concept argument list
+    can itself contain a nested template-id (``std::same_as<std::vector
+    <int>>``), which a naive single-level ``(?:<[^<>]*>)?`` cannot match
+    since its excluded-character class stops at the first inner ``<``/
+    ``>``. The matcher must tolerate arbitrary nesting depth, the same
+    way ``_find_matching_close_paren`` already does for parenthesized
+    requires-expressions."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <concepts>\n#include <vector>\n"
+        "template <std::same_as<std::vector<int>> T> void f(T);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "constrained-template-parameter" for r in reqs)
+
+
 def test_cpp20_detector_ignores_custom_nttp_type_resembling_constrained_param(
     tmp_path,
 ):
