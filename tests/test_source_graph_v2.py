@@ -253,6 +253,68 @@ class TestEdgeMerge:
         # that only need family-level (not role-level) precision still can.
         assert {e.key() for e in g.edges} == {("decl://f", "type://T", "DECL_HAS_TYPE")}
 
+    def test_add_edge_resolves_role_only_in_facts_before_indexing(self) -> None:
+        # Codex review on PR #620: relation_key() was computed before
+        # ensure_facts_and_resolve() ran, so an edge whose role lives only in
+        # `facts` (attrs still empty at construction time) got indexed under
+        # the blank-role key instead of its true post-resolution one. Two
+        # genuinely same-role edges built this way must still merge into one.
+        g = SourceGraphSummary()
+        g.add_edge(
+            GraphEdge(
+                src="decl://f",
+                dst="type://T",
+                kind="DECL_HAS_TYPE",
+                facts=[
+                    GraphFact(
+                        producer="type_graph", confidence=CONF_HIGH, attrs={"role": "param"}
+                    )
+                ],
+            )
+        )
+        g.add_edge(
+            GraphEdge(
+                src="decl://f",
+                dst="type://T",
+                kind="DECL_HAS_TYPE",
+                facts=[
+                    GraphFact(
+                        producer="type_graph", confidence=CONF_HIGH, attrs={"role": "param"}
+                    )
+                ],
+            )
+        )
+        assert len(g.edges) == 1
+        (edge,) = g.edges
+        assert edge.relation_key() == ("decl://f", "type://T", "DECL_HAS_TYPE", "param")
+
+    def test_add_edge_resolves_role_only_in_facts_stays_role_distinct(self) -> None:
+        # Same construction shape as above, but genuinely different roles --
+        # must still stay two separate edges, not collapse onto the shared
+        # blank-role key a pre-resolution relation_key() would have computed.
+        g = SourceGraphSummary()
+        g.add_edge(
+            GraphEdge(
+                src="decl://f",
+                dst="type://T",
+                kind="DECL_HAS_TYPE",
+                facts=[GraphFact(producer="type_graph", attrs={"role": "return"})],
+            )
+        )
+        g.add_edge(
+            GraphEdge(
+                src="decl://f",
+                dst="type://T",
+                kind="DECL_HAS_TYPE",
+                facts=[GraphFact(producer="type_graph", attrs={"role": "param"})],
+            )
+        )
+        assert len(g.edges) == 2
+        assert {e.relation_key() for e in g.edges} == {
+            ("decl://f", "type://T", "DECL_HAS_TYPE", "return"),
+            ("decl://f", "type://T", "DECL_HAS_TYPE", "param"),
+        }
+
 
 class TestConstructorSeededGraphs:
     """``SourceGraphSummary(nodes=[...], edges=[...])`` bypasses ``add_node``/
@@ -279,6 +341,23 @@ class TestConstructorSeededGraphs:
         SourceGraphSummary(edges=[edge])
         assert len(edge.facts) == 1
         assert edge.resolved == {}
+
+    def test_constructor_seeded_edge_index_uses_resolved_relation_key(self) -> None:
+        # Codex review on PR #620: __post_init__ built _edge_keys/_edge_by_key
+        # before resolving constructor-seeded edges, so an edge whose role
+        # lives only in `facts` (not yet mirrored into `attrs`) was indexed
+        # under the blank-role key instead of its true, post-resolution one.
+        edge = GraphEdge(
+            src="decl://f",
+            dst="type://T",
+            kind="DECL_HAS_TYPE",
+            facts=[GraphFact(producer="type_graph", attrs={"role": "param"})],
+        )
+        g = SourceGraphSummary(edges=[edge])
+        rkey = edge.relation_key()
+        assert rkey == ("decl://f", "type://T", "DECL_HAS_TYPE", "param")
+        assert rkey in g._edge_keys
+        assert g._edge_by_key[rkey] is edge
 
 
 class TestSerializationRoundTrip:

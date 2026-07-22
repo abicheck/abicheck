@@ -360,6 +360,41 @@ just role-distinct ones (the tuple shape gains a role element throughout) —
 `SOURCE_GRAPH_VERSION` does), so this is a correctness fix, not a compat
 break.
 
+### Follow-up fix: resolve before indexing, not after (Codex review)
+
+A third gap in the same family, caught in code review of PR #620:
+`SourceGraphSummary.add_edge` computed `rkey = edge.relation_key()` *before*
+calling `ensure_facts_and_resolve(edge)` — so an edge whose role lives only
+in `facts` (not yet mirrored into `attrs` at construction time) had its
+dedup key computed against an empty `attrs`/`resolved` view (`relation_key()`
+falls back to `self.resolved or self.attrs`, and both are empty
+pre-resolution), producing the wrong blank-role key instead of the edge's
+true, post-resolution one. Two genuinely same-role edges built this way
+would fail to merge (each computing a distinct-looking blank-role key that
+happened to coincide, or not, depending on registration order); two
+genuinely role-distinct edges could collapse onto the same blank-role key
+and incorrectly merge. `SourceGraphSummary.__post_init__` had the identical
+ordering bug for constructor-seeded edges (`_edge_keys`/`_edge_by_key` built
+before the backfill/resolve loop that follows it).
+
+No real producer hits this today — `type_graph.py` (the actual role-emitting
+call site) constructs edges with `attrs={"role": ...}` directly, so
+`relation_key()`'s `self.attrs` fallback already sees the role before
+resolution ever runs. This is a latent correctness gap for any future
+producer or constructor-seeded builder that populates `facts` directly
+without going through `attrs` first (a valid, undocumented-as-forbidden
+construction shape the dataclass itself allows).
+
+Fix: both `add_edge` and `__post_init__` now resolve first, index second —
+`ensure_facts_and_resolve` runs before `relation_key()` is ever computed for
+indexing, in both places.
+
+`tests/test_source_graph_v2.py`: `test_add_edge_resolves_role_only_in_facts_before_indexing`/
+`test_add_edge_resolves_role_only_in_facts_stays_role_distinct` (the
+`add_edge` path) and `test_constructor_seeded_edge_index_uses_resolved_relation_key`
+(the constructor-seeded path) — all three fail without the fix (verified by
+temporarily reverting it) and pass with it.
+
 ## D2 implementation (G29 Phase 2, slice 1)
 
 Implemented as the first slice of Phase 2, chosen because D2 is the change

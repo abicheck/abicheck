@@ -270,6 +270,19 @@ class SourceGraphSummary:
     degraded_passes: dict[str, bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        # ADR-046 D2: backfill/re-derive facts/resolved for anything
+        # constructed directly (bypassing add_node/add_edge), so every node
+        # reachable from this summary satisfies "facts is never empty,
+        # resolved is derived from facts". Must run *before* the de-dup
+        # indexes below (Codex review, fresh evidence): a constructor-seeded
+        # edge whose role lives only in `facts` (not yet mirrored into
+        # `attrs`) would otherwise have its `relation_key()` computed against
+        # an empty `attrs`/`resolved` view, indexing it under the wrong
+        # (blank-role) key before resolution ever populates the real one.
+        for n in self.nodes:
+            ensure_facts_and_resolve(n)
+        for e in self.edges:
+            ensure_facts_and_resolve(e)
         # De-dup indexes for O(1) add_node/add_edge, seeded from whatever the
         # constructor (or from_dict) provided. Edges dedup on relation_key()
         # (src, dst, kind, role), not the coarser key() (ADR-046 D1, Codex
@@ -289,14 +302,6 @@ class SourceGraphSummary:
         self._edge_by_key: dict[tuple[str, str, str, str], GraphEdge] = {
             e.relation_key(): e for e in self.edges
         }
-        # ADR-046 D2: backfill/re-derive facts/resolved for anything
-        # constructed directly (bypassing add_node/add_edge), so every node
-        # reachable from this summary satisfies "facts is never empty,
-        # resolved is derived from facts".
-        for n in self.nodes:
-            ensure_facts_and_resolve(n)
-        for e in self.edges:
-            ensure_facts_and_resolve(e)
 
     # -- mutation helpers ---------------------------------------------------
 
@@ -321,10 +326,16 @@ class SourceGraphSummary:
         (``(src, dst, kind, role)`` — ADR-046 D1) so two edges that only
         differ by role stay distinct objects instead of one silently
         swallowing the other's role.
+
+        Resolves *edge* before computing its key (Codex review, fresh
+        evidence): an edge whose role lives only in ``facts`` (not yet
+        mirrored into ``attrs``) would otherwise have ``relation_key()``
+        computed against an empty ``attrs``/``resolved`` view and dedup on
+        the wrong (blank-role) key instead of its true, post-resolution one.
         """
+        ensure_facts_and_resolve(edge)
         rkey = edge.relation_key()
         if rkey not in self._edge_keys:
-            ensure_facts_and_resolve(edge)
             self.edges.append(edge)
             self._edge_keys.add(rkey)
             self._edge_by_key[rkey] = edge
