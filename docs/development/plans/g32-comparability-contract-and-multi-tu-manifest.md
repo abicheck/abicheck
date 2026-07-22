@@ -54,10 +54,15 @@ A's own section is explicit that there is no soft-launch/report-only mode
 (the gate hard-fails `not_comparable` from day one; see Phase A). "Ships
 independently" describes *when* Phase A can land relative to the other
 phases, not a different (report-only) behavior it has while doing so.
-Phase B and Phase D may both start once Phase 0's fixtures exist — Phase
-D's parser and `host`-default path don't depend on B, though selecting a
-*non-default* context needs Phase B's `frontend_context` field/flag to
-request it (see Phase D). Phase C starts only after Phase B lands, since
+Phase B and Phase D's *parser* may both start once Phase 0's fixtures
+exist — decoding/selecting AST contexts by `kind` doesn't itself depend on
+B. **But Phase D as a whole also depends on Phase A, not Phase 0 alone:**
+its own acceptance criteria require folding the resolved `kind` into
+`comparability.compute_extraction_contract`'s hashed fields and proving a
+host-vs-device mismatch through D2's gate (see Phase D) — both Phase A
+deliverables, the identical class of dependency Phase E already has on A.
+Selecting a *non-default* context also needs Phase B's
+`frontend_context` field/flag to request it (see Phase D). Phase C starts only after Phase B lands, since
 it operates on the `TuFragment` contract Phase B defines and produces —
 it is not a third parallel branch alongside B and D. **E depends on
 *both* A and B — not on B alone.** `scope_fingerprint` as a *type* and
@@ -81,14 +86,20 @@ this phase exists for. `profile_fingerprint`
 is the one that can never be a pre-dump cache-key input, on either path
 (see Phase E) — and its scheduling half schedules Phase B's per-TU loop.
 
-```text
-                      ┌──▶ Phase A (contract + gate) ──────────┐
-                      │                                        │
-Phase 0 (fixtures) ───┼──▶ Phase B (manifest/multi-TU) ─┬──────┴─▶ Phase E (scheduling + cache)
-                      │                                 │
-                      │                                 └─▶ Phase C (compatible merge)
-                      └──▶ Phase D (SYCL host/device context)
-```
+Dependency edges (not a parallel-branch diagram — several phases now have
+more than one incoming dependency, which a simple tree can't render
+unambiguously):
+
+- **Phase A** — depends on Phase 0 only.
+- **Phase B** — depends on Phase 0 only.
+- **Phase C** — depends on Phase B (operates on the `TuFragment` contract
+  Phase B defines and produces).
+- **Phase D** — depends on Phase 0 (the parser) **and** Phase A (folding
+  the resolved `kind` into `compute_extraction_contract`, testing the
+  gate) — see above. Its *non-default*-context path additionally needs
+  Phase B's `frontend_context` field/flag, though the phase as a whole
+  does not depend on B.
+- **Phase E** — depends on **both** Phase A and Phase B — see above.
 
 ---
 
@@ -697,11 +708,19 @@ Implements ADR-050 D1 and D2.
   match, exactly the regression this per-slot-token fix (as opposed to
   the simpler single-sentinel fix test (12) alone would validate) exists
   to close; (14) a sibling support root declared via a labeled `--include`
-  entry, not nested under any declared `--header` — `old`/`new` both
-  declare `--header .../include/foo.h --include .../include --include
-  both:support=.../src` (`src/` a sibling of `include/`, containing a
-  private header `foo.h` `#include`s) — with a **content edit confined to
-  `src/`'s private header** between old and new leaves `profile_fingerprint`
+  entry, not nested under any declared `--header` — `old` declares
+  `--header old/include/foo.h --include old/include --include
+  old:support=old/src`, `new` declares the analogous
+  `--header new/include/foo.h --include new/include --include
+  new:support=new/src` (**genuinely side-scoped paths, `old/src` vs.
+  `new/src`, not `both:` applied to one shared literal path — `both:`
+  cannot represent two different two-checkout roots at all, so it would
+  either force an artificial same-path scenario or silently feed one
+  side's directory to both snapshots, proving nothing about the
+  side-aware label path this fix actually adds** — P2 review) — `src/` a
+  sibling of `include/`, containing a private header `foo.h`
+  `#include`s — with a **content edit confined to `src/`'s private
+  header** between old and new leaves `profile_fingerprint`
   matching, proving the labeled form extends project-ownership to a
   sibling directory the ancestor rule alone would otherwise classify as
   external (and thus spuriously flip on this routine internal edit); a
@@ -2199,13 +2218,25 @@ verdict-producing comparison, so it doesn't fit the example catalog's
 
 ## Phase D — SYCL/DPC++ host vs. device AST context selection
 
-Implements ADR-050 D5. Independent of Phase C's merge work; depends only
-on Phase 0's captured DPC++ fixture for the parser itself. Selecting a
-*non-default* context does have a soft dependency on Phase B, though: the
+Implements ADR-050 D5. Independent of Phase C's merge work. **Depends on
+both Phase 0 and Phase A — not Phase 0 alone.** The parser
+(`sycl_context.py`'s document-boundary decoding and `kind`-based
+selection) only needs Phase 0's captured DPC++ fixture, but this phase's
+own acceptance criteria also require folding the resolved `kind` into
+`comparability.compute_extraction_contract`'s hashed fields and testing a
+host-vs-device `profile_fingerprint` mismatch through D2's gate (see the
+dedicated acceptance-criteria bullet below) — both of those are Phase A's
+`ExtractionContract`/`compute_extraction_contract`/gate machinery.
+Starting or landing D before A leaves nothing concrete for that bullet to
+extend, and — worse than merely blocked — could ship a selector whose
+chosen context is invisible to the comparability gate if the fingerprint
+half is skipped or deferred, the identical risk already identified and
+fixed for Phase E's dependency on Phase A. Selecting a
+*non-default* context also has a soft dependency on Phase B: the
 `frontend_context` field (manifest base profile) and `--frontend-context`
 CLI flag this phase's selector reads are defined there, not here (Phase B
-"Goal & acceptance criteria"). Everything in this phase can be built and
-tested against the `host` default without Phase B, but a real DPC++
+"Goal & acceptance criteria"). The parser and `host`-default path can be
+built and tested without Phase B, but a real DPC++
 device-context request has nowhere to come from until Phase B's field/flag
 exist.
 

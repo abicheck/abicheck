@@ -1544,14 +1544,20 @@ to surface before D5 is implemented against a guess.
 `buildsource/source_replay.py` already implements exactly the scheduling
 policy the review asks for — a thread/process pool sized by
 `min(cpu-derived cap, cgroup-`MemAvailable`-derived cap)`, documented in
-`buildsource/CLAUDE.md`. Rather than a second implementation in `dumper.py`,
-the RAM-probing/pool-sizing helper is factored out of `source_replay.py`
-into a new leaf module, `abicheck/process_resources.py`, that both
-`source_replay.py` and `dumper.py`'s new per-TU invocation loop (D3) import
-— the "move the shared logic to a leaf module both sides can depend on"
-rule AGENTS.md's import-cycle guidance already states, applied here instead
-of growing a second scheduler. `dumper.py`'s per-TU castxml/clang calls run
-under this pool instead of today's fully sequential loop; a killed/timed-out
+`buildsource/CLAUDE.md`. Rather than a second implementation in the
+manifest driver, the RAM-probing/pool-sizing helper is factored out of
+`source_replay.py` into a new leaf module, `abicheck/process_resources.py`,
+that both `source_replay.py` and the new per-TU invocation loop (D3)
+import — the "move the shared logic to a leaf module both sides can
+depend on" rule AGENTS.md's import-cycle guidance already states, applied
+here instead of growing a second scheduler. **The per-TU loop itself
+lives in a new sibling module, `abicheck/dumper_manifest.py`, not
+`dumper.py` — `dumper.py` is already at its file-size hard cap with no
+headroom, so D3's new per-TU logic (and this section's scheduler wiring)
+must not be added to it directly; `dumper.py` keeps only a thin
+manifest-vs.-single-TU dispatch that calls into the new module.** The
+per-TU castxml/clang calls in `dumper_manifest.py` run
+under this pool instead of a fully sequential loop; a killed/timed-out
 TU is recorded with its exit signal, never silently retried as a clean
 empty TU.
 
