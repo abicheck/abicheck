@@ -143,7 +143,16 @@ from typing import Any
 #:       primitives G30 P1 will add (``resolve-baseline``, ``check-target``)
 #:       have a report-level place to record a check's identity. Omitted
 #:       entirely (never emitted as null) when unset.
-REPORT_SCHEMA_VERSION = "2.12"
+#:   2.13: added two additive optional per-change keys (G29 Phase 3 slice 1,
+#:       ADR-050) -- ``reachability_state`` (the tri-state signal from PR
+#:       #607's ``Change.reachability_state``, always present, never
+#:       serialized before this) and ``impact_assessment`` (a unified read
+#:       view over the scattered reachability/impact fields above --
+#:       ``reachability_state``/``public_reachable``/``reachability_kind``/
+#:       the proof path/decision state/``evidence_category``/
+#:       ``correlated_change_kind`` -- present only when it carries
+#:       information beyond the all-defaults case).
+REPORT_SCHEMA_VERSION = "2.13"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

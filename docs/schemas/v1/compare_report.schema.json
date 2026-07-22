@@ -371,6 +371,53 @@
         "impact_is_direct": {
           "type": "boolean",
           "description": "G31 Phase B3 (ADR-048, schema 2.11): true when impact_proof_path is a single hop (the public root directly references the finding's subject), false when transitive. Present only when affected_public_roots is present."
+        },
+        "reachability_state": {
+          "type": "string",
+          "description": "G29 Phase 3 slice 1 (ADR-050, schema 2.13): the tri-state refinement of public_reachable (Change.reachability_state, in memory since PR #607 but never serialized before this). 'reachable' when public_reachable is true. 'unreachable' when the walk positively found this change not part of the effective public ABI. 'unknown' when no walk reached a verdict, or the only available evidence (the optional L5 call/type graph) is itself flagged narrowed/degraded — distinct from 'unreachable', since 'unknown' is not proof of absence. Always present (the enum's own default is 'unknown', an honest answer, not an absent key).",
+          "enum": ["reachable", "unreachable", "unknown"]
+        },
+        "impact_assessment": {
+          "type": "object",
+          "description": "G29 Phase 3 slice 1 (ADR-050, schema 2.13): a unified read view over this finding's reachability/impact fields above (reachability_state, public_reachable, reachability_kind, the proof path, decision state, evidence_category, correlated_change_kind) -- a single object a consumer can query instead of stitching several independently-nullable keys together. Intentionally duplicates data already published at the top level (see the fields above); present only when it carries information beyond the all-defaults case (a proof path exists, reachability_state is not 'unknown', public_reachable is true, a modulation/demotion fired, or correlated_change_kind/evidence_category is set).",
+          "properties": {
+            "reachability_state": {
+              "type": "string",
+              "enum": ["reachable", "unreachable", "unknown"]
+            },
+            "public_reachable": { "type": "boolean" },
+            "reachability_kind": { "type": "string" },
+            "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+            "evidence_category": { "type": "string" },
+            "correlated_change_kind": { "type": "string" },
+            "proof_path": {
+              "type": "object",
+              "description": "The dataclass counterpart of impact_proof_path/reachability_proof_path above, packaged as one object.",
+              "properties": {
+                "target": { "type": "string" },
+                "root": { "type": "string" },
+                "is_direct": { "type": "boolean" },
+                "steps": {
+                  "type": "array",
+                  "items": { "type": "object" }
+                },
+                "prose": { "type": "string" }
+              },
+              "required": ["target"]
+            },
+            "decision": {
+              "type": "object",
+              "description": "Whether this finding was kept or suppressed, and why. suppression_rule is not yet populated (ADR-050 'Deliberately not implemented this slice').",
+              "properties": {
+                "state": { "type": "string", "enum": ["kept", "suppressed"] },
+                "reason_code": { "type": "string" },
+                "suppression_rule": { "type": "string" },
+                "demotion": { "type": "string" }
+              },
+              "required": ["state"]
+            }
+          },
+          "required": ["reachability_state", "public_reachable", "confidence", "decision"]
         }
       }
     }

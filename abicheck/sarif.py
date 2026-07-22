@@ -39,6 +39,7 @@ from abicheck.checker_policy import (
     impact_for,
     policy_for,
 )
+from abicheck.impact import assess_change
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import _finding_id, apply_show_only
 from abicheck.reporter_markdown import ShowOnlyFilter
@@ -298,6 +299,14 @@ def _result_for(
         properties["impactProofPath"] = change.impact_proof_path
     if change.impact_is_direct is not None:
         properties["impactIsDirect"] = change.impact_is_direct
+    # G29 Phase 3 slice 1 (ADR-050): same unified read view reporter.py's
+    # JSON output gained -- reachabilityState always present (the tri-state
+    # signal from PR #607, never surfaced in SARIF before this), and the
+    # unified impactAssessment object when it carries more than the defaults.
+    assessment = assess_change(change)
+    properties["reachabilityState"] = assessment.reachability_state.value
+    if assessment.has_signal():
+        properties["impactAssessment"] = assessment.to_dict()
     evidence_status = evidence_status_override or evidence_status_for_change(change)
     if evidence_status is not None:
         properties["evidenceStatus"] = evidence_status.value

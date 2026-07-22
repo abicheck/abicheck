@@ -84,6 +84,7 @@ nav:
     - Architecture: concepts/architecture.md
     - Build Info & Sources (build-source data): concepts/build-source-data.md
     - Graph Coverage & Negative Evidence: concepts/graph-coverage.md
+    - Unified Impact Assessment: concepts/impact-analysis.md
     - Environment & Toolchain Drift: concepts/environment-drift.md
     - Limitations: concepts/limitations.md
   # Lookup tables — precise, exhaustive, no narrative.
@@ -212,6 +213,7 @@ nav:
       - "047: GitHub Actions Integration Model": development/adr/047-github-actions-integration-model.md
       - "048: Canonical Entity Identity and Graph Reconciliation": development/adr/048-canonical-entity-identity-and-graph-reconciliation.md
       - "049: Contract Relevance and Compatibility Configuration": development/adr/049-contract-relevance-and-compatibility-configuration.md
+      - "050: Unified Impact Assessment Model": development/adr/050-unified-impact-assessment-model.md
 
 # Agent instructions are repo-internal context, not published documentation.
 exclude_docs: |

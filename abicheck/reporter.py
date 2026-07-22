@@ -37,6 +37,7 @@ from .checker_policy import (
     policy_kind_sets as _policy_kind_sets,
 )
 from .checker_types import validate_check_id, validate_evidence_depth
+from .impact import assess_change
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
 
@@ -973,6 +974,18 @@ def _change_to_dict(
     impact_direct = getattr(c, "impact_is_direct", None)
     if impact_direct is not None:
         d["impact_is_direct"] = impact_direct
+    # G29 Phase 3 slice 1 (ADR-050): reachability_state has existed on Change
+    # since PR #607 but was never serialized -- without it, a JSON consumer
+    # cannot tell a PROVEN_UNREACHABLE finding apart from one the graph walk
+    # never examined at all (UNKNOWN), since both leave public_reachable
+    # False. impact_assessment is the unified read view over the scattered
+    # reachability/impact fields above; only emitted when it carries
+    # information beyond the all-defaults case, matching this function's own
+    # convention of not padding every plain finding with an empty object.
+    assessment = assess_change(c)
+    d["reachability_state"] = assessment.reachability_state.value
+    if assessment.has_signal():
+        d["impact_assessment"] = assessment.to_dict()
     return d
 
 
