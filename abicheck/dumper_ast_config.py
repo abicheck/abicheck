@@ -143,6 +143,38 @@ _CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
     rb"\brequires\s+\w"
 )  # template<T> requires Foo<T>
 
+# Constrained template parameters using a *standard-library* concept name in
+# place of ``typename``/``class`` (``template <std::integral T> void f(T);``)
+# — the abbreviated-constraint form the module docstring above already
+# describes but never actually matched (Codex review). Deliberately scoped
+# to the fixed, well-known set of concepts in <concepts>/<iterator>/<ranges>
+# rather than "any bare or qualified identifier in a template parameter
+# list": an arbitrary identifier there is *routinely* a valid pre-C++20
+# non-type template parameter's type (``template<MyEnum E>``,
+# ``template<Traits::value_type V>``), so matching on identifier shape alone
+# would trade this false-negative for a much broader false-positive risk.
+# A `std::`-qualified name from this exact, finite standard list used
+# immediately before a bare template-parameter identifier has no such
+# ambiguity — it is never a plausible NTTP type spelling.
+_CPP20_STD_CONCEPT_NAMES = (
+    rb"same_as|derived_from|convertible_to|common_reference_with|common_with|"
+    rb"integral|signed_integral|unsigned_integral|floating_point|"
+    rb"assignable_from|swappable_with|swappable|destructible|"
+    rb"constructible_from|default_initializable|move_constructible|"
+    rb"copy_constructible|equality_comparable_with|equality_comparable|"
+    rb"totally_ordered_with|totally_ordered|movable|copyable|semiregular|"
+    rb"regular_invocable|regular|invocable|predicate|relation|"
+    rb"strict_weak_order|sortable|mergeable|permutable|indirect_unary_predicate|"
+    rb"indirect_binary_predicate|indirect_equivalence_relation|"
+    rb"indirect_strict_weak_order|indirectly_regular_unary_invocable|"
+    rb"weakly_incrementable|incrementable|input_or_output_iterator|"
+    rb"sentinel_for|input_iterator|output_iterator|forward_iterator|"
+    rb"bidirectional_iterator|random_access_iterator|contiguous_iterator"
+)
+_CPP20_CONSTRAINED_TEMPLATE_PARAM_PATTERN = re.compile(
+    rb"\bstd::(?:" + _CPP20_STD_CONCEPT_NAMES + rb")\b\s*(?:<[^<>]*>)?\s+\w+\s*[,>]"
+)  # template <std::integral T>  /  template <std::convertible_to<int> T, ...>
+
 # "requires" only became a reserved keyword in C++20 — any earlier standard
 # allows it as an ordinary identifier, e.g. ``bool requires(int x) { ... }``
 # (a declaration) or ``requires(1);`` (a call), both real uses of a
@@ -273,6 +305,32 @@ def _looks_like_genuine_concept(
     identifier anywhere else in a statement (Codex review: excluding only
     ``::`` still missed a plain, unqualified pre-C++20 use like
     ``static concept C = {};``)."""
+    same_line_prefix = lookahead[:match_start].rstrip()
+    if same_line_prefix.endswith(b">"):
+        return True
+    if not same_line_prefix:
+        return prev_nonblank_code.rstrip().endswith(b">")
+    return False
+
+
+def _looks_like_genuine_requires_clause(
+    lookahead: bytes, match_start: int, prev_nonblank_code: bytes
+) -> bool:
+    """True only if the requires-*clause* candidate (the bare, non-
+    parenthesized ``requires Foo<T>`` form matched by
+    ``_CPP20_REQUIRES_CLAUSE_PATTERN``) is actually preceded by a
+    ``template<...>`` header's closing ``>`` — mirrors
+    :func:`_looks_like_genuine_concept` exactly, for the same reason: a
+    plain pre-C++20 declaration using "requires" as an ordinary type/
+    variable name (``struct requires {}; requires value;`` — declaring a
+    variable of type "requires") has the identical bare
+    ``requires\\s+\\w`` shape as a genuine clause, and was previously
+    accepted unconditionally by this branch with no declarator check at
+    all (Codex review). Unlike the parenthesized/brace-delimited
+    requires-expression form (:func:`_looks_like_requires_declarator`), a
+    clause has no body to confirm, so the *only* positive signal
+    available is the preceding template header — exactly the same
+    positive-signal-required design already used for ``concept``."""
     same_line_prefix = lookahead[:match_start].rstrip()
     if same_line_prefix.endswith(b">"):
         return True
@@ -466,8 +524,16 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 lookahead, requires_expr_match, prev_nonblank_code
             ):
                 found.append(Cpp20Requirement("requires-expression", str(p), start_no))
-            elif _CPP20_REQUIRES_CLAUSE_PATTERN.search(lookahead):
+            elif (
+                clause_match := _CPP20_REQUIRES_CLAUSE_PATTERN.search(lookahead)
+            ) and _looks_like_genuine_requires_clause(
+                lookahead, clause_match.start(), prev_nonblank_code
+            ):
                 found.append(Cpp20Requirement("requires-clause", str(p), start_no))
+            elif _CPP20_CONSTRAINED_TEMPLATE_PARAM_PATTERN.search(lookahead):
+                found.append(
+                    Cpp20Requirement("constrained-template-parameter", str(p), start_no)
+                )
             if code.strip():
                 prev_nonblank_code = code
     return found

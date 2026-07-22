@@ -450,6 +450,58 @@ def test_cpp20_detector_accepts_genuine_requires_expression_as_operand(tmp_path)
     assert _detect_cpp20_headers(headers) is True
 
 
+def test_cpp20_detector_ignores_bare_declaration_of_type_named_requires(tmp_path):
+    """Regression (Codex review, fourth round): "requires" only became a
+    reserved keyword in C++20 — a variable declaration using a type
+    literally named "requires" (``struct requires {}; requires value;``)
+    has the identical bare ``requires\\s+\\w`` shape as a genuine
+    requires-clause, but the clause branch previously had no declarator
+    check at all — unlike the parenthesized/brace requires-expression
+    form. A genuine clause is always preceded by its own template<...>
+    header; this declaration is not."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "struct requires {};\nrequires value;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_detects_std_concept_constrained_template_parameter(tmp_path):
+    """Regression (Codex review): a constrained template parameter using a
+    standard-library concept in place of typename/class (the abbreviated
+    ``template <std::integral T>`` form) is genuine C++20 syntax with no
+    "concept"/"requires" keyword anywhere at the use site, so neither
+    existing pattern detected it. Scoped to the fixed, well-known
+    <concepts>/<iterator>/<ranges> name list rather than any identifier,
+    since an arbitrary identifier there is routinely a valid pre-C++20
+    non-type template parameter's type."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <concepts>\ntemplate <std::integral T> void f(T);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "constrained-template-parameter" for r in reqs)
+
+
+def test_cpp20_detector_ignores_custom_nttp_type_resembling_constrained_param(
+    tmp_path,
+):
+    """Companion to the above: an ordinary non-type template parameter
+    using a custom (non-std::) type — a perfectly valid pre-C++20
+    construct — must not be mistaken for a constrained template
+    parameter just because it has the same "identifier identifier"
+    shape."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<ns::Traits::value_type V> void f();\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_ignores_qualified_concept_used_as_pre_cxx20_type(tmp_path):
     """Regression (Codex review): "concept" only became a reserved keyword
     in C++20 — a qualified reference to a type literally named "concept"
