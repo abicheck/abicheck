@@ -84,6 +84,6 @@ against the code as unverified, regardless of how confident it reads.
 | [043](043-cli-pre-1.0-surface-reset.md) | Pre-1.0 CLI Surface Reset — Root Command Collapse, Depth Ladder Narrowing, and Dry-Run Unification | Accepted — implemented |
 | [044](044-reachability-aware-suppression.md) | Reachability-Aware Suppression and the Effective Public ABI | Accepted — P0 slice implemented |
 | [045](045-identity-based-old-new-entity-matching.md) | Identity-Based Old/New Entity Matching | Accepted — implemented for `RecordType` and `EnumType` |
-| [046](046-source-graph-identity-v2-and-evidence-merge.md) | Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge | Accepted — D2 (evidence-preserving merge) implemented; D1/D3-D6 open |
+| [046](046-source-graph-identity-v2-and-evidence-merge.md) | Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge | Accepted — D2 (evidence-preserving merge), D3 (per-role coverage matrix) implemented; D1/D4-D6 open |
 | [047](047-github-actions-integration-model.md) | GitHub Actions Integration Model — Project Lifecycle Over Aggregate-Centric Design | Proposed — not implemented; see [G30](../plans/g30-github-actions-integration-model.md) |
 | [048](048-canonical-entity-identity-and-graph-reconciliation.md) | Canonical Entity Identity and Graph Reconciliation (G31 Phase B) | Accepted — implemented |

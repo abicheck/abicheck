@@ -152,14 +152,16 @@ field alongside `public_reachable`/`reachability_kind`/`reachability_proof_path`
 each producer still sets it independently, and the proof path is still one
 formatted string.
 
-### Phase 2 — Graph core v2 — **ADR accepted; D2 slice implemented, D1/D3-D6 open**
+### Phase 2 — Graph core v2 — **ADR accepted; D2/D3 slices implemented, D1/D4-D6 open**
 
 [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) records
 the D1-D6 decisions below — the "needs its own ADR" gate this phase set for
-itself. **D2 (the evidence-preserving node/edge merge) is implemented** — see
-ADR-046's "D2 implementation" section, `abicheck/buildsource/graph_facts.py`,
-and `tests/test_source_graph_v2.py`. D1, D3, D4, D5, and D6 below remain
-open follow-up work under the same accepted ADR.
+itself. **D2 (the evidence-preserving node/edge merge) and D3 (the
+per-(kind,role) coverage matrix) are implemented** — see ADR-046's "D2
+implementation"/"D3 implementation" sections,
+`abicheck/buildsource/graph_facts.py`, `abicheck/buildsource/inline_graph_fold.py`,
+`tests/test_source_graph_v2.py`, and `tests/test_inline_changed_paths.py`. D1,
+D4, D5, and D6 below remain open follow-up work under the same accepted ADR.
 
 - `abicheck/buildsource/source_graph.py`: split edge identity into a
   `relation_key = (src, dst, kind, semantic_role)` (used for closure/diff) and

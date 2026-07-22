@@ -1,13 +1,14 @@
 # ADR-046: Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge
 
 **Date:** 2026-07-19
-**Status:** Accepted — D2 slice implemented: the evidence-preserving node/edge
-merge (`GraphFact`/`FactConflict`/`merge_graph_facts`, replacing
-`SourceGraphSummary.add_node`/`add_edge`'s v1 first-writer-wins drop). D1
-(`relation_key`/`occurrence_id` edge-identity split), D3 (per-(kind,role)
-coverage matrix), D4 (`EntityResolver`/`SOURCE_GRAPH_VERSION = 2`), D5
-(`TraversalPolicy`), and D6 (proof-path preference order) remain open — see
-"D2 implementation" below.
+**Status:** Accepted — D2 and D3 slices implemented: the evidence-preserving
+node/edge merge (`GraphFact`/`FactConflict`/`merge_graph_facts`, replacing
+`SourceGraphSummary.add_node`/`add_edge`'s v1 first-writer-wins drop), and the
+per-(kind,role) coverage matrix for `inline_graph_fold.fold_type_graph`. D1
+(`relation_key`/`occurrence_id` edge-identity split), D4
+(`EntityResolver`/`SOURCE_GRAPH_VERSION = 2`), D5 (`TraversalPolicy`), and D6
+(proof-path preference order) remain open — see "D2 implementation"/"D3
+implementation" below.
 **Decision maker:** (pending — recorded per repository convention, the same
 caveat ADR-048's header carries; a single-maintainer repo where merging the
 implementing PR is the acceptance mechanism.)
@@ -311,13 +312,51 @@ of by first-writer-wins.
   recording vs. silent agreement, edge merge parity with node merge,
   constructor-seeded backfill, and v1-pack/v2-pack round-trip compatibility.
 
-**Not yet implemented** (D1, D3-D6): `relation_key`/`occurrence_id` edge
-identity splitting, the per-(kind,role) coverage matrix, the USR-based
-`EntityResolver` (`SOURCE_GRAPH_VERSION` therefore stays `1`, not `2` —
-D2 alone does not need the version bump since it changes no on-disk key
-shape a v1 reader couldn't already tolerate additively), `TraversalPolicy`,
-and the six-tier proof-path preference order all remain open follow-up work
-under this same ADR.
+**Not yet implemented at this point** (D1, D4-D6): `relation_key`/
+`occurrence_id` edge identity splitting, the USR-based `EntityResolver`
+(`SOURCE_GRAPH_VERSION` therefore still `1`, not `2` — D2 alone does not need
+the version bump since it changes no on-disk key shape a v1 reader couldn't
+already tolerate additively), `TraversalPolicy`, and the six-tier proof-path
+preference order all remain open follow-up work under this same ADR — see
+"D3 implementation" below for the one further slice landed since.
+
+## D3 implementation (G29 Phase 2, slice 2)
+
+- `abicheck/buildsource/inline_graph_fold.py`: `ROLE_COVERAGE_MATRIX` (the
+  exact role vocabulary `type_graph.py`'s `_walk_types` emits per edge kind —
+  `TYPE_INHERITS:base`, `TYPE_HAS_FIELD_TYPE:{field,alias}`,
+  `DECL_HAS_TYPE:{var,return,param}`, `DECL_REFERENCES_DECL:ref`),
+  `role_pass_covered()` (the read helper new code consults, falling back to
+  the family-level flag for an untracked role), and `_mark_role_coverage()`
+  (sets every matrix key alongside a confirmed family flag). Wired into
+  `fold_type_graph()`: a confirmed full *or* narrowed pass earns the finer
+  `extractor_passes`/`narrowed_passes` keys too, not just the family key.
+- **Deliberately scoped to `inline_graph_fold.fold_type_graph`'s
+  build-integrated pass only** — the primary, most-exercised collection
+  path. Two things explicitly *not* covered by this slice, both documented
+  as open follow-up rather than silently assumed:
+  - `header_graph.py`'s header-only type-graph pass (reuses the same
+    `type_graph.py` walker for its clang path, so the same role matrix would
+    likely apply there too — not yet wired).
+  - The ADR-038 C.8 clang-plugin producer (`abicheck-clang-plugin`, ingested
+    via `inputs_pack.py`) — the *actual* motivating case for a per-role gap
+    (it structurally never emits `DECL_HAS_TYPE` for a variable's or
+    typedef's own type, only return/parameter types). Its L4-level
+    `fact_family_states`/`fact_set` coverage schema (`source_abi.py`,
+    `fact_set.py`) only tracks one flat `source_edges` family today, with no
+    role subdivision — extending *that* schema to plumb a per-role claim
+    through to `source_graph.mark_source_edges_extractor_coverage` is a
+    materially larger change than this slice (touches the L4 fact-set
+    contract, not just the L5 graph), so it stays open.
+  `call_graph.py`'s `DECL_CALLS_DECL` is not given role granularity either:
+  its unconditional walk visits every call expression the same way
+  regardless of `call_kind` (direct/virtual/function_pointer/template), so
+  there is no structural per-role gap to make the matrix honest about — a
+  confirmed family flag already means every call kind was examined.
+- `tests/test_inline_changed_paths.py`: a confirmed full pass sets every
+  matrix key; a narrowed pass sets the narrowed-side keys only (never the
+  family-level `extractor_passes` side); `role_pass_covered()`'s direct-hit
+  and family-fallback behavior.
 
 ## Non-goals
 
@@ -409,6 +448,8 @@ under this same ADR.
   delegate to `graph_facts.py` (D2, implemented).
 - `abicheck/buildsource/graph_facts.py` — D2's `GraphFact`/`FactConflict`/
   `merge_graph_facts`/`ensure_facts_and_resolve`/`register_fact`.
+- `abicheck/buildsource/inline_graph_fold.py` — D3's `ROLE_COVERAGE_MATRIX`/
+  `role_pass_covered`/`_mark_role_coverage`, wired into `fold_type_graph`.
 - `abicheck/internal_leak.py` — `compute_leak_paths`/
   `compute_call_graph_leak_paths`, `is_consumer_compiled_node`/
   `is_consumer_compiled_public_entry` (D5's starting point, not implemented).
@@ -416,6 +457,7 @@ under this same ADR.
   root/qualified_name fallback pattern D4 centralizes, `min(paths, key=len)`
   proof-path selection D6 replaces (both not implemented).
 - `tests/test_source_graph_v2.py` — D2 unit tests.
+- `tests/test_inline_changed_paths.py` — D3 unit tests.
 - PR #607 review history — the concrete, repeated instances of identity/
   coverage-granularity bugs this ADR's Context section draws on.
 - [ADR-031](031-source-implementation-graph-augmentation.md), [ADR-041](041-compiler-facts-semantic-impact-graph.md), [ADR-044](044-reachability-aware-suppression.md), [ADR-048](048-canonical-entity-identity-and-graph-reconciliation.md)
