@@ -2073,11 +2073,18 @@ also fails fast via `_EVIDENCE_SET_INPUT_FLAGS`'s guard, the same way
 proving `--dump-manifest` can't reach `_dispatch_release_compare`'s
 kwargs (which never carries it) and silently do nothing on a release
 compare. A
-**`scan --frontend-context`**
-regression test asserting `abicheck scan --against` accepts `device` and
-threads it into the L2 header frontend the same way `dump`/`compare` do,
-proving `compile_context_options` (not a `dump`/`compare`-only decorator) is
-what carries the flag.
+**`scan --frontend-context` Phase-B rejection**
+test asserting `abicheck scan --against ... --frontend-context device`
+also raises the same Phase-B-only rejection `dump`/`compare` do (see the
+dedicated acceptance-criteria bullet above) — **not** that `scan` accepts
+and threads `device` yet, which Phase B cannot honor until Phase D's
+selector exists; the behavioral "`scan` actually threads `device` into
+the L2 header frontend" assertion belongs in Phase D's own tests instead
+(see there), once there is a real selector for it to reach. This test
+does still prove `compile_context_options` is the shared decorator
+`dump`/`compare`/`scan` all resolve through (not a `dump`/`compare`-only
+one) — `scan`'s rejection goes through the identical guard path, not a
+separate one that could drift.
 
 **Example fixtures.** Phase 0's external-STL-noise pair only, wired through
 the real manifest path end to end — **not** the ODR-safe pair. The
@@ -2267,7 +2274,14 @@ D2's gate — proving the resolved `kind` actually reaches
 `compute_extraction_contract`'s hash, not just `sycl_context.py`'s
 selection logic; a companion assertion with the *same* `frontend_context`
 on both sides leaves `profile_fingerprint` matching, the routine case this
-fix must not break.
+fix must not break. A **`scan --frontend-context device` acceptance**
+test — moved here from Phase B, not duplicated (P2 review: Phase B's own
+test asserts `device` is *rejected* there, since this phase's selector
+doesn't exist yet at that point) — asserting `abicheck scan --against ...
+--frontend-context device` now succeeds and threads the request into the
+L2 header frontend via `compile_context_options`/`resolve_compile_context`,
+proving `scan` reaches this phase's selector the same way `dump`/`compare`
+do once it actually exists, closing the loop Phase B's rejection opened.
 
 **Example fixtures.** None required beyond Phase 0's captures — this phase
 is extraction-layer, not diff-layer; no new `ChangeKind`.
