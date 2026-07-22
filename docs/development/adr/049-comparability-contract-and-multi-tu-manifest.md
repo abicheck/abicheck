@@ -164,6 +164,30 @@ not a latent surprise discovered after Phase A ships.
   comment, must not change the fingerprint; reordering includes *within*
   one TU, or changing either flag, must.
 
+**Both fingerprints hash root-relative paths, never absolute or
+side-specific ones — this is not optional, it protects abicheck's single
+most common workflow.** `compare` already supports side-scoped
+`--header old=v1/foo.h --header new=v2/foo.h` and
+`--include old=inc1 --include new=inc2` (ADR-040, `cli_options.py:230+`)
+for the ordinary two-checkout-tree comparison — the old and new sides
+*necessarily* resolve to different absolute paths even when they cover the
+identical logical surface, precisely because they live in different
+checkouts. Hashing resolved absolute paths directly would make every
+routine `compare` invocation fingerprint-mismatch and hard-fail as
+`not_comparable` — the gate would break its primary use case on day one,
+the exact inverse of what it's for. Each side's header/include/forced-
+include paths are therefore normalized **relative to that side's own
+resolution root** before folding into either fingerprint: for the legacy,
+non-manifest CLI path, the root is the longest common path prefix of that
+side's own resolved header/include paths (a pure function of that side's
+own inputs, no new flag needed); for the manifest-driven path (D3), the
+root is the manifest file's own directory. Two sides with the same logical
+directory layout (`include/foo.h` under each side's own root) normalize to
+identical relative paths and produce equal fingerprints regardless of where
+each checkout happens to live on disk; a side whose logical layout actually
+differs (a header moved to a different relative location) still changes the
+fingerprint, correctly.
+
 Both fingerprints live in a new `contract: ExtractionContract | None` field
 on `AbiSnapshot` rather than flattening two more top-level fields onto an
 already-large dataclass — `ExtractionContract` is the one new nested type
@@ -206,7 +230,16 @@ one: `abicheck/schemas/compare_report.schema.json` currently requires
 `tests/test_report_schema.py` validates emitted reports against exactly
 that file — both must change in the same phase that starts emitting
 `not_comparable`, or JSON output goes invalid (or the published schema goes
-stale) the moment the gate first fires. **The exit code is part of this
+stale) the moment the gate first fires. This includes the schema's own
+version metadata, not just its `verdict` constraint:
+`abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION` (currently
+`"2.12"`, a documented `MAJOR.MINOR` policy — every JSON report emits it as
+`report_schema_version`) is bumped in the same change, and the published
+mirror `docs/schemas/v1/compare_report.schema.json` is regenerated via the
+existing `scripts/publish_schemas.py` so it stays byte-identical to the
+packaged schema — `tests/test_report_schema.py`'s
+`test_docs_mirror_matches_packaged_schema` already asserts that identity
+and fails the build otherwise. **The exit code is part of this
 same contract and must be pinned explicitly, not left implicit.**
 `docs/reference/exit-codes.md` documents two co-existing `compare` exit
 schemes (legacy: 0/2/4; severity-aware, with any `--severity-*` flag:

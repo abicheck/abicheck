@@ -116,6 +116,21 @@ Implements ADR-049 D1 and D2.
   declarations feed the ABI model without necessarily touching a TU's
   includes, so leaving it out of the hash would let that exact class of
   scope drift pass the gate undetected.
+- **Both fingerprints hash root-relative paths, never raw absolute ones —
+  the single highest-priority correctness requirement in this phase.**
+  `compare`'s side-scoped `--header old=v1/foo.h --header new=v2/foo.h` /
+  `--include old=inc1 --include new=inc2` (ADR-040) is the ordinary
+  two-checkout compare workflow, and its old/new sides necessarily resolve
+  to different absolute paths even for an identical logical surface.
+  Hashing absolute paths directly would fingerprint-mismatch and hard-fail
+  *every routine compare* as `not_comparable` — breaking the gate's primary
+  use case on day one. Each side's paths are normalized relative to that
+  side's own resolution root (legacy CLI path: the longest common prefix of
+  that side's own resolved paths; manifest path: the manifest file's own
+  directory) before hashing (ADR-049 D1). A dedicated test using
+  `--header old=v1/foo.h --header new=v2/foo.h` against logically identical
+  trees under different roots, asserting the resulting `profile_fingerprint`s
+  match, is non-negotiable for this phase to be considered done.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -191,7 +206,14 @@ Implements ADR-049 D1 and D2.
   already validates emitted reports against this exact file — gains a case
   for a `not_comparable` report. Shipping the reporter change without this
   either emits JSON that fails its own published schema, or ships a stale
-  schema — not an acceptable outcome for either.
+  schema — not an acceptable outcome for either. The schema's own version
+  metadata moves in lockstep, not as an afterthought:
+  `abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION` (currently
+  `"2.12"`, emitted in every report as `report_schema_version`) is bumped,
+  and the published mirror `docs/schemas/v1/compare_report.schema.json` is
+  regenerated via the existing `scripts/publish_schemas.py` — skipping
+  either fails `tests/test_report_schema.py::test_docs_mirror_matches_packaged_schema`,
+  which already asserts the two stay byte-identical.
 - `--diagnostic-comparison` opt-in flag: downgrades the hard-fail to a
   tentative diff, every finding stamped `assurance: none`.
 - **Rollout: the hard gate is the default from the first shipped version of
@@ -232,7 +254,10 @@ top of `compare`), `service.py`,
 `mcp_server.py`, `cli.py`/`cli_compare_release.py` (flag + the new,
 distinct `not_comparable` exit code), `docs/reference/exit-codes.md` (a
 new row in both the legacy and severity-aware tables), `reporter.py`,
-`sarif.py`, `junit_report.py`, `abicheck/schemas/compare_report.schema.json`.
+`sarif.py`, `junit_report.py`, `abicheck/schemas/compare_report.schema.json`,
+`abicheck/schemas/__init__.py` (`REPORT_SCHEMA_VERSION` bump),
+`docs/schemas/v1/compare_report.schema.json` (regenerated via
+`scripts/publish_schemas.py`, not hand-edited).
 
 **Tests.** A `dump()`-level test asserting a real (non-manifest) dump
 returns a snapshot with a populated, non-`None` `contract` — the specific
@@ -248,7 +273,11 @@ warn-and-continue path; a regression test pinning that a schema bump
 *below* the threshold still only warns (today's lenient behavior for
 ordinary additive fields must not become accidentally stricter);
 `tests/test_report_schema.py` gains a `not_comparable` case validated
-against the updated `compare_report.schema.json`; an exit-code test
+against the updated `compare_report.schema.json`, and its existing
+`test_docs_mirror_matches_packaged_schema` must still pass against the
+regenerated `docs/schemas/v1` copy; a root-relative-path fingerprint test
+(the acceptance-criteria bullet above — same-tree-different-root compare
+must not fingerprint-mismatch); an exit-code test
 asserting `not_comparable` returns the new dedicated code, never `0`, from
 both the legacy and severity-aware `compare` invocations; a
 `changekind-partition`/`changekind-detector`-gate-compliant unit test for
