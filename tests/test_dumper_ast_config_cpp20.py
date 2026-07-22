@@ -820,6 +820,26 @@ def test_cpp20_detector_ignores_variable_template_of_type_named_concept(
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_concept_typed_variable_template_any_initializer(
+    tmp_path,
+):
+    """Regression (Codex review, fourth round): the brace-only exclusion
+    above only covered aggregate-initialized variable templates — a type
+    literally named "concept" can equally be initialized via *any* other
+    expression convertible to it, e.g. a converting constructor
+    (``struct concept { concept(int); }; template<class T> concept C =
+    1;``). No per-initializer-shape check can be complete, so the
+    detector now instead checks whether "concept" is defined as a real
+    type *anywhere* in the header and, if so, rejects every bare
+    "concept NAME = ..." match in it outright."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "struct concept { concept(int); };\ntemplate<class T> concept C = 1;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_still_accepts_template_concept_after_qualified_check(
     tmp_path,
 ):

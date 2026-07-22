@@ -133,6 +133,19 @@ _CPP_PATTERNS = [_EXTERN_C_PATTERN, *_CPP_ONLY_PATTERNS]
 # in a `#error`/`#define` message or a string literal is never mistaken for
 # the C++20 keyword (Codex/false-positive report).
 _CPP20_CONCEPT_PATTERN = re.compile(rb"\bconcept\s+\w+\s*=")  # concept Addable = ...
+# "concept" only became a reserved keyword in C++20 — a pre-C++20 header can
+# legally declare a type literally named "concept" (Codex review, four
+# rounds: a qualified use, an unqualified use, a brace-initialized variable
+# template, and — the general case this pattern exists to catch — a
+# variable template initialized via *any* other expression convertible to
+# that type, e.g. through a converting constructor: ``struct concept {
+# concept(int); }; template<class T> concept C = 1;``). No per-initializer
+# check can ever be complete, so this instead detects the one thing that
+# makes every one of those variants possible: a definition of "concept" as
+# an ordinary type name anywhere in the header.
+_CONCEPT_AS_TYPE_NAME_PATTERN = re.compile(
+    rb"\b(?:struct|class)\s+concept\b|\busing\s+concept\s*=|\btypedef\b[^;]*\bconcept\s*;"
+)
 _CPP20_REQUIRES_EXPR_PATTERN = re.compile(
     rb"\brequires\s*[(\{]"
 )  # requires(T a, T b) { ... }  OR the parameterless requires { ... } form
@@ -432,7 +445,10 @@ def _looks_like_requires_declarator(
 
 
 def _looks_like_genuine_concept(
-    lookahead: bytes, match: re.Match[bytes], prev_nonblank_code: bytes
+    lookahead: bytes,
+    match: re.Match[bytes],
+    prev_nonblank_code: bytes,
+    concept_type_shadowed: bool,
 ) -> bool:
     """True only if the concept-declaration candidate is actually preceded
     by a ``template<...>`` header's closing ``>`` — either earlier on the
@@ -448,19 +464,21 @@ def _looks_like_genuine_concept(
 
     Even with a preceding template header, "concept" only became a
     reserved keyword in C++20 — a pre-C++20 header can legally declare a
-    type literally named "concept" (``struct concept {};``) and then use
-    it in an ordinary *variable template* (``template<class T> concept C
-    = {};``, valid since C++14), which has the identical textual shape as
-    a genuine concept definition (Codex review, second round). The two
-    are distinguishable here: a concept's constraint-expression is never
-    just a bare brace-init-list — ``{}``/``{...}`` isn't a valid
-    constant-expression in that position — so a variable template's
-    aggregate/value-initialization (which *is* exactly that shape) can be
-    ruled out by checking whether the very first non-whitespace token
-    after "=" is ``{``."""
-    same_line_prefix = lookahead[: match.start()].rstrip()
-    if lookahead[match.end() :].lstrip().startswith(b"{"):
+    type literally named "concept" and use it in an ordinary *variable
+    template* (``template<class T> concept C = {};``, valid since
+    C++14), which has the identical textual shape as a genuine concept
+    definition (Codex review, several rounds). No per-initializer-shape
+    check can be complete — the variable template's initializer can be
+    *any* expression convertible to the shadowing type, not just a
+    brace-init-list (e.g. ``struct concept { concept(int); }; ...
+    concept C = 1;`` via a converting constructor) — so *whenever this
+    header defines "concept" as a real type anywhere*
+    (``concept_type_shadowed``), every bare ``concept NAME = ...`` match
+    in it is ambiguous and rejected outright, regardless of what follows
+    "="."""
+    if concept_type_shadowed:
         return False
+    same_line_prefix = lookahead[: match.start()].rstrip()
     if same_line_prefix.endswith(b">"):
         return True
     if not same_line_prefix:
@@ -672,6 +690,17 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
             content,
             flags=re.DOTALL,
         )
+        # Whether this header defines "concept" as an ordinary type name
+        # anywhere (Codex review, fourth round) — a pre-C++20 header can
+        # declare a type literally named "concept" and initialize a
+        # variable template of that type via *any* expression convertible
+        # to it (not just a brace-init-list, which only covered the
+        # aggregate-init case), so no per-initializer-shape check can be
+        # complete. Once "concept" is confirmed to name a real type in
+        # this header, every bare "concept NAME = ..." match in it is
+        # ambiguous and treated as non-genuine — see
+        # ``_looks_like_genuine_concept``.
+        concept_type_shadowed = bool(_CONCEPT_AS_TYPE_NAME_PATTERN.search(content))
         logical_lines = _iter_logical_lines(content)
         n = len(logical_lines)
         # Last non-blank line's own (un-extended) code, tracked across
@@ -710,7 +739,7 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
             concept_match = _CPP20_CONCEPT_PATTERN.search(lookahead)
             requires_expr_match = _CPP20_REQUIRES_EXPR_PATTERN.search(lookahead)
             if concept_match and _looks_like_genuine_concept(
-                lookahead, concept_match, prev_nonblank_code
+                lookahead, concept_match, prev_nonblank_code, concept_type_shadowed
             ):
                 found.append(Cpp20Requirement("concept-declaration", str(p), start_no))
             elif requires_expr_match and not _looks_like_requires_declarator(
