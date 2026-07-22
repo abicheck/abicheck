@@ -145,26 +145,40 @@ _CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
 
 # "requires" only became a reserved keyword in C++20 — any earlier standard
 # allows it as an ordinary identifier, e.g. ``bool requires(int x) { ... }``
-# (a real function literally named "requires"). Forcing -std=gnu++20 on such
-# a header would break it, since the identifier is no longer usable there
-# (Codex review). The only way "requires(" is preceded by a bare word (just
-# whitespace, no operator) in *genuine* C++20 usage is a handful of
-# expression-introducing keywords (return/throw/co_return); every other
-# preceding identifier can only be a declaration/call using "requires" as a
-# plain pre-C++20 name — juxtaposing two bare identifiers with nothing but
-# whitespace between them is not valid C++ in any other production.
+# (a declaration) or ``requires(1);`` (a call), both real uses of a
+# function literally named "requires". Forcing -std=gnu++20 on such a
+# header would break it, since the identifier is no longer usable there
+# (Codex review, two rounds: the declaration case, then the call/
+# expression-statement case). The only way "requires(" is preceded by a
+# bare word (just whitespace, no operator) in *genuine* C++20 usage is a
+# handful of expression-introducing keywords (return/throw/co_return);
+# every other preceding identifier can only be a declaration/call using
+# "requires" as a plain pre-C++20 name — juxtaposing two bare identifiers
+# with nothing but whitespace between them is not valid C++ in any other
+# production. Likewise, "requires(" at the very start of a statement (
+# preceded by nothing, or by a statement-boundary "{"/"}"/";") can only be
+# a call-as-statement using the plain pre-C++20 name — a genuine
+# requires-expression or requires-clause is always itself a sub-expression
+# (an operand), never a bare statement by construction of this detector's
+# own trigger (there is no standalone top-level "requires ...;" construct
+# in C++20 outside of being part of a larger declaration/expression).
 _REQUIRES_EXPR_SAFE_PRECEDING_WORDS = frozenset({b"return", b"throw", b"co_return"})
+_REQUIRES_STATEMENT_BOUNDARY_CHARS = frozenset({b"{", b"}", b";"})
 _TRAILING_IDENTIFIER_PATTERN = re.compile(rb"([A-Za-z_]\w*)\Z")
 
 
 def _looks_like_requires_declarator(code: bytes, match_start: int) -> bool:
     """True if the requires-expression candidate at *match_start* in *code*
-    is immediately preceded (skipping only whitespace) by a bare identifier
-    that isn't one of the few keywords that can legitimately introduce a
-    requires-expression as an operand — i.e., "requires" looks like an
-    ordinary pre-C++20 identifier being declared or called, not the C++20
-    keyword."""
+    looks like an ordinary pre-C++20 use of "requires" as a plain
+    identifier — either immediately preceded (skipping only whitespace) by
+    a bare identifier that isn't one of the few keywords that can
+    legitimately introduce a requires-expression as an operand (the
+    declaration/call-with-preceding-name case), or preceded by nothing but
+    a statement boundary (the bare call-as-statement case) — rather than
+    the C++20 keyword."""
     prefix = code[:match_start].rstrip()
+    if not prefix or prefix[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
+        return True
     m = _TRAILING_IDENTIFIER_PATTERN.search(prefix)
     return m is not None and m.group(1) not in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS
 

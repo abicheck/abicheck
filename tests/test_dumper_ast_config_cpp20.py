@@ -280,6 +280,21 @@ def test_cpp20_detector_ignores_requires_used_as_pre_cxx20_identifier(tmp_path):
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_call_to_pre_cxx20_requires_function(tmp_path):
+    """Regression (Codex review, second round): a statement-level *call* to
+    a pre-C++20 function named "requires" (e.g. ``requires(1);`` inside a
+    function body) was still misdetected — the earlier fix only excluded
+    "requires(" preceded by a bare identifier (the declaration case), not
+    preceded by nothing but a statement boundary like "{" (the call-as-
+    statement case)."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "void requires(int);\ninline void f() { requires(1); }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_still_accepts_return_requires_expression(tmp_path):
     """Non-regression: "return requires(...)" — a requires-expression used
     directly as a return value — must stay detected. "return" is one of the
