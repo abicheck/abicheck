@@ -93,8 +93,11 @@ real data.
   entity boundary at the merge layer (this boundary itself is ADR-024's, not
   new — the fixture just needs to exist for the merge tests to use it).
 - A "scope drift" fixture pair: same manifest structure, new side adds one
-  extra TU — used to assert Phase A's `SCOPE_MISMATCH` fires correctly and
-  that a *report-only* mode correctly demotes it instead of hard-failing.
+  extra TU — used to assert Phase A's gate hard-fails `not_comparable` on it
+  by default, and that the explicit `--diagnostic-comparison` opt-in (D2's
+  one sanctioned escape hatch, not a separate always-on report-only mode)
+  correctly downgrades it to a tentative, `assurance: "none"`-stamped diff
+  instead.
 
 **Files & surfaces.** New fixtures under `tests/fixtures/g32/` (raw AST
 captures, not committed as generated `.abi.json` — those are produced by

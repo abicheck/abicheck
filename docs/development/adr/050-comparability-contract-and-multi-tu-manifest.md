@@ -261,12 +261,16 @@ correctly keeps the common project-include-root workflow working (the
 thing that matters for the gate's primary use case), at the cost of not
 being able to detect a dependency-version change expressed purely as a
 different `-I` mount point with the same basename — that class of drift
-is undetectable by this fingerprint on the legacy CLI path. The
-manifest-driven path (D3) has no such gap, since every manifest-declared
-path is relative to one explicit document rather than inferred from
-directory shape — a user who needs reliable dependency-version detection
-without a manifest has `--diagnostic-comparison` (D2) as the sanctioned
-fallback, not a silent guess in either direction.
+is undetectable by this fingerprint on the legacy CLI path. **This is not a
+case `--diagnostic-comparison` (D2) can rescue**: that flag downgrades a
+*detected* fingerprint mismatch into a tentative diff, but this exact gap is
+the fingerprints *spuriously matching* — the gate never raises, so there is
+no hard-fail for the flag to soften. The only real fallback is the
+manifest-driven path (D3), which has no such gap at all, since every
+manifest-declared path is relative to one explicit document rather than
+inferred from directory shape — a user who needs reliable dependency-version
+detection for this specific shape must use a manifest; there is no
+legacy-CLI escape hatch for it, silent or otherwise.
 
 Both fingerprints live in a new `contract: ExtractionContract | None` field
 on `AbiSnapshot` rather than flattening two more top-level fields onto an
