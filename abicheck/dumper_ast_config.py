@@ -169,6 +169,18 @@ def _looks_like_requires_declarator(code: bytes, match_start: int) -> bool:
     return m is not None and m.group(1) not in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS
 
 
+def _looks_like_concept_declarator(code: bytes, match_start: int) -> bool:
+    """True if the concept-declaration candidate at *match_start* in *code*
+    is immediately preceded (skipping only whitespace) by ``::`` — a
+    qualified-name operator can never precede a genuine C++20 concept
+    declaration (a concept-name is always declared bare, directly after its
+    own ``template<...>`` header, never out-of-line via a scope-resolution
+    qualifier), so this can only mean "concept" is being used as an
+    ordinary pre-C++20 (qualified) type name, e.g. ``ns::concept C = {};``
+    (Codex review)."""
+    return code[:match_start].rstrip().endswith(b"::")
+
+
 _STRING_LITERAL_PATTERN = re.compile(rb'"(?:\\.|[^"\\\n])*"')
 _CHAR_LITERAL_PATTERN = re.compile(rb"'(?:\\.|[^'\\\n])*'")
 # C++11 raw string literal: [prefix]R"delim(...)delim" — the standard
@@ -339,8 +351,11 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 nxt = _strip_literals_joined(logical_lines[j][1]).split(b"//")[0]
                 lookahead += b"\n" + nxt
                 lookahead_budget -= 1
+            concept_match = _CPP20_CONCEPT_PATTERN.search(lookahead)
             requires_expr_match = _CPP20_REQUIRES_EXPR_PATTERN.search(lookahead)
-            if _CPP20_CONCEPT_PATTERN.search(lookahead):
+            if concept_match and not _looks_like_concept_declarator(
+                lookahead, concept_match.start()
+            ):
                 found.append(Cpp20Requirement("concept-declaration", str(p), start_no))
             elif requires_expr_match and not _looks_like_requires_declarator(
                 lookahead, requires_expr_match.start()

@@ -295,6 +295,37 @@ def test_cpp20_detector_still_accepts_return_requires_expression(tmp_path):
     assert any(r.reason == "requires-expression" for r in reqs)
 
 
+def test_cpp20_detector_ignores_qualified_concept_used_as_pre_cxx20_type(tmp_path):
+    """Regression (Codex review): "concept" only became a reserved keyword
+    in C++20 — a qualified reference to a type literally named "concept"
+    (e.g. ``ns::concept C = {};``) is valid pre-C++20 code. A concept-name
+    is always declared bare, directly after its own template<...> header,
+    never out-of-line via a scope-resolution qualifier, so "::concept"
+    can only mean the pre-C++20 identifier usage."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "namespace ns { struct concept {}; }\nns::concept C = {};\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_still_accepts_template_concept_after_qualified_check(
+    tmp_path,
+):
+    """Non-regression: a genuine concept declaration (preceded by its
+    template<...> header on a separate line, not by "::") must stay
+    detected."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<class T>\nconcept HasFoo = requires(T a, T b) { a.foo(b); };\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
 def test_cpp20_detector_accepts_inline_concept_declaration(tmp_path):
     headers = _write(
         tmp_path,
