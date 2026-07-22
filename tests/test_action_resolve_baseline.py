@@ -703,6 +703,17 @@ class TestArchiveExtraction:
         assert outputs.get("bootstrap") == "false"
         assert outputs.get("channel") == "release-contract"
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "git-bash's tar on windows-latest CI does not reliably "
+            "recreate a symlink as a real NTFS reparse point on extraction "
+            "(same limitation as test_archive_with_symlink_hard_fails_"
+            "with_typed_outputs above) -- an extraction-tooling limitation "
+            "of the Windows test runner, not a gap in run.sh's detection "
+            "logic, which the Linux/macOS lanes still exercise."
+        ),
+    )
     def test_archive_with_many_symlinks_hard_fails_with_typed_outputs(
         self, tmp_path: Path
     ) -> None:
