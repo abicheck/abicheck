@@ -323,16 +323,30 @@ Implements ADR-050 D1 and D2.
   ancestor rule classifies these as external today, so an ordinary edit to
   a generated or private support header still flips `profile_fingerprint`
   on a routine CMake/Meson-style layout, not an edge case. Legacy CLI gains
-  a new, side-scoped, **labeled** `--project-include <label>=<path>` option
-  (`--project-include support=old/src --project-include support=new/src`,
-  alongside the existing `--include old=... --include new=...` side-scoping,
-  ADR-040) asserting a directory is project-owned regardless of ancestry.
-  `--project-include` requires a `label` (a user-supplied logical name, not
-  path-derived — the same choice D3's manifest `name` field already makes)
-  because a support root with no owned declared header has nothing for the
-  ancestor-derived per-slot token below to key off of; asking for one
-  avoids yet another path-shape heuristic. Legacy-CLI-only: the manifest
-  path (D3) already has no such gap via per-TU forced-includes.
+  a new, side-scoped, **labeled** `--project-include` option — its value
+  grammar cannot naively reuse `<label>=<path>`, though: `cli_params.py`'s
+  existing `SidedPathParam`/`SidedStrParam` (ADR-040 Lever 1) already
+  reserve the `X=` prefix position exclusively for the side discriminator
+  (`old=`/`new=`/`both=`, `_SIDES`) — `support=old/src` has no recognized
+  side prefix, so it would fall through to that parser's bare-value case
+  as `("both", Path("support=old/src"))`, the literal string swallowed
+  whole as a bogus path, never parsed as a label. `--project-include`
+  therefore needs its own dedicated param type, `SidedLabeledPathParam`,
+  carrying both pieces: `[old:|new:|both:]<label>=<path>` — a
+  colon-terminated side prefix (colon instead of `=` so it can't collide
+  with the label's own `=`), defaulting to `both:` when omitted, the same
+  "bare value means both sides" convention as the existing sided params.
+  A two-checkout compare with side-specific paths for one shared logical
+  root is declared `--project-include old:support=old/src
+  --project-include new:support=new/src` — same `support` label on both
+  invocations (so the per-slot token matches across sides for the same
+  logical root), different paths per side. `--project-include` requires
+  that label (a user-supplied logical name, not path-derived — the same
+  choice D3's manifest `name` field already makes) because a support root
+  with no owned declared header has nothing for the ancestor-derived
+  per-slot token below to key off of; asking for one avoids yet another
+  path-shape heuristic. Legacy-CLI-only: the manifest path (D3) already
+  has no such gap via per-TU forced-includes.
   `scope_fingerprint` owns everything
   under a project-owned root; `profile_fingerprint` owns only external
   roots, in full. **Excluding a project-owned directory's content must not
@@ -373,9 +387,9 @@ Implements ADR-050 D1 and D2.
   collide with a header name. `-I project -I dep` (project ancestor of
   declared `foo.h`) hashes `[token(foo.h), digest(dep)]`; `-I dep -I
   project` hashes `[digest(dep), token(foo.h)]` — different, correctly
-  flagged as non-comparable; `--project-include support=old/src` vs. the
-  same directory declared last instead of first is distinguished the same
-  way via `token(support)`. **Residual limitation (same class as the
+  flagged as non-comparable; `--project-include both:support=old/src` vs.
+  the same directory declared last instead of first is distinguished the
+  same way via `token(support)`. **Residual limitation (same class as the
   vendored-nested-dependency gap below):** two separately declared `-I`
   roots that are both ancestors of the *same* declared header (an outer
   directory and one of its own subdirectories, each passed as its own
@@ -506,17 +520,23 @@ Implements ADR-050 D1 and D2.
   to close; (14) a sibling support root declared via `--project-include`,
   not nested under any declared `--header` — `old`/`new` both declare
   `--header .../include/foo.h --include .../include --project-include
-  support=.../src` (`src/` a sibling of `include/`, containing a private
-  header `foo.h` `#include`s) — with a **content edit confined to `src/`'s
-  private header** between old and new leaves `profile_fingerprint`
+  both:support=.../src` (`src/` a sibling of `include/`, containing a
+  private header `foo.h` `#include`s) — with a **content edit confined to
+  `src/`'s private header** between old and new leaves `profile_fingerprint`
   matching, proving `--project-include` extends project-ownership to a
   sibling directory the ancestor rule alone would otherwise classify as
   external (and thus spuriously flip on this routine internal edit); a
-  companion assertion swapping `--project-include support=.../src` to
-  declaration-last on one side while an unrelated ancestor-derived root
-  keeps its position produces a *different* `profile_fingerprint`,
-  confirming the label-derived token participates in the same
-  order-sensitive sequence as every other project-owned slot.
+  companion assertion swapping `--project-include old:support=old/src
+  --project-include new:support=new/src` to declaration-last on one side
+  while an unrelated ancestor-derived root keeps its position produces a
+  *different* `profile_fingerprint`, confirming the label-derived token
+  participates in the same order-sensitive sequence as every other
+  project-owned slot; a third assertion parses `--project-include
+  old:support=old/src` and asserts the side/label/path triple round-trips
+  correctly through `SidedLabeledPathParam`, the exact grammar this fix
+  exists to get right (P2 review: a naive `<label>=<path>` grammar would
+  have silently misparsed as `("both", Path("support=old/src"))` instead
+  of raising or splitting a side/label/path triple).
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -968,10 +988,13 @@ Implements ADR-050 D1 and D2.
   ADR-041's header-graph flag flip, which changed behavior for an
   already-common default-off-to-on transition.
 
-**Files & surfaces.** `cli_options.py` (new side-scoped, labeled
-`--project-include <label>=<path>` option, alongside the existing
-`--include`/`--header` `SIDED_PATH_PARAM` family, ADR-040 — legacy CLI
-only, see the sibling-support-root acceptance-criteria bullet above),
+**Files & surfaces.** `cli_params.py` (new `SidedLabeledPathParam` —
+`[old:|new:|both:]<label>=<path>`, a dedicated param type distinct from
+`SidedPathParam`/`SidedStrParam` since neither carries a side *and* a
+label at once, see the sibling-support-root acceptance-criteria bullet
+above), `cli_options.py` (new side-scoped, labeled `--project-include`
+option built on it, alongside the existing `--include`/`--header`
+`SIDED_PATH_PARAM` family, ADR-040 — legacy CLI only),
 `model.py` (new `ExtractionContract`), new
 `abicheck/comparability.py` (fingerprint computation, `compute_extraction_contract`
 — its project-ownership predicate takes both ancestor-derived headers and

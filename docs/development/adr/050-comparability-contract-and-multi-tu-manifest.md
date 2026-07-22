@@ -437,23 +437,39 @@ enough (any CMake/Meson build with a generated-headers directory) that
 this is not the same "unusual declaration shape" class as the
 nested-vendor-dependency gap below; it is a routine one. The legacy CLI
 gains an explicit escape hatch for exactly this case: a new, side-scoped,
-**labeled** `--project-include <label>=<path>` option (`--project-include
-support=old/src --project-include support=new/src`, alongside the
-existing side-scoped `--include old=... --include new=...` convention,
-ADR-040) that asserts a declared `-I` directory is project-owned
-regardless of whether it is an ancestor of any declared header. Unlike
-`--include`, `--project-include` requires a `label` — not a path-derived
-name, a short user-supplied logical identifier, the same "name a TU
-instead of inferring one from path shape" choice the manifest path (D3)
-already makes for its `name` field — because an explicitly-declared
-support root has no natural "owned declared header" for the per-slot
-token below to derive from the way an ancestor-derived root does; asking
-the user for one avoids inventing yet another path-shape heuristic that
-could break in some other way, the repeated lesson of every rejected
-attempt in this section. `--project-include` is a legacy-CLI-only
-addition: the manifest path (D3) already has no such gap, since a
-manifest TU can declare a per-TU forced-include for exactly this
-directory instead of relying on directory-tree inference.
+**labeled** `--project-include` option — but its value grammar cannot
+reuse the plain `<label>=<path>` shape naively: `abicheck/cli_params.py`'s
+existing `SidedPathParam`/`SidedStrParam` (ADR-040 Lever 1) already claim
+the `X=` prefix position exclusively for the side discriminator
+(`old=`/`new=`/`both=`, `_SIDES` at `:101`) — a value like
+`support=old/src` has no recognized side prefix (`support` isn't in
+`_SIDES`), so it would fall through to that parser's bare-value case and
+be parsed as `("both", Path("support=old/src"))`, the literal string
+`support=old/src` swallowed whole as a bogus path, not as a label at all.
+`--project-include` therefore needs its own dedicated Click param type,
+`SidedLabeledPathParam`, with a grammar that carries *both* pieces:
+`[old:|new:|both:]<label>=<path>` — a colon-terminated side prefix (same
+three words as `_SIDES`, colon instead of `=` to stay unambiguous against
+the label's own `=`), defaulting to `both:` when omitted, exactly
+mirroring "a bare value means both sides" for the existing sided params.
+A genuine two-checkout compare with side-specific support-root paths but
+one shared logical identity is declared as `--project-include
+old:support=old/src --project-include new:support=new/src` — same
+`support` label on both invocations (so the per-slot token below matches
+across sides for the same logical root), different paths (so each side
+resolves its own checkout's directory). Unlike `--include`,
+`--project-include` requires that label — not a path-derived name, a
+short user-supplied logical identifier, the same "name a TU instead of
+inferring one from path shape" choice the manifest path (D3) already
+makes for its `name` field — because an explicitly-declared support root
+has no natural "owned declared header" for the per-slot token below to
+derive from the way an ancestor-derived root does; asking the user for
+one avoids inventing yet another path-shape heuristic that could break in
+some other way, the repeated lesson of every rejected attempt in this
+section. `--project-include` is a legacy-CLI-only addition: the manifest
+path (D3) already has no such gap, since a manifest TU can declare a
+per-TU forced-include for exactly this directory instead of relying on
+directory-tree inference.
 This is a strict partition on `-I` *directories*, not individual files:
 `scope_fingerprint` owns everything under a project-owned root (declared
 or not); `profile_fingerprint` owns only external roots, in full.
@@ -510,7 +526,7 @@ ancestor-derived roots for different declared headers (`include/` →
 `foo.h`, a second header root → `bar.h`) produce distinguishable,
 order-sensitive tokens instead of collapsing to one interchangeable
 constant, and two `--project-include` roots (`--project-include
-support=old/src`, `--project-include generated=old/gen`) are
+both:support=old/src`, `--project-include both:generated=old/gen`) are
 distinguished by their distinct labels the same way. **Residual
 limitation, same class as the vendored-nested-dependency
 gap below:** two separately declared `-I` roots that are both ancestors of
