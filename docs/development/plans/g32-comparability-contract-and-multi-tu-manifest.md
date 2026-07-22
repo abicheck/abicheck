@@ -998,7 +998,23 @@ Implements ADR-050 D1 and D2.
   (ProfileMismatchError, ScopeMismatchError) as exc:` branch alongside its
   existing two, returning `ScanResult(verdict="NOT_COMPARABLE",
   exit_code=6, ...)` — reusing `scan`'s own exit `6` rather than inventing
-  a second code for the same command. Fixing `run_scan` alone closes both
+  a second code for the same command. **This is a new possible value on
+  the versioned scan envelope, not schema-invisible internal plumbing —
+  `abicheck/schemas/__init__.py`'s own `SCAN_SCHEMA_VERSION` docstring
+  states outright that it versions both public scan dict shapes
+  (`ScanOutcome.to_dict`/`ScanResult.to_dict`) "including
+  verdict/exit_code," with the same additive/breaking bump policy
+  `REPORT_SCHEMA_VERSION` already gets in this same plan (the JSON schema
+  bullet above) — a new `verdict` string a pre-Phase-A `scan` consumer
+  could never have received before is exactly what that policy exists to
+  track.** `SCAN_SCHEMA_VERSION` (currently `"1.1"`) is bumped in this same
+  change, with a new version-history line in its docstring (`1.2` — added
+  the `NOT_COMPARABLE` verdict/exit `6`, mirroring `REPORT_SCHEMA_VERSION`'s
+  own `not_comparable`/`verdict: null` bump), plus a regression test
+  confirming old scan reports (pre-`1.2`) stay distinguishable from new
+  ones by this version, the same guarantee
+  `tests/test_report_schema.py` already provides for `compare`. Fixing
+  `run_scan` alone closes both
   gaps: `run_scan_subprocess`'s worker calls `run_scan(...)` directly, so
   a `NOT_COMPARABLE` result now flows through its normal `q.put(("ok",
   ...))` path — no separate `run_scan_subprocess`/`mcp_server.py` change
@@ -1585,6 +1601,13 @@ than raising, and a second test asserting `run_scan_subprocess` (and, by
 extension, `mcp_server.abi_scan`) surfaces that same structured result
 rather than a generic `RuntimeError` — proving the fix at `run_scan`
 actually reaches the MCP surface without any change needed there; a
+**scan schema-version** test asserting `SCAN_SCHEMA_VERSION` is bumped
+to `"1.2"` and that a `ScanResult.to_dict()`/`ScanOutcome.to_dict()`
+carrying `verdict="NOT_COMPARABLE"` emits that bumped
+`scan_schema_version` — proving a consumer parsing the older `"1.1"`
+envelope can tell it could never have received this verdict, the same
+version-distinguishability guarantee `compare`'s `REPORT_SCHEMA_VERSION`
+bump already provides; a
 **deps-compare exit-code** test asserting `abicheck deps
 compare` returns exactly `5` (never folded into `4`'s `FAIL`, never a
 silent `None` diff indistinguishable from the pre-existing
@@ -1719,6 +1742,24 @@ Implements ADR-050 D3. The highest-risk phase — see Risk above.
   DPC++ flow needing a non-default context with nowhere to request it
   (ADR-050 D3). The legacy, non-manifest CLI path gains a matching
   `--frontend-context host|device` flag (default `host`).
+  **Phase B accepting `device` at all is not safe on its own — Phase B can
+  ship (per Sequencing above) before Phase D, and in that window there is
+  no selector behind the request.** `sycl_context.py` and
+  `dumper_clang.py`'s multi-context decoding/selection are introduced in
+  Phase D, not here; if Phase B accepts and forwards a `device` request
+  with nothing downstream to act on it, `dumper.py`/`dumper_clang.py`
+  would silently extract whatever the existing single/default-context
+  path already does today and hand back an ordinary snapshot — which a
+  user who explicitly requested `device` would reasonably, but wrongly,
+  believe is device-derived. Phase B therefore accepts `frontend_context`/
+  `--frontend-context` in its schema and CLI surface (so Phase D has
+  somewhere to plug in without a follow-up schema change) but **rejects
+  any value other than `host`** with a clear "device context selection
+  requires Phase D" error, both in `dump_manifest.py`'s parser (a
+  manifest-declared `frontend_context: device` is a `ManifestValidationError`
+  in this phase) and in the CLI flag's own validation. Phase D, when it
+  lands, is what lifts this restriction once `sycl_context.py`'s selector
+  actually exists to honor the request — not before.
 - **The per-TU loop and `TuFragment` handling land in a new sibling
   module, not inline in `dumper.py` itself — `dumper.py` has zero lines of
   headroom left before the AI-readiness file-size gate's hard cap.**
@@ -1982,7 +2023,15 @@ choke point `compare`/`dump`/`scan` all resolve through, so no
 
 **Tests.** Manifest parser unit tests (the invariant violation, duplicate
 TU names, unknown fields, relative-path resolution, `frontend_context`
-accepted/defaulted/rejected-when-invalid). A **manifest support-root
+accepted/defaulted/rejected-when-invalid). A **Phase-B-only device
+rejection** test asserting a manifest declaring `frontend_context:
+device` raises `ManifestValidationError` (not silently accepted and
+extracted as if it were `host`), and a companion CLI test asserting
+`--frontend-context device` on `dump`/`compare`/`scan` fails the same way
+in a Phase-B-only build — proving Phase B never hands back a snapshot a
+user could mistake for device-derived before Phase D's selector actually
+exists to produce one; `frontend_context: host` (or omitted) still
+parses and defaults normally. A **manifest support-root
 ownership** test asserting a TU declaring `includes: [{path: ../src,
 project_owned: true}]` (a sibling of the TU's own declared path, not an
 ancestor) leaves `profile_fingerprint` matching across an old/new manifest
@@ -2120,6 +2169,18 @@ CLI flag this phase's selector reads are defined there, not here (Phase B
 tested against the `host` default without Phase B, but a real DPC++
 device-context request has nowhere to come from until Phase B's field/flag
 exist.
+
+**This phase also lifts a restriction Phase B deliberately imposed, not
+just adds new behavior.** Phase B ships with `dump_manifest.py`/the
+`--frontend-context` flag rejecting any value other than `host` (its own
+"Phase-B-only device rejection" acceptance criterion), precisely because
+Phase B alone has nowhere to route a `device` request — accepting and
+silently ignoring it would hand back a snapshot a user could mistake for
+device-derived. This phase's selector is what makes a `device` request
+meaningful, so it is also what removes Phase B's rejection: once
+`sycl_context.py` exists, `frontend_context: device`/`--frontend-context
+device` are accepted rather than raising `ManifestValidationError`/a CLI
+error.
 
 **Goal & acceptance criteria.**
 - New `abicheck/sycl_context.py`: decodes a DPC++ frontend's
