@@ -917,7 +917,20 @@ Implements ADR-050 D1 and D2.
   real guard alongside the bump: a new
   `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION = 12` constant (same naming
   convention as the existing `_MIN_SCHEMA_VERSION_FOR_CV_FACTS`) and a new
-  `IncompatibleSnapshotSchemaError` (`errors.py`), raised by
+  `IncompatibleSnapshotSchemaError` (`errors.py`) — **declared as
+  `class IncompatibleSnapshotSchemaError(SnapshotError):`, not a bare
+  sibling of `AbicheckError`** — following the exact precedent
+  `HeaderToolchainError(SnapshotError)` already documents in its own
+  docstring ("a subclass of `SnapshotError` — existing `except
+  SnapshotError` handling still catches it unchanged"). Verified against
+  the actual code: `cli_resolve.py`'s snapshot-loading paths (`:294-296`,
+  `332-335`) only translate `ValidationError`/`SnapshotError` into a clean
+  `click.UsageError`/`click.ClickException` — a sibling `AbicheckError`
+  that isn't a `SnapshotError` would fall through both `except` clauses
+  and surface as an unhandled/internal failure the next time `compare`/
+  `dump` loads a too-new on-disk `.abi.json` snapshot, instead of the
+  intended clean incompatibility message this bullet exists to produce.
+  Raised by
   `snapshot_from_dict` *before* the existing warn-only branch when the
   snapshot's `schema_version` is **both greater than the running
   `SCHEMA_VERSION` and at or above the threshold** — not "the running
@@ -1774,7 +1787,15 @@ threshold" condition would silently stop protecting, per the corrected
 `>` running-version comparison above; a regression test pinning that a
 schema bump *below* the threshold still only warns (today's lenient
 behavior for ordinary additive fields must not become accidentally
-stricter);
+stricter); a **CLI snapshot-load** regression test asserting
+`IncompatibleSnapshotSchemaError` `isinstance`-checks true against
+`SnapshotError`, and a real end-to-end `compare old.abi.json new.so`
+invocation where `old.abi.json` carries a stubbed future `schema_version`
+surfaces as a clean `click.ClickException` (exit `1`, a readable message)
+through `cli_resolve.py`'s existing `except SnapshotError` handling —
+never an unhandled traceback — proving the subclass relationship, not
+just the exception type existing, is what keeps the CLI's snapshot-load
+path working;
 `tests/test_report_schema.py` gains a `not_comparable` case validated
 against the updated `compare_report.schema.json`, and its existing
 `test_docs_mirror_matches_packaged_schema` must still pass against the

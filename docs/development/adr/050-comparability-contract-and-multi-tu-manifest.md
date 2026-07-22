@@ -112,7 +112,20 @@ incompatible-reader guard, not just a version bump: a new
 is newer than what this reader supports," not "this reader predates the
 threshold"** — the two are not the same condition, and only the first one
 is actually what "Phase-A-or-later code hard-rejects unsupported schemas"
-requires: `IncompatibleSnapshotSchemaError` (`errors.py`) is raised when
+requires: `IncompatibleSnapshotSchemaError` (`errors.py`) — **a subclass of
+the existing `SnapshotError`, not a bare sibling of `AbicheckError`**,
+following the identical precedent `HeaderToolchainError(SnapshotError)`
+already documents ("a subclass of `SnapshotError` — existing `except
+SnapshotError` handling still catches it unchanged"). `cli_resolve.py`'s
+snapshot-loading paths (`:294-296`, `332-335`) already translate
+`ValidationError`/`SnapshotError` into a clean `click.UsageError`/
+`click.ClickException`; a schema-rejection raised while `compare`/`dump`
+loads an on-disk `.abi.json` snapshot must surface through that same
+existing translation, not bypass it as an unhandled internal failure the
+CLI has no branch for. Semantically it fits directly too —
+`SnapshotError`'s own docstring is "raised when an ABI snapshot cannot be
+loaded or parsed," exactly what a too-new `schema_version` is — is raised
+when
 the snapshot's `schema_version` is both **greater than the running
 `SCHEMA_VERSION`** (genuinely unsupported by this reader) *and* at or
 above the threshold — not merely "the running version is below the
@@ -1648,18 +1661,25 @@ selection key — a frontend could in principle label a context's target
 triple ambiguously or use a triple this ADR doesn't enumerate, and
 `sycl_context.py` must not be in the business of pattern-matching triple
 strings to guess intent when the compiler already states `kind` plainly.
-Three outcomes, all extraction-time, none reaching D1's fingerprinting:
+Three outcomes — only the two error outcomes are extraction-time failures
+that never reach D1's fingerprinting at all (there is no snapshot for
+either to describe); the successful-selection outcome instead *feeds*
+D1's fingerprinting, per the next paragraph below, not the reverse:
 
 - **Exactly one decoded context has the requested `kind`** — the normal
-  case, selected and passed on to normal extraction.
+  case, selected and passed on to normal extraction, whose resolved `kind`
+  is then hashed into `profile_fingerprint` (below) exactly like every
+  other resolved compile-context field.
 - **Zero decoded contexts have the requested `kind`** — `AST_CONTEXT_MISSING`
-  (e.g. only a `spir64`/device context when `host` was requested).
+  (e.g. only a `spir64`/device context when `host` was requested), an
+  extraction failure with no resulting snapshot, so nothing to fingerprint.
 - **More than one decoded context shares the requested `kind`** —
   `AST_CONTEXT_AMBIGUOUS`, never resolved by picking the first, the
   smallest, or any other implicit tiebreaker; an ambiguous frontend output
   is exactly the kind of "the extraction can't prove what it captured"
   situation this ADR's authority rule (ADR-028 D3) says must not be
-  silently resolved in either direction.
+  silently resolved in either direction — also an extraction failure with
+  no resulting snapshot, so nothing to fingerprint.
 
 **Selecting the right context is not the same as the gate knowing which
 context was selected — `profile_fingerprint` must hash the resolved
