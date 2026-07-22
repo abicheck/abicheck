@@ -307,6 +307,40 @@ def _requires_match_has_body(lookahead: bytes, match: re.Match[bytes]) -> bool:
     return lookahead[close + 1 :].lstrip().startswith(b"{")
 
 
+_TRAILING_DECLARATOR_SPECIFIER_WORDS = frozenset(
+    {b"const", b"volatile", b"noexcept", b"override", b"final"}
+)
+
+
+def _strip_trailing_declarator_specifiers(prefix: bytes) -> bytes:
+    """Strip zero or more trailing cv/ref-qualifiers and specifiers
+    (``const``, ``volatile``, ``noexcept``, ``override``, ``final``,
+    ``&``, ``&&``) from *prefix* (Codex review). A trailing requires-clause
+    can follow any number of these after a function's declarator (
+    ``void f(T) const noexcept requires C<T>;``) — stripping them lets the
+    caller still trace the prefix back to the declarator's own closing
+    ``)`` regardless of how many specifiers sit in between. Safe to strip
+    unconditionally: none of these words/operators can appear as a bare
+    trailing token in *any* other C++ construct without being part of a
+    declarator's trailing specifier sequence."""
+    prefix = prefix.rstrip()
+    changed = True
+    while changed:
+        changed = False
+        if prefix.endswith(b"&&"):
+            prefix = prefix[:-2].rstrip()
+            changed = True
+        elif prefix.endswith(b"&"):
+            prefix = prefix[:-1].rstrip()
+            changed = True
+        else:
+            m = _TRAILING_IDENTIFIER_PATTERN.search(prefix)
+            if m is not None and m.group(1) in _TRAILING_DECLARATOR_SPECIFIER_WORDS:
+                prefix = prefix[: m.start()].rstrip()
+                changed = True
+    return prefix
+
+
 def _looks_like_requires_declarator(
     lookahead: bytes, match: re.Match[bytes], prev_nonblank_code: bytes
 ) -> bool:
@@ -352,15 +386,27 @@ def _looks_like_requires_declarator(
     and must not be mistaken for a template header's closing angle bracket
     (Codex review, third round; regression caught locally before commit).
     Mirrors :func:`_looks_like_genuine_concept`'s identical same-line
-    check."""
+    check.
+
+    A parenthesized requires-clause can equally *trail* a function's
+    declarator (``void f(T) requires (sizeof(T) > 4);``, or after cv/ref/
+    ``noexcept`` specifiers — ``void f(T) const noexcept requires
+    (sizeof(T) > 4);``), which the body-check fallback below cannot
+    recognize on its own — a clause has no body to confirm (Codex
+    review). :func:`_strip_trailing_declarator_specifiers` traces the
+    prefix back through any such specifiers to the parameter list's own
+    closing ``)``, the same unambiguous positional signal already used
+    in :func:`_looks_like_genuine_requires_clause`."""
     prefix = lookahead[: match.start()].rstrip()
     if not prefix:
-        return not prev_nonblank_code.rstrip().endswith(b">")
+        prev = _strip_trailing_declarator_specifiers(prev_nonblank_code.rstrip())
+        return not (prev.endswith(b">") or prev.endswith(b")"))
     if prefix[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
         return True
     if prefix.endswith(b".") or prefix.endswith(b"->") or prefix.endswith(b"::"):
         return True
-    if prefix.endswith(b">"):
+    stripped = _strip_trailing_declarator_specifiers(prefix)
+    if stripped.endswith(b">") or stripped.endswith(b")"):
         return False
     m = _TRAILING_IDENTIFIER_PATTERN.search(prefix)
     if m is not None and m.group(1) not in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS:
@@ -417,12 +463,17 @@ def _looks_like_genuine_requires_clause(
     requires-clause, ...) can follow a function declarator's ``)``
     before the terminating ``;``/``{`` in *any* C++ grammar, pre-C++20
     included — there is no production for a second, unrelated statement
-    beginning right there with no separator."""
-    same_line_prefix = lookahead[:match_start].rstrip()
+    beginning right there with no separator. Any number of such
+    specifiers (``void f(T) const noexcept requires C<T>;``) can sit
+    between the ``)`` and the clause — Codex review, second round —
+    traced back via :func:`_strip_trailing_declarator_specifiers`."""
+    same_line_prefix = _strip_trailing_declarator_specifiers(
+        lookahead[:match_start].rstrip()
+    )
     if same_line_prefix.endswith(b">") or same_line_prefix.endswith(b")"):
         return True
     if not same_line_prefix:
-        prev = prev_nonblank_code.rstrip()
+        prev = _strip_trailing_declarator_specifiers(prev_nonblank_code.rstrip())
         return prev.endswith(b">") or prev.endswith(b")")
     return False
 

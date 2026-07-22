@@ -130,6 +130,81 @@ def test_cpp20_detector_accepts_trailing_requires_clause_on_own_line(
     assert any(r.reason == "requires-clause" for r in reqs)
 
 
+def test_cpp20_detector_accepts_qualified_trailing_requires_clause(tmp_path):
+    """Regression (Codex review, second round): a trailing requires-clause
+    can follow any number of cv/ref-qualifiers and specifiers (``const``,
+    ``noexcept``, ...) between the declarator's ``)`` and the clause
+    itself (``void f(T) const noexcept requires std::integral<T>;``) —
+    the plain ")"-ending check alone missed these."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <concepts>\n"
+        "template<class T> void f(T) const requires std::integral<T>;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "requires-clause" for r in reqs)
+
+
+def test_cpp20_detector_accepts_noexcept_qualified_trailing_requires_clause(
+    tmp_path,
+):
+    """Companion: ``noexcept`` specifically, and a non-template function."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <concepts>\nvoid f(int) noexcept requires std::integral<int>;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_accepts_multiline_qualifiers_before_trailing_clause(
+    tmp_path,
+):
+    """Companion: the qualifiers can sit on the same line as the clause
+    while the declarator itself is on the previous line — same-line
+    prefix strips to empty, falling back to prev_nonblank_code."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <concepts>\nvoid f(int)\nconst noexcept requires std::integral<int>;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_accepts_parenthesized_trailing_clause_after_declarator(
+    tmp_path,
+):
+    """Regression (Codex review, second round): a *parenthesized*
+    trailing requires-clause (``void f(T) requires (sizeof(T) > 4);``)
+    matches the requires-*expression* pattern, not the clause pattern —
+    its declarator-check previously only recognized a preceding
+    template<...> header (">" ), not a function declarator's ")",  so
+    the body-check fallback wrongly rejected it (a clause has no body)."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<class T> void f(T) requires (sizeof(T) > 4);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "requires-expression" for r in reqs)
+
+
+def test_cpp20_detector_accepts_qualified_parenthesized_trailing_clause(
+    tmp_path,
+):
+    """Companion: qualifiers between the declarator and a parenthesized
+    trailing clause."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<class T> void f(T) const noexcept requires (sizeof(T) > 4);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
 def test_cpp20_detector_accepts_requires_expression(tmp_path):
     headers = _write(
         tmp_path,

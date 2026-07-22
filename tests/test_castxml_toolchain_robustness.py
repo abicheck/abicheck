@@ -634,6 +634,45 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
             "castxml-toolchain-version-mismatch"
         )
 
+    def test_fallback_recovers_from_castxml_version_gate_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression (Codex review): UnsupportedCastxmlVersionError (the
+        proactive version-gate check, raised before castxml even runs) is
+        exactly the same "this castxml can't be trusted" signal as the two
+        string-matched stderr signatures this fallback already recognizes
+        -- excluding it defeated the opt-in fallback's whole purpose for
+        the one new reason a castxml can now be untrusted."""
+        from abicheck.dumper import _header_ast_parser
+        from abicheck.errors import UnsupportedCastxmlVersionError
+
+        header = tmp_path / "api.h"
+        header.write_text("int f(void);\n", encoding="utf-8")
+
+        sentinel = MagicMock()
+        with (
+            patch.dict(os.environ, {"ABICHECK_ALLOW_AST_FALLBACK": "1"}),
+            patch(
+                "abicheck.dumper._castxml_dump",
+                side_effect=UnsupportedCastxmlVersionError(
+                    "CastXML 0.6.20260105 is not supported."
+                ),
+            ),
+            patch("abicheck.dumper.shutil.which", return_value="/usr/bin/clang++"),
+            patch("abicheck.dumper._clang_header_dump", return_value=MagicMock()),
+            patch("abicheck.dumper._ClangAstParser", return_value=sentinel),
+        ):
+            result = _header_ast_parser(
+                [header],
+                [],
+                compiler="c++",
+                gcc_path=None,
+                gcc_prefix=None,
+                **self._KWARGS,
+            )
+        assert result is sentinel
+        assert result._abicheck_ast_fallback_reason == "castxml-unsupported-version"
+
     def test_auto_fallback_is_fail_closed_by_default(self, tmp_path: Path) -> None:
         from abicheck.dumper import _header_ast_parser
 

@@ -587,30 +587,46 @@ def _header_ast_parser(
             except SnapshotError:
                 return False
 
+        # A proactive UnsupportedCastxmlVersionError (raised before castxml
+        # even runs) is exactly the same "this castxml can't be trusted"
+        # signal as the two string-matched stderr signatures below — it's
+        # just detected earlier and more precisely (an exact version
+        # comparison instead of a diagnostic-text guess). The opt-in
+        # fallback's whole purpose is letting a user accept the
+        # castxml/clang discrepancy risk to keep scanning on a host whose
+        # castxml can't be trusted; excluding this one reason a castxml is
+        # untrusted defeated that opt-in for exactly the case this PR's own
+        # new gate creates (Codex review).
+        is_version_gate_failure = isinstance(exc, UnsupportedCastxmlVersionError)
         if (
             auto_selected
             and _ast_fallback_enabled()
             and _clang_fallback_ready()
             and (
-                _is_toolchain_version_failure(str(exc))
+                is_version_gate_failure
+                or _is_toolchain_version_failure(str(exc))
                 or _is_direct_include_guard_failure(str(exc))
             )
         ):
             log.warning(
-                "castxml could not parse the header(s) (toolchain mismatch or a "
-                "header that refuses direct inclusion); falling back to the clang "
-                "header backend, which parses against the host toolchain and can "
-                "exclude direct-include #error guard headers. Set --ast-frontend "
-                "castxml to force castxml and see the original error."
+                "castxml could not parse the header(s) (toolchain mismatch, an "
+                "unsupported castxml version, or a header that refuses direct "
+                "inclusion); falling back to the clang header backend, which "
+                "parses against the host toolchain and can exclude direct-include "
+                "#error guard headers. Set --ast-frontend castxml to force castxml "
+                "and see the original error."
             )
             fallback_reason = (
-                "castxml-toolchain-version-mismatch"
+                "castxml-unsupported-version"
+                if is_version_gate_failure
+                else "castxml-toolchain-version-mismatch"
                 if _is_toolchain_version_failure(str(exc))
                 else "castxml-direct-include-guard"
             )
             return _run_clang(fallback_reason=fallback_reason)
         if auto_selected and (
-            _is_toolchain_version_failure(str(exc))
+            is_version_gate_failure
+            or _is_toolchain_version_failure(str(exc))
             or _is_direct_include_guard_failure(str(exc))
         ):
             message = (
