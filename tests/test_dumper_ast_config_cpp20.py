@@ -388,6 +388,36 @@ def test_cpp20_detector_ignores_throw_call_to_pre_cxx20_requires(tmp_path):
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_operand_context_call_to_pre_cxx20_requires(tmp_path):
+    """Regression (Codex review, sixth round): a call to a pre-C++20
+    function named "requires" used as an operand — ``if (requires(1))
+    ...`` — has no bare identifier directly preceding it (it's preceded by
+    ``(`` instead), which previously made the detector assume genuine
+    C++20 syntax unconditionally. A plain call is just as syntactically
+    valid as an operand there as a real requires-expression, so this case
+    must also fall back to the requirements-body check rather than being
+    accepted on the strength of "no declarator identifier precedes it"."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "inline bool requires(int);\n"
+        "inline bool f() { if (requires(1)) return true; return false; }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_accepts_genuine_requires_expression_as_operand(tmp_path):
+    """Companion to the above: a genuine requires-expression used as an
+    operand (here, assigned to a variable) must still be detected — the
+    body-check fallback must not blanket-reject every operand-context use."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "bool ok = requires (typename T) { typename T::value_type; };\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
 def test_cpp20_detector_ignores_qualified_concept_used_as_pre_cxx20_type(tmp_path):
     """Regression (Codex review): "concept" only became a reserved keyword
     in C++20 — a qualified reference to a type literally named "concept"

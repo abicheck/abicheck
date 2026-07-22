@@ -223,8 +223,14 @@ def _looks_like_requires_declarator(
     sufficient: ``return requires(1);`` — a plain call to a pre-C++20
     "requires" function — is just as syntactically valid there as a real
     ``return requires(T t) { t.foo(); };``. Only the latter carries a
-    requirements body, so the safe-word branch additionally confirms one
-    before accepting (Codex review)."""
+    requirements body, so that case additionally confirms one before
+    accepting (Codex review). The same ambiguity applies whenever
+    "requires" is preceded by an operator/punctuation rather than a bare
+    identifier at all — ``if (requires(1)) ...``, ``!requires(1)``,
+    ``x = requires(1);`` — a plain call is just as valid there as a genuine
+    requires-expression used as an operand, so that case also falls back to
+    the body check rather than assuming genuine (Codex review, second
+    round)."""
     prefix = lookahead[: match.start()].rstrip()
     if not prefix:
         return not prev_nonblank_code.rstrip().endswith(b">")
@@ -233,11 +239,9 @@ def _looks_like_requires_declarator(
     if prefix.endswith(b".") or prefix.endswith(b"->") or prefix.endswith(b"::"):
         return True
     m = _TRAILING_IDENTIFIER_PATTERN.search(prefix)
-    if m is None:
-        return False
-    if m.group(1) in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS:
-        return not _requires_match_has_body(lookahead, match)
-    return True
+    if m is not None and m.group(1) not in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS:
+        return True
+    return not _requires_match_has_body(lookahead, match)
 
 
 def _looks_like_genuine_concept(
