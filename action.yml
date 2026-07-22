@@ -169,6 +169,42 @@ inputs:
       deps-compare, and follow-deps.
     required: false
 
+  # ── Scoped comparison: app-usage / required-symbol contracts (compare mode) ──
+  used-by:
+    description: >
+      Application binary/binaries whose actual imports/required symbol
+      versions scope the comparison (space-separated; maps to repeated
+      compare --used-by). The full library comparison still runs; the
+      worst app-scoped result becomes the primary verdict/exit code, with
+      the full verdict kept as informational context. Mutually exclusive
+      with required-symbol/required-symbols (the CLI rejects both being
+      set). compare mode only.
+    required: false
+  verify-runtime:
+    description: >
+      With used-by: actually run each consumer binary once against the old
+      library and once against the new one (LD_BIND_NOW=1), recording a
+      runtime-load-failure finding when the dynamic linker reports an
+      undefined symbol against the new library after loading cleanly
+      against the old one. Linux-only; a no-op elsewhere. Ignored without
+      used-by. compare mode only.
+    required: false
+    default: 'false'
+  required-symbol:
+    description: >
+      An exported linker symbol a plugin host resolves via dlopen/dlsym
+      and requires (space-separated; maps to repeated compare
+      --required-symbol). Scopes the comparison to this explicit
+      entrypoint contract instead of the full diff. Mutually exclusive
+      with used-by. compare mode only.
+    required: false
+  required-symbols:
+    description: >
+      Path to a file of required symbols, one per line (blank lines and
+      '#' comments ignored) -- combined with any required-symbol values.
+      compare mode only.
+    required: false
+
   # ── Source-scan & build-source evidence (scan / dump modes) ──────────────────
   against:
     description: >
@@ -480,6 +516,10 @@ runs:
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
+        INPUT_USED_BY: ${{ inputs.used-by }}
+        INPUT_VERIFY_RUNTIME: ${{ inputs.verify-runtime }}
+        INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
+        INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
       run: bash "${{ github.action_path }}/action/validate-inputs.sh"
 
     # ── 1. Python ─────────────────────────────────────────────────────────────
@@ -531,6 +571,10 @@ runs:
         INPUT_FOLLOW_DEPS: ${{ inputs.follow-deps }}
         INPUT_OLD_ROOT: ${{ inputs.old-root }}
         INPUT_NEW_ROOT: ${{ inputs.new-root }}
+        INPUT_USED_BY: ${{ inputs.used-by }}
+        INPUT_VERIFY_RUNTIME: ${{ inputs.verify-runtime }}
+        INPUT_REQUIRED_SYMBOL: ${{ inputs.required-symbol }}
+        INPUT_REQUIRED_SYMBOLS: ${{ inputs.required-symbols }}
         INPUT_AGAINST: ${{ inputs.against }}
         INPUT_SEARCH_PATH: ${{ inputs.search-path }}
         INPUT_LD_LIBRARY_PATH: ${{ inputs.ld-library-path }}

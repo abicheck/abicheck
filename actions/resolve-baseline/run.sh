@@ -114,34 +114,27 @@ elif [[ -f "$BASELINE_PATH" ]]; then
       # abicheck) -- on a minimal/self-hosted runner without one, tar fails
       # before resolution even though the archive itself is perfectly
       # valid, misreporting a good baseline as corrupt (Codex review, fifth
-      # round). Prefer the system zstd when present (fast, no extra
-      # dependency); fall back to the Python 'zstandard' package when it
-      # happens to be installed (abicheck's own package.py extractor uses
-      # the identical fallback for .conda archives); only then fail, with a
-      # message that names the actual gap instead of a generic "failed to
-      # extract".
-      if command -v zstd >/dev/null 2>&1; then
-        tar --zstd -xf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \
-          || _fail_ambiguous "failed to extract $BASELINE_PATH (tar --zstd) -- the archive is truncated or corrupted."
-      elif python3 -c "import zstandard" >/dev/null 2>&1; then
-        python3 -c '
+      # round). Delegate to abicheck.package.TarExtractor's own
+      # _safe_extract_zst_tar (already installed by the earlier "Install
+      # abicheck" step) instead of reimplementing the same zstd-vs-
+      # zstandard fallback here: it tries the Python 'zstandard' package
+      # first, falls back to a system zstd binary, and -- unlike a plain
+      # `tarfile.extractall()` on Python <3.12, which has no member-path
+      # validation at all before PEP 706's `filter="data"` -- validates
+      # every member (rejects `..`-escaping paths, symlink-target escapes,
+      # and device/FIFO entries) before extracting, on every supported
+      # Python version, not just 3.12+ (Codex review, sixth round: a
+      # naive Python-side zstd fallback on Python 3.10/3.11 without a
+      # system zstd binary could extract a `../`-escaping member outside
+      # $BASELINE_DIR before the symlink/manifest checks below even run).
+      python3 -c '
 import sys
-import tarfile
-import zstandard
+from pathlib import Path
+from abicheck.package import TarExtractor
 
-with open(sys.argv[1], "rb") as compressed:
-    dctx = zstandard.ZstdDecompressor()
-    with dctx.stream_reader(compressed) as reader:
-        with tarfile.open(fileobj=reader, mode="r|") as tf:
-            if sys.version_info >= (3, 12):
-                tf.extractall(path=sys.argv[2], filter="data")
-            else:
-                tf.extractall(path=sys.argv[2])
+TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
 ' "$_ARCHIVE_COPY" "$BASELINE_DIR" \
-          || _fail_ambiguous "failed to extract $BASELINE_PATH (python zstandard) -- the archive is truncated or corrupted."
-      else
-        _fail_ambiguous "baseline-path '$BASELINE_PATH' is a .tar.zst archive, but neither a 'zstd' command-line tool nor the Python 'zstandard' package is available on this runner -- install one of them (e.g. 'apt-get install zstd' or 'pip install zstandard') before calling resolve-baseline with a .tar.zst baseline."
-      fi
+        || _fail_ambiguous "failed to extract $BASELINE_PATH (.tar.zst) -- the archive is truncated or corrupted, or this runner has neither a 'zstd' command-line tool nor the Python 'zstandard' package available (install one of them, e.g. 'apt-get install zstd' or 'pip install zstandard')."
       ;;
     *.tar.gz | *.tgz)
       tar -xzf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \

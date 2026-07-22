@@ -24,6 +24,7 @@ in isolation in ``tests/test_baseline_set.py``).
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -571,6 +572,76 @@ class TestArchiveExtraction:
         assert result.returncode == 0
         assert outputs.get("outcome") == "resolved"
         assert Path(outputs["snapshot-path"]).is_file()
+
+    def test_tar_zst_archive_rejects_path_traversal_member(
+        self, tmp_path: Path
+    ) -> None:
+        # The .tar.zst extraction path delegates to
+        # abicheck.package.TarExtractor._safe_extract_zst_tar, which
+        # validates every member's path before extracting -- unlike a bare
+        # tarfile.extractall() on Python <3.12 (no filter="data" support),
+        # which would happily write a "../"-escaping member outside
+        # BASELINE_DIR before the symlink/manifest checks even run (Codex
+        # review, sixth round). Build the malicious member directly via
+        # TarInfo (not tf.add()), mirroring
+        # tests/test_package.py::TestTarExtractorSymlinks's own pattern for
+        # constructing an escaping archive member. The extraction root is
+        # run.sh's own mktemp -d (not this test's tmp_path), so there is no
+        # fixed path to assert non-existence of -- the outcome/exit-code
+        # assertions below are what prove the member was rejected before
+        # extraction, not written somewhere unverifiable.
+        tar_buf = io.BytesIO()
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            manifest_bytes = json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": "v1.0.0",
+                    "profile": PROFILE,
+                    "snapshot_schema": 9,
+                    "fact_set": None,
+                    "artifacts": [_target_artifact("libpvxs")],
+                },
+                indent=2,
+            ).encode("utf-8")
+            info = tarfile.TarInfo("manifest.json")
+            info.size = len(manifest_bytes)
+            tf.addfile(info, io.BytesIO(manifest_bytes))
+
+            evil_bytes = b"escaped"
+            evil = tarfile.TarInfo("../escaped.txt")
+            evil.size = len(evil_bytes)
+            tf.addfile(evil, io.BytesIO(evil_bytes))
+
+        if shutil.which("zstd") is not None:
+            tar_path = tmp_path / "payload.tar"
+            tar_path.write_bytes(tar_buf.getvalue())
+            archive_path = tmp_path / "baseline-traversal.tar.zst"
+            subprocess.run(
+                ["zstd", "-f", "-q", str(tar_path), "-o", str(archive_path)],
+                check=True,
+            )
+        else:
+            try:
+                import zstandard
+            except ImportError:
+                pytest.skip("neither zstd nor the zstandard package is available")
+            archive_path = tmp_path / "baseline-traversal.tar.zst"
+            cctx = zstandard.ZstdCompressor()
+            with open(archive_path, "wb") as out, cctx.stream_writer(out) as writer:
+                writer.write(tar_buf.getvalue())
+
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(archive_path),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_REQUIRED": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert outputs.get("outcome") == "ambiguous"
 
     def test_unrecognized_archive_extension_fails(self, tmp_path: Path) -> None:
         bogus = tmp_path / "baseline.zip"
