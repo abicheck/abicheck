@@ -880,6 +880,35 @@ def test_resolve_bundle_ambiguous_duplicate_manifest_entries(tmp_path: Path) -> 
     assert "multiple artifacts" in result.message
 
 
+def test_resolve_bundle_duplicate_entries_reported_even_when_first_lacks_binary(
+    tmp_path: Path,
+) -> None:
+    # artifact_for() returns only the first matching row -- if that row
+    # happens to lack "binary" while a later duplicate has one, the
+    # duplicate-entry check must still win over the generic "no staged
+    # binary declared" message, not silently depend on manifest row order
+    # (CodeRabbit review).
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact("libpvxs", extra={"binary": ""}),
+            _target_artifact("libpvxs", extra={"binary": "binaries/b.so"}),
+        ],
+    )
+    (tmp_path / "binaries").mkdir()
+    (tmp_path / "binaries" / "b.so").write_bytes(b"\x7fELF-fake")
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "multiple artifacts" in result.message
+    assert "no staged binary declared" not in result.message
+
+
 def test_resolve_bundle_rejects_non_elf_binary_no_digest(tmp_path: Path) -> None:
     # build_bundle_snapshot() (abicheck/bundle.py) silently skips any staged
     # input that isn't a real ELF file -- a non-ELF file staged under

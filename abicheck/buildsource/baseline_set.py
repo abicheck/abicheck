@@ -857,15 +857,24 @@ def resolve_bundle(
     problems: dict[str, str] = {}
     binary_paths: dict[str, str] = {}
     for member in members:
-        artifact = manifest.artifact_for(member)
-        if artifact is None or not artifact.binary:
-            problems[member] = "no staged binary declared in the manifest"
-            continue
+        # Check for duplicate artifacts[] entries before touching any
+        # artifact-specific field: artifact_for() returns only the first
+        # matching row, so if that row happens to lack .binary while a
+        # later duplicate has one, checking artifact.binary first would
+        # misreport "no staged binary declared" instead of the more
+        # accurate duplicate-entry ambiguity -- silently depending on
+        # manifest row order, the exact class of bug artifact_count_for was
+        # introduced to eliminate. Mirrors resolve_target's ordering
+        # (CodeRabbit review).
         if manifest.artifact_count_for(member) > 1:
             problems[member] = (
                 "multiple artifacts[] entries in this baseline-set's "
                 "manifest -- ambiguous which one is authoritative"
             )
+            continue
+        artifact = manifest.artifact_for(member)
+        if artifact is None or not artifact.binary:
+            problems[member] = "no staged binary declared in the manifest"
             continue
         resolved = _resolve_under_baseline_dir(baseline_dir, artifact.binary)
         # The documented bundle contract is that every member's binary lives
