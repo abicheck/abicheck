@@ -867,18 +867,42 @@ def _hidden_friend_owner_reason(
     )
 
 
+def _hidden_friend_owner_effective_origin(
+    surf: PublicSurface, owner: str, bare: str
+) -> ScopeOrigin | None:
+    """Resolve one side's origin for a qualified hidden-friend owner: an
+    exact ``origin_by_qualified_key`` match if present, else the bare
+    tail's origin when the type exists on this side at all — even if that
+    origin is ``UNKNOWN`` — else ``None`` only when the type is genuinely
+    absent from this snapshot (the common add/remove-together case).
+    "Present but unclassified" must never collapse to the same ``None``
+    as "absent": the caller treats ``None`` as a side that cannot
+    disagree, but a present-and-unclassified side very much can (Codex
+    review — a prior version of this fallback used ``None`` for both,
+    letting an exact private match on one side demote a friend even when
+    the other side's bare-name entry neither confirms nor refutes that,
+    because the type is right there, just unclassified)."""
+    exact = surf.origin_by_qualified_key.get(owner)
+    if exact is not None:
+        return exact
+    if bare in surf.all_types:
+        return surf.origin_by_key.get(bare, ScopeOrigin.UNKNOWN)
+    return None
+
+
 def _hidden_friend_owner_reason_qualified(
-    q_old: ScopeOrigin | None,
-    q_new: ScopeOrigin | None,
+    eff_old: ScopeOrigin | None,
+    eff_new: ScopeOrigin | None,
 ) -> str | None:
-    """Like :func:`_hidden_friend_owner_reason`, but resolving from two exact
-    ``origin_by_qualified_key`` lookups instead of the ambiguous bare-name
-    candidate set — each already unambiguous, so no both-sides-agreement
-    requirement is needed beyond "every side that has an entry agrees".
-    ``None`` for a side means that snapshot has no type under this exact
-    qualified spelling (removed/added together with the friend, or simply
-    absent), not "present but unknown"."""
-    origins = [o for o in (q_old, q_new) if o is not None]
+    """Like :func:`_hidden_friend_owner_reason`, but resolving from two
+    per-side *effective* origins (see
+    :func:`_hidden_friend_owner_effective_origin`) instead of the ambiguous
+    bare-name candidate set. ``None`` for a side means the owner is
+    genuinely absent from that snapshot (removed/added together with the
+    friend); a present-but-``UNKNOWN`` side blocks the reason exactly like
+    an ordinary origin disagreement would, via ``_ORIGIN_REASON.get``
+    returning ``None`` for it."""
+    origins = [o for o in (eff_old, eff_new) if o is not None]
     if not origins:
         return None
     reasons = {_ORIGIN_REASON.get(o) for o in origins}
@@ -924,35 +948,20 @@ def _classify_hidden_friend_surface(
         # bare-name path below, which would otherwise conflate two distinct
         # same-leaf-name classes in different namespaces (e.g. "pub::Foo"
         # public, "priv::Foo" private) into one merged, over-conservative
-        # origin (Codex review). Only consulted when at least one snapshot
-        # actually indexed this exact spelling; an owner absent from both
-        # qualified indexes (older snapshot / non-castxml producer that never
-        # populated ``qualified_name``) falls through to the bare-name path.
-        q_old = surf_old.origin_by_qualified_key.get(owner)
-        q_new = surf_new.origin_by_qualified_key.get(owner)
-        if q_old is not None or q_new is not None:
-            # A side with no exact qualified entry (an older snapshot, or a
-            # producer that never populated qualified_name for this
-            # particular record) can still carry a confident *bare-name*
-            # public origin for the same type. Checking only q_old/q_new
-            # for the public override ignored that side entirely, so an
-            # exact private/system match on one side could demote a friend
-            # even when the OTHER side's bare-name index proves the owner
-            # is public (Codex review).
-            bare = owner.rsplit("::", 1)[-1]
-            bare_old = (
-                surf_old.origin_by_key.get(bare, ScopeOrigin.UNKNOWN)
-                if q_old is None
-                else None
-            )
-            bare_new = (
-                surf_new.origin_by_key.get(bare, ScopeOrigin.UNKNOWN)
-                if q_new is None
-                else None
-            )
-            if ScopeOrigin.PUBLIC_HEADER in (q_old, q_new, bare_old, bare_new):
+        # origin (Codex review). Each side's *effective* origin falls back
+        # to its bare-name entry when the type exists there without a
+        # qualified match — genuinely distinct from a side that lacks the
+        # type entirely (added/removed together with the friend) — so an
+        # unclassified-but-present bare owner on one side can neither be
+        # silently ignored (it might disagree) nor mistaken for proof of
+        # anything (Codex review, second round).
+        bare = owner.rsplit("::", 1)[-1]
+        eff_old = _hidden_friend_owner_effective_origin(surf_old, owner, bare)
+        eff_new = _hidden_friend_owner_effective_origin(surf_new, owner, bare)
+        if eff_old is not None or eff_new is not None:
+            if ScopeOrigin.PUBLIC_HEADER in (eff_old, eff_new):
                 return True, None
-            reason = _hidden_friend_owner_reason_qualified(q_old, q_new)
+            reason = _hidden_friend_owner_reason_qualified(eff_old, eff_new)
             return (False, reason) if reason is not None else (True, None)
     if owner:
         # RecordType.name stays deliberately bare (model.py) — a namespaced

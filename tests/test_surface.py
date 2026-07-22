@@ -1399,6 +1399,44 @@ class TestHiddenFriendSurface:
         )
         assert classify_change_surface(c, s_old, s_new) == (True, None)
 
+    def test_qualified_demotion_blocked_by_unknown_bare_origin_on_other_side(self):
+        """Regression (Codex review, second round): when one side has an
+        exact qualified entry (private/system) but the *other* side's
+        bare-name entry for the same owner exists with an ``UNKNOWN``
+        origin (present, just unclassified — e.g. an older/non-qualified
+        producer that never ran with a --public-header set), that side
+        neither confirms nor refutes private/system, and must not be
+        silently ignored the way a genuinely *absent* owner is. The
+        finding must stay retained rather than demote on the strength of
+        only one side."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "Foo",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                    qualified_name="ns::Foo",
+                )
+            ],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("Foo", origin=ScopeOrigin.UNKNOWN)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN2ns3FooeqERKS0_S1_",
+            caused_by_type="ns::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (True, None)
+
 
 # ── widening overlay (ADR-024 §D6 / Phase 4) ─────────────────────────────────
 
