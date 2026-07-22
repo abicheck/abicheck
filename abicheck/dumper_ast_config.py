@@ -157,17 +157,25 @@ _CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
     rb"\brequires\s+\w"
 )  # template<T> requires Foo<T>
 
-# ``consteval``/``constinit`` are new C++20 declaration specifiers with no
-# pre-C++20 meaning at all (unlike "concept"/"requires", neither was ever a
-# plausible ordinary identifier in real code — they are alien portmanteau
-# words specific to the C++20 proposals that introduced them), so an
-# unconditional bare-keyword match carries the same low, accepted risk as
-# the existing `_CPP_ONLY_PATTERNS` entries for `constexpr`/`noexcept`/
-# `nullptr`/`override` (Codex review — a header whose only C++20 signal was
-# one of these was previously parsed under the pre-C++20 default dialect,
-# rejecting an otherwise-valid header).
-_CPP20_CONSTEVAL_PATTERN = re.compile(rb"\bconsteval\b")
-_CPP20_CONSTINIT_PATTERN = re.compile(rb"\bconstinit\b")
+# ``consteval``/``constinit`` are new C++20 declaration specifiers, but
+# unlike "concept"/"requires" this is not just a style-vs-risk trade-off:
+# neither was a reserved word before C++20, so a pre-C++20 header can
+# legally use either as an ordinary identifier (``int consteval;``, ``int
+# constinit;`` — declaring a variable with that name). An unconditional
+# bare-keyword match (unlike the deliberately unconditional
+# `_CPP_ONLY_PATTERNS` entries for `constexpr`/`noexcept`/`nullptr`/
+# `override`, which only ever decide "must be C++", not "must be C++20")
+# would force -std=gnu++20 on such a header, where the identifier is no
+# longer usable — actively breaking a header that previously parsed fine
+# (Codex review, second round). Requiring a positive lookahead for
+# whitespace then another identifier-starting character distinguishes a
+# genuine specifier (``consteval int f();``, ``constinit extern int
+# x;`` — always followed by more decl-specifier/declarator content) from
+# the ordinary-identifier shape, where the keyword is the last token of
+# its (simple) declarator, directly followed by ``;``/``,``/``=``/``)``/
+# ``[`` instead.
+_CPP20_CONSTEVAL_PATTERN = re.compile(rb"\bconsteval\b(?=\s+[A-Za-z_])")
+_CPP20_CONSTINIT_PATTERN = re.compile(rb"\bconstinit\b(?=\s+[A-Za-z_])")
 
 # Constrained template parameters using a *standard-library* concept name in
 # place of ``typename``/``class`` (``template <std::integral T> void f(T);``)

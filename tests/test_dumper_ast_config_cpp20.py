@@ -1080,6 +1080,51 @@ def test_cpp20_detector_detects_constinit(tmp_path):
     assert any(r.reason == "constinit-declaration" for r in reqs)
 
 
+def test_cpp20_detector_ignores_consteval_as_ordinary_identifier(tmp_path):
+    """Regression (Codex review, second round): neither ``consteval`` nor
+    ``constinit`` was a reserved word before C++20, so a pre-C++20 header
+    can legally declare a variable literally named "consteval"
+    (``int consteval;``). Forcing -std=gnu++20 on such a header breaks it,
+    since the identifier is no longer usable there — this is a real
+    correctness risk, unlike the deliberately unconditional
+    `constexpr`/`noexcept`/`nullptr`/`override` entries in
+    `_CPP_ONLY_PATTERNS`, which only ever decide "must be C++", never
+    "must be C++20"."""
+    headers = _write(tmp_path, "a.h", "int consteval;\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_constinit_as_ordinary_identifier(tmp_path):
+    """Companion: ``constinit`` as an ordinary identifier."""
+    headers = _write(tmp_path, "a.h", "int constinit;\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_consteval_as_initialized_identifier(tmp_path):
+    """Companion: the identifier form with an initializer
+    (``int consteval = 5;``) must not be mistaken for the specifier form
+    either — "consteval" here is directly followed by "=", not another
+    decl-specifier/declarator token."""
+    headers = _write(tmp_path, "a.h", "int consteval = 5;\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_consteval_as_parameter_name(tmp_path):
+    """Companion: ``consteval`` as an ordinary parameter name
+    (``void f(int consteval);``)."""
+    headers = _write(tmp_path, "a.h", "void f(int consteval);\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_detects_consteval_with_auto_return_type(tmp_path):
+    """Companion: ``consteval`` followed by ``auto`` (rather than a
+    concrete type) must still be recognized as genuine — the positive
+    lookahead only needs *some* identifier-starting token to follow, not
+    a specific one."""
+    headers = _write(tmp_path, "a.h", "consteval auto f() { return 1; }\n")
+    assert _detect_cpp20_headers(headers) is True
+
+
 def test_cpp20_detector_detects_abbreviated_unconstrained_function_template(tmp_path):
     """Regression (Codex review): a bare (unconstrained) ``auto`` used
     directly as an ordinary function's parameter type (``void f(auto
