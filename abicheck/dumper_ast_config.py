@@ -391,22 +391,25 @@ def _looks_like_requires_declarator(
     A parenthesized requires-clause can equally *trail* a function's
     declarator (``void f(T) requires (sizeof(T) > 4);``, or after cv/ref/
     ``noexcept`` specifiers — ``void f(T) const noexcept requires
-    (sizeof(T) > 4);``), which the body-check fallback below cannot
-    recognize on its own — a clause has no body to confirm (Codex
-    review). :func:`_strip_trailing_declarator_specifiers` traces the
-    prefix back through any such specifiers to the parameter list's own
-    closing ``)``, the same unambiguous positional signal already used
-    in :func:`_looks_like_genuine_requires_clause`."""
+    (sizeof(T) > 4);``, or a trailing return type — ``auto f(T) -> int
+    requires (sizeof(T) > 4);``), which the body-check fallback below
+    cannot recognize on its own — a clause has no body to confirm (Codex
+    review, two rounds). :func:`_strip_trailing_declarator_specifiers`
+    traces the prefix back through cv/ref/``noexcept`` specifiers to the
+    parameter list's own closing ``)``; a ``->`` anywhere in what remains
+    signals a trailing return type instead — the same unambiguous
+    positional signals already used in
+    :func:`_looks_like_genuine_requires_clause`."""
     prefix = lookahead[: match.start()].rstrip()
     if not prefix:
         prev = _strip_trailing_declarator_specifiers(prev_nonblank_code.rstrip())
-        return not (prev.endswith(b">") or prev.endswith(b")"))
+        return not (prev.endswith(b">") or prev.endswith(b")") or b"->" in prev)
     if prefix[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
         return True
     if prefix.endswith(b".") or prefix.endswith(b"->") or prefix.endswith(b"::"):
         return True
     stripped = _strip_trailing_declarator_specifiers(prefix)
-    if stripped.endswith(b">") or stripped.endswith(b")"):
+    if stripped.endswith(b">") or stripped.endswith(b")") or b"->" in stripped:
         return False
     m = _TRAILING_IDENTIFIER_PATTERN.search(prefix)
     if m is not None and m.group(1) not in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS:
@@ -466,15 +469,32 @@ def _looks_like_genuine_requires_clause(
     beginning right there with no separator. Any number of such
     specifiers (``void f(T) const noexcept requires C<T>;``) can sit
     between the ``)`` and the clause — Codex review, second round —
-    traced back via :func:`_strip_trailing_declarator_specifiers`."""
+    traced back via :func:`_strip_trailing_declarator_specifiers`.
+
+    A trailing return type (``auto f(T) -> int requires C<T>;``) is the
+    same shape once more removed: whatever sits between ``->`` and
+    ``requires`` is the return-type expression, itself impossible to
+    bound generically, but its mere presence is enough — a bare
+    ``requires IDENTIFIER`` directly following *any* token with no
+    separator is, by the same invariant as the ``)``/``>`` cases, only
+    ever valid pre-C++20 as a two-identifier ``Type Name;`` declaration,
+    and that shape requires "requires" to be preceded by *nothing but*
+    the type name — never by a ``->`` (which only ever introduces a
+    trailing return type or a member access, neither of which can
+    itself be the "type name" half of such a declaration) — Codex
+    review, third round."""
     same_line_prefix = _strip_trailing_declarator_specifiers(
         lookahead[:match_start].rstrip()
     )
-    if same_line_prefix.endswith(b">") or same_line_prefix.endswith(b")"):
+    if (
+        same_line_prefix.endswith(b">")
+        or same_line_prefix.endswith(b")")
+        or b"->" in same_line_prefix
+    ):
         return True
     if not same_line_prefix:
         prev = _strip_trailing_declarator_specifiers(prev_nonblank_code.rstrip())
-        return prev.endswith(b">") or prev.endswith(b")")
+        return prev.endswith(b">") or prev.endswith(b")") or b"->" in prev
     return False
 
 

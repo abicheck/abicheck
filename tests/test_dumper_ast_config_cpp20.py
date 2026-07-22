@@ -205,6 +205,44 @@ def test_cpp20_detector_accepts_qualified_parenthesized_trailing_clause(
     assert _detect_cpp20_headers(headers) is True
 
 
+def test_cpp20_detector_accepts_trailing_requires_clause_after_return_type(
+    tmp_path,
+):
+    """Regression (Codex review, third round): a trailing requires-clause
+    after a trailing return type (``auto f(T) -> int requires
+    std::integral<T>;``) has its prefix end in the return-type token, not
+    the declarator's ")"/">" directly. The return-type expression itself
+    can't be bounded generically, but its mere presence right after a
+    "->" is enough: a bare "requires IDENTIFIER" directly following any
+    token with no separator is only ever valid pre-C++20 as a two-
+    identifier "Type Name;" declaration, and "->" can't itself be that
+    type name."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <concepts>\n"
+        "template<class T> auto f(T) -> int requires std::integral<T>;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "requires-clause" for r in reqs)
+
+
+def test_cpp20_detector_accepts_parenthesized_clause_after_return_type(
+    tmp_path,
+):
+    """Companion: the parenthesized trailing-clause form after a trailing
+    return type."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<class T> auto f(T) -> int requires (sizeof(T) > 4);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "requires-expression" for r in reqs)
+
+
 def test_cpp20_detector_accepts_requires_expression(tmp_path):
     headers = _write(
         tmp_path,
