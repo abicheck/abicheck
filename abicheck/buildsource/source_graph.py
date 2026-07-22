@@ -61,6 +61,7 @@ from .graph_facts import (
     GraphFact as GraphFact,
     GraphNode as GraphNode,
     ensure_facts_and_resolve,
+    merge_entity_facts,
     register_fact,
 )
 
@@ -309,6 +310,14 @@ class SourceGraphSummary:
         """Add a node, or merge a second registration's facts into it (ADR-046
         D2 — evidence-preserving, replaces v1 first-writer-wins). ``kind``/
         ``label`` keep the first registration's value; only ``attrs`` merge.
+
+        Merges *node*'s full ``facts`` list, not just its top-level
+        ``provenance``/``confidence``/``attrs`` (Codex review, fresh
+        evidence): an *incoming* node that already carries multiple facts of
+        its own (e.g. re-added from an already evidence-merged graph) would
+        otherwise have its whole fact history collapsed into one flattened
+        fact, discarding the individual per-producer facts and any
+        ``conflicts`` it already recorded.
         """
         if node.id not in self._node_ids:
             ensure_facts_and_resolve(node)
@@ -316,16 +325,15 @@ class SourceGraphSummary:
             self._node_ids.add(node.id)
             self._node_by_id[node.id] = node
             return
-        register_fact(
-            self._node_by_id[node.id], node.provenance, node.confidence, node.attrs
-        )
+        merge_entity_facts(self._node_by_id[node.id], node)
 
     def add_edge(self, edge: GraphEdge) -> None:
         """Add an edge, or merge a second registration's facts into it — same
         as :meth:`add_node`, keyed on :meth:`GraphEdge.relation_key`
         (``(src, dst, kind, role)`` — ADR-046 D1) so two edges that only
         differ by role stay distinct objects instead of one silently
-        swallowing the other's role.
+        swallowing the other's role. Merges *edge*'s full ``facts`` list on a
+        duplicate registration, same as :meth:`add_node`.
 
         Resolves *edge* before computing its key (Codex review, fresh
         evidence): an edge whose role lives only in ``facts`` (not yet
@@ -340,9 +348,7 @@ class SourceGraphSummary:
             self._edge_keys.add(rkey)
             self._edge_by_key[rkey] = edge
             return
-        register_fact(
-            self._edge_by_key[rkey], edge.provenance, edge.confidence, edge.attrs
-        )
+        merge_entity_facts(self._edge_by_key[rkey], edge)
 
     def has_node(self, node_id: str) -> bool:
         """Whether a node with ``node_id`` is already in the graph."""

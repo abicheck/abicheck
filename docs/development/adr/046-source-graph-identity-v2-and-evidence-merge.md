@@ -434,6 +434,41 @@ synthetic AST for exactly the return+param-same-type shape and asserts
 `parse_clang_ast_types` emits both roles (fails without the fix, verified by
 temporarily reverting it — only `"return"` survived).
 
+### Follow-up fix: `add_node`/`add_edge`'s duplicate branch flattened an already multi-fact incoming entity (Codex review)
+
+A fifth gap, back in `graph_facts.py`/`source_graph.py` themselves rather
+than an upstream producer: `SourceGraphSummary.add_node`/`add_edge`'s
+duplicate-registration branch called `register_fact(existing,
+incoming.provenance, incoming.confidence, incoming.attrs)` — correct for the
+common case where *incoming* is a bare, single-producer `GraphNode(...)`/
+`GraphEdge(...)` construction (after resolution, its own `facts` list holds
+exactly one entry matching that triple), but wrong whenever *incoming*
+already carries **multiple** facts of its own — e.g. a node/edge re-added
+from an already evidence-merged graph (a graph-combining scenario like
+`cli_buildsource.py`'s pack merge, not yet exercised by any current call
+site, but exactly the shape D2 exists to handle correctly). `register_fact`
+only ever appends one new, freshly-flattened fact; it had no way to unpack
+*incoming*'s own multi-producer history, so re-merging an already-merged
+node/edge silently collapsed its accumulated facts (and any `conflicts` it
+had already recorded) into a single derived one.
+
+Fix: new `graph_facts.merge_entity_facts(existing, incoming)` resolves
+*incoming* first (so evidence living only in its `facts`, not yet mirrored
+into `attrs`, isn't missed either — same principle as the resolve-before-
+index fix above), then merges every fact in *incoming*'s own `facts` list
+into *existing* one at a time (a duplicate fact is a no-op, matching
+`register_fact`'s own idempotence). `add_node`/`add_edge`'s duplicate
+branches now call this instead of `register_fact`. `register_fact` itself
+is unchanged and still used by `fold_source_edges`'s ad hoc single-fact
+backfill, which isn't merging a full entity.
+
+`tests/test_source_graph_v2.py`:
+`test_re_adding_an_already_multi_fact_node_preserves_all_its_facts`/
+`test_re_adding_an_already_multi_fact_edge_preserves_all_its_facts` build an
+*incoming* node/edge with two facts already attached and assert both
+survive the merge (fail without the fix, verified by temporarily reverting
+it — only one of the two incoming producers survived).
+
 ## D2 implementation (G29 Phase 2, slice 1)
 
 Implemented as the first slice of Phase 2, chosen because D2 is the change
@@ -761,7 +796,8 @@ respects rather than sidesteps.
 - `abicheck/buildsource/graph_facts.py` — the `GraphNode`/`GraphEdge` schema
   itself, D1's `edge_relation_key`/`GraphEdge.relation_key` (implemented) and
   D2's `GraphFact`/`FactConflict`/`merge_graph_facts`/
-  `ensure_facts_and_resolve`/`register_fact` (implemented).
+  `ensure_facts_and_resolve`/`register_fact`/`merge_entity_facts`
+  (implemented).
 - `abicheck/buildsource/inline_graph_fold.py` — D3's `ROLE_COVERAGE_MATRIX`/
   `role_pass_covered`/`_mark_role_coverage`, wired into `fold_type_graph`.
 - `abicheck/internal_leak.py` — `compute_leak_paths`/

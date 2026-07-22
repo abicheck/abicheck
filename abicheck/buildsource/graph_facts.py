@@ -339,6 +339,34 @@ def register_fact(
     ensure_facts_and_resolve(entity)
 
 
+def merge_entity_facts(
+    existing: GraphNode | GraphEdge, incoming: GraphNode | GraphEdge
+) -> None:
+    """Merge every fact from an already-registered *incoming* node/edge into
+    *existing* (Codex review, fresh evidence).
+
+    ``SourceGraphSummary.add_node``/``add_edge``'s duplicate-registration
+    branch used to call :func:`register_fact` with just *incoming*'s own
+    top-level ``provenance``/``confidence``/``attrs`` — correct for the
+    common case where *incoming* is a bare, single-producer
+    ``GraphNode(...)``/``GraphEdge(...)`` construction, but wrong for an
+    *incoming* that already carries multiple facts of its own (e.g. a node
+    re-added from an already evidence-merged graph): only one flattened fact
+    got appended, silently discarding the individual per-producer facts (and
+    any ``conflicts`` already recorded) *incoming* carried. Resolves
+    *incoming* first (so a *incoming* whose evidence still lives only in
+    ``facts``, not yet mirrored into ``attrs``, is not missed either — same
+    fix as the ``add_edge`` resolve-before-index bug), then merges its full
+    ``facts`` list into *existing*, one fact at a time (duplicates are a
+    no-op, matching :func:`register_fact`'s own idempotence).
+    """
+    ensure_facts_and_resolve(incoming)
+    for fact in incoming.facts:
+        if fact not in existing.facts:
+            existing.facts.append(fact)
+    ensure_facts_and_resolve(existing)
+
+
 def edge_relation_key(
     src: str, dst: str, kind: str, resolved: dict[str, Any]
 ) -> tuple[str, str, str, str]:

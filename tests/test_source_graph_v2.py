@@ -169,6 +169,31 @@ class TestEvidencePreservingMerge:
         assert n.conflicts == []
         assert n.resolved["is_virtual"] is True
 
+    def test_re_adding_an_already_multi_fact_node_preserves_all_its_facts(
+        self,
+    ) -> None:
+        # Codex review on PR #620: add_node's duplicate branch used to call
+        # register_fact with just the incoming node's own top-level
+        # provenance/confidence/attrs -- fine for a bare single-producer
+        # GraphNode(...), but an incoming node that already carries multiple
+        # facts of its own (e.g. re-added from an already evidence-merged
+        # graph) had its whole fact history collapsed into one flattened
+        # fact, discarding the individual per-producer facts.
+        g = SourceGraphSummary()
+        g.add_node(_node("producer-a", CONF_HIGH, is_virtual=True))
+        incoming = GraphNode(
+            id="decl://foo",
+            kind="source_decl",
+            facts=[
+                GraphFact(producer="producer-b", confidence=CONF_HIGH, attrs={"x": 1}),
+                GraphFact(producer="producer-c", confidence=CONF_REDUCED, attrs={"y": 2}),
+            ],
+        )
+        g.add_node(incoming)
+        (n,) = g.nodes
+        assert {f.producer for f in n.facts} == {"producer-a", "producer-b", "producer-c"}
+        assert n.resolved == {"is_virtual": True, "x": 1, "y": 2}
+
 
 class TestEdgeMerge:
     def test_edge_facts_merge_the_same_way_as_node_facts(self) -> None:
@@ -197,6 +222,35 @@ class TestEdgeMerge:
         assert len(e.facts) == 2
         assert e.resolved == {"call_kind": "direct", "resolution": "exact"}
         assert e.conflicts == []
+
+    def test_re_adding_an_already_multi_fact_edge_preserves_all_its_facts(
+        self,
+    ) -> None:
+        # Edge analogue of the same-named node test above (Codex review).
+        g = SourceGraphSummary()
+        g.add_edge(
+            GraphEdge(
+                src="decl://a",
+                dst="decl://b",
+                kind="DECL_CALLS_DECL",
+                provenance="producer-a",
+                confidence=CONF_HIGH,
+                attrs={"x": 1},
+            )
+        )
+        incoming = GraphEdge(
+            src="decl://a",
+            dst="decl://b",
+            kind="DECL_CALLS_DECL",
+            facts=[
+                GraphFact(producer="producer-b", confidence=CONF_HIGH, attrs={"y": 2}),
+                GraphFact(producer="producer-c", confidence=CONF_REDUCED, attrs={"z": 3}),
+            ],
+        )
+        g.add_edge(incoming)
+        (e,) = g.edges
+        assert {f.producer for f in e.facts} == {"producer-a", "producer-b", "producer-c"}
+        assert e.resolved == {"x": 1, "y": 2, "z": 3}
 
     def test_add_edge_dedups_true_duplicates_on_relation_key(self) -> None:
         # Same (src, dst, kind, role) -- role empty on both -- still merges
