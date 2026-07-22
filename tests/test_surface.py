@@ -1437,6 +1437,47 @@ class TestHiddenFriendSurface:
         )
         assert classify_change_surface(c, s_old, s_new) == (True, None)
 
+    def test_qualified_demotion_checks_legacy_full_name_owner_match(self):
+        """Regression (Codex review, third round): a producer that stores
+        the hidden-friend owner's ``RecordType.name`` as the full qualified
+        string (``"ns::Foo"``) rather than populating ``qualified_name``
+        separately (legacy/DWARF-style) records its origin under that exact
+        key in ``origin_by_key`` — but ``all_types`` only ever indexes a
+        record's own ``name``, never a bare tail extracted from it, so the
+        bare-tail fallback in ``_hidden_friend_owner_effective_origin``
+        never finds it either. That side was wrongly treated as absent even
+        though it's right there under the full owner string, letting a
+        confidently-public legacy side get silently ignored while the other
+        (qualified-style) side's private/system origin demoted the
+        finding."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("ns::Foo", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "Foo",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                    qualified_name="ns::Foo",
+                )
+            ],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN2ns3FooeqERKS0_S1_",
+            caused_by_type="ns::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (True, None)
+
 
 # ── widening overlay (ADR-024 §D6 / Phase 4) ─────────────────────────────────
 

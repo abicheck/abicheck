@@ -871,20 +871,30 @@ def _hidden_friend_owner_effective_origin(
     surf: PublicSurface, owner: str, bare: str
 ) -> ScopeOrigin | None:
     """Resolve one side's origin for a qualified hidden-friend owner: an
-    exact ``origin_by_qualified_key`` match if present, else the bare
-    tail's origin when the type exists on this side at all — even if that
-    origin is ``UNKNOWN`` — else ``None`` only when the type is genuinely
-    absent from this snapshot (the common add/remove-together case).
-    "Present but unclassified" must never collapse to the same ``None``
-    as "absent": the caller treats ``None`` as a side that cannot
+    exact ``origin_by_qualified_key`` match if present, else an exact match
+    on ``owner`` itself in ``origin_by_key`` (a producer that stores the
+    owner's ``RecordType.name`` as the full qualified string rather than
+    populating ``qualified_name`` separately — legacy/DWARF-style), else
+    the bare tail's origin when the type exists on this side at all — even
+    if that origin is ``UNKNOWN`` — else ``None`` only when the type is
+    genuinely absent from this snapshot (the common add/remove-together
+    case). "Present but unclassified" must never collapse to the same
+    ``None`` as "absent": the caller treats ``None`` as a side that cannot
     disagree, but a present-and-unclassified side very much can (Codex
     review — a prior version of this fallback used ``None`` for both,
     letting an exact private match on one side demote a friend even when
     the other side's bare-name entry neither confirms nor refutes that,
-    because the type is right there, just unclassified)."""
+    because the type is right there, just unclassified). The full-``owner``
+    check matters because ``all_types`` only ever indexes a record's own
+    ``name`` (never the bare tail extracted from it), so a legacy side
+    whose ``name`` *is* the qualified string was otherwise treated as
+    absent even though its origin is recorded under that exact key too
+    (Codex review, third round)."""
     exact = surf.origin_by_qualified_key.get(owner)
     if exact is not None:
         return exact
+    if owner in surf.all_types:
+        return surf.origin_by_key.get(owner, ScopeOrigin.UNKNOWN)
     if bare in surf.all_types:
         return surf.origin_by_key.get(bare, ScopeOrigin.UNKNOWN)
     return None

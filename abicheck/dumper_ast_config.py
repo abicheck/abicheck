@@ -230,7 +230,20 @@ def _looks_like_requires_declarator(
     ``x = requires(1);`` — a plain call is just as valid there as a genuine
     requires-expression used as an operand, so that case also falls back to
     the body check rather than assuming genuine (Codex review, second
-    round)."""
+    round).
+
+    A requires-*clause* with a parenthesized constraint directly
+    continuing its own ``template<...>`` header on the *same* line
+    (``template<class T> requires (sizeof(T) > 4) void f(T);``) has no
+    trailing ``{`` body — a clause is not an expression — so without this
+    check it would be misjudged as a plain pre-C++20 call by the body-check
+    fallback below, the same way a bare trailing ``requires`` on its own
+    line already falls back to *prev_nonblank_code* for this. Checked only
+    *after* the member-access exclusion, since ``->`` itself ends in ``>``
+    and must not be mistaken for a template header's closing angle bracket
+    (Codex review, third round; regression caught locally before commit).
+    Mirrors :func:`_looks_like_genuine_concept`'s identical same-line
+    check."""
     prefix = lookahead[: match.start()].rstrip()
     if not prefix:
         return not prev_nonblank_code.rstrip().endswith(b">")
@@ -238,6 +251,8 @@ def _looks_like_requires_declarator(
         return True
     if prefix.endswith(b".") or prefix.endswith(b"->") or prefix.endswith(b"::"):
         return True
+    if prefix.endswith(b">"):
+        return False
     m = _TRAILING_IDENTIFIER_PATTERN.search(prefix)
     if m is not None and m.group(1) not in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS:
         return True

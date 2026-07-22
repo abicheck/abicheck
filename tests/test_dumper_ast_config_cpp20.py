@@ -169,6 +169,38 @@ def test_cpp20_detector_accepts_parenthesized_requires_clause_on_own_line(tmp_pa
     assert any(r.reason == "requires-expression" for r in reqs)
 
 
+def test_cpp20_detector_accepts_parenthesized_requires_clause_on_same_line(tmp_path):
+    """Regression (Codex review, third round): a requires-clause with a
+    parenthesized constraint on the *same* line as its ``template<...>``
+    header (``template<class T> requires (sizeof(T) > 4) void f(T);``) has
+    no trailing ``{`` body — a clause is not an expression — so the
+    body-check fallback used for ambiguous operand contexts previously
+    misjudged it as a plain pre-C++20 call, and the requires-clause regex
+    (``requires\\s+\\w``) doesn't match either since the next token is
+    ``(`` rather than a word. Both the requires-expression body-check path
+    and the requires-clause path missed this common formatting."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<class T> requires (sizeof(T) > 4) void f(T);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_ignores_pointer_member_call_ending_in_angle_bracket(tmp_path):
+    """Regression guard: the same-line parenthesized-clause fix (checking
+    whether the prefix ends in ``>``) must not fire for ``->`` — the
+    pointer-member-access operator also ends in ``>`` and must still be
+    excluded by the earlier member-access check, not misread as a
+    template header's closing angle bracket."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "struct S { void requires(int); };\nvoid f(S* x) { x->requires(1); }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_ignores_requires_text_in_raw_string(tmp_path):
     """Regression (Codex review): a C++11 raw string literal (``R"(...)"``)
     is not recognized by ``_strip_literals`` (only ordinary ``"..."``), so
