@@ -1221,7 +1221,16 @@ def _build_leak_change(
 ) -> Change:
     """Build a single ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`` Change entry."""
     kinds_seen = sorted({c.kind.value for c in triggers})
-    path_strs = [_format_path(p) for p in paths[:3]]
+    # CodeRabbit review: this finding's own displayed proof path must prefer
+    # value-propagating evidence too, the same way MarkReachability's
+    # separate layout walk already does via select_preferred_path (ADR-046
+    # D6) -- otherwise a shorter indirect-only path could still be shown
+    # here even when a stronger value-propagating one exists among `paths`.
+    ordered_paths = paths
+    if paths:
+        preferred = select_preferred_path(paths)
+        ordered_paths = [preferred] + [p for p in paths if p is not preferred]
+    path_strs = [_format_path(p) for p in ordered_paths[:3]]
     more = "" if len(paths) <= 3 else f" (+{len(paths) - 3} more paths)"
     sev_hint = (
         "embedded-by-value or via inheritance — layout change propagates "

@@ -1,27 +1,16 @@
 <!--
 A new changelog fragment. See changelog.d/README.md for the workflow.
 -->
-
-### Changed
-
-- **L5 graph edges gain a role-aware identity alongside their existing
-  coarse one** (ADR-046 D1, G29 Phase 2 slice 3): `GraphEdge.relation_key()`
-  returns `(src, dst, kind, role)` so two structurally different
-  dependencies that share `(src, dst, kind)` — e.g. a type used as a
-  function's return type on one edge and as a parameter type on another,
-  both `DECL_HAS_TYPE` — stay distinguishable to code that needs that
-  distinction. `GraphEdge.key()` keeps its exact shape and remains used by
-  the role-blind `diff_source_graph` comparison; `SourceGraphSummary.add_edge()`
-  deduplicates on the role-aware `relation_key()` instead (a same-PR
-  follow-up fix — deduping on `key()` alone silently folded two real,
-  role-distinct edges into one).
-  `GraphNode`/`GraphEdge` also moved from `abicheck/buildsource/source_graph.py`
-  to `abicheck/buildsource/graph_facts.py` (both re-exported from the old
-  location) to keep `source_graph.py` under the project's file-size cap;
-  purely a module reorganization, no import path most callers use changes.
-
 <!--
 ### Added
+
+- **Short bold summary** — the rest of the sentence: what changed, for
+  whom, and why it matters. Backtick identifiers like `ChangeKind` or
+  `--policy-file`.
+
+-->
+<!--
+### Changed
 
 - **Short bold summary** — the rest of the sentence: what changed, for
   whom, and why it matters. Backtick identifiers like `ChangeKind` or
@@ -44,14 +33,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `--policy-file`.
 
 -->
-<!--
+
 ### Fixed
 
-- **Short bold summary** — the rest of the sentence: what changed, for
-  whom, and why it matters. Backtick identifiers like `ChangeKind` or
-  `--policy-file`.
+- **`INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`'s own displayed proof path now
+  also prefers value-propagating evidence** (CodeRabbit review): ADR-046
+  D6's `select_preferred_path` was wired into `MarkReachability`'s layout
+  walk but not into `internal_leak._build_leak_change`, the leak
+  detector's own synthetic finding builder — so a shorter indirect-only
+  path could still be shown there even when a stronger value-propagating
+  path also existed among the same candidates.
 
--->
 <!--
 ### Performance
 

@@ -1238,10 +1238,20 @@ def _walk_types(
 
 
 def _dedupe_edges(edges: list[TypeEdge]) -> list[TypeEdge]:
-    seen: set[tuple[str, str, str]] = set()
+    """Dedup on ``(src, dst, kind, role)``, not just ``(src, dst, kind)``
+    (Codex review, fresh evidence): a function that both returns and takes
+    the same private type emits two real, role-distinct ``DECL_HAS_TYPE``
+    edges sharing ``(src, dst, kind)`` (``role="return"`` vs.
+    ``role="param"``) -- deduping on the coarser triple silently dropped
+    the second role before it ever reached ``augment_graph_with_types``/
+    ``add_edge``, so the ADR-046 D1 relation-key split downstream could
+    never actually observe both roles from this producer no matter how
+    ``add_edge`` itself was keyed.
+    """
+    seen: set[tuple[str, str, str, str]] = set()
     out: list[TypeEdge] = []
     for e in edges:
-        key = (e.src, e.dst, e.kind)
+        key = (e.src, e.dst, e.kind, e.role)
         if key not in seen:
             seen.add(key)
             out.append(e)
@@ -1455,7 +1465,7 @@ _CONFIDENCE_RANK = {CONF_HIGH: 2, CONF_REDUCED: 1, "unknown": 0}
 
 
 def _merge_type_edges(existing: TypeEdge, new: TypeEdge) -> TypeEdge:
-    """Merge two edges sharing a ``(src, dst, kind)`` key from different TUs.
+    """Merge two edges sharing a ``(src, dst, kind, role)`` key from different TUs.
 
     Keeps the stronger ``confidence`` and fills a missing ``dst_file`` from
     whichever edge has one — a TU that doesn't include the header declaring a
@@ -1597,11 +1607,16 @@ class ClangTypeGraphExtractor:
             return []
 
         all_edges: list[TypeEdge] = []
-        seen: dict[tuple[str, str, str], int] = {}
+        # Role-aware key (Codex review, fresh evidence) -- same fix as
+        # _dedupe_edges above, applied to the cross-TU merge: two TUs
+        # emitting the same private type as a function's return type in one
+        # and its parameter type in the other must not collapse onto a
+        # single role, the same way one TU's own return+param edges must not.
+        seen: dict[tuple[str, str, str, str], int] = {}
 
         def add_edges(edges: Iterable[TypeEdge]) -> None:
             for e in edges:
-                key = (e.src, e.dst, e.kind)
+                key = (e.src, e.dst, e.kind, e.role)
                 idx = seen.get(key)
                 if idx is None:
                     seen[key] = len(all_edges)

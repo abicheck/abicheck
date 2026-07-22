@@ -14,7 +14,6 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   build-info pack written by an older abicheck still loads unchanged (the
   finer keys are additive).
 
--->
 <!--
 ### Added
 

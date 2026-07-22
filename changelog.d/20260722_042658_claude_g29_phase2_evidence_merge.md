@@ -13,9 +13,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (`abicheck/buildsource/graph_facts.py`'s new `GraphFact`/`FactConflict`),
   recording a genuine cross-producer disagreement instead of silently
   picking one value. Internal graph plumbing only — no `ChangeKind`, CLI
-  flag, or JSON/SARIF field changes; a `.abi.json`/build-info pack written by
-  an older abicheck still loads unchanged (the merge synthesizes a single
-  fact from its existing `attrs`/`provenance`/`confidence`).
+  flag, or top-level report/SARIF field changes; graph/build-info
+  serialization gains additive `facts`/`resolved`/`conflicts` fields, and a
+  `.abi.json`/build-info pack written by an older abicheck still loads
+  unchanged (the merge synthesizes a single fact from its existing
+  `attrs`/`provenance`/`confidence`).
 
 <!--
 ### Added

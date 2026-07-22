@@ -1704,6 +1704,58 @@ class TestDetectCallGraphLeaks:
         assert detect_call_graph_leaks([triggering], _snap(), _snap()) == []
 
 
+class TestBuildLeakChangePreferredPath:
+    """CodeRabbit review on PR #620: the INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API
+    finding's own displayed proof path must also prefer value-propagating
+    evidence over a shorter indirect one -- select_preferred_path (ADR-046
+    D6) was wired into MarkReachability's separate layout walk but not into
+    this, the leak detector's own synthetic Change builder."""
+
+    def test_reachability_proof_path_prefers_value_propagating(self) -> None:
+        from abicheck.internal_leak import _build_leak_change, _format_path
+
+        indirect_short = ["Public", "indirect:ptr", "Internal"]
+        value_longer = ["Public", "field:x", "Mid", "field:y", "Internal"]
+        change = _build_leak_change(
+            "ns::detail::Internal",
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Internal",
+                    description="size changed",
+                )
+            ],
+            [indirect_short, value_longer],
+            _snap(),
+            embedded_by_value=True,
+        )
+        assert change.reachability_proof_path == _format_path(value_longer)
+
+    def test_more_paths_count_still_reflects_the_full_collection(self) -> None:
+        from abicheck.internal_leak import _build_leak_change
+
+        paths = [
+            ["Public", "field:x", "Internal"],
+            ["Public", "field:y", "Internal"],
+            ["Public", "field:z", "Internal"],
+            ["Public", "indirect:ptr", "Internal"],
+        ]
+        change = _build_leak_change(
+            "ns::detail::Internal",
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Internal",
+                    description="size changed",
+                )
+            ],
+            paths,
+            _snap(),
+            embedded_by_value=True,
+        )
+        assert "+1 more paths" in (change.description or "")
+
+
 class TestSelectPreferredPath:
     """ADR-046 D6 (partial): prefer a value-propagating path over a shorter
     indirect-only one instead of plain ``min(paths, key=len)``."""

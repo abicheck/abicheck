@@ -681,18 +681,18 @@ def test_inline_graph_type_pass_marks_role_coverage_matrix(monkeypatch):
     from abicheck.buildsource.type_graph import TypeEdge
 
     class _FakeCallExtractor:
-        def __init__(self, *a, **k):
+        def __init__(self, *a: object, **k: object) -> None:
             self.clang_bin = "clang++"
             self.diagnostics: list[str] = []
 
         def available(self) -> bool:
             return True
 
-        def extract_from_build(self, build):
+        def extract_from_build(self, build: BuildEvidence) -> list[object]:
             return []
 
     class _FakeTypeExtractor:
-        def __init__(self, *a, **k):
+        def __init__(self, *a: object, **k: object) -> None:
             self.clang_bin = "clang++"
             self.diagnostics: list[str] = []
             self.last_jobs = 0
@@ -701,7 +701,7 @@ def test_inline_graph_type_pass_marks_role_coverage_matrix(monkeypatch):
         def available(self) -> bool:
             return True
 
-        def extract_from_build(self, build):
+        def extract_from_build(self, build: BuildEvidence) -> list[TypeEdge]:
             return [TypeEdge("ns::Widget", "ns::Base", "TYPE_INHERITS")]
 
     monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)

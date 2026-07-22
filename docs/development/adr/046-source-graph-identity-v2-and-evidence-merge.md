@@ -383,7 +383,9 @@ call site) constructs edges with `attrs={"role": ...}` directly, so
 resolution ever runs. This is a latent correctness gap for any future
 producer or constructor-seeded builder that populates `facts` directly
 without going through `attrs` first (a valid, undocumented-as-forbidden
-construction shape the dataclass itself allows).
+construction shape the dataclass itself allows). (See the next follow-up fix
+below, though, for a *different* gap in this same producer — the role never
+even reached `add_edge` for one of two role-distinct relations.)
 
 Fix: both `add_edge` and `__post_init__` now resolve first, index second —
 `ensure_facts_and_resolve` runs before `relation_key()` is ever computed for
@@ -394,6 +396,43 @@ indexing, in both places.
 `add_edge` path) and `test_constructor_seeded_edge_index_uses_resolved_relation_key`
 (the constructor-seeded path) — all three fail without the fix (verified by
 temporarily reverting it) and pass with it.
+
+### Follow-up fix: `type_graph.py`'s own upstream dedup dropped a role before `add_edge` ever saw it (Codex review)
+
+A fourth gap, one level upstream of everything else in this family: even
+after `add_edge`/`__post_init__` correctly dedup on the role-aware
+`relation_key()`, the actual production ingestion path
+(`ClangTypeGraphExtractor.extract_from_build` → `parse_clang_ast_types` →
+`augment_graph_with_types` → `graph.add_edge`) never gave `add_edge` the
+chance: `type_graph.py`'s own `_dedupe_edges` (the per-TU pass inside
+`parse_clang_ast_types`) and the `add_edges` closure inside
+`extract_from_build` (the cross-TU merge) both deduplicated raw `TypeEdge`s
+on the coarse `(src, dst, kind)` triple — **without role** — before a
+`GraphEdge` was ever constructed. A function that both returns and takes
+the same private type (`detail::Impl foo(detail::Impl)`) emits two real,
+role-distinct `TypeEdge`s from `_walk_types` (`role="return"` and
+`role="param"`, both `DECL_HAS_TYPE`, same `src`/`dst`); `_dedupe_edges`
+silently kept only whichever was emitted first (`"return"`, since return
+types are walked before parameters), so the `"param"` `TypeEdge` never
+reached `augment_graph_with_types`/`add_edge` at all — no amount of
+role-awareness downstream could recover evidence that was already dropped.
+This also means the D3 coverage matrix could mark
+`type_graph:DECL_HAS_TYPE:param` "covered" for a confirmed pass even when
+this exact scenario silently ate the param edge for one specific
+declaration — the *pass* genuinely examined every role, but this one
+relation's evidence didn't survive to be stored.
+
+Fix: both `_dedupe_edges` and `extract_from_build`'s cross-TU `add_edges`
+now key on `(src, dst, kind, role)`, matching `add_edge`'s own dedup
+granularity. `_merge_type_edges` (the cross-TU confidence/`dst_file` merge)
+needed no change — two edges that now share a dedup key by construction
+already share a role too.
+
+`tests/test_type_graph.py`:
+`test_same_private_type_as_return_and_param_stays_role_distinct` builds a
+synthetic AST for exactly the return+param-same-type shape and asserts
+`parse_clang_ast_types` emits both roles (fails without the fix, verified by
+temporarily reverting it — only `"return"` survived).
 
 ## D2 implementation (G29 Phase 2, slice 1)
 
@@ -413,16 +452,24 @@ of by first-writer-wins.
   disagreement recorded as a `FactConflict` instead of dropped),
   `ensure_facts_and_resolve()` and `register_fact()` (the two operations
   `SourceGraphSummary.add_node`/`add_edge` now delegate to). Deliberately a
-  dependency-free leaf module — `_FactHolder` is a structural `Protocol`
-  describing the `GraphNode`/`GraphEdge` shape it needs, so this module never
-  imports `source_graph.py` (not even under `TYPE_CHECKING`) and cannot form
-  an import cycle with it (CLAUDE.md "M1-3"); `source_graph.py` imports and
-  re-exports its public names (`CONF_HIGH`/`CONF_REDUCED`/`CONF_UNKNOWN`/
-  `GraphFact`/`FactConflict`) so existing `from .source_graph import
-  CONF_HIGH` call sites are unaffected. Also the mechanical reason for the
-  split: `source_graph.py` was already the largest module in `buildsource/`
-  and D2's dataclass/merge code would have pushed it past the AI-readiness
-  2000-line hard cap.
+  dependency-free leaf module — `GraphNode` and `GraphEdge` are defined here
+  alongside the fact/merge machinery, so the helpers type directly against
+  those classes; this module never imports `source_graph.py` (not even
+  under `TYPE_CHECKING`) and cannot form an import cycle with it (CLAUDE.md
+  "M1-3"); `source_graph.py` imports and re-exports its public names
+  (`CONF_HIGH`/`CONF_REDUCED`/`CONF_UNKNOWN`/`GraphFact`/`FactConflict`) so
+  existing `from .source_graph import CONF_HIGH` call sites are unaffected.
+  Also the mechanical reason for the split: `source_graph.py` was already
+  the largest module in `buildsource/` and D2's dataclass/merge code would
+  have pushed it past the AI-readiness 2000-line hard cap.
+
+  (At the time this D2 slice landed, `GraphNode`/`GraphEdge` still lived in
+  `source_graph.py` and a structural `_FactHolder` `Protocol` stood in for
+  them here to avoid an import cycle; the "Mechanical follow-up:
+  `GraphNode`/`GraphEdge` moved into `graph_facts.py`" section above
+  describes the later D1 slice that moved the classes themselves into this
+  module and removed `_FactHolder` as no longer needed — this section is
+  written to describe the module's current, post-D1 shape throughout.)
 - `GraphNode`/`GraphEdge` (`source_graph.py`) gain `facts: list[GraphFact]`,
   `resolved: dict[str, Any]`, `conflicts: list[FactConflict]`. `attrs`/
   `provenance`/`confidence` remain real fields (v1 read-compatibility, exactly
@@ -550,8 +597,12 @@ preference order all remain open follow-up work under this same ADR — see
   confirmed, reduced-confidence name resolution) need structured per-hop
   evidence (confidence, producer, `ScopeOrigin`) this walk's plain
   `list[str]` path representation doesn't carry — not implemented.
-- Wired into exactly one call site: `post_processing.py`'s `MarkReachability`
-  layout-walk proof-path selection (the `reachable_types`-keyed branch). The
+- Wired into two call sites over the same layout-walk path representation:
+  `post_processing.py`'s `MarkReachability` proof-path selection (the
+  `reachable_types`-keyed branch), and `internal_leak._build_leak_change`
+  (the `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` synthetic finding's own
+  displayed proof path — CodeRabbit review caught that the first wiring
+  missed this second consumer of the same `paths` shape). The
   call-graph-walk's own `min(call_paths, key=len)` selection is **deliberately
   left unchanged** — `call_paths` there are already-formatted strings with no
   structured value/indirection signal to tier on, so `select_preferred_path`
@@ -569,7 +620,11 @@ preference order all remain open follow-up work under this same ADR — see
 - `tests/test_internal_leak.py` (`TestSelectPreferredPath`): value-propagating
   preferred over a shorter indirect path; shortest wins within the same tier;
   a pointer/signature-only path beats a pure-indirect one; a single path
-  returns unchanged.
+  returns unchanged. `TestBuildLeakChangePreferredPath`: the
+  `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` finding's own `reachability_proof_path`
+  also prefers the value-propagating path (verified to fail without the fix);
+  the description's "+N more paths" count still reflects the full,
+  unreordered candidate collection.
 - **Not implemented**: the `primary_path`/`alternative_paths[0..N]`/
   `discarded_path_count` finding shape the Decision text describes, and the
   four evidence-requiring tiers listed above — this slice only replaces the

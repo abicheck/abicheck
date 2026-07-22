@@ -228,9 +228,11 @@ open follow-up work under the same accepted ADR.
   `primary_path`/`alternative_paths`/`discarded_path_count` finding shape are
   still open.
 
-**ADR-046 drafted** (identity/version bump + merge semantics change is
-exactly ADR-044's own bar for "needs a recorded decision"). Implementation
-proceeds once the ADR is reviewed/accepted.
+**ADR-046 accepted and partially implemented** — see the Phase 2 heading
+above for the current per-decision status (D1 partial/D2/D3/D5 partial/D6
+partial implemented, D4 deliberately deferred); this paragraph originally
+described the pre-implementation "needs a recorded decision" gate
+(ADR-044's own bar) before the ADR existed.
 
 ### Phase 3 — Reporting & root causes
 

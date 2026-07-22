@@ -1223,6 +1223,29 @@ def test_return_type_edge_with_parameters() -> None:
     ]
 
 
+def test_same_private_type_as_return_and_param_stays_role_distinct() -> None:
+    # Codex review on PR #620: a function that both returns and takes the
+    # same private type used to collapse onto one DECL_HAS_TYPE edge --
+    # _dedupe_edges keyed on (src, dst, kind) alone, dropping whichever role
+    # was emitted second (params, since return is emitted first) before the
+    # edge ever reached augment_graph_with_types/add_edge. Both roles must
+    # now survive as distinct TypeEdges.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "FunctionDecl",
+            "name": "roundtrip",
+            "mangledName": "_Z9roundtripN6detail4ImplE",
+            "type": {"qualType": "detail::Impl (detail::Impl)"},
+            "inner": [_param("x", "detail::Impl")],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    has_type = [e for e in edges if e.kind == "DECL_HAS_TYPE" and e.dst == "detail::Impl"]
+    roles = {e.role for e in has_type}
+    assert roles == {"return", "param"}
+
+
 def test_builtin_return_type_produces_no_edge() -> None:
     ast = _tu(
         {
