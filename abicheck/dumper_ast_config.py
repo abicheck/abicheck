@@ -148,18 +148,18 @@ _CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
 # place of ``typename``/``class`` (``template <std::integral T> void f(T);``)
 # — the abbreviated-constraint form the module docstring above already
 # describes but never actually matched (Codex review). Deliberately scoped
-# to the fixed, well-known set of concepts in <concepts>/<iterator> (bare
-# ``std::`` names only — the ``std::ranges::`` concepts from <ranges>, e.g.
-# ``range``/``sized_range``/``view``, are a distinct namespace and not
-# covered here) rather than "any bare or qualified identifier in a
-# template parameter list": an arbitrary identifier there is *routinely* a
-# valid pre-C++20
+# to the fixed, well-known set of concepts in <concepts>/<iterator>/<ranges>
+# rather than "any bare or qualified identifier in a template parameter
+# list": an arbitrary identifier there is *routinely* a valid pre-C++20
 # non-type template parameter's type (``template<MyEnum E>``,
 # ``template<Traits::value_type V>``), so matching on identifier shape alone
 # would trade this false-negative for a much broader false-positive risk.
 # A `std::`-qualified name from this exact, finite standard list used
 # immediately before a bare template-parameter identifier has no such
-# ambiguity — it is never a plausible NTTP type spelling.
+# ambiguity — it is never a plausible NTTP type spelling. <ranges> concepts
+# (Codex review, second round) live under the distinct ``std::ranges::``
+# namespace, matched by a separate pattern below rather than folded into
+# the bare ``std::`` one, since the two prefixes are not interchangeable.
 _CPP20_STD_CONCEPT_NAMES = (
     rb"same_as|derived_from|convertible_to|common_reference_with|common_with|"
     rb"integral|signed_integral|unsigned_integral|floating_point|"
@@ -175,9 +175,19 @@ _CPP20_STD_CONCEPT_NAMES = (
     rb"sentinel_for|input_iterator|output_iterator|forward_iterator|"
     rb"bidirectional_iterator|random_access_iterator|contiguous_iterator"
 )
+_CPP20_STD_RANGES_CONCEPT_NAMES = (
+    rb"range|borrowed_range|sized_range|view|input_range|output_range|"
+    rb"forward_range|bidirectional_range|random_access_range|"
+    rb"contiguous_range|common_range|viewable_range|constant_range"
+)
 _CPP20_CONSTRAINED_TEMPLATE_PARAM_PATTERN = re.compile(
     rb"\bstd::(?:" + _CPP20_STD_CONCEPT_NAMES + rb")\b\s*(?:<[^<>]*>)?\s+\w+\s*[,>]"
 )  # template <std::integral T>  /  template <std::convertible_to<int> T, ...>
+_CPP20_CONSTRAINED_TEMPLATE_PARAM_RANGES_PATTERN = re.compile(
+    rb"\bstd::ranges::(?:"
+    + _CPP20_STD_RANGES_CONCEPT_NAMES
+    + rb")\b\s*(?:<[^<>]*>)?\s+\w+\s*[,>]"
+)  # template <std::ranges::range R>
 
 # "requires" only became a reserved keyword in C++20 — any earlier standard
 # allows it as an ordinary identifier, e.g. ``bool requires(int x) { ... }``
@@ -539,7 +549,9 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 lookahead, clause_match.start(), prev_nonblank_code
             ):
                 found.append(Cpp20Requirement("requires-clause", str(p), start_no))
-            elif _CPP20_CONSTRAINED_TEMPLATE_PARAM_PATTERN.search(lookahead):
+            elif _CPP20_CONSTRAINED_TEMPLATE_PARAM_PATTERN.search(
+                lookahead
+            ) or _CPP20_CONSTRAINED_TEMPLATE_PARAM_RANGES_PATTERN.search(lookahead):
                 found.append(
                     Cpp20Requirement("constrained-template-parameter", str(p), start_no)
                 )

@@ -486,6 +486,25 @@ def test_cpp20_detector_detects_std_concept_constrained_template_parameter(tmp_p
     assert any(r.reason == "constrained-template-parameter" for r in reqs)
 
 
+def test_cpp20_detector_detects_std_ranges_concept_constrained_template_parameter(
+    tmp_path,
+):
+    """Regression (Codex review, second round): the constrained-template
+    probe only matched bare ``std::`` names, missing the equally common
+    ``std::ranges::`` concepts from `<ranges>` (e.g.
+    ``template <std::ranges::range R> void f(R&&);``) — a distinct
+    namespace from the plain `<concepts>`/`<iterator>` names, not folded
+    into the same pattern."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <ranges>\ntemplate <std::ranges::range R> void f(R&&);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "constrained-template-parameter" for r in reqs)
+
+
 def test_cpp20_detector_ignores_custom_nttp_type_resembling_constrained_param(
     tmp_path,
 ):
