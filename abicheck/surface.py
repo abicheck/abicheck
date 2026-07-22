@@ -864,6 +864,21 @@ def _hidden_friend_owner_effective_origin(
     return None
 
 
+def _one_sided_key_origin(
+    surf: PublicSurface, key: str, universe: frozenset[str] | set[str]
+) -> ScopeOrigin | None:
+    """Resolve *key*'s origin on one *surf*, distinguishing "present but
+    unclassified" (an actual :class:`ScopeOrigin`, possibly ``UNKNOWN``)
+    from "genuinely absent" (``None``) — the same distinction
+    :func:`_hidden_friend_owner_effective_origin` makes for a type owner,
+    generalized to any flat key already indexed by *universe* (a symbol's
+    ``all_symbols``, or a type's ``all_types`` when no ``::``-qualified/
+    bare-tail ambiguity needs resolving)."""
+    if key not in universe:
+        return None
+    return surf.origin_by_key.get(key, ScopeOrigin.UNKNOWN)
+
+
 def _hidden_friend_owner_reason_qualified(
     eff_old: ScopeOrigin | None,
     eff_new: ScopeOrigin | None,
@@ -950,7 +965,18 @@ def _classify_hidden_friend_surface(
             # friend function's own origin (step 2) instead of returning
             # (True, None) here, exactly like the owner-not-found case.
     sym = change.symbol or ""
-    reason = _origin_reason(surf_old, surf_new, sym)
+    # A plain both-sides-must-agree _origin_reason lookup treats a symbol
+    # genuinely absent from one side (the common case: the friend function
+    # itself was added/removed together with the finding, not just its
+    # owner) identically to a side that has it but is UNKNOWN — starving
+    # this fallback of the same one-sided relaxation already applied to
+    # the owner above (Codex review). Resolve each side's own presence
+    # first so an absent side can neither block nor fabricate a reason.
+    eff_sym_old = _one_sided_key_origin(surf_old, sym, surf_old.all_symbols)
+    eff_sym_new = _one_sided_key_origin(surf_new, sym, surf_new.all_symbols)
+    if ScopeOrigin.PUBLIC_HEADER in (eff_sym_old, eff_sym_new):
+        return True, None
+    reason = _hidden_friend_owner_reason_qualified(eff_sym_old, eff_sym_new)
     if reason is not None:
         return False, reason
     return True, None

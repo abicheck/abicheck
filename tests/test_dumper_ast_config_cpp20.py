@@ -305,6 +305,43 @@ def test_cpp20_detector_ignores_requires_call_after_unrelated_arrow_prev_line(
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_requires_call_after_unrelated_arrow_same_statement(
+    tmp_path,
+):
+    """Regression (Codex review, fifth round): an unrelated "->" earlier
+    in the *same* statement/expression (not a different one — the
+    statement-boundary check does not apply here) must not be mistaken
+    for a trailing-return-type arrow either. ``int requires(int);`` is a
+    plain pre-C++20 declaration of a function named "requires"; ``return
+    p->m + requires(1);`` is an ordinary call to it, added to an unrelated
+    member access — the "->" in "p->m" is not adjacent to any function
+    declarator's closing ")", so it must not force -std=gnu++20."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "int requires(int);\nbool g(int* p) {\n    return p->m + requires(1);\n}\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_accepts_trailing_return_with_nested_arrow_in_type(tmp_path):
+    """Companion: a genuine trailing-return-type clause whose *return
+    type itself* contains a nested arrow (a ``decltype(a->b)*`` return
+    type, deliberately not ending in ")" so the plain endswith(")") check
+    can't trivially catch it) must still be recognized — the declarator-
+    adjacency check walks every "->" occurrence right-to-left rather than
+    only the rightmost one (which here belongs to the nested decltype,
+    not the genuine trailing-return-type arrow)."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <concepts>\n"
+        "template<class T>\n"
+        "auto f(T x) -> decltype(x.p->b)* requires std::integral<T>;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
 def test_cpp20_detector_accepts_requires_expression(tmp_path):
     headers = _write(
         tmp_path,

@@ -468,6 +468,37 @@ def _strip_trailing_declarator_specifiers(prefix: bytes) -> bytes:
     return prefix
 
 
+def _has_declarator_adjacent_trailing_arrow(prefix: bytes) -> bool:
+    """True if *prefix* contains a trailing-return-type arrow (``->``)
+    that itself directly follows (after stripping cv/ref/noexcept
+    specifiers) a function declarator's closing ``)`` — the ``->
+    ReturnType`` shape of ``auto f(T) -> ReturnType``.
+
+    A bare substring search for ``->`` anywhere in *prefix* also matches
+    an unrelated member-access expression earlier in the *same*
+    statement/expression, not just a different one (the statement-
+    boundary check catches that case, but not this one): ``int
+    requires(int); return p->m + requires(1);`` — a plain pre-C++20 call
+    to a function named "requires", added to a member-access result —
+    was wrongly classified genuine because of the ``->`` in ``p->m``, with
+    no statement boundary between it and "requires" (Codex review, fifth
+    round). Walking every ``->`` occurrence right-to-left (rather than
+    just checking substring membership) also correctly finds a nested
+    arrow inside the return type itself (a rare ``decltype(a->b)`` return
+    type) even when it is not the rightmost occurrence.
+
+    Residual, accepted ambiguity: a function *call* immediately followed
+    by member access (``getObj()->m``) has the identical ``...)  ->...``
+    shape as a genuine declarator, and this check cannot tell them apart
+    without real parsing — the same "impossible to bound generically"
+    trade-off already accepted for the return-type expression itself."""
+    for m in re.finditer(re.escape(b"->"), prefix):
+        before = _strip_trailing_declarator_specifiers(prefix[: m.start()])
+        if before.endswith(b")"):
+            return True
+    return False
+
+
 def _looks_like_requires_declarator(
     lookahead: bytes, match: re.Match[bytes], prev_nonblank_code: bytes
 ) -> bool:
@@ -539,13 +570,21 @@ def _looks_like_requires_declarator(
         prev = _strip_trailing_declarator_specifiers(prev_nonblank_code.rstrip())
         if prev[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
             return True
-        return not (prev.endswith(b">") or prev.endswith(b")") or b"->" in prev)
+        return not (
+            prev.endswith(b">")
+            or prev.endswith(b")")
+            or _has_declarator_adjacent_trailing_arrow(prev)
+        )
     if prefix[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
         return True
     if prefix.endswith(b".") or prefix.endswith(b"->") or prefix.endswith(b"::"):
         return True
     stripped = _strip_trailing_declarator_specifiers(prefix)
-    if stripped.endswith(b">") or stripped.endswith(b")") or b"->" in stripped:
+    if (
+        stripped.endswith(b">")
+        or stripped.endswith(b")")
+        or _has_declarator_adjacent_trailing_arrow(stripped)
+    ):
         return False
     m = _TRAILING_IDENTIFIER_PATTERN.search(prefix)
     if m is not None and m.group(1) not in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS:
@@ -650,7 +689,13 @@ def _looks_like_genuine_requires_clause(
     directly preceding "requires" can never be a genuine clause's
     continuation, so it is excluded first, mirroring
     :func:`_looks_like_requires_declarator`'s identical check — Codex
-    review, fourth round."""
+    review, fourth round. That statement-boundary check alone still
+    leaves the *same*-statement case open — an unrelated ``->`` earlier
+    in the same expression (``return p->m + requires(1);``, no statement
+    boundary between them) — so the arrow check itself now requires the
+    ``->`` to be declarator-adjacent via
+    :func:`_has_declarator_adjacent_trailing_arrow` rather than a bare
+    substring search — Codex review, fifth round."""
     same_line_prefix = _strip_trailing_declarator_specifiers(
         lookahead[:match_start].rstrip()
     )
@@ -659,14 +704,18 @@ def _looks_like_genuine_requires_clause(
     if (
         same_line_prefix.endswith(b">")
         or same_line_prefix.endswith(b")")
-        or b"->" in same_line_prefix
+        or _has_declarator_adjacent_trailing_arrow(same_line_prefix)
     ):
         return True
     if not same_line_prefix:
         prev = _strip_trailing_declarator_specifiers(prev_nonblank_code.rstrip())
         if prev[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
             return False
-        return prev.endswith(b">") or prev.endswith(b")") or b"->" in prev
+        return (
+            prev.endswith(b">")
+            or prev.endswith(b")")
+            or _has_declarator_adjacent_trailing_arrow(prev)
+        )
     return False
 
 

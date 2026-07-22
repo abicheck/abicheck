@@ -1194,6 +1194,109 @@ class TestHiddenFriendSurface:
         )
         assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
 
+    def test_friend_symbol_added_together_demotes_from_one_sided_private(self):
+        """Regression (Codex review): with no caused_by_type (owner
+        unresolved), the friend function's own recorded origin is the only
+        fallback signal. The friend is most often added/removed *together
+        with* the finding itself, so the symbol legitimately exists in only
+        ONE snapshot's function map. A plain both-sides-must-agree lookup
+        treats the absent side identically to "present but unknown" and
+        never demotes this common case, even though the one side that has
+        the symbol confidently says private-header — the same one-sided
+        relaxation already applied to the owner fallback above must also
+        apply here."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "mylib::operator==",
+                    mangled="_ZN5mylibeqERKNS_5pointES2_",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+            ],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type=None,
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (
+            False,
+            REASON_PRIVATE_HEADER,
+        )
+
+    def test_friend_symbol_removed_together_demotes_from_one_sided_system(self):
+        """Symmetric case: the friend function existed only in the *old*
+        snapshot (removed together with the finding), confidently
+        originating from a system header there."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "mylib::operator==",
+                    mangled="_ZN5mylibeqERKNS_5pointES2_",
+                    origin=ScopeOrigin.SYSTEM_HEADER,
+                ),
+            ],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type=None,
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (False, REASON_SYSTEM_HEADER)
+
+    def test_friend_symbol_added_together_with_unknown_origin_stays_retained(self):
+        """The one-sided relaxation must still be conservative: a friend
+        symbol added together with the finding but recorded with an
+        UNKNOWN origin (not confidently private/system) must not demote."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "mylib::operator==",
+                    mangled="_ZN5mylibeqERKNS_5pointES2_",
+                    origin=ScopeOrigin.UNKNOWN,
+                ),
+            ],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type=None,
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (True, None)
+
     def test_owner_added_together_with_friend_demotes_from_one_sided_private(self):
         """Regression (Codex review): a hidden friend is most often added or
         removed *together with* its owner class, so the owner legitimately
