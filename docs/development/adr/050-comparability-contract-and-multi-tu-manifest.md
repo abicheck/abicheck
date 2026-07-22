@@ -224,53 +224,87 @@ identically and wrongly pass the gate. Taking the parent directory first
 means a lone header's basename survives normalization (`v1/foo.h` → root
 `v1/`, normalized path `foo.h`).
 
-**`profile_fingerprint`'s `-I` directories use the *same* parent-directory
-rule as headers, uniformly — this went through two wrong "clever" fixes
-before landing on the simple one, worth recording so it isn't
-rediscovered.** A first attempt applied the header rule unchanged (root =
-the `-I` directory's own parent), which was right for the common
-real-world shape — `--include old=old/include --include new=new/include`
-(the project's own include root, exactly the ADR-040 "same project, two
-checkouts" case the header rule is designed for; the [user-guide's
-real-world compare
-example](../../user-guide/real-world-example.md) uses this exact shape) —
-but wrong for a lone *external dependency* directory:
-`--include old=/opt/dep-v1/include --include new=/opt/dep-v2/include`
-would normalize both to `include` relative to their own root
-(`/opt/dep-v1`, `/opt/dep-v2`), silently erasing a genuine dependency-
-version difference. A second attempt tried to fix that by hashing each
-`-I` directory's last two path components instead
-(`/opt/dep-v1/include` → `dep-v1/include`) — this broke the *other*
-direction: it made the ordinary `old/include` vs. `new/include` project-
-root case (the common, documented workflow) hash as different, hard-
-failing the routine two-checkout compare this whole fingerprint design
-exists to keep working.
+**`profile_fingerprint`'s `-I` directories are fingerprinted by *resolved
+content*, not by path shape — three path-shape heuristics were tried and
+rejected in turn before landing here, worth recording in full so none of
+the three is rediscovered.** A first attempt applied the header
+parent-directory rule unchanged (root = the `-I` directory's own parent),
+right for the common real-world shape — `--include old=old/include
+--include new=new/include` (the project's own include root, exactly the
+ADR-040 "same project, two checkouts" case; the [user-guide's real-world
+compare example](../../user-guide/real-world-example.md) uses this exact
+shape) — but wrong for a lone *external dependency* directory: `--include
+old=/opt/dep-v1/include --include new=/opt/dep-v2/include` would normalize
+both to `include` relative to their own root, silently erasing a genuine
+dependency-version difference. A second attempt hashed each `-I`
+directory's last two path components instead (`/opt/dep-v1/include` →
+`dep-v1/include`) — this broke the *other* direction, making the ordinary
+`old/include`/`new/include` project-root case hash as different and
+hard-fail the routine, documented two-checkout compare. A third attempt
+reverted to the parent-directory rule uniformly (single or multiple `-I`
+directories, common ancestor of parents, no special case) and accepted the
+dependency-version gap as a documented limitation — this in turn broke a
+*third* direction once a side declares more than one `-I` directory of
+different kinds: a normal compare with a side-specific project include
+plus a shared external dependency (`old=/work/v1/include` +
+`old=/opt/dep`, `new=/work/v2/include` + `new=/opt/dep`, the dependency
+identical on both sides) computes each side's common ancestor as `/` (the
+external `/opt/dep` shares no meaningful prefix with `/work/v{1,2}`), which
+normalizes the project include back to its diverging checkout root
+(`work/v1/include` vs. `work/v2/include`) and hard-fails `PROFILE_MISMATCH`
+on an otherwise-identical, routine two-checkout upgrade — reintroducing
+the exact class of bug this whole fingerprint design exists to close, one
+level deeper (mixing heterogeneous `-I` *categories* into one shared root
+computation, the same mistake `scope_fingerprint`/`profile_fingerprint`
+splitting into separate roots already fixed once, recurring *within*
+`profile_fingerprint` itself).
 
-Both attempts failed for the same underlying reason: **whether a
-differently-rooted `-I` path means "same dependency, different checkout
-mount point" (should normalize) or "a genuinely different dependency"
-(should not) is not decidable from path shape alone, and no heuristic can
-resolve it — the two examples above have *identical* shape** (`.../X →
-.../include`, two segments, differing prefix) and opposite correct
-answers. `profile_fingerprint` therefore uses the header rule as-is (root
-= common ancestor of that side's `-I` directories' own parent
-directories, single or multiple, no special case) rather than a bespoke
-heuristic invented to split a difference that path shape cannot express.
-This is a **known, accepted limitation, not a solved problem**: it
-correctly keeps the common project-include-root workflow working (the
-thing that matters for the gate's primary use case), at the cost of not
-being able to detect a dependency-version change expressed purely as a
-different `-I` mount point with the same basename — that class of drift
-is undetectable by this fingerprint on the legacy CLI path. **This is not a
-case `--diagnostic-comparison` (D2) can rescue**: that flag downgrades a
-*detected* fingerprint mismatch into a tentative diff, but this exact gap is
-the fingerprints *spuriously matching* — the gate never raises, so there is
-no hard-fail for the flag to soften. The only real fallback is the
-manifest-driven path (D3), which has no such gap at all, since every
-manifest-declared path is relative to one explicit document rather than
-inferred from directory shape — a user who needs reliable dependency-version
-detection for this specific shape must use a manifest; there is no
-legacy-CLI escape hatch for it, silent or otherwise.
+All three attempts fail for the same underlying reason, and it's now clear
+no path-shape function of `-I` directories can be made correct: **whether
+a differently-rooted `-I` path means "same dependency, different checkout
+mount point" or "a genuinely different dependency" is not decidable from
+path shape alone, and combining multiple `-I` directories under one shared
+root additionally risks corrupting entries that would have normalized
+correctly on their own.** `profile_fingerprint` therefore does not compute
+a root from `-I` path text at all. Each `-I` directory (per side, in
+declared order — order is already a hashed input, per the note above)
+contributes its own, independent digest: the sorted set of (path relative
+to that `-I` directory, content hash) pairs for every header file
+extraction actually resolved from inside it. This is available at zero
+extra cost — `dumper_castxml.py`/`dumper_clang.py` already record each
+declaration's resolving header path (`_source_location`/
+`header_from_location`) to build `source_location`/`ast_toolchain` today;
+computing this digest only needs grouping those already-collected paths by
+which `-I` directory produced them and hashing their contents, not a new
+compiler invocation or a full directory-tree walk of (frequently huge)
+system/vendor include trees. `profile_fingerprint`'s `-I` component is the
+hash of the **ordered** sequence of per-directory digests.
+
+This is lossless with respect to every case the three rejected attempts
+traded off against each other, because content, unlike a path, is not
+ambiguous: two checkouts of a byte-identical dependency normalize
+identically regardless of mount point (`old=/opt/dep-v1`,
+`new=/opt/dep-v2`, same header content on both sides — attempt one's
+routine case, still correct); two mount points with genuinely different
+header content normalize differently regardless of naming, including the
+`dep-v1`/`dep-v2` case attempt one broke and attempt two overcorrected for;
+and a shared external dependency alongside a side-specific project
+include normalizes each independently, since there is no shared-root
+computation left to corrupt — attempt three's regression is structurally
+impossible here, not just untested for. If a resolved header's content
+cannot be read at fingerprint time (permission error, file removed between
+parse and fingerprinting), extraction fails outright with a dedicated
+error rather than folding an "unresolvable" sentinel into the hash — two
+runs that are each unresolvable for different underlying reasons must not
+spuriously fingerprint-match. `scope_fingerprint` is unaffected by any of
+this: it hashes header/TU *paths* because declared naming is itself part
+of the public surface being compared (a header renamed with identical
+content is still a scope change), whereas `profile_fingerprint`'s `-I`
+directories describe *how* `#include` resolves, where identity should
+track resolved content, not the path label pointing at it. The
+manifest-driven path (D3) is unaffected either way — it already had no
+such gap, since every manifest-declared path is relative to one explicit
+document rather than inferred from directory shape.
 
 Both fingerprints live in a new `contract: ExtractionContract | None` field
 on `AbiSnapshot` rather than flattening two more top-level fields onto an

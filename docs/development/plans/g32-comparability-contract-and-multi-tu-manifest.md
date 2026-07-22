@@ -170,40 +170,60 @@ Implements ADR-050 D1 and D2.
   failure from the one this fix exists to close; taking the parent
   directory first preserves the filename (`v1/foo.h` → root `v1/`,
   normalized `foo.h`).
-  **`profile_fingerprint`'s `-I` directories use that same parent-directory
-  rule too, uniformly — this went through two rejected "clever" fixes
-  before landing on the simple one; both are worth recording so neither is
-  rediscovered.** A first attempt applied the header rule unchanged, which
-  is right for the common real-world shape (`--include old=old/include
-  --include new=new/include`, the project's own include root across two
-  checkouts — the exact shape `docs/user-guide/real-world-example.md`
-  documents) but wrong for a lone *external dependency* directory:
-  `--include old=/opt/dep-v1/include --include new=/opt/dep-v2/include`
-  would normalize both to `include` relative to their own root, silently
-  erasing a genuine dependency-version difference. A second attempt tried
-  hashing each `-I` directory's last two path components instead
-  (`/opt/dep-v1/include` → `dep-v1/include`) — this broke the *other*
-  direction, making the ordinary `old/include`/`new/include` project-root
-  case hash as different and hard-fail the routine, documented two-checkout
-  compare. Both attempts fail for the same underlying reason: **whether a
-  differently-rooted `-I` path means "same dependency, different checkout
-  mount point" or "genuinely different dependency version" is not decidable
-  from path shape alone, and no heuristic can resolve it** — the two
-  examples above have identical shape (two segments, differing prefix) and
-  opposite correct answers. `profile_fingerprint` therefore uses the header
-  rule as-is, single or multiple `-I` directories, no special case — a
-  **known, accepted limitation, not a solved problem**: it keeps the common
-  project-include-root workflow working (the gate's primary use case), at
-  the cost of not detecting a dependency-version change expressed purely as
-  a differently-named `-I` mount point with the same basename; that class
-  of drift is undetectable by this fingerprint on the legacy CLI path (a
-  user who needs it has `--diagnostic-comparison`, D2, as the sanctioned
-  fallback). For the manifest path (D3), both fingerprints' roots are
-  simply the manifest file's own directory — none of these legacy-path
-  degenerate cases exist there, since every manifest-declared path is
-  already relative to one document.
+  **`profile_fingerprint`'s `-I` directories are fingerprinted by resolved
+  content, not by path shape — three path-shape heuristics were tried and
+  rejected in turn (ADR-050 D1 records all three in full); a fourth,
+  path-shape-agnostic design is what actually ships.** Rejected attempt
+  one: header parent-directory rule applied unchanged — right for
+  `--include old=old/include --include new=new/include` (the routine
+  two-checkout project-root case), wrong for a lone external dependency
+  (`--include old=/opt/dep-v1/include --include new=/opt/dep-v2/include`
+  normalizes both to `include`, erasing a real version difference).
+  Rejected attempt two: hash each `-I` directory's last two path
+  components instead — fixes the dependency case, breaks the routine
+  project-root case (hashes `old/include` vs. `new/include` as different).
+  Rejected attempt three: revert to the parent-directory rule uniformly
+  and accept the dependency-version gap as documented — this breaks a
+  *third* direction once a side declares a project include **plus** a
+  shared external dependency (`old=/work/v1/include` + `old=/opt/dep`,
+  `new=/work/v2/include` + `new=/opt/dep`): each side's common ancestor
+  collapses to `/`, so the project include normalizes back to its
+  diverging checkout root and an otherwise-identical routine upgrade
+  hard-fails `PROFILE_MISMATCH` — the same "combining heterogeneous
+  categories under one shared root" mistake `scope_fingerprint`/
+  `profile_fingerprint` splitting apart already fixed once, recurring
+  *within* `profile_fingerprint` itself. No function of `-I` path shape
+  can be made correct, and combining multiple `-I` directories under one
+  shared root additionally risks corrupting entries that would have
+  normalized correctly alone. `profile_fingerprint` therefore computes no
+  root from `-I` path text at all: each `-I` directory (per side, in
+  declared order — order is already a hashed input) contributes its own
+  digest — the sorted set of (path relative to that `-I` directory,
+  content hash) pairs for every header file extraction actually resolved
+  from inside it, available at zero extra cost from the per-declaration
+  resolving-header paths `dumper_castxml.py`/`dumper_clang.py` already
+  collect (`_source_location`/`header_from_location`) — grouped by
+  originating `-I` directory and hashed, not a new compiler invocation or
+  a full directory-tree walk. `profile_fingerprint`'s `-I` component is
+  the hash of the **ordered** sequence of per-directory digests. This is
+  lossless: byte-identical dependency content at different mount points
+  normalizes identically (attempt one's routine case, still correct);
+  genuinely different content normalizes differently regardless of naming
+  (the `dep-v1`/`dep-v2` case both attempt one and two mishandled); a
+  side-specific project include alongside a shared external dependency
+  normalizes each independently, since no shared-root computation exists
+  left to corrupt (attempt three's regression is structurally impossible
+  here). If a resolved header's content can't be read at fingerprint time,
+  extraction fails outright with a dedicated error rather than folding an
+  "unresolvable" sentinel into the hash. `scope_fingerprint` is unaffected
+  — it hashes header/TU *paths* (declared naming is part of the compared
+  surface), unlike `profile_fingerprint`'s `-I` job of describing *how*
+  `#include` resolves, where identity should track content, not the path
+  label. For the manifest path (D3), both fingerprints' roots are simply
+  the manifest file's own directory — none of these legacy-CLI cases
+  exist there.
 
-  Four dedicated tests are non-negotiable for this phase to be considered
+  Six dedicated tests are non-negotiable for this phase to be considered
   done: (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
   identical trees under different roots asserts the resulting
   **`scope_fingerprint`s** match (not `profile_fingerprint` — headers are a
@@ -212,17 +232,19 @@ Implements ADR-050 D1 and D2.
   `old=v1/foo.h`/`new=v2/bar.h` (genuinely different header names) produce
   *different* `scope_fingerprint`s; (3) adding an identical, out-of-checkout
   `--include old=/opt/dep --include new=/opt/dep` alongside case (1)'s
-  headers still leaves `scope_fingerprint` matching — the specific
-  external-dependency-directory regression this criterion exists to
-  prevent; (4) `--include old=old/include --include new=new/include` (the
-  common two-checkout project-include-root shape) leaves `profile_fingerprint`
-  matching, and a documented, deliberately-not-fixed regression test pinning
-  that `--include old=/opt/dep-v1/include --include new=/opt/dep-v2/include`
-  (a lone, genuinely different `-I` directory sharing the same basename)
-  currently produces the *same* `profile_fingerprint` on both sides — the
-  known, accepted limitation above, asserted so a future change doesn't
-  silently start "fixing" it into a heuristic that breaks case (4)'s first
-  half again.
+  headers still leaves `scope_fingerprint` matching; (4) `--include
+  old=old/include --include new=new/include` with byte-identical header
+  content on both sides leaves `profile_fingerprint` matching — the
+  routine two-checkout case every rejected attempt had to keep working;
+  (5) `--include old=/opt/dep-v1/include --include new=/opt/dep-v2/include`
+  with **genuinely different** header content produces *different*
+  `profile_fingerprint`s — the case attempts one and two got wrong in
+  opposite directions, now closed rather than documented as a gap; (6) a
+  side declaring a project include **plus** a shared, byte-identical
+  external dependency (`old=/work/v1/include` + `old=/opt/dep`,
+  `new=/work/v2/include` + `new=/opt/dep`) leaves `profile_fingerprint`
+  matching — the specific mixed-roots regression rejected attempt three
+  introduced, now a permanent regression test rather than a live bug.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -463,7 +485,9 @@ Implements ADR-050 D1 and D2.
   either fails `tests/test_report_schema.py::test_docs_mirror_matches_packaged_schema`,
   which already asserts the two stay byte-identical.
 - `--diagnostic-comparison` opt-in flag: downgrades the hard-fail to a
-  tentative diff, every finding stamped `assurance: none`.
+  tentative diff, the whole result stamped `assurance: "none"` — a single
+  `DiffResult`-level field (see the dedicated bullet below), never a
+  per-finding one.
 - **Rollout: the hard gate is the default from the first shipped version of
   this phase — no soft-launch flag, and no second flag with a default that
   contradicts ADR-050 D2.** D2 is explicit that a contract mismatch is a
@@ -823,9 +847,25 @@ exist.
   `AST_CONTEXT_AMBIGUOUS`, never resolved by an implicit tiebreaker.
 - `dumper_clang.py`'s existing single-context assumption is generalized to
   call this module when the detected frontend is DPC++-capable; a plain
-  (non-SYCL) clang/castxml invocation is unaffected — zero-context-stream
-  output degrades to the existing single-context path, not a new failure
-  mode for the common case.
+  (non-SYCL) clang/castxml invocation is unaffected.
+- **The legacy single-context fallback is gated on positive non-SYCL
+  identification, never on the decoded context count.** "Zero contexts
+  with the requested `kind`" (above, → `AST_CONTEXT_MISSING`) and "this
+  wasn't a multi-document DPC++ invocation at all" are different
+  conditions and must not be conflated: the fallback to the existing
+  single-context path fires only when the frontend invocation is
+  positively identified as non-SYCL *before* `sycl_context.py` is ever
+  invoked (e.g. no DPC++/multi-document toolchain flag was requested, or
+  the raw output never contains the module's document-boundary markers at
+  all) — never as a recovery path *after* handing DPC++-capable output to
+  the decoder and getting back an empty or malformed stream. A
+  DPC++-capable invocation that decodes to zero contexts (a broken
+  toolchain invocation, truncated output, or any other malformed-data
+  case) must still raise `AST_CONTEXT_MISSING` through the three-outcome
+  logic above, not silently degrade to the single-context path — that
+  degradation is reserved for output that was never a context stream to
+  begin with, so missing or malformed DPC++ context data can never result
+  in silently selecting the wrong (or an arbitrary) AST.
 
 **Files & surfaces.** New `abicheck/sycl_context.py`, `dumper_clang.py`
 (wiring), `sycl_metadata.py` (unaffected — this phase adds frontend-level
@@ -842,7 +882,13 @@ sharing the requested `kind` raises `AST_CONTEXT_AMBIGUOUS`. A dedicated
 test asserting selection is by `kind`, not target-triple pattern-matching —
 a `{kind: "device", target: "spir64"}` context selected when `frontend_context`
 is `device`, and *not* rejected as a triple-mismatch, is the specific
-regression this criterion exists to prevent.
+regression this criterion exists to prevent. A **fallback-gating** test
+asserting a DPC++-capable invocation whose decoded stream comes back empty
+(a broken toolchain invocation, truncated output) raises
+`AST_CONTEXT_MISSING`, never silently falling back to the single-context
+path — proving the fallback distinguishes "genuinely not a multi-document
+invocation" from "was one, but decoded to nothing," the specific
+conflation this criterion exists to prevent.
 
 **Example fixtures.** None required beyond Phase 0's captures — this phase
 is extraction-layer, not diff-layer; no new `ChangeKind`.
