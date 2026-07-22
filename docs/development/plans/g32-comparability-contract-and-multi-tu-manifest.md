@@ -1402,7 +1402,17 @@ everything else into `{"status": "error", ...}` today; exposing
 `abi_compare` also gains a dedicated `except (ProfileMismatchError,
 ScopeMismatchError)` branch, ordered before that generic catch, rendering
 `{"status": "not_comparable", "reason": ...}` distinct from
-`{"status": "error"}` for the default hard-fail path). **`appcompat.py` is a
+`{"status": "error"}` for the default hard-fail path). **Adding
+`diagnostic_comparison` to `abi_compare`'s parameters is not just an
+`mcp_server.py`/`cli.py` change: `scripts/check_ai_readiness.py`'s
+`cli-contract` check (`_check_mcp_cli_name_map`, ADR-037 D10.3, mirrored
+in `tests/test_cli_contract.py::test_mcp_cli_name_map_complete`) ERRORs on
+any `abi_compare` parameter absent from `cli_options.MCP_CLI_NAME_MAP`**
+— the single source of truth reconciling every MCP param against its
+`compare` CLI flag. `MCP_CLI_NAME_MAP` (`cli_options.py:1651`) gains a
+new `"diagnostic_comparison": "--diagnostic-comparison"` row in this same
+phase; skipping it fails this CI gate the moment the parameter lands, not
+as a follow-up cleanup. **`appcompat.py` is a
 third, independent instance of this exact bypass, not covered by fixing
 `CompareRequest`/`run_compare_request` or `mcp_server.py` alone — verified
 against the actual code:** `check_appcompat` (`:1018`) and
@@ -1424,7 +1434,17 @@ for both functions, same as any other direct `compare_snapshots` caller
 that doesn't opt in — this phase documents that explicitly as these two
 functions' intended contract (in their docstrings) rather than leaving it
 implicit, closing the ambiguity Codex flagged rather than silently
-choosing one reading. `cli.py`
+choosing one reading. **`--diagnostic-comparison` is a new visible
+`compare` flag, and `compare` is already at its flag-budget ceiling —
+`tests/test_config_rebalance.py::TestFlagBudget` asserts visible flag
+count `<= COMPARE_FLAG_BUDGET`, currently exactly met, and
+`COMPARE_FLAG_BUDGET` is itself derived as
+`COMPARE_FLAG_BUDGET_BASE + len(COMPARE_FLAG_BUDGET_RAISES)` — every flag
+beyond the base needs its own ledger entry, not just a Click
+definition, or this test fails on the very PR that adds the flag.**
+`cli_options.py`'s `COMPARE_FLAG_BUDGET_RAISES` gains a new
+`"--diagnostic-comparison": "..."` entry (a short rationale, matching the
+style of every existing entry there) in this same change. `cli.py`
 (the `--diagnostic-comparison` flag definition and the new, distinct
 `not_comparable` exit `16` constant), **`cli_compare_helpers.py`** (the new
 `except (ProfileMismatchError, ScopeMismatchError)` branch around the real
@@ -1720,7 +1740,13 @@ own direct `compare_snapshots` call (bypassing `CompareRequest` entirely)
 got its own dedicated catch, not just the `diagnostic_comparison`
 parameter; and a second `abi_compare` test asserting
 `diagnostic_comparison=True` on the same mismatched pair returns a real
-tentative result instead; a `--diagnostic-comparison` end-to-end test asserting the report's
+tentative result instead; an **`MCP_CLI_NAME_MAP` completeness** test
+(already run by `tests/test_cli_contract.py::test_mcp_cli_name_map_complete`,
+extended to cover the new parameter, not a new test file) asserting
+`"diagnostic_comparison"` is present in `cli_options.MCP_CLI_NAME_MAP`
+mapped to `"--diagnostic-comparison"` — proving the `cli-contract`
+AI-readiness check stays green rather than ERROR-ing on the first PR that
+adds this parameter; a `--diagnostic-comparison` end-to-end test asserting the report's
 top-level `assurance` field is `"none"` and that no individual finding
 carries its own `assurance` value; a
 backward-compat test asserting a contract-less snapshot pair compares
@@ -1929,7 +1955,16 @@ above), added as one decorator in `cli_options.py` and applied at `dump`'s
 and `compare`'s existing declarations directly, not merely implied by
 registering a new command module — deliberately not named `--manifest`,
 which `@release_options` already registers on `compare` for the unrelated
-ADR-023 release manifest. `cli_resolve.py` (`_resolve_compare_snapshots`
+ADR-023 release manifest. **Both `--dump-manifest` and `--frontend-context`
+(below) are new visible `compare` flags, and `compare` is already at its
+flag-budget ceiling — `tests/test_config_rebalance.py::TestFlagBudget`
+fails the moment either lands without its own
+`COMPARE_FLAG_BUDGET_RAISES` ledger entry, the same gate Phase A's
+`--diagnostic-comparison` has to satisfy.** `cli_options.py`'s
+`COMPARE_FLAG_BUDGET_RAISES` gains two new entries in this phase —
+`"--dump-manifest": "..."` and `"--frontend-context": "..."` — each a
+short rationale in the style of the existing entries there.
+`cli_resolve.py` (`_resolve_compare_snapshots`
 and `_resolve_input` each gain the same manifest parameter, threaded
 through to `service.py`) and `service.py` (`resolve_input`/`run_dump` gain
 it too, the actual entry points into `dumper.py`) — see the dedicated
@@ -2072,7 +2107,12 @@ parameter, threaded into the `CompileContext` it builds — the single
 choke point `compare`/`dump`/`scan` all resolve through, so no
 `scan_engine.py` dump-call-site change is needed beyond this).
 
-**Tests.** Manifest parser unit tests (the invariant violation, duplicate
+**Tests.** A **flag-budget ledger** test (`tests/test_config_rebalance.py::TestFlagBudget`,
+already run, not a new test file) asserting `compare`'s visible flag
+count still passes `<= COMPARE_FLAG_BUDGET` once `--dump-manifest` and
+`--frontend-context` are both visible, proving `COMPARE_FLAG_BUDGET_RAISES`
+gained both ledger entries in this same phase rather than the flags
+landing unaccounted-for. Manifest parser unit tests (the invariant violation, duplicate
 TU names, unknown fields, relative-path resolution, `frontend_context`
 accepted/defaulted/rejected-when-invalid). A **Phase-B-only device
 rejection** test asserting a manifest declaring `frontend_context:
