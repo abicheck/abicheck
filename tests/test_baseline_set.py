@@ -214,6 +214,27 @@ def test_resolve_target_ambiguous_snapshot_file_missing_on_disk(tmp_path: Path) 
     assert result.outcome == ResolveOutcome.AMBIGUOUS
 
 
+def test_resolve_target_ambiguous_duplicate_manifest_entries(tmp_path: Path) -> None:
+    # A real actions/baseline-produced manifest can never have two entries
+    # for the same library (run.sh's own input validation already rejects
+    # a duplicate library name before anything is dumped) -- two rows here
+    # means a hand-edited or corrupted manifest, and artifact_for() would
+    # otherwise silently pick whichever one happens to appear first
+    # (Codex review).
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact("libpvxs", extra={"snapshot": "a.abicheck.json"}),
+            _target_artifact("libpvxs", extra={"snapshot": "b.abicheck.json"}),
+        ],
+    )
+    (tmp_path / "a.abicheck.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "b.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "multiple artifacts" in result.message
+
+
 def test_resolve_target_incompatible_evidence_producer_mismatch(tmp_path: Path) -> None:
     _write_manifest(
         tmp_path,
@@ -788,3 +809,25 @@ def test_resolve_bundle_message_reports_distinct_per_member_reasons(
     assert "digest does not match" in result.message  # libpvxsIoc
     assert "no staged binary declared" in result.message  # libpvxsExtra
     assert "'libpvxs':" not in result.message  # libpvxs itself resolved fine
+
+
+def test_resolve_bundle_ambiguous_duplicate_manifest_entries(tmp_path: Path) -> None:
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact("libpvxs", extra={"binary": "binaries/a.so"}),
+            _target_artifact("libpvxs", extra={"binary": "binaries/b.so"}),
+        ],
+    )
+    (tmp_path / "binaries").mkdir()
+    (tmp_path / "binaries" / "a.so").write_bytes(b"\x7fELF-fake")
+    (tmp_path / "binaries" / "b.so").write_bytes(b"\x7fELF-fake")
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "multiple artifacts" in result.message

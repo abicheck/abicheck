@@ -246,6 +246,19 @@ class BaselineManifest:
                 return entry
         return None
 
+    def artifact_count_for(self, library: str) -> int:
+        """How many ``artifacts[]`` rows declare this library.
+
+        A real ``actions/baseline``-produced manifest can never have more
+        than one (``run.sh``'s own input validation already rejects a
+        duplicate library name before anything is dumped), so >1 here means
+        a hand-edited or corrupted manifest -- :func:`artifact_for` would
+        otherwise silently return whichever duplicate happens to appear
+        first, letting ``resolve_target``/``resolve_bundle`` report
+        ``resolved`` against an arbitrarily-picked one (Codex review).
+        """
+        return sum(1 for entry in self.artifacts if entry.library == library)
+
 
 def load_baseline_manifest(baseline_dir: Path | str) -> BaselineManifest | None:
     """Read ``<baseline_dir>/manifest.json``.
@@ -664,6 +677,18 @@ def resolve_target(
             ),
             manifest_path=manifest_path,
         )
+    if manifest.artifact_count_for(target) > 1:
+        return ResolveResult(
+            outcome=ResolveOutcome.AMBIGUOUS,
+            message=(
+                f"target {target!r} has multiple artifacts[] entries in "
+                "this baseline-set's manifest -- ambiguous which one is "
+                "authoritative; a real actions/baseline-produced manifest "
+                "never has duplicate library entries, so this manifest is "
+                "hand-edited or corrupted."
+            ),
+            manifest_path=manifest_path,
+        )
 
     incompatible = _evidence_incompatibility(manifest, candidate_evidence_producer)
     if incompatible:
@@ -773,6 +798,12 @@ def resolve_bundle(
         artifact = manifest.artifact_for(member)
         if artifact is None or not artifact.binary:
             problems[member] = "no staged binary declared in the manifest"
+            continue
+        if manifest.artifact_count_for(member) > 1:
+            problems[member] = (
+                "multiple artifacts[] entries in this baseline-set's "
+                "manifest -- ambiguous which one is authoritative"
+            )
             continue
         resolved = _resolve_under_baseline_dir(baseline_dir, artifact.binary)
         # The documented bundle contract is that every member's binary lives
