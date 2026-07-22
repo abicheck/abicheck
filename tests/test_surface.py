@@ -55,7 +55,9 @@ def _fn(
     )
 
 
-def _rec(name, fields=(), bases=(), size=64, origin=ScopeOrigin.UNKNOWN):
+def _rec(
+    name, fields=(), bases=(), size=64, origin=ScopeOrigin.UNKNOWN, qualified_name=None
+):
     return RecordType(
         name=name,
         kind="struct",
@@ -63,6 +65,7 @@ def _rec(name, fields=(), bases=(), size=64, origin=ScopeOrigin.UNKNOWN):
         fields=[TypeField(name=n, type=t) for n, t in fields],
         bases=list(bases),
         origin=origin,
+        qualified_name=qualified_name,
     )
 
 
@@ -1247,6 +1250,61 @@ class TestHiddenFriendSurface:
             description="",
         )
         assert classify_change_surface(c, s_old, s_new) == (False, REASON_SYSTEM_HEADER)
+
+    def test_ambiguous_bare_name_resolves_via_qualified_owner(self):
+        """Regression (Codex review): two distinct classes sharing a bare
+        leaf name in different namespaces (``pub::Foo`` public, ``priv::Foo``
+        private) must not be conflated via the bare-name ``origin_by_key``
+        collision (which would merge to PUBLIC_HEADER, the conservative
+        "any side public" winner, and wrongly keep a hidden friend whose
+        *specific* owner is confidently private). An exact qualified-name
+        match resolves the ambiguity."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "Foo", origin=ScopeOrigin.PUBLIC_HEADER, qualified_name="pub::Foo"
+                ),
+                _rec(
+                    "Foo", origin=ScopeOrigin.PRIVATE_HEADER, qualified_name="priv::Foo"
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN4priv3FooeqERKS0_S1_",
+            caused_by_type="priv::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
+
+    def test_ambiguous_bare_name_public_owner_still_retained(self):
+        """Symmetric case: the specific owner is the public one — must stay
+        retained despite the same bare-name collision as the test above."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "Foo", origin=ScopeOrigin.PUBLIC_HEADER, qualified_name="pub::Foo"
+                ),
+                _rec(
+                    "Foo", origin=ScopeOrigin.PRIVATE_HEADER, qualified_name="priv::Foo"
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN3pub3FooeqERKS0_S1_",
+            caused_by_type="pub::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (True, None)
 
     def test_owner_added_together_with_unknown_origin_stays_retained(self):
         """The one-sided-presence relaxation must still be conservative: an

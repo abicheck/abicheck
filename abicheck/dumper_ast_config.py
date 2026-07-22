@@ -224,16 +224,39 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
             content,
             flags=re.DOTALL,
         )
-        for start_no, logical in _iter_logical_lines(content):
+        logical_lines = _iter_logical_lines(content)
+        n = len(logical_lines)
+        for i, (start_no, logical) in enumerate(logical_lines):
             if _is_preprocessor_directive(logical):
                 continue
             code = _strip_literals(logical)
             code = code.split(b"//")[0]
-            if _CPP20_CONCEPT_PATTERN.search(code):
+            # A bare "requires" trailing at the end of a line (no parameter
+            # list or brace yet) means the construct's `(`/`{`/constraint
+            # landed on a following physical line with no backslash join in
+            # between — the per-line scan otherwise never sees the two
+            # halves together (Codex review). Pull in subsequent non-
+            # directive lines (bounded, so a stray trailing "requires" in
+            # unrelated code can't scan unboundedly) until the bare-trailing
+            # condition no longer holds.
+            lookahead = code
+            j = i
+            lookahead_budget = 5
+            while (
+                lookahead_budget > 0
+                and re.search(rb"\brequires\s*$", lookahead.rstrip())
+                and j + 1 < n
+                and not _is_preprocessor_directive(logical_lines[j + 1][1])
+            ):
+                j += 1
+                nxt = _strip_literals(logical_lines[j][1]).split(b"//")[0]
+                lookahead += b"\n" + nxt
+                lookahead_budget -= 1
+            if _CPP20_CONCEPT_PATTERN.search(lookahead):
                 found.append(Cpp20Requirement("concept-declaration", str(p), start_no))
-            elif _CPP20_REQUIRES_EXPR_PATTERN.search(code):
+            elif _CPP20_REQUIRES_EXPR_PATTERN.search(lookahead):
                 found.append(Cpp20Requirement("requires-expression", str(p), start_no))
-            elif _CPP20_REQUIRES_CLAUSE_PATTERN.search(code):
+            elif _CPP20_REQUIRES_CLAUSE_PATTERN.search(lookahead):
                 found.append(Cpp20Requirement("requires-clause", str(p), start_no))
     return found
 

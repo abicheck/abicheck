@@ -322,6 +322,16 @@ class PublicSurface:
     # name. Only populated when the snapshot was dumped with a public-header
     # set; otherwise every value is UNKNOWN and provenance reasons never fire.
     origin_by_key: dict[str, ScopeOrigin] = field(default_factory=dict)
+    # Origin keyed by a type's *qualified* name (``RecordType.qualified_name``
+    # / ``EnumType.qualified_name``), populated only for types that actually
+    # carry one. ``origin_by_key`` is keyed by the deliberately-bare ``name``
+    # (see model.py), so two distinct types sharing a leaf name in different
+    # namespaces (``pub::Foo`` vs. ``priv::Foo``) collide there and their
+    # origins merge conservatively (public wins). This index lets a caller
+    # holding a fully-qualified owner identity (e.g. a hidden friend's
+    # ``befriending`` class) resolve it exactly instead of falling into that
+    # collision (Codex review).
+    origin_by_qualified_key: dict[str, ScopeOrigin] = field(default_factory=dict)
     # True when *any* declaration carried a non-UNKNOWN origin — i.e. the
     # snapshot was dumped with a public-header set so provenance is available.
     # Lets the classifier distinguish a confident reachability demotion from one
@@ -391,7 +401,12 @@ def _index_surface_types(
             tail = rec.name.rsplit("::", 1)[1]
             record_by_name.setdefault(tail, []).append(rec)
             keys.add(tail)
-        _record_origin(surface, keys, getattr(rec, "origin", ScopeOrigin.UNKNOWN))
+        origin = getattr(rec, "origin", ScopeOrigin.UNKNOWN)
+        _record_origin(surface, keys, origin)
+        if rec.qualified_name:
+            surface.origin_by_qualified_key[rec.qualified_name] = _merge_origin(
+                surface.origin_by_qualified_key.get(rec.qualified_name), origin
+            )
     enum_by_name: dict[str, list[EnumType]] = {}
     for en in snap.enums:
         surface.all_types.add(en.name)
@@ -401,7 +416,12 @@ def _index_surface_types(
             tail = en.name.rsplit("::", 1)[1]
             enum_by_name.setdefault(tail, []).append(en)
             keys.add(tail)
-        _record_origin(surface, keys, getattr(en, "origin", ScopeOrigin.UNKNOWN))
+        origin = getattr(en, "origin", ScopeOrigin.UNKNOWN)
+        _record_origin(surface, keys, origin)
+        if en.qualified_name:
+            surface.origin_by_qualified_key[en.qualified_name] = _merge_origin(
+                surface.origin_by_qualified_key.get(en.qualified_name), origin
+            )
     for alias in snap.typedefs:
         surface.all_types.add(alias)
     return record_by_name, enum_by_name
@@ -840,6 +860,30 @@ def _hidden_friend_owner_reason(
     )
 
 
+def _hidden_friend_owner_reason_qualified(
+    q_old: ScopeOrigin | None,
+    q_new: ScopeOrigin | None,
+) -> str | None:
+    """Like :func:`_hidden_friend_owner_reason`, but resolving from two exact
+    ``origin_by_qualified_key`` lookups instead of the ambiguous bare-name
+    candidate set — each already unambiguous, so no both-sides-agreement
+    requirement is needed beyond "every side that has an entry agrees".
+    ``None`` for a side means that snapshot has no type under this exact
+    qualified spelling (removed/added together with the friend, or simply
+    absent), not "present but unknown"."""
+    origins = [o for o in (q_old, q_new) if o is not None]
+    if not origins:
+        return None
+    reasons = {_ORIGIN_REASON.get(o) for o in origins}
+    if None in reasons:
+        return None
+    return (
+        REASON_PRIVATE_HEADER
+        if REASON_PRIVATE_HEADER in reasons
+        else REASON_SYSTEM_HEADER
+    )
+
+
 def _classify_hidden_friend_surface(
     change: Change,
     surf_old: PublicSurface,
@@ -868,6 +912,22 @@ def _classify_hidden_friend_surface(
        claim a provenance-confirmed demotion that was never verified.
     """
     owner = change.caused_by_type
+    if owner and "::" in owner:
+        # An exact qualified-name match is unambiguous — prefer it over the
+        # bare-name path below, which would otherwise conflate two distinct
+        # same-leaf-name classes in different namespaces (e.g. "pub::Foo"
+        # public, "priv::Foo" private) into one merged, over-conservative
+        # origin (Codex review). Only consulted when at least one snapshot
+        # actually indexed this exact spelling; an owner absent from both
+        # qualified indexes (older snapshot / non-castxml producer that never
+        # populated ``qualified_name``) falls through to the bare-name path.
+        q_old = surf_old.origin_by_qualified_key.get(owner)
+        q_new = surf_new.origin_by_qualified_key.get(owner)
+        if q_old is not None or q_new is not None:
+            if ScopeOrigin.PUBLIC_HEADER in (q_old, q_new):
+                return True, None
+            reason = _hidden_friend_owner_reason_qualified(q_old, q_new)
+            return (False, reason) if reason is not None else (True, None)
     if owner:
         # RecordType.name stays deliberately bare (model.py) — a namespaced
         # owner ("ns::Foo", from castxml/clang's qualified-name walk) would

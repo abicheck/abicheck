@@ -118,6 +118,51 @@ def test_cpp20_detector_accepts_parameterless_requires_expression(tmp_path):
     assert any(r.reason == "requires-expression" for r in reqs)
 
 
+def test_cpp20_detector_accepts_requires_expression_split_across_lines(tmp_path):
+    """Regression (Codex review): the per-logical-line scan never joined
+    physical lines that lacked a backslash continuation, so a parameterless
+    requires-expression with "requires" at the end of one line and its "{"
+    starting the next was invisible to both the requires-expression and
+    requires-clause patterns."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<class T>\n"
+        "constexpr bool has_value_type = requires\n"
+        "{ typename T::value_type; };\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "requires-expression" for r in reqs)
+
+
+def test_cpp20_detector_accepts_requires_clause_split_across_lines(tmp_path):
+    """Same line-split gap for the requires-*clause* form (a named
+    constraint, not a brace-delimited expression)."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<class T>\nrequires\nConcept<T>\nvoid f(T);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "requires-clause" for r in reqs)
+
+
+def test_cpp20_detector_lookahead_stops_at_preprocessor_directive(tmp_path):
+    """The line-join lookahead for a bare trailing "requires" must stop at a
+    preprocessor directive rather than pulling its text into the scan
+    window — the directive line is not a real continuation of the
+    requires-expression/clause."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "bool ok = requires\n#define X 1\n(T a) { a.foo(); };\n",
+    )
+    reqs = _find_cpp20_requirements(headers)
+    assert not any(r.reason == "requires-expression" for r in reqs)
+
+
 def test_cpp20_detector_accepts_inline_concept_declaration(tmp_path):
     headers = _write(
         tmp_path,
