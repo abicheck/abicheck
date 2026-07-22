@@ -312,6 +312,28 @@ Implements ADR-050 D1 and D2.
   `-I` directory contains it — one extra cheap compiler flag per TU,
   reusing a proven parser at a new call site, not a second compiler
   invocation or a directory-tree walk.
+  **Project-ownership isn't only a declared-`-I`-directory concept — a
+  declared header's own parent directory is implicitly project-owned too,
+  with no `--include` needed, or the single most common workflow
+  (header-only, no `-I`) reintroduces this whole fix's bug.** The
+  preprocessor resolves a quote-include (`#include "detail.h"`) by first
+  searching the *including file's own directory*, independent of any `-I`
+  flag — standard behavior, no compiler option required. A side declared
+  with only `--header old/include/foo.h` (no `--include` at all) still has
+  `foo.h`'s own directory searched for its quote-includes; if `foo.h`
+  `#include`s a private `detail.h` from that same directory, the depfile
+  lists it under `old/include/`, but no `-I` directory was ever declared
+  there for the ancestor rule to classify. Unhandled, this path falls
+  through to "not under any declared `-I` directory" (the system/toolchain
+  bucket below) and gets full content hashing, so an ordinary edit to
+  `detail.h` flips `profile_fingerprint` on the single most common compare
+  shape (headers only, no explicit `-I`), not an edge case. The
+  ownership predicate therefore also treats the **parent directory of
+  every declared `--header`/manifest TU path** as an implicitly
+  project-owned root, whether or not that directory is separately passed
+  via `--include` — the same whole-directory exclusion the explicit
+  ancestor rule already applies, just triggered by a header's own
+  location instead of a declared `-I` flag.
   **Not every `-MD`-listed path falls under a declared `-I` directory.**
   `dumper.py` already introduces search paths outside the user-declared
   `includes` list: `--sysroot`, the GNU-toolchain `-isystem` dirs it probes
@@ -568,7 +590,7 @@ Implements ADR-050 D1 and D2.
   the manifest file's own directory — none of these legacy-CLI cases
   exist there.
 
-  Fifteen dedicated tests (numbered 1–14, with 8b alongside 8) are non-negotiable for this phase to be considered
+  Sixteen dedicated tests (numbered 1–14, with 8b and 8c alongside 8) are non-negotiable for this phase to be considered
   done: (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
   identical trees under different roots asserts the resulting
   **`scope_fingerprint`s** match (not `profile_fingerprint` — headers are a
@@ -618,7 +640,17 @@ Implements ADR-050 D1 and D2.
   matching, proving the exclusion covers the *whole* project-owned `-I`
   directory, not only the explicitly-named header; excluding only the
   named file would still hash `detail.h`'s change and spuriously
-  hard-fail this routine internal-refactor case; (9) a header reached only through a
+  hard-fail this routine internal-refactor case; (8c) the same shape as
+  (8b), but **no `--include` is declared at all** — `--header
+  old/include/foo.h --header new/include/foo.h`, nothing else — and
+  `foo.h` quote-includes a private `detail.h` from its own directory,
+  resolved purely by the preprocessor's implicit same-directory search
+  (no `-I` naming `include/` anywhere); an edit confined to `detail.h`
+  still leaves `profile_fingerprint` matching, proving the parent
+  directory of a declared header is implicitly project-owned even with
+  zero `--include` flags — the single most common compare shape, and the
+  specific case (8)/(8b)'s explicit-`--include` fixtures don't exercise;
+  (9) a header reached only through a
   system/`-isystem`-classified include path (not a plain user `-I`) with
   genuinely different content between old and new produces *different*
   `profile_fingerprint`s — proving the depfile request uses `-MD`, not
@@ -2310,12 +2342,23 @@ needed, so it genuinely can feed the cache key pre-dump. The scheduling
 half depends on Phase B too (the per-TU loop it schedules).
 
 **Goal & acceptance criteria.**
-- The RAM-probing/pool-sizing helper in `buildsource/source_replay.py` is
+- **The scheduler targets `dumper_manifest.py`'s per-TU loop, not
+  `dumper.py`'s — Phase B already moved that loop out, and this phase
+  must not point at where it used to live.** Phase B's own acceptance
+  criteria (above) put the per-TU invocation loop and `TuFragment`
+  handling in a new `abicheck/dumper_manifest.py` specifically because
+  `dumper.py` is already at its 2000-line file-size cap with no headroom;
+  `dumper.py` itself keeps only a thin manifest-vs.-single-TU dispatch.
+  Following an unrevised "`dumper.py`'s per-TU loop" instruction here
+  would mean either scheduling a loop that no longer exists in that file,
+  or adding the scheduler back into the capped file and re-tripping the
+  same file-size gate Phase B's split exists to avoid. The RAM-probing/
+  pool-sizing helper in `buildsource/source_replay.py` is
   factored out into new leaf module `abicheck/process_resources.py`; both
-  `source_replay.py` and `dumper.py`'s per-TU loop import it — one
+  `source_replay.py` and `dumper_manifest.py`'s per-TU loop import it — one
   implementation, not two, per AGENTS.md's own import-cycle guidance ("move
   shared logic to a leaf module both sides can depend on").
-- `dumper.py`'s per-TU castxml/clang invocations (Phase B) run under this
+- `dumper_manifest.py`'s per-TU castxml/clang invocations (Phase B) run under this
   pool instead of a fully sequential loop; a killed/timed-out TU records
   its exit signal and never silently retries as a clean empty TU.
 - **`profile_fingerprint` itself cannot be a cache-key input — this phase
@@ -2352,19 +2395,42 @@ half depends on Phase B too (the per-TU loop it schedules).
   genuinely is available before `dump()` runs; `snapshot_cache.py`'s
   `_cache_key()` (`:130`) hashes the **full computed `scope_fingerprint`**
   for a manifest-driven dump (TU names, per-TU ordered includes/
-  forced-includes, and the `contributes_to_abi`/`required` flags together,
-  not any one piece in isolation), closing the whole class of
+  forced-includes, the `contributes_to_abi`/`required` flags, **and each
+  `includes` entry's `project_owned` bit** — the mapping form
+  `{path: ..., project_owned: true}` a sibling support root uses —
+  together, not any one piece in isolation), closing the whole class of
   pre-dump-knowable manifest drift `iter_cache_header_files`'s
-  filesystem-content walk structurally cannot see.
+  filesystem-content walk structurally cannot see. `project_owned` needs
+  its own key material specifically because toggling it on an otherwise
+  unchanged path changes neither the file's content/mtime nor any of the
+  other hashed fields — without it, a warm cache could still serve a
+  `contract.profile_fingerprint` computed under the previous ownership
+  predicate after a manifest edit that only flipped this one bit, the
+  same class of gap already closed for the legacy CLI's labeled
+  `--include` form.
 
 **Files & surfaces.** New `abicheck/process_resources.py`,
 `buildsource/source_replay.py` (import from it instead of its own inline
-implementation), `dumper.py` (per-TU pool), `snapshot_cache.py`
+implementation), `abicheck/dumper_manifest.py` (per-TU pool — not
+`dumper.py`, which only holds the thin dispatch after Phase B's split),
+`snapshot_cache.py`
 (`_cache_key` gains the full computed `scope_fingerprint` — TU names,
 per-TU ordered includes/forced-includes, and `contributes_to_abi`/
-`required` flags together — as an additional key input for manifest-driven
+`required` flags together, **plus each `includes` entry's `project_owned`
+bit** (Phase B's manifest mapping form, `{path: ..., project_owned: true}`)
+— as an additional key input for manifest-driven
 dumps; still never `profile_fingerprint`, which cannot be a pre-dump input
-at all, per the bullet above).
+at all, per the bullet above). **The `project_owned` bit needs its own key
+material, not just the path it's attached to — verified this was missing:
+toggling it on an unchanged file changes neither the file's content/mtime
+nor (per the field list above, before this fix) anything `_cache_key()`
+already hashes, so a warm cache could serve a `contract.profile_fingerprint`
+computed under the previous ownership predicate even after a manifest
+edit that only flipped this one flag.** This is the identical class of gap
+already found and fixed for the legacy CLI's `--project-include`/labeled
+`--include` label (Phase A's cache-key bullet) — the manifest form of the
+same escape hatch needs the same treatment, just missed here when Phase B
+added it after this bullet was first written.
 **Modifying `_cache_key()`'s own internals is not sufficient — the caller
 that decides what to pass it never sees the manifest today.**
 `service_dump_cache.cached_run_dump` is what actually builds the pre-dump
@@ -2390,7 +2456,13 @@ order* (same files, reordered) ⇒ cache miss; identical TUs and flags,
 differing only one TU's *name* ⇒ cache miss — the three independent
 components of the pre-dump-knowable gap this phase closes,
 distinct from Phase A's already-completed order-sensitivity and
-whole-snapshot-cache-version fixes.
+whole-snapshot-cache-version fixes. A fourth, **`project_owned`
+cache-key** test: identical manifest TU includes and flags, differing
+only one `includes` entry's `project_owned` bit (`true` on one call,
+`false`/absent on the next, same unchanged path) ⇒ cache miss — proving
+the bit is its own key material, not silently absorbed into content/mtime
+hashing (which can't see it) or any of the three fields above (none of
+which change when only this bit does).
 
 **Out of scope.** No new scheduling *policy* — this phase ports the
 existing, already-proven `source_replay.py` policy verbatim; a different

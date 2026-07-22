@@ -338,6 +338,34 @@ underlying invocation. Every listed path is attributed to whichever declared
 one additional cheap compiler flag per TU, not a second compiler invocation
 or a directory-tree walk — rather than inventing new file-discovery logic.
 
+**Project-ownership isn't only a declared-`-I`-directory concept — a
+declared header's own parent directory is implicitly project-owned too,
+even with no `--include` naming it at all, or the single most common
+workflow (header-only, no `-I`) reintroduces this whole section's bug.**
+The C/C++ preprocessor resolves a quote-include (`#include "detail.h"`)
+by first searching the *including file's own directory*, independent of
+any `-I` search path — standard behavior no compiler flag is needed to
+get. A side declared with only `--header old/include/foo.h` (no
+`--include` at all — an entirely ordinary, minimal invocation) still has
+`foo.h`'s own directory searched for its quote-includes; if `foo.h`
+`#include`s a private `detail.h` from that same directory, the depfile
+lists `detail.h` under `old/include/`, but no `-I` directory was ever
+declared there for the ancestor rule above to classify. Left unhandled,
+this path falls through to "not under any declared `-I` directory" (the
+system/toolchain bucket described next) and gets full content hashing —
+so an ordinary, project-internal edit to `detail.h` flips
+`profile_fingerprint` and hard-fails the gate on the single most common
+compare shape (headers only, no explicit `-I`), not an edge case. The
+project-ownership predicate is therefore not "is this path under a
+*declared* `-I` directory that's project-owned" alone; it also treats the
+**parent directory of every declared `--header`/manifest TU path** as an
+implicitly project-owned root, whether or not that same directory was
+separately passed via `--include` — the same exclusion-in-entirety
+treatment (not file-by-file) the explicit ancestor rule already applies,
+just triggered by a header's own location instead of a declared `-I`
+flag. This closes the gap for exactly the workflow variant the explicitly-
+declared-`-I` fix above didn't cover: no `--include` present at all.
+
 **Not every `-MD`-listed path falls under a declared `-I` directory, and
 those paths cannot be silently dropped or mis-attributed.** `dumper.py`
 already introduces header search paths that are never part of the
