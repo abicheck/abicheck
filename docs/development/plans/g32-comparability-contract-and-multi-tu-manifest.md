@@ -54,10 +54,19 @@ A's own section is explicit that there is no soft-launch/report-only mode
 (the gate hard-fails `not_comparable` from day one; see Phase A). "Ships
 independently" describes *when* Phase A can land relative to the other
 phases, not a different (report-only) behavior it has while doing so.
-Phase B and Phase D's *parser* may both start once Phase 0's fixtures
-exist — decoding/selecting AST contexts by `kind` doesn't itself depend on
-B or A. **But Phase D as a whole depends on both Phase A and Phase B, not
-Phase 0 alone.** Its own acceptance criteria require folding the resolved
+Phase B's manifest schema/parser and per-TU dump loop, and Phase D's AST-
+context parser, may both start once Phase 0's fixtures exist — neither
+the manifest grammar nor decoding/selecting AST contexts by `kind`
+themselves depend on A. **But Phase B as a whole depends on Phase A too,
+not Phase 0 alone — the identical "parser vs. whole phase" split Phase D
+and Phase E already have.** Phase B's own acceptance criteria require
+`plan --dump-manifest` to print a real `scope_fingerprint`, and its
+manifest support-root-ownership tests assert `profile_fingerprint`
+matching/mismatching across manifest pairs (see Phase B) — both fields
+are `ExtractionContract`/`comparability.compute_extraction_contract`,
+Phase A's deliverable, not something Phase B computes on its own. **Phase
+D as a whole depends on all of Phase 0, Phase A, and Phase B, not Phase 0
+alone.** Its own acceptance criteria require folding the resolved
 `kind` into `comparability.compute_extraction_contract`'s hashed fields
 and proving a host-vs-device mismatch through D2's gate (see Phase D) —
 both Phase A deliverables, the identical class of dependency Phase E
@@ -70,7 +79,10 @@ needs B," it is "Phase D is not done until this criterion is met,"
 making B a hard prerequisite for the phase as a whole, not just its
 non-default-context path. Phase C starts only after Phase B lands, since
 it operates on the `TuFragment` contract Phase B defines and produces —
-it is not a third parallel branch alongside B and D. **E depends on
+it is not a third parallel branch alongside B and D; since B now depends
+on A too, Phase C's effective prerequisite chain is Phase 0 → A → B → C,
+even though Phase C's own acceptance criteria don't reference A's
+fingerprint machinery directly. **E depends on
 *both* A and B — not on B alone.** `scope_fingerprint` as a *type* and
 *computation* (`ExtractionContract`, `comparability.compute_extraction_contract`)
 is Phase A's deliverable; Phase B only adds the manifest-driven *inputs*
@@ -97,9 +109,15 @@ more than one incoming dependency, which a simple tree can't render
 unambiguously):
 
 - **Phase A** — depends on Phase 0 only.
-- **Phase B** — depends on Phase 0 only.
+- **Phase B** — depends on **both** Phase 0 and Phase A, not Phase 0 alone.
+  The manifest schema/parser and per-TU dump loop need only Phase 0, but
+  `plan --dump-manifest` printing `scope_fingerprint` and the
+  support-root-ownership tests asserting `profile_fingerprint` (see Phase
+  B) both call `comparability.compute_extraction_contract` — Phase A's
+  deliverable, not reimplemented in Phase B.
 - **Phase C** — depends on Phase B (operates on the `TuFragment` contract
-  Phase B defines and produces).
+  Phase B defines and produces); transitively depends on Phase A through
+  B, since B itself now requires A.
 - **Phase D** — depends on **all three** of Phase 0 (the parser), Phase A
   (folding the resolved `kind` into `compute_extraction_contract`, testing
   the gate), **and** Phase B. The parser and `host`-default path alone
@@ -1870,7 +1888,24 @@ part of this phase.
 
 ## Phase B — Manifest and real multi-TU dump
 
-Implements ADR-050 D3. The highest-risk phase — see Risk above.
+Implements ADR-050 D3. The highest-risk phase — see Risk above. **Depends
+on Phase 0 and Phase A, not Phase 0 alone.** The manifest schema/parser
+(`dump_manifest.py`) and the per-TU dump loop only need Phase 0's
+fixtures, but this phase's own acceptance criteria go past that: `plan
+--dump-manifest` must print a real `scope_fingerprint` (below), and the
+manifest support-root-ownership tests assert `profile_fingerprint`
+matching/mismatching across manifest pairs (below). Both `scope_fingerprint`
+and `profile_fingerprint` are `ExtractionContract`/
+`comparability.compute_extraction_contract` — Phase A's deliverable, not
+something Phase B reimplements. Phase B supplies the manifest-driven
+*inputs* (TU names, per-TU ordered includes/forced-includes,
+`contributes_to_abi`/`required`) that feed that already-existing
+computation; it does not invent the fingerprints themselves, the same
+relationship Phase E's cache-key half already has with Phase A. Starting
+Phase B with Phase A unmerged leaves `plan --dump-manifest` with no real
+`compute_extraction_contract` to call and no way to satisfy its own
+`profile_fingerprint`-asserting tests short of an ad hoc reimplementation
+that risks drifting from what Phase A's gate actually computes.
 
 **Goal & acceptance criteria.**
 - New `abicheck/dump_manifest.py`: strict YAML parser (unknown fields
