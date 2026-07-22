@@ -342,25 +342,50 @@ def _permitted_summary_pages(entry: dict[str, object]) -> set[str]:
 
 
 _MD_LINK_TARGET_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+_MD_REF_LINK_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
+_MD_REF_DEF_RE = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
+
+
+def _resolve_href(path: Path, href: str) -> str | None:
+    """Clean a Markdown link target (strip an optional title/anchor) and
+    resolve it to a docs/-relative POSIX path, or None if it's external,
+    absolute, or doesn't resolve under `DOCS`."""
+    href = href.strip().split(" ", 1)[0].split("#", 1)[0]
+    if not href or "://" in href or href.startswith(("mailto:", "/")):
+        return None
+    resolved = (path.parent / href).resolve()
+    try:
+        return resolved.relative_to(DOCS.resolve()).as_posix()
+    except ValueError:
+        return None
 
 
 def _page_links_to(path: Path, target_rel_to_docs: str) -> bool:
-    """True if `path`'s Markdown body contains a relative link resolving to
-    `target_rel_to_docs` (a docs/-relative POSIX path). The whole point of
-    `summarizes` is "link back to the canonical page instead of restating
-    it" — being a permitted summarizer (registered in topics.yaml) isn't
-    the same as actually doing that, so this enforces the link exists."""
+    """True if `path`'s Markdown body contains a link (inline `[text](url)`
+    or reference-style `[text][label]`/`[text][]` with a `[label]: url`
+    definition) resolving to `target_rel_to_docs` (a docs/-relative POSIX
+    path). The whole point of `summarizes` is "link back to the canonical
+    page instead of restating it" — being a permitted summarizer (registered
+    in topics.yaml) isn't the same as actually doing that, so this enforces
+    the link exists."""
     text = _strip_front_matter(path.read_text(encoding="utf-8"))
     for m in _MD_LINK_TARGET_RE.finditer(text):
-        href = m.group(1).strip().split(" ", 1)[0].split("#", 1)[0]
-        if not href or "://" in href or href.startswith(("mailto:", "/")):
-            continue
-        resolved = (path.parent / href).resolve()
-        try:
-            resolved_rel = resolved.relative_to(DOCS.resolve()).as_posix()
-        except ValueError:
-            continue
-        if resolved_rel == target_rel_to_docs:
+        if _resolve_href(path, m.group(1)) == target_rel_to_docs:
+            return True
+    # Reference-style links: [text][label] / [text][] -- resolve `label`
+    # (or `text` for the collapsed [text][] form) against a `[label]: url`
+    # definition anywhere in the document. CommonMark reference labels are
+    # matched case-insensitively; the bare shortcut form ([label] with no
+    # second bracket pair) is deliberately not handled here -- it's
+    # indistinguishable from non-link bracketed prose (e.g. "[[nodiscard]]")
+    # without a much heavier parser, and isn't used anywhere in this repo.
+    definitions = {
+        label.strip().casefold(): url for label, url in _MD_REF_DEF_RE.findall(text)
+    }
+    for link_text, label in _MD_REF_LINK_RE.findall(text):
+        key = (label or link_text).strip().casefold()
+        url = definitions.get(key)
+        if url and _resolve_href(path, url) == target_rel_to_docs:
             return True
     return False
 

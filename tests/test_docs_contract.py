@@ -587,6 +587,65 @@ def test_page_links_to_ignores_external_links(tmp_path: Path) -> None:
     assert dc._page_links_to(page, "owner.md") is False
 
 
+def test_page_links_to_recognises_reference_style_link(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Standard CommonMark reference-style links (`[text][label]` plus a
+    `[label]: url` definition elsewhere in the document) are a valid
+    backlink too -- real pages in this repo (docs/user-guide/annotations.md)
+    use this style, and mkdocs renders it identically to an inline link
+    (regression test for the gap flagged in PR #619 review)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(
+        "See [the owner][owner-ref] for details.\n\n[owner-ref]: owner.md\n",
+        encoding="utf-8",
+    )
+    assert dc._page_links_to(page, "owner.md") is True
+
+
+def test_page_links_to_recognises_collapsed_reference_style_link(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The collapsed `[label][]` form reuses `label` itself as the
+    reference-definition key."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(
+        "See [owner-ref][] for details.\n\n[owner-ref]: owner.md\n",
+        encoding="utf-8",
+    )
+    assert dc._page_links_to(page, "owner.md") is True
+
+
+def test_page_links_to_reference_style_label_is_case_insensitive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CommonMark matches reference labels case-insensitively."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(
+        "See [the owner][Owner-Ref] for details.\n\n[owner-ref]: owner.md\n",
+        encoding="utf-8",
+    )
+    assert dc._page_links_to(page, "owner.md") is True
+
+
+def test_page_links_to_reference_style_ignores_unresolved_label(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A `[text][label]` with no matching `[label]: url` definition is not a
+    link -- must not crash, must not count as a backlink."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text("See [the owner][missing-ref] for details.\n", encoding="utf-8")
+    assert dc._page_links_to(page, "owner.md") is False
+
+
 def test_front_matter_schema_accepts_valid_page(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
