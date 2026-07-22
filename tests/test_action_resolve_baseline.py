@@ -175,6 +175,32 @@ class TestInputValidation:
         assert result.returncode == 1
         assert "bundle input is required" in result.stdout
 
+    def test_channel_with_newline_fails(self, tmp_path: Path) -> None:
+        result, _ = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(tmp_path),
+                "INPUT_CHANNEL": "accepted-main\nmalicious-key=evil",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_TARGET": "libpvxs",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "must not contain a newline" in result.stdout
+
+    def test_baseline_path_with_newline_fails(self, tmp_path: Path) -> None:
+        result, _ = _run_action(
+            {
+                "INPUT_BASELINE_PATH": f"{tmp_path}\nmalicious-key=evil",
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_TARGET": "libpvxs",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "must not contain a newline" in result.stdout
+
 
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/resolve-baseline/run.sh not found"
@@ -510,6 +536,15 @@ class TestArchiveExtraction:
         assert result.returncode == 1
         assert outputs.get("outcome") != "not_found"
         assert "malformed" in result.stdout
+        # Must carry the same typed outputs every other resolution failure
+        # does -- a caller running under continue-on-error or inspecting
+        # this Action's outputs must be able to distinguish "malformed
+        # archive" from an unrelated input/runner failure, not see no
+        # outputs at all (Codex review, second round).
+        assert outputs.get("outcome") == "ambiguous"
+        assert outputs.get("bootstrap") == "false"
+        assert outputs.get("channel") == "release-contract"
+        assert "malformed" in outputs.get("message", "")
 
     def test_archive_with_ambiguous_subdirectories_hard_fails(
         self, tmp_path: Path

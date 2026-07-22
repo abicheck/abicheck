@@ -12,6 +12,30 @@ _fail() {
   exit 1
 }
 
+# Like _fail, but for a failure that has a real resolution outcome (as
+# opposed to a usage/input error that never reached resolution logic at
+# all) -- writes the same typed outcome/bootstrap/message shape
+# resolve_baseline.py's own outputs use before failing the job, so a
+# caller inspecting this Action's outputs (or running under
+# continue-on-error) can distinguish "baseline archive was malformed" from
+# an unrelated input/runner failure instead of seeing no outputs at all
+# (Codex review). Callers may embed $BASELINE_PATH in $message since it is
+# newline-guarded below, same as $CHANNEL.
+_fail_ambiguous() {
+  local message="$1"
+  {
+    echo "outcome=ambiguous"
+    echo "bootstrap=false"
+    echo "manifest-path="
+    echo "snapshot-path="
+    echo "binaries-dir="
+    echo "binary-paths={}"
+    echo "message=$message"
+    echo "channel=$CHANNEL"
+  } >> "${GITHUB_OUTPUT:-/dev/null}"
+  _fail "$message"
+}
+
 BASELINE_PATH="${INPUT_BASELINE_PATH:?baseline-path input is required}"
 CHANNEL="${INPUT_CHANNEL:?channel input is required}"
 KIND="${INPUT_KIND:-target}"
@@ -23,13 +47,16 @@ REQUIRED="${INPUT_REQUIRED:-true}"
 CANDIDATE_BUILD_OUTPUT="${INPUT_CANDIDATE_BUILD_OUTPUT:-}"
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
-# A newline in channel would corrupt the `channel=$CHANNEL` line this
-# script later appends to $GITHUB_OUTPUT (each line there is a plain
-# key=value pair) -- rejecting it up front is simpler and equally safe as
-# heredoc-encoding it, and channel is always meant to be a short identifier
-# anyway (Codex/CodeRabbit review).
+# A newline in channel (or baseline-path, which _fail_ambiguous may embed
+# in a message written to $GITHUB_OUTPUT) would corrupt the key=value
+# lines this script appends there -- rejecting it up front is simpler and
+# equally safe as heredoc-encoding it, and both are always meant to be
+# short identifiers/paths anyway (Codex/CodeRabbit review).
 case "$CHANNEL" in
   *$'\n'*) _fail "channel input must not contain a newline." ;;
+esac
+case "$BASELINE_PATH" in
+  *$'\n'*) _fail "baseline-path input must not contain a newline." ;;
 esac
 case "$KIND" in
   target | bundle) ;;
@@ -120,8 +147,12 @@ elif [[ -f "$BASELINE_PATH" ]]; then
       # manifest.json), and resolve_baseline.py would then report
       # not_found -- silently letting a `required: false` caller treat a
       # broken archive as an ordinary "nothing published yet" bootstrap
-      # instead of a real extraction failure (Codex review).
-      _fail "baseline-set archive $BASELINE_PATH does not contain a manifest.json at its root or in a single unambiguous subdirectory -- this archive is malformed, not simply an unpublished baseline."
+      # instead of a real extraction failure (Codex review). Uses
+      # _fail_ambiguous, not _fail: this has a real resolution outcome
+      # (ambiguous), not merely a usage error, so it must carry the same
+      # typed outputs every other resolution failure does (Codex review,
+      # second round).
+      _fail_ambiguous "baseline-set archive $BASELINE_PATH does not contain a manifest.json at its root or in a single unambiguous subdirectory -- this archive is malformed, not simply an unpublished baseline."
     fi
   fi
 else
