@@ -1,3 +1,15 @@
+---
+doc_type: tutorial
+audience:
+  - library-maintainer
+level: beginner
+summarizes:
+  - evidence-model
+  - verdicts
+lifecycle: active
+generated: false
+---
+
 # Getting Started
 
 **abicheck** compares two versions of a C/C++ shared library and tells you whether existing binaries will break. It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries.
@@ -105,8 +117,8 @@ pip install -e .
 ## 2) First check (using repo examples)
 
 **Best first run:** compare two shared libraries with their public headers — it
-gives abicheck the most evidence to work with (see the
-[input-quality ladder](#input-quality-the-five-evidence-layers-l0l4) below).
+gives abicheck the most evidence to work with (see
+[how much evidence you need](#how-much-evidence-do-you-need) below).
 
 The repo includes 195 ABI scenario examples. Most are single-library cases with
 paired `v1`/`v2` sources and headers; the L3/L4/L5 build/source-only cases
@@ -162,73 +174,33 @@ abicheck compare libfoo.so.1 libfoo.so.2 -H include/
 If no headers are provided for ELF inputs, abicheck falls back to **symbols-only** mode
 and prints a warning (weaker analysis: may miss type/signature ABI breaks).
 
-### Input quality: the five evidence layers (L0–L4)
+### How much evidence do you need?
 
-How much abicheck can *prove* depends on what you give it. It overlays up to
-**five independent, additive sources** — labelled `L0`–`L4` — and lets the
-strongest evidence win. Start at the layer your artifacts allow and add more
-when you need more confidence:
-
-| Layer | Inputs (flags) | Confidence | What it newly catches |
-|:--:|---|---|---|
-| **L0** | Binary only | **Low** | Symbol add/remove, SONAME, visibility, basic metadata |
-| **L1** | + debug info (`-g` build / sidecar) | **Medium** | Struct/class layout, field offsets, enum *values*, vtable slots, calling convention |
-| **L2** | + headers (`-H include/`) | **High** | Public API surface: signatures, overloads, access, `noexcept`, templates, public/internal scoping |
-| **L3** | + build data (`-p build/`) | **Higher** | The flags the library was *actually* built with: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, sysroot, export maps |
-| **L4** | + sources (build/source pack via `compare --build-info`) | **Best** | Facts that never reach the binary: macro/`constexpr` values, default-argument *values*, uninstantiated templates |
-
-The layers are **additive, not a fallback chain**: artifact-backed evidence
-(L0/L1/L2) is authoritative for the shipped-ABI verdict, while build/source
-evidence (L3/L4) *explains, localizes, and scopes* a finding (and can raise its
-own source-level findings) but never silently deletes an artifact-proven break.
-With less input, abicheck degrades gracefully *down the staircase* rather than
-failing — a stripped binary with no headers collapses toward symbol-only
-checking.
-
-> **A sixth code you may meet later:** the `scan` docs also use **`L5`** — the
-> source *reachability graph* abicheck **derives** from L3/L4 evidence. You
-> provide five sources (L0–L4); L5 is computed, never an input. See
-> [Evidence & Detectability](concepts/evidence-and-detectability.md).
-
-Run `abicheck dump libfoo.so --dry-run` to see which layers abicheck
-found for a binary. For the full picture see [Evidence &
-Detectability](concepts/evidence-and-detectability.md) and the per-layer
-[Tool Modes](user-guide/tool-modes.md#abicheck-native-modes-by-evidence-source-l0l4)
-reference; build data (L3) and source build/source packs (L4) are documented under
-[Evidence, Build-Context, and Debug Flags → Evidence packs](user-guide/dump-compare-flags.md#evidence-packs-build-source-context-l3-l4).
-For stripped production builds, point abicheck at separate debug files
-(`--debug-root old=/new=`) or fetch them with `--debuginfod` — see
-[Evidence, Build-Context, and Debug Flags](user-guide/dump-compare-flags.md#debug-artifact-resolution).
+Binary-only detects exported-symbol changes (add/remove, SONAME, visibility).
+Adding debug info catches layout and calling-convention breaks; adding headers
+adds the full public API surface and scopes out internal types; adding build
+and source context catches the facts that never reach the binary at all
+(macros, default-argument values, uninstantiated templates). Each source is
+additive — more evidence only ever finds more, never hides an artifact-proven
+break. Run `abicheck dump libfoo.so --dry-run` to see which layers abicheck
+found for a binary. For the full model, the exact `L0`–`L4` layer table, and a
+worked example, see [Evidence & Detectability](concepts/evidence-and-detectability.md)
+and [What Each Level Sees](concepts/what-each-level-sees.md).
 
 ---
 
 ## 3) Output formats
 
-abicheck supports five output formats: `markdown` (default), `json`, `sarif`, `html`, and `junit` (plus a compact `review` digest). See [Output Formats](user-guide/output-formats.md) for the full reference.
-
-Markdown (default, printed to stdout):
-
-```bash
-abicheck compare libfoo.so.1 libfoo.so.2 -H foo.h
-```
-
-JSON — machine-readable, includes precise verdict field:
+`abicheck compare` prints `markdown` by default; pass `--format json` for
+machine-readable output (CI logic, agents), or `--format sarif`/`html`/`junit`
+for Code Scanning, standalone reports, or CI test dashboards respectively:
 
 ```bash
 abicheck compare libfoo.so.1 libfoo.so.2 -H foo.h --format json -o result.json
 ```
 
-SARIF — for GitHub Code Scanning:
-
-```bash
-abicheck compare libfoo.so.1 libfoo.so.2 -H foo.h --format sarif -o abi.sarif
-```
-
-HTML — standalone human-readable report:
-
-```bash
-abicheck compare libfoo.so.1 libfoo.so.2 -H foo.h --format html -o report.html
-```
+See [Output Formats](user-guide/output-formats.md) for the full reference
+(field-by-field JSON schema, SARIF/JUnit details, the `review` digest).
 
 ---
 
@@ -247,39 +219,13 @@ abicheck compare baseline.json ./build/libfoo.so \
   --header new=include/foo.h --version new=2.0-dev
 ```
 
-```bash
-# Or compare two snapshots (no headers needed — already baked in)
-abicheck compare old.json new.json
-```
-
-`compare` auto-detects each input: `.so` files are dumped on-the-fly, `.json` snapshots are loaded directly. You can mix them freely.
-
-### Language mode
-
-Use `--lang c` for pure C libraries (default is `c++`):
-
-```bash
-abicheck dump libfoo.so -H foo.h --lang c -o snap.json
-```
-
-### Cross-compilation
-
-When analysing libraries built for a different architecture:
-
-```bash
-abicheck dump libfoo.so -H include/foo.h \
-  --gcc-prefix aarch64-linux-gnu- \
-  --sysroot /opt/sysroots/aarch64 \
-  -o snap.json
-```
-
-Available flags: `--gcc-path`, `--gcc-prefix`, `--gcc-options`, `--sysroot`, `--nostdinc`.
-
-### Verbose output
-
-```bash
-abicheck compare old.json new.json -v
-```
+`compare` auto-detects each input: `.so` files are dumped on-the-fly, `.json`
+snapshots are loaded directly (and can be compared to each other with no
+headers/castxml/network needed) — mix them freely. See [Baseline
+Management](user-guide/baseline-management.md) for where to store baselines
+and how to compare across releases, and [Evidence, Build-Context & Debug
+Flags](user-guide/dump-compare-flags.md) for `--lang c`, cross-compilation
+(`--gcc-prefix`, `--sysroot`), and verbose output.
 
 ---
 
@@ -320,91 +266,14 @@ Other commands add their own codes on top of this space — `scan` can exit `5`
 per-command matrix, including `compat` mode, is the
 [Exit Codes reference](reference/exit-codes.md).
 
-### Policy recipes — what should fail the build?
-
-abicheck separates *what fails CI* (severity → exit code) from *what shows up in
-the report* (display filtering). These three recipes cover the common cases; the
-[CI Gating](user-guide/ci-gating.md) page explains how baselines, policies,
-suppressions, and severity fit together, and the
-[Choose Your Workflow → policy recipes](user-guide/choose-your-workflow.md#3-how-should-ci-behave-policy-recipes)
-and [Severity Configuration](user-guide/severity.md) pages have the rest.
-
-```bash
-# Breakage-only gate: report everything, fail ONLY on binary ABI breaks
-abicheck compare baseline.json build/libfoo.so \
-  --header new=include/ \
-  --severity-preset info-only \
-  --severity-abi-breaking error
-
-# Strict API-surface governance: also fail on new public ABI/API additions
-# (--severity-potential-breaking keeps source-level API breaks failing too —
-# any --severity-* flag switches to the severity scheme, where that category
-# is only a warning by default)
-abicheck compare baseline.json build/libfoo.so \
-  --header new=include/ \
-  --severity-potential-breaking error \
-  --severity-addition error
-
-# Show only additions in a review report — verdict and exit code unchanged
-abicheck compare baseline.json build/libfoo.so \
-  --header new=include/ \
-  --show-only compatible,added
-```
-
-The first maps to "just alert me on breakages"; the second to "fail when new
-public ABI/API appears." The third is **display-only** — `--show-only` filters
-what the report renders without changing the verdict or exit code.
-
-### GitHub Actions — the easy way
-
-The fastest way to gate ABI in CI is the **first-class
-[GitHub Action](user-guide/github-action.md)**. It installs Python, `castxml`,
-and abicheck for you, runs the comparison, sets the step exit code, and can
-upload SARIF — all in a few lines of YAML:
-
-```yaml
-- uses: abicheck/abicheck@v0.5.0
-  with:
-    old-library: abi-baseline.json   # committed or downloaded baseline
-    new-library: build/libfoo.so
-    new-header: include/foo.h
-    upload-sarif: true
-```
-
-See the [GitHub Action reference](user-guide/github-action.md) for every input,
-baseline workflows, package/bundle compare mode, and multi-platform matrices.
-
-### GitHub Actions — raw CLI
-
-If you prefer to drive the CLI directly, save a baseline once at release time,
-then compare every new build:
-
-```bash
-# Release step — save baseline as an artifact
-abicheck dump ./build/libfoo.so -H include/foo.h \
-  --version 1.0 -o abi-baseline.json
-# Upload abi-baseline.json as a release artifact
-```
-
-```yaml
-# CI step — compare new build against saved baseline
-steps:
-  - name: Download ABI baseline
-    uses: actions/download-artifact@v4
-    with:
-      name: abi-baseline
-
-  - name: Compare ABI
-    run: |
-      abicheck compare abi-baseline.json ./build/libfoo.so \
-        --header new=include/foo.h \
-        --format sarif -o abi.sarif
-
-  - uses: github/codeql-action/upload-sarif@v3
-    if: always()
-    with:
-      sarif_file: abi.sarif
-```
+Passing any `--severity-*` flag switches to a finer-grained exit-code scheme
+instead, and suppressions/policies/baselines all interact with the same
+pipeline before it — see [CI Gating](user-guide/ci-gating.md) for how those
+pieces fit together, [Severity Configuration](user-guide/severity.md) for the
+severity-aware codes and policy recipes, and the
+[GitHub Action](user-guide/github-action.md) for the fastest way to wire this
+into CI (it installs Python/castxml/abicheck and runs the comparison in a few
+lines of YAML).
 
 ---
 

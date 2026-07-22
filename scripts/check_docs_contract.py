@@ -174,17 +174,27 @@ def _load_topics(f: Findings) -> dict[str, dict[str, object]] | None:
 
 def _resolves_under(base: Path, value: str) -> Path | None:
     """Join `value` onto `base` and return the resolved path, or None if
-    `value` isn't a relative, in-tree path. Rejects an absolute `value`
-    outright — the topics.yaml schema is docs-/repo-relative paths only, and
-    pathlib's `/` operator would otherwise honor an absolute right-hand side
-    outright (`Path("/docs") / "/etc/passwd" == Path("/etc/passwd")`,
-    silently discarding `base`) — checking only the *resolved* result would
-    still wrongly accept a machine-local absolute path that happens to
-    resolve under `base` on this checkout but not on any other. Also
-    catches `../` traversal, via the resolved-parents check below."""
+    `value` isn't a relative, in-tree, actually-existing path. Rejects an
+    absolute `value` outright — the topics.yaml schema is docs-/repo-relative
+    paths only, and pathlib's `/` operator would otherwise honor an absolute
+    right-hand side outright (`Path("/docs") / "/etc/passwd" ==
+    Path("/etc/passwd")`, silently discarding `base`) — checking only the
+    *resolved* result would still wrongly accept a machine-local absolute
+    path that happens to resolve under `base` on this checkout but not on any
+    other. Resolves with `strict=True`: a *non*-strict resolve() lexically
+    collapses `..` even through a phantom, nonexistent intermediate segment
+    (e.g. `missing/../index.md` resolves to the real `index.md` even though
+    `missing/` was never created), which would let a broken registry entry
+    pass this check and then raise an unhandled FileNotFoundError the first
+    time a caller actually opens it via a plain (unresolved) join instead of
+    this function's result. Also catches `../` traversal proper, via the
+    resolved-parents check below."""
     if Path(value).is_absolute():
         return None
-    candidate = (base / value).resolve()
+    try:
+        candidate = (base / value).resolve(strict=True)
+    except OSError:
+        return None
     resolved_base = base.resolve()
     if candidate != resolved_base and resolved_base not in candidate.parents:
         return None
@@ -392,9 +402,10 @@ def _check_canonical_pages_declare_ownership(
     for topic_id, entry in topics.items():
         if not isinstance(entry, dict) or "canonical_page" not in entry:
             continue
-        if not _is_file_under(DOCS, str(entry["canonical_page"])):
+        resolved = _resolves_under(DOCS, str(entry["canonical_page"]))
+        if resolved is None or not resolved.is_file():
             continue  # already reported by _check_referenced_paths_exist
-        page_path = DOCS / str(entry["canonical_page"])
+        page_path = resolved
         try:
             fm = load_front_matter(page_path)
         except yaml.YAMLError:

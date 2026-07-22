@@ -84,13 +84,16 @@ def test_canonical_page_uniqueness_allows_distinct_pages() -> None:
 
 
 def test_canonical_page_uniqueness_flags_equivalent_spellings() -> None:
-    """`concepts/x.md` and `./concepts/x.md` name the same file — the
-    uniqueness check must normalize before comparing, or two differently
-    spelled entries silently bypass the one-owner rule (regression test for
-    the gap flagged in PR #619 review)."""
+    """`index.md` and `./index.md` name the same file — the uniqueness check
+    must normalize before comparing, or two differently spelled entries
+    silently bypass the one-owner rule (regression test for the gap flagged
+    in PR #619 review). Uses a real docs/ file (index.md) since normalization
+    requires the path to actually exist (a later fix rejected phantom
+    nonexistent-component paths — see test_resolves_under_rejects_phantom_
+    intermediate_component below)."""
     topics = {
-        "topic-a": {"canonical_page": "concepts/x.md"},
-        "topic-b": {"canonical_page": "./concepts/x.md"},
+        "topic-a": {"canonical_page": "index.md"},
+        "topic-b": {"canonical_page": "./index.md"},
     }
     f = dc.Findings()
     dc._check_canonical_page_uniqueness(f, topics)
@@ -99,9 +102,7 @@ def test_canonical_page_uniqueness_flags_equivalent_spellings() -> None:
 
 
 def test_docs_relative_key_normalizes_equivalent_spellings() -> None:
-    assert dc._docs_relative_key("./concepts/x.md") == dc._docs_relative_key(
-        "concepts/x.md"
-    )
+    assert dc._docs_relative_key("./index.md") == dc._docs_relative_key("index.md")
 
 
 # --- _check_referenced_paths_exist ----------------------------------------
@@ -164,9 +165,28 @@ def test_resolves_under_accepts_a_real_in_tree_path(tmp_path: Path) -> None:
 
 
 def test_resolves_under_rejects_dotdot_escape(tmp_path: Path) -> None:
+    # Actually create the escaped target so this tests the escape-boundary
+    # check specifically, not mere nonexistence (which _resolves_under also
+    # rejects, but for an unrelated reason — see the strict-resolution test
+    # below).
     outside = tmp_path.parent / "definitely-not-under-tmp_path.md"
+    outside.write_text("x", encoding="utf-8")
     rel = str(Path("..") / outside.name)
     assert dc._resolves_under(tmp_path, rel) is None
+
+
+def test_resolves_under_rejects_phantom_intermediate_component(
+    tmp_path: Path,
+) -> None:
+    """A non-strict Path.resolve() lexically collapses '..' even through a
+    directory component that was never created — e.g. `missing/../index.md`
+    resolves straight to the real `index.md` even though `missing/` doesn't
+    exist. That would let a broken topics.yaml entry pass the existence
+    check and then crash a downstream caller that opens the raw (unresolved)
+    path directly instead (regression test for the gap flagged in PR #619
+    review)."""
+    (tmp_path / "index.md").write_text("x", encoding="utf-8")
+    assert dc._resolves_under(tmp_path, "missing/../index.md") is None
 
 
 def test_resolves_under_rejects_absolute_value_even_if_it_resolves_inside_base(
