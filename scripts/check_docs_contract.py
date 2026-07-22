@@ -388,6 +388,13 @@ def _check_front_matter_schema(
             f.err("front-matter", f"{_rel(path)}: canonical_for must be a list")
             canonical_for = []
         for topic_id in canonical_for:
+            if not isinstance(topic_id, str):
+                f.err(
+                    "front-matter",
+                    f"{_rel(path)}: canonical_for entry {topic_id!r} must be "
+                    "a topic-id string",
+                )
+                continue
             entry = topics.get(topic_id)
             if entry is None:
                 f.err(
@@ -416,6 +423,13 @@ def _check_front_matter_schema(
             f.err("front-matter", f"{_rel(path)}: summarizes must be a list")
             summarizes = []
         for topic_id in summarizes:
+            if not isinstance(topic_id, str):
+                f.err(
+                    "front-matter",
+                    f"{_rel(path)}: summarizes entry {topic_id!r} must be a "
+                    "topic-id string",
+                )
+                continue
             entry = topics.get(topic_id)
             if entry is None:
                 f.err(

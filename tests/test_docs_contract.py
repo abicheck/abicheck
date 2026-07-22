@@ -392,6 +392,34 @@ def test_front_matter_schema_flags_unknown_summarizes_topic(
     assert any("summarizes" in msg for _, msg in f.errors)
 
 
+def test_front_matter_schema_flags_non_string_canonical_for_entry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An unhashable canonical_for entry (e.g. an accidental YAML mapping
+    item, "- {bad: value}") must not crash topics.get() with a TypeError --
+    it should report a clean schema error instead (regression test for the
+    gap flagged in PR #619 review)."""
+    (tmp_path / "page.md").write_text(
+        "---\ncanonical_for:\n  - bad: value\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, {})  # must not raise
+    assert any("must be a topic-id string" in msg for _, msg in f.errors)
+
+
+def test_front_matter_schema_flags_non_string_summarizes_entry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "page.md").write_text(
+        "---\nsummarizes:\n  - [nested, list]\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, {})  # must not raise
+    assert any("must be a topic-id string" in msg for _, msg in f.errors)
+
+
 def test_front_matter_schema_flags_summarizes_page_not_registered_for_topic(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
