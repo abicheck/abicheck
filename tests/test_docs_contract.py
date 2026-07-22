@@ -169,6 +169,19 @@ def test_resolves_under_rejects_dotdot_escape(tmp_path: Path) -> None:
     assert dc._resolves_under(tmp_path, rel) is None
 
 
+def test_resolves_under_rejects_absolute_value_even_if_it_resolves_inside_base(
+    tmp_path: Path,
+) -> None:
+    """An absolute path is rejected outright, even when it happens to
+    resolve under `base` on this machine/checkout — the topics.yaml schema
+    is relative paths only, and an absolute one would silently stop
+    resolving under `base` on any other checkout (regression test for the
+    gap flagged in PR #619 review)."""
+    (tmp_path / "page.md").write_text("x", encoding="utf-8")
+    machine_local_absolute = str(tmp_path / "page.md")
+    assert dc._resolves_under(tmp_path, machine_local_absolute) is None
+
+
 # --- front matter: parsing --------------------------------------------------
 
 

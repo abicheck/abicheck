@@ -173,11 +173,17 @@ def _load_topics(f: Findings) -> dict[str, dict[str, object]] | None:
 
 
 def _resolves_under(base: Path, value: str) -> Path | None:
-    """Join `value` onto `base` and return the resolved path, or None if it
-    doesn't stay under `base` — catches both `../` traversal and an absolute
-    `value`, which pathlib's `/` operator would otherwise honor outright
-    (`Path("/docs") / "/etc/passwd" == Path("/etc/passwd")`, silently
-    discarding `base`)."""
+    """Join `value` onto `base` and return the resolved path, or None if
+    `value` isn't a relative, in-tree path. Rejects an absolute `value`
+    outright — the topics.yaml schema is docs-/repo-relative paths only, and
+    pathlib's `/` operator would otherwise honor an absolute right-hand side
+    outright (`Path("/docs") / "/etc/passwd" == Path("/etc/passwd")`,
+    silently discarding `base`) — checking only the *resolved* result would
+    still wrongly accept a machine-local absolute path that happens to
+    resolve under `base` on this checkout but not on any other. Also
+    catches `../` traversal, via the resolved-parents check below."""
+    if Path(value).is_absolute():
+        return None
     candidate = (base / value).resolve()
     resolved_base = base.resolve()
     if candidate != resolved_base and resolved_base not in candidate.parents:
