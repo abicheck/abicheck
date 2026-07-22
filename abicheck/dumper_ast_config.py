@@ -11,6 +11,7 @@ import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from ._compiler_options import has_explicit_std
 from .header_utils import iter_cache_header_files
@@ -147,9 +148,12 @@ _CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
 # place of ``typename``/``class`` (``template <std::integral T> void f(T);``)
 # — the abbreviated-constraint form the module docstring above already
 # describes but never actually matched (Codex review). Deliberately scoped
-# to the fixed, well-known set of concepts in <concepts>/<iterator>/<ranges>
-# rather than "any bare or qualified identifier in a template parameter
-# list": an arbitrary identifier there is *routinely* a valid pre-C++20
+# to the fixed, well-known set of concepts in <concepts>/<iterator> (bare
+# ``std::`` names only — the ``std::ranges::`` concepts from <ranges>, e.g.
+# ``range``/``sized_range``/``view``, are a distinct namespace and not
+# covered here) rather than "any bare or qualified identifier in a
+# template parameter list": an arbitrary identifier there is *routinely* a
+# valid pre-C++20
 # non-type template parameter's type (``template<MyEnum E>``,
 # ``template<Traits::value_type V>``), so matching on identifier shape alone
 # would trade this false-negative for a much broader false-positive risk.
@@ -445,7 +449,12 @@ def _is_preprocessor_directive(line: bytes) -> bool:
 class Cpp20Requirement:
     """A single structural C++20 construct found while scanning headers."""
 
-    reason: str  # "concept-declaration" | "requires-expression" | "requires-clause"
+    reason: Literal[
+        "concept-declaration",
+        "requires-expression",
+        "requires-clause",
+        "constrained-template-parameter",
+    ]
     path: str
     line: int
 
