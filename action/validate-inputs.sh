@@ -176,6 +176,29 @@ if [[ "$_JOBS" != "0" ]] && { [[ "$MODE" != "compare" ]] || [[ "$_RELEASE_STYLE_
   _warn "jobs is set but has no effect: it only applies to mode: compare with a directory/package old-library/new-library operand (mode is '$MODE')."
 fi
 
+# used-by/verify-runtime/required-symbol/required-symbols: compare mode only
+# (ADR-043 scoped-comparison contracts). --used-by and --required-symbol/
+# --required-symbols are mutually exclusive on the CLI itself, but that
+# UsageError only surfaces after Python setup/dependency install/pip
+# install -- fail here instead, before any of that, matching this script's
+# whole reason for existing (G30 P1.3, resolving the S22/S23 root-Action
+# gap: check-target's kind: app-consumer/plugin-contract route through
+# these two flags).
+_USED_BY="${INPUT_USED_BY:-}"
+_REQUIRED_SYMBOL="${INPUT_REQUIRED_SYMBOL:-}"
+_REQUIRED_SYMBOLS="${INPUT_REQUIRED_SYMBOLS:-}"
+if [[ -n "$_USED_BY" && ( -n "$_REQUIRED_SYMBOL" || -n "$_REQUIRED_SYMBOLS" ) ]]; then
+  _fail "used-by is mutually exclusive with required-symbol/required-symbols -- set only one contract per check."
+fi
+_scoped_input_names=(used-by verify-runtime required-symbol required-symbols)
+_scoped_input_values=("$_USED_BY" "${INPUT_VERIFY_RUNTIME:-false}" "$_REQUIRED_SYMBOL" "$_REQUIRED_SYMBOLS")
+_scoped_input_unset_values=("" "false" "" "")
+for _i in "${!_scoped_input_names[@]}"; do
+  if [[ "${_scoped_input_values[$_i]}" != "${_scoped_input_unset_values[$_i]}" && "$MODE" != "compare" ]]; then
+    _warn "${_scoped_input_names[$_i]} is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
+  fi
+done
+
 # abi-baseline: compare mode (used as old-library) or scan mode (used as the
 # scan baseline) only.
 _ABI_BASELINE="${INPUT_ABI_BASELINE:-}"

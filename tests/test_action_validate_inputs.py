@@ -80,6 +80,10 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_ABI_BASELINE",
     "INPUT_ESTIMATE",
     "INPUT_AUDIT",
+    "INPUT_USED_BY",
+    "INPUT_VERIFY_RUNTIME",
+    "INPUT_REQUIRED_SYMBOL",
+    "INPUT_REQUIRED_SYMBOLS",
 )
 
 
@@ -644,6 +648,73 @@ class TestModeScopedInputWarnings:
 
     def test_no_mode_scoped_inputs_set_produces_no_warnings(self) -> None:
         result = _run_validate({"INPUT_MODE": "compare"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
+class TestScopedComparisonInputs:
+    """ADR-043 --used-by/--required-symbol(s) contracts (G30 P1.3: resolves
+    the ADR-047 S22/S23 gap -- these were previously not forwarded by the
+    root Action at all)."""
+
+    def test_used_by_and_required_symbol_together_is_hard_error(self) -> None:
+        # The CLI itself rejects this combination, but only after Python
+        # setup/dependency install/pip install -- catch it here instead,
+        # before any of that (same rationale as every other check in this
+        # script).
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_USED_BY": "app1",
+                "INPUT_REQUIRED_SYMBOL": "abi_do_thing",
+            }
+        )
+        assert result.returncode == 1
+        assert "mutually exclusive" in result.stdout
+
+    def test_used_by_and_required_symbols_file_together_is_hard_error(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_USED_BY": "app1",
+                "INPUT_REQUIRED_SYMBOLS": "symbols.txt",
+            }
+        )
+        assert result.returncode == 1
+        assert "mutually exclusive" in result.stdout
+
+    def test_used_by_alone_passes(self) -> None:
+        result = _run_validate({"INPUT_MODE": "compare", "INPUT_USED_BY": "app1"})
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_required_symbol_alone_passes(self) -> None:
+        result = _run_validate(
+            {"INPUT_MODE": "compare", "INPUT_REQUIRED_SYMBOL": "abi_do_thing"}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    @pytest.mark.parametrize(
+        "env_name,value",
+        [
+            ("INPUT_USED_BY", "app1"),
+            ("INPUT_VERIFY_RUNTIME", "true"),
+            ("INPUT_REQUIRED_SYMBOL", "abi_do_thing"),
+            ("INPUT_REQUIRED_SYMBOLS", "symbols.txt"),
+        ],
+    )
+    def test_scoped_input_warns_on_non_compare_mode(
+        self, env_name: str, value: str
+    ) -> None:
+        result = _run_validate({"INPUT_MODE": "scan", env_name: value})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+        assert "has no effect" in result.stdout
+
+    def test_no_scoped_inputs_set_produces_no_warnings(self) -> None:
+        result = _run_validate({"INPUT_MODE": "scan"})
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" not in result.stdout
 

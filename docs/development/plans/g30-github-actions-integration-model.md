@@ -289,11 +289,13 @@ failure taxonomy, including all three of the plan's required shared-pack
 test cases (verified against a hand-authored example directory manually as
 well as in the test suite).
 
-### P1.2 — `actions/resolve-baseline`
+### P1.2 — `actions/resolve-baseline` — **done**
 
 Implements ADR-047 §4/§6. New composite Action; consumes a baseline-set
 archive/cache entry + `channel`/`target`/`profile` inputs; outputs a
-resolved snapshot path or one of the five typed failure states.
+resolved snapshot path (a resolved bundle instead returns staged member
+binary paths, per the S14 correction below) or one of the five typed
+failure states.
 **Input gap, flagged by review: candidate evidence metadata is missing
 from this list, and the `incompatible_evidence` outcome cannot be detected
 without it.** §6's taxonomy requires `resolve-baseline` to reject a
@@ -330,17 +332,49 @@ the logic is non-trivial).
 (ADR-047 §6 table); a bundle-scoped resolution fixture asserting binaries
 (not snapshots) come back for a bundle target.
 
-**Files:** new `actions/resolve-baseline/action.yml`, `run.sh`. Reuses
-`actions/baseline/build_manifest.py`'s manifest-reading logic — extract a
-shared helper rather than duplicating the schema/digest-check code (avoid
-recreating `IMPORT_CYCLE_ALLOWLIST`-style coupling; this is shell, not
-Python import structure, but the same "don't duplicate the parsing logic"
-principle applies — factor the manifest reader into
-`abicheck/buildsource/`-adjacent Python invoked by both Actions' `run.sh` if
-the logic is non-trivial).
+**Status:** implemented. New `abicheck/buildsource/baseline_set.py` is the
+shared reader/resolver — the "extract a shared helper" the plan asked for,
+factored into `abicheck/buildsource/`-adjacent Python rather than duplicated
+bash/`jq`. It parses `manifest.json` with the same defensive-`.get()`
+philosophy `build_manifest.py` itself uses for snapshot files (a corrupt or
+hand-edited manifest never raises, it produces a structured outcome), and
+implements `resolve_target()`/`resolve_bundle()` covering all six branches
+of §6's table: `not_found` (with the `required`/bootstrap split — `required:
+false` + missing baseline is an advisory, non-fatal pass, `required: true`
+is a hard failure), `ambiguous` (target missing from the manifest, or a
+resolved snapshot/binary missing from disk), `wrong_profile`,
+`stale_schema` (`manifest_version` outside `SUPPORTED_MANIFEST_VERSIONS =
+{1}`, the only version `build_manifest.py` has ever emitted),
+`incompatible_evidence` (comparing the baseline's `fact_set.producer`/
+`producer_version` against the candidate's `evidence_producer` block — the
+review-flagged input gap above, closed via a new `candidate-build-output`
+Action input read only for that block), and `resolved`. The bundle-scoped
+correction is implemented as specified: `resolve_bundle()` returns paths to
+every member's **staged binary** under the baseline-set's `binaries/`
+directory (`BASELINE_BINARIES_DIRNAME`), never a snapshot path — a member
+with no staged binary fails the whole bundle resolution as `ambiguous`
+rather than silently omitting that member. `actions/baseline` does not
+populate `binaries/` yet (that's G30 P1.6, not built here); bundle
+resolution is exercised against a hand-authored fixture in the meantime, the
+same "defines the contract, no producer yet" scoping G30 P1.1 used for
+`build-output.json`.
 
-**Tests:** shell-mapping tests for each of the five failure taxonomy rows
-(ADR-047 §6 table).
+`actions/resolve-baseline/action.yml`/`run.sh` wrap this in a composite
+Action: `baseline-path` accepts either an already-staged directory or a
+`.tar.zst`/`.tar.gz`/`.tgz`/`.tar` archive (extracted in `run.sh`, including
+a one-level directory descent when the archive nests the baseline-set under
+a single subdirectory rather than at its root) — this Action never fetches
+from a baseline channel's storage backend itself, that stays the calling
+workflow's job per §10, exactly as the "actions/baseline never fetches"
+precedent already established. `resolve_baseline.py` is the thin
+argparse/stdout-key=value CLI wrapper `run.sh` shells out to, mirroring
+`build_manifest.py`'s own pattern. `tests/test_baseline_set.py` (pure,
+21 cases) covers every resolver branch directly;
+`tests/test_action_resolve_baseline.py` (16 cases) covers the bash
+orchestration end-to-end, including one test per §6 failure-taxonomy row,
+bundle resolution, and archive extraction (flat and one-level-nested).
+`docs/reference/resolve-baseline.md` (new, linked from mkdocs nav)
+documents the Action's contract.
 
 ### P1.3 — `actions/check-target`
 
