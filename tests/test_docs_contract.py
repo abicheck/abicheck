@@ -587,6 +587,23 @@ def test_page_links_to_ignores_external_links(tmp_path: Path) -> None:
     assert dc._page_links_to(page, "owner.md") is False
 
 
+def test_page_links_to_ignores_links_inside_fenced_code_blocks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A link shown only inside a ``` fence (e.g. example Markdown syntax) is
+    rendered by MkDocs as literal code, not a navigable backlink -- it must
+    not satisfy the summarizes-must-link-back contract (regression test for
+    the gap flagged in PR #619 review)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(
+        "Example syntax:\n\n```\n[owner](owner.md)\n```\n",
+        encoding="utf-8",
+    )
+    assert dc._page_links_to(page, "owner.md") is False
+
+
 def test_page_links_to_recognises_reference_style_link(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
