@@ -150,18 +150,20 @@ _CHAR_LITERAL_PATTERN = re.compile(rb"'(?:\\.|[^'\\\n])*'")
 # e.g. u8R"(...)"; without it, "\bR" never matches after "u8"/"u"/"U"/"L"
 # since both characters are \w (no boundary between them), leaving a
 # prefixed raw string completely unstripped (Codex review). The delimiter
-# charset per the standard excludes parentheses/backslash/whitespace;
-# restricting to identifier characters here covers the overwhelming common
-# case (including the empty delimiter, R"(...)"") without needing the full
-# grammar. Not handled by _STRING_LITERAL_PATTERN (only ordinary "..."
-# literals) or by the plain-comment stripper, so its body was otherwise
-# scanned as ordinary code: text that merely *looks* like a
-# requires-expression/concept inside a raw string would force -std=gnu++20
-# unnecessarily — worse once a multi-line construct can span into a raw
-# string's later lines too. DOTALL so the (non-greedy) body can span
-# newlines.
+# (d-char-sequence) grammar permits any basic-source character except
+# whitespace, parentheses, and backslash — not just identifier characters
+# (a delimiter like "tag-" is valid and was missed by an earlier,
+# identifier-only version of this pattern (Codex review) — matching the
+# exclusion directly is simpler and more complete than enumerating every
+# permitted punctuation character. Not handled by _STRING_LITERAL_PATTERN
+# (only ordinary "..." literals) or by the plain-comment stripper, so its
+# body was otherwise scanned as ordinary code: text that merely *looks*
+# like a requires-expression/concept inside a raw string would force
+# -std=gnu++20 unnecessarily — worse once a multi-line construct can span
+# into a raw string's later lines too. DOTALL so the (non-greedy) body can
+# span newlines.
 _RAW_STRING_LITERAL_PATTERN = re.compile(
-    rb'\b(?:u8|u|U|L)?R"([A-Za-z0-9_]{0,16})\((?:.*?)\)\1"', re.DOTALL
+    rb'\b(?:u8|u|U|L)?R"([^\s()\\]{0,16})\((?:.*?)\)\1"', re.DOTALL
 )
 
 

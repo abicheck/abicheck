@@ -175,6 +175,22 @@ def test_cpp20_detector_ignores_requires_text_in_delimited_raw_string(tmp_path):
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_requires_text_in_punctuation_delimited_raw_string(
+    tmp_path,
+):
+    """Regression (Codex review): a raw-string delimiter (d-char-sequence)
+    may contain any basic-source character except whitespace, parentheses,
+    and backslash — not just identifier characters. An earlier version of
+    the raw-string pattern restricted the delimiter to ``[A-Za-z0-9_]``,
+    missing a delimiter like ``tag-``."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        'const char* msg = R"tag-(this text requires\n{ nothing })tag-";\n',
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 @pytest.mark.parametrize("prefix", ["u8", "u", "U", "L"])
 def test_cpp20_detector_ignores_requires_text_in_prefixed_raw_string(tmp_path, prefix):
     """Regression (Codex review): the raw-string pattern's ``\\bR"`` never
