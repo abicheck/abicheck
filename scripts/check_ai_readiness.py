@@ -1499,22 +1499,61 @@ def check_mkdocs_nav_coverage(f: Findings) -> None:
 #: per-number, so that's not flagged here.
 _ADR_FILE_RE = re.compile(r"^\d{3}-.+\.md$")
 
+#: An ADR's status, either as an inline bold label ("**Status:** Accepted —
+#: ...") or as its own heading ("## Status\n\nAccepted — ..."). Both
+#: conventions are in active use across the existing 51 ADRs.
+_ADR_STATUS_INLINE_RE = re.compile(r"^\*\*Status:\*\*\s*(.+)$", re.MULTILINE)
+_ADR_STATUS_HEADING_RE = re.compile(r"^## Status\s*\n+(.+)$", re.MULTILINE)
+
+_ADR_REPLACEMENT_LINK_RE = re.compile(r"\[[^\]]*\]\([^)]+\)")
+
+
+def _adr_status_text(text: str) -> str | None:
+    m = _ADR_STATUS_INLINE_RE.search(text)
+    if m:
+        return m.group(1)
+    m = _ADR_STATUS_HEADING_RE.search(text)
+    if m:
+        return m.group(1)
+    return None
+
 
 def check_adr_index_and_nav_sync(f: Findings) -> None:
-    """Every docs/development/adr/*.md file must be linked from index.md and
-    listed in mkdocs.yml's nav.
+    """Every docs/development/adr/*.md file must be linked from index.md,
+    and the ADR index itself must be listed in mkdocs.yml's nav.
 
-    This is an ERROR, not a WARN under mkdocs-nav-coverage, because an ADR
-    reachable only via index.md's link (satisfying that orphan check) but
-    missing from nav is a real bug that happened in practice: ADR-041 was
-    accepted and linked from index.md but never added to mkdocs.yml, so it
-    was never published to the site nav despite being a real, current ADR.
+    Individual ADRs are deliberately NOT required in nav (relaxed from the
+    original rule): reachable via the index page is enough, and requiring
+    51+ separate nav entries just for a flat historical-record tree was
+    overloading top-level navigation for no reader benefit. The index page
+    being in nav (checked below) is what makes every ADR actually reachable
+    from published navigation, same as before — an ADR reachable only via
+    index.md's link is fine now, whereas it wasn't under the old rule (ADR-041
+    was accepted and linked from index.md but never added to mkdocs.yml
+    individually, so under the *old* rule it was never published to nav
+    despite being a real, current ADR; under this rule the index entry alone
+    covers that).
+
+    Two additional structural checks close a different gap: every ADR must
+    carry a Status metadata line/heading (so a reader — or this check itself
+    — can tell what state a given ADR is in without reading its full body),
+    and an ADR whose status *leads with* "superseded" must link to its
+    replacement (a bare "superseded" with no pointer to what replaced it
+    leaves a reader stuck).
     """
     adr_dir = DOCS / "development" / "adr"
     if not adr_dir.is_dir():
         return
     index_text = _read(adr_dir / "index.md")
     nav_refs = _collect_mkdocs_nav_refs()
+    index_nav_target = "development/adr/index.md"
+    if nav_refs and index_nav_target not in nav_refs:
+        f.err(
+            "adr-index-nav-sync",
+            "docs/development/adr/index.md: the ADR index itself is not "
+            "listed in mkdocs.yml nav (every ADR is reachable only through "
+            "this page, so it must be a real nav entry)",
+        )
     for md in sorted(adr_dir.glob("*.md")):
         if md.name == "index.md" or not _ADR_FILE_RE.match(md.name):
             continue
@@ -1524,13 +1563,23 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
                 f"docs/development/adr/{md.name}: not linked from "
                 f"docs/development/adr/index.md",
             )
-        nav_target = f"development/adr/{md.name}"
-        if nav_refs and nav_target not in nav_refs:
+        text = _read(md)
+        status = _adr_status_text(text)
+        if status is None:
             f.err(
                 "adr-index-nav-sync",
-                f"docs/development/adr/{md.name}: not listed in mkdocs.yml nav "
-                f"(published pages must be reachable from the ADR nav group, "
-                f"not just linked from index.md)",
+                f"docs/development/adr/{md.name}: missing a Status "
+                "metadata line ('**Status:** ...') or heading ('## Status')",
+            )
+            continue
+        leading_word = re.split(r"[\s—.,;-]", status.strip(), maxsplit=1)[0]
+        if leading_word.lower() == "superseded" and not (
+            _ADR_REPLACEMENT_LINK_RE.search(status)
+        ):
+            f.err(
+                "adr-index-nav-sync",
+                f"docs/development/adr/{md.name}: status is 'Superseded' "
+                "but doesn't link to its replacement ADR",
             )
 
 

@@ -94,10 +94,13 @@ def test_adr_index_and_nav_sync_holds(car):
     assert f.errors == [], f"ADR index/nav drift: {f.errors}"
 
 
-def test_adr_index_and_nav_sync_catches_missing_nav_entry(car, tmp_path, monkeypatch):
-    """Regression test for the real bug this check exists to catch: ADR-041
-    was accepted and linked from index.md but never added to mkdocs.yml, so
-    it was never published to the site nav."""
+def test_adr_index_and_nav_sync_catches_missing_index_nav_entry(
+    car, tmp_path, monkeypatch
+):
+    """The ADR index page itself (not each individual ADR -- that
+    requirement was relaxed, see test_adr_index_nav_sync_does_not_require_
+    individual_adr_in_nav below) must be listed in mkdocs.yml nav, since
+    every ADR is reachable only through it."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
     adr_dir = fake_docs / "development" / "adr"
@@ -105,7 +108,9 @@ def test_adr_index_and_nav_sync_catches_missing_nav_entry(car, tmp_path, monkeyp
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | Accepted |\n", encoding="utf-8"
     )
-    (adr_dir / "001-example.md").write_text("# ADR-001\n", encoding="utf-8")
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
     (fake_root / "mkdocs.yml").write_text(
         "nav:\n  - Home: index.md\n", encoding="utf-8"
     )
@@ -115,9 +120,131 @@ def test_adr_index_and_nav_sync_catches_missing_nav_entry(car, tmp_path, monkeyp
 
     f = car.Findings()
     car.check_adr_index_and_nav_sync(f)
-    assert any("mkdocs.yml nav" in msg for _, msg in f.errors), (
-        f"expected a missing-from-nav error, got: {f.errors}"
+    assert any("ADR index itself" in msg for _, msg in f.errors), (
+        f"expected a missing-index-from-nav error, got: {f.errors}"
     )
+
+
+def test_adr_index_nav_sync_does_not_require_individual_adr_in_nav(
+    car, tmp_path, monkeypatch
+):
+    """Relaxed rule: an ADR linked from index.md is reachable, and the index
+    itself is in nav -- an individual ADR entry is no longer required."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | Accepted |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
+def test_adr_index_nav_sync_catches_missing_status(car, tmp_path, monkeypatch):
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text("# ADR-001\n\nNo status here.\n")
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("missing a Status" in msg for _, msg in f.errors)
+
+
+def test_adr_index_nav_sync_accepts_heading_style_status(car, tmp_path, monkeypatch):
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n## Status\n\nAccepted — implemented.\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
+def test_adr_index_nav_sync_catches_superseded_without_replacement_link(
+    car, tmp_path, monkeypatch
+):
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded, no pointer to what replaced it.\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
+def test_adr_index_nav_sync_accepts_superseded_with_replacement_link(
+    car, tmp_path, monkeypatch
+):
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded by [ADR-002](002-example.md).\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
 
 
 def test_no_hard_file_size_violations(car):

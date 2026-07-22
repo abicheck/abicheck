@@ -871,6 +871,100 @@ def test_duplicate_paragraph_scan_still_ignores_tiny_tables(
 
 
 # ---------------------------------------------------------------------------
+# Fenced-code stripping (line-aware)
+# ---------------------------------------------------------------------------
+
+
+def test_strip_fenced_code_ignores_inline_backticks_in_code_content() -> None:
+    """A closing fence must be alone on its own line per CommonMark -- an
+    inline backtick run embedded within a code line (e.g. a code sample that
+    itself shows ``` fence syntax) must not be mistaken for the real closer
+    (regression test for the gap flagged in PR #619 review: the previous
+    regex-based stripper closed early on any 3+-backtick run anywhere in the
+    text, corrupting both the removed code and what stayed visible)."""
+    text = (
+        "```markdown\n"
+        "Use ```python for a code fence, like this: ```\n"
+        "This line should still be code, containing [fake](./hidden.md)\n"
+        "```\n"
+        "Real prose here: [real](./real-link.md)\n"
+    )
+    assert dc._strip_fenced_code(text) == "Real prose here: [real](./real-link.md)\n"
+
+
+def test_strip_fenced_code_handles_tilde_fences() -> None:
+    text = "~~~\n[hidden](./hidden.md)\n~~~\nProse: [real](./real-link.md)\n"
+    assert dc._strip_fenced_code(text) == "Prose: [real](./real-link.md)\n"
+
+
+def test_strip_fenced_code_requires_matching_or_longer_closer() -> None:
+    """A 4-backtick opener needs at least 4 backticks to close -- a nested
+    3-backtick run (e.g. showing a fence example inside a longer fence)
+    must not close it early."""
+    text = "````\n```\nstill code\n```\n````\nReal prose.\n"
+    assert dc._strip_fenced_code(text) == "Real prose.\n"
+
+
+def test_strip_fenced_code_leaves_prose_untouched() -> None:
+    text = "Just a paragraph with no fences at all.\n"
+    assert dc._strip_fenced_code(text) == text
+
+
+# ---------------------------------------------------------------------------
+# Terminology malformed-type guards
+# ---------------------------------------------------------------------------
+
+
+def test_check_terminology_entries_flags_non_string_term_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A non-string YAML mapping key (e.g. `123:`) must be reported cleanly,
+    not crash re.escape() downstream (regression test for PR #619 review)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_terminology_entries(
+        f, {123: {"canonical_page": "owner.md", "short_definition": "x"}}
+    )
+    assert any("must be a string" in msg for _, msg in f.errors)
+
+
+def test_check_terminology_entries_flags_list_valued_canonical_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_terminology_entries(
+        f, {"ABI": {"canonical_page": ["a.md", "b.md"], "short_definition": "x"}}
+    )
+    assert any("canonical_page must be a string" in msg for _, msg in f.errors)
+
+
+def test_check_duplicate_term_definitions_skips_non_string_term_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Must not raise -- a malformed term id is already reported by
+    _check_terminology_entries; this pass just skips it defensively."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    f = dc.Findings()
+    dc._check_duplicate_term_definitions(
+        f, {123: {"canonical_page": "owner.md", "short_definition": "x"}}
+    )
+    assert f.warnings == []
+
+
+def test_check_duplicate_term_definitions_skips_list_valued_canonical_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_duplicate_term_definitions(
+        f, {"ABI": {"canonical_page": ["a.md"], "short_definition": "x"}}
+    )
+    assert f.warnings == []
+
+
+# ---------------------------------------------------------------------------
 # Terminology registry
 # ---------------------------------------------------------------------------
 

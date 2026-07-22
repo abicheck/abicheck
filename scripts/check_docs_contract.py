@@ -95,7 +95,35 @@ _MIN_DUPLICATE_WORDS = 40
 _MIN_DUPLICATE_TABLE_WORDS = 10
 
 _FRONT_MATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
-_FENCE_RE = re.compile(r"(`{3,}|~{3,}).*?\1", re.DOTALL)
+_FENCE_OPEN_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})[^\n]*$")
+
+
+def _strip_fenced_code(text: str) -> str:
+    """Remove fenced code blocks the way CommonMark actually delimits them:
+    a closing fence must be alone on its own line (only leading whitespace
+    before it), using the same delimiter character as the opener with at
+    least as many repeats. A naive "find the next occurrence of 3+ of the
+    same character anywhere" regex (the previous implementation) closes
+    early on an inline backtick run embedded *within* a code line -- e.g. a
+    code sample that itself shows ``` fence syntax -- silently leaking part
+    of the block's real content into the "prose" the summarizes/duplicate/
+    terminology checks scan (PR #619 review)."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        m = _FENCE_OPEN_RE.match(lines[i])
+        if m is None:
+            out.append(lines[i])
+            i += 1
+            continue
+        fence = m.group(1)
+        i += 1
+        closer = re.compile(rf"^[ \t]{{0,3}}{fence[0]}{{{len(fence)},}}[ \t]*$")
+        while i < n and closer.match(lines[i]) is None:
+            i += 1
+        i += 1  # skip the closing fence line itself (or EOF, harmlessly)
+    return "\n".join(out)
 
 
 class Findings:
@@ -376,7 +404,7 @@ def _page_links_to(path: Path, target_rel_to_docs: str) -> bool:
     the link exists. Fenced code blocks are stripped first: a link shown
     inside a ``` fence is example text, not a navigable link -- MkDocs
     renders it as code, not as a backlink."""
-    text = _FENCE_RE.sub("", _strip_front_matter(path.read_text(encoding="utf-8")))
+    text = _strip_fenced_code(_strip_front_matter(path.read_text(encoding="utf-8")))
     for m in _MD_LINK_TARGET_RE.finditer(text):
         if _resolve_href(path, m.group(1)) == target_rel_to_docs:
             return True
@@ -624,6 +652,9 @@ def _check_terminology_entries(
     be unique -- two terms (e.g. ABI/API) may legitimately share a defining
     page. Only existence and required-field presence are checked here."""
     for term, entry in terms.items():
+        if not isinstance(term, str):
+            f.err("terminology", f"term {term!r}: term id must be a string")
+            continue
         if not isinstance(entry, dict):
             f.err("terminology", f"term {term!r}: entry must be a mapping")
             continue
@@ -633,7 +664,13 @@ def _check_terminology_entries(
                 "terminology",
                 f"term {term!r}: missing required 'canonical_page' field",
             )
-        elif not _is_file_under(DOCS, str(canonical_page)):
+        elif not isinstance(canonical_page, str):
+            f.err(
+                "terminology",
+                f"term {term!r}: canonical_page must be a string, got "
+                f"{type(canonical_page).__name__}",
+            )
+        elif not _is_file_under(DOCS, canonical_page):
             f.err(
                 "terminology",
                 f"term {term!r}: canonical_page {canonical_page!r} does not "
@@ -676,15 +713,18 @@ def _check_duplicate_term_definitions(
     mentioned or linked -- a broader "term appears on another page" check
     would flag ordinary, correct usage constantly."""
     for term, entry in terms.items():
-        if not isinstance(entry, dict) or not entry.get("canonical_page"):
+        if not isinstance(term, str) or not isinstance(entry, dict):
             continue
-        canonical_key = _docs_relative_key(entry["canonical_page"])
+        canonical_page = entry.get("canonical_page")
+        if not canonical_page or not isinstance(canonical_page, str):
+            continue
+        canonical_key = _docs_relative_key(canonical_page)
         pattern = _term_definition_re(term)
         for path in _iter_duplicate_scan_files():
             if _docs_relative_key(str(path.relative_to(DOCS))) == canonical_key:
                 continue
             text = _strip_front_matter(path.read_text(encoding="utf-8"))
-            text = _FENCE_RE.sub("", text)
+            text = _strip_fenced_code(text)
             if pattern.search(text):
                 f.warn(
                     "terminology",
@@ -712,7 +752,7 @@ def _extract_blocks(text: str) -> list[str]:
     between rows/items), which is exactly what lets exact-duplicate tables
     and lists surface without any special-casing."""
     text = _strip_front_matter(text)
-    text = _FENCE_RE.sub("", text)
+    text = _strip_fenced_code(text)
     blocks = re.split(r"\n\s*\n", text)
     result = []
     for block in blocks:
