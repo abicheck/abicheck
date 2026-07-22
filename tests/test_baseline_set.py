@@ -339,6 +339,37 @@ def test_resolve_target_resolved(tmp_path: Path) -> None:
     assert result.manifest_path == str(tmp_path / BASELINE_MANIFEST_FILENAME)
 
 
+def test_resolve_target_rejects_absolute_snapshot_path(tmp_path: Path) -> None:
+    # A corrupt/hand-edited/tampered manifest.json pointing "snapshot" at an
+    # absolute path must never resolve -- Path's own "/" operator silently
+    # discards the left operand for an absolute right-hand side, so without
+    # an explicit guard this would hand a downstream compare an arbitrary
+    # file outside the baseline-set (Codex review).
+    outside = tmp_path.parent / "outside.abicheck.json"
+    outside.write_text("{}", encoding="utf-8")
+    _write_manifest(
+        tmp_path,
+        artifacts=[_target_artifact("libpvxs", extra={"snapshot": str(outside)})],
+    )
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "escapes" in result.message
+
+
+def test_resolve_target_rejects_traversing_snapshot_path(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "outside.abicheck.json"
+    outside.write_text("{}", encoding="utf-8")
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact("libpvxs", extra={"snapshot": f"../{outside.name}"})
+        ],
+    )
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "escapes" in result.message
+
+
 def test_resolve_target_digest_match_resolves(tmp_path: Path) -> None:
     snapshot_content = {"library": "libpvxs", "schema_version": 9}
     real_digest = compute_snapshot_content_hash(snapshot_content)
@@ -593,3 +624,29 @@ def test_resolve_bundle_resolved_returns_binaries_not_snapshots(tmp_path: Path) 
     }
     for path in result.binary_paths.values():
         assert Path(path).is_file()
+
+
+def test_resolve_bundle_rejects_escaping_binary_path(tmp_path: Path) -> None:
+    # Same path-traversal guard as resolve_target, applied to a bundle
+    # member's "binary" field (Codex review).
+    outside = tmp_path.parent / "outside.so"
+    outside.write_bytes(b"\x7fELF-fake")
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact("libpvxs", extra={"binary": f"../{outside.name}"}),
+            _target_artifact(
+                "libpvxsIoc", extra={"binary": "binaries/libpvxsIoc.so.1.5"}
+            ),
+        ],
+    )
+    _write_binary(tmp_path, "binaries/libpvxsIoc.so.1.5")
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs", "libpvxsIoc"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "['libpvxs']" in result.message

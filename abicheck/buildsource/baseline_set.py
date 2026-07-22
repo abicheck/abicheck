@@ -382,13 +382,27 @@ def _load_manifest_or_result(
 #: against the real producers -- only two exist today:
 #: `abicheck/buildsource/source_extractors/clang.py`'s `ClangExtractor`
 #: stamps `"abicheck-cc-clang-extractor"` for *both* the wrapper and replay
-#: collection strategies (there is no third extractor, so this check cannot
-#: yet distinguish "wrapper" from "replay" evidence via fact_set.producer
-#: alone -- that distinction simply isn't recorded at this level today), and
-#: `contrib/abicheck-clang-plugin/AbicheckFactsPlugin.cpp:3101` stamps
-#: `"abicheck-clang-plugin"` regardless of collect-facts' own `"clang-plugin"`
-#: producer name. Extend this table if/when a new extractor's producer id
-#: needs a public alias, not by guessing at an unverified mapping.
+#: collection strategies, and `contrib/abicheck-clang-plugin/
+#: AbicheckFactsPlugin.cpp:3101` stamps `"abicheck-clang-plugin"` regardless
+#: of collect-facts' own `"clang-plugin"` producer name.
+#:
+#: **Known, accepted limitation, not an oversight (Codex review):** because
+#: there is no third extractor, this check genuinely cannot distinguish
+#: "wrapper" from "replay" evidence via fact_set.producer alone -- both
+#: alias to the one real value, so a wrapper-produced baseline resolves for
+#: a "replay"-declared candidate and vice versa, and that specific
+#: cross-mismatch is NOT caught. The alternative -- aliasing "wrapper" and
+#: "replay" only to themselves -- was considered and rejected: since no real
+#: fact_set ever records the literal string "wrapper" or "replay", that
+#: would make every real wrapper/replay resolution report
+#: incompatible_evidence unconditionally, rejecting 100% of legitimate
+#: source-depth checks to guard against one narrow cross-mismatch. A correct
+#: fix needs `fact_set` to record the collection strategy as its own field
+#: (plumbed through `dump --sources`/`--build-info`, the wrapper, and
+#: replay) -- a schema change to `abicheck/buildsource/source_abi.py`
+#: outside this Action's/module's scope, not a resolver-side guess. Extend
+#: this table if/when a new extractor's producer id needs a public alias,
+#: not by guessing at an unverified mapping.
 _PRODUCER_ALIASES: dict[str, frozenset[str]] = {
     "wrapper": frozenset({"wrapper", "abicheck-cc-clang-extractor"}),
     "replay": frozenset({"replay", "abicheck-cc-clang-extractor"}),
@@ -524,6 +538,31 @@ def _snapshot_digest_issue(
     return None
 
 
+def _resolve_under_baseline_dir(baseline_dir: Path, rel: str) -> Path | None:
+    """Resolve *rel* under *baseline_dir*, refusing an absolute path or an
+    escape (e.g. ``"../../etc/passwd"``) -- ``None`` if refused.
+
+    A ``manifest.json``'s ``snapshot``/``binary`` fields are untrusted
+    content from a restored archive/cache entry (a hand-edited or corrupt
+    manifest, or a compromised baseline artifact); ``Path``'s own ``/``
+    operator silently *discards the left operand entirely* when the right
+    side is an absolute path (a well-known pathlib gotcha), so an absolute
+    or ``..``-escaping value must be checked explicitly rather than trusted
+    -- otherwise a corrupt manifest could point a "resolved" snapshot/binary
+    path at an arbitrary file outside the baseline-set, which a downstream
+    ``compare`` would then silently read as the old side (Codex review).
+    Mirrors :func:`~.build_output._resolve_under_root`'s identical guard for
+    ``build-output.json``.
+    """
+    if Path(rel).is_absolute():
+        return None
+    candidate = (baseline_dir / rel).resolve()
+    root_resolved = baseline_dir.resolve()
+    if candidate != root_resolved and not candidate.is_relative_to(root_resolved):
+        return None
+    return baseline_dir / rel
+
+
 def resolve_target(
     baseline_dir: Path | str,
     *,
@@ -579,7 +618,18 @@ def resolve_target(
             message=f"target {target!r}'s manifest entry has no snapshot filename.",
             manifest_path=manifest_path,
         )
-    snapshot_path = baseline_dir / artifact.snapshot
+    snapshot_path = _resolve_under_baseline_dir(baseline_dir, artifact.snapshot)
+    if snapshot_path is None:
+        return ResolveResult(
+            outcome=ResolveOutcome.AMBIGUOUS,
+            message=(
+                f"target {target!r}'s manifest entry names snapshot "
+                f"{artifact.snapshot!r}, which is an absolute path or "
+                "escapes the baseline-set directory -- refusing to resolve "
+                "it."
+            ),
+            manifest_path=manifest_path,
+        )
     if not snapshot_path.is_file():
         return ResolveResult(
             outcome=ResolveOutcome.AMBIGUOUS,
@@ -657,8 +707,8 @@ def resolve_bundle(
         if artifact is None or not artifact.binary:
             missing.append(member)
             continue
-        resolved = baseline_dir / artifact.binary
-        if not resolved.is_file():
+        resolved = _resolve_under_baseline_dir(baseline_dir, artifact.binary)
+        if resolved is None or not resolved.is_file():
             missing.append(member)
             continue
         binary_paths[member] = str(resolved)
