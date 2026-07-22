@@ -490,6 +490,39 @@ distinct from both native `compare`'s `16` and `compat check`'s `9` since
 all three commands maintain independent, non-overlapping exit-code
 schemes. `docs/reference/exit-codes.md`'s `scan` table gains this row.
 
+**A seventh surface imports `checker.compare` directly and swallows every
+exception, including these new ones, into an undifferentiated `None`:
+`stack_checker.py`'s `_run_abi_diff`, driving `abicheck deps compare`.**
+`stack_checker.py:32` imports `compare` from `checker` (not through
+`service.compare_snapshots`), and `_run_abi_diff` (`:396-410`) wraps its
+whole body — the `dump()` calls *and* the `compare()` call — in one broad
+`except Exception as exc: log.warning(...); return None`. A
+`ProfileMismatchError`/`ScopeMismatchError` from a changed dependency DSO
+would be swallowed into that same `None`, indistinguishable from the
+"file unreadable" case a few lines above (`:363-364`, also `abi_diff=None`)
+or a genuine crash — the per-library `StackChange` this produces carries no
+`not_comparable` reason at all, just a silent absence of a diff, which
+`cli_stack.py`'s `deps compare` reporters and exit-code contract (`0`/`1`
+`WARN`/`4` `FAIL`/`64`, `docs/reference/exit-codes.md`) then read no
+differently than "nothing to report for this library." `StackChange` gains
+a `not_comparable_reason: str | None = None` field (additive, alongside its
+existing `abi_diff: DiffResult | None`); `_run_abi_diff`'s caller (the loop
+building `StackChange` entries) gains a dedicated `except
+(ProfileMismatchError, ScopeMismatchError) as exc:` branch around the
+`_run_abi_diff(...)` call, ordered so it is never reached by
+`_run_abi_diff`'s own broad `except Exception` first — `_run_abi_diff`
+itself re-raises `ProfileMismatchError`/`ScopeMismatchError` rather than
+swallowing them, since only its caller can attach the result to a
+`StackChange` — setting `not_comparable_reason` instead of leaving
+`abi_diff` as an unexplained `None`. `deps compare` gains its own exit code
+for "at least one dependency was not_comparable": **`5`**, the next integer
+after the currently documented ceiling (`4`, `FAIL`) in that command's own
+`0`/`1`/`4`/`64` scheme — distinct from `scan`'s `6`, `compat check`'s `9`,
+and native `compare`'s `16`, continuing the same "each command keeps its
+own disjoint scheme" rule the previous three surfaces already established,
+never folded into the existing `FAIL`/`4` the way a swallowed exception
+would today.
+
 On the reporting surface (`reporter.py`,
 `sarif.py`, `junit_report.py`), a `not_comparable` result is a distinct
 top-level state — `verdict: null`, a `reason` object naming the mismatched

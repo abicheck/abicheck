@@ -391,7 +391,7 @@ Implements ADR-050 D1 and D2.
   makes the release fan-out fix (below) actually surface at the release
   level instead of being computed per-library and then silently
   outranked.
-- The gate is wired at **all six** entry points in one phase, closing the
+- The gate is wired at **all seven** entry points in one phase, closing the
   gap AGENTS.md's "Known gaps" section already names for the depth
   contract rather than repeating the CLI-only mistake: `checker.compare`
   (core), `service.py`'s `ScanRequest`/`compare_snapshots`,
@@ -399,10 +399,13 @@ Implements ADR-050 D1 and D2.
   directory/package fan-out, `compat/cli.py`'s ABICC-compatible
   `compat check` (which calls `checker.compare` directly too — see the
   dedicated bullet below for its own, independent exit-code contract),
-  **and** `cli_scan.py`'s `scan --against` (which reaches
+  `cli_scan.py`'s `scan --against` (which reaches
   `compare_snapshots` through `cli_scan_baseline._run_baseline_compare` —
   see its own dedicated bullet below for why listing `service.py`'s
-  `compare_snapshots` alone doesn't already cover it).
+  `compare_snapshots` alone doesn't already cover it), **and**
+  `stack_checker.py`'s `_run_abi_diff`, driving `abicheck deps compare`
+  (which imports `checker.compare` directly too, and today swallows every
+  exception — see its own dedicated bullet below).
 - **The release fan-out needs a dedicated fix, not inherited behavior.**
   `_compare_one_library` (`cli_compare_release.py:180-269`) wraps its
   entire per-library flow in `except (click.ClickException,
@@ -473,6 +476,34 @@ Implements ADR-050 D1 and D2.
   independent exit-code schemes; reusing either of those would imply a
   shared numbering `scan` doesn't have. `docs/reference/exit-codes.md`'s
   `scan` table gains this row.
+- **A seventh entry point imports `checker.compare` directly and swallows
+  every exception into an undifferentiated `None` today — a different
+  failure mode than the previous six, and it needs its own fix.**
+  `stack_checker.py:32` imports `compare` from `checker` (not through
+  `service.compare_snapshots`), driving `abicheck deps compare`.
+  `_run_abi_diff` (`:396-410`) wraps its whole body — both the `dump()`
+  calls and the `compare()` call — in one broad `except Exception as exc:
+  log.warning(...); return None`. Verified against the actual code: a
+  `ProfileMismatchError`/`ScopeMismatchError` from a changed dependency DSO
+  would be swallowed into that same `None`, indistinguishable from the
+  pre-existing "file unreadable" case a few lines above (`:363-364`, also
+  `abi_diff=None`) or a genuine crash — the resulting `StackChange` carries
+  no `not_comparable` reason at all, and `cli_stack.py`'s `deps compare`
+  reporters/exit-code contract (`0`/`1`/`4`/`64`) read it no differently
+  than "nothing to report for this library." `StackChange` (`stack_checker.py`)
+  gains an additive `not_comparable_reason: str | None = None` field
+  alongside its existing `abi_diff: DiffResult | None`. `_run_abi_diff`
+  itself re-raises `ProfileMismatchError`/`ScopeMismatchError` instead of
+  swallowing them (only its caller can attach a result to a `StackChange`);
+  its caller (the loop building `StackChange` entries) gains a dedicated
+  `except (ProfileMismatchError, ScopeMismatchError) as exc:` branch around
+  the `_run_abi_diff(...)` call, setting `not_comparable_reason` instead of
+  leaving `abi_diff` an unexplained `None`. `deps compare` gains its own
+  exit code for "at least one dependency was not_comparable": **`5`**, the
+  next integer after that command's own currently-documented ceiling (`4`,
+  `FAIL`) — distinct from `scan`'s `6`, `compat check`'s `9`, and native
+  `compare`'s `16`, continuing the same disjoint-per-command scheme rule,
+  never folded into the existing `FAIL`/`4`.
 - Reporting: `reporter.py`/`sarif.py`/`junit_report.py` gain a
   `not_comparable` top-level result distinct from every existing verdict
   value — never coerced into `compatible`/`breaking`.
@@ -596,10 +627,15 @@ table update), `cli_scan.py` (`scan_cmd`'s new third `except
 its existing `_BudgetOverflow`/`_EvidenceContractError` clauses — no change
 needed in `cli_scan_baseline.py`/`scan_engine.py` themselves, since
 neither catches these exceptions today and both must keep letting them
-propagate), `docs/reference/exit-codes.md` (a
+propagate), `stack_checker.py` (`StackChange.not_comparable_reason`
+field; `_run_abi_diff` re-raises `ProfileMismatchError`/`ScopeMismatchError`
+instead of swallowing them into its broad `except Exception`; its caller
+gains the dedicated `except` branch that sets `not_comparable_reason`),
+`cli_stack.py` (`deps_compare_cmd`'s new exit-`5` branch alongside its
+existing `0`/`1`/`4`/`64` logic), `docs/reference/exit-codes.md` (a
 new row in both the legacy and severity-aware `compare` tables, the
-multi-library section, the `compat check` table's `9` row, **and** the
-`scan` table's `6` row), `reporter.py`,
+multi-library section, the `compat check` table's `9` row, the
+`scan` table's `6` row, **and** the `deps compare` table's `5` row), `reporter.py`,
 `sarif.py`, `junit_report.py`, `html_report.py` (`generate_html_report`'s
 `contract_coverage` headline card), `service_render.py` (`render_output`'s
 `--format html` branch skips `generate_html_report` on the `not_comparable`
@@ -665,7 +701,7 @@ severity-aware release schemes — proving `not_comparable`'s precedence
 over the removed-library mechanism is unconditional, unlike that
 mechanism's own existing scheme-dependent precedence; gate unit tests
 for all
-six entry points; a **compat-mode exit-code** test asserting
+seven entry points; a **compat-mode exit-code** test asserting
 `compat check` returns exactly `9` (never `10`'s generic fallback, never
 `16`, and never an unhandled traceback) for a
 `ProfileMismatchError`/`ScopeMismatchError`, exercised both through
@@ -679,7 +715,14 @@ budget-overflow code) for a `ProfileMismatchError`/`ScopeMismatchError`
 raised from the baseline compare, exercised through a real end-to-end
 `scan --against` invocation on a mismatched pair — proving `scan_cmd`'s new
 `except` clause actually catches what `_run_baseline_compare` lets through
-uncaught today; a `--diagnostic-comparison` end-to-end test asserting the report's
+uncaught today; a **deps-compare exit-code** test asserting `abicheck deps
+compare` returns exactly `5` (never folded into `4`'s `FAIL`, never a
+silent `None` diff indistinguishable from the pre-existing
+"file unreadable" case) for a `ProfileMismatchError`/`ScopeMismatchError`
+raised while diffing a changed dependency DSO, and asserting the resulting
+`StackChange.not_comparable_reason` is populated rather than `abi_diff`
+being left an unexplained `None` — proving `_run_abi_diff`'s caller, not
+`_run_abi_diff` itself, is what classifies the exception; a `--diagnostic-comparison` end-to-end test asserting the report's
 top-level `assurance` field is `"none"` and that no individual finding
 carries its own `assurance` value; a
 backward-compat test asserting a contract-less snapshot pair compares
@@ -739,35 +782,50 @@ Implements ADR-050 D3. The highest-risk phase — see Risk above.
   diagnostic, and — enforced by the parse-time invariant above — an
   optional TU can never be `contributes_to_abi: true`, so this can never
   produce a false removal.
-- New CLI surface: `--manifest path/to/manifest.yml` and
+- **New CLI surface is `--dump-manifest`, not `--manifest` — that spelling
+  is already taken.** Native `compare` already registers a `--manifest`
+  option today, via `@release_options` (`cli.py:1499-1507`,
+  `cli_options.py:883-889`): the ADR-023 release instantiation manifest
+  listing symbols a directory/package release publicly promises, visible
+  in `compare --help-all`. Reusing the same flag spelling for this ADR's
+  extraction/TU manifest would either collide at Click's option-registration
+  level or silently reinterpret an existing `compare old_dir new_dir
+  --manifest manifest.yml` release workflow as a TU-dump manifest instead —
+  a real, user-visible ambiguity, not a naming nitpick. This ADR's manifest
+  flag is therefore `--dump-manifest path/to/manifest.yml`, alongside
   `--frontend-context host|device` **options added to the existing
   `dump`/`compare` commands** (not new commands — a new sibling module
   cannot retroactively add options to a command already declared
-  elsewhere), plus a genuinely new `abicheck plan --manifest ...`
-  diagnostic command that prints the normalized manifest and both D1
+  elsewhere), plus a genuinely new `abicheck plan --dump-manifest ...`
+  diagnostic command (same flag spelling, for consistency — `plan` is a new
+  command so `--manifest` wouldn't itself collide there, but using two
+  different names for the same concept across sibling commands would be its
+  own inconsistency) that prints the normalized manifest and both D1
   fingerprints without running extraction — cheap to run in CI before
   committing to a full dump.
-- **`--manifest` must be side-scoped on `compare`, not a single shared
+- **`--dump-manifest` must be side-scoped on `compare`, not a single shared
   path.** `dump` produces one snapshot from one manifest, so a bare
-  `--manifest path` is correct there. `compare OLD_INPUT NEW_INPUT` is
+  `--dump-manifest path` is correct there. `compare OLD_INPUT NEW_INPUT` is
   different: it already dumps both sides from independently-rooted
   header/include trees via `--header`/`--include`'s `old=`/`new=` prefix
   convention (`SIDED_PATH_PARAM`, ADR-040) precisely because old and new
-  live under different roots. A single unsided `--manifest v1/abi.yml`
+  live under different roots. A single unsided `--dump-manifest v1/abi.yml`
   would either apply the same manifest to both sides (unable to express
   the normal two-checkout case) or leave no way to also pass `v2/abi.yml`
-  for the new side. `compare`'s `--manifest` therefore reuses
-  `SIDED_PATH_PARAM` exactly like `--header`/`--include` do — `--manifest
-  old=v1/abi.yml --manifest new=v2/abi.yml` — while `dump`'s stays a bare
-  path (it only ever has one side).
+  for the new side. `compare`'s `--dump-manifest` therefore reuses
+  `SIDED_PATH_PARAM` exactly like `--header`/`--include` do —
+  `--dump-manifest old=v1/abi.yml --dump-manifest new=v2/abi.yml` — while
+  `dump`'s stays a bare path (it only ever has one side).
 
 **Files & surfaces.** New `abicheck/dump_manifest.py`, `abicheck/dumper.py`
-(per-TU invocation loop, `TuFragment` type). `--manifest` is a shared-concept
-option across `dump` and `compare` (side-scoped on `compare` via
-`SIDED_PATH_PARAM`, bare on `dump` — see the acceptance-criteria bullet
+(per-TU invocation loop, `TuFragment` type). `--dump-manifest` is a
+shared-concept option across `dump` and `compare` (side-scoped on `compare`
+via `SIDED_PATH_PARAM`, bare on `dump` — see the acceptance-criteria bullet
 above), added as one decorator in `cli_options.py` and applied at `dump`'s
 and `compare`'s existing declarations directly, not merely implied by
-registering a new command module.
+registering a new command module — deliberately not named `--manifest`,
+which `@release_options` already registers on `compare` for the unrelated
+ADR-023 release manifest.
 **`--frontend-context` is not a `dump`/`compare`-only option — it belongs in
 the existing `compile_context_options` decorator (`cli_options.py`), the same
 shared L2 compile-context family `dump`, `compare`, *and* `cli_scan.py`'s
@@ -782,11 +840,11 @@ same way it already inherits `--ast-frontend` and the cross-toolchain
 `--gcc-*`/`--sysroot`/`--nostdinc` flags from that decorator, with no
 separate `scan_cmd` edit required beyond that decorator already being
 applied there today. New `cli_dump_manifest.py`
-sibling command module for the genuinely new `plan --manifest` command
+sibling command module for the genuinely new `plan --dump-manifest` command
 only (per the root `CLAUDE.md`'s "larger command → sibling module"
 convention) — registering it is not implicit: `cli.py`'s bottom
 side-effect `from . import (...)` block gains `cli_dump_manifest`, or
-`plan --manifest` never attaches to `main` at all, and `pyproject.toml`'s
+`plan --dump-manifest` never attaches to `main` at all, and `pyproject.toml`'s
 `disallow_untyped_decorators = false` override
 list gains `abicheck.cli_dump_manifest` alongside the existing per-module
 entries, or the typed-decorator mypy lane fails on its `@click` decorators
@@ -798,13 +856,17 @@ command" procedure, steps 3–4) — `cli_dump_helpers.py` (extend
 TU names, unknown fields, relative-path resolution, `frontend_context`
 accepted/defaulted/rejected-when-invalid). `dumper.py` multi-TU
 integration tests (`@pytest.mark.integration`, needs castxml/clang) using
-Phase 0's fixtures. A `plan --manifest` unit test asserting it never invokes
-a compiler. A `--frontend-context` CLI-flag unit test for the legacy
+Phase 0's fixtures. A `plan --dump-manifest` unit test asserting it never
+invokes a compiler. A `--frontend-context` CLI-flag unit test for the legacy
 (non-manifest) path, mirroring the manifest-field test. A **side-scoped
-`compare --manifest`** test asserting `compare old.so new.so --manifest
-old=v1/abi.yml --manifest new=v2/abi.yml` dumps each side from its own
-manifest (not both from one), plus a `dump --manifest path` test confirming
-the single-sided form is unaffected. A **`scan --frontend-context`**
+`compare --dump-manifest`** test asserting `compare old.so new.so
+--dump-manifest old=v1/abi.yml --dump-manifest new=v2/abi.yml` dumps each
+side from its own manifest (not both from one), plus a `dump --dump-manifest
+path` test confirming the single-sided form is unaffected. A test asserting
+`compare --dump-manifest` and the pre-existing `--manifest` (ADR-023 release
+manifest) coexist as distinct, independently-settable options on the same
+`compare` invocation — the specific collision this naming choice exists to
+avoid. A **`scan --frontend-context`**
 regression test asserting `abicheck scan --against` accepts `device` and
 threads it into the L2 header frontend the same way `dump`/`compare` do,
 proving `compile_context_options` (not a `dump`/`compare`-only decorator) is
