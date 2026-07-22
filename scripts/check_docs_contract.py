@@ -190,6 +190,20 @@ def _is_file_under(base: Path, value: str) -> bool:
     return candidate is not None and candidate.is_file()
 
 
+def _docs_relative_key(value: object) -> str:
+    """Normalize a docs/-relative path value (e.g. a `canonical_page`
+    entry) to its resolved, docs-relative POSIX form, so equivalent
+    spellings (`concepts/x.md` vs `./concepts/x.md`) compare equal instead
+    of silently bypassing the uniqueness/round-trip checks. Falls back to
+    the raw string for a value that escapes docs/ or is malformed — that's
+    already reported by `_check_referenced_paths_exist`, not this helper's
+    job."""
+    resolved = _resolves_under(DOCS, str(value))
+    if resolved is None:
+        return str(value)
+    return resolved.relative_to(DOCS.resolve()).as_posix()
+
+
 def _exists_under(base: Path, value: str) -> bool:
     candidate = _resolves_under(base, value)
     return candidate is not None and candidate.exists()
@@ -249,7 +263,7 @@ def _check_canonical_page_uniqueness(
     owners: dict[str, list[str]] = defaultdict(list)
     for topic_id, entry in topics.items():
         if isinstance(entry, dict) and "canonical_page" in entry:
-            owners[str(entry["canonical_page"])].append(topic_id)
+            owners[_docs_relative_key(entry["canonical_page"])].append(topic_id)
     for page, topic_ids in owners.items():
         if len(topic_ids) > 1:
             f.err(
@@ -326,7 +340,7 @@ def _check_front_matter_schema(
                     f"{_rel(path)}: canonical_for references unknown topic "
                     f"{topic_id!r} (not in {_rel(TOPICS_FILE)})",
                 )
-            elif str(entry.get("canonical_page")) != rel_to_docs:
+            elif _docs_relative_key(entry.get("canonical_page")) != rel_to_docs:
                 f.err(
                     "front-matter",
                     f"{_rel(path)}: claims canonical_for {topic_id!r}, but "
@@ -368,9 +382,9 @@ def _check_canonical_pages_declare_ownership(
     for topic_id, entry in topics.items():
         if not isinstance(entry, dict) or "canonical_page" not in entry:
             continue
-        page_path = DOCS / str(entry["canonical_page"])
-        if not page_path.is_file():
+        if not _is_file_under(DOCS, str(entry["canonical_page"])):
             continue  # already reported by _check_referenced_paths_exist
+        page_path = DOCS / str(entry["canonical_page"])
         try:
             fm = load_front_matter(page_path)
         except yaml.YAMLError:

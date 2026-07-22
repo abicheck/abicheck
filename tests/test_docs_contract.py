@@ -83,6 +83,27 @@ def test_canonical_page_uniqueness_allows_distinct_pages() -> None:
     assert f.errors == []
 
 
+def test_canonical_page_uniqueness_flags_equivalent_spellings() -> None:
+    """`concepts/x.md` and `./concepts/x.md` name the same file — the
+    uniqueness check must normalize before comparing, or two differently
+    spelled entries silently bypass the one-owner rule (regression test for
+    the gap flagged in PR #619 review)."""
+    topics = {
+        "topic-a": {"canonical_page": "concepts/x.md"},
+        "topic-b": {"canonical_page": "./concepts/x.md"},
+    }
+    f = dc.Findings()
+    dc._check_canonical_page_uniqueness(f, topics)
+    assert len(f.errors) == 1
+    assert "topic-a" in f.errors[0][1] and "topic-b" in f.errors[0][1]
+
+
+def test_docs_relative_key_normalizes_equivalent_spellings() -> None:
+    assert dc._docs_relative_key("./concepts/x.md") == dc._docs_relative_key(
+        "concepts/x.md"
+    )
+
+
 # --- _check_referenced_paths_exist ----------------------------------------
 
 
@@ -201,6 +222,23 @@ def test_front_matter_schema_flags_canonical_for_pointing_elsewhere(
     f = dc.Findings()
     dc._check_front_matter_schema(f, topics)
     assert any("canonical_for" in msg for _, msg in f.errors)
+
+
+def test_front_matter_schema_accepts_canonical_for_via_equivalent_spelling(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The registry's canonical_page can be spelled `./page.md`; the page's
+    own front matter names itself as plain `page.md` — these must compare
+    equal, not fail the round-trip check on a cosmetic spelling mismatch."""
+    (tmp_path / "page.md").write_text(
+        "---\ndoc_type: explanation\ncanonical_for:\n  - topic-a\n---\n\n# Title\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    topics = {"topic-a": {"canonical_page": "./page.md"}}
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)
+    assert f.errors == []
 
 
 def test_front_matter_schema_flags_unknown_summarizes_topic(
