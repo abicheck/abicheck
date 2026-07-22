@@ -266,6 +266,35 @@ def test_cpp20_detector_lookahead_stops_at_preprocessor_directive(tmp_path):
     assert not any(r.reason == "requires-expression" for r in reqs)
 
 
+def test_cpp20_detector_ignores_requires_used_as_pre_cxx20_identifier(tmp_path):
+    """Regression (Codex review): "requires" only became a reserved keyword
+    in C++20 — any earlier standard allows it as an ordinary identifier,
+    e.g. a function literally named "requires". Forcing -std=gnu++20 on
+    such a header would break it, since the identifier is no longer usable
+    there."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "inline bool requires(int x) { return x > 0; }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_still_accepts_return_requires_expression(tmp_path):
+    """Non-regression: "return requires(...)" — a requires-expression used
+    directly as a return value — must stay detected. "return" is one of the
+    few keywords that can legitimately introduce a requires-expression as a
+    bare preceding word, unlike an ordinary declarator identifier."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<class T>\nbool check() { return requires(T t) { t.foo(); }; }\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "requires-expression" for r in reqs)
+
+
 def test_cpp20_detector_accepts_inline_concept_declaration(tmp_path):
     headers = _write(
         tmp_path,

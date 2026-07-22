@@ -143,6 +143,32 @@ _CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
     rb"\brequires\s+\w"
 )  # template<T> requires Foo<T>
 
+# "requires" only became a reserved keyword in C++20 — any earlier standard
+# allows it as an ordinary identifier, e.g. ``bool requires(int x) { ... }``
+# (a real function literally named "requires"). Forcing -std=gnu++20 on such
+# a header would break it, since the identifier is no longer usable there
+# (Codex review). The only way "requires(" is preceded by a bare word (just
+# whitespace, no operator) in *genuine* C++20 usage is a handful of
+# expression-introducing keywords (return/throw/co_return); every other
+# preceding identifier can only be a declaration/call using "requires" as a
+# plain pre-C++20 name — juxtaposing two bare identifiers with nothing but
+# whitespace between them is not valid C++ in any other production.
+_REQUIRES_EXPR_SAFE_PRECEDING_WORDS = frozenset({b"return", b"throw", b"co_return"})
+_TRAILING_IDENTIFIER_PATTERN = re.compile(rb"([A-Za-z_]\w*)\Z")
+
+
+def _looks_like_requires_declarator(code: bytes, match_start: int) -> bool:
+    """True if the requires-expression candidate at *match_start* in *code*
+    is immediately preceded (skipping only whitespace) by a bare identifier
+    that isn't one of the few keywords that can legitimately introduce a
+    requires-expression as an operand — i.e., "requires" looks like an
+    ordinary pre-C++20 identifier being declared or called, not the C++20
+    keyword."""
+    prefix = code[:match_start].rstrip()
+    m = _TRAILING_IDENTIFIER_PATTERN.search(prefix)
+    return m is not None and m.group(1) not in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS
+
+
 _STRING_LITERAL_PATTERN = re.compile(rb'"(?:\\.|[^"\\\n])*"')
 _CHAR_LITERAL_PATTERN = re.compile(rb"'(?:\\.|[^'\\\n])*'")
 # C++11 raw string literal: [prefix]R"delim(...)delim" — the standard
@@ -313,9 +339,12 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 nxt = _strip_literals_joined(logical_lines[j][1]).split(b"//")[0]
                 lookahead += b"\n" + nxt
                 lookahead_budget -= 1
+            requires_expr_match = _CPP20_REQUIRES_EXPR_PATTERN.search(lookahead)
             if _CPP20_CONCEPT_PATTERN.search(lookahead):
                 found.append(Cpp20Requirement("concept-declaration", str(p), start_no))
-            elif _CPP20_REQUIRES_EXPR_PATTERN.search(lookahead):
+            elif requires_expr_match and not _looks_like_requires_declarator(
+                lookahead, requires_expr_match.start()
+            ):
                 found.append(Cpp20Requirement("requires-expression", str(p), start_no))
             elif _CPP20_REQUIRES_CLAUSE_PATTERN.search(lookahead):
                 found.append(Cpp20Requirement("requires-clause", str(p), start_no))
