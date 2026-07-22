@@ -342,6 +342,16 @@ class ResolveResult:
         return self.outcome == ResolveOutcome.RESOLVED
 
     def to_dict(self) -> dict[str, Any]:
+        """JSON-serializable form of this result.
+
+        The ``resolve-baseline`` composite Action (this PR) prints its
+        fields individually via ``resolve_baseline.py``'s ``_print_outputs``
+        rather than going through this method -- ``to_dict()`` is exposed
+        for a future direct-Python caller (e.g. the not-yet-built
+        ``check-target`` composite Action, G30 P1.3) that wants the whole
+        result as one JSON-serializable object instead of discrete
+        ``GITHUB_OUTPUT`` keys.
+        """
         return {
             "outcome": self.outcome,
             "message": self.message,
@@ -900,7 +910,20 @@ def resolve_bundle(
             )
             continue
         artifact = manifest.artifact_for(member)
-        if artifact is None or not artifact.binary:
+        # Two distinct causes, not one generic message: "not in the
+        # manifest at all" (a bundle-members typo, or a target never
+        # staged into this baseline-set) points an operator at a
+        # different fix than "in the manifest but has no binary field"
+        # (a pre-P1.6 baseline-set that only ever staged snapshots) --
+        # mirrors resolve_target's own not-in-manifest branch, which
+        # already lists the known targets (code review).
+        if artifact is None:
+            known = sorted(a.library for a in manifest.artifacts if a.library)
+            problems[member] = (
+                f"not in this baseline-set's manifest (known targets: {known})"
+            )
+            continue
+        if not artifact.binary:
             problems[member] = "no staged binary declared in the manifest"
             continue
         resolved = _resolve_under_baseline_dir(baseline_dir, artifact.binary)

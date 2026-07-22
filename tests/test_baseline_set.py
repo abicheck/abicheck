@@ -1068,7 +1068,7 @@ def test_resolve_bundle_message_reports_distinct_per_member_reasons(
                 "libpvxsIoc",
                 extra={"binary": "binaries/libpvxsIoc.so.1.5", "sha256": "0" * 64},
             ),
-            # libpvxsExtra has no "binary" field at all.
+            # libpvxsExtra has no manifest entry at all.
         ],
     )
     (tmp_path / "binaries").mkdir()
@@ -1083,7 +1083,7 @@ def test_resolve_bundle_message_reports_distinct_per_member_reasons(
     )
     assert result.outcome == ResolveOutcome.AMBIGUOUS
     assert "digest does not match" in result.message  # libpvxsIoc
-    assert "no staged binary declared" in result.message  # libpvxsExtra
+    assert "not in this baseline-set's manifest" in result.message  # libpvxsExtra
     assert "'libpvxs':" not in result.message  # libpvxs itself resolved fine
 
 

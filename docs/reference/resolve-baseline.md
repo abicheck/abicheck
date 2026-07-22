@@ -91,6 +91,21 @@ member named in `bundle-members` must have one, or the whole resolution
 reports `ambiguous` — a partially-staged bundle baseline would otherwise
 silently produce a bundle report missing one member's old-side data.
 
+## Known limitation: `wrapper`/`replay` producer aliasing
+
+The `incompatible_evidence` check (see the outcome table above) compares
+each side's recorded evidence producer string. Both the `abicheck-cc`
+wrapper and the source-replay (L4) path populate `evidence_producer.tool`
+with the same underlying string, `abicheck-cc-clang-extractor` — there is
+currently no way to tell "the wrapper captured this" apart from "source
+replay reconstructed this after the fact" from the recorded producer alone.
+A baseline staged via one path and a candidate produced via the other will
+**not** be flagged `incompatible_evidence`, even though their evidence has
+different fidelity characteristics. Only a genuinely different tool (e.g.
+the Clang facts plugin vs. either of the above) is caught. Tightening this
+would need a distinct producer string per path, which is deferred rather
+than done in this PR.
+
 ## Example
 
 ```yaml
