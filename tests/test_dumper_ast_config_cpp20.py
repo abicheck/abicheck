@@ -149,6 +149,43 @@ def test_cpp20_detector_accepts_requires_clause_split_across_lines(tmp_path):
     assert any(r.reason == "requires-clause" for r in reqs)
 
 
+def test_cpp20_detector_ignores_requires_text_in_raw_string(tmp_path):
+    """Regression (Codex review): a C++11 raw string literal (``R"(...)"``)
+    is not recognized by ``_strip_literals`` (only ordinary ``"..."``), so
+    its body was scanned as ordinary code. Text merely resembling a
+    requires-expression inside a raw string must not force -std=gnu++20."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        'const char* msg = R"(this text requires\n{ nothing, really })";\n',
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_requires_text_in_delimited_raw_string(tmp_path):
+    """Same as above, but with an explicit (non-empty) raw-string
+    delimiter."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        'const char* msg = R"tag(this text requires\n{ nothing })tag";\n',
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_still_detects_real_construct_after_raw_string(tmp_path):
+    """A raw string earlier in the file must not swallow a genuine C++20
+    construct that follows it."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        'const char* msg = R"(just text)";\ntemplate<class T> concept C = true;\n',
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" and r.line == 2 for r in reqs)
+
+
 def test_cpp20_detector_lookahead_stops_at_preprocessor_directive(tmp_path):
     """The line-join lookahead for a bare trailing "requires" must stop at a
     preprocessor directive rather than pulling its text into the scan

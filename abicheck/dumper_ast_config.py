@@ -145,6 +145,29 @@ _CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
 
 _STRING_LITERAL_PATTERN = re.compile(rb'"(?:\\.|[^"\\\n])*"')
 _CHAR_LITERAL_PATTERN = re.compile(rb"'(?:\\.|[^'\\\n])*'")
+# C++11 raw string literal: R"delim(...)delim" — the delimiter charset per
+# the standard excludes parentheses/backslash/whitespace; restricting to
+# identifier characters here covers the overwhelming common case (including
+# the empty delimiter, R"(...)"") without needing the full grammar. Not
+# handled by _STRING_LITERAL_PATTERN (only ordinary "..." literals) or by
+# the plain-comment stripper, so its body was otherwise scanned as ordinary
+# code: text that merely *looks* like a requires-expression/concept inside a
+# raw string would force -std=gnu++20 unnecessarily — worse once a
+# multi-line construct can span into a raw string's later lines too (Codex
+# review). DOTALL so the (non-greedy) body can span newlines.
+_RAW_STRING_LITERAL_PATTERN = re.compile(
+    rb'\bR"([A-Za-z0-9_]{0,16})\((?:.*?)\)\1"', re.DOTALL
+)
+
+
+def _strip_raw_strings(content: bytes) -> bytes:
+    """Blank C++11 raw string literals entirely (delimiter and body alike),
+    preserving embedded newlines so line numbers reported for code after a
+    multi-line raw string stay accurate (mirrors the block-comment
+    stripper's newline-preserving approach)."""
+    return _RAW_STRING_LITERAL_PATTERN.sub(
+        lambda m: b"\n" * m.group(0).count(b"\n"), content
+    )
 
 
 def _strip_literals(line: bytes) -> bytes:
@@ -212,6 +235,10 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
             content = p.read_bytes()
         except OSError:
             continue
+        # Blank raw string literals first — their body can contain arbitrary
+        # quotes/backslashes that would otherwise confuse the ordinary
+        # string-literal stripper below.
+        content = _strip_raw_strings(content)
         # Blank string/char literals first so a literal containing comment-like
         # text ("/* not a comment */") is never mistaken for a real comment.
         content = _strip_literals(content)
