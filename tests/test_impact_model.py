@@ -43,6 +43,26 @@ class TestProofStep:
         assert step.kind == "source_decl"
         assert step.role is None
 
+    def test_from_dict_node_preserves_id_distinct_from_label(self) -> None:
+        """A node's id (stable) and label (human-readable, possibly
+        colliding across nodes) are different things -- losing the id would
+        make two same-label nodes indistinguishable (Codex review)."""
+        step = ProofStep.from_dict(
+            {
+                "type": "node",
+                "id": "decl://ns::pub",
+                "kind": "source_decl",
+                "label": "pub",
+            }
+        )
+        assert step.node_id == "decl://ns::pub"
+        assert step.label == "pub"
+
+    def test_node_to_dict_includes_id(self) -> None:
+        step = ProofStep(step_type="node", label="pub", node_id="decl://ns::pub")
+        d = step.to_dict()
+        assert d["id"] == "decl://ns::pub"
+
     def test_from_dict_edge(self) -> None:
         step = ProofStep.from_dict(
             {
@@ -127,6 +147,17 @@ class TestImpactAssessmentHasSignal:
     def test_demotion_has_signal(self) -> None:
         assessment = ImpactAssessment(decision=FindingDecision(demotion="compatible"))
         assert assessment.has_signal() is True
+
+    def test_non_high_confidence_has_signal(self) -> None:
+        """A finding whose only non-default impact field is a reduced
+        confidence (e.g. the vtable/RTTI layout findings in
+        diff_elf_layout.py, which set MEDIUM with no reachability/proof
+        metadata) must still surface impact_assessment -- otherwise the
+        advertised per-finding confidence is silently never serialized
+        (Codex review)."""
+        assert ImpactAssessment(confidence=Confidence.MEDIUM).has_signal() is True
+        assert ImpactAssessment(confidence=Confidence.LOW).has_signal() is True
+        assert ImpactAssessment(confidence=Confidence.HIGH).has_signal() is False
 
     def test_to_dict_shape(self) -> None:
         assessment = ImpactAssessment(
@@ -213,8 +244,10 @@ class TestAssessChange:
         assert assessment.proof_path.is_direct is True
         assert len(assessment.proof_path.steps) == 3
         assert assessment.proof_path.steps[0].step_type == "node"
+        assert assessment.proof_path.steps[0].node_id == "decl://pub"
         assert assessment.proof_path.steps[1].step_type == "edge"
         assert assessment.proof_path.steps[1].kind == "DECL_CALLS_DECL"
+        assert assessment.proof_path.steps[2].node_id == "decl://helper"
 
     def test_suppressed_flag_sets_decision_state(self) -> None:
         change = _change()

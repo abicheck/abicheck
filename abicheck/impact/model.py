@@ -47,16 +47,19 @@ class ProofStep:
     kind: str | None = None
     role: str | None = None
     confidence: str | None = None
+    node_id: str | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, object]) -> ProofStep:
         step_type = str(raw.get("type", ""))
         kind = raw.get("kind")
         if step_type == "node":
+            node_id = raw.get("id")
             return cls(
                 step_type="node",
-                label=str(raw.get("label", raw.get("id", ""))),
+                label=str(raw.get("label", node_id or "")),
                 kind=str(kind) if kind else None,
+                node_id=str(node_id) if node_id else None,
             )
         role = raw.get("role")
         confidence = raw.get("confidence")
@@ -76,6 +79,8 @@ class ProofStep:
             d["role"] = self.role
         if self.confidence is not None:
             d["confidence"] = self.confidence
+        if self.node_id is not None:
+            d["id"] = self.node_id
         return d
 
 
@@ -164,6 +169,7 @@ class ImpactAssessment:
             self.proof_path is not None
             or self.reachability_state != ReachabilityState.UNKNOWN
             or self.public_reachable
+            or self.confidence != Confidence.HIGH
             or self.decision.reason_code is not None
             or self.decision.demotion is not None
             or self.correlated_change_kind is not None
