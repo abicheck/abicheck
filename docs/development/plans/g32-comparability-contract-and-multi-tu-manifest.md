@@ -116,6 +116,16 @@ Implements ADR-049 D1 and D2.
   declarations feed the ABI model without necessarily touching a TU's
   includes, so leaving it out of the hash would let that exact class of
   scope drift pass the gate undetected.
+- **Modeling `contract` is not the same as populating it — this phase must
+  do both.** `dump()` (`dumper.py`) is the one place that already resolves
+  every input both fingerprints need; it calls
+  `comparability.compute_extraction_contract(...)` and attaches the result
+  to the `AbiSnapshot` it returns, for every dump (not only a manifest-
+  driven one — Phase B). Without this, `contract` stays `None` on every
+  freshly-produced snapshot, and since the gate below only ever raises when
+  **both** sides carry one, two ordinary dumps would silently take the same
+  code path as the intentionally-lenient mixed-pair case forever — a fully
+  specified, fully inert gate.
 - `serialization.SCHEMA_VERSION` is bumped (11 → 12) in the same change
   that starts writing `contract` — **not** treated as a free additive field
   the way ADR-041's advisory `extractor_passes`/`narrowed_passes` were. The
@@ -146,6 +156,25 @@ Implements ADR-049 D1 and D2.
   non-authoritative annotation on the ordinary verdict that still gets
   produced — same shape as the existing `SOURCE_FACT_COVERAGE_INCOMPLETE`
   (`checker_policy.py:618`), not a second meaning for `not_comparable`.
+  `UNKNOWN_PROFILE` is registered as a real `ChangeKind` via the repo's
+  standard four-step procedure (AGENTS.md "Adding a new ChangeKind"), the
+  same as `SOURCE_FACT_COVERAGE_INCOMPLETE` was — enum entry
+  (`checker_policy.py`), one `ChangeKindMeta` entry with `default_verdict`
+  placing it in `RISK_KINDS` (a `change_registry*.py` module), a detector in
+  `comparability.py` wired via `@registry.detector(...)`, and a unit test.
+  Not an ad-hoc report string: that would trip the AI-readiness
+  `changekind-partition`/`changekind-detector` gates or bypass the
+  registry's own import-time completeness assertion.
+- **The exit code is part of the published contract too, not an
+  afterthought.** `docs/reference/exit-codes.md` documents two co-existing
+  `compare` schemes (legacy: 0/2/4; severity-aware: 0/1/2/4) where `0`
+  means *compatible* in both. `not_comparable` must never exit `0` in
+  either scheme — otherwise the exact "missing evidence reads as safe"
+  failure this ADR exists to prevent reappears at the process-exit
+  boundary, undoing the JSON-level fix. This phase reserves one new,
+  distinct nonzero code and adds it as its own row to both tables in
+  `docs/reference/exit-codes.md`, not folded into either scheme's existing
+  numbering.
 - The gate is wired at **all three** entry points in one phase, closing the
   gap AGENTS.md's "Known gaps" section already names for the depth
   contract rather than repeating the CLI-only mistake: `checker.compare`
@@ -187,30 +216,44 @@ Implements ADR-049 D1 and D2.
   already-common default-off-to-on transition.
 
 **Files & surfaces.** `model.py` (new `ExtractionContract`), new
-`abicheck/comparability.py` (fingerprint computation + gate), `errors.py`
+`abicheck/comparability.py` (fingerprint computation, `compute_extraction_contract`,
+the gate, and the `UNKNOWN_PROFILE` detector), `dumper.py` (`dump()` calls
+`compute_extraction_contract(...)` and attaches it to every returned
+snapshot — see the acceptance-criteria bullet above; this is not optional
+plumbing), `errors.py`
 (`ProfileMismatchError`/`ScopeMismatchError`/`IncompatibleSnapshotSchemaError`),
 `serialization.py` (`SCHEMA_VERSION` bump,
 `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION` threshold + the
 `snapshot_from_dict` hard-rejection branch, `contract` round-trip through
-`snapshot_to_dict`/`snapshot_from_dict`), `checker.py` (gate call at the
+`snapshot_to_dict`/`snapshot_from_dict`), `checker_policy.py`
+(`UNKNOWN_PROFILE` enum entry) and a `change_registry*.py` module (its
+`ChangeKindMeta` entry), `checker.py` (gate call at the
 top of `compare`), `service.py`,
-`mcp_server.py`, `cli.py`/`cli_compare_release.py` (flag + `not_comparable`
-exit-code handling — see `docs/reference/exit-codes.md`, which needs a new
-row), `reporter.py`, `sarif.py`, `junit_report.py`,
-`abicheck/schemas/compare_report.schema.json`.
+`mcp_server.py`, `cli.py`/`cli_compare_release.py` (flag + the new,
+distinct `not_comparable` exit code), `docs/reference/exit-codes.md` (a
+new row in both the legacy and severity-aware tables), `reporter.py`,
+`sarif.py`, `junit_report.py`, `abicheck/schemas/compare_report.schema.json`.
 
-**Tests.** Unit tests for fingerprint stability (same manifest,
+**Tests.** A `dump()`-level test asserting a real (non-manifest) dump
+returns a snapshot with a populated, non-`None` `contract` — the specific
+gap that would otherwise leave the gate permanently inert. Unit tests for
+fingerprint stability (same manifest,
 independent-TU reordering unaffected; include-order-within-a-TU changes
 the fingerprint; flipping one TU's `contributes_to_abi` or `required` flag
 with its includes held identical also changes `scope_fingerprint`); a
-a hard-rejection test asserting a pre-bump reader (a stubbed/patched
+hard-rejection test asserting a pre-bump reader (a stubbed/patched
 `SCHEMA_VERSION` below the threshold) raises `IncompatibleSnapshotSchemaError`
 on a schema-12 `contract`-bearing snapshot instead of the pre-existing
 warn-and-continue path; a regression test pinning that a schema bump
 *below* the threshold still only warns (today's lenient behavior for
 ordinary additive fields must not become accidentally stricter);
 `tests/test_report_schema.py` gains a `not_comparable` case validated
-against the updated `compare_report.schema.json`; gate unit tests for all
+against the updated `compare_report.schema.json`; an exit-code test
+asserting `not_comparable` returns the new dedicated code, never `0`, from
+both the legacy and severity-aware `compare` invocations; a
+`changekind-partition`/`changekind-detector`-gate-compliant unit test for
+the `UNKNOWN_PROFILE` detector, matching the existing test pattern for
+`SOURCE_FACT_COVERAGE_INCOMPLETE`; gate unit tests for all
 three entry points; a `--diagnostic-comparison` end-to-end test; a
 backward-compat test asserting a contract-less snapshot pair compares
 unchanged; a **mixed-pair** test (one side `contract`, one side none)

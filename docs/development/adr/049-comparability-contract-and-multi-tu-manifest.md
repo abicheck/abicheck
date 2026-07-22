@@ -117,6 +117,25 @@ default for ordinary additive fields, per ADR-041's `extractor_passes`
 precedent) — only the specific jump that first introduces a
 verdict-blocking field becomes a hard failure for an older reader.
 
+**Known, permanent limitation — not something a later phase can close.**
+This guard protects any reader running Phase-A-or-later code: it makes
+*that* code hard-reject a schema it doesn't support instead of warning past
+it, and is the right pattern for any *future* comparability-critical bump.
+It does **not**, and structurally cannot, protect an already-deployed
+pre-Phase-A binary — that binary's `snapshot_from_dict` has no
+`_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION` check compiled into it at
+all, only the unconditional warn-and-continue branch, and no change to
+future abicheck releases can retroactively alter code already running
+elsewhere. A fleet where some environments have upgraded past Phase A and
+others haven't can still see a not-yet-upgraded reader silently produce an
+ordinary verdict on a `contract`-bearing snapshot. This is the same
+unavoidable boundary every additive capability gate has (an abicheck old
+enough to predate `DumpDepthNotSatisfiedError` doesn't enforce it either)
+— the mitigation is operational (upgrade a comparison pipeline's producer
+and consumer together), not something this ADR's on-disk format can
+guarantee unilaterally. Documented here so it's a known, accepted limit,
+not a latent surprise discovered after Phase A ships.
+
 - `profile_fingerprint: str` — a `sha256:`-prefixed digest of the
   **resolved** compile context: compiler family/version, target triple,
   `abi_dialect` (Itanium/MSVC), language standard, pointer width/endianness,
@@ -145,12 +164,23 @@ verdict-blocking field becomes a hard failure for an older reader.
   comment, must not change the fingerprint; reordering includes *within*
   one TU, or changing either flag, must.
 
-Both fingerprints live in a new `contract: ExtractionContract` sub-object on
-`AbiSnapshot` rather than flattening two more top-level fields onto an
-already-large dataclass — this is the one new nested type this ADR
-introduces on the model, deliberately scoped to just the two fingerprints
-plus the resolved fields that produce them (so a report can show *what*
-differs, not just that the hashes don't match).
+Both fingerprints live in a new `contract: ExtractionContract | None` field
+on `AbiSnapshot` rather than flattening two more top-level fields onto an
+already-large dataclass — `ExtractionContract` is the one new nested type
+this ADR introduces on the model, deliberately scoped to just the two
+fingerprints plus the resolved fields that produce them (so a report can
+show *what* differs, not just that the hashes don't match).
+
+**Modeling the field is not the same as populating it, and this ADR
+requires both.** `dump()` (`dumper.py`) is the one place that already
+resolves every input both fingerprints are computed from — it must call
+`comparability.compute_extraction_contract(...)` and attach the result to
+the `AbiSnapshot` it returns, for every dump, not only a manifest-driven
+one (D3). Without this wired in from D1, `contract` stays `None` on every
+freshly-produced snapshot, and since D2's gate only ever raises when
+**both** sides carry a `contract`, two perfectly ordinary dumps would
+silently take the same code path as the intentionally-lenient mixed-pair
+case (D2) forever — the gate would be fully specified and fully inert.
 
 ### D2. Comparability gate — hard-fail before symbol diff, not a RISK finding
 
@@ -176,7 +206,17 @@ one: `abicheck/schemas/compare_report.schema.json` currently requires
 `tests/test_report_schema.py` validates emitted reports against exactly
 that file — both must change in the same phase that starts emitting
 `not_comparable`, or JSON output goes invalid (or the published schema goes
-stale) the moment the gate first fires.
+stale) the moment the gate first fires. **The exit code is part of this
+same contract and must be pinned explicitly, not left implicit.**
+`docs/reference/exit-codes.md` documents two co-existing `compare` exit
+schemes (legacy: 0/2/4; severity-aware, with any `--severity-*` flag:
+0/1/2/4) where `0` means *compatible* in both — a `not_comparable` result
+must never exit `0` in either scheme, or the exact failure mode this ADR
+exists to prevent (missing evidence reading as "safe") reappears one layer
+down, at the process-exit boundary instead of the JSON `verdict` field. D2
+reserves a new, distinct nonzero code for `not_comparable`, documented as
+its own row in both exit-code tables, not folded into either existing
+scheme's numbering.
 
 **Mixed pairs (one side has a `contract`, the other doesn't) never hard-fail
 — this is unambiguous, not left to implementer discretion.** The backward-
@@ -197,7 +237,16 @@ an otherwise-ordinary verdict — same shape and same authority-rule
 justification as the existing `SOURCE_FACT_COVERAGE_INCOMPLETE`
 (`checker_policy.py:618`) — surfaced only for a mixed pair, to tell the
 reader "this comparison ran without being able to check profile/scope
-drift on one side," without withholding the verdict itself.
+drift on one side," without withholding the verdict itself. Since
+`SOURCE_FACT_COVERAGE_INCOMPLETE` is itself a real `ChangeKind`, not a
+free-floating report string, `UNKNOWN_PROFILE` is registered the same way,
+through the repository's standard four-step procedure (`ChangeKind` enum
+entry in `checker_policy.py`, one `ChangeKindMeta` entry in a
+`change_registry*.py` module with `default_verdict` placing it in
+`RISK_KINDS`, a detector in `comparability.py` wired via
+`@registry.detector(...)`, and a unit test) — not an ad-hoc string that
+would trip the AI-readiness `changekind-partition`/`changekind-detector`
+gates or bypass the registry's completeness assertion.
 
 ### D3. Manifest and real multi-TU dump
 
