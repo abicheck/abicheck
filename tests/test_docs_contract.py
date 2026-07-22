@@ -291,6 +291,33 @@ def test_front_matter_schema_flags_unknown_doc_type(
     assert any("doc_type" in msg for _, msg in f.errors)
 
 
+def test_front_matter_schema_flags_scalar_audience(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`audience` is documented as list-valued; a bare scalar must be
+    flagged, not silently accepted (regression test for the gap flagged in
+    PR #619 review)."""
+    (tmp_path / "page.md").write_text(
+        "---\naudience: library-maintainer\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, {})
+    assert any("audience" in msg for _, msg in f.errors)
+
+
+def test_front_matter_schema_flags_scalar_depends_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "page.md").write_text(
+        "---\ndepends_on: abicheck/model.py\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, {})
+    assert any("depends_on" in msg for _, msg in f.errors)
+
+
 def test_front_matter_schema_flags_canonical_for_pointing_elsewhere(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

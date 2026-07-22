@@ -369,6 +369,12 @@ def _check_front_matter_schema(
                 "front-matter",
                 f"{_rel(path)}: level {level!r} not in {sorted(_ALLOWED_LEVELS)}",
             )
+        audience = fm.get("audience")
+        if audience is not None and not isinstance(audience, list):
+            f.err("front-matter", f"{_rel(path)}: audience must be a list")
+        depends_on = fm.get("depends_on")
+        if depends_on is not None and not isinstance(depends_on, list):
+            f.err("front-matter", f"{_rel(path)}: depends_on must be a list")
         lifecycle = fm.get("lifecycle")
         if lifecycle is not None and lifecycle not in _ALLOWED_LIFECYCLES:
             f.err(
