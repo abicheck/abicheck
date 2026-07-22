@@ -322,31 +322,50 @@ Implements ADR-050 D1 and D2.
   `--include` but never an ancestor of any declared `--header`. The
   ancestor rule classifies these as external today, so an ordinary edit to
   a generated or private support header still flips `profile_fingerprint`
-  on a routine CMake/Meson-style layout, not an edge case. Legacy CLI gains
-  a new, side-scoped, **labeled** `--project-include` option — its value
-  grammar cannot naively reuse `<label>=<path>`, though: `cli_params.py`'s
-  existing `SidedPathParam`/`SidedStrParam` (ADR-040 Lever 1) already
-  reserve the `X=` prefix position exclusively for the side discriminator
-  (`old=`/`new=`/`both=`, `_SIDES`) — `support=old/src` has no recognized
-  side prefix, so it would fall through to that parser's bare-value case
-  as `("both", Path("support=old/src"))`, the literal string swallowed
-  whole as a bogus path, never parsed as a label. `--project-include`
-  therefore needs its own dedicated param type, `SidedLabeledPathParam`,
-  carrying both pieces: `[old:|new:|both:]<label>=<path>` — a
-  colon-terminated side prefix (colon instead of `=` so it can't collide
-  with the label's own `=`), defaulting to `both:` when omitted, the same
-  "bare value means both sides" convention as the existing sided params.
-  A two-checkout compare with side-specific paths for one shared logical
-  root is declared `--project-include old:support=old/src
-  --project-include new:support=new/src` — same `support` label on both
-  invocations (so the per-slot token matches across sides for the same
-  logical root), different paths per side. `--project-include` requires
-  that label (a user-supplied logical name, not path-derived — the same
-  choice D3's manifest `name` field already makes) because a support root
-  with no owned declared header has nothing for the ancestor-derived
-  per-slot token below to key off of; asking for one avoids yet another
-  path-shape heuristic. Legacy-CLI-only: the manifest path (D3) already
-  has no such gap via per-TU forced-includes.
+  on a routine CMake/Meson-style layout, not an edge case.
+
+  **A separate `--project-include` option cannot carry this at all,
+  regardless of its own value grammar — Click doesn't preserve declaration
+  order *across* two differently-named repeatable options.** Verified
+  against Click's actual parsing model: a `multiple=True` option's
+  callback gets that option's own values as one tuple, in that option's
+  own declaration order, but Click never records one option's occurrences
+  relative to a *different* option's. `--include dep --project-include
+  support=src` and `--project-include support=src --include dep` arrive
+  at the callback as the identical `(include=('dep',),
+  project_include=('support=src',))` — no way to recover which came
+  first. Since `profile_fingerprint`'s `-I` ordering is search-precedence
+  order (the actual relative position the compiler sees), a second,
+  separate option can never feed it correctly, no matter how its value is
+  shaped — this sinks the separate-option design before its grammar is
+  even considered. **Fix: no second option — the label rides on
+  `--include` itself**, the one option Click already keeps in true
+  declaration order (the same guarantee the whole `-I`-sequence design
+  already relies on for plain `--include`/`--include` pairs).
+  `cli_params.py`'s existing `SidedPathParam` (shared today by
+  `--include`, `--header`, and other sided-path options) is extended for
+  `--include` specifically into a new `SidedIncludePathParam` — `--header`
+  and the rest keep the unchanged, 2-tuple `SidedPathParam`, since only
+  `--include` needs a label slot. `SidedIncludePathParam` layers an
+  optional labeled form on top of the existing `[old=|new=|both=]PATH`
+  grammar: `[old:|new:|both:]LABEL=PATH` — a colon-terminated side prefix
+  (colon instead of `=`, unambiguous since no `--include` value has ever
+  started with `old:`/`new:`/`both:`), returning a `(side, label, path)`
+  triple with `label=None` for every existing unlabeled form so ordinary
+  uses are byte-for-byte unaffected. A two-checkout compare with
+  side-specific paths for one shared logical root is declared `--include
+  old:support=old/src --include new:support=new/src` — same `support`
+  label on both invocations (so the per-slot token matches across sides
+  for the same logical root), different paths per side, interleaved with
+  any number of ordinary `--include old=/opt/dep` entries in exactly
+  their typed order, since it's all one option's accumulated tuple. The
+  label is required for this labeled form specifically (a user-supplied
+  logical name, not path-derived — the same choice D3's manifest `name`
+  field already makes) because a support root with no owned declared
+  header has nothing for the ancestor-derived per-slot token below to key
+  off of; asking for one avoids yet another path-shape heuristic. This
+  labeled `--include` form is legacy-CLI-only: the manifest path (D3)
+  already has no such gap via per-TU forced-includes.
   `scope_fingerprint` owns everything
   under a project-owned root; `profile_fingerprint` owns only external
   roots, in full. **Excluding a project-owned directory's content must not
@@ -380,16 +399,16 @@ Implements ADR-050 D1 and D2.
   header set tokenizes identically regardless of mount point, consistent
   with `scope_fingerprint` already treating declared header *names* as
   legitimate, already-tracked identity, so no new information leaks
-  through the token; a `--project-include` support root's token is its
-  required user-supplied **`label`** instead (it owns no declared header
-  by construction — that's exactly why it needed its own flag), namespaced
-  separately from the ancestor-derived token space so a label can never
-  collide with a header name. `-I project -I dep` (project ancestor of
-  declared `foo.h`) hashes `[token(foo.h), digest(dep)]`; `-I dep -I
-  project` hashes `[digest(dep), token(foo.h)]` — different, correctly
-  flagged as non-comparable; `--project-include both:support=old/src` vs.
-  the same directory declared last instead of first is distinguished the
-  same way via `token(support)`. **Residual limitation (same class as the
+  through the token; a labeled `--include old:LABEL=PATH` support root's
+  token is its required user-supplied **`label`** instead (it owns no
+  declared header by construction — that's exactly why it needs the label
+  form), namespaced separately from the ancestor-derived token space so a
+  label can never collide with a header name. `-I project -I dep` (project
+  ancestor of declared `foo.h`) hashes `[token(foo.h), digest(dep)]`; `-I
+  dep -I project` hashes `[digest(dep), token(foo.h)]` — different,
+  correctly flagged as non-comparable; `--include both:support=old/src`
+  vs. the same directory declared last instead of first is distinguished
+  the same way via `token(support)`. **Residual limitation (same class as the
   vendored-nested-dependency gap below):** two separately declared `-I`
   roots that are both ancestors of the *same* declared header (an outer
   directory and one of its own subdirectories, each passed as its own
@@ -517,26 +536,32 @@ Implements ADR-050 D1 and D2.
   orderings to the same `[SENTINEL, SENTINEL]` sequence and spuriously
   match, exactly the regression this per-slot-token fix (as opposed to
   the simpler single-sentinel fix test (12) alone would validate) exists
-  to close; (14) a sibling support root declared via `--project-include`,
-  not nested under any declared `--header` — `old`/`new` both declare
-  `--header .../include/foo.h --include .../include --project-include
+  to close; (14) a sibling support root declared via a labeled `--include`
+  entry, not nested under any declared `--header` — `old`/`new` both
+  declare `--header .../include/foo.h --include .../include --include
   both:support=.../src` (`src/` a sibling of `include/`, containing a
   private header `foo.h` `#include`s) — with a **content edit confined to
   `src/`'s private header** between old and new leaves `profile_fingerprint`
-  matching, proving `--project-include` extends project-ownership to a
+  matching, proving the labeled form extends project-ownership to a
   sibling directory the ancestor rule alone would otherwise classify as
   external (and thus spuriously flip on this routine internal edit); a
-  companion assertion swapping `--project-include old:support=old/src
-  --project-include new:support=new/src` to declaration-last on one side
-  while an unrelated ancestor-derived root keeps its position produces a
-  *different* `profile_fingerprint`, confirming the label-derived token
-  participates in the same order-sensitive sequence as every other
-  project-owned slot; a third assertion parses `--project-include
-  old:support=old/src` and asserts the side/label/path triple round-trips
-  correctly through `SidedLabeledPathParam`, the exact grammar this fix
-  exists to get right (P2 review: a naive `<label>=<path>` grammar would
-  have silently misparsed as `("both", Path("support=old/src"))` instead
-  of raising or splitting a side/label/path triple).
+  companion assertion declares `--include old:support=old/src --include
+  old=/opt/dep` vs. `--include old=/opt/dep --include old:support=old/src`
+  (the labeled support root and an unrelated external root swapped in
+  declaration order, same two directories, same label) and asserts
+  *different* `profile_fingerprint`s, confirming the label-derived token
+  participates in the same order-sensitive sequence as every other slot
+  **and** that interleaving a labeled and an unlabeled `--include` entry
+  preserves their true relative order — the exact guarantee a second,
+  separately-named `--project-include` option could not have provided,
+  since Click never records cross-option interleaving (P2 review: verified
+  against Click's own parsing model — two differently-named repeatable
+  options each get their own accumulated tuple with no relative-order
+  record between them); a third assertion parses `--include
+  old:support=old/src` directly and asserts the side/label/path triple
+  round-trips correctly through `SidedIncludePathParam`, and that a bare
+  `--include old=v1/foo.h` still round-trips to `(side="old", label=None,
+  path=...)` unchanged.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -573,22 +598,24 @@ Implements ADR-050 D1 and D2.
   and hashes them in caller-supplied order instead; deferring this to
   Phase E doesn't help, since Phase E's cache-key work is scoped to a
   different, manifest-only gap (see Phase E) and wouldn't by itself make
-  the existing sorted hashing order-preserving. **The same key must also
-  carry the `--project-include` side/label/path triples, not just
-  `headers`/`includes`.** Both the project-ownership predicate and the
-  per-slot logical token depend on which directories are marked
-  project-owned and under which label — two dumps with identical
-  `headers`/`includes` but a different `--project-include` label on the
-  same directory (or the marker present on one run and absent on the
-  next, the directory otherwise unchanged) would otherwise hit the same
-  cache entry under a key that never saw the label at all, and
-  `cached_run_dump` would serve back a stale `contract.profile_fingerprint`
-  computed under the old labeling — a warm-cache bypass of this whole
-  phase's ownership fix, the identical class of gap already found and
-  fixed above for a cold `contract=None` cache entry. `_cache_key()` folds
-  the normalized `(side, label, path)` triples into its key material
-  alongside `headers`/`includes`, in caller-supplied order for the same
-  reason those two are no longer sorted.
+  the existing sorted hashing order-preserving. **The `includes` key
+  material must carry each entry's *label* too, not just its path — since
+  `--include`'s labeled form (`old:LABEL=PATH`) folds the label into
+  `includes` itself rather than a separate option, "hash `includes` in
+  caller-supplied order" is only correct if that per-entry hash covers the
+  full `(side, label, path)` triple.** Both the project-ownership
+  predicate and the per-slot logical token depend on which directories are
+  marked project-owned and under which label — two dumps with identical
+  paths but a different label on the same directory (or the label present
+  on one run and absent on the next, the path otherwise unchanged) would
+  otherwise hit the same cache entry under a key that only ever hashed the
+  path, and `cached_run_dump` would serve back a stale
+  `contract.profile_fingerprint` computed under the old labeling — a
+  warm-cache bypass of this whole phase's ownership fix, the identical
+  class of gap already found and fixed above for a cold `contract=None`
+  cache entry. `_cache_key()` hashes each `includes` entry's full
+  `(side, label, path)` triple, not `path` alone, in caller-supplied order
+  for the same reason it's no longer sorted.
 - `serialization.SCHEMA_VERSION` is bumped (11 → 12) in the same change
   that starts writing `contract` — **not** treated as a free additive field
   the way ADR-041's advisory `extractor_passes`/`narrowed_passes` were. The
@@ -693,7 +720,13 @@ Implements ADR-050 D1 and D2.
   `compare_snapshots` alone doesn't already cover it), **and**
   `stack_checker.py`'s `_run_abi_diff`, driving `abicheck deps compare`
   (which imports `checker.compare` directly too, and today swallows every
-  exception — see its own dedicated bullet below).
+  exception — see its own dedicated bullet below). `appcompat.py`'s
+  `check_appcompat`/`check_plugin_host_contract` reach the same gate
+  (via `compare_snapshots`) but are deliberately **not** among these
+  seven: per the dedicated `diagnostic_comparison` bullet below, letting
+  the mismatch exception propagate is these two functions' documented
+  default behavior (a `diagnostic_comparison` opt-in is added, but no
+  outcome-conversion wrapper), not an oversight to close here.
 - **The release fan-out needs a dedicated fix, not inherited behavior.**
   `_compare_one_library` (`cli_compare_release.py:180-269`) wraps its
   entire per-library flow in `except (click.ClickException,
@@ -1003,43 +1036,57 @@ Implements ADR-050 D1 and D2.
   ADR-041's header-graph flag flip, which changed behavior for an
   already-common default-off-to-on transition.
 
-**Files & surfaces.** `cli_params.py` (new `SidedLabeledPathParam` —
-`[old:|new:|both:]<label>=<path>`, a dedicated param type distinct from
-`SidedPathParam`/`SidedStrParam` since neither carries a side *and* a
-label at once, see the sibling-support-root acceptance-criteria bullet
-above), `cli_options.py` (new side-scoped, labeled `--project-include`
-option built on it, alongside the existing `--include`/`--header`
-`SIDED_PATH_PARAM` family, ADR-040 — legacy CLI only).
-**Declaring the option is not enough — `--project-include` needs the same
-per-layer threading already required (and already found missing, twice)
-for `--dump-manifest`/`--diagnostic-comparison`/`--frontend-context` in
-this same phase/plan, and this bullet was the one surface that skipped
-that step on the first pass.** `compare_cmd` forwards `**kwargs` to
-`cli_compare_helpers.run_compare`, whose signature is fixed and explicit
-(no `project_include` slot today); `dump_cmd`/`scan_cmd` are themselves
-fixed Click callbacks Click invokes directly, not `**kwargs` forwarders.
-Each of `run_compare`, `dump_cmd`, and `scan_cmd` gains its own
-`old_project_includes`/`new_project_includes` (or the `scan`/`dump`
-single-side equivalent) parameter carrying the parsed side/label/path
-triples, threaded down through the same chains already established for
-`--dump-manifest` and `--frontend-context` in this phase — `run_compare` →
+**Files & surfaces.** `cli_params.py` (new `SidedIncludePathParam` —
+`[old:|new:|both:]LABEL=PATH` layered on the existing
+`[old=|new=|both=]PATH` grammar, returning `(side, label, path)` with
+`label=None` for every unlabeled form — a dedicated param type used only
+by `--include`'s own Click option, distinct from the unchanged, 2-tuple
+`SidedPathParam` `--header`/`--sources`/etc. keep, see the
+sibling-support-root acceptance-criteria bullet above), `cli_options.py`
+(`--include`'s existing option switches `type=` from `SIDED_PATH_PARAM`
+to the new param type; a new `split_sided_include_paths` function sits
+alongside the existing `split_sided_paths` — shared by `--header` and
+plain, unlabeled `--include` — and additionally returns a
+`dict[Path, str]` of resolved path → label for whichever entries carried
+one, while still returning the same flat `(both, old_only, new_only)`
+`Path` tuples `split_sided_paths` does, so the compiler-argv-building code
+that already consumes those tuples is unchanged).
+**Getting the label out of Click's parsed value is not enough — it still
+needs its own path down to `comparability.compute_extraction_contract`,
+the same per-layer threading already required (and already found
+missing, twice) for `--dump-manifest`/`--diagnostic-comparison`/
+`--frontend-context` in this same phase/plan, and this bullet was the one
+surface that skipped that step on the first pass.** `dumper.dump()`'s
+`extra_includes: list[Path]` parameter (`dumper.py:1119`, and every
+internal per-TU helper it threads through, e.g. `:152,264,453,813,994`)
+stays a bare `Path` list, deliberately unchanged — rippling a label into
+every one of those internal helpers would be a far wider blast radius
+than this fix needs, since only the top-level `compute_extraction_contract`
+call actually reads labels. `dump()` instead gains one new, separate,
+optional parameter, `project_include_labels: dict[Path, str] | None =
+None`, passed alongside `extra_includes` (not folded into it) straight
+into `compute_extraction_contract(extra_includes, headers,
+project_include_labels=project_include_labels, ...)`. That parameter is
+threaded down the same chains already established for `--dump-manifest`
+and `--frontend-context` in this phase: `cli_compare_helpers.run_compare`
+(gains the parameter itself; `compare_cmd` forwards `**kwargs`, so Click
+already passes it through once `run_compare`'s signature names it) →
 `cli_resolve._resolve_compare_snapshots` → `cli_resolve._resolve_input` →
-`service.resolve_input`/`run_dump` for `compare`; `dump_cmd` →
-`cli_dump_helpers` → `service.resolve_input`/`run_dump` for `dump`;
-`scan_cmd` → `service.resolve_input`/`run_dump` for `scan` — terminating
-in `dumper.dump()`, which passes the triples into
-`comparability.compute_extraction_contract(...)` so the project-ownership
-predicate can actually consult them. Without this, the sibling
-support-root acceptance tests (test (14) below) either fail with an
-"unexpected keyword argument" at the Click-callback boundary or silently
-run with `--project-include` accepted and parsed but never reaching the
-predicate — the flag would parse successfully and do nothing, the same
-silent-loss failure mode already caught once for
-`--diagnostic-comparison` on `run_compare` in this phase.
+`service.resolve_input`/`run_dump` for `compare`; `dump_cmd`/`scan_cmd`
+(themselves fixed Click callbacks Click invokes directly, each gaining
+the parameter in their own signature) → `cli_dump_helpers`/`scan_engine`
+→ `service.resolve_input`/`run_dump` for `dump`/`scan` — terminating in
+`dumper.dump()`. Without this, the sibling support-root acceptance tests
+(test (14) below) either fail with an "unexpected keyword argument" at
+the Click-callback boundary or silently run with the label parsed by
+Click but never reaching the predicate — the labeled `--include` form
+would parse successfully and do nothing, the same silent-loss failure
+mode already caught once for `--diagnostic-comparison` on `run_compare`
+in this phase.
 `model.py` (new `ExtractionContract`), new
 `abicheck/comparability.py` (fingerprint computation, `compute_extraction_contract`
 — its project-ownership predicate takes both ancestor-derived headers and
-declared `--project-include` labels as inputs, not headers alone —
+the new `project_include_labels` mapping as inputs, not headers alone —
 the gate, and `contract_coverage` metadata computation — no detector, since
 `UNKNOWN_PROFILE` is report metadata, not a `Change`; reuses
 `abicheck/buildsource/include_graph.py`'s existing `parse_depfile()` to turn
@@ -1083,7 +1130,29 @@ everything else into `{"status": "error", ...}` today; exposing
 `abi_compare` also gains a dedicated `except (ProfileMismatchError,
 ScopeMismatchError)` branch, ordered before that generic catch, rendering
 `{"status": "not_comparable", "reason": ...}` distinct from
-`{"status": "error"}` for the default hard-fail path), `cli.py`
+`{"status": "error"}` for the default hard-fail path). **`appcompat.py` is a
+third, independent instance of this exact bypass, not covered by fixing
+`CompareRequest`/`run_compare_request` or `mcp_server.py` alone — verified
+against the actual code:** `check_appcompat` (`:1018`) and
+`check_plugin_host_contract` (`:1227`) each call `service.compare_snapshots(...)`
+directly (`:1078`, `:1248`), with no surrounding `try` today, no
+`CompareRequest` in either call path, and no route through `run_compare_request`
+at all — these are themselves public Python-API entry points (documented,
+user-callable functions, not internal helpers), so a mismatched pair raises
+a raw `ProfileMismatchError`/`ScopeMismatchError` straight out of them,
+uncaught, with no `AppCompatResult`/`PluginHostContractResult` to carry a
+`not_comparable` outcome (both dataclasses' `full_diff: DiffResult | None`
+has nowhere to put a result when the gate raises *before* any `DiffResult`
+exists). Both functions gain a `diagnostic_comparison: bool = False`
+parameter, forwarded into their own `compare_snapshots(...)` calls exactly
+like `run_compare_request`'s equivalent parameter — giving a caller of the
+Python API the same tentative-diff escape hatch every other front-end
+gets. Raw exception propagation remains the *default* (undiagnosed) behavior
+for both functions, same as any other direct `compare_snapshots` caller
+that doesn't opt in — this phase documents that explicitly as these two
+functions' intended contract (in their docstrings) rather than leaving it
+implicit, closing the ambiguity Codex flagged rather than silently
+choosing one reading. `cli.py`
 (the `--diagnostic-comparison` flag definition and the new, distinct
 `not_comparable` exit `16` constant), **`cli_compare_helpers.py`** (the new
 `except (ProfileMismatchError, ScopeMismatchError)` branch around the real
