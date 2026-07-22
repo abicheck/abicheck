@@ -1650,6 +1650,27 @@ this ADR has already made and corrected once for `CompareRequest`
 `dumper.dump()` is where it actually terminates, alongside the existing
 `except (ProfileMismatchError, ScopeMismatchError)` fix already planned
 in `run_compare`.
+**`--dump-manifest` reaching native `compare` means directory/package
+`compare` accepts it too, on the exact same set-input path already
+established for evidence flags — and must reject it, not silently ignore
+it, the identical mistake this plan already caught once for
+`--frontend-context` (below).** Verified against the actual code:
+`run_compare`'s `{old_kind, new_kind} & {"directory", "package"}` branch
+(`cli_compare_helpers.py:1155-1168`) dispatches to
+`cli._dispatch_release_compare(...)` with its own explicit kwargs list —
+no `dump_manifest`/`manifest_path` field in it — so a directory/package
+`compare old_dir new_dir --dump-manifest old=... --dump-manifest new=...`
+would be accepted by Click, never forwarded into the release fan-out, and
+silently do nothing. `--dump-manifest` is conceptually the same kind of
+"how do I resolve this side's dump input" flag `_EVIDENCE_SET_INPUT_FLAGS`
+(`cli_resolve.py:618-622`) already exists to reject on set inputs
+(`--sources`, `--build-info`) — not a compile-context flag — so it gains
+its own entry there (the raw, pre-side-normalization Click dest, matching
+how `sources`/`build_info` are keyed), and
+`_reject_evidence_flags_for_set_inputs` picks it up automatically once
+listed, the same way `frontend_context`'s own fix (below) inherits
+`_COMPILE_CONTEXT_SET_INPUT_FLAGS`'s existing rejection path rather than
+writing a new one.
 **`--frontend-context` reaching `compile_context_options` means directory/package
 `compare` accepts it too — and must reject it, not silently ignore it.**
 The release/set-input fan-out (`cli_compare_release.py`) never threads a
@@ -1765,7 +1786,14 @@ rejects `--frontend-context`** test asserting `compare old_dir new_dir
 --frontend-context device` fails fast via `cli_resolve.py`'s existing
 set-input guard, the same way it already fails fast for `--gcc-path`/
 `--ast-frontend` on a directory/package input — proving the flag can't be
-silently accepted and then ignored by the release backend. A
+silently accepted and then ignored by the release backend. A companion
+**release rejects `--dump-manifest`** test asserting `compare old_dir
+new_dir --dump-manifest old=v1/abi.yml --dump-manifest new=v2/abi.yml`
+also fails fast via `_EVIDENCE_SET_INPUT_FLAGS`'s guard, the same way
+`--sources`/`--build-info` already do on a directory/package input —
+proving `--dump-manifest` can't reach `_dispatch_release_compare`'s
+kwargs (which never carries it) and silently do nothing on a release
+compare. A
 **`scan --frontend-context`**
 regression test asserting `abicheck scan --against` accepts `device` and
 threads it into the L2 header frontend the same way `dump`/`compare` do,
