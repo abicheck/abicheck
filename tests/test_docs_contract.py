@@ -1019,6 +1019,21 @@ def test_check_terminology_entries_flags_missing_short_definition(
     assert any("missing required 'short_definition'" in msg for _, msg in f.errors)
 
 
+def test_check_terminology_entries_flags_non_string_short_definition(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A truthy non-string short_definition (e.g. a YAML list/mapping) must
+    be reported, not silently accepted by the truthiness check alone
+    (regression test for the gap flagged in PR #619 review)."""
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_terminology_entries(
+        f, {"ABI": {"canonical_page": "owner.md", "short_definition": ["a", "b"]}}
+    )
+    assert any("short_definition must be a string" in msg for _, msg in f.errors)
+
+
 def test_check_terminology_entries_allows_two_terms_sharing_a_page(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

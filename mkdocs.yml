@@ -99,6 +99,7 @@ nav:
     - Platforms: reference/platforms.md
     - Tool Comparison: reference/tool-comparison.md
     - ABICC Flag Reference: reference/abicc-flags.md
+    - GitHub Action Inputs/Outputs: reference/github-action-inputs.md
   # Track 1 (educational): what ABI/API compatibility is and how to manage it,
   # from first principles (series part 0) to expert-level design guidance.
   - ABI/API Handling & Recommendations:

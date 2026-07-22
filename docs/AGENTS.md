@@ -233,6 +233,7 @@ duplication fixes, the document lifecycle, and the PR checklist.
 ```bash
 python scripts/gen_examples_docs.py     # docs/examples/*.md
 python scripts/gen_detector_spec.py     # docs/reference/detector-spec.{md,json}
+python scripts/gen_action_reference.py  # docs/reference/github-action-inputs.md
 ```
 
 Commit the resulting files. `scripts/verify.py --profile pr` (via the

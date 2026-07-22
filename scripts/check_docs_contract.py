@@ -84,6 +84,7 @@ _DUPLICATE_SCAN_EXCLUDE_PREFIXES = (
     "examples/by-verdict/",
     "examples/by-category/",
     "reference/detector-spec.md",
+    "reference/github-action-inputs.md",
     "schemas/",
 )
 _DUPLICATE_SCAN_EXCLUDE_NAMES = frozenset({"CLAUDE.md", "AGENTS.md"})
@@ -677,10 +678,17 @@ def _check_terminology_entries(
                 "exist as a file under docs/ (or escapes it via '..'/an "
                 "absolute path)",
             )
-        if not entry.get("short_definition"):
+        short_definition = entry.get("short_definition")
+        if not short_definition:
             f.err(
                 "terminology",
                 f"term {term!r}: missing required 'short_definition' field",
+            )
+        elif not isinstance(short_definition, str):
+            f.err(
+                "terminology",
+                f"term {term!r}: short_definition must be a string, got "
+                f"{type(short_definition).__name__}",
             )
         aliases = entry.get("aliases", [])
         if not isinstance(aliases, list):
