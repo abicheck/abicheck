@@ -1186,7 +1186,41 @@ visible first-party consumer. `action/run.sh` gains a matching `VERDICT`
 value (e.g. `NOT_COMPARABLE`) for each new code, and
 `_maybe_post_pr_comment`'s `ERROR`-only skip is joined by an explicit
 carve-out that still posts for `NOT_COMPARABLE` — this result deserves the
-comment more than an ordinary pass, not less. **Mapping the `VERDICT`
+comment more than an ordinary pass, not less.
+
+**The bash-level `VERDICT != "ERROR"` carve-out is not what actually
+decides whether a comment gets posted — the real suppression point is one
+layer deeper, in the Python renderer `_maybe_post_pr_comment` delegates
+to, and it was never taught about `not_comparable` at all.** Verified
+against the actual code: `_maybe_post_pr_comment` (`action/run.sh:897`)
+invokes `python3 -m abicheck.cli_pr_comment` (`:968`), whose
+`build_model`/`should_post` (`abicheck/pr_comment.py:628,643`) decide the
+actual outcome. `should_post(model, on="changes")` — the Action's own
+default (`INPUT_PR_COMMENT_ON:-changes`) — returns `True` only when
+`model.total_changes > 0` or `removed_libraries`/`added_libraries` is
+non-empty; a `not_comparable` report has none of these (the gate raised
+before any `Change` was ever produced), so even though the bash-level
+carve-out above correctly avoids an early return, `cli_pr_comment` itself
+would still silently decide there is "nothing to report" and post no
+comment at all — the exact suppression this whole fix exists to prevent,
+just one call deeper. Closing this needs three changes in
+`abicheck/pr_comment.py`, not just the bash-level one: (1) `CommentModel`
+gains a `not_comparable_reason: str | None = None` field; (2)
+`build_model` (or the mode-specific builder it dispatches to,
+`_from_compare`/`_from_release`) detects the canonical `verdict: null`
+shape (compare mode) or a release library entry's string
+`verdict == "not_comparable"` (the pre-existing `summary.json` idiom,
+D2) and populates it from the report's `reason`; (3) `should_post` checks
+`model.not_comparable_reason is not None` **before** the `on == "changes"`
+bucket-count logic and returns `True` regardless of bucket counts (only
+`on == "never"` still suppresses it) — mirroring "this result deserves the
+comment more than an ordinary pass, not less" at the layer that actually
+enforces it. The rendered comment body also needs its own distinct
+not-comparable headline (a `_header`-level case checked before the
+existing `scoped_verdict`/`removed_libraries`/bucket-count branches,
+since a not-comparable result means none of that bucket data is
+trustworthy) rather than falling through to whatever an empty
+`breaking`/`review`/`safe` set would otherwise render. **Mapping the `VERDICT`
 string is necessary but not sufficient — `run.sh`'s separate final
 exit-code section has no `NOT_COMPARABLE` branch of its own, verified
 against the actual code (`:1074-1145`): it starts `FINAL_EXIT=0` and only

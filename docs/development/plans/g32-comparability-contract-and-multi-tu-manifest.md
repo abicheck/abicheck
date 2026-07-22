@@ -1591,7 +1591,32 @@ blocking, independent of `discovered_only`), `action/run.sh` (a new
 `VERDICT="NOT_COMPARABLE"` case-branch alongside each of the `compare`/
 `scan`/`deps compare` exit-code `case` statements, and an explicit
 carve-out in `_maybe_post_pr_comment` so `NOT_COMPARABLE` still posts a
-comment despite the existing `ERROR`-only skip).
+comment despite the existing `ERROR`-only skip). **The bash-level carve-out
+above is not what actually decides whether a comment gets posted — that
+decision lives one layer deeper, in `abicheck/pr_comment.py`, which
+`_maybe_post_pr_comment` delegates to via `python3 -m
+abicheck.cli_pr_comment` (`action/run.sh:968`), and it was never taught
+about `not_comparable` at all.** Verified against the actual code:
+`should_post(model, on="changes")` (`pr_comment.py:643`) — the Action's
+own default policy — returns `True` only when `model.total_changes > 0`
+or `removed_libraries`/`added_libraries` is non-empty; a `not_comparable`
+report has none of these (no `Change` was ever produced), so
+`cli_pr_comment` would still silently post nothing even though the
+bash-level carve-out correctly avoids its own early return — the exact
+suppression this fix exists to close, one call deeper than the
+`run.sh` fix alone reaches. `abicheck/pr_comment.py` (`CommentModel` gains
+`not_comparable_reason: str | None = None`; `build_model` — or the
+mode-specific builder it dispatches to, `_from_compare`/`_from_release`
+— detects the canonical `verdict: null` shape or a release library
+entry's string `verdict == "not_comparable"` and populates it from the
+report's `reason`; `should_post` checks
+`model.not_comparable_reason is not None` *before* the `on == "changes"`
+bucket-count logic and returns `True` regardless of bucket counts, only
+`on == "never"` still suppressing it; the rendered body gains its own
+distinct not-comparable headline, checked before the existing
+`scoped_verdict`/`removed_libraries`/bucket-count branches in `_header`,
+since none of that bucket data is trustworthy when the comparison never
+ran).
 
 **Tests.** A `dump()`-level test asserting a real (non-manifest) dump
 returns a snapshot with a populated, non-`None` `contract` — the specific
@@ -1811,7 +1836,22 @@ final-exit section is a separate code path from the `case`-statement
 mapping and, verified against the actual code, has no `NOT_COMPARABLE`
 branch of its own; without it, `FINAL_EXIT` stays `0` and the step
 reports green despite the underlying CLI call having failed to compare
-at all.
+at all. A **`pr_comment.py` not-comparable** test suite, distinct from
+the Action-wrapper test above (proving the real decision point, not just
+that `run.sh` avoids its own early return): `should_post(model, on="changes")`
+returns `True` for a `CommentModel` with `not_comparable_reason` set,
+even though `total_changes == 0` and `removed_libraries`/
+`added_libraries` are both empty — proving the fix targets the actual
+suppression logic (`pr_comment.py:643`), not the bash-level carve-out
+alone; `should_post(model, on="never")` still returns `False` for the
+same model — proving the `on=never` policy still fully suppresses,
+`not_comparable` isn't an unconditional override; `build_model` given a
+raw `verdict: null` compare report (and, separately, a release
+`summary.json` with one library's `verdict: "not_comparable"`) populates
+`not_comparable_reason` correctly in both shapes; and a rendered-body
+assertion that the not-comparable headline is emitted (not an empty
+Breaking/Review/Safe section that would otherwise result from zero
+buckets) — the specific silent-drop this whole fix exists to close.
 
 **Example fixtures.** The Phase 0 "scope drift" pair stays a `tests/`-level
 fixture, not an `examples/case*/` catalog entry: `tests/test_validate_examples_unit.py`'s
