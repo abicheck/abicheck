@@ -284,13 +284,18 @@ Implements ADR-050 D1 and D2.
   (8) the documented real-world shape — `--header old=old/include/foo.h
   --header new=new/include/foo.h --include old=old/include --include
   new=new/include`, the same directory serving both roles — with an
-  **ordinary content edit to `foo.h` itself** between old and new produces
-  a *different* `scope_fingerprint` (correctly reflecting the compared
-  surface changed) but the *same* `profile_fingerprint` (the environment
-  that resolved it did not) — proving the exclusion actually prevents the
-  routine, intentional-header-edit case from spuriously hard-failing
-  `PROFILE_MISMATCH`, the specific regression this exclusion exists to
-  close.
+  **ordinary content edit to `foo.h` itself** (e.g. adding a parameter to a
+  declared function) between old and new leaves **both**
+  `scope_fingerprint` **and** `profile_fingerprint` matching: neither
+  fingerprint hashes the declared header's own content — `scope_fingerprint`
+  tracks declared TU/header *identity* (names, include structure, flags),
+  never content, precisely so an ordinary API/ABI edit is an unremarkable,
+  comparable case, not a mismatch; `profile_fingerprint` excludes exactly
+  this file per the bullet above. The comparison proceeds past the gate and
+  the diff reports the parameter addition as an ordinary `Change` —
+  `not_comparable` never fires on the routine case of "the thing being
+  compared changed," which is this whole tool's primary purpose, not an
+  edge case to special-case around.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -861,12 +866,29 @@ D3)`), not a new, narrower decorator applied only to two of those three.**
 Leaving `scan` out would strand the one-shot `abicheck scan --against`
 workflow on the `host` default with no way to request `device` — the same
 SYCL/DPC++ target a `scan`-driven audit can already reach via that command's
-side-aware `-H`/`-I` options. Adding `--frontend-context` to
-`compile_context_options` itself means `scan` picks it up automatically, the
-same way it already inherits `--ast-frontend` and the cross-toolchain
-`--gcc-*`/`--sysroot`/`--nostdinc` flags from that decorator, with no
-separate `scan_cmd` edit required beyond that decorator already being
-applied there today. New `cli_dump_manifest.py`
+side-aware `-H`/`-I` options.
+**The decorator alone only makes Click accept the flag — it does not by
+itself thread the value anywhere, and this phase must not stop at the
+decorator.** Verified against the actual code: `cli_options.resolve_compile_context`
+(the single function the `@compile_context_options` family resolves to for
+`compare`/`dump`/`scan` alike) has a fixed, explicit keyword-argument list
+and builds a `service_scan.CompileContext` from exactly those fields —
+neither has a slot for a host/device context today. Adding
+`--frontend-context` to the decorator without also extending
+`resolve_compile_context`'s signature and `CompileContext` would either
+raise a "got an unexpected keyword argument" error at the Click-callback
+boundary, or (if the new option is simply left unread) silently accept the
+flag and drop it before it ever reaches a dump. This phase therefore also
+adds `CompileContext.frontend_context: str = "host"` and a matching
+`frontend_context` parameter to `resolve_compile_context`, threaded into
+the `CompileContext(...)` it constructs. Because `scan_engine.run_scan_core`
+already passes the *whole* `CompileContext` object through to
+`service.resolve_input` (`compile=compile_context`, not individual
+unpacked fields — verified at `scan_engine.py:243-254`) the same way
+`dump`/`compare` do, `dump()`'s Phase-B addition of a `compile.frontend_context`
+read (needed there regardless, for the legacy CLI path) automatically
+reaches `scan` too once `CompileContext` carries the field — no
+`scan_engine.py`-specific dump-call change beyond that. New `cli_dump_manifest.py`
 sibling command module for the genuinely new `plan --dump-manifest` command
 only (per the root `CLAUDE.md`'s "larger command → sibling module"
 convention) — registering it is not implicit: `cli.py`'s bottom
@@ -877,7 +899,12 @@ list gains `abicheck.cli_dump_manifest` alongside the existing per-module
 entries, or the typed-decorator mypy lane fails on its `@click` decorators
 (both required steps of the root `CLAUDE.md`'s "Adding a new top-level
 command" procedure, steps 3–4) — `cli_dump_helpers.py` (extend
-`resolve_dump_depth`/`check_requested_depth_satisfied` to operate per-TU).
+`resolve_dump_depth`/`check_requested_depth_satisfied` to operate per-TU),
+`service_scan.py` (`CompileContext.frontend_context: str = "host"`),
+`cli_options.py` (`resolve_compile_context`'s new `frontend_context`
+parameter, threaded into the `CompileContext` it builds — the single
+choke point `compare`/`dump`/`scan` all resolve through, so no
+`scan_engine.py` dump-call-site change is needed beyond this).
 
 **Tests.** Manifest parser unit tests (the invariant violation, duplicate
 TU names, unknown fields, relative-path resolution, `frontend_context`
