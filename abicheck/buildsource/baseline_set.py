@@ -581,19 +581,20 @@ def _schema_and_profile_check(
 def _snapshot_digest_issue(
     target: str, snapshot_path: Path, expected_sha256: str
 ) -> str | None:
-    """Verify a resolved snapshot's content against the manifest's recorded
-    digest -- ``None`` when it matches (or the manifest recorded no digest
-    to check, an older/hand-authored manifest).
+    """Verify a resolved snapshot is well-formed, and (when the manifest
+    recorded one) matches its digest -- ``None`` when both checks pass.
 
-    Without this, a truncated/corrupted/silently-replaced snapshot file (a
-    partial artifact download, a stale cache restore) would still resolve as
-    ``resolved`` purely because a file with the right name exists on disk --
-    letting ``compare`` consume the wrong old-side content and report a
-    verdict from data that was never actually part of this baseline set
-    (Codex review).
+    The JSON-shape check (readable, valid JSON, a JSON object) always runs,
+    even when the manifest recorded no ``sha256`` (an older/hand-authored
+    manifest): without it, a truncated/corrupted/non-JSON snapshot file
+    would still resolve as ``resolved`` purely because a file with the
+    right name exists on disk, for any baseline-set whose manifest happens
+    to have no recorded digest -- letting ``compare`` consume garbage
+    old-side content instead of getting this resolver's typed ``ambiguous``
+    outcome (Codex review). The digest comparison itself stays conditional
+    on ``expected_sha256`` being present, since older manifests never
+    recorded one.
     """
-    if not expected_sha256:
-        return None
     try:
         with snapshot_path.open(encoding="utf-8") as fh:
             raw = json.load(fh)
@@ -614,6 +615,8 @@ def _snapshot_digest_issue(
             f"target {target!r}'s snapshot {snapshot_path.name!r} does not "
             "contain a JSON object -- the baseline-set is corrupt."
         )
+    if not expected_sha256:
+        return None
     actual_sha256 = compute_snapshot_content_hash(raw)
     if actual_sha256 != expected_sha256:
         return (

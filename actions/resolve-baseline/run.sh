@@ -136,13 +136,23 @@ TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
 ' "$_ARCHIVE_COPY" "$BASELINE_DIR" \
         || _fail_ambiguous "failed to extract $BASELINE_PATH (.tar.zst) -- the archive is truncated or corrupted, or this runner has neither a 'zstd' command-line tool nor the Python 'zstandard' package available (install one of them, e.g. 'apt-get install zstd' or 'pip install zstandard')."
       ;;
-    *.tar.gz | *.tgz)
-      tar -xzf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \
-        || _fail_ambiguous "failed to extract $BASELINE_PATH (tar -xzf) -- the archive is truncated or corrupted."
-      ;;
-    *.tar)
-      tar -xf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \
-        || _fail_ambiguous "failed to extract $BASELINE_PATH (tar -xf) -- the archive is truncated or corrupted."
+    *.tar.gz | *.tgz | *.tar)
+      # Delegate to TarExtractor._safe_extract instead of plain `tar -x`:
+      # bare tar has no member validation at all, so a malformed archive
+      # could plant a `..`-escaping path, a symlink escaping $BASELINE_DIR,
+      # or a device/FIFO entry on disk before the symlink/manifest checks
+      # below even run -- the same class of risk the .tar.zst branch above
+      # already closed by routing through this same extractor (Codex
+      # review). `tarfile.open`'s default mode auto-detects gzip vs. plain
+      # tar from the file itself, so one call handles both extensions.
+      python3 -c '
+import sys
+from pathlib import Path
+from abicheck.package import TarExtractor
+
+TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
+' "$_ARCHIVE_COPY" "$BASELINE_DIR" \
+        || _fail_ambiguous "failed to extract $BASELINE_PATH -- the archive is truncated or corrupted, or contains a disallowed member (path traversal, a symlink escaping the extraction root, or a device/FIFO entry)."
       ;;
     *)
       rm -f "$_ARCHIVE_COPY" || true

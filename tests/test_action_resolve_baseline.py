@@ -667,6 +667,49 @@ class TestArchiveExtraction:
         assert result.returncode == 1
         assert outputs.get("outcome") == "ambiguous"
 
+    def test_tar_gz_archive_rejects_path_traversal_member(
+        self, tmp_path: Path
+    ) -> None:
+        # Plain .tar.gz/.tar inputs now route through the same
+        # TarExtractor._safe_extract member validation as the .tar.zst
+        # branch above, instead of a bare `tar -x` with no member
+        # validation at all -- confirm a "../"-escaping member is rejected
+        # before extraction (Codex review).
+        archive_path = tmp_path / "baseline-traversal.tar.gz"
+        with tarfile.open(archive_path, "w:gz") as tf:
+            manifest_bytes = json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": "v1.0.0",
+                    "profile": PROFILE,
+                    "snapshot_schema": 9,
+                    "fact_set": None,
+                    "artifacts": [_target_artifact("libpvxs")],
+                },
+                indent=2,
+            ).encode("utf-8")
+            info = tarfile.TarInfo("manifest.json")
+            info.size = len(manifest_bytes)
+            tf.addfile(info, io.BytesIO(manifest_bytes))
+
+            evil_bytes = b"escaped"
+            evil = tarfile.TarInfo("../escaped.txt")
+            evil.size = len(evil_bytes)
+            tf.addfile(evil, io.BytesIO(evil_bytes))
+
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(archive_path),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_REQUIRED": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert outputs.get("outcome") == "ambiguous"
+
     def test_unrecognized_archive_extension_fails(self, tmp_path: Path) -> None:
         bogus = tmp_path / "baseline.zip"
         bogus.write_bytes(b"PK\x03\x04not-really-a-zip")

@@ -655,6 +655,24 @@ def test_resolve_target_digest_check_rejects_snapshot_that_is_not_a_json_object(
     assert "JSON object" in result.message
 
 
+def test_resolve_target_corrupt_snapshot_is_ambiguous_even_without_recorded_digest(
+    tmp_path: Path,
+) -> None:
+    # An older/hand-authored manifest with no recorded sha256 has nothing
+    # to compare a digest against, but that must not skip JSON-shape
+    # validation entirely -- a corrupt/non-JSON snapshot with no recorded
+    # digest was previously resolving as RESOLVED purely because a file
+    # with the right name existed on disk (Codex review).
+    _write_manifest(
+        tmp_path,
+        artifacts=[_target_artifact("libpvxs")],  # no sha256
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text("not valid json", encoding="utf-8")
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert not result.ok
+
+
 def test_strip_volatile_snapshot_fields_strips_nested_build_source_coverage(
     tmp_path: Path,
 ) -> None:
