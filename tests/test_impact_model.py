@@ -148,6 +148,15 @@ class TestImpactAssessmentHasSignal:
         assessment = ImpactAssessment(decision=FindingDecision(demotion="compatible"))
         assert assessment.has_signal() is True
 
+    def test_suppressed_state_has_signal(self) -> None:
+        """A suppressed finding with no proof path/reachability/confidence/
+        modulation metadata still has a non-default decision.state
+        ("suppressed") -- impact_assessment is the only object carrying that
+        decision, so omitting it here would silently drop the one thing this
+        assessment had to say (Codex review)."""
+        assessment = ImpactAssessment(decision=FindingDecision(state="suppressed"))
+        assert assessment.has_signal() is True
+
     def test_non_high_confidence_has_signal(self) -> None:
         """A finding whose only non-default impact field is a reduced
         confidence (e.g. the vtable/RTTI layout findings in
@@ -253,6 +262,7 @@ class TestAssessChange:
         change = _change()
         assessment = assess_change(change, suppressed=True)
         assert assessment.decision.state == "suppressed"
+        assert assessment.has_signal() is True
 
     def test_modulation_and_demotion_carried_into_decision(self) -> None:
         change = _change(

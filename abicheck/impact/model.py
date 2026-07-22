@@ -170,6 +170,7 @@ class ImpactAssessment:
             or self.reachability_state != ReachabilityState.UNKNOWN
             or self.public_reachable
             or self.confidence != Confidence.HIGH
+            or self.decision.state != "kept"
             or self.decision.reason_code is not None
             or self.decision.demotion is not None
             or self.correlated_change_kind is not None
