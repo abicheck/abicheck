@@ -1909,7 +1909,17 @@ that risks drifting from what Phase A's gate actually computes.
 
 **Goal & acceptance criteria.**
 - New `abicheck/dump_manifest.py`: strict YAML parser (unknown fields
-  error), `roots`/`translation_units` schema, `name`-uniqueness,
+  error, **and duplicate mapping keys error too** — `yaml.safe_load` on
+  the repo's existing PyYAML stack silently accepts a duplicate key with
+  last-value-wins semantics, so `required: false` followed later by
+  `required: true` in the same TU mapping would otherwise pass unnoticed;
+  since `required`, `contributes_to_abi`, `project_owned`, and
+  `frontend_context` all control extraction scope or hard-fail behavior,
+  the parser installs a `yaml.SafeLoader` subclass overriding
+  `construct_mapping` to raise `ManifestValidationError` on any duplicate
+  key, the same mechanism and error type as the unknown-field/invariant
+  checks below, not a separate ad hoc check), `roots`/`translation_units`
+  schema, `name`-uniqueness,
   `contributes_to_abi=True ⇒ required=True` invariant enforced at parse
   time (a validation error, not a silent coercion). A TU's `includes`
   entries accept either a bare path string (external-by-default, D1's
@@ -1941,6 +1951,28 @@ that risks drifting from what Phase A's gate actually computes.
   in this phase) and in the CLI flag's own validation. Phase D, when it
   lands, is what lifts this restriction once `sycl_context.py`'s selector
   actually exists to honor the request — not before.
+- **The base-profile section also accepts optional `public_header_paths`/
+  `public_header_dirs` (root-relative), and `--dump-manifest` rejects
+  `--public-header`/`--public-header-dir` outright when combined on
+  `dump`.** ADR-050 D1 already documents `scope_fingerprint` hashing
+  `public_header_paths`/`public_header_dirs`/filtering policy — for
+  today's legacy single-header path that's literally the existing
+  `--public-header`/`--public-header-dir` CLI flags (ADR-015, D1), but a
+  manifest schema that only carried `roots`/`translation_units` would
+  leave `plan --dump-manifest`'s `scope_fingerprint` (below) computed from
+  the manifest document alone while the *actual* `dump --dump-manifest
+  ... --public-header foo.h` invocation folded in a CLI flag `plan` never
+  saw — a real, silent divergence between the diagnostic and gate values,
+  not just an omission. Rather than teaching `plan` to also resolve CLI
+  flags (breaking its "manifest document alone, no compiler/CLI-state
+  needed" design), the manifest itself gains these two optional
+  base-profile fields, and `dump` raises a `UsageError` if `--dump-manifest`
+  and either `--public-header`/`--public-header-dir` are given together —
+  the same "manifest is the sole source of truth once selected" pattern
+  this phase already applies to `--frontend-context`'s CLI/manifest split
+  above. A manifest caller who needs provenance classification declares it
+  in the manifest; a legacy caller keeps using the CLI flags exactly as
+  today.
 - **The per-TU loop and `TuFragment` handling land in a new sibling
   module, not inline in `dumper.py` itself — `dumper.py` has zero lines of
   headroom left before the AI-readiness file-size gate's hard cap.**
@@ -2218,7 +2250,14 @@ count still passes `<= COMPARE_FLAG_BUDGET` once `--dump-manifest` and
 gained both ledger entries in this same phase rather than the flags
 landing unaccounted-for. Manifest parser unit tests (the invariant violation, duplicate
 TU names, unknown fields, relative-path resolution, `frontend_context`
-accepted/defaulted/rejected-when-invalid). A **Phase-B-only device
+accepted/defaulted/rejected-when-invalid). A **duplicate-key rejection**
+test asserting a manifest re-declaring the same mapping key twice within
+one TU (e.g. `required: false` followed by `required: true` in the same
+block) raises `ManifestValidationError` rather than silently taking
+PyYAML's last-value-wins result — covering `required`, `contributes_to_abi`,
+`project_owned`, and `frontend_context` as the fields whose silent
+last-value-wins would actually change extraction scope or hard-fail
+behavior. A **Phase-B-only device
 rejection** test asserting a manifest declaring `frontend_context:
 device` raises `ManifestValidationError` (not silently accepted and
 extracted as if it were `host`), and a companion CLI test asserting
@@ -2240,7 +2279,17 @@ redundant with the ancestor rule. `dumper.py` multi-TU
 integration tests (`@pytest.mark.integration`, needs castxml/clang) using
 Phase 0's fixtures. A `plan --dump-manifest` unit test asserting it never
 invokes a compiler and prints `scope_fingerprint` only — never a
-`profile_fingerprint` value, which would require one. A `--frontend-context` CLI-flag unit test for the legacy
+`profile_fingerprint` value, which would require one. A **manifest-mode
+public-header exclusivity** test asserting `dump --dump-manifest
+manifest.yml --public-header foo.h` fails fast with a `UsageError` (and
+the same for `--public-header-dir`), proving the CLI flags can't silently
+combine with an explicit manifest and leave `plan --dump-manifest`'s
+printed `scope_fingerprint` blind to an input the real `dump` invocation
+actually used; a companion test asserting a manifest declaring
+`public_header_paths`/`public_header_dirs` in its base profile changes
+`scope_fingerprint` the same way `--public-header`/`--public-header-dir`
+already change it on the legacy path, confirming the manifest fields are
+a genuine replacement, not a no-op. A `--frontend-context` CLI-flag unit test for the legacy
 (non-manifest) path, mirroring the manifest-field test. A **side-scoped
 `compare --dump-manifest`** test asserting `compare old.so new.so
 --dump-manifest old=v1/abi.yml --dump-manifest new=v2/abi.yml` dumps each

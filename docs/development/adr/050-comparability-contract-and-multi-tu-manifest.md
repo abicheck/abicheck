@@ -174,7 +174,15 @@ not a latent surprise discovered after Phase A ships.
   `name`, not by list position), each TU's ordered includes and forced
   includes, each TU's `required`/`contributes_to_abi` flags, and the
   `public_header_paths`/`public_header_dirs`/filtering policy already
-  threaded through `dumper.py` today. The `contributes_to_abi` flag is a
+  threaded through `dumper.py` today. **For the legacy single-TU path this
+  filtering policy is exactly today's `--public-header`/`--public-header-dir`
+  CLI flags; for an explicit `--dump-manifest`, the same policy is a
+  base-profile field on the manifest document itself (D3), not the CLI
+  flags** — `--dump-manifest` and `--public-header`/`--public-header-dir`
+  are mutually exclusive on `dump`, so the manifest document is always the
+  complete, sole source of this fingerprint's inputs, never a CLI-flag/
+  manifest split that `plan --dump-manifest` (D3) couldn't see half of.
+  The `contributes_to_abi` flag is a
   hashed input, not just a manifest-validation detail (D3): flipping a TU
   from `contributes_to_abi: false` to `true` changes which declarations
   feed the ABI model without necessarily changing that TU's includes at
@@ -1433,7 +1441,10 @@ finding.
 ### D3. Manifest and real multi-TU dump
 
 New `abicheck/dump_manifest.py`: a strict YAML parser (unknown fields are
-errors, not silently ignored) for a `roots` / `translation_units` document —
+errors, and duplicate mapping keys are errors too — `yaml.safe_load`'s
+default last-value-wins duplicate-key handling is exactly the kind of
+silent scope drift this ADR exists to catch, not silently ignored) for a
+`roots` / `translation_units` document —
 each TU carries `name` (unique), `includes` (ordered), `forced_includes`
 (ordered, local to that TU only), `required: bool`, and
 `contributes_to_abi: bool`, with the invariant
@@ -1444,6 +1455,20 @@ contributes" is the exact shape that produces false removals). All existing
 single-header/`-H` CLI invocations construct a single-TU manifest internally
 (one `legacy-main` TU) — no behavior change for a caller not opting into a
 manifest file.
+
+The base profile also carries `public_header_paths`/`public_header_dirs`
+(both optional, root-relative, D1's provenance-classification inputs) —
+the manifest-mode equivalent of today's `--public-header`/
+`--public-header-dir` CLI flags. **`--dump-manifest` and `--public-header`/
+`--public-header-dir` are mutually exclusive on `dump`** (a `UsageError`,
+the same "manifest is the sole source of truth for scope" pattern D3
+already applies to `--frontend-context`'s CLI/manifest split): a caller
+using an explicit manifest declares provenance classification inside it,
+so `scope_fingerprint` (D1) always has one complete, manifest-only source
+for these inputs rather than a CLI-flag/manifest-field split that D3's
+`plan --dump-manifest` diagnostic (see below) — which reads the manifest
+document only, never invoking a compiler or resolving CLI flags — could
+never fully see.
 
 `dumper.py`'s `dump()` gains a manifest-driven path: **one castxml/clang
 invocation per TU** (base compile profile + that TU's own forced includes),
