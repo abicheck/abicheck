@@ -328,12 +328,14 @@ Implements ADR-050 D1 and D2.
   makes the release fan-out fix (below) actually surface at the release
   level instead of being computed per-library and then silently
   outranked.
-- The gate is wired at **all four** entry points in one phase, closing the
+- The gate is wired at **all five** entry points in one phase, closing the
   gap AGENTS.md's "Known gaps" section already names for the depth
   contract rather than repeating the CLI-only mistake: `checker.compare`
   (core), `service.py`'s `ScanRequest`/`compare_snapshots`,
-  `mcp_server.py`'s MCP compare tools, **and** `cli_compare_release.py`'s
-  directory/package fan-out.
+  `mcp_server.py`'s MCP compare tools, `cli_compare_release.py`'s
+  directory/package fan-out, **and** `compat/cli.py`'s ABICC-compatible
+  `compat check` (which calls `checker.compare` directly too — see the
+  dedicated bullet below for its own, independent exit-code contract).
 - **The release fan-out needs a dedicated fix, not inherited behavior.**
   `_compare_one_library` (`cli_compare_release.py:180-269`) wraps its
   entire per-library flow in `except (click.ClickException,
@@ -354,9 +356,41 @@ Implements ADR-050 D1 and D2.
   library and then silently outranked by a co-occurring `BREAKING`, and
   `docs/reference/exit-codes.md`'s multi-library section documents both
   together.
+- **A fifth entry point needs its own exit code, not the fourth one's.**
+  `abicheck/compat/cli.py`'s ABICC-compatible `compat check` command calls
+  `checker.compare` directly (`from ..checker import compare`, the call
+  around `:967`) — a separate front-end from native `compare`, with its own
+  independent 0–2/3–11 exit-code contract (`_classify_compat_error_exit_code`
+  in `compat/_errors.py`) that this phase must not silently break by leaving
+  a `ProfileMismatchError`/`ScopeMismatchError` to fall into that function's
+  generic fallback code. `_classify_compat_error_exit_code` gains an explicit
+  `isinstance(exc, (ProfileMismatchError, ScopeMismatchError))` check —
+  mirroring its existing `KeyboardInterrupt` special case — returning **`9`**,
+  the one integer the current 3–11 range documents no meaning for (3/4/5/6/7/8/10/11
+  are all taken; 9 is the sole gap). This is deliberately a different number
+  from native `compare`'s `16`: the two commands already use disjoint,
+  independently-documented exit-code schemes (native `compare`'s legacy/severity-aware
+  0/1/2/4 doubling vs. `compat check`'s ABICC-mimicking 0/1/2/3-11), so reusing
+  `16` here would misleadingly imply a shared numbering that doesn't exist.
+  `compat/CLAUDE.md`'s exit-code table and a changelog fragment are updated in
+  the same phase, per that file's own stated policy that changing the
+  exit-code contract "requires a CHANGELOG note and downstream coordination."
 - Reporting: `reporter.py`/`sarif.py`/`junit_report.py` gain a
   `not_comparable` top-level result distinct from every existing verdict
   value — never coerced into `compatible`/`breaking`.
+- **`verdict: null` is JSON-output shape, not a `checker_types.DiffResult`
+  typing change.** `DiffResult` (`verdict: Verdict = Verdict.NO_CHANGE`,
+  non-nullable) is never constructed at all for a
+  `ProfileMismatchError`/`ScopeMismatchError` case — the gate raises before
+  any diff runs, so each front-end's own exception handler assembles the
+  `verdict: null` JSON shape; `DiffResult` itself needs no new field for
+  that path. The **mixed-pair** case (below) is different: it's an ordinary,
+  non-exception comparison that completes and produces real `DiffResult`s,
+  just with reduced evidence on one side — so `contract_coverage` is a
+  genuinely new field, not report-assembly shape. `checker_types.py` gains
+  `contract_coverage: str | None = None` on `DiffResult` itself, and
+  `checker.py`'s `compare()` sets it when exactly one side carries a
+  `contract`.
 - The published JSON contract moves with the reporters, in this phase, not
   after: `abicheck/schemas/compare_report.schema.json` currently requires
   `verdict` and restricts it to a fixed string enum with no `null` member.
@@ -410,8 +444,9 @@ warm-cache acceptance-criteria bullets above), `errors.py`
 `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION` threshold + the
 `snapshot_from_dict` hard-rejection branch, `contract` round-trip through
 `snapshot_to_dict`/`snapshot_from_dict`), `checker.py` (gate call at the
-top of `compare`, `contract_coverage` field on the result), `service.py`,
-`mcp_server.py`, `cli.py` (flag + the new,
+top of `compare`, `contract_coverage` field on the result),
+`checker_types.py` (`DiffResult.contract_coverage: str | None = None`),
+`service.py`, `mcp_server.py`, `cli.py` (flag + the new,
 distinct `not_comparable` exit code), `cli_compare_release.py`
 (`_compare_one_library`'s dedicated
 `except (ProfileMismatchError, ScopeMismatchError)` branch, ordered before
@@ -419,9 +454,13 @@ distinct `not_comparable` exit code), `cli_compare_release.py`
 above; this is not covered by the CLI's own exit-code handling, it is a
 separate call path), `cli_compare_release_helpers.py`
 (`_RELEASE_VERDICT_ORDER`'s new rank-6 `not_comparable` entry),
-`docs/reference/exit-codes.md` (a
+`compat/cli.py` (no call-site change beyond routing through the updated
+`_classify_compat_error_exit_code`), `compat/_errors.py`
+(`_classify_compat_error_exit_code`'s new `ProfileMismatchError`/
+`ScopeMismatchError` branch returning `9`), `compat/CLAUDE.md` (exit-code
+table update), `docs/reference/exit-codes.md` (a
 new row in both the legacy and severity-aware tables, **and** the
-multi-library section), `reporter.py`,
+multi-library section, **and** the `compat check` table's `9` row), `reporter.py`,
 `sarif.py`, `junit_report.py`, `abicheck/schemas/compare_report.schema.json`,
 `abicheck/schemas/__init__.py` (`REPORT_SCHEMA_VERSION` bump),
 `docs/schemas/v1/compare_report.schema.json` (regenerated via
@@ -479,7 +518,11 @@ severity-aware release schemes — proving `not_comparable`'s precedence
 over the removed-library mechanism is unconditional, unlike that
 mechanism's own existing scheme-dependent precedence; gate unit tests
 for all
-four entry points; a `--diagnostic-comparison` end-to-end test; a
+five entry points; a **compat-mode exit-code** test asserting
+`compat check` returns exactly `9` (never `10`'s generic fallback, never
+`16`) for a `ProfileMismatchError`/`ScopeMismatchError`, exercised through
+`_classify_compat_error_exit_code` directly and through a `compat check`
+end-to-end invocation; a `--diagnostic-comparison` end-to-end test; a
 backward-compat test asserting a contract-less snapshot pair compares
 unchanged; a **mixed-pair** test (one side `contract`, one side none)
 asserting the comparison never hard-fails and instead carries a
@@ -492,8 +535,14 @@ exits successfully — proving `contract_coverage` is structurally outside
 the findings list any severity flag scans, not merely untested against the
 one flag checked last time.
 
-**Example fixtures.** The Phase 0 "scope drift" pair, promoted to a real
-`examples/case2xx_profile_scope_mismatch_gate/` once the gate exists.
+**Example fixtures.** The Phase 0 "scope drift" pair stays a `tests/`-level
+fixture, not an `examples/case*/` catalog entry: `tests/test_validate_examples_unit.py`'s
+`_VALID_VERDICTS` frozenset accepts only the five real `Verdict` strings, and
+`not_comparable` is deliberately not one of them (it is a precondition
+failure, never a verdict) — the same reasoning Phase C already applies to
+`INCONSISTENT_DECLARATION`. Adding it to `examples/` would need a change to
+that frozenset and the catalog machinery it gates, which is out of scope
+here.
 
 **Out of scope (deferred to later phases or explicitly not planned).**
 `expected_public_headers` coverage inventory (ADR-050 non-goals) is not

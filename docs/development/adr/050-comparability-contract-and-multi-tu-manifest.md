@@ -367,6 +367,32 @@ multi-library section) are extended to recognize that verdict value the
 same way the single-library path does, rather than folding it into
 `"ERROR"`.
 
+**A fifth surface calls `checker.compare` directly, with its own,
+independent exit-code contract that this ADR must not silently
+break: `abicheck/compat/cli.py`'s ABICC-compatible `compat check`
+command** (`from ..checker import compare`, called around `:967`).
+Because `compare()` there is the exact same function D2's gate wraps,
+`ProfileMismatchError`/`ScopeMismatchError` propagate to `compat check`
+automatically — the gap is not "the gate doesn't fire," it's that nothing
+classifies the resulting exception into a *deliberate* compat-mode
+outcome. `compat/CLAUDE.md` documents a closed exit-code contract (`0`
+compatible, `1` `BREAKING`, `2` `API_BREAK`, `3`–`11` errors via
+`_classify_compat_error_exit_code` in `compat/_errors.py`) that "requires
+a CHANGELOG note and downstream coordination" to change — this ADR cannot
+reuse `16` here (that would silently break the documented ABICC-mimicking
+numbering, which has nothing to do with the native `compare` command's own
+scheme) nor let the exception fall through to `_classify_compat_error_exit_code`'s
+generic `10` fallback (an existing, different meaning — "generic
+internal/tool error" — that a `not_comparable` result must not be
+conflated with, for the same reason it must not be folded into `"ERROR"`
+on the release path). `_classify_compat_error_exit_code` gains an explicit
+`isinstance(exc, (ProfileMismatchError, ScopeMismatchError))` check —
+mirroring its existing `KeyboardInterrupt` special case — returning **`9`**,
+the one integer the current 3–11 range documents no meaning for
+(3/4/5/6/7/8/10/11 are all taken; 9 is the sole gap), with `compat/CLAUDE.md`'s
+exit-code table and a changelog fragment updated in the same phase per that
+file's own stated policy.
+
 On the reporting surface (`reporter.py`,
 `sarif.py`, `junit_report.py`), a `not_comparable` result is a distinct
 top-level state — `verdict: null`, a `reason` object naming the mismatched
@@ -374,6 +400,26 @@ fingerprint field(s) — never coerced into `COMPATIBLE`/`BREAKING`'s existing
 enum values. A `--diagnostic-comparison` opt-in flag (default off) downgrades
 the hard-fail to a tentative diff with `assurance: none` stamped on every
 finding, for exploratory use — never the default, and never silent.
+
+**`verdict: null` is JSON-output shape, not a change to `checker_types.DiffResult`'s
+own typing — this needs to be explicit, or an implementer reasonably reads
+D2 as requiring `DiffResult.verdict: Verdict | None`.** `DiffResult`
+(`checker_types.py:234,239`, `verdict: Verdict = Verdict.NO_CHANGE`) is
+never constructed for a `ProfileMismatchError`/`ScopeMismatchError` case at
+all — the gate raises *before* any `diff_*` module runs, so there is no
+comparison to build a `DiffResult` from. `verdict: null` in JSON is
+assembled fresh by each front-end's own exception-handling path (`cli.py`,
+`service.py`, `mcp_server.py`, `cli_compare_release.py`'s dict literal,
+`compat/cli.py`) when it catches the exception — `DiffResult.verdict`
+itself stays exactly as typed today, `Verdict`, never `Verdict | None`, so
+no downstream consumer that already assumes a concrete `Verdict` needs to
+change. `contract_coverage` (the mixed-pair annotation) is a genuinely
+different case, and does need a real field: unlike the hard-fail path, a
+mixed pair *does* produce an ordinary `DiffResult` — `checker_types.py`
+gains `contract_coverage: str | None = None` on `DiffResult` itself
+(additive, mirroring how `assurance` already needs the same treatment for
+`--diagnostic-comparison`'s tentative-diff findings), and `checker.py`'s
+`compare()` sets it when exactly one side carries a `contract`.
 `verdict: null` is a **published contract change**, not just an internal
 one: `abicheck/schemas/compare_report.schema.json` currently requires
 `verdict` and restricts it to a fixed string enum with no `null` member, and
