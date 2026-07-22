@@ -378,6 +378,30 @@ class TestFailureTaxonomy:
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/resolve-baseline/run.sh not found"
 )
+def _real_elf_bytes() -> bytes:
+    """Return a known-good system .so's bytes for a real ELF round-trip.
+
+    Hand-crafting a minimal-but-valid ELF (dynamic section, section header
+    table, ...) via elftools' write APIs is heavy for a fixture; reusing a
+    real system library is the same trade-off
+    ``tests/test_bundle.py::test_build_bundle_snapshot_with_real_elf``
+    makes to exercise the real ``parse_elf_metadata`` path. This module
+    invokes ``run.sh`` as a real subprocess, so (unlike
+    ``tests/test_baseline_set.py``) there is no monkeypatch seam to stub
+    the deep ELF-parse check with.
+    """
+    for candidate in (
+        "/lib/x86_64-linux-gnu/libc.so.6",
+        "/lib64/libc.so.6",
+        "/usr/lib/libc.so.6",
+        "/usr/lib/x86_64-linux-gnu/libc.so.6",
+    ):
+        p = Path(candidate)
+        if p.is_file():
+            return p.read_bytes()
+    pytest.skip("no system libc available for ELF round-trip")
+
+
 class TestBundleResolution:
     def test_bundle_returns_binaries_not_snapshots(self, tmp_path: Path) -> None:
         baseline_dir = tmp_path / "baseline"
@@ -393,8 +417,9 @@ class TestBundleResolution:
         )
         binaries_dir = baseline_dir / "binaries"
         binaries_dir.mkdir()
-        (binaries_dir / "libpvxs.so.1.5").write_bytes(b"\x7fELF-fake")
-        (binaries_dir / "libpvxsIoc.so.1.5").write_bytes(b"\x7fELF-fake")
+        elf_bytes = _real_elf_bytes()
+        (binaries_dir / "libpvxs.so.1.5").write_bytes(elf_bytes)
+        (binaries_dir / "libpvxsIoc.so.1.5").write_bytes(elf_bytes)
 
         result, outputs = _run_action(
             {
@@ -496,7 +521,7 @@ class TestArchiveExtraction:
     def test_unrecognized_archive_extension_fails(self, tmp_path: Path) -> None:
         bogus = tmp_path / "baseline.zip"
         bogus.write_bytes(b"PK\x03\x04not-really-a-zip")
-        result, _ = _run_action(
+        result, outputs = _run_action(
             {
                 "INPUT_BASELINE_PATH": str(bogus),
                 "INPUT_CHANNEL": "release-contract",
@@ -507,6 +532,39 @@ class TestArchiveExtraction:
         )
         assert result.returncode == 1
         assert "not a recognized archive" in result.stdout
+        # baseline-path WAS a real file, so this is a real (if unusable)
+        # archive, not a bare usage error -- must carry the same typed
+        # outputs every other archive-processing failure does (Codex
+        # review, third round).
+        assert outputs.get("outcome") == "ambiguous"
+        assert outputs.get("bootstrap") == "false"
+        assert outputs.get("channel") == "release-contract"
+
+    def test_truncated_tar_gz_archive_fails_with_typed_outputs(
+        self, tmp_path: Path
+    ) -> None:
+        # A recognized extension whose contents are truncated/corrupted
+        # (a partial download, an interrupted upload) must fail through the
+        # same typed ambiguous path as an unrecognized extension or a
+        # malformed extracted shape -- not a bare runner-looking failure
+        # (Codex review, third round).
+        archive_path = tmp_path / "truncated.tar.gz"
+        archive_path.write_bytes(b"\x1f\x8b\x08\x00not-a-complete-gzip-stream")
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(archive_path),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_REQUIRED": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "failed to extract" in result.stdout
+        assert outputs.get("outcome") == "ambiguous"
+        assert outputs.get("bootstrap") == "false"
+        assert outputs.get("channel") == "release-contract"
 
     def test_archive_with_no_manifest_anywhere_hard_fails_even_when_not_required(
         self, tmp_path: Path

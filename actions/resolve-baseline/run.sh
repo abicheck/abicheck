@@ -98,23 +98,31 @@ elif [[ -f "$BASELINE_PATH" ]]; then
   # --force-local support, which isn't guaranteed identical across GNU tar
   # and macOS's bsdtar.
   _ARCHIVE_COPY="$_EXTRACT_DIR.archive-input"
-  cp "$BASELINE_PATH" "$_ARCHIVE_COPY" || _fail "failed to stage $BASELINE_PATH for extraction."
+  # Every failure branch below uses _fail_ambiguous, not _fail: baseline-path
+  # WAS a file that existed, so a staging/extraction/format failure here
+  # means the archive itself is truncated, corrupted, or unusable -- the
+  # same class of malformed-baseline-set failure the no-manifest/ambiguous-
+  # subdirectory and symlink checks below already report as ambiguous, not
+  # a bare runner/input failure a continue-on-error caller can't tell apart
+  # from an unrelated problem (Codex review, third round).
+  cp "$BASELINE_PATH" "$_ARCHIVE_COPY" \
+    || _fail_ambiguous "failed to stage $BASELINE_PATH for extraction -- the archive may be truncated or unreadable."
   case "$BASELINE_PATH" in
     *.tar.zst)
       tar --zstd -xf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \
-        || _fail "failed to extract $BASELINE_PATH (tar --zstd)."
+        || _fail_ambiguous "failed to extract $BASELINE_PATH (tar --zstd) -- the archive is truncated or corrupted."
       ;;
     *.tar.gz | *.tgz)
       tar -xzf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \
-        || _fail "failed to extract $BASELINE_PATH (tar -xzf)."
+        || _fail_ambiguous "failed to extract $BASELINE_PATH (tar -xzf) -- the archive is truncated or corrupted."
       ;;
     *.tar)
       tar -xf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \
-        || _fail "failed to extract $BASELINE_PATH (tar -xf)."
+        || _fail_ambiguous "failed to extract $BASELINE_PATH (tar -xf) -- the archive is truncated or corrupted."
       ;;
     *)
       rm -f "$_ARCHIVE_COPY" || true
-      _fail "baseline-path '$BASELINE_PATH' is a file but not a recognized archive (.tar.zst/.tar.gz/.tgz/.tar)."
+      _fail_ambiguous "baseline-path '$BASELINE_PATH' is a file but not a recognized archive (.tar.zst/.tar.gz/.tgz/.tar)."
       ;;
   esac
   rm -f "$_ARCHIVE_COPY" || true

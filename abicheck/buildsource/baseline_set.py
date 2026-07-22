@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import serialization
+from ..elf_metadata import parse_elf_metadata
 
 #: The only ``manifest_version`` ``actions/baseline/build_manifest.py`` has
 #: ever emitted. A resolver that doesn't recognize the value on a real
@@ -642,17 +643,22 @@ _ELF_MAGIC = b"\x7fELF"
 
 
 def _not_elf_issue(member: str, binary_path: Path) -> str | None:
-    """Sniff *binary_path*'s ELF magic -- ``None`` when it starts with the
-    4-byte ELF header, a problem string otherwise.
+    """Check whether ``build_bundle_snapshot()`` would actually keep
+    *binary_path* -- ``None`` when it would, a problem string otherwise.
 
     ``build_bundle_snapshot()`` (``abicheck/bundle.py``) silently skips any
-    staged input that isn't a real ELF file rather than erroring, so a
-    non-ELF file staged under ``binaries/`` (e.g. a JSON snapshot placed at
-    the wrong path, or a truncated/replaced binary that happens to still
-    match its recorded digest) would otherwise resolve as ``resolved`` here
-    and then silently vanish from the bundle-scoped comparison downstream --
-    reported success on a comparison that never actually consulted this
-    member (Codex review).
+    staged input that isn't a real, parseable ELF file rather than erroring,
+    so a non-ELF file staged under ``binaries/`` (e.g. a JSON snapshot
+    placed at the wrong path) -- or a truncated/corrupted one that still
+    happens to start with the ELF magic and match its recorded digest --
+    would otherwise resolve as ``resolved`` here and then silently vanish
+    from the bundle-scoped comparison downstream, reporting success on a
+    comparison that never actually consulted this member. A bare magic-byte
+    sniff alone doesn't catch the truncated case, so this mirrors
+    ``build_bundle_snapshot()``'s own skip criteria exactly (magic check,
+    then a real parse, then the same "essentially empty" emptiness check)
+    so a ``resolved`` outcome here actually predicts survival there (Codex
+    review, two rounds).
     """
     try:
         with binary_path.open("rb") as fh:
@@ -670,6 +676,27 @@ def _not_elf_issue(member: str, binary_path: Path) -> str | None:
             "build_bundle_snapshot() silently skips non-ELF inputs, so this "
             "member would otherwise vanish from the bundle comparison "
             "despite resolve-baseline reporting success."
+        )
+    try:
+        meta = parse_elf_metadata(binary_path)
+    except Exception as exc:
+        return (
+            f"bundle member {member!r}'s staged binary {binary_path.name!r} "
+            f"starts with the ELF magic but could not be parsed as a valid "
+            f"ELF file ({exc}) -- it is truncated or corrupted, and "
+            "build_bundle_snapshot() would silently skip it, so this "
+            "member would vanish from the bundle comparison despite "
+            "resolve-baseline reporting success."
+        )
+    if meta is None or (
+        not meta.soname and not meta.symbols and not meta.imports and not meta.needed
+    ):
+        return (
+            f"bundle member {member!r}'s staged binary {binary_path.name!r} "
+            "parses as an essentially empty ELF file (no soname, symbols, "
+            "imports, or needed entries) -- build_bundle_snapshot() would "
+            "silently skip it, so this member would vanish from the bundle "
+            "comparison despite resolve-baseline reporting success."
         )
     return None
 

@@ -39,8 +39,29 @@ from abicheck.buildsource.baseline_set import (
     resolve_bundle,
     resolve_target,
 )
+from abicheck.elf_metadata import (
+    ElfMetadata,
+    parse_elf_metadata as _real_parse_elf_metadata,
+)
 
 PROFILE = "linux-x86_64-gcc13-release"
+
+
+@pytest.fixture(autouse=True)
+def _stub_bundle_elf_parse(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bundle-resolution tests stage placeholder bytes (not a real ELF
+    structure) under ``binaries/`` -- stub the deep ELF parse
+    ``_not_elf_issue()`` runs (added to catch truncated/corrupted staged
+    binaries that still pass the magic-byte sniff, Codex review) so those
+    tests exercise ``resolve_bundle()``'s path/digest/output plumbing
+    rather than requiring a hand-built, fully valid ELF fixture.
+    ``test_resolve_bundle_rejects_truncated_elf_binary`` below restores
+    the real parser to test the deep-parse guard itself.
+    """
+    monkeypatch.setattr(
+        "abicheck.buildsource.baseline_set.parse_elf_metadata",
+        lambda path: ElfMetadata(soname=path.name),
+    )
 
 
 def _write_manifest(
@@ -961,3 +982,38 @@ def test_resolve_bundle_rejects_non_elf_binary_matching_digest(tmp_path: Path) -
     )
     assert result.outcome == ResolveOutcome.AMBIGUOUS
     assert "not an ELF file" in result.message
+
+
+def test_resolve_bundle_rejects_truncated_elf_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A bare magic-byte sniff isn't enough: a truncated/corrupted staged
+    # binary can still start with \x7fELF while being unparseable (or
+    # parsing to essentially-empty metadata) -- build_bundle_snapshot()
+    # would silently skip it just the same as a non-ELF file, so this must
+    # be caught too, not just the missing-magic case (Codex review, second
+    # round). Restores the real parser (undoing the autouse stub) since
+    # this test is specifically about the deep-parse guard.
+    monkeypatch.setattr(
+        "abicheck.buildsource.baseline_set.parse_elf_metadata",
+        _real_parse_elf_metadata,
+    )
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact("libpvxs", extra={"binary": "binaries/libpvxs.so"})
+        ],
+    )
+    (tmp_path / "binaries").mkdir()
+    (tmp_path / "binaries" / "libpvxs.so").write_bytes(
+        b"\x7fELF-truncated-not-a-real-elf-structure"
+    )
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "essentially empty ELF file" in result.message
