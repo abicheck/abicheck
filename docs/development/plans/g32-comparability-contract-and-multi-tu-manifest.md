@@ -168,6 +168,30 @@ Implements ADR-050 D1 and D2.
   declarations feed the ABI model without necessarily touching a TU's
   includes, so leaving it out of the hash would let that exact class of
   scope drift pass the gate undetected.
+- **A profile mismatch confined to target triple/pointer width/endianness
+  must not preempt `diff_platform.py`'s existing, more specific
+  platform-identity detectors.** `profile_fingerprint` deliberately
+  includes target triple/pointer width/endianness (they genuinely affect
+  AST extraction — omitting them reopens the under-counting bug this
+  design exists to close), but `elf_machine_changed`/`elf_class_changed`/
+  `elf_endianness_changed` (and PE/Mach-O equivalents) already detect the
+  exact same axis directly from the binaries' own headers, already
+  classified `BREAKING` — comparing genuinely different target
+  architectures is `profile_fingerprint`'s single most likely mismatch
+  source, and unlike every other drift case this gate exists to catch, it
+  is not unexplained: the diff pipeline already has a correct,
+  artifact-grounded answer. Gating it into a generic `not_comparable`
+  before `diff_platform.py` ever runs would downgrade a proven `BREAKING`
+  verdict into a strictly less useful "couldn't tell" result. Fix:
+  `check_contracts_comparable` inspects *which* resolved fields differ
+  (the same per-field data `ExtractionContract` already stores for
+  reporting, not just the opaque hash), and when the *only* differing
+  fields are target/pointer-width/endianness, it does not raise —
+  `compare()` proceeds to the normal `diff_*` pipeline and lets the
+  existing platform detectors produce their own verdict. Any other
+  differing field still hard-fails as before, even alongside a
+  co-occurring target difference — scoped to platform-identity fields
+  alone, not a general loosening.
 - **Both fingerprints hash root-relative paths, never raw absolute ones —
   the single highest-priority correctness requirement in this phase — and
   each normalizes against its *own* root, never a root shared across both.**
@@ -391,8 +415,25 @@ Implements ADR-050 D1 and D2.
   field already makes) because a support root with no owned declared
   header has nothing for the ancestor-derived per-slot token below to key
   off of; asking for one avoids yet another path-shape heuristic. This
-  labeled `--include` form is legacy-CLI-only: the manifest path (D3)
-  already has no such gap via per-TU forced-includes.
+  labeled `--include` form is legacy-CLI-only. **The manifest path (D3) is
+  not automatically exempt from the same gap — an earlier revision of this
+  bullet wrongly claimed `forced_includes` already covered it.**
+  `forced_includes` is a per-TU list of individual force-included header
+  *files*, the manifest equivalent of a single named header — it says
+  nothing about a TU's `includes` list, the manifest's own `-I`
+  search-path entries. A manifest TU declaring `includes: [../src]` or
+  `includes: [generated/]` to resolve a private/generated support header
+  has the identical problem: that directory is a *sibling* of the TU's own
+  path, not an ancestor, so the ancestor rule classifies it external and
+  an ordinary edit inside it still flips `profile_fingerprint`. Fix, in the
+  manifest's own idiom: an `includes` entry is either a bare path string
+  (unchanged — ancestor rule decides) or a mapping `{path: ...,
+  project_owned: true}` explicitly marking it project-owned. No separate
+  label is needed here, unlike the CLI form — manifest paths are already
+  root-relative/side-normalized by design, so the same relative path
+  string on both the old and new manifest already is a stable,
+  mount-point-independent per-slot token, the same way a TU's `name`
+  already serves as stable identity elsewhere in this design.
 
   **`--include` is three separate Click registrations today, not one —
   `SidedIncludePathParam` only fixes `compare`'s.** Verified against the
@@ -1431,7 +1472,18 @@ silent `None` diff indistinguishable from the pre-existing
 raised while diffing a changed dependency DSO, and asserting the resulting
 `StackChange.not_comparable_reason` is populated rather than `abi_diff`
 being left an unexplained `None` — proving `_run_abi_diff`'s caller, not
-`_run_abi_diff` itself, is what classifies the exception; a **diagnostic-comparison API** test asserting `checker.compare(old, new,
+`_run_abi_diff` itself, is what classifies the exception; a
+**platform-identity dominance** test asserting that an old/new pair built
+for genuinely different target triples (e.g. `x86_64` vs. `aarch64`),
+otherwise identical in every other profile field, does **not** raise
+`ProfileMismatchError` and instead produces a real `DiffResult` carrying
+`elf_machine_changed` classified `BREAKING` — proving the gate defers to
+`diff_platform.py`'s existing detector rather than preempting it with
+`not_comparable`; a companion assertion with the *same* target mismatch
+**plus** a genuinely different macro definition asserts the gate still
+raises `ProfileMismatchError` — proving the carve-out is scoped to
+target-only mismatches, not a blanket exemption whenever a target
+difference happens to be present; a **diagnostic-comparison API** test asserting `checker.compare(old, new,
 diagnostic_comparison=True)` on a mismatched pair returns a real
 `DiffResult` (never raises) with `assurance == "none"` — proving the flag
 reaches the gate check itself, not just a CLI-level catch with nothing to
@@ -1518,7 +1570,12 @@ Implements ADR-050 D3. The highest-risk phase — see Risk above.
 - New `abicheck/dump_manifest.py`: strict YAML parser (unknown fields
   error), `roots`/`translation_units` schema, `name`-uniqueness,
   `contributes_to_abi=True ⇒ required=True` invariant enforced at parse
-  time (a validation error, not a silent coercion). The base-profile
+  time (a validation error, not a silent coercion). A TU's `includes`
+  entries accept either a bare path string (external-by-default, D1's
+  ancestor rule decides ownership, unchanged) or a mapping `{path: ...,
+  project_owned: true}` explicitly marking a sibling support root
+  project-owned — see the dedicated acceptance-criteria bullet above for
+  why `forced_includes` alone doesn't already cover this. The base-profile
   section also accepts `frontend_context` (`host` default) — the field
   Phase D's context selector needs an accepted input path for; a manifest
   schema that only carried `roots`/`translation_units` would leave a
@@ -1762,7 +1819,17 @@ choke point `compare`/`dump`/`scan` all resolve through, so no
 
 **Tests.** Manifest parser unit tests (the invariant violation, duplicate
 TU names, unknown fields, relative-path resolution, `frontend_context`
-accepted/defaulted/rejected-when-invalid). `dumper.py` multi-TU
+accepted/defaulted/rejected-when-invalid). A **manifest support-root
+ownership** test asserting a TU declaring `includes: [{path: ../src,
+project_owned: true}]` (a sibling of the TU's own declared path, not an
+ancestor) leaves `profile_fingerprint` matching across an old/new manifest
+pair when the edit is confined to a private header inside `../src` —
+proving the mapping form extends project-ownership the same way the
+legacy CLI's labeled `--include` does — alongside a companion assertion
+that a bare `includes: [../src]` (no `project_owned` marker) on the same
+layout still classifies `../src` external and flips `profile_fingerprint`
+on that same edit, confirming the mapping form is genuinely required, not
+redundant with the ancestor rule. `dumper.py` multi-TU
 integration tests (`@pytest.mark.integration`, needs castxml/clang) using
 Phase 0's fixtures. A `plan --dump-manifest` unit test asserting it never
 invokes a compiler and prints `scope_fingerprint` only — never a

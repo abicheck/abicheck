@@ -503,10 +503,37 @@ has no natural "owned declared header" for the per-slot token below to
 derive from the way an ancestor-derived root does; asking the user for
 one avoids inventing yet another path-shape heuristic that could break in
 some other way, the repeated lesson of every rejected attempt in this
-section. This labeled `--include` form is a legacy-CLI-only addition: the
-manifest path (D3) already has no such gap, since a manifest TU can
-declare a per-TU forced-include for exactly this directory instead of
-relying on directory-tree inference.
+section. **This labeled `--include` form is legacy-CLI-only — but the
+manifest path (D3) is not automatically exempt from the same gap, and an
+earlier revision of this section wrongly claimed it was.**
+`forced_includes` (D3) is a per-TU list of individual header *files*
+force-included into that TU's compile (`-include foo.h`), the manifest
+equivalent of a single named header — it says nothing about a TU's
+`includes` list, the manifest's own `-I` *search-path* entries used for
+ordinary `#include "..."` resolution. A manifest TU declaring `includes:
+[../src]` or `includes: [generated/]` to resolve a private support header
+or a build-generated one has exactly the same problem the legacy CLI just
+got fixed for: `../src`/`generated/` is a *sibling* of the TU's own
+declared path, not an ancestor of it, so D1's ancestor rule alone
+classifies it **external**, and an ordinary edit to a header inside it
+still flips `profile_fingerprint` before the diff ever runs. The manifest
+schema therefore gains the same escape hatch, in its own idiom: an
+`includes` entry is either a bare path string (external-by-default,
+ancestor rule decides ownership, unchanged) or a mapping
+`{path: ..., project_owned: true}` explicitly asserting the entry is
+project-owned regardless of ancestry. Unlike the legacy CLI's labeled
+`--include` form, a manifest entry needs **no separate user-supplied
+label** for the per-slot token: manifest paths are already
+root-relative and side-normalized by design (D1's "both fingerprints hash
+root-relative paths" principle), so two manifests describing the same
+logical support root — `includes: [{path: ../src, project_owned: true}]`
+on both the old and new side's manifest — already share the same stable,
+mount-point-independent path string; that string itself serves as the
+per-slot token, the same way a manifest TU's declared `name` already
+serves as stable identity elsewhere in this ADR. This closes the gap in
+the manifest's own structured-YAML idiom rather than reusing the CLI's
+colon/`=` string grammar, which has no reason to exist in a schema that
+already supports mapping values natively.
 
 **`--include` is not one Click registration shared by `compare`/`dump`/`scan`
 — it is three separate ones today, and `SidedIncludePathParam` only fixes
@@ -721,6 +748,42 @@ subclass at the CLI boundary (`cli.py`), a plain exception at the
 must not repeat that CLI-only mistake; D2 lands in `service.py`'s
 `ScanRequest`/`compare_snapshots` and `mcp_server.py`'s MCP tools from the
 start, not as a follow-up).
+
+**A profile mismatch confined to target triple/pointer width/endianness
+must not preempt the existing, more specific platform-identity
+detectors — this is a required carve-out, not an edge case to leave
+implicit.** `profile_fingerprint` (D1) deliberately includes target
+triple, pointer width, and endianness, since they genuinely affect what
+the L2 AST frontend parses (a 32- vs. 64-bit `sizeof(long)`, an
+`__aarch64__`-gated declaration) — omitting them from the fingerprint
+would reintroduce the exact under-counting bug this whole design exists
+to close. But `diff_platform.py` already has artifact-backed, dedicated
+detectors for exactly this axis — `elf_machine_changed`,
+`elf_class_changed`, `elf_endianness_changed`, and the PE/Mach-O
+equivalents — computed directly from the binaries' own ELF/PE/Mach-O
+headers, independent of any AST extraction, and already classified
+`BREAKING` (a real, load-incompatible ABI difference: an x86_64 build
+compared against an aarch64 build of "the same" library). Comparing two
+binaries for genuinely different target architectures is `profile_fingerprint`'s single most likely mismatch source — and, unlike
+every other profile-drift case this ADR is built to catch, it is not an
+*unexplained* drift: the diff pipeline already has a specific, correct,
+artifact-grounded answer for it. Gating it into a generic
+`not_comparable` before `diff_platform.py` ever runs would silently
+downgrade a proven, informative `BREAKING` verdict into a strictly less
+useful "couldn't tell" result — the opposite of this ADR's purpose. The
+gate therefore inspects *which* resolved fields differ, not only whether
+the overall hash differs: `check_contracts_comparable` computes the
+mismatch at field granularity (the same resolved fields
+`ExtractionContract` already stores so a report can show *what* differs,
+not just that the hashes don't match — D1), and when the *only* differing
+fields are target triple/pointer width/endianness, the gate does not
+raise — it lets `compare()` proceed to the normal `diff_*` pipeline, where
+`diff_platform.py`'s existing detectors take over and produce their own,
+already-correct verdict. Any *other* differing field (compiler family,
+macros, `-I` content, language standard) still hard-fails exactly as
+before, even if a target difference happens to co-occur with it — this
+carve-out is scoped to the platform-identity fields alone, not a general
+loosening of the gate.
 
 **A fourth surface reaches `checker.compare` besides the three named
 above: `cli_compare_release.py`'s directory/package fan-out, and it needs
