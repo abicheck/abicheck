@@ -128,7 +128,11 @@ as the `docs-contract` step) enforces, as **hard errors**:
 - a page's `summarizes` entries must round-trip too: the page itself must be
   registered as that topic's `worked_example`, `reference_page`, or a
   `task_pages`/`allowed_summaries` entry — a page can't grant itself
-  permission to restate a topic just by adding the front-matter claim.
+  permission to restate a topic just by adding the front-matter claim;
+- a topic's `canonical_page` can't itself be marked `generated: true` — the
+  canonical_page is the hand-authored narrative owner by definition, so a
+  registry entry pointing it at a generated page is a misconfiguration
+  (register the generated page as `reference_page` instead).
 
 As **warnings** (non-blocking; the check that flags likely accidental
 duplication, not a structural ownership conflict):

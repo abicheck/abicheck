@@ -498,7 +498,21 @@ def _check_canonical_pages_declare_ownership(
             )
             continue
         if fm.get("generated") is True:
-            continue  # generated pages don't carry the hand-authored schema
+            # Unlike _check_front_matter_schema's blanket generated skip
+            # (which just means "don't enforce the hand-authored schema on
+            # this page"), a topic's *canonical_page* specifically claims to
+            # be the narrative owner -- a machine-generated page can't be
+            # that by definition, so this is a real registry misconfiguration
+            # (register it as reference_page instead), not something to wave
+            # through silently.
+            f.err(
+                "ownership",
+                f"{_rel(page_path)}: is topic {topic_id!r}'s canonical_page "
+                f"in {_rel(TOPICS_FILE)}, but is marked generated: true -- a "
+                "canonical_page must be hand-authored (register a generated "
+                "page as reference_page instead)",
+            )
+            continue
         canonical_for = fm.get("canonical_for", [])
         if isinstance(canonical_for, list) and topic_id not in canonical_for:
             f.err(

@@ -598,6 +598,28 @@ def test_canonical_pages_declare_ownership_warns_on_missing_front_matter(
     assert len(f.warnings) == 1
 
 
+def test_canonical_pages_declare_ownership_errors_on_generated_canonical_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A topic's canonical_page can't be marked generated: true -- the
+    canonical_page is the hand-authored narrative owner by definition, so
+    this is a real registry misconfiguration, not something to silently
+    wave through the way _check_front_matter_schema's blanket generated
+    skip does for ordinary schema enforcement (regression test for the gap
+    flagged in PR #619 review)."""
+    (tmp_path / "owner.md").write_text(
+        "---\ndoc_type: reference\ncanonical_for:\n  - topic-a\ngenerated: true\n"
+        "---\n\n# Title\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    topics = {"topic-a": {"canonical_page": "owner.md"}}
+    f = dc.Findings()
+    dc._check_canonical_pages_declare_ownership(f, topics)
+    assert len(f.errors) == 1
+    assert "generated: true" in f.errors[0][1]
+
+
 def test_canonical_pages_declare_ownership_errors_when_front_matter_omits_topic(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
