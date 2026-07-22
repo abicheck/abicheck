@@ -46,13 +46,20 @@ Phase 0 first, always — it is what makes Phase D (and to a lesser extent B)
 design-by-evidence instead of design-by-assumption, per the originating
 review's own strongest procedural point ("don't build a stream parser
 against a guessed format; capture the real thing first"). Phase A can ship
-and start providing value (as a report-only signal) independently of B–E —
-it does not require multi-TU support to be useful, since even today's
-single-aggregate-TU snapshots have a real, checkable `profile_fingerprint`.
-B, C, and D can proceed in parallel once Phase 0's fixtures exist (C
-depends on B landing first; D's parser and `host`-default path don't
-depend on B or C, though selecting a *non-default* context needs Phase B's
-`frontend_context` field/flag to request it — see Phase D). E depends on A
+and start providing value independently of B–E — it does not require
+multi-TU support to be useful, since even today's single-aggregate-TU
+snapshots have a real, checkable `profile_fingerprint` — **and it ships
+with the hard-blocking gate as its actual, only default behavior**: Phase
+A's own section is explicit that there is no soft-launch/report-only mode
+(the gate hard-fails `not_comparable` from day one; see Phase A). "Ships
+independently" describes *when* Phase A can land relative to the other
+phases, not a different (report-only) behavior it has while doing so.
+Phase B and Phase D may both start once Phase 0's fixtures exist — Phase
+D's parser and `host`-default path don't depend on B, though selecting a
+*non-default* context needs Phase B's `frontend_context` field/flag to
+request it (see Phase D). Phase C starts only after Phase B lands, since
+it operates on the `TuFragment` contract Phase B defines and produces —
+it is not a third parallel branch alongside B and D. E depends on A
 (needs the fingerprints to extend the cache key) and loosely on B (the
 per-TU loop it schedules); the cache-key half of E can land right after A
 without waiting for B if useful on its own.
@@ -262,15 +269,31 @@ Implements ADR-050 D1 and D2.
   so it's structurally unreachable by severity promotion rather than
   merely unreachable by the flags checked so far.
 - **The exit code is part of the published contract too, not an
-  afterthought.** `docs/reference/exit-codes.md` documents two co-existing
-  `compare` schemes (legacy: 0/2/4; severity-aware: 0/1/2/4) where `0`
+  afterthought — and it must be a pinned value, not "a new code TBD."**
+  `docs/reference/exit-codes.md` documents two co-existing `compare`
+  schemes (legacy: 0/2/4; severity-aware: 0/1/2/4) where `0`
   means *compatible* in both. `not_comparable` must never exit `0` in
   either scheme — otherwise the exact "missing evidence reads as safe"
   failure this ADR exists to prevent reappears at the process-exit
-  boundary, undoing the JSON-level fix. This phase reserves one new,
-  distinct nonzero code and adds it as its own row to both tables in
+  boundary, undoing the JSON-level fix. This phase reserves exit code
+  **`8`** — identical in both schemes, since `not_comparable` fires before
+  severity classification ever runs — continuing the existing power-of-two
+  pattern, and adds it as its own row to both tables in
   `docs/reference/exit-codes.md`, not folded into either scheme's existing
-  numbering.
+  numbering. `8` is unused in `compare`'s own exit-code space today (which
+  tops out at `4` in both schemes).
+- **Release-level (directory/package) aggregation gets an explicit
+  precedence, not an implied one.** `cli_compare_release_helpers.py`'s
+  `_RELEASE_VERDICT_ORDER` (currently `NO_CHANGE` < `COMPATIBLE` <
+  `COMPATIBLE_WITH_RISK` < `API_BREAK` < `BREAKING` < `ERROR`, rank 5 as
+  the ceiling) gains `not_comparable` at rank 6, above `ERROR` — a
+  correctly-diagnosed `not_comparable` result carries less trustworthy
+  information about a library than even a partial `ERROR`, so it
+  dominates the release-level "worst verdict wins" rollup over every other
+  outcome in the same release, including a genuine crash. This is what
+  makes the release fan-out fix (below) actually surface at the release
+  level instead of being computed per-library and then silently
+  outranked.
 - The gate is wired at **all four** entry points in one phase, closing the
   gap AGENTS.md's "Known gaps" section already names for the depth
   contract rather than repeating the CLI-only mistake: `checker.compare`
@@ -291,9 +314,12 @@ Implements ADR-050 D1 and D2.
   multi-library surface. `_compare_one_library` gains a dedicated
   `except (ProfileMismatchError, ScopeMismatchError) as exc:` branch,
   ordered before the generic `except Exception`, returning
-  `{"verdict": "not_comparable", "reason": ...}`; the release aggregator
-  and `docs/reference/exit-codes.md`'s multi-library section recognize
-  that verdict value distinctly, not folded into `"ERROR"`.
+  `{"verdict": "not_comparable", "reason": ...}`; `_RELEASE_VERDICT_ORDER`'s
+  new rank-6 entry (the bullet above) is what makes that verdict actually
+  win the release-level rollup instead of being computed correctly per
+  library and then silently outranked by a co-occurring `BREAKING`, and
+  `docs/reference/exit-codes.md`'s multi-library section documents both
+  together.
 - Reporting: `reporter.py`/`sarif.py`/`junit_report.py` gain a
   `not_comparable` top-level result distinct from every existing verdict
   value — never coerced into `compatible`/`breaking`.
@@ -356,7 +382,9 @@ distinct `not_comparable` exit code), `cli_compare_release.py`
 `except (ProfileMismatchError, ScopeMismatchError)` branch, ordered before
 `except Exception` — see the release-fan-out acceptance-criteria bullet
 above; this is not covered by the CLI's own exit-code handling, it is a
-separate call path), `docs/reference/exit-codes.md` (a
+separate call path), `cli_compare_release_helpers.py`
+(`_RELEASE_VERDICT_ORDER`'s new rank-6 `not_comparable` entry),
+`docs/reference/exit-codes.md` (a
 new row in both the legacy and severity-aware tables, **and** the
 multi-library section), `reporter.py`,
 `sarif.py`, `junit_report.py`, `abicheck/schemas/compare_report.schema.json`,
@@ -388,13 +416,18 @@ against the updated `compare_report.schema.json`, and its existing
 regenerated `docs/schemas/v1` copy; a root-relative-path fingerprint test
 (the acceptance-criteria bullet above — same-tree-different-root compare
 must not fingerprint-mismatch); an exit-code test
-asserting `not_comparable` returns the new dedicated code, never `0`, from
+asserting `not_comparable` returns exactly `8`, never `0`, from
 both the legacy and severity-aware `compare` invocations; a **release
 fan-out** test asserting a `not_comparable`-triggering library inside a
 directory/package `compare` reports `verdict: "not_comparable"` in its
 release-level entry, not `"ERROR"` — the specific inversion (incomparable
 reported as the worst-possible classification) this phase must close on
-its fourth entry point; gate unit tests for all
+its fourth entry point; a **release-precedence** test asserting a mixed
+release (one `not_comparable` library, one `BREAKING`, N `COMPATIBLE`)
+reports and exits as `not_comparable` overall, proving
+`_RELEASE_VERDICT_ORDER`'s new rank actually wins the rollup rather than
+being silently outranked by the co-occurring `BREAKING`; gate unit tests
+for all
 four entry points; a `--diagnostic-comparison` end-to-end test; a
 backward-compat test asserting a contract-less snapshot pair compares
 unchanged; a **mixed-pair** test (one side `contract`, one side none)
@@ -447,19 +480,30 @@ Implements ADR-050 D3. The highest-risk phase — see Risk above.
   diagnostic, and — enforced by the parse-time invariant above — an
   optional TU can never be `contributes_to_abi: true`, so this can never
   produce a false removal.
-- New CLI surface: `abicheck dump --manifest path/to/manifest.yml` (or
-  `compare --manifest`), plus a `abicheck plan --manifest ...` diagnostic
-  command that prints the normalized manifest and both D1 fingerprints
-  without running extraction — cheap to run in CI before committing to a
-  full dump.
+- New CLI surface: `--manifest path/to/manifest.yml` and
+  `--frontend-context host|device` **options added to the existing
+  `dump`/`compare` commands** (not new commands — a new sibling module
+  cannot retroactively add options to a command already declared
+  elsewhere), plus a genuinely new `abicheck plan --manifest ...`
+  diagnostic command that prints the normalized manifest and both D1
+  fingerprints without running extraction — cheap to run in CI before
+  committing to a full dump.
 
 **Files & surfaces.** New `abicheck/dump_manifest.py`, `abicheck/dumper.py`
-(per-TU invocation loop, `TuFragment` type), new `cli_dump_manifest.py`
-sibling command module (per the root `CLAUDE.md`'s "larger command → sibling
-module" convention) — registering it is not implicit: `cli.py`'s bottom
-side-effect `from . import (...)` block gains `cli_dump_manifest`, or the
-new `plan --manifest`/`dump --manifest` commands never attach to `main` at
-all, and `pyproject.toml`'s `disallow_untyped_decorators = false` override
+(per-TU invocation loop, `TuFragment` type). `--manifest`/
+`--frontend-context` are shared-concept options per multiple existing
+commands (`dump` and `compare`), so — following `cli_options.py`'s own
+existing convention for `-v/--verbose`, `output_options(...)`, and
+`lang_option(...)` — they're added as one shared decorator in
+`cli_options.py` and applied at `dump`'s and `compare`'s existing
+declarations directly (wherever those already live: `cli.py`), not merely
+implied by registering a new command module. New `cli_dump_manifest.py`
+sibling command module for the genuinely new `plan --manifest` command
+only (per the root `CLAUDE.md`'s "larger command → sibling module"
+convention) — registering it is not implicit: `cli.py`'s bottom
+side-effect `from . import (...)` block gains `cli_dump_manifest`, or
+`plan --manifest` never attaches to `main` at all, and `pyproject.toml`'s
+`disallow_untyped_decorators = false` override
 list gains `abicheck.cli_dump_manifest` alongside the existing per-module
 entries, or the typed-decorator mypy lane fails on its `@click` decorators
 (both required steps of the root `CLAUDE.md`'s "Adding a new top-level

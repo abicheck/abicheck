@@ -208,43 +208,49 @@ identically and wrongly pass the gate. Taking the parent directory first
 means a lone header's basename survives normalization (`v1/foo.h` → root
 `v1/`, normalized path `foo.h`).
 
-**`profile_fingerprint`'s `-I` directories do *not* use the same
-parent-directory rule — a lone `-I` directory needs a different fix, not
-the header one applied by analogy.** The header fix's goal is "make the
-filename survive"; for a directory (no filename to preserve), taking its
-own parent as root strips *all* distinguishing structure in the
-single-entry case: `--include old=/opt/dep-v1/include --include
-new=/opt/dep-v2/include` would each normalize to `include` relative to
-their own root (`/opt/dep-v1`, `/opt/dep-v2` respectively) — hashing
-identically and silently erasing a genuine dependency-version difference
-this fingerprint should be able to catch, the same class of bug as the
-header case but with the opposite fix required. Whether a
-differently-rooted `-I` path represents "the same dependency, different
-checkout mount point" (should normalize) or "a genuinely different
-dependency version" (should not) is not decidable from path shape alone —
-unlike headers, where ADR-040's `old=`/`new=` design exists specifically
-for the "same project, two checkouts" case, an external `-I` directory has
-no comparably strong prior. `profile_fingerprint` therefore hashes each
-`-I` directory's **last two path components** (its own basename plus its
-immediate parent's basename) rather than attempting root-relative
-normalization at all: `/opt/dep-v1/include` → `dep-v1/include`,
-`/opt/dep-v2/include` → `dep-v2/include` — correctly distinct. This is a
-bounded, explicitly imperfect compromise, not a general solution: a
-checkout-root difference expressed exactly two segments above the `-I`
-directory (e.g. `--include old=/work/v1/vendor/include --include
-new=/work/v2/vendor/include`, if `vendor/include` is the last two
-segments) still spuriously mismatches, the mirror image of the problem
-this fix is closing. Multiple `-I` directories per side (2+) instead use
-the same common-ancestor-of-parents approach as headers, since real anchor
-points exist there the same way they do for multiple headers.
+**`profile_fingerprint`'s `-I` directories use the *same* parent-directory
+rule as headers, uniformly — this went through two wrong "clever" fixes
+before landing on the simple one, worth recording so it isn't
+rediscovered.** A first attempt applied the header rule unchanged (root =
+the `-I` directory's own parent), which was right for the common
+real-world shape — `--include old=old/include --include new=new/include`
+(the project's own include root, exactly the ADR-040 "same project, two
+checkouts" case the header rule is designed for; the [user-guide's
+real-world compare
+example](../../user-guide/real-world-example.md) uses this exact shape) —
+but wrong for a lone *external dependency* directory:
+`--include old=/opt/dep-v1/include --include new=/opt/dep-v2/include`
+would normalize both to `include` relative to their own root
+(`/opt/dep-v1`, `/opt/dep-v2`), silently erasing a genuine dependency-
+version difference. A second attempt tried to fix that by hashing each
+`-I` directory's last two path components instead
+(`/opt/dep-v1/include` → `dep-v1/include`) — this broke the *other*
+direction: it made the ordinary `old/include` vs. `new/include` project-
+root case (the common, documented workflow) hash as different, hard-
+failing the routine two-checkout compare this whole fingerprint design
+exists to keep working.
 
-For the manifest-driven path (D3), both roots are the manifest file's own
-directory (a manifest's `includes`/`forced_includes` and its base
-profile's search paths are declared relative to one document, so neither
-the header nor the `-I` degenerate case, nor external-directory
-contamination, is possible there) — the manifest path is the fully
-general fix; the legacy-path heuristics above exist only because the
-legacy CLI has no such document to anchor against.
+Both attempts failed for the same underlying reason: **whether a
+differently-rooted `-I` path means "same dependency, different checkout
+mount point" (should normalize) or "a genuinely different dependency"
+(should not) is not decidable from path shape alone, and no heuristic can
+resolve it — the two examples above have *identical* shape** (`.../X →
+.../include`, two segments, differing prefix) and opposite correct
+answers. `profile_fingerprint` therefore uses the header rule as-is (root
+= common ancestor of that side's `-I` directories' own parent
+directories, single or multiple, no special case) rather than a bespoke
+heuristic invented to split a difference that path shape cannot express.
+This is a **known, accepted limitation, not a solved problem**: it
+correctly keeps the common project-include-root workflow working (the
+thing that matters for the gate's primary use case), at the cost of not
+being able to detect a dependency-version change expressed purely as a
+different `-I` mount point with the same basename — that class of drift
+is undetectable by this fingerprint on the legacy CLI path. The
+manifest-driven path (D3) has no such gap, since every manifest-declared
+path is relative to one explicit document rather than inferred from
+directory shape — a user who needs reliable dependency-version detection
+without a manifest has `--diagnostic-comparison` (D2) as the sanctioned
+fallback, not a silent guess in either direction.
 
 Both fingerprints live in a new `contract: ExtractionContract | None` field
 on `AbiSnapshot` rather than flattening two more top-level fields onto an
@@ -350,9 +356,35 @@ schemes (legacy: 0/2/4; severity-aware, with any `--severity-*` flag:
 must never exit `0` in either scheme, or the exact failure mode this ADR
 exists to prevent (missing evidence reading as "safe") reappears one layer
 down, at the process-exit boundary instead of the JSON `verdict` field. D2
-reserves a new, distinct nonzero code for `not_comparable`, documented as
-its own row in both exit-code tables, not folded into either existing
-scheme's numbering.
+reserves exit code **`8`** for `not_comparable` — pinned, not left as "a
+new code TBD" — in **both** schemes identically (legacy and
+severity-aware alike; `not_comparable` fires before any severity
+classification runs, so it is orthogonal to the flag that distinguishes
+the two schemes), continuing the existing legacy/severity-aware scheme's
+power-of-two pattern (0/1/2/4) one step further, and documented as its own
+row in both tables, not folded into either scheme's existing numbering.
+`8` is unused today in `compare`'s exit-code space (which tops out at `4`
+in both schemes — `compat`'s separate 3–11 error range is a different
+command's own codespace, per `docs/reference/exit-codes.md`'s per-command
+split, and does not constrain `compare`'s).
+
+**Release-level (directory/package) aggregation needs its own explicit
+precedence, not an implied one.** `cli_compare_release.py`'s
+`_RELEASE_VERDICT_ORDER` (`cli_compare_release_helpers.py:45`) already
+ranks per-library verdicts for the "worst verdict wins" release rollup —
+`NO_CHANGE` < `COMPATIBLE` < `COMPATIBLE_WITH_RISK` < `API_BREAK` <
+`BREAKING` < `ERROR` (rank 5, currently the ceiling). `not_comparable`
+gets its own rank **above** `ERROR` (rank 6): a `not_comparable` result is
+a definitive, correctly-diagnosed outcome (this ADR's whole point), not a
+crash, but it carries strictly less trustworthy information about the
+library than even an `ERROR` entry's partial context — so for the purpose
+of picking one release-level exit code, a `not_comparable` library
+dominates every other outcome in the same release, including a genuine
+`ERROR`. This closes the release fan-out gap directly (see below): once
+`not_comparable` is a real rank in this ordering, a mixed release
+(one `not_comparable` library, one `BREAKING`, N `COMPATIBLE`) reports and
+exits as `not_comparable` overall, not silently as `BREAKING` or folded
+into a generic `ERROR`.
 
 **Mixed pairs (one side has a `contract`, the other doesn't) never hard-fail
 — this is unambiguous, not left to implementer discretion.** The backward-
@@ -499,13 +531,41 @@ frontend's possibly-multi-document JSON output as a sequence of
 `{kind, target, ast}` contexts (streaming document boundaries, not a
 bracket/string split), tags each with the compiler-reported target triple,
 and selects the context matching the manifest's/CLI's requested
-`frontend_context` (`host` by default). A run that produces only a
-`spir64`/device context when `host` was requested is an extraction failure
-(`AST_CONTEXT_MISSING`), not a successful-but-wrong snapshot — it must not
-reach D1's fingerprinting at all. Fixture-first per the review's own
-sequencing advice: a real captured multi-document DPC++ AST fixture and a
-plain single-context clang fixture land before the stream parser, so the
-parser is built against real output shape, not an assumption of it.
+`frontend_context` (`host` by default).
+
+**Selection is by `kind`, not by target-triple string matching — this
+needs to be explicit, since "host vs. device" reads like it could mean
+either.** Each decoded context's `kind` (`"host"` or `"device"`, read
+directly from the compiler's own JSON output, the same authoritative
+source the target triple comes from) is what's compared against the
+requested `frontend_context`; the target triple (`spir64`, etc.) is
+carried alongside for diagnostics and provenance, never itself the
+selection key — a frontend could in principle label a context's target
+triple ambiguously or use a triple this ADR doesn't enumerate, and
+`sycl_context.py` must not be in the business of pattern-matching triple
+strings to guess intent when the compiler already states `kind` plainly.
+Three outcomes, all extraction-time, none reaching D1's fingerprinting:
+
+- **Exactly one decoded context has the requested `kind`** — the normal
+  case, selected and passed on to normal extraction.
+- **Zero decoded contexts have the requested `kind`** — `AST_CONTEXT_MISSING`
+  (e.g. only a `spir64`/device context when `host` was requested).
+- **More than one decoded context shares the requested `kind`** —
+  `AST_CONTEXT_AMBIGUOUS`, never resolved by picking the first, the
+  smallest, or any other implicit tiebreaker; an ambiguous frontend output
+  is exactly the kind of "the extraction can't prove what it captured"
+  situation this ADR's authority rule (ADR-028 D3) says must not be
+  silently resolved in either direction.
+
+A run that produces only a `spir64`/device context when `host` was
+requested is an extraction failure, not a successful-but-wrong snapshot.
+Fixture-first per the review's own sequencing advice: a real captured
+multi-document DPC++ AST fixture and a plain single-context clang fixture
+land before the stream parser (Phase 0), so the parser — and this `kind`
+vs. target-triple distinction — is built against real output shape, not
+an assumption of it; if a captured real fixture turns out not to carry a
+`kind` field at all, that is exactly the kind of discovery Phase 0 exists
+to surface before D5 is implemented against a guess.
 
 ### D6. Resource-aware scheduling for the frontend, shared with `buildsource`
 
