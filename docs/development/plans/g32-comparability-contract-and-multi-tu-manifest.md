@@ -12,10 +12,10 @@ today produces a page of false additions/removals instead of a clear
 "these two snapshots aren't comparable" result. Most of what the review
 also raised (public/private/external classification, deterministic
 serialization, content-hash caching, RAM-aware parallel extraction) turned
-out to already be shipped under different names — see ADR-049's Context
+out to already be shipped under different names — see ADR-050's Context
 for the full audit. This plan implements only the genuinely new decisions.
 
-**ADR:** [ADR-049](../adr/049-comparability-contract-and-multi-tu-manifest.md)
+**ADR:** [ADR-050](../adr/050-comparability-contract-and-multi-tu-manifest.md)
 (Proposed — records the target model; this plan carries the phased
 backlog).
 **Type:** Initiative plan (cross-cutting; spans `abicheck/model.py`,
@@ -27,7 +27,7 @@ top-level modules).
 L. Phase E — M. Total: XL, phased over multiple PRs.
 **Risk:** Phase 0 — low (fixtures only, no production code path changes).
 Phase A — low-medium (new gate at a well-defined entry point, additive
-fields; ships as a hard default per ADR-049 D2 from day one — risk is
+fields; ships as a hard default per ADR-050 D2 from day one — risk is
 mitigated by Phase 0 fixture coverage and a pre-merge dry run, not by a
 runtime soft-default — see Phase A below). Phase B — **high** — changes
 `dumper.py`'s single hottest
@@ -111,14 +111,14 @@ non-emptiness now, and by the real stream parser once Phase D exists.
 
 ## Phase A — `ExtractionContract`: profile/scope fingerprints and the comparability gate
 
-Implements ADR-049 D1 and D2.
+Implements ADR-050 D1 and D2.
 
 **Goal & acceptance criteria.**
 - `AbiSnapshot.contract: ExtractionContract | None` (`model.py`) carries
   `profile_fingerprint`/`scope_fingerprint` plus the resolved inputs that
   produced them. `scope_fingerprint`'s hashed inputs include each TU's
   `required`/`contributes_to_abi` flags, not just its includes/forced
-  includes (ADR-049 D1) — flipping `contributes_to_abi` changes which
+  includes (ADR-050 D1) — flipping `contributes_to_abi` changes which
   declarations feed the ABI model without necessarily touching a TU's
   includes, so leaving it out of the hash would let that exact class of
   scope drift pass the gate undetected.
@@ -135,7 +135,7 @@ Implements ADR-049 D1 and D2.
   **directory** of that side's inputs — each header's *parent* directory
   plus each include directory itself, **not** the header paths taken
   literally; manifest path: the manifest file's own directory) before
-  hashing (ADR-049 D1). Deriving the root from header paths directly instead
+  hashing (ADR-050 D1). Deriving the root from header paths directly instead
   of their parents breaks the single-header-per-side case — the common
   ancestor of a one-element path set is that whole path, so `old=v1/foo.h`
   and `new=v2/bar.h` would both normalize to the same empty marker and hash
@@ -188,7 +188,7 @@ Implements ADR-049 D1 and D2.
   `SCHEMA_VERSION` is below it. Versions below the threshold keep today's
   warn-and-continue behavior unchanged — only the specific version that
   first introduces a verdict-blocking field becomes a hard failure for an
-  older reader (ADR-049 D1).
+  older reader (ADR-050 D1).
 - `comparability.check_contracts_comparable(old, new)` raises
   `ProfileMismatchError`/`ScopeMismatchError` (`errors.py`) **only when
   both sides carry a `contract`** and the fingerprints differ. A **mixed**
@@ -271,7 +271,7 @@ Implements ADR-049 D1 and D2.
   tentative diff, every finding stamped `assurance: none`.
 - **Rollout: the hard gate is the default from the first shipped version of
   this phase — no soft-launch flag, and no second flag with a default that
-  contradicts ADR-049 D2.** D2 is explicit that a contract mismatch is a
+  contradicts ADR-050 D2.** D2 is explicit that a contract mismatch is a
   precondition failure producing `not_comparable`, never an ordinary
   verdict with a RISK-tier finding attached; a runtime default that quietly
   downgraded that to "warn, still produce a verdict" would ship exactly the
@@ -366,14 +366,14 @@ one flag checked last time.
 `examples/case2xx_profile_scope_mismatch_gate/` once the gate exists.
 
 **Out of scope (deferred to later phases or explicitly not planned).**
-`expected_public_headers` coverage inventory (ADR-049 non-goals) is not
+`expected_public_headers` coverage inventory (ADR-050 non-goals) is not
 part of this phase.
 
 ---
 
 ## Phase B — Manifest and real multi-TU dump
 
-Implements ADR-049 D3. The highest-risk phase — see Risk above.
+Implements ADR-050 D3. The highest-risk phase — see Risk above.
 
 **Goal & acceptance criteria.**
 - New `abicheck/dump_manifest.py`: strict YAML parser (unknown fields
@@ -433,7 +433,7 @@ as a placeholder, replaced by Phase C's real compatible-merge lattice.
 
 ## Phase C — Compatible merge across translation units
 
-Implements ADR-049 D4. Depends on Phase B.
+Implements ADR-050 D4. Depends on Phase B.
 
 **Goal & acceptance criteria.**
 - New `abicheck/tu_merge.py`: for each `entity_key` seen in more than one
@@ -455,7 +455,7 @@ Implements ADR-049 D4. Depends on Phase B.
 
 **Files & surfaces.** New `abicheck/tu_merge.py`, reusing
 `buildsource/crosscheck.py`'s existing merge/classify shape (not a new
-algorithm — see ADR-049 D4). `dumper.py`'s manifest path calls this instead
+algorithm — see ADR-050 D4). `dumper.py`'s manifest path calls this instead
 of Phase B's placeholder concatenation.
 
 **Tests.** Phase 0's ODR-safe fixture (must merge cleanly) and
@@ -470,7 +470,7 @@ style, per the repo's existing metamorphic-test convention).
 
 ## Phase D — SYCL/DPC++ host vs. device AST context selection
 
-Implements ADR-049 D5. Independent of Phases B/C; depends only on Phase 0's
+Implements ADR-050 D5. Independent of Phases B/C; depends only on Phase 0's
 captured DPC++ fixture.
 
 **Goal & acceptance criteria.**
@@ -508,7 +508,7 @@ is extraction-layer, not diff-layer; no new `ChangeKind`.
 
 ## Phase E — Resource-aware frontend scheduling and cache-key extension
 
-Implements ADR-049 D6. Depends on Phase A (fingerprints for the cache key);
+Implements ADR-050 D6. Depends on Phase A (fingerprints for the cache key);
 the scheduling half loosely depends on Phase B (the per-TU loop it
 schedules) but the cache-key half can land immediately after Phase A.
 
@@ -546,7 +546,7 @@ scoped here.
 
 ## How to pick up this plan
 
-1. Read [ADR-049](../adr/049-comparability-contract-and-multi-tu-manifest.md)
+1. Read [ADR-050](../adr/050-comparability-contract-and-multi-tu-manifest.md)
    in full before starting any phase — it has the authority-boundary rule
    (`The one rule that does not change`) every phase must preserve.
 2. Start with Phase 0 regardless of which later phase you're aiming for.

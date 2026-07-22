@@ -1,4 +1,4 @@
-# ADR-049: Comparability Contract — Profile/Scope Fingerprints and the Multi-TU Manifest
+# ADR-050: Comparability Contract — Profile/Scope Fingerprints and the Multi-TU Manifest
 
 **Date:** 2026-07-22
 **Status:** Proposed — not implemented. This ADR records the target model and
