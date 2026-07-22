@@ -12,45 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-046 D2: evidence-preserving node/edge fact merge for the L5 source
-graph (ADR-031). Split out of ``source_graph.py`` to keep that module under
-the AI-readiness line-count cap — a true leaf module with **no** import
-(runtime or ``TYPE_CHECKING``) back on ``source_graph.py``: ``_FactHolder``
-below is a structural :class:`~typing.Protocol` describing exactly the
-attributes ``GraphNode``/``GraphEdge`` carry, so this module never needs to
-name those classes and cannot form an import cycle with them (CLAUDE.md
-"M1-3" — a new cross-module cycle needs an ADR, not an allowlist entry;
-a dependency-free leaf avoids the question entirely). ``source_graph.py``
-imports and re-exports the public names here so existing ``from
-.source_graph import CONF_HIGH`` etc. call sites are unaffected.
+"""L5 source-graph node/edge schema (ADR-031 D2) and the ADR-046 D1/D2
+evidence-preserving fact merge. Split out of ``source_graph.py`` (moved here
+across two rounds — first the merge machinery, then ``GraphNode``/
+``GraphEdge`` themselves) to keep that module under the AI-readiness
+line-count cap; ``source_graph.py`` imports and re-exports every public name
+here so existing ``from .source_graph import GraphNode``/``CONF_HIGH`` etc.
+call sites are unaffected.
 
 Replaces the v1 first-writer-wins ``SourceGraphSummary.add_node``/``add_edge``
 behavior: a node or edge accumulates one :class:`GraphFact` per producer that
 ever registered it, folded into one order-independent ``resolved`` dict via
 :func:`merge_graph_facts`, with genuine cross-producer disagreements recorded
-as :class:`FactConflict` instead of silently dropped. See ADR-046 D2 and
-``docs/development/plans/g29-impact-analysis-layer.md`` Phase 2.
+as :class:`FactConflict` instead of silently dropped (D2). :func:`edge_relation_key`
+adds a role-aware edge identity alongside the coarse ``(src, dst, kind)`` one
+(D1). See ADR-046 and ``docs/development/plans/g29-impact-analysis-layer.md``
+Phase 2.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Protocol
-
-
-class _FactHolder(Protocol):
-    """Structural shape of ``GraphNode``/``GraphEdge`` this module needs —
-    see the module docstring for why this is a ``Protocol`` and not an import.
-    """
-
-    facts: list[GraphFact]
-    resolved: dict[str, Any]
-    conflicts: list[FactConflict]
-    attrs: dict[str, Any]
-    confidence: str
-    provenance: str
-
+from typing import Any
 
 #: Confidence labels (ADR-031 D9). Mirrors the evidence-model vocabulary so the
 #: coverage report and graph speak the same language. Canonical home of these
@@ -183,7 +167,125 @@ def merge_graph_facts(
     return resolved, conflicts
 
 
-def ensure_facts_and_resolve(entity: _FactHolder) -> None:
+@dataclass
+class GraphNode:
+    """A single ABI/API-relevant graph node (ADR-031 D2).
+
+    ``facts``/``resolved``/``conflicts``: the ADR-046 D2 evidence-preserving
+    merge. ``attrs``/``provenance``/``confidence`` stay real fields (v1
+    read-compat), (re)populated from the merged facts, not frozen at
+    first registration.
+    """
+
+    id: str
+    kind: str  # one of source_graph.NODE_KINDS (preserved even if unknown)
+    label: str = ""  # human-readable name/path (redacted upstream)
+    attrs: dict[str, Any] = field(default_factory=dict)
+    provenance: str = ""  # how this node was derived, e.g. "build_evidence"
+    confidence: str = CONF_UNKNOWN
+    facts: list[GraphFact] = field(default_factory=list)
+    resolved: dict[str, Any] = field(default_factory=dict)
+    conflicts: list[FactConflict] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "label": self.label,
+            "attrs": dict(self.attrs),
+            "provenance": self.provenance,
+            "confidence": self.confidence,
+            "facts": [f.to_dict() for f in self.facts],
+            "resolved": dict(self.resolved),
+            "conflicts": [c.to_dict() for c in self.conflicts],
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> GraphNode:
+        # v1 pack has no "facts" key; ensure_facts_and_resolve synthesizes it
+        # from attrs/provenance/confidence (no forced re-collection). A stored
+        # "resolved"/"conflicts" is never trusted — always recomputed, so a
+        # hand-edited pack self-heals instead of persisting a stale merge.
+        node = cls(
+            id=str(d["id"]),
+            kind=str(d.get("kind", "file")),
+            label=str(d.get("label", "")),
+            attrs=dict(d.get("attrs", {})),
+            provenance=str(d.get("provenance", "")),
+            confidence=str(d.get("confidence", CONF_UNKNOWN)),
+            facts=[GraphFact.from_dict(f) for f in d.get("facts", [])],
+        )
+        ensure_facts_and_resolve(node)
+        return node
+
+
+@dataclass
+class GraphEdge:
+    """A directed edge between two nodes, with provenance + confidence (D2, D9).
+
+    ``attrs`` carries edge-kind-specific labels — most importantly the
+    ``call_kind``/``resolution`` pair for ``DECL_CALLS_DECL`` edges (ADR-031
+    D4). ``facts``/``resolved``/``conflicts`` are the ADR-046 D2
+    evidence-preserving merge — see :class:`GraphNode`.
+    """
+
+    src: str
+    dst: str
+    kind: str  # one of source_graph.EDGE_KINDS (preserved even if unknown)
+    provenance: str = ""
+    confidence: str = CONF_UNKNOWN
+    attrs: dict[str, Any] = field(default_factory=dict)
+    facts: list[GraphFact] = field(default_factory=list)
+    resolved: dict[str, Any] = field(default_factory=dict)
+    conflicts: list[FactConflict] = field(default_factory=list)
+
+    def key(self) -> tuple[str, str, str]:
+        """Identity for diffing/de-dup: (src, dst, kind) — ADR-046 D1's
+        coarsest (role-blind) projection, unchanged so every existing caller
+        is unaffected; role-aware code uses :meth:`relation_key`.
+        """
+        return (self.src, self.dst, self.kind)
+
+    def relation_key(self) -> tuple[str, str, str, str]:
+        """Role-aware identity (ADR-046 D1) — see :func:`edge_relation_key`.
+        Falls back to raw ``attrs`` pre-registration, when ``resolved`` is
+        still empty.
+        """
+        return edge_relation_key(
+            self.src, self.dst, self.kind, self.resolved or self.attrs
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "edge": self.kind,
+            "src": self.src,
+            "dst": self.dst,
+            "provenance": self.provenance,
+            "confidence": self.confidence,
+            "attrs": dict(self.attrs),
+            "facts": [f.to_dict() for f in self.facts],
+            "resolved": dict(self.resolved),
+            "conflicts": [c.to_dict() for c in self.conflicts],
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> GraphEdge:
+        # See GraphNode.from_dict: v1-pack compat + always-recompute-from-facts
+        # apply identically here.
+        edge = cls(
+            src=str(d["src"]),
+            dst=str(d["dst"]),
+            kind=str(d.get("edge", d.get("kind", ""))),
+            provenance=str(d.get("provenance", "")),
+            confidence=str(d.get("confidence", CONF_UNKNOWN)),
+            attrs=dict(d.get("attrs", {})),
+            facts=[GraphFact.from_dict(f) for f in d.get("facts", [])],
+        )
+        ensure_facts_and_resolve(edge)
+        return edge
+
+
+def ensure_facts_and_resolve(entity: GraphNode | GraphEdge) -> None:
     """Ensure ``entity.facts`` is non-empty and (re)derive ``resolved``/
     ``conflicts``/``attrs``/``confidence``/``provenance`` from it.
 
@@ -214,7 +316,7 @@ def ensure_facts_and_resolve(entity: _FactHolder) -> None:
 
 
 def register_fact(
-    entity: _FactHolder,
+    entity: GraphNode | GraphEdge,
     provenance: str,
     confidence: str,
     attrs: dict[str, Any],
@@ -231,3 +333,27 @@ def register_fact(
     if new_fact not in entity.facts:
         entity.facts.append(new_fact)
     ensure_facts_and_resolve(entity)
+
+
+def edge_relation_key(
+    src: str, dst: str, kind: str, resolved: dict[str, Any]
+) -> tuple[str, str, str, str]:
+    """ADR-046 D1 role-aware edge identity: (src, dst, kind, role).
+
+    Adds ``resolved.get("role", "")`` (D2's merged view, not raw ``attrs``)
+    as a fourth discriminator to the coarse ``(src, dst, kind)`` key
+    (``GraphEdge.key()``), so two structurally different dependencies that
+    happen to share that triple — e.g. a type used as a ``"return"`` type on
+    one edge and as a ``"param"`` type on another, both ``DECL_HAS_TYPE`` —
+    stay distinguishable to code that needs that distinction. Existing
+    edge-set comparisons (``add_edge`` dedup, ``diff_source_graph``) keep
+    using the coarser ``key()`` unchanged; this is additive, for new
+    role-aware code only.
+
+    D1's second half — ``occurrence_id`` (the full, non-deduplicated
+    per-call-site/per-configuration evidence trail a ``relation_key`` can
+    back many of) — is not implemented here: it needs the pack-size
+    cost-model check ADR-046's own Costs section calls for before landing on
+    a default, always-on path rather than an opt-in one.
+    """
+    return (src, dst, kind, str(resolved.get("role", "")))

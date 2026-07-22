@@ -12,12 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for ADR-046 D2: the evidence-preserving node/edge merge (G29 Phase 2,
-slice 1) — ``GraphFact``/``FactConflict``, order-independent ``resolved``
-folding, conflict recording, and v1-pack read-compatibility."""
+"""Tests for ADR-046 D2 and D1 (G29 Phase 2, slices 1 and 3):
+
+- D2 — the evidence-preserving node/edge merge: ``GraphFact``/``FactConflict``,
+  order-independent ``resolved`` folding, conflict recording, and v1-pack
+  read-compatibility.
+- D1 — role-aware edge identity: ``GraphEdge.relation_key()``/
+  ``edge_relation_key()``.
+"""
 
 from __future__ import annotations
 
+from abicheck.buildsource.graph_facts import edge_relation_key
 from abicheck.buildsource.source_graph import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -327,3 +333,94 @@ class TestPostRegistrationBackfillSurvivesRoundTrip:
         after = next(n for n in reloaded.nodes if n.id == "decl://b")
         assert after.attrs.get("defined_in_project") is True
         assert after.attrs.get("def_file") == "src/detail/helper.h"
+
+
+class TestRelationKey:
+    """ADR-046 D1: role-aware edge identity."""
+
+    def test_relation_key_adds_role_to_coarse_key(self) -> None:
+        edge = GraphEdge(
+            src="decl://a",
+            dst="type://T",
+            kind="DECL_HAS_TYPE",
+            provenance="type_graph",
+            confidence=CONF_HIGH,
+            attrs={"role": "return"},
+        )
+        assert edge.key() == ("decl://a", "type://T", "DECL_HAS_TYPE")
+        assert edge.relation_key() == (
+            "decl://a",
+            "type://T",
+            "DECL_HAS_TYPE",
+            "return",
+        )
+
+    def test_relation_key_distinguishes_edges_that_collapse_on_key(self) -> None:
+        # Two structurally different dependencies sharing (src, dst, kind) --
+        # a type used as a return type on one edge, a param type on another.
+        return_edge = GraphEdge(
+            src="decl://f",
+            dst="type://T",
+            kind="DECL_HAS_TYPE",
+            attrs={"role": "return"},
+        )
+        param_edge = GraphEdge(
+            src="decl://f",
+            dst="type://T",
+            kind="DECL_HAS_TYPE",
+            attrs={"role": "param"},
+        )
+        assert return_edge.key() == param_edge.key()
+        assert return_edge.relation_key() != param_edge.relation_key()
+
+    def test_relation_key_defaults_to_empty_role_when_absent(self) -> None:
+        edge = GraphEdge(src="decl://a", dst="decl://b", kind="DECL_CALLS_DECL")
+        assert edge.relation_key() == ("decl://a", "decl://b", "DECL_CALLS_DECL", "")
+
+    def test_relation_key_reads_role_from_merged_resolved_not_raw_attrs(self) -> None:
+        # register_fact's evidence-preserving merge is what relation_key must
+        # see -- not whichever fact happened to register first (ADR-046 D2).
+        g = SourceGraphSummary()
+        g.add_edge(
+            GraphEdge(
+                src="decl://a",
+                dst="type://T",
+                kind="DECL_HAS_TYPE",
+                provenance="weak",
+                confidence=CONF_REDUCED,
+                attrs={"role": "param"},
+            )
+        )
+        g.add_edge(
+            GraphEdge(
+                src="decl://a",
+                dst="type://T",
+                kind="DECL_HAS_TYPE",
+                provenance="strong",
+                confidence=CONF_HIGH,
+                attrs={"role": "return"},
+            )
+        )
+        (edge,) = g.edges
+        assert edge.relation_key() == (
+            "decl://a",
+            "type://T",
+            "DECL_HAS_TYPE",
+            "return",
+        )
+
+    def test_edge_relation_key_function_matches_method(self) -> None:
+        g = SourceGraphSummary()
+        g.add_edge(
+            GraphEdge(
+                src="decl://a",
+                dst="type://T",
+                kind="TYPE_HAS_FIELD_TYPE",
+                attrs={"role": "field"},
+            )
+        )
+        (edge,) = g.edges
+        assert edge.resolved  # registered: resolved is populated, not empty
+        assert edge.relation_key() == edge_relation_key(
+            edge.src, edge.dst, edge.kind, edge.resolved
+        )

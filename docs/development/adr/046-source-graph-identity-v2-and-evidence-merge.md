@@ -1,14 +1,15 @@
 # ADR-046: Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge
 
 **Date:** 2026-07-19
-**Status:** Accepted — D2 and D3 slices implemented: the evidence-preserving
+**Status:** Accepted — D1, D2, and D3 slices implemented: role-aware edge
+identity (`GraphEdge.relation_key()`/`edge_relation_key`, the `relation_key`
+half of D1's split — `occurrence_id` remains open), the evidence-preserving
 node/edge merge (`GraphFact`/`FactConflict`/`merge_graph_facts`, replacing
 `SourceGraphSummary.add_node`/`add_edge`'s v1 first-writer-wins drop), and the
-per-(kind,role) coverage matrix for `inline_graph_fold.fold_type_graph`. D1
-(`relation_key`/`occurrence_id` edge-identity split), D4
+per-(kind,role) coverage matrix for `inline_graph_fold.fold_type_graph`. D4
 (`EntityResolver`/`SOURCE_GRAPH_VERSION = 2`), D5 (`TraversalPolicy`), and D6
-(proof-path preference order) remain open — see "D2 implementation"/"D3
-implementation" below.
+(proof-path preference order) remain open — see "D1 implementation"/"D2
+implementation"/"D3 implementation" below.
 **Decision maker:** (pending — recorded per repository convention, the same
 caveat ADR-048's header carries; a single-maintainer repo where merging the
 implementing PR is the acceptance mechanism.)
@@ -255,6 +256,46 @@ The finding keeps `primary_path` (the highest-preference path found) plus
 "how much evidence was there, and how strong was the best of it," not just
 one arbitrary shortest path.
 
+## D1 implementation (G29 Phase 2, slice 3 — the `relation_key` half)
+
+- `abicheck/buildsource/graph_facts.py`: `edge_relation_key(src, dst, kind,
+  resolved)` and `GraphEdge.relation_key()` — the `(src, dst, kind, role)`
+  tuple, reading `role` from `resolved` (D2's merged view) when populated,
+  falling back to raw `attrs` for a bare edge that hasn't gone through
+  `add_edge`/`ensure_facts_and_resolve` yet. Purely additive: `GraphEdge.key()`
+  keeps its exact `(src, dst, kind)` shape and every existing caller
+  (`SourceGraphSummary.add_edge`'s dedup, `diff_source_graph`'s edge-set
+  comparison) is unaffected — per the Decision text above, this is new
+  surface for role-aware code, not a behavior change to today's dedup/diff.
+- **Not implemented**: `occurrence_id` (the full, non-deduplicated
+  per-call-site/per-configuration evidence trail one `relation_key` can back
+  many of). The ADR's own Costs section flags this specifically as needing "a
+  measured check against the existing scan-level cost model... before this
+  lands on a default, always-on path rather than an opt-in one" — that
+  measurement hasn't been done, so this slice stops at the identity split and
+  does not add per-occurrence storage.
+- `tests/test_source_graph_v2.py` (`TestRelationKey`): role discriminates two
+  edges that collapse on `key()`; defaults to `""` when no role attr;
+  defaults absent; reads the D2-merged `resolved` view (not whichever fact
+  registered first) rather than a raw/stale attr; the free function and
+  method agree.
+
+### Mechanical follow-up: `GraphNode`/`GraphEdge` moved into `graph_facts.py`
+
+Landing D1 alongside D2/D3 pushed `source_graph.py` back over the
+AI-readiness 2000-line hard cap. Rather than trim prose further (this module
+is already dense with Codex-review-driven rationale that would lose meaning
+compressed), `GraphNode`/`GraphEdge` themselves — not just the D1/D2 merge
+functions — moved into `graph_facts.py`, which already held their supporting
+`GraphFact`/`FactConflict`/merge machinery. This *simplified* `graph_facts.py`
+rather than complicating it: the `_FactHolder` structural `Protocol` that
+previously stood in for `GraphNode`/`GraphEdge` (to avoid importing them and
+risking a cycle) is gone — with the real classes now defined in the same
+module, `ensure_facts_and_resolve`/`register_fact` just type-hint
+`GraphNode | GraphEdge` directly. `source_graph.py` re-exports both names
+(alongside the existing `CONF_HIGH`/`GraphFact`/`FactConflict` re-exports) so
+every existing `from .source_graph import GraphNode` call site is unaffected.
+
 ## D2 implementation (G29 Phase 2, slice 1)
 
 Implemented as the first slice of Phase 2, chosen because D2 is the change
@@ -443,11 +484,14 @@ preference order all remain open follow-up work under this same ADR — see
 
 ## References
 
-- `abicheck/buildsource/source_graph.py` — v1 schema (`GraphNode`, `GraphEdge`,
-  `SourceGraphSummary`, `SOURCE_GRAPH_VERSION`); `add_node`/`add_edge` now
-  delegate to `graph_facts.py` (D2, implemented).
-- `abicheck/buildsource/graph_facts.py` — D2's `GraphFact`/`FactConflict`/
-  `merge_graph_facts`/`ensure_facts_and_resolve`/`register_fact`.
+- `abicheck/buildsource/source_graph.py` — `SourceGraphSummary`,
+  `SOURCE_GRAPH_VERSION` (v1 schema container); `add_node`/`add_edge` now
+  delegate to `graph_facts.py` (D2, implemented). `GraphNode`/`GraphEdge`
+  themselves live in `graph_facts.py`, re-exported here.
+- `abicheck/buildsource/graph_facts.py` — the `GraphNode`/`GraphEdge` schema
+  itself, D1's `edge_relation_key`/`GraphEdge.relation_key` (implemented) and
+  D2's `GraphFact`/`FactConflict`/`merge_graph_facts`/
+  `ensure_facts_and_resolve`/`register_fact` (implemented).
 - `abicheck/buildsource/inline_graph_fold.py` — D3's `ROLE_COVERAGE_MATRIX`/
   `role_pass_covered`/`_mark_role_coverage`, wired into `fold_type_graph`.
 - `abicheck/internal_leak.py` — `compute_leak_paths`/
