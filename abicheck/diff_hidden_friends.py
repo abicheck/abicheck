@@ -36,12 +36,11 @@ def check_hidden_friend_change(
     Hidden-friend transitions: an in-class ``friend`` declaration was
     added or removed across versions. Tri-state — skip when either
     side's snapshot did not record the flag (e.g. DWARF-only path or
-    an older snapshot). The matched-mangled iteration here handles
-    the case where the friend has an out-of-line definition (i.e.
-    a real symbol). Inline-only hidden friends never appear here
-    because they have no symbol on either side; those transitions
-    are picked up by ``diff_inline_hidden_friends`` below by matching
-    on (name, params) rather than mangled name.
+    an older snapshot). Called both from the public-symbol pairing (a
+    friend with an out-of-line definition, i.e. a real exported symbol)
+    and from ``diff_inline_hidden_friends`` below for an inline-only
+    friend that keeps the same mangled key on both sides but is HIDDEN
+    on at least one — the public pairing never sees that case at all.
 
     ``caused_by_type`` carries the befriending class's qualified name (the
     side that is/was actually a hidden friend) so surface classification can
@@ -75,41 +74,62 @@ def check_hidden_friend_change(
 def diff_inline_hidden_friends(
     old_all: dict[str, Function],
     new_all: dict[str, Function],
+    old_public: dict[str, Function],
+    new_public: dict[str, Function],
 ) -> list[Change]:
-    """Pick up hidden-friend additions/removals that have no public symbol.
+    """Pick up hidden-friend transitions that the public-symbol diff misses.
 
     Inline-defined hidden friends never appear in the .so dynsym (the
     compiler emits them as `linkonce_odr`, often inlined into callers).
     They show up in the castxml snapshot with ``visibility=HIDDEN`` and
-    ``is_hidden_friend=True``. The public-symbol diff above skips them.
-    This pass compares across the full function map and only fires for
-    functions that are flagged as hidden friends on one side.
+    ``is_hidden_friend=True``, so the public-symbol diff (which only
+    matches on *old_public*/*new_public*, i.e. ``_public_functions()``'s
+    PUBLIC/ELF_ONLY filter) never even considers them. This pass compares
+    across the full function map (*old_all*/*new_all*) instead, so it
+    covers three shapes:
+
+    * present only in *old_all* — removed together with its symbol.
+    * present only in *new_all* — added together with its symbol.
+    * present (same mangled key) in both — the friend keeps its symbol
+      identity but may still flip ``is_hidden_friend`` with no change to
+      its signature (e.g. an in-class ``friend`` declaration pulled out
+      to file scope, or vice versa, which preserves the mangled name
+      since a hidden friend already mangles under its enclosing
+      namespace, not the class). When at least one side is HIDDEN this
+      transition would otherwise never be observed — the sibling
+      ``check_hidden_friend_change`` only runs on pairs matched from
+      *old_public*/*new_public* — so it is checked here too, but only
+      when the pair was NOT already covered by that public-symbol
+      pairing (both sides public), to avoid emitting it twice (Codex
+      review).
     """
     changes: list[Change] = []
     for mangled, f_old in old_all.items():
-        if not f_old.is_hidden_friend:
+        f_new = new_all.get(mangled)
+        if f_new is None:
+            if f_old.is_hidden_friend:
+                changes.append(
+                    make_change(
+                        ChangeKind.HIDDEN_FRIEND_REMOVED,
+                        symbol=mangled,
+                        old=f_old.name,
+                        caused_by_type=f_old.hidden_friend_owner,
+                    )
+                )
             continue
-        if mangled in new_all:
+        if mangled in old_public and mangled in new_public:
             continue
-        changes.append(
-            make_change(
-                ChangeKind.HIDDEN_FRIEND_REMOVED,
-                symbol=mangled,
-                old=f_old.name,
-                caused_by_type=f_old.hidden_friend_owner,
-            )
-        )
+        changes.extend(check_hidden_friend_change(mangled, f_old, f_new))
     for mangled, f_new in new_all.items():
-        if not f_new.is_hidden_friend:
-            continue
         if mangled in old_all:
             continue
-        changes.append(
-            make_change(
-                ChangeKind.HIDDEN_FRIEND_ADDED,
-                symbol=mangled,
-                new=f_new.name,
-                caused_by_type=f_new.hidden_friend_owner,
+        if f_new.is_hidden_friend:
+            changes.append(
+                make_change(
+                    ChangeKind.HIDDEN_FRIEND_ADDED,
+                    symbol=mangled,
+                    new=f_new.name,
+                    caused_by_type=f_new.hidden_friend_owner,
+                )
             )
-        )
     return changes

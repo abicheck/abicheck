@@ -946,8 +946,10 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # HIDDEN_FRIEND_ADDED / HIDDEN_FRIEND_REMOVED for the inline-only case.
     # Inline hidden friends have no external symbol (visibility=HIDDEN) so
     # the public-symbol diff above does not see them. Match across versions
-    # by mangled name across the FULL function map (not just public).
-    changes.extend(diff_inline_hidden_friends(old_all, new_all_map))
+    # by mangled name across the FULL function map (not just public) —
+    # old_map/new_map are passed too so a same-key pair already covered by
+    # the public-symbol pairing above is not re-processed (Codex review).
+    changes.extend(diff_inline_hidden_friends(old_all, new_all_map, old_map, new_map))
 
     return changes
 
