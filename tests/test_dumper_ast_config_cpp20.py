@@ -1022,3 +1022,81 @@ def test_cpp20_detector_ignores_comment_like_text_in_string(tmp_path):
         'const char* s = "/* not a comment */ requires Concept<T>";\n',
     )
     assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_detects_consteval(tmp_path):
+    """Regression (Codex review): a header whose only C++20 signal is a
+    ``consteval`` function (no concept/requires anywhere) was previously
+    parsed under the pre-C++20 default dialect, where ``consteval`` is not
+    a keyword — rejecting an otherwise-valid header."""
+    headers = _write(tmp_path, "a.h", "consteval int f() { return 1; }\n")
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
+def test_cpp20_detector_detects_constinit(tmp_path):
+    """Companion: ``constinit``."""
+    headers = _write(tmp_path, "a.h", "constinit extern int x;\n")
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "constinit-declaration" for r in reqs)
+
+
+def test_cpp20_detector_detects_abbreviated_unconstrained_function_template(tmp_path):
+    """Regression (Codex review): a bare (unconstrained) ``auto`` used
+    directly as an ordinary function's parameter type (``void f(auto
+    x);`` — the C++20 abbreviated function template form) has no
+    ``concept``/``requires``/constrained-parameter syntax at all, so none
+    of the existing checks caught it."""
+    headers = _write(tmp_path, "a.h", "void f(auto x);\n")
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "abbreviated-function-template-parameter" for r in reqs)
+
+
+def test_cpp20_detector_detects_abbreviated_param_with_cv_qualifier(tmp_path):
+    """Companion: a cv-qualifier between the enclosing ``(``/``,`` and the
+    bare ``auto`` (``void f(const auto& x);``) must not block detection —
+    only the qualifier separates them, not an unrelated expression."""
+    headers = _write(tmp_path, "a.h", "void f(const auto& x);\n")
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_ignores_generic_lambda_auto_param(tmp_path):
+    """A generic lambda's ``auto`` parameter (``[](auto x) { ... }``) has
+    been valid since C++14 — it must never be mistaken for the C++20-only
+    abbreviated *function* template form just because both use a bare
+    ``auto`` directly in a parameter list."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "auto g() { return [](auto x) { return x; }; }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_nested_lambda_default_argument(tmp_path):
+    """A generic lambda nested inside an ordinary function's default
+    argument must still be recognized as a lambda parameter list, not the
+    enclosing function's own parameter list."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "void f(int x = []( auto y){ return y; }(0));\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_auto_variable_declaration(tmp_path):
+    """Ordinary ``auto`` type deduction for a variable (C++11+) must not be
+    mistaken for the abbreviated function template parameter form."""
+    headers = _write(tmp_path, "a.h", "void f() { auto x = 5; }\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_trailing_return_type_auto(tmp_path):
+    """A trailing-return-type ``auto`` (C++11+, ``auto f() -> int;``) must
+    not be mistaken for a parameter's bare ``auto`` type."""
+    headers = _write(tmp_path, "a.h", "auto f() -> int;\n")
+    assert _detect_cpp20_headers(headers) is False

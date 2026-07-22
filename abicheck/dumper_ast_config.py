@@ -157,6 +157,18 @@ _CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
     rb"\brequires\s+\w"
 )  # template<T> requires Foo<T>
 
+# ``consteval``/``constinit`` are new C++20 declaration specifiers with no
+# pre-C++20 meaning at all (unlike "concept"/"requires", neither was ever a
+# plausible ordinary identifier in real code — they are alien portmanteau
+# words specific to the C++20 proposals that introduced them), so an
+# unconditional bare-keyword match carries the same low, accepted risk as
+# the existing `_CPP_ONLY_PATTERNS` entries for `constexpr`/`noexcept`/
+# `nullptr`/`override` (Codex review — a header whose only C++20 signal was
+# one of these was previously parsed under the pre-C++20 default dialect,
+# rejecting an otherwise-valid header).
+_CPP20_CONSTEVAL_PATTERN = re.compile(rb"\bconsteval\b")
+_CPP20_CONSTINIT_PATTERN = re.compile(rb"\bconstinit\b")
+
 # Constrained template parameters using a *standard-library* concept name in
 # place of ``typename``/``class`` (``template <std::integral T> void f(T);``)
 # — the abbreviated-constraint form the module docstring above already
@@ -279,6 +291,67 @@ def _has_constrained_param_syntax(lookahead: bytes) -> bool:
         # non-word separator existed there in the first place.
         rest = lookahead[pos:]
         if re.match(rb"auto\b", rest) or _CONSTRAINED_PARAM_TAIL_PATTERN.match(rest):
+            return True
+    return False
+
+
+def _find_enclosing_open_paren(text: bytes, pos: int) -> int | None:
+    """Return the index of the nearest unmatched ``(`` to the left of
+    *pos* in *text*, skipping balanced ``()`` pairs — mirrors
+    :func:`_find_matching_close_paren`'s forward scan, just backward."""
+    depth = 0
+    idx = pos - 1
+    while idx >= 0:
+        ch = text[idx : idx + 1]
+        if ch == b")":
+            depth += 1
+        elif ch == b"(":
+            if depth == 0:
+                return idx
+            depth -= 1
+        idx -= 1
+    return None
+
+
+def _is_lambda_param_list_open_paren(text: bytes, open_paren_pos: int) -> bool:
+    """True if the ``(`` at *open_paren_pos* opens a lambda's parameter
+    list — immediately preceded (skipping whitespace) by the ``]`` that
+    closes a lambda capture list. A generic lambda's ``auto`` parameter
+    (``[](auto x) { ... }``) has been valid since C++14 and must never be
+    mistaken for the C++20-only abbreviated *function* template form."""
+    idx = open_paren_pos - 1
+    while idx >= 0 and text[idx : idx + 1] in b" \t\r\n":
+        idx -= 1
+    return idx >= 0 and text[idx : idx + 1] == b"]"
+
+
+def _has_abbreviated_unconstrained_auto_param(lookahead: bytes) -> bool:
+    """True if *lookahead* contains a bare (unconstrained) ``auto`` used
+    directly as an ordinary function's parameter type (``void f(auto
+    x);``) — the C++20 abbreviated function template form, distinct from
+    the *constrained* form (``std::integral auto x``, handled separately
+    by :func:`_has_constrained_param_syntax`) and from a generic lambda's
+    ``auto`` parameter (``[](auto x) { ... }``), which has been valid
+    since C++14 and is excluded via :func:`_is_lambda_param_list_open_paren`
+    (Codex review). Only matches when nothing but an optional cv-qualifier
+    separates ``auto`` from its enclosing ``(``/``,`` — that position is
+    unambiguous: a bare ``auto`` can never be a parameter's default-
+    argument expression or any other operand there, only its type."""
+    for m in re.finditer(rb"\bauto\b", lookahead):
+        prefix = _strip_trailing_declarator_specifiers(lookahead[: m.start()])
+        if not prefix:
+            continue
+        last = prefix[-1:]
+        open_pos: int | None
+        if last == b"(":
+            open_pos = len(prefix) - 1
+        elif last == b",":
+            open_pos = _find_enclosing_open_paren(lookahead, len(prefix))
+            if open_pos is None:
+                continue
+        else:
+            continue
+        if not _is_lambda_param_list_open_paren(lookahead, open_pos):
             return True
     return False
 
@@ -685,6 +758,9 @@ class Cpp20Requirement:
         "requires-expression",
         "requires-clause",
         "constrained-template-parameter",
+        "abbreviated-function-template-parameter",
+        "consteval-declaration",
+        "constinit-declaration",
     ]
     path: str
     line: int
@@ -794,13 +870,29 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 found.append(
                     Cpp20Requirement("constrained-template-parameter", str(p), start_no)
                 )
+            elif _has_abbreviated_unconstrained_auto_param(lookahead):
+                found.append(
+                    Cpp20Requirement(
+                        "abbreviated-function-template-parameter", str(p), start_no
+                    )
+                )
+            elif _CPP20_CONSTEVAL_PATTERN.search(code):
+                found.append(
+                    Cpp20Requirement("consteval-declaration", str(p), start_no)
+                )
+            elif _CPP20_CONSTINIT_PATTERN.search(code):
+                found.append(
+                    Cpp20Requirement("constinit-declaration", str(p), start_no)
+                )
             if code.strip():
                 prev_nonblank_code = code
     return found
 
 
 def _detect_cpp20_headers(header_paths: list[Path]) -> bool:
-    """Return True if any header contains C++20-only syntax (concept/requires).
+    """Return True if any header contains structural C++20-only syntax
+    (concept/requires, a constrained or abbreviated function template
+    parameter, ``consteval``, or ``constinit``).
 
     Used to decide whether to pass ``-std=gnu++20`` to castxml. castxml's
     default standard is whatever the underlying compiler defaults to
