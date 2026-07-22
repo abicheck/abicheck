@@ -372,10 +372,23 @@ independent exit-code contract that this ADR must not silently
 break: `abicheck/compat/cli.py`'s ABICC-compatible `compat check`
 command** (`from ..checker import compare`, called around `:967`).
 Because `compare()` there is the exact same function D2's gate wraps,
-`ProfileMismatchError`/`ScopeMismatchError` propagate to `compat check`
-automatically — the gap is not "the gate doesn't fire," it's that nothing
-classifies the resulting exception into a *deliberate* compat-mode
-outcome. `compat/CLAUDE.md` documents a closed exit-code contract (`0`
+`ProfileMismatchError`/`ScopeMismatchError` propagate out of that call —
+but, verified against the actual call site, **not into any existing
+classifier**: unlike `check`'s other operations (descriptor parsing,
+logging setup, dump, report writing), each individually wrapped in its own
+narrow `except ... : _compat_fail(...)` block, the bare `result =
+compare(old_snap, new_snap, ...)` call has no surrounding `try` at all
+today. Left alone, the new exceptions would propagate uncaught out of the
+Click command entirely — not into `_classify_compat_error_exit_code`'s
+generic `10` fallback (which would at least be a *wrong but classified*
+outcome), but past classification altogether, as an unhandled traceback.
+This phase adds the missing `try`/`except (ProfileMismatchError,
+ScopeMismatchError) as exc: _compat_fail("comparing snapshots", exc)`
+around that call site — a real call-site change, not merely a classifier
+update — so the gap is not "the gate doesn't fire," it's that nothing
+today would catch the resulting exception at all, let alone classify it
+into a *deliberate* compat-mode outcome. `compat/CLAUDE.md` documents a
+closed exit-code contract (`0`
 compatible, `1` `BREAKING`, `2` `API_BREAK`, `3`–`11` errors via
 `_classify_compat_error_exit_code` in `compat/_errors.py`) that "requires
 a CHANGELOG note and downstream coordination" to change — this ADR cannot
@@ -398,8 +411,18 @@ On the reporting surface (`reporter.py`,
 top-level state — `verdict: null`, a `reason` object naming the mismatched
 fingerprint field(s) — never coerced into `COMPATIBLE`/`BREAKING`'s existing
 enum values. A `--diagnostic-comparison` opt-in flag (default off) downgrades
-the hard-fail to a tentative diff with `assurance: none` stamped on every
-finding, for exploratory use — never the default, and never silent.
+the hard-fail to a tentative diff, the whole result stamped `assurance:
+"none"` for exploratory use — never the default, and never silent.
+**`assurance` is a single field on `DiffResult` (alongside
+`contract_coverage`), not a per-`Change` field.** A forced diagnostic
+comparison is uniformly tentative — the contract gate failed for the pair
+as a whole, before any `diff_*` module ran, so every finding the tentative
+diff produces shares the identical, single reduced-assurance reason; there
+is no per-finding split to encode. `checker_types.Change` gains no new
+field for this; `checker_types.py` gains `assurance: str | None = None`
+on `DiffResult` itself, set to `"none"` only on the `--diagnostic-comparison`
+path (`None` — i.e. absent — on every ordinary comparison, matching
+`contract_coverage`'s own default).
 
 **`html_report.py` is a reporting surface too, not an omission this ADR can
 leave implicit.** AGENTS.md's own module map lists it alongside

@@ -363,7 +363,16 @@ Implements ADR-050 D1 and D2.
   independent 0–2/3–11 exit-code contract (`_classify_compat_error_exit_code`
   in `compat/_errors.py`) that this phase must not silently break by leaving
   a `ProfileMismatchError`/`ScopeMismatchError` to fall into that function's
-  generic fallback code. `_classify_compat_error_exit_code` gains an explicit
+  generic fallback code — or, worse, propagate out of the command entirely
+  unclassified. **This is a real call-site change, not just a classifier
+  update**: verified against the actual code, the `result = compare(old_snap,
+  new_snap, ...)` call has no surrounding `try` today, unlike `check`'s other
+  operations (descriptor parsing, logging setup, dump, report writing), each
+  wrapped in its own narrow `except ...: _compat_fail(...)` block. This phase
+  adds `try: result = compare(...) except (ProfileMismatchError,
+  ScopeMismatchError) as exc: _compat_fail("comparing snapshots", exc)`
+  around that call site so the new exceptions are ever caught at all, not
+  only classified correctly once caught. `_classify_compat_error_exit_code` gains an explicit
   `isinstance(exc, (ProfileMismatchError, ScopeMismatchError))` check —
   mirroring its existing `KeyboardInterrupt` special case — returning **`9`**,
   the one integer the current 3–11 range documents no meaning for (3/4/5/6/7/8/10/11
@@ -406,6 +415,15 @@ Implements ADR-050 D1 and D2.
   `contract_coverage: str | None = None` on `DiffResult` itself, and
   `checker.py`'s `compare()` sets it when exactly one side carries a
   `contract`.
+- **`assurance` (the `--diagnostic-comparison` stamp) is also a `DiffResult`
+  field, not a per-`Change` one.** A forced diagnostic comparison is
+  uniformly tentative — the gate failed for the pair as a whole before any
+  diff ran, so every finding a tentative diff produces shares one identical
+  reduced-assurance reason; there is no per-finding split to encode, and
+  `checker_types.Change` gains no new field for this. `checker_types.py`
+  gains `assurance: str | None = None` on `DiffResult` itself (alongside
+  `contract_coverage`), set to `"none"` only on the `--diagnostic-comparison`
+  path.
 - The published JSON contract moves with the reporters, in this phase, not
   after: `abicheck/schemas/compare_report.schema.json` currently requires
   `verdict` and restricts it to a fixed string enum with no `null` member.
@@ -460,7 +478,8 @@ warm-cache acceptance-criteria bullets above), `errors.py`
 `snapshot_from_dict` hard-rejection branch, `contract` round-trip through
 `snapshot_to_dict`/`snapshot_from_dict`), `checker.py` (gate call at the
 top of `compare`, `contract_coverage` field on the result),
-`checker_types.py` (`DiffResult.contract_coverage: str | None = None`),
+`checker_types.py` (`DiffResult.contract_coverage: str | None = None` and
+`DiffResult.assurance: str | None = None`),
 `service.py`, `mcp_server.py`, `cli.py` (flag + the new,
 distinct `not_comparable` exit code), `cli_compare_release.py`
 (`_compare_one_library`'s dedicated
@@ -469,8 +488,10 @@ distinct `not_comparable` exit code), `cli_compare_release.py`
 above; this is not covered by the CLI's own exit-code handling, it is a
 separate call path), `cli_compare_release_helpers.py`
 (`_RELEASE_VERDICT_ORDER`'s new rank-6 `not_comparable` entry),
-`compat/cli.py` (no call-site change beyond routing through the updated
-`_classify_compat_error_exit_code`), `compat/_errors.py`
+`compat/cli.py` (new `try`/`except (ProfileMismatchError, ScopeMismatchError)`
+wrapping the `compare()` call — there is no surrounding `try` there today —
+routing to the updated `_classify_compat_error_exit_code` via `_compat_fail`),
+`compat/_errors.py`
 (`_classify_compat_error_exit_code`'s new `ProfileMismatchError`/
 `ScopeMismatchError` branch returning `9`), `compat/CLAUDE.md` (exit-code
 table update), `docs/reference/exit-codes.md` (a
@@ -543,9 +564,15 @@ mechanism's own existing scheme-dependent precedence; gate unit tests
 for all
 five entry points; a **compat-mode exit-code** test asserting
 `compat check` returns exactly `9` (never `10`'s generic fallback, never
-`16`) for a `ProfileMismatchError`/`ScopeMismatchError`, exercised through
-`_classify_compat_error_exit_code` directly and through a `compat check`
-end-to-end invocation; a `--diagnostic-comparison` end-to-end test; a
+`16`, and never an unhandled traceback) for a
+`ProfileMismatchError`/`ScopeMismatchError`, exercised both through
+`_classify_compat_error_exit_code` directly and through a real end-to-end
+`compat check` invocation on a mismatched pair — the latter is what proves
+the new `try`/`except` around the `compare()` call site actually catches the
+exception, not just that the classifier returns the right code once handed
+one; a `--diagnostic-comparison` end-to-end test asserting the report's
+top-level `assurance` field is `"none"` and that no individual finding
+carries its own `assurance` value; a
 backward-compat test asserting a contract-less snapshot pair compares
 unchanged; a **mixed-pair** test (one side `contract`, one side none)
 asserting the comparison never hard-fails and instead carries a
