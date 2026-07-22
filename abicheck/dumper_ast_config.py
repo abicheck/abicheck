@@ -313,6 +313,26 @@ def _find_enclosing_open_paren(text: bytes, pos: int) -> int | None:
     return None
 
 
+_TRAILING_ATTRIBUTE_PATTERN = re.compile(rb"\[\[[^\[\]]*\]\]\s*\Z")
+
+
+def _strip_trailing_attributes(prefix: bytes) -> bytes:
+    """Strip zero or more trailing ``[[attr]]``/``[[attr(args)]]``
+    attribute-specifier-seq entries (``[[maybe_unused]]``,
+    ``[[deprecated("msg")]]``, ...) from *prefix* — a standard attribute
+    can precede a parameter's type (``void f([[maybe_unused]] auto x);``),
+    which otherwise leaves the prefix ending in ``]`` instead of the
+    enclosing ``(``/``,`` (Codex review). Narrow gap, accepted: an
+    attribute argument containing a literal ``[``/``]`` (e.g. inside a
+    string) is not unwrapped — vanishingly rare in practice."""
+    prefix = prefix.rstrip()
+    while True:
+        m = _TRAILING_ATTRIBUTE_PATTERN.search(prefix)
+        if not m:
+            return prefix
+        prefix = prefix[: m.start()].rstrip()
+
+
 def _is_lambda_param_list_open_paren(text: bytes, open_paren_pos: int) -> bool:
     """True if the ``(`` at *open_paren_pos* opens a lambda's parameter
     list — immediately preceded (skipping whitespace) by the ``]`` that
@@ -334,11 +354,14 @@ def _has_abbreviated_unconstrained_auto_param(lookahead: bytes) -> bool:
     ``auto`` parameter (``[](auto x) { ... }``), which has been valid
     since C++14 and is excluded via :func:`_is_lambda_param_list_open_paren`
     (Codex review). Only matches when nothing but an optional cv-qualifier
-    separates ``auto`` from its enclosing ``(``/``,`` — that position is
-    unambiguous: a bare ``auto`` can never be a parameter's default-
-    argument expression or any other operand there, only its type."""
+    and/or attribute-specifier-seq (``[[maybe_unused]] auto x`` — Codex
+    review, second round) separates ``auto`` from its enclosing ``(``/
+    ``,`` — that position is unambiguous: a bare ``auto`` can never be a
+    parameter's default-argument expression or any other operand there,
+    only its type."""
     for m in re.finditer(rb"\bauto\b", lookahead):
         prefix = _strip_trailing_declarator_specifiers(lookahead[: m.start()])
+        prefix = _strip_trailing_attributes(prefix)
         if not prefix:
             continue
         last = prefix[-1:]

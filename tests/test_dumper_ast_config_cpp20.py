@@ -1100,3 +1100,42 @@ def test_cpp20_detector_ignores_trailing_return_type_auto(tmp_path):
     not be mistaken for a parameter's bare ``auto`` type."""
     headers = _write(tmp_path, "a.h", "auto f() -> int;\n")
     assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_detects_abbreviated_param_with_attribute(tmp_path):
+    """Regression (Codex review, second round): a standard attribute
+    directly before the abbreviated parameter's bare ``auto``
+    (``void f([[maybe_unused]] auto x);``) leaves the prefix ending in the
+    attribute's closing ``]]`` instead of the enclosing ``(``/``,``, which
+    the plain cv-qualifier strip alone did not account for."""
+    headers = _write(tmp_path, "a.h", "void f([[maybe_unused]] auto x);\n")
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "abbreviated-function-template-parameter" for r in reqs)
+
+
+def test_cpp20_detector_detects_abbreviated_param_with_attribute_and_args(tmp_path):
+    """Companion: an attribute carrying an argument list
+    (``[[deprecated("msg")]]``) must be stripped as a whole, not just a
+    bare ``[[name]]``."""
+    headers = _write(tmp_path, "a.h", 'void f([[deprecated("msg")]] auto x);\n')
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_detects_abbreviated_param_with_attribute_and_cv(tmp_path):
+    """Companion: an attribute followed by a cv-qualifier before ``auto``
+    (``[[maybe_unused]] const auto& x``) must strip both, in order."""
+    headers = _write(tmp_path, "a.h", "void f([[maybe_unused]] const auto& x);\n")
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_ignores_generic_lambda_auto_param_with_attribute(tmp_path):
+    """A generic lambda's ``auto`` parameter with an attribute must still
+    be excluded — the attribute strip must not defeat the lambda-capture-
+    list exclusion."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "auto g() { return [](  [[maybe_unused]] auto x) { return x; }; }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
