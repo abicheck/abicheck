@@ -125,12 +125,23 @@ Implements ADR-049 D1 and D2.
   Hashing absolute paths directly would fingerprint-mismatch and hard-fail
   *every routine compare* as `not_comparable` — breaking the gate's primary
   use case on day one. Each side's paths are normalized relative to that
-  side's own resolution root (legacy CLI path: the longest common prefix of
-  that side's own resolved paths; manifest path: the manifest file's own
-  directory) before hashing (ADR-049 D1). A dedicated test using
-  `--header old=v1/foo.h --header new=v2/foo.h` against logically identical
-  trees under different roots, asserting the resulting `profile_fingerprint`s
-  match, is non-negotiable for this phase to be considered done.
+  side's own resolution root (legacy CLI path: the common ancestor
+  **directory** of that side's inputs — each header's *parent* directory
+  plus each include directory itself, **not** the header paths taken
+  literally; manifest path: the manifest file's own directory) before
+  hashing (ADR-049 D1). Deriving the root from header paths directly instead
+  of their parents breaks the single-header-per-side case — the common
+  ancestor of a one-element path set is that whole path, so `old=v1/foo.h`
+  and `new=v2/bar.h` would both normalize to the same empty marker and hash
+  identically despite being different scopes, the opposite failure from the
+  one this fix exists to close; taking the parent directory first preserves
+  the filename (`v1/foo.h` → root `v1/`, normalized `foo.h`). A dedicated
+  test using `--header old=v1/foo.h --header new=v2/foo.h` against
+  logically identical trees under different roots, asserting the resulting
+  `profile_fingerprint`s match — **and** a second test asserting
+  `old=v1/foo.h`/`new=v2/bar.h` (genuinely different header names) produce
+  *different* fingerprints — is non-negotiable for this phase to be
+  considered done.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -141,6 +152,19 @@ Implements ADR-049 D1 and D2.
   **both** sides carry one, two ordinary dumps would silently take the same
   code path as the intentionally-lenient mixed-pair case forever — a fully
   specified, fully inert gate.
+- **The whole-snapshot cache is the same bypass by a different route — this
+  phase closes it too, not just Phase E's later cache-key work.**
+  `service_dump_cache.cached_run_dump` looks up `snapshot_cache` *before*
+  calling `dump()`; a warm cache entry from a pre-Phase-A abicheck (no
+  `contract` computed) served after upgrading would still come back with
+  `contract=None`, defeating the fix above through a different code path.
+  `snapshot_cache._SNAPSHOT_CACHE_VERSION` (`:48`, currently `"3"`) is
+  bumped in this same phase so every pre-Phase-A cache entry misses once
+  and gets rebuilt through the now-`contract`-populating `dump()`. This is
+  separate from Phase E's later `profile_fingerprint`/`scope_fingerprint`-
+  as-cache-key work (a different gap: a pure profile change with identical
+  headers not invalidating) and cannot be deferred to it without leaving
+  the gate inert for every warm-cache user until Phase E ships.
 - `serialization.SCHEMA_VERSION` is bumped (11 → 12) in the same change
   that starts writing `contract` — **not** treated as a free additive field
   the way ADR-041's advisory `extractor_passes`/`narrowed_passes` were. The
@@ -242,7 +266,8 @@ Implements ADR-049 D1 and D2.
 the gate, and the `UNKNOWN_PROFILE` detector), `dumper.py` (`dump()` calls
 `compute_extraction_contract(...)` and attaches it to every returned
 snapshot — see the acceptance-criteria bullet above; this is not optional
-plumbing), `errors.py`
+plumbing), `snapshot_cache.py` (`_SNAPSHOT_CACHE_VERSION` bump — see the
+warm-cache acceptance-criteria bullet above), `errors.py`
 (`ProfileMismatchError`/`ScopeMismatchError`/`IncompatibleSnapshotSchemaError`),
 `serialization.py` (`SCHEMA_VERSION` bump,
 `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION` threshold + the
@@ -261,8 +286,13 @@ new row in both the legacy and severity-aware tables), `reporter.py`,
 
 **Tests.** A `dump()`-level test asserting a real (non-manifest) dump
 returns a snapshot with a populated, non-`None` `contract` — the specific
-gap that would otherwise leave the gate permanently inert. Unit tests for
-fingerprint stability (same manifest,
+gap that would otherwise leave the gate permanently inert. A **warm-cache**
+regression test: seed `snapshot_cache` with a pre-bump-version entry (no
+`contract`), call `cached_run_dump` for the same inputs post-bump, and
+assert it misses and rebuilds with `contract` populated rather than
+serving the stale hit — the cache-layer analogue of the `dump()` test
+above, closing the same class of bypass through a different code path.
+Unit tests for fingerprint stability (same manifest,
 independent-TU reordering unaffected; include-order-within-a-TU changes
 the fingerprint; flipping one TU's `contributes_to_abi` or `required` flag
 with its includes held identical also changes `scope_fingerprint`); a

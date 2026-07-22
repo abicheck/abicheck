@@ -178,12 +178,23 @@ routine `compare` invocation fingerprint-mismatch and hard-fail as
 the exact inverse of what it's for. Each side's header/include/forced-
 include paths are therefore normalized **relative to that side's own
 resolution root** before folding into either fingerprint: for the legacy,
-non-manifest CLI path, the root is the longest common path prefix of that
-side's own resolved header/include paths (a pure function of that side's
-own inputs, no new flag needed); for the manifest-driven path (D3), the
-root is the manifest file's own directory. Two sides with the same logical
-directory layout (`include/foo.h` under each side's own root) normalize to
-identical relative paths and produce equal fingerprints regardless of where
+non-manifest CLI path, the root is the common ancestor **directory** of
+that side's own inputs — each header path's *parent* directory and each
+include directory itself, not the header paths taken literally (a pure
+function of that side's own inputs, no new flag needed). Computing it from
+the header paths directly, rather than their parents, degenerates in the
+single-header-per-side case that's actually the common one: the "common
+prefix" of a one-element path set is that whole path, so `old=v1/foo.h`
+and `new=v2/bar.h` would both normalize their sole header to the same
+empty/root marker, losing the filename entirely — two genuinely different
+public scopes would then hash identically and wrongly pass the gate, the
+opposite failure from the one this fix exists to close. Taking the parent
+directory first means a lone header's basename survives normalization
+(`v1/foo.h` → root `v1/`, normalized path `foo.h`); for the manifest-driven
+path (D3), the root is the manifest file's own directory. Two sides with
+the same logical directory layout (`include/foo.h` under each side's own
+root) normalize to identical relative paths and produce equal fingerprints
+regardless of where
 each checkout happens to live on disk; a side whose logical layout actually
 differs (a header moved to a different relative location) still changes the
 fingerprint, correctly.
@@ -205,6 +216,26 @@ freshly-produced snapshot, and since D2's gate only ever raises when
 **both** sides carry a `contract`, two perfectly ordinary dumps would
 silently take the same code path as the intentionally-lenient mixed-pair
 case (D2) forever — the gate would be fully specified and fully inert.
+
+**The whole-snapshot cache is the same bypass by a different route, and it
+matters from day one, not just at D6's later cache-key extension.**
+`service_dump_cache.cached_run_dump` looks up `snapshot_cache` *before*
+calling `run_dump`/`dump()` and returns a cache hit unchanged — so a warm
+cache entry written by a pre-this-ADR abicheck (schema 11, no `contract`
+computed at all) served after upgrading to a version that implements this
+ADR would still come back with `contract=None`, for the same reason a
+never-populated `dump()` would: the code path that would have called
+`compute_extraction_contract(...)` never runs on a cache hit. D1 therefore
+also bumps `snapshot_cache._SNAPSHOT_CACHE_VERSION` (`:48`, currently
+`"3"`) in the same change — folded into `_cache_key()` (`:196`) already, so
+every pre-this-ADR cache entry misses exactly once and gets rebuilt through
+the now-`contract`-populating `dump()`. This is deliberately separate from
+D6's later `profile_fingerprint`/`scope_fingerprint`-as-cache-key-input
+work: that closes a *different* gap (a pure compile-profile change with
+identical header content not invalidating the cache); this one closes
+"the cache doesn't know `contract` exists yet at all," and cannot wait for
+D6's phase without leaving the gate inert for every warm-cache user in the
+interim.
 
 ### D2. Comparability gate — hard-fail before symbol diff, not a RISK finding
 
