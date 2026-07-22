@@ -1038,70 +1038,90 @@ Implements ADR-050 D1 and D2.
   the same phase, per that file's own stated policy that changing the
   exit-code contract "requires a CHANGELOG note and downstream coordination."
 - **A sixth entry point reaches `compare_snapshots` through a different
-  code path than the ones already named, with its own exit-code contract
-  too.** `abicheck scan --against` calls `service.compare_snapshots` from
+  code path than the ones already named, and the fix belongs one layer
+  deeper than the per-front-end catches used for the other five — inside
+  the shared engine core, not in `scan_cmd` or `run_scan` individually.**
+  `abicheck scan --against` calls `service.compare_snapshots` from
   `cli_scan_baseline._run_baseline_compare` (invoked from
   `scan_engine.run_scan_core` around `:852`) — `compare_snapshots` itself
   has no exception handling of its own (a thin wrapper over
   `checker.compare`), so `ProfileMismatchError`/`ScopeMismatchError`
   propagate through it cleanly, exactly as intended at the `service.py`
-  boundary. The gap is one level up: `cli_scan.py`'s `scan_cmd` wraps its
-  `run_scan_core` call in `try`/`except _BudgetOverflow`/`except
-  _EvidenceContractError` only — verified against the actual code, neither
-  clause catches `ProfileMismatchError`/`ScopeMismatchError`, so today they
-  would propagate uncaught out of `scan_cmd` entirely, an unhandled
-  traceback rather than any of `scan`'s own documented exit codes
-  (`0`/`2`/`4`/`5`/`64`). `scan_cmd` gains a third `except
-  (ProfileMismatchError, ScopeMismatchError) as exc:` branch alongside its
-  existing two, exiting **`6`** — the next integer after `scan`'s own
-  highest documented code (`5`), distinct from both native `compare`'s
-  `16` and `compat check`'s `9` since all three commands maintain
-  independent exit-code schemes; reusing either of those would imply a
-  shared numbering `scan` doesn't have. `docs/reference/exit-codes.md`'s
-  `scan` table gains this row.
-- **`cli_scan.py`'s `scan_cmd` is not the only front-end wrapping
-  `run_scan_core` — the typed Python API and MCP reach the same
-  `_run_baseline_compare` call through a separate, unfixed path.**
-  `service_scan.run_scan` (`:801-928`) is its own front-end over
-  `run_scan_core`, with its own `try`/`except _BudgetOverflow`/`except
-  _EvidenceContractError` — the identical gap as `scan_cmd`'s, on a
-  different call site: `ProfileMismatchError`/`ScopeMismatchError` would
-  propagate out of `run_scan` uncaught today. This matters beyond the
-  Python API itself because `run_scan_subprocess`'s worker (`:982-985`)
-  calls `run_scan(req).to_dict()` inside `except BaseException as exc:
-  q.put(("err", f"{type(exc).__name__}: {exc}"))` — a fully generic
-  catch-all that cannot distinguish a deliberate `not_comparable` result
-  from any other crash, and `run_scan_subprocess` (`:1108-1135`) turns that
-  into a bare `RuntimeError`. `mcp_server`'s `abi_scan` MCP tool goes
-  through `run_scan_subprocess`, so an AI agent calling `abi_scan(...
-  against=...)` on a mismatched pair would see an opaque worker-crash
-  `RuntimeError`, not a structured not-comparable result — losing the
-  ADR's semantics entirely on the one surface built specifically for
-  agent consumption. `run_scan` gains a fourth `except
-  (ProfileMismatchError, ScopeMismatchError) as exc:` branch alongside its
-  existing two, returning `ScanResult(verdict="NOT_COMPARABLE",
-  exit_code=6, ...)` — reusing `scan`'s own exit `6` rather than inventing
-  a second code for the same command. **This is a new possible value on
-  the versioned scan envelope, not schema-invisible internal plumbing —
-  `abicheck/schemas/__init__.py`'s own `SCAN_SCHEMA_VERSION` docstring
-  states outright that it versions both public scan dict shapes
-  (`ScanOutcome.to_dict`/`ScanResult.to_dict`) "including
-  verdict/exit_code," with the same additive/breaking bump policy
-  `REPORT_SCHEMA_VERSION` already gets in this same plan (the JSON schema
-  bullet above) — a new `verdict` string a pre-Phase-A `scan` consumer
-  could never have received before is exactly what that policy exists to
-  track.** `SCAN_SCHEMA_VERSION` (currently `"1.1"`) is bumped in this same
-  change, with a new version-history line in its docstring (`1.2` — added
-  the `NOT_COMPARABLE` verdict/exit `6`, mirroring `REPORT_SCHEMA_VERSION`'s
-  own `not_comparable`/`verdict: null` bump), plus a regression test
-  confirming old scan reports (pre-`1.2`) stay distinguishable from new
-  ones by this version, the same guarantee
-  `tests/test_report_schema.py` already provides for `compare`. Fixing
-  `run_scan` alone closes both
-  gaps: `run_scan_subprocess`'s worker calls `run_scan(...)` directly, so
-  a `NOT_COMPARABLE` result now flows through its normal `q.put(("ok",
-  ...))` path — no separate `run_scan_subprocess`/`mcp_server.py` change
-  needed beyond that.
+  boundary. `run_scan_core`'s own module docstring already states its
+  purpose: "the one body the CLI, `service.run_scan`, and the MCP scan
+  tool share" — catching one layer too high, separately in `scan_cmd` and
+  in `service_scan.run_scan`, would duplicate the fix across two call
+  sites this module exists specifically to keep from diverging, **and** it
+  would catch the exception *after* `run_scan_core` has already returned
+  (or failed to return) a `ScanCoreResult` — too late to build a real
+  `ScanOutcome`, since `scan_cmd`'s outer `try` only has `core.outcome` to
+  work with once `run_scan_core` returns normally, and its own
+  `_emit_scan_report(core.outcome, fmt, output)` call (the one function
+  that renders text/JSON, writes the `-o` file, and exits on `exit_code
+  != 0`, mirrored by the *existing* `_BudgetOverflow`/
+  `_EvidenceContractError` branches, which also skip `_emit_scan_report`
+  and just exit/raise bare, matching precedent) never runs on any
+  exception path at all. A bare `sys.exit(6)` in a new `scan_cmd` except
+  branch would therefore skip `_emit_scan_report` entirely: `abicheck scan
+  --against ... --format json -o report.json` on a mismatched pair would
+  exit `6` but **write no report file** — no `ScanOutcome` JSON, no bumped
+  `scan_schema_version`, no reason object — even though this same phase's
+  `SCAN_SCHEMA_VERSION` bump (below) is framed as versioning exactly that
+  envelope's new `NOT_COMPARABLE` verdict. The fix instead wraps only the
+  `_run_baseline_compare(...)` call inside `run_scan_core` (`:852`,
+  already inside a `try` catching `deadline.DeadlineExceeded`) in an
+  additional `except (ProfileMismatchError, ScopeMismatchError) as exc:`
+  branch. At that point every field `ScanOutcome` needs except the
+  baseline-diff-derived ones is already resolved locally (`scan_mode`,
+  `resolved`, `eff_depth_enum`, `collect_mode`, `risk`, `is_auto`,
+  `changed`, `changed_src`, `pattern`, `preproc`, `cc`'s coverage/findings,
+  `stage_timings` collected so far) — the branch sets
+  `verdict = "NOT_COMPARABLE"`, `exit_code = 6`,
+  `diff_summary = {"reason": str(exc)}`, and skips the crosscheck-severity
+  promotion step below it (a `NOT_COMPARABLE` gate result is not something
+  a promoted cross-check finding should be able to soften or override, the
+  same "hard-blocking gate, no soft-launch path" rule Phase A's own
+  section already establishes), then falls through to the function's
+  existing `ScanOutcome(...)` construction (`:902`) with those three
+  fields instead of the normal baseline-diff ones. **Fixing it here closes
+  all three front-ends in one change, not one at a time:** `scan_cmd`
+  needs no new `except` branch at all — `core.outcome.exit_code == 6`
+  already makes its existing, unconditional `_emit_scan_report(core.outcome,
+  fmt, output)` call (`:885`) write the real `ScanOutcome` JSON/text and
+  exit `6`, the same path every successful scan already takes, not a
+  bypass of it; `service_scan.run_scan` needs no new `except` branch
+  either, since (per `ScanCoreResult`'s own docstring) it already builds
+  its typed `ScanResult` from `core.outcome` "without re-running
+  anything," so `verdict="NOT_COMPARABLE"`/`exit_code=6` flow through
+  automatically; and `run_scan_subprocess`'s worker (`:982-985`) — whose
+  fully generic `except BaseException` catch-all today cannot distinguish
+  a deliberate not-comparable result from any other crash, turning it into
+  a bare `RuntimeError` `mcp_server`'s `abi_scan` MCP tool would see as an
+  opaque failure — needs no change either, because there is no longer an
+  exception for that catch-all to swallow: `run_scan(req)` returns
+  normally with a `NOT_COMPARABLE` `ScanResult`, flowing through the
+  worker's ordinary `q.put(("ok", ...))` success path, reaching the agent
+  as the structured result the ADR's semantics require. `docs/reference/
+  exit-codes.md`'s `scan` table gains a `6` row — the next integer after
+  `scan`'s own highest documented code (`5`), distinct from both native
+  `compare`'s `16` and `compat check`'s `9` since all three commands
+  maintain independent exit-code schemes; reusing either of those would
+  imply a shared numbering `scan` doesn't have.
+- **This is a new possible value on the versioned scan envelope, not
+  schema-invisible internal plumbing.** `abicheck/schemas/__init__.py`'s
+  own `SCAN_SCHEMA_VERSION` docstring states outright that it versions
+  both public scan dict shapes (`ScanOutcome.to_dict`/`ScanResult.to_dict`)
+  "including verdict/exit_code," with the same additive/breaking bump
+  policy `REPORT_SCHEMA_VERSION` already gets in this same plan (the JSON
+  schema bullet above) — a new `verdict` string a pre-Phase-A `scan`
+  consumer could never have received before is exactly what that policy
+  exists to track. `SCAN_SCHEMA_VERSION` (currently `"1.1"`) is bumped in
+  this same change, with a new version-history line in its docstring
+  (`1.2` — added the `NOT_COMPARABLE` verdict/exit `6`, mirroring
+  `REPORT_SCHEMA_VERSION`'s own `not_comparable`/`verdict: null` bump),
+  plus a regression test confirming old scan reports (pre-`1.2`) stay
+  distinguishable from new ones by this version, the same guarantee
+  `tests/test_report_schema.py` already provides for `compare`.
 - **A seventh entry point imports `checker.compare` directly and swallows
   every exception into an undifferentiated `None` today — a different
   failure mode than the previous six, and it needs its own fix.**
@@ -1536,18 +1556,21 @@ routing to the updated `_classify_compat_error_exit_code` via `_compat_fail`),
 `compat/_errors.py`
 (`_classify_compat_error_exit_code`'s new `ProfileMismatchError`/
 `ScopeMismatchError` branch returning `9`), `compat/CLAUDE.md` (exit-code
-table update), `cli_scan.py` (`scan_cmd`'s new third `except
-(ProfileMismatchError, ScopeMismatchError)` branch exiting `6`, alongside
-its existing `_BudgetOverflow`/`_EvidenceContractError` clauses — no change
-needed in `cli_scan_baseline.py`/`scan_engine.py` themselves, since
-neither catches these exceptions today and both must keep letting them
-propagate), `service_scan.py` (`run_scan`'s new fourth `except
-(ProfileMismatchError, ScopeMismatchError)` branch returning
-`ScanResult(verdict="NOT_COMPARABLE", exit_code=6, ...)`, alongside its
-existing `_BudgetOverflow`/`_EvidenceContractError` clauses — no separate
-`run_scan_subprocess`/`mcp_server.py` change needed, since the worker
-already calls `run_scan(...)` and forwards whatever `ScanResult` it
-returns), `stack_checker.py` (`StackChange.not_comparable_reason`
+table update), `scan_engine.py` (`run_scan_core`'s `_run_baseline_compare`
+call (`:852`) gains an `except (ProfileMismatchError, ScopeMismatchError)
+as exc:` branch alongside its existing `except deadline.DeadlineExceeded`,
+setting `verdict="NOT_COMPARABLE"`/`exit_code=6`/
+`diff_summary={"reason": str(exc)}`, skipping the crosscheck-severity
+promotion step, and falling through to the function's existing
+`ScanOutcome(...)` construction — the single shared fix point `scan_cmd`,
+`service_scan.run_scan`, and `mcp_server.abi_scan` all inherit from,
+per this module's own "one body the CLI/API/MCP share" docstring; **no
+change needed in `cli_scan.py`, `service_scan.py`, or `mcp_server.py`
+themselves** — `scan_cmd`'s existing, unconditional
+`_emit_scan_report(core.outcome, fmt, output)` call and
+`service_scan.run_scan`'s existing "build `ScanResult` from `core.outcome`
+without re-running anything" logic both already propagate whatever
+`ScanOutcome` `run_scan_core` returns), `stack_checker.py` (`StackChange.not_comparable_reason`
 field; `_run_abi_diff` re-raises `ProfileMismatchError`/`ScopeMismatchError`
 instead of swallowing them into its broad `except Exception`; its caller
 gains the dedicated `except` branch that sets `not_comparable_reason`),
@@ -1731,19 +1754,25 @@ seven entry points; a **compat-mode exit-code** test asserting
 `compat check` invocation on a mismatched pair — the latter is what proves
 the new `try`/`except` around the `compare()` call site actually catches the
 exception, not just that the classifier returns the right code once handed
-one; a **scan-mode exit-code** test asserting `abicheck scan --against`
-returns exactly `6` (never an unhandled traceback, never `5`'s
-budget-overflow code) for a `ProfileMismatchError`/`ScopeMismatchError`
-raised from the baseline compare, exercised through a real end-to-end
-`scan --against` invocation on a mismatched pair — proving `scan_cmd`'s new
-`except` clause actually catches what `_run_baseline_compare` lets through
-uncaught today; a **`run_scan` API/MCP** test asserting
+one; a **scan-mode exit-code and report-emission** test asserting
+`abicheck scan --against ... --format json -o report.json` returns exactly
+`6` (never an unhandled traceback, never `5`'s budget-overflow code) for a
+`ProfileMismatchError`/`ScopeMismatchError` raised from the baseline
+compare, exercised through a real end-to-end `scan --against` invocation
+on a mismatched pair, **and asserts `report.json` was actually written**
+with `verdict: "NOT_COMPARABLE"`, a populated `diff.reason`, and the
+bumped `scan_schema_version` — proving the fix lands inside
+`run_scan_core` so `scan_cmd`'s existing, unconditional
+`_emit_scan_report` call renders and writes it, not a bare `sys.exit(6)`
+that skips report emission the way `_BudgetOverflow`'s existing bare-exit
+path deliberately does; a **`run_scan` API/MCP** test asserting
 `service_scan.run_scan(ScanRequest(..., baseline=...))` on a mismatched
 pair returns `ScanResult(verdict="NOT_COMPARABLE", exit_code=6)` rather
 than raising, and a second test asserting `run_scan_subprocess` (and, by
 extension, `mcp_server.abi_scan`) surfaces that same structured result
-rather than a generic `RuntimeError` — proving the fix at `run_scan`
-actually reaches the MCP surface without any change needed there; a
+rather than a generic `RuntimeError` — proving the single fix inside
+`run_scan_core` reaches both the CLI and the MCP surface without any
+separate change at either front-end; a
 **scan schema-version** test asserting `SCAN_SCHEMA_VERSION` is bumped
 to `"1.2"` and that a `ScanResult.to_dict()`/`ScanOutcome.to_dict()`
 carrying `verdict="NOT_COMPARABLE"` emits that bumped
