@@ -56,13 +56,19 @@ independently" describes *when* Phase A can land relative to the other
 phases, not a different (report-only) behavior it has while doing so.
 Phase B and Phase D's *parser* may both start once Phase 0's fixtures
 exist — decoding/selecting AST contexts by `kind` doesn't itself depend on
-B. **But Phase D as a whole also depends on Phase A, not Phase 0 alone:**
-its own acceptance criteria require folding the resolved `kind` into
-`comparability.compute_extraction_contract`'s hashed fields and proving a
-host-vs-device mismatch through D2's gate (see Phase D) — both Phase A
-deliverables, the identical class of dependency Phase E already has on A.
-Selecting a *non-default* context also needs Phase B's
-`frontend_context` field/flag to request it (see Phase D). Phase C starts only after Phase B lands, since
+B or A. **But Phase D as a whole depends on both Phase A and Phase B, not
+Phase 0 alone.** Its own acceptance criteria require folding the resolved
+`kind` into `comparability.compute_extraction_contract`'s hashed fields
+and proving a host-vs-device mismatch through D2's gate (see Phase D) —
+both Phase A deliverables, the identical class of dependency Phase E
+already has on A. They also require *lifting* Phase B's blanket
+non-`host` rejection and exercising `--frontend-context device`/a
+manifest `frontend_context: device` end to end (see Phase D) — neither is
+implementable without Phase B's field/flag already existing to lift a
+restriction on, so this is not merely "selecting a non-default context
+needs B," it is "Phase D is not done until this criterion is met,"
+making B a hard prerequisite for the phase as a whole, not just its
+non-default-context path. Phase C starts only after Phase B lands, since
 it operates on the `TuFragment` contract Phase B defines and produces —
 it is not a third parallel branch alongside B and D. **E depends on
 *both* A and B — not on B alone.** `scope_fingerprint` as a *type* and
@@ -94,11 +100,19 @@ unambiguously):
 - **Phase B** — depends on Phase 0 only.
 - **Phase C** — depends on Phase B (operates on the `TuFragment` contract
   Phase B defines and produces).
-- **Phase D** — depends on Phase 0 (the parser) **and** Phase A (folding
-  the resolved `kind` into `compute_extraction_contract`, testing the
-  gate) — see above. Its *non-default*-context path additionally needs
-  Phase B's `frontend_context` field/flag, though the phase as a whole
-  does not depend on B.
+- **Phase D** — depends on **all three** of Phase 0 (the parser), Phase A
+  (folding the resolved `kind` into `compute_extraction_contract`, testing
+  the gate), **and** Phase B. The parser and `host`-default path alone
+  need only Phase 0, but Phase D's *own* acceptance criteria go further
+  than that: they require lifting Phase B's blanket non-`host` rejection
+  and exercising `--frontend-context device` end to end (both the
+  "lifts a restriction Phase B imposed" and the "reject device on a
+  plain frontend" bullets below) — neither is implementable, let alone
+  testable, without Phase B's `frontend_context` manifest field/CLI flag
+  already existing to lift a restriction *on*. Treating this as a "soft"
+  dependency understates it: Phase D is not done until those criteria are
+  met, so Phase B is a hard prerequisite for completing Phase D, not only
+  for its non-default-context path.
 - **Phase E** — depends on **both** Phase A and Phase B — see above.
 
 ---
@@ -2153,10 +2167,17 @@ at a mock of any intermediate layer) — proving `cli_compare_helpers.py`,
 `cli_resolve.py`, and `service.py` were all updated together, not just
 `cli.py`. A **release
 rejects `--frontend-context`** test asserting `compare old_dir new_dir
---frontend-context device` fails fast via `cli_resolve.py`'s existing
-set-input guard, the same way it already fails fast for `--gcc-path`/
-`--ast-frontend` on a directory/package input — proving the flag can't be
-silently accepted and then ignored by the release backend. A companion
+--frontend-context host` — deliberately `host`, not `device`, so the
+only thing that can make this fail is `cli_resolve.py`'s set-input guard
+itself, not Phase B's separate, temporary rejection of every non-`host`
+value (`host` is always accepted there); using `device` here would let
+this test pass via that unrelated rejection without ever proving the
+set-input guard rejects the flag at all, silently resurfacing once
+Phase D makes `device` a normally-accepted value too — fails fast via
+`cli_resolve.py`'s existing set-input guard, the same way it already
+fails fast for `--gcc-path`/`--ast-frontend` on a directory/package input
+— proving the flag can't be silently accepted and then ignored by the
+release backend. A companion
 **release rejects `--dump-manifest`** test asserting `compare old_dir
 new_dir --dump-manifest old=v1/abi.yml --dump-manifest new=v2/abi.yml`
 also fails fast via `_EVIDENCE_SET_INPUT_FLAGS`'s guard, the same way
@@ -2259,26 +2280,32 @@ verdict-producing comparison, so it doesn't fit the example catalog's
 ## Phase D — SYCL/DPC++ host vs. device AST context selection
 
 Implements ADR-050 D5. Independent of Phase C's merge work. **Depends on
-both Phase 0 and Phase A — not Phase 0 alone.** The parser
+Phase 0, Phase A, *and* Phase B — not Phase 0 alone, and not a "soft"
+dependency on B either.** The parser
 (`sycl_context.py`'s document-boundary decoding and `kind`-based
 selection) only needs Phase 0's captured DPC++ fixture, but this phase's
-own acceptance criteria also require folding the resolved `kind` into
-`comparability.compute_extraction_contract`'s hashed fields and testing a
-host-vs-device `profile_fingerprint` mismatch through D2's gate (see the
-dedicated acceptance-criteria bullet below) — both of those are Phase A's
-`ExtractionContract`/`compute_extraction_contract`/gate machinery.
-Starting or landing D before A leaves nothing concrete for that bullet to
-extend, and — worse than merely blocked — could ship a selector whose
-chosen context is invisible to the comparability gate if the fingerprint
-half is skipped or deferred, the identical risk already identified and
-fixed for Phase E's dependency on Phase A. Selecting a
-*non-default* context also has a soft dependency on Phase B: the
-`frontend_context` field (manifest base profile) and `--frontend-context`
-CLI flag this phase's selector reads are defined there, not here (Phase B
-"Goal & acceptance criteria"). The parser and `host`-default path can be
-built and tested without Phase B, but a real DPC++
-device-context request has nowhere to come from until Phase B's field/flag
-exist.
+own acceptance criteria go well past the parser: they require folding the
+resolved `kind` into `comparability.compute_extraction_contract`'s hashed
+fields and testing a host-vs-device `profile_fingerprint` mismatch
+through D2's gate (both Phase A's `ExtractionContract`/
+`compute_extraction_contract`/gate machinery — see the dedicated
+acceptance-criteria bullet below), **and** they require lifting Phase B's
+blanket non-`host` rejection and exercising `--frontend-context device`
+end to end (see the "this phase also lifts a restriction" bullet below)
+— unimplementable without Phase B's `frontend_context` manifest
+field/CLI flag already existing to lift a restriction *on*. Starting or
+landing D before A leaves nothing concrete for the fingerprint-folding
+bullet to extend, and — worse than merely blocked — could ship a
+selector whose chosen context is invisible to the comparability gate if
+that half is skipped or deferred, the identical risk already identified
+and fixed for Phase E's dependency on Phase A. Starting or landing D
+before B leaves the "lift the restriction" criterion equally
+unimplementable — there is no restriction to lift, and no
+`--frontend-context`/manifest field to test `device` through, until B's
+field/flag exist. The parser and `host`-default path alone can be built
+and tested without either A or B, but Phase D as a *whole* — the phase
+this document tracks completion of — cannot be considered done without
+both.
 
 **This phase also lifts a restriction Phase B deliberately imposed, not
 just adds new behavior.** Phase B ships with `dump_manifest.py`/the

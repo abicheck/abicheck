@@ -1589,10 +1589,25 @@ existing mechanism, plus D1's own order-sensitivity fix (Phase A, not
 deferred here) already invalidates on the cases that matter; D6 adds no
 further cache-key work for the `-I`/profile side beyond that. D6's cache-key
 extension is instead scoped to what genuinely is pre-dump-knowable and not
-already covered: the manifest-driven `scope_fingerprint` inputs (TU
-`required`/`contributes_to_abi` flags, D3), which the existing
-`iter_cache_header_files` walk has no way to see since they aren't
-filesystem content at all.
+already covered: **the manifest-driven `scope_fingerprint`'s full set of
+inputs, not only its `required`/`contributes_to_abi` flags** — an earlier
+revision of this paragraph narrowed to just those two flags, but D1's own
+`scope_fingerprint` definition also covers each TU's *name*, its *ordered*
+`includes`/`forced_includes`, and (D1's sibling-support-root fix) each
+`includes` entry's `project_owned` bit. A manifest-only change confined to
+any of those — a TU rename, a per-TU include/forced-include reorder, or
+flipping `project_owned` on an unchanged path — leaves filesystem content
+untouched (so `iter_cache_header_files`'s content/mtime walk can't see it)
+while still changing what the extraction contract actually computes; a
+cache key scoped to only the two flags would miss exactly this class of
+drift and serve a stale `contract` from a warm cache, defeating D2's gate
+through a route this whole cache-key extension exists to close. D6
+therefore hashes the manifest-driven `scope_fingerprint`'s **full**
+computed input set — TU names, per-TU ordered includes/forced-includes,
+the `contributes_to_abi`/`required` flags, and each `includes` entry's
+`project_owned` bit, together, not any one piece in isolation — none of
+which the existing `iter_cache_header_files` walk has any way to see,
+since none of it is filesystem content at all.
 
 ## Non-goals
 
