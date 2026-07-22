@@ -98,6 +98,17 @@ def test_load_baseline_manifest_malformed_json_raises(tmp_path: Path) -> None:
         load_baseline_manifest(tmp_path)
 
 
+def test_load_baseline_manifest_invalid_utf8_raises_value_error(tmp_path: Path) -> None:
+    # UnicodeDecodeError (raised by the text-mode read itself) is a
+    # ValueError subclass, not a json.JSONDecodeError -- must be caught
+    # alongside it so this function's documented "raises ValueError"
+    # contract holds for a manifest replaced by binary garbage too, not
+    # just malformed-but-valid-UTF-8 JSON (Codex review).
+    (tmp_path / BASELINE_MANIFEST_FILENAME).write_bytes(b"\xff\xfe\x00not valid utf-8")
+    with pytest.raises(ValueError, match="not valid JSON"):
+        load_baseline_manifest(tmp_path)
+
+
 def test_load_baseline_manifest_not_a_dict_raises(tmp_path: Path) -> None:
     (tmp_path / BASELINE_MANIFEST_FILENAME).write_text("[1, 2, 3]", encoding="utf-8")
     with pytest.raises(ValueError, match="JSON object"):
@@ -206,9 +217,16 @@ def test_resolve_target_incompatible_evidence_producer_mismatch(tmp_path: Path) 
     assert "wrapper" in result.message and "replay" in result.message
 
 
-def test_resolve_target_incompatible_evidence_producer_version_mismatch(
+def test_resolve_target_version_mismatch_alone_is_not_incompatible(
     tmp_path: Path,
 ) -> None:
+    # evidence_producer.version (candidate, package-release-styled per
+    # ADR-047 section 2's own example) and fact_set.producer_version
+    # (baseline, an independent internal extractor-recipe version e.g.
+    # "0.7") are two incommensurable numbering schemes -- comparing them
+    # directly would reject nearly every real resolution on a coincidental
+    # mismatch, so this check intentionally does NOT compare version when
+    # the producer kind itself matches (Codex review).
     _write_manifest(
         tmp_path,
         fact_set={
@@ -231,7 +249,42 @@ def test_resolve_target_incompatible_evidence_producer_version_mismatch(
             "version": "0.6.0",
         },
     )
-    assert result.outcome == ResolveOutcome.INCOMPATIBLE_EVIDENCE
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_target_clang_plugin_alias_matches_real_producer_id(
+    tmp_path: Path,
+) -> None:
+    # The C++ clang-plugin extractor self-reports fact_set.producer as
+    # "abicheck-clang-plugin" (contrib/abicheck-clang-plugin/
+    # AbicheckFactsPlugin.cpp), not the "clang-plugin" name
+    # actions/collect-facts/run.sh's own `producer` input/build-output.json
+    # evidence_producer.kind uses -- must not spuriously report
+    # incompatible_evidence for a candidate/baseline pair that are actually
+    # the same producer (Codex review).
+    _write_manifest(
+        tmp_path,
+        fact_set={
+            "name": "pvxs",
+            "version": 3,
+            "producer": "abicheck-clang-plugin",
+            "producer_version": "0.3",
+        },
+        artifacts=[_target_artifact("libpvxs")],
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(
+        tmp_path,
+        target="libpvxs",
+        profile=PROFILE,
+        required=True,
+        candidate_evidence_producer={
+            "kind": "clang-plugin",
+            "tool": "abicheck-clang-plugin",
+            "version": "0.x.y",
+        },
+    )
+    assert result.outcome == ResolveOutcome.RESOLVED
 
 
 def test_resolve_target_evidence_check_skipped_when_baseline_has_no_fact_set(
@@ -315,6 +368,24 @@ def test_resolve_target_digest_mismatch_is_ambiguous(tmp_path: Path) -> None:
     result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
     assert result.outcome == ResolveOutcome.AMBIGUOUS
     assert "digest does not match" in result.message
+
+
+def test_resolve_target_digest_check_handles_invalid_utf8_snapshot(
+    tmp_path: Path,
+) -> None:
+    # A snapshot replaced by non-UTF-8/binary garbage must produce the same
+    # typed ambiguous outcome as any other corrupt snapshot, not an
+    # unhandled UnicodeDecodeError (Codex review) -- UnicodeDecodeError is a
+    # ValueError subclass, not a json.JSONDecodeError, so it needs its own
+    # except clause.
+    _write_manifest(
+        tmp_path,
+        artifacts=[_target_artifact("libpvxs", extra={"sha256": "0" * 64})],
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_bytes(b"\xff\xfe\x00not valid utf-8")
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert not result.ok
 
 
 def test_resolve_target_digest_ignores_volatile_fields(tmp_path: Path) -> None:

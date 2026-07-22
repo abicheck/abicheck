@@ -263,7 +263,13 @@ def load_baseline_manifest(baseline_dir: Path | str) -> BaselineManifest | None:
     with path.open(encoding="utf-8") as fh:
         try:
             data = json.load(fh)
-        except json.JSONDecodeError as exc:
+        # UnicodeDecodeError (raised by the text-mode read itself, e.g. a
+        # truncated/binary-garbage manifest) is a ValueError subclass, not a
+        # json.JSONDecodeError -- must be caught alongside it, or a corrupt
+        # manifest with invalid UTF-8 bytes escapes as an unhandled
+        # exception instead of this function's documented ValueError
+        # contract (Codex review).
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError(f"{path} is not valid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"{path} must contain a JSON object.")
@@ -367,19 +373,55 @@ def _load_manifest_or_result(
     return manifest, None
 
 
+#: Known aliases between ADR-047 section 2's build-output.json
+#: `evidence_producer.kind` vocabulary (`"wrapper"`/`"replay"`/
+#: `"clang-plugin"` -- also `actions/collect-facts/run.sh`'s own `producer`
+#: input values) and what a real baseline's `fact_set.producer` actually
+#: records today: the *extractor implementation's* self-reported id, a
+#: different vocabulary that was never reconciled with the ADR's. Verified
+#: against the real producers -- only two exist today:
+#: `abicheck/buildsource/source_extractors/clang.py`'s `ClangExtractor`
+#: stamps `"abicheck-cc-clang-extractor"` for *both* the wrapper and replay
+#: collection strategies (there is no third extractor, so this check cannot
+#: yet distinguish "wrapper" from "replay" evidence via fact_set.producer
+#: alone -- that distinction simply isn't recorded at this level today), and
+#: `contrib/abicheck-clang-plugin/AbicheckFactsPlugin.cpp:3101` stamps
+#: `"abicheck-clang-plugin"` regardless of collect-facts' own `"clang-plugin"`
+#: producer name. Extend this table if/when a new extractor's producer id
+#: needs a public alias, not by guessing at an unverified mapping.
+_PRODUCER_ALIASES: dict[str, frozenset[str]] = {
+    "wrapper": frozenset({"wrapper", "abicheck-cc-clang-extractor"}),
+    "replay": frozenset({"replay", "abicheck-cc-clang-extractor"}),
+    "clang-plugin": frozenset({"clang-plugin", "abicheck-clang-plugin"}),
+}
+
+
 def _evidence_incompatibility(
     manifest: BaselineManifest, candidate_evidence_producer: dict[str, Any] | None
 ) -> str | None:
     """ADR-047 §6's ``incompatible_evidence`` check.
 
-    Compares the baseline's recorded ``fact_set.producer``/``producer_version``
-    (``build_manifest.py``'s own ADR-038 C.8-derived identity, e.g.
-    ``"wrapper"``/``"replay"``/``"clang-plugin"`` plus a tool version) against
-    the candidate build's ``build-output.json`` ``evidence_producer`` block
-    (ADR-047 §2: ``{"kind", "tool", "version"}``). Only compares when *both*
-    sides declare an evidence identity — a plain header/binary-depth check on
+    Compares the baseline's recorded ``fact_set.producer`` (``build_manifest
+    .py``'s own ADR-038 C.8-derived identity) against the candidate build's
+    ``build-output.json`` ``evidence_producer.kind`` (ADR-047 §2:
+    ``{"kind", "tool", "version"}``), via :data:`_PRODUCER_ALIASES` since the
+    two are different vocabularies today. Only compares when *both* sides
+    declare an evidence identity — a plain header/binary-depth check on
     either side has nothing to compare and is never penalized for a producer
     mismatch that doesn't actually affect it.
+
+    Deliberately does **not** also compare ``evidence_producer.version``
+    against ``fact_set.producer_version``: ADR-047 §2's own example styles
+    ``evidence_producer.version`` as a package release version
+    (``"0.x.y"``), but ``fact_set.producer_version`` is
+    ``CLANG_EXTRACTOR_VERSION`` — an independent internal extractor-recipe
+    version (``"0.7"`` today, per ``source_extractors/clang.py``) with no
+    correspondence to a package release number. Comparing the two directly
+    would reject nearly every real resolution on a coincidental mismatch
+    between two incommensurable version schemes, which is worse than not
+    checking at all — a real version-compatibility check needs a producer-
+    side fix (recording the same identity in both places), not a resolver-
+    side guess.
     """
     if not candidate_evidence_producer:
         return None
@@ -392,28 +434,14 @@ def _evidence_incompatibility(
     baseline_producer = str(baseline_fact_set.get("producer") or "")
     if not baseline_producer:
         return None
-    if baseline_producer != candidate_kind:
+    aliases = _PRODUCER_ALIASES.get(candidate_kind, frozenset({candidate_kind}))
+    if baseline_producer not in aliases:
         return (
             f"baseline's evidence producer is {baseline_producer!r} but the "
             f"candidate build's evidence producer is {candidate_kind!r} -- "
             "comparing source-depth evidence across different producers "
             "(e.g. wrapper vs. replay) is an infrastructure incompatibility, "
             "not an ABI finding (ADR-047 section 6)."
-        )
-    candidate_version = str(candidate_evidence_producer.get("version") or "")
-    baseline_producer_version = str(baseline_fact_set.get("producer_version") or "")
-    if (
-        candidate_version
-        and baseline_producer_version
-        and candidate_version != baseline_producer_version
-    ):
-        return (
-            f"baseline's evidence producer version is "
-            f"{baseline_producer_version!r} but the candidate build's is "
-            f"{candidate_version!r} -- a producer version change can alter "
-            "the evidence recipe (fact_set.py's comparability rules), so "
-            "this is treated as an infrastructure incompatibility rather "
-            "than silently comparing anyway (ADR-047 section 6)."
         )
     return None
 
@@ -467,7 +495,13 @@ def _snapshot_digest_issue(
     try:
         with snapshot_path.open(encoding="utf-8") as fh:
             raw = json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
+    # UnicodeDecodeError (the text-mode read itself, e.g. the snapshot was
+    # replaced by non-UTF-8/binary garbage) is a ValueError subclass, not a
+    # json.JSONDecodeError -- must be caught alongside it, or exactly the
+    # corrupted-baseline case this check exists to catch escapes as an
+    # unhandled exception instead of this typed ambiguous outcome (Codex
+    # review).
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return (
             f"target {target!r}'s snapshot {snapshot_path.name!r} could not "
             f"be read to verify its digest: {exc} -- the baseline-set is "
