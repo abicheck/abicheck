@@ -373,16 +373,45 @@ exists to compare — would feed `profile_fingerprint` too, and an ordinary,
 intentional edit to `foo.h` (changing its content hash) would flip
 `profile_fingerprint` and hard-fail `PROFILE_MISMATCH` *before* the diff
 ever ran, on literally the routine case this whole ADR exists to support.
-Each `-I` directory's digest is therefore built from its depfile-resolved
-file list **minus** the set of paths `scope_fingerprint` already covers for
-that side (the explicit `--header`/manifest TU entry points) — leaving only
-the supporting/dependency files a TU pulls in but never directly declares.
-This is a strict partition, not a heuristic: `scope_fingerprint` owns
-"what's declared and compared"; `profile_fingerprint` owns "what
-environment resolved it," and a file cannot honestly belong to both. A
-header that stops being resolved purely as a support file and becomes a
-directly-declared entry point (or vice versa) moves from one fingerprint's
-input set to the other's, not into both or neither.
+
+**Excluding only the explicitly-named header is not enough — the exclusion
+has to cover the whole project-owned `-I` directory, or an ordinary edit
+to any *unnamed* internal header still breaks the same way.** A first
+version of this fix excluded only the specific paths `scope_fingerprint`
+names (the explicit `--header`/manifest entry points) from the digest —
+correct for `foo.h` itself, but most real projects have far more headers
+than the ones named on the command line: `foo.h` typically
+`#include`s project-internal support headers (`detail.h`, a private
+implementation header) that are never individually named, reached only
+because they live under the same declared `-I` root. Those files are still
+depfile-listed and still fall under a declared `-I` directory, so the
+first-version fix would still feed their content into that directory's
+digest — meaning an ordinary internal refactor (renaming `detail_v1.h` to
+`detail_v2.h`, or editing its content, with `foo.h` itself untouched) would
+still flip `profile_fingerprint` and hard-fail the gate before the diff
+ran, on a routine internal change, not an edge case. The fix generalizes
+from "exclude the named file" to "exclude the whole `-I` directory when
+it's the project's own": a declared `-I` directory is **project-owned**
+when it equals, or is an ancestor of, any of that side's declared
+`--header`/manifest TU paths — every file under it (named or not) is
+scope-adjacent, not environment, and is excluded from `profile_fingerprint`
+in its entirety, not file-by-file. A declared `-I` directory with no such
+relationship to any declared header is **external** and keeps the full
+per-file content digest described above — a genuine third-party dependency,
+where a change anywhere in it *is* meaningful profile drift. This is a
+strict partition on `-I` *directories*, not individual files:
+`scope_fingerprint` owns everything under a project-owned root (declared
+or not); `profile_fingerprint` owns only external roots, in full.
+A known, accepted residual gap: a vendored dependency nested *inside* a
+project-owned root (e.g. `include/thirdparty/foo.h` under the project's
+own `include/`) is swept into the project-owned exclusion along with
+everything else there, so a content change confined to that nested vendor
+copy is invisible to `profile_fingerprint` on the legacy CLI path — the
+same class of "can't disambiguate from path/directory-tree shape alone"
+limitation this ADR already documents for the mixed-roots case, not a new
+kind of gap. The manifest path (D3) has no such gap: it can express a
+per-TU forced-include for exactly this case instead of relying on
+directory-tree inference.
 
 This is lossless with respect to every case the three rejected attempts
 traded off against each other, because content, unlike a path, is not
@@ -680,6 +709,23 @@ state — dominating `exit_code()` regardless of `discovered_only`, matching
 the same "a `not_comparable` result must never read as safe" rule D2
 already applies to the native `compare`/`compat check`/`scan`/`deps
 compare` schemes and the release-level rollup's rank-6 precedence.
+
+**The GitHub Action wrapper is another consumer with the same blind spot,
+one layer further from the Python package.** `action/run.sh` maps each
+command's known exit codes to a `VERDICT` string via `case` statements with
+an unconditional `*) VERDICT="ERROR"` fallback for anything unrecognized —
+native `compare`'s new `16`, `scan`'s new `6`, and `deps compare`'s new `5`
+all fall through it today, since the script predates this ADR. Worse,
+`_maybe_post_pr_comment` unconditionally skips posting when `VERDICT ==
+"ERROR"` — so a deliberate `not_comparable` result would both misreport as
+a generic internal error *and* silently suppress the one PR comment meant
+to surface it, the combination this ADR most needs to avoid on its most
+visible first-party consumer. `action/run.sh` gains a matching `VERDICT`
+value (e.g. `NOT_COMPARABLE`) for each new code, and
+`_maybe_post_pr_comment`'s `ERROR`-only skip is joined by an explicit
+carve-out that still posts for `NOT_COMPARABLE` — this result deserves the
+comment more than an ordinary pass, not less.
+
 **`assurance` is a single field on `DiffResult` (alongside
 `contract_coverage`), not a per-`Change` field.** A forced diagnostic
 comparison is uniformly tentative — the contract gate failed for the pair

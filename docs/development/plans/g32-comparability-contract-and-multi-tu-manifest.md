@@ -279,21 +279,39 @@ Implements ADR-050 D1 and D2.
   before any bucketing runs. `profile_fingerprint`'s
   `-I` component is the hash of the **ordered** sequence of per-directory
   digests, **plus this one system/toolchain bucket appended last** —
-  **after excluding every path `scope_fingerprint` already
-  covers for that side (the explicit `--header`/manifest TU entry points),
-  not the depfile's raw output.** The documented real-world workflow
+  **after excluding every declared `-I` directory that is project-owned,
+  in its entirety, not just the specific paths `scope_fingerprint` names.**
+  The documented real-world workflow
   (`docs/user-guide/real-world-example.md:61-63`) passes the project's own
   include root as *both* `--header` (the headers being compared) and
   `--include` (so `#include` resolves) — the same directory serves both
   roles, so a depfile for that TU necessarily lists the very header being
-  compared alongside its support headers. Hashing the depfile's output
-  unfiltered would feed that header's content into `profile_fingerprint`
-  too, and an ordinary, intentional edit to it would flip
-  `profile_fingerprint` and hard-fail `PROFILE_MISMATCH` before the diff
-  ever ran — on the routine case this whole ADR exists to keep working, not
-  an edge case. `scope_fingerprint` owns "what's declared and compared";
-  `profile_fingerprint` owns "what environment resolved it"; a file cannot
-  honestly feed both. This is lossless: byte-identical dependency content at different mount points
+  compared alongside its support headers. **Excluding only the named
+  header is not enough**: `foo.h` typically `#include`s project-internal
+  support headers (a private `detail.h`) that are never individually
+  named, only reached because they live under the same declared `-I`
+  root — an exclusion scoped to just the explicit `--header`/manifest
+  entry points would still hash those unnamed support headers' content, so
+  an ordinary internal refactor (renaming `detail_v1.h` to `detail_v2.h`,
+  or editing it, with `foo.h` itself untouched) would still flip
+  `profile_fingerprint` and hard-fail the gate before the diff ran — a
+  routine case, not an edge case. The exclusion therefore applies at the
+  **whole `-I` directory** level: a declared `-I` directory is
+  **project-owned** when it equals or is an ancestor of any of that side's
+  declared `--header`/manifest TU paths — every file under it, named or
+  not, is excluded from `profile_fingerprint` entirely. A declared `-I`
+  directory unrelated to any declared header is **external** and keeps the
+  full per-file content digest — a real dependency, where a change
+  anywhere in it is meaningful drift. `scope_fingerprint` owns everything
+  under a project-owned root; `profile_fingerprint` owns only external
+  roots, in full. **Known, accepted residual gap:** a vendored dependency
+  nested *inside* a project-owned root is swept into that exclusion too,
+  so a content change confined there is invisible to `profile_fingerprint`
+  on the legacy CLI path — the same "can't disambiguate from directory
+  shape alone" class of limitation already documented for the mixed-roots
+  case, not a new kind of gap; the manifest path (D3) has no such gap,
+  since it can express a per-TU forced-include instead of relying on
+  directory-tree inference. This is lossless: byte-identical dependency content at different mount points
   normalizes identically (attempt one's routine case, still correct);
   genuinely different content normalizes differently regardless of naming
   (the `dep-v1`/`dep-v2` case both attempt one and two mishandled); a
@@ -310,7 +328,7 @@ Implements ADR-050 D1 and D2.
   the manifest file's own directory — none of these legacy-CLI cases
   exist there.
 
-  Eleven dedicated tests are non-negotiable for this phase to be considered
+  Twelve dedicated tests (numbered 1–11, with 8b alongside 8) are non-negotiable for this phase to be considered
   done: (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
   identical trees under different roots asserts the resulting
   **`scope_fingerprint`s** match (not `profile_fingerprint` — headers are a
@@ -347,12 +365,20 @@ Implements ADR-050 D1 and D2.
   fingerprint hashes the declared header's own content — `scope_fingerprint`
   tracks declared TU/header *identity* (names, include structure, flags),
   never content, precisely so an ordinary API/ABI edit is an unremarkable,
-  comparable case, not a mismatch; `profile_fingerprint` excludes exactly
-  this file per the bullet above. The comparison proceeds past the gate and
-  the diff reports the parameter addition as an ordinary `Change` —
-  `not_comparable` never fires on the routine case of "the thing being
-  compared changed," which is this whole tool's primary purpose, not an
-  edge case to special-case around; (9) a header reached only through a
+  comparable case, not a mismatch; `profile_fingerprint` excludes the whole
+  project-owned `-I` root per the bullet above, `foo.h` included. The
+  comparison proceeds past the gate and the diff reports the parameter
+  addition as an ordinary `Change` — `not_comparable` never fires on the
+  routine case of "the thing being compared changed," which is this whole
+  tool's primary purpose, not an edge case to special-case around; (8b)
+  the same shape, but the edit lands in an **unnamed, project-internal
+  support header** `foo.h` `#include`s (a `detail.h` never itself passed to
+  `--header`) — renaming it (`detail_v1.h` → `detail_v2.h`) or editing its
+  content, `foo.h` itself untouched — still leaves `profile_fingerprint`
+  matching, proving the exclusion covers the *whole* project-owned `-I`
+  directory, not only the explicitly-named header; excluding only the
+  named file would still hash `detail.h`'s change and spuriously
+  hard-fail this routine internal-refactor case; (9) a header reached only through a
   system/`-isystem`-classified include path (not a plain user `-I`) with
   genuinely different content between old and new produces *different*
   `profile_fingerprint`s — proving the depfile request uses `-MD`, not
@@ -664,6 +690,23 @@ Implements ADR-050 D1 and D2.
   unconditionally blocking contribution — regardless of `discovered_only`,
   matching the same precedence `_RELEASE_VERDICT_ORDER`'s rank-6 entry
   already gives `not_comparable` in the release rollup.
+- **`action/run.sh` is another consumer with the same blind spot, one layer
+  further from the Python package, and it compounds into a worse failure
+  than a generic misreport.** Verified against the actual script:
+  `action/run.sh` maps each command's exit codes to a `VERDICT` string via
+  `case` statements ending in an unconditional `*) VERDICT="ERROR"`
+  fallback — native `compare`'s exit codes are matched at `:680-698` (no
+  `16` case), `scan`'s at `:656-666` (no `6` case), `deps compare`'s at
+  `:628-634` (no `5` case), so all three new codes fall through to
+  `VERDICT="ERROR"` today. `_maybe_post_pr_comment` (`:897`) then
+  unconditionally returns early when `VERDICT == "ERROR"` (`:907`) — so a
+  deliberate `not_comparable` result would both misreport as a generic
+  internal error *and* silently suppress the one PR comment meant to
+  surface it, on the Action's most visible first-party consumer. Each
+  `case` statement gains a matching branch (e.g. `16) VERDICT="NOT_COMPARABLE"
+  ;;`), and `_maybe_post_pr_comment`'s `ERROR`-only skip is joined by an
+  explicit exception that still posts for `NOT_COMPARABLE` — this result
+  deserves the comment more than an ordinary pass, not less.
 - **`html_report.py`/`service_render.py` are the fourth reporting surface,
   not an optional add-on.** AGENTS.md's own module map groups `html_report.py`
   with `reporter.py`/`sarif.py`/`junit_report.py` under "Reporting," and
@@ -808,8 +851,17 @@ front-end chokepoint, not `compare_snapshots` itself, see the
 acceptance-criteria bullet above; the legacy `run_compare` keyword shim
 gains the same parameter appended last, matching the `debuginfod_url`
 precedent), `api_types.py` (`CompareRequest.diagnostic_comparison: bool =
-False`), `mcp_server.py` (compare tools expose the same parameter), `cli.py` (flag + the new,
-distinct `not_comparable` exit code), `cli_compare_release.py`
+False`), `mcp_server.py` (compare tools expose the same parameter), `cli.py`
+(the `--diagnostic-comparison` flag definition and the new, distinct
+`not_comparable` exit `16` constant), **`cli_compare_helpers.py`** (the new
+`except (ProfileMismatchError, ScopeMismatchError)` branch around the real
+`compare_snapshots(...)` call in `run_compare` — verified against the
+actual code: `cli.py`'s `compare_cmd` is a thin `**kwargs` forwarder to
+`cli_compare_helpers.run_compare`, which is where `compare_snapshots(...)`
+is actually called (`:1464`) and where the output/exit-code rendering
+(`_finalize_compare_result` etc.) lives; a bare exception there today would
+propagate as an unhandled traceback, not the planned `verdict: null`
+report + exit `16` — `cli.py` alone has nothing to catch), `cli_compare_release.py`
 (`_compare_one_library`'s dedicated
 `except (ProfileMismatchError, ScopeMismatchError)` branch, ordered before
 `except Exception` — see the release-fan-out acceptance-criteria bullet
@@ -856,7 +908,11 @@ path instead of calling it with no `DiffResult`), `abicheck/schemas/compare_repo
 (`parse_report_verdict`/`GateInfo`/`TargetReport` gain a way to
 distinguish a deliberate `not_comparable` report from a missing/corrupt
 one, and `exit_code()`/`coverage_blocking` treat it as unconditionally
-blocking, independent of `discovered_only`).
+blocking, independent of `discovered_only`), `action/run.sh` (a new
+`VERDICT="NOT_COMPARABLE"` case-branch alongside each of the `compare`/
+`scan`/`deps compare` exit-code `case` statements, and an explicit
+carve-out in `_maybe_post_pr_comment` so `NOT_COMPARABLE` still posts a
+comment despite the existing `ERROR`-only skip).
 
 **Tests.** A `dump()`-level test asserting a real (non-manifest) dump
 returns a snapshot with a populated, non-`None` `contract` — the specific
@@ -897,7 +953,11 @@ handler owns that path instead), and a second test asserting a mixed-pair
 the same way its JSON/Markdown/SARIF/JUnit siblings do; a root-relative-path fingerprint test
 (the acceptance-criteria bullet above — same-tree-different-root compare
 must not fingerprint-mismatch); an exit-code test
-asserting `not_comparable` returns exactly `16`, never `0`, from
+asserting `not_comparable` returns exactly `16`, never `0` and never an
+unhandled traceback, from a real end-to-end native `compare` invocation on
+a mismatched pair — exercised through the actual `cli_compare_helpers.run_compare`
+call site, proving the new `except` clause there catches what `cli.py`'s
+thin forwarder has no chance to — from
 both the legacy and severity-aware `compare` invocations; a **release
 fan-out** test asserting a `not_comparable`-triggering library inside a
 directory/package `compare` reports `verdict: "not_comparable"` in its
@@ -974,7 +1034,14 @@ one flag checked last time; an **aggregate not_comparable** test asserting
 target's report is `not_comparable` — never silently `0` — and a second
 test asserting a `not_comparable` report is never conflated with a
 genuinely missing/corrupt one in `aggregate`'s rendered per-target output,
-proving the two "unavailable"-shaped states stay distinguishable.
+proving the two "unavailable"-shaped states stay distinguishable; an
+**Action wrapper** test (`action/run.sh`'s existing bats/shell test
+harness) asserting exit `16`/`6`/`5` from `compare`/`scan`/`deps compare`
+each map to `VERDICT="NOT_COMPARABLE"`, never the `*) VERDICT="ERROR"`
+fallback, plus a `_maybe_post_pr_comment` test asserting a `NOT_COMPARABLE`
+verdict still posts a PR comment despite the existing `ERROR`-only skip —
+proving the Action doesn't both misreport and silently suppress the one
+comment meant to surface a deliberate not-comparable result.
 
 **Example fixtures.** The Phase 0 "scope drift" pair stays a `tests/`-level
 fixture, not an `examples/case*/` catalog entry: `tests/test_validate_examples_unit.py`'s
