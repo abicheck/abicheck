@@ -1194,6 +1194,32 @@ and `compare`'s existing declarations directly, not merely implied by
 registering a new command module — deliberately not named `--manifest`,
 which `@release_options` already registers on `compare` for the unrelated
 ADR-023 release manifest.
+**Declaring the Click option is not enough for `compare` — `cli_compare_helpers.py`
+needs the actual plumbing, the same gap already fixed once for the
+gate's own exception handling on this exact command.** `compare_cmd`
+forwards `**kwargs` to `cli_compare_helpers.run_compare`, whose signature
+is a large, explicit, fixed keyword list (verified against the actual
+code — it already carries `manifest_path` for the unrelated ADR-023
+release manifest, confirming the pattern: a new Click option's dest must
+also appear here or it either raises "unexpected keyword argument" or
+never reaches the per-side dump resolution). `run_compare` gains the new
+`old_dump_manifest`/`new_dump_manifest` parameters and threads them into
+its per-side header/include resolution (`_resolve_compare_snapshots`),
+alongside the existing `except (ProfileMismatchError, ScopeMismatchError)`
+fix already planned there.
+**`--frontend-context` reaching `compile_context_options` means directory/package
+`compare` accepts it too — and must reject it, not silently ignore it.**
+The release/set-input fan-out (`cli_compare_release.py`) never threads a
+per-library `CompileContext` at all; `cli_resolve.py`'s existing
+`_COMPILE_CONTEXT_SET_INPUT_FLAGS` dict is exactly the guard that rejects
+every other compile-context flag (`--gcc-path`, `--ast-frontend`, etc.) on
+a directory/package input, loudly, instead of silently accepting and then
+ignoring it. `frontend_context` gains its own entry in that same dict — the
+new option automatically inherits the existing rejection path once listed
+there, so `compare old_dir new_dir --frontend-context device` fails fast
+with the same clear error every other compile-context flag already
+produces on a set input, rather than being accepted and silently dropped
+by a backend that was never taught to use it.
 **`--frontend-context` is not a `dump`/`compare`-only option — it belongs in
 the existing `compile_context_options` decorator (`cli_options.py`), the same
 shared L2 compile-context family `dump`, `compare`, *and* `cli_scan.py`'s
@@ -1257,7 +1283,17 @@ path` test confirming the single-sided form is unaffected. A test asserting
 `compare --dump-manifest` and the pre-existing `--manifest` (ADR-023 release
 manifest) coexist as distinct, independently-settable options on the same
 `compare` invocation — the specific collision this naming choice exists to
-avoid. A **`scan --frontend-context`**
+avoid; and an end-to-end test asserting `compare old.so new.so
+--dump-manifest old=v1/abi.yml --dump-manifest new=v2/abi.yml` actually
+dumps each side from its own manifest through `run_compare`'s real
+resolution path (not just that Click accepts the flags) — proving
+`cli_compare_helpers.py`, not only `cli.py`, was updated. A **release
+rejects `--frontend-context`** test asserting `compare old_dir new_dir
+--frontend-context device` fails fast via `cli_resolve.py`'s existing
+set-input guard, the same way it already fails fast for `--gcc-path`/
+`--ast-frontend` on a directory/package input — proving the flag can't be
+silently accepted and then ignored by the release backend. A
+**`scan --frontend-context`**
 regression test asserting `abicheck scan --against` accepts `device` and
 threads it into the L2 header frontend the same way `dump`/`compare` do,
 proving `compile_context_options` (not a `dump`/`compare`-only decorator) is
@@ -1489,6 +1525,21 @@ per-TU ordered includes/forced-includes, and `contributes_to_abi`/
 `required` flags together — as an additional key input for manifest-driven
 dumps; still never `profile_fingerprint`, which cannot be a pre-dump input
 at all, per the bullet above).
+**Modifying `_cache_key()`'s own internals is not sufficient — the caller
+that decides what to pass it never sees the manifest today.**
+`service_dump_cache.cached_run_dump` is what actually builds the pre-dump
+key: it computes an `extra` string via `_dump_cache_extra_key(...)` and
+calls `snapshot_cache._cache_key(path, _headers, _cache_includes, version,
+lang, extra=extra)` *before* `dump()` runs (verified against the actual
+code, `:338-348`). Changing `_cache_key()`'s signature/behavior alone has
+no effect unless this call site is also updated to compute the
+manifest-driven `scope_fingerprint` and fold it into `extra` (or a new
+keyword) — otherwise a manifest-only change (a TU rename, reordered
+forced-includes) still hits a stale cache entry regardless of what
+`_cache_key()` itself is capable of hashing. `service_dump_cache.py` gains
+that plumbing: `cached_run_dump` computes the manifest's `scope_fingerprint`
+(cheap — no compiler invocation, per the acceptance-criteria bullet above)
+before its cache lookup and folds it into the key it builds.
 
 **Tests.** `process_resources.py` unit tests migrated from
 `source_replay.py`'s existing RAM-probing tests (same behavior, new import
