@@ -34,10 +34,12 @@ from abicheck import serialization
 from abicheck.buildsource.baseline_set import (
     BASELINE_MANIFEST_FILENAME,
     ResolveOutcome,
+    ResolveResult,
     compute_snapshot_content_hash,
     load_baseline_manifest,
     resolve_bundle,
     resolve_target,
+    strip_volatile_snapshot_fields,
 )
 from abicheck.elf_metadata import (
     ElfMetadata,
@@ -282,6 +284,16 @@ def test_resolve_target_ambiguous_snapshot_file_missing_on_disk(tmp_path: Path) 
     assert result.outcome == ResolveOutcome.AMBIGUOUS
 
 
+def test_resolve_target_ambiguous_empty_snapshot_filename(tmp_path: Path) -> None:
+    # A manifest entry with a "library"/"artifact" but an empty "snapshot"
+    # filename (snapshot=False) is a distinct problem from a missing file on
+    # disk -- the manifest itself never named one.
+    _write_manifest(tmp_path, artifacts=[_target_artifact("libpvxs", snapshot=False)])
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "no snapshot filename" in result.message
+
+
 def test_resolve_target_ambiguous_duplicate_manifest_entries(tmp_path: Path) -> None:
     # A real actions/baseline-produced manifest can never have two entries
     # for the same library (run.sh's own input validation already rejects
@@ -361,6 +373,54 @@ def test_resolve_target_version_mismatch_alone_is_not_incompatible(
             "tool": "abicheck-cc",
             "version": "0.6.0",
         },
+    )
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_target_incompatible_evidence_noop_when_candidate_kind_empty(
+    tmp_path: Path,
+) -> None:
+    # An empty/missing candidate "kind" has nothing to compare against --
+    # must no-op (resolve normally), not treat an unset field as a mismatch.
+    _write_manifest(
+        tmp_path,
+        fact_set={
+            "name": "pvxs",
+            "version": 3,
+            "producer": "wrapper",
+            "producer_version": "0.5.0",
+        },
+        artifacts=[_target_artifact("libpvxs")],
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(
+        tmp_path,
+        target="libpvxs",
+        profile=PROFILE,
+        required=True,
+        candidate_evidence_producer={"kind": "", "tool": "abicheck"},
+    )
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_target_incompatible_evidence_noop_when_baseline_producer_empty(
+    tmp_path: Path,
+) -> None:
+    # A baseline fact_set with no (or empty) "producer" recorded has nothing
+    # to compare against either -- an older/hand-authored manifest, not an
+    # incompatibility.
+    _write_manifest(
+        tmp_path,
+        fact_set={"name": "pvxs", "version": 3, "producer": ""},
+        artifacts=[_target_artifact("libpvxs")],
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(
+        tmp_path,
+        target="libpvxs",
+        profile=PROFILE,
+        required=True,
+        candidate_evidence_producer={"kind": "wrapper", "tool": "abicheck"},
     )
     assert result.outcome == ResolveOutcome.RESOLVED
 
@@ -556,6 +616,154 @@ def test_resolve_target_digest_ignores_volatile_fields(tmp_path: Path) -> None:
     )
     result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
     assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_target_digest_check_rejects_snapshot_that_is_not_a_json_object(
+    tmp_path: Path,
+) -> None:
+    # A snapshot file that parses as valid JSON but isn't an object (e.g. an
+    # array) must still be reported as corrupt, not crash or silently
+    # compare against something with no library/schema_version fields.
+    _write_manifest(
+        tmp_path,
+        artifacts=[_target_artifact("libpvxs", extra={"sha256": "0" * 64})],
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text("[1, 2, 3]", encoding="utf-8")
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "JSON object" in result.message
+
+
+def test_strip_volatile_snapshot_fields_strips_nested_build_source_coverage(
+    tmp_path: Path,
+) -> None:
+    # compute_snapshot_content_hash's stable view must strip volatile fields
+    # nested under build_source_pack/build_source.manifest(.coverage/
+    # .extractors)/build_source.source_abi.coverage too, not just the
+    # top-level keys -- a re-dump with fresh build-evidence timing/cache
+    # counters but otherwise identical content must still verify.
+    raw = {
+        "library": "libpvxs",
+        "created_at": "2026-01-01T00:00:00Z",
+        "build_source_pack": {"path_hint": "/tmp/run1", "kind": "embedded"},
+        "build_source": {
+            "manifest": {
+                "created_at": "2026-01-01T00:00:00Z",
+                "targets": 1,
+                "coverage": [{"detail": "x", "elapsed_s": 1.0, "state": "ok"}],
+                "extractors": [
+                    {
+                        "detail": "y",
+                        "started_at": "t0",
+                        "finished_at": "t1",
+                        "name": "clang",
+                    }
+                ],
+            },
+            "source_abi": {
+                "coverage": {
+                    "cache_lookup_s": 0.1,
+                    "extract_s": 0.2,
+                    "link_s": 0.3,
+                    "elapsed_s": 0.6,
+                    "cache_misses": 2,
+                    "cache_hits": 5,
+                    "extractor_jobs": 4,
+                    "units": 10,
+                },
+            },
+        },
+    }
+    redumped = {
+        "library": "libpvxs",
+        "created_at": "2026-07-22T12:00:00Z",
+        "build_source_pack": {"path_hint": "/tmp/run2", "kind": "embedded"},
+        "build_source": {
+            "manifest": {
+                "created_at": "2026-07-22T12:00:00Z",
+                "targets": 1,
+                "coverage": [{"detail": "z", "elapsed_s": 9.9, "state": "ok"}],
+                "extractors": [
+                    {
+                        "detail": "w",
+                        "started_at": "t9",
+                        "finished_at": "t10",
+                        "name": "clang",
+                    }
+                ],
+            },
+            "source_abi": {
+                "coverage": {
+                    "cache_lookup_s": 9.0,
+                    "extract_s": 9.0,
+                    "link_s": 9.0,
+                    "elapsed_s": 9.0,
+                    "cache_misses": 99,
+                    "cache_hits": 99,
+                    "extractor_jobs": 99,
+                    "units": 10,
+                },
+            },
+        },
+    }
+    stable_1 = strip_volatile_snapshot_fields(raw)
+    stable_2 = strip_volatile_snapshot_fields(redumped)
+    assert stable_1 == stable_2
+    assert "path_hint" not in stable_1["build_source_pack"]
+    assert stable_1["build_source_pack"]["kind"] == "embedded"
+    assert "created_at" not in stable_1["build_source"]["manifest"]
+    assert stable_1["build_source"]["manifest"]["coverage"] == [{"state": "ok"}]
+    assert stable_1["build_source"]["manifest"]["extractors"] == [{"name": "clang"}]
+    assert stable_1["build_source"]["source_abi"]["coverage"] == {"units": 10}
+    assert compute_snapshot_content_hash(raw) == compute_snapshot_content_hash(redumped)
+
+
+def test_strip_volatile_snapshot_fields_tolerates_malformed_shapes() -> None:
+    # Defensive fallbacks for a hand-edited/corrupt manifest whose nested
+    # fields don't match the producer's real shape -- must pass the
+    # malformed value through unchanged rather than raising, mirroring this
+    # whole module's "never crash on corrupt content" convention.
+    raw = {
+        "library": "libpvxs",
+        "build_source": {
+            # coverage/extractors as non-list values -- _strip_row_keys must
+            # return them unchanged instead of assuming list-of-dict shape.
+            "manifest": {"coverage": "not-a-list", "extractors": 42},
+            # source_abi missing entirely is the common case (already
+            # covered elsewhere); here it's present but not a dict.
+            "source_abi": "not-a-dict",
+        },
+    }
+    stable = strip_volatile_snapshot_fields(raw)
+    assert stable["build_source"]["manifest"]["coverage"] == "not-a-list"
+    assert stable["build_source"]["manifest"]["extractors"] == 42
+    assert stable["build_source"]["source_abi"] == "not-a-dict"
+
+    raw_coverage_not_dict = {
+        "library": "libpvxs",
+        "build_source": {"source_abi": {"coverage": "not-a-dict"}},
+    }
+    stable_2 = strip_volatile_snapshot_fields(raw_coverage_not_dict)
+    assert stable_2["build_source"]["source_abi"]["coverage"] == "not-a-dict"
+
+
+def test_resolve_result_to_dict(tmp_path: Path) -> None:
+    result = ResolveResult(
+        outcome=ResolveOutcome.RESOLVED,
+        message="resolved target 'libpvxs'.",
+        bootstrap=False,
+        manifest_path=str(tmp_path / "manifest.json"),
+        snapshot_path=str(tmp_path / "libpvxs.abicheck.json"),
+    )
+    assert result.to_dict() == {
+        "outcome": ResolveOutcome.RESOLVED,
+        "message": "resolved target 'libpvxs'.",
+        "bootstrap": False,
+        "manifest_path": str(tmp_path / "manifest.json"),
+        "snapshot_path": str(tmp_path / "libpvxs.abicheck.json"),
+        "binaries_dir": "",
+        "binary_paths": {},
+    }
 
 
 def test_resolve_target_corrupt_manifest_is_stale_schema_not_a_traceback(
@@ -1017,6 +1225,124 @@ def test_resolve_bundle_rejects_truncated_elf_binary(
     )
     assert result.outcome == ResolveOutcome.AMBIGUOUS
     assert "essentially empty ELF file" in result.message
+
+
+def test_resolve_bundle_binary_digest_os_error_is_ambiguous(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A permission error (or the file disappearing mid-read) while hashing a
+    # staged binary must produce the same typed ambiguous outcome as any
+    # other corrupt binary, not an unhandled OSError. Simulated via
+    # monkeypatch since a real permission error isn't reliably reproducible
+    # when tests run as root (same rationale as
+    # test_load_baseline_manifest_os_error_raises_value_error).
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact(
+                "libpvxs",
+                extra={"binary": "binaries/libpvxs.so", "sha256": "0" * 64},
+            )
+        ],
+    )
+    (tmp_path / "binaries").mkdir()
+    binary_path = tmp_path / "binaries" / "libpvxs.so"
+    binary_path.write_bytes(b"\x7fELF-fake")
+    real_open = Path.open
+    # _not_elf_issue opens+reads the same binary_path first (a 4-byte magic
+    # sniff) before _binary_digest_issue's own whole-file read -- let that
+    # first open succeed for real (so the ELF check passes normally, given
+    # the autouse fixture's non-empty ElfMetadata stub) and only fail
+    # starting from the second open of this path, which is the digest read
+    # this test is actually about.
+    open_count = 0
+
+    def _boom(self: Path, *args: object, **kwargs: object) -> object:
+        nonlocal open_count
+        if self == binary_path:
+            open_count += 1
+            if open_count > 1:
+                raise PermissionError("synthetic permission error")
+        return real_open(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "open", _boom)
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "could not be read to verify its digest" in result.message
+
+
+def test_resolve_bundle_not_elf_os_error_is_ambiguous(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A permission error while reading the ELF-magic header must be caught
+    # too, not just the digest read (same rationale as the digest-OSError
+    # test above). No recorded digest, so _not_elf_issue's own read is the
+    # first one reached.
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact("libpvxs", extra={"binary": "binaries/libpvxs.so"})
+        ],
+    )
+    (tmp_path / "binaries").mkdir()
+    binary_path = tmp_path / "binaries" / "libpvxs.so"
+    binary_path.write_bytes(b"\x7fELF-fake")
+    real_open = Path.open
+
+    def _boom(self: Path, *args: object, **kwargs: object) -> object:
+        if self == binary_path:
+            raise PermissionError("synthetic permission error")
+        return real_open(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "open", _boom)
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "could not be read to verify it is an ELF file" in result.message
+
+
+def test_resolve_bundle_not_elf_unexpected_parse_exception_is_ambiguous(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # parse_elf_metadata's own documented contract is "returns an empty
+    # ElfMetadata on any parse error" (it catches ELFError/OSError/
+    # ValueError internally) -- but a sufficiently pathological/adversarial
+    # input could still trip an exception type outside that tuple deep in
+    # pyelftools. _not_elf_issue's own except Exception clause is defensive
+    # coverage for that case; simulated directly since crafting real bytes
+    # that reproduce it is impractical.
+    def _boom(path: Path) -> object:
+        raise RuntimeError("synthetic unexpected parser failure")
+
+    monkeypatch.setattr("abicheck.buildsource.baseline_set.parse_elf_metadata", _boom)
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact("libpvxs", extra={"binary": "binaries/libpvxs.so"})
+        ],
+    )
+    (tmp_path / "binaries").mkdir()
+    (tmp_path / "binaries" / "libpvxs.so").write_bytes(b"\x7fELF-fake")
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "could not be parsed as a valid ELF file" in result.message
 
 
 def test_resolve_bundle_rejects_binary_field_equal_to_binaries_dir_itself(
