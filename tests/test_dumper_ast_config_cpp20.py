@@ -733,6 +733,44 @@ def test_cpp20_detector_ignores_custom_nttp_type_resembling_constrained_param(
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_detects_constrained_param_with_default(tmp_path):
+    """Regression (Codex review): a constrained template parameter can
+    carry a default argument (``template <std::integral T = int>``), which
+    the bare ``\\w+\\s*[,>]`` tail-check missed entirely since "T" is
+    followed by " = int>", not directly by ","/">"."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <concepts>\ntemplate <std::integral T = int> void f(T);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "constrained-template-parameter" for r in reqs)
+
+
+def test_cpp20_detector_detects_constrained_param_pack(tmp_path):
+    """Companion: a constrained template parameter *pack*
+    (``template <std::integral... Ts>``) — the concept name is followed
+    by "..." before the (optional) parameter name, not directly by a
+    bare identifier."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <concepts>\ntemplate <std::integral... Ts> void f(Ts...);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "constrained-template-parameter" for r in reqs)
+
+
+def test_cpp20_detector_ignores_ordinary_nttp_with_default(tmp_path):
+    """Companion: an ordinary (non-std::) non-type template parameter with
+    a default value — valid pre-C++20 code — must not be mistaken for a
+    constrained parameter just because it also has an "=" tail."""
+    headers = _write(tmp_path, "a.h", "template<int N = 5> void f();\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_ignores_qualified_concept_used_as_pre_cxx20_type(tmp_path):
     """Regression (Codex review): "concept" only became a reserved keyword
     in C++20 — a qualified reference to a type literally named "concept"

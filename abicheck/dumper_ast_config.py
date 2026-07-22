@@ -193,6 +193,20 @@ _CPP20_CONSTRAINED_PARAM_CONCEPT_PATTERN = re.compile(
     + _CPP20_STD_CONCEPT_NAMES
     + rb"))\b"
 )
+# What can follow a constrained template parameter's (optional) concept
+# argument list, before the enclosing template parameter list's next ","
+# or its own closing ">": an optional pack ellipsis, an optional parameter
+# name (anonymous constrained parameters are legal too), and an optional
+# default argument (Codex review — a bare trailing "\w+\s*[,>]" missed
+# both ``template <std::integral T = int>`` and ``template
+# <std::integral... Ts>``). The default's own value is not validated
+# beyond excluding ","/";"/"{"/"}" — a default containing a raw,
+# bracket-free comma (e.g. a function-pointer type) is the one shape this
+# doesn't cover, an acceptable narrow gap given how rare that spelling is
+# in a template-parameter default specifically.
+_CONSTRAINED_PARAM_TAIL_PATTERN = re.compile(
+    rb"(?:\.\.\.)?\s*\w*\s*(?:=\s*[^,;{}]*)?\s*[,>]"
+)
 
 
 def _find_matching_close_angle(text: bytes, open_angle_pos: int) -> int | None:
@@ -247,7 +261,7 @@ def _has_constrained_param_syntax(lookahead: bytes) -> bool:
         # \b at the concept-name pattern's own end guarantees *some*
         # non-word separator existed there in the first place.
         rest = lookahead[pos:]
-        if re.match(rb"auto\b", rest) or re.match(rb"\w+\s*[,>]", rest):
+        if re.match(rb"auto\b", rest) or _CONSTRAINED_PARAM_TAIL_PATTERN.match(rest):
             return True
     return False
 
