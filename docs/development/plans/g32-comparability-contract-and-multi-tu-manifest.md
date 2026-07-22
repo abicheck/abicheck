@@ -105,15 +105,26 @@ real data.
 
 **Files & surfaces.** New fixtures under `tests/fixtures/g32/` (raw AST
 captures, not committed as generated `.abi.json` — those are produced by
-the tests themselves once Phase A/B land). These stay `tests/`-level
-fixtures throughout, not a future `examples/case2xx_*/` catalog entry:
-`not_comparable` (Phase A), `UNKNOWN_PROFILE`/`contract_coverage` metadata
-(Phase A), and `INCONSISTENT_DECLARATION`/`HETEROGENEOUS_ABI_CONTEXT`
-(Phase C) are all extraction-time outcomes, not `ChangeKind`s or `Verdict`
-values — `tests/test_validate_examples_unit.py`'s `_VALID_VERDICTS`
-frozenset only accepts the five real `Verdict` strings, so none of this
-phase's fixtures ever becomes a catalogued example (see Phase A's and
-Phase C's own "Example fixtures" sections for the same reasoning).
+the tests themselves once Phase A/B land).
+**Not every Phase 0 fixture is a `tests/`-only artifact — only the ones
+whose *outcome* is genuinely non-verdict-producing are.** The "scope drift"
+pair (Phase A's `not_comparable`/`SCOPE_MISMATCH`) and the
+conflicting-return-type pair (Phase C's `INCONSISTENT_DECLARATION`/
+`HETEROGENEOUS_ABI_CONTEXT`) are extraction-time outcomes, not `ChangeKind`s
+or `Verdict` values — `tests/test_validate_examples_unit.py`'s
+`_VALID_VERDICTS` frozenset only accepts the five real `Verdict` strings,
+so *these two specifically* never become catalogued examples (see Phase
+A's and Phase C's own "Example fixtures" sections for the same reasoning).
+The **ODR-safe** pair's compatible-merge half is different: it produces an
+ordinary, verdict-bearing comparison once Phase C's real merge lands, and
+is exactly what becomes `examples/case2xx_multi_tu_compatible_merge/`
+(Phase C's own "Example fixtures" section) — it is not swept into this
+tests-only rule. The DPC++/plain-clang AST captures aren't diff fixtures at
+all (they feed Phase D's parser directly), so the examples-catalog
+question doesn't apply to them either way. The external-STL-noise pair is
+wired through Phase B's real manifest path (see Phase B's own "Example
+fixtures" section) as a `tests/`-level check of the supporting-vs-reportable
+merge boundary, with no catalog promotion currently planned for it.
 
 **Tests.** No new production tests yet — this phase is fixture capture and
 a short `tests/test_g32_fixtures.py` asserting the fixtures are non-empty
@@ -1028,9 +1039,20 @@ Implements ADR-050 D3. The highest-risk phase — see Risk above.
   diagnostic command (same flag spelling, for consistency — `plan` is a new
   command so `--manifest` wouldn't itself collide there, but using two
   different names for the same concept across sibling commands would be its
-  own inconsistency) that prints the normalized manifest and both D1
-  fingerprints without running extraction — cheap to run in CI before
-  committing to a full dump.
+  own inconsistency) that prints the normalized manifest and its
+  **`scope_fingerprint`** — genuinely computable from the manifest document
+  alone, no compiler invocation needed (established in Phase E's cache-key
+  discussion) — without running extraction. **It does not print
+  `profile_fingerprint`**: that fingerprint's `-I` component is a
+  `-MD`-depfile digest (Phase A) that only exists once an L2 castxml/clang
+  invocation actually runs, so promising it here would either be
+  impossible to compute honestly or require inventing a pre-extraction
+  surrogate the compare gate would later have to treat as authoritative —
+  exactly the kind of guessed value this ADR's whole design exists to
+  avoid. `plan --dump-manifest` is scoped to what's genuinely
+  pre-extraction-knowable — manifest validity and `scope_fingerprint` — cheap
+  to run in CI before committing to a full dump; a real `profile_fingerprint`
+  check still needs an actual `dump`/`compare` invocation.
 - **`--dump-manifest` must be side-scoped on `compare`, not a single shared
   path.** `dump` produces one snapshot from one manifest, so a bare
   `--dump-manifest path` is correct there. `compare OLD_INPUT NEW_INPUT` is
@@ -1107,7 +1129,8 @@ TU names, unknown fields, relative-path resolution, `frontend_context`
 accepted/defaulted/rejected-when-invalid). `dumper.py` multi-TU
 integration tests (`@pytest.mark.integration`, needs castxml/clang) using
 Phase 0's fixtures. A `plan --dump-manifest` unit test asserting it never
-invokes a compiler. A `--frontend-context` CLI-flag unit test for the legacy
+invokes a compiler and prints `scope_fingerprint` only — never a
+`profile_fingerprint` value, which would require one. A `--frontend-context` CLI-flag unit test for the legacy
 (non-manifest) path, mirroring the manifest-field test. A **side-scoped
 `compare --dump-manifest`** test asserting `compare old.so new.so
 --dump-manifest old=v1/abi.yml --dump-manifest new=v2/abi.yml` dumps each
