@@ -39,16 +39,22 @@ from __future__ import annotations
 
 import collections
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .buildsource.entity_identity import candidate_lookup_keys
+from .buildsource.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 
 if TYPE_CHECKING:
     from .buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
     from .model import AbiSnapshot, RecordType
+
+#: Local copy of graph_facts._CONFIDENCE_RANK (module-private there) — same
+#: duplication pattern as buildsource/type_graph.py's own local rank dict.
+_CONFIDENCE_RANK: dict[str, int] = {CONF_HIGH: 2, CONF_REDUCED: 1, CONF_UNKNOWN: 0}
 
 
 # ---------------------------------------------------------------------------
@@ -70,35 +76,37 @@ DEFAULT_INTERNAL_NAMESPACES: tuple[str, ...] = (
 # Change kinds that represent a meaningful change to a type's binary layout
 # or identity. If a *change of one of these kinds* applies to an internal
 # type that's reachable from public API, we raise a leak finding.
-_LEAK_TRIGGERING_KINDS: frozenset[ChangeKind] = frozenset({
-    ChangeKind.TYPE_SIZE_CHANGED,
-    ChangeKind.TYPE_ALIGNMENT_CHANGED,
-    ChangeKind.TYPE_FIELD_REMOVED,
-    ChangeKind.TYPE_FIELD_ADDED,
-    ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
-    ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-    ChangeKind.TYPE_BASE_CHANGED,
-    ChangeKind.TYPE_VTABLE_CHANGED,
-    ChangeKind.TYPE_REMOVED,
-    ChangeKind.STRUCT_SIZE_CHANGED,
-    ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
-    ChangeKind.STRUCT_FIELD_REMOVED,
-    ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
-    ChangeKind.STRUCT_ALIGNMENT_CHANGED,
-    # Fine-grained class-layout descriptor kinds (layout-closure work): like the
-    # coarse type/struct kinds above, they carry an owner type name and are a
-    # layout change on a type, so they must participate in the internal-leak
-    # pipeline too — otherwise a private ``detail::Impl`` with only a
-    # TRIVIALLY_COPYABLE_LOST / BASE_CLASS_OFFSET_CHANGED finding is neither
-    # attributed to a real public leak nor demoted as unreachable internal churn
-    # (Codex review #345).
-    ChangeKind.BASE_CLASS_OFFSET_CHANGED,
-    ChangeKind.VPTR_INTRODUCED,
-    ChangeKind.TRIVIALLY_COPYABLE_LOST,
-    ChangeKind.STANDARD_LAYOUT_LOST,
-    ChangeKind.TAIL_PADDING_REUSE_CHANGED,
-    ChangeKind.LAYOUT_UNVERIFIABLE,
-})
+_LEAK_TRIGGERING_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.TYPE_SIZE_CHANGED,
+        ChangeKind.TYPE_ALIGNMENT_CHANGED,
+        ChangeKind.TYPE_FIELD_REMOVED,
+        ChangeKind.TYPE_FIELD_ADDED,
+        ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        ChangeKind.TYPE_BASE_CHANGED,
+        ChangeKind.TYPE_VTABLE_CHANGED,
+        ChangeKind.TYPE_REMOVED,
+        ChangeKind.STRUCT_SIZE_CHANGED,
+        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+        ChangeKind.STRUCT_FIELD_REMOVED,
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+        ChangeKind.STRUCT_ALIGNMENT_CHANGED,
+        # Fine-grained class-layout descriptor kinds (layout-closure work): like the
+        # coarse type/struct kinds above, they carry an owner type name and are a
+        # layout change on a type, so they must participate in the internal-leak
+        # pipeline too — otherwise a private ``detail::Impl`` with only a
+        # TRIVIALLY_COPYABLE_LOST / BASE_CLASS_OFFSET_CHANGED finding is neither
+        # attributed to a real public leak nor demoted as unreachable internal churn
+        # (Codex review #345).
+        ChangeKind.BASE_CLASS_OFFSET_CHANGED,
+        ChangeKind.VPTR_INTRODUCED,
+        ChangeKind.TRIVIALLY_COPYABLE_LOST,
+        ChangeKind.STANDARD_LAYOUT_LOST,
+        ChangeKind.TAIL_PADDING_REUSE_CHANGED,
+        ChangeKind.LAYOUT_UNVERIFIABLE,
+    }
+)
 
 
 # Splits a qualified C++ name into namespace segments, ignoring template
@@ -219,6 +227,7 @@ def _is_known_pointer_wrapper(outer: str) -> bool:
     # project-specific alias narrow; a bare ``acme::pimpl<T>`` may be an
     # arbitrary by-value template and must not suppress layout leaks.
     return clean == "oneapi::dal::detail::pimpl"
+
 
 def _candidate_type_names_indirect(typename: str) -> list[tuple[str, bool]]:
     """Yield ``(candidate_type_name, reached_through_pointer)`` pairs for *typename*.
@@ -448,10 +457,7 @@ def _resolve_type_name(
     if suffix_index is not None:
         candidates: list[str] = suffix_index.get(typename, [])
     else:
-        candidates = [
-            name for name in type_map
-            if name.rsplit("::", 1)[-1] == typename
-        ]
+        candidates = [name for name in type_map if name.rsplit("::", 1)[-1] == typename]
     if len(candidates) == 1:
         return candidates[0]
     return typename
@@ -529,7 +535,9 @@ def _seed_queue_from_public_types(
     if is_dwarf_fallback:
         return
     for seed_name in type_map:
-        if seed_name and not _typename_is_internal(seed_name, qualified_index, internal_set):
+        if seed_name and not _typename_is_internal(
+            seed_name, qualified_index, internal_set
+        ):
             queue.append((seed_name, [f"type:{seed_name}"]))
 
 
@@ -692,10 +700,16 @@ def compute_leak_paths(
     _seed_queue_from_functions(snap, queue)
     _seed_queue_from_variables(snap, queue)
     _seed_queue_from_public_types(
-        type_map, qualified_index, internal_set, queue, is_dwarf_fallback=is_dwarf_fallback
+        type_map,
+        qualified_index,
+        internal_set,
+        queue,
+        is_dwarf_fallback=is_dwarf_fallback,
     )
 
-    paths = _bfs_collect_paths(queue, type_map, qualified_index, internal_set, snap.typedefs)
+    paths = _bfs_collect_paths(
+        queue, type_map, qualified_index, internal_set, snap.typedefs
+    )
     return _dedup_paths(paths)
 
 
@@ -716,13 +730,52 @@ def _is_consumer_compiled_node(node_id: str, node_by_id: dict[str, GraphNode]) -
     return is_consumer_compiled_node(node_id, node_by_id)
 
 
+@dataclass(frozen=True)
+class TraversalPolicy:
+    """Named, reusable graph-walk rules (ADR-046 D5, partial).
+
+    Formalizes what was previously :func:`_consumer_compiled_reachability`'s
+    own hard-coded edge-kind set and stop check into one object a future
+    walk can construct and reuse instead of re-deriving the same rules
+    inline. ``stop_conditions`` matches the ADR's own polarity: True means
+    "do not expand past this node" — the node itself is still recorded as
+    reachable (its own removal/change is still consumer-visible), only its
+    outgoing edges are not queued for further descent.
+
+    Not implemented this slice: ``effect_transitions`` (how a walk's
+    precision label changes crossing a particular edge kind, e.g.
+    downgrading "exact" to "over-approximation" crossing a virtual-call
+    edge) — no current walk needs it, so adding it now would be speculative.
+    Also not (yet) adopted by :func:`compute_leak_paths`'s layout/type-graph
+    walk — that walk traverses ``RecordType``/typedef structures, not the L5
+    ``GraphNode``/``GraphEdge`` graph this policy shape describes, so it does
+    not naturally fit without first changing its data model, which is out of
+    scope here.
+    """
+
+    allowed_edges: frozenset[str]
+    stop_conditions: Callable[[str, dict[str, GraphNode]], bool]
+    minimum_confidence: str = CONF_UNKNOWN
+
+
+#: The call-graph leak walk's own rules (ADR-044 P1 item 1), reified as a
+#: policy instance instead of the inline edge_kinds/_is_consumer_compiled_node
+#: pair :func:`compute_call_graph_leak_paths` hard-coded before D5.
+CALL_GRAPH_TRAVERSAL_POLICY = TraversalPolicy(
+    allowed_edges=frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"}),
+    stop_conditions=lambda node_id, node_by_id: not _is_consumer_compiled_node(
+        node_id, node_by_id
+    ),
+)
+
+
 def _consumer_compiled_reachability(
     graph: SourceGraphSummary,
-    edge_kinds: frozenset[str],
+    policy: TraversalPolicy,
     entries: Iterable[str],
     node_by_id: dict[str, GraphNode],
 ) -> dict[str, tuple[frozenset[str], dict[str, GraphEdge]]]:
-    """BFS from each *entry*, restricted to consumer-compiled call chains.
+    """BFS from each *entry*, restricted per *policy* (ADR-046 D5).
 
     Unlike :func:`~abicheck.buildsource.source_graph_findings._dependency_reachability`
     (which this call-graph walk used before this fix), the traversal does not
@@ -742,9 +795,10 @@ def _consumer_compiled_reachability(
     reconstruct a proof path without a second, unrestricted graph walk that
     could show a route the restriction above would have rejected.
     """
+    min_rank = _CONFIDENCE_RANK.get(policy.minimum_confidence, 0)
     adjacency: dict[str, list[GraphEdge]] = {}
     for e in graph.edges:
-        if e.kind in edge_kinds:
+        if e.kind in policy.allowed_edges and _CONFIDENCE_RANK.get(e.confidence, 0) >= min_rank:
             adjacency.setdefault(e.src, []).append(e)
     out: dict[str, tuple[frozenset[str], dict[str, GraphEdge]]] = {}
     for entry in entries:
@@ -753,7 +807,7 @@ def _consumer_compiled_reachability(
         queue: collections.deque[str] = collections.deque([entry])
         while queue:
             node = queue.popleft()
-            if node != entry and not _is_consumer_compiled_node(node, node_by_id):
+            if node != entry and policy.stop_conditions(node, node_by_id):
                 continue
             for e in adjacency.get(node, []):
                 if e.dst in seen:
@@ -854,8 +908,7 @@ def compute_call_graph_leak_paths(
     from .buildsource.source_graph import is_consumer_compiled_public_entry
     from .buildsource.source_graph_findings import _format_dependency_path
 
-    edge_kinds = frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"})
-    if not any(e.kind in edge_kinds for e in graph.edges):
+    if not any(e.kind in CALL_GRAPH_TRAVERSAL_POLICY.allowed_edges for e in graph.edges):
         return {}
 
     node_by_id = {n.id: n for n in graph.nodes}
@@ -863,7 +916,7 @@ def compute_call_graph_leak_paths(
     symbol_prefix = "binary_symbol://"
     for e in graph.edges:
         if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL" and e.dst.startswith(symbol_prefix):
-            decl_to_symbol[e.src] = e.dst[len(symbol_prefix):]
+            decl_to_symbol[e.src] = e.dst[len(symbol_prefix) :]
     exported_decls = set(decl_to_symbol)
     # is_consumer_compiled_public_entry (not the broader is_public_dependency_node
     # crosscheck.py's advisory RISK-only check uses) -- an ordinary out-of-line
@@ -879,7 +932,9 @@ def compute_call_graph_leak_paths(
         return {}
 
     internal_set = set(internal_namespaces)
-    reachability = _consumer_compiled_reachability(graph, edge_kinds, entries, node_by_id)
+    reachability = _consumer_compiled_reachability(
+        graph, CALL_GRAPH_TRAVERSAL_POLICY, entries, node_by_id
+    )
     result: dict[str, list[str]] = collections.defaultdict(list)
     for entry in entries:
         targets, came_from = reachability.get(entry, (frozenset(), {}))
@@ -1020,8 +1075,12 @@ def _typenode_is_indirection_wrapper(name: str) -> bool:
     return any(
         marker in outer
         for marker in (
-            "std::unique_ptr", "std::shared_ptr", "std::weak_ptr",
-            "__uniq_ptr", "__shared_ptr", "__weak_ptr",
+            "std::unique_ptr",
+            "std::shared_ptr",
+            "std::weak_ptr",
+            "__uniq_ptr",
+            "__shared_ptr",
+            "__weak_ptr",
         )
     )
 
@@ -1057,7 +1116,9 @@ def _path_has_indirection(path: list[str], snap: AbiSnapshot | None = None) -> b
     return any(s.startswith("indirect:") for s in path)
 
 
-def _path_is_value_propagating(path: list[str], snap: AbiSnapshot | None = None) -> bool:
+def _path_is_value_propagating(
+    path: list[str], snap: AbiSnapshot | None = None
+) -> bool:
     """Return True if a layout change on the leaf propagates *by value* to the
     public root along *path* — a value-embedding / inheritance chain with no
     pointer edge. Drives the leak's severity-hint wording.
@@ -1065,6 +1126,39 @@ def _path_is_value_propagating(path: list[str], snap: AbiSnapshot | None = None)
     if _path_has_indirection(path):
         return False
     return any(s.startswith(("field:", "base:", "vbase:")) for s in path)
+
+
+def select_preferred_path(paths: list[list[str]]) -> list[str]:
+    """Pick the strongest layout-walk proof path among *paths* (ADR-046 D6,
+    partial — the two tiers this walk's own per-path signals already support:
+    "exact" (2) and "virtual/indirect over-approximation" (6) of the ADR's
+    six-tier order).
+
+    Plain ``min(paths, key=len)`` (what this replaces) can pick an
+    indirect-only path over an available value-propagating one just because
+    it's shorter — a real path exists that proves the change propagates by
+    value, but the proof shown is the weaker "reached through a pointer"
+    one, silently hiding the stronger evidence
+    ``reachability_kind="value_embedding"`` already claims exists elsewhere
+    on the same finding. Preferring a value-propagating path first (falling
+    back to length only within a tier) means the shown path always matches
+    the strongest evidence actually available, not just the shortest.
+
+    The other four tiers (consumer-proven, public-header structural,
+    multi-producer-confirmed, reduced-confidence name resolution) need
+    structured per-hop evidence (confidence, producer, ``ScopeOrigin``) this
+    walk's plain ``list[str]`` path representation doesn't carry — not
+    implemented here.
+    """
+
+    def _tier(p: list[str]) -> int:
+        if _path_is_value_propagating(p):
+            return 0
+        if _path_has_indirection(p):
+            return 2
+        return 1
+
+    return min(paths, key=lambda p: (_tier(p), len(p)))
 
 
 def _collect_internal_changes(
@@ -1107,13 +1201,15 @@ def _merge_leak_paths(
 # value-embedding analysis. Every other triggering kind is a pure layout change
 # (size/offset/padding/field add-remove), which does NOT reach the public holder
 # through a pointer and is suppressed for pointer-only leaks (UXL field run P2).
-_IDENTITY_VTABLE_KINDS: frozenset[ChangeKind] = frozenset({
-    ChangeKind.TYPE_VTABLE_CHANGED,
-    ChangeKind.VPTR_INTRODUCED,
-    ChangeKind.TYPE_BASE_CHANGED,
-    ChangeKind.BASE_CLASS_OFFSET_CHANGED,
-    ChangeKind.TYPE_REMOVED,
-})
+_IDENTITY_VTABLE_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.TYPE_VTABLE_CHANGED,
+        ChangeKind.VPTR_INTRODUCED,
+        ChangeKind.TYPE_BASE_CHANGED,
+        ChangeKind.BASE_CLASS_OFFSET_CHANGED,
+        ChangeKind.TYPE_REMOVED,
+    }
+)
 
 
 def _build_leak_change(
@@ -1125,14 +1221,23 @@ def _build_leak_change(
 ) -> Change:
     """Build a single ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`` Change entry."""
     kinds_seen = sorted({c.kind.value for c in triggers})
-    path_strs = [_format_path(p) for p in paths[:3]]
+    # CodeRabbit review: this finding's own displayed proof path must prefer
+    # value-propagating evidence too, the same way MarkReachability's
+    # separate layout walk already does via select_preferred_path (ADR-046
+    # D6) -- otherwise a shorter indirect-only path could still be shown
+    # here even when a stronger value-propagating one exists among `paths`.
+    ordered_paths = paths
+    if paths:
+        preferred = select_preferred_path(paths)
+        ordered_paths = [preferred] + [p for p in paths if p is not preferred]
+    path_strs = [_format_path(p) for p in ordered_paths[:3]]
     more = "" if len(paths) <= 3 else f" (+{len(paths) - 3} more paths)"
     sev_hint = (
         "embedded-by-value or via inheritance — layout change propagates "
         "to public type size/offset"
         if embedded_by_value
         else "reachable via pointer / template — identity/vtable changes "
-             "propagate to consumers"
+        "propagate to consumers"
     )
     return Change(
         kind=ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
@@ -1151,7 +1256,9 @@ def _build_leak_change(
         # either, mirroring the raw trigger changes MarkReachability tags.
         public_reachable=True,
         reachability_state=ReachabilityState.PROVEN_REACHABLE,
-        reachability_kind="value_embedding" if embedded_by_value else "pointer_or_signature",
+        reachability_kind="value_embedding"
+        if embedded_by_value
+        else "pointer_or_signature",
         reachability_proof_path=path_strs[0] if path_strs else None,
     )
 
@@ -1184,7 +1291,9 @@ def detect_internal_leaks(
     merged_qualified_index: dict[str, set[str | None]] = collections.defaultdict(set)
     for t in (*old.types, *new.types):
         merged_qualified_index[t.name].add(t.qualified_name)
-    internal_changes = _collect_internal_changes(changes, internal_set, merged_qualified_index)
+    internal_changes = _collect_internal_changes(
+        changes, internal_set, merged_qualified_index
+    )
     if not internal_changes:
         return []
 
@@ -1210,9 +1319,7 @@ def detect_internal_leaks(
         # sample snapshot would mis-read the indirection (Codex review). A side
         # with no paths contributes nothing.
         side_paths = [(p, old) for p in old_pl] + [(p, new) for p in new_pl]
-        identity_or_vtable = any(
-            c.kind in _IDENTITY_VTABLE_KINDS for c in triggers
-        )
+        identity_or_vtable = any(c.kind in _IDENTITY_VTABLE_KINDS for c in triggers)
         # P2 (UXL field run): an internal type reached **only** behind a pointer
         # (per-hop ``indirect:`` markers recorded at enqueue) whose change is pure
         # layout is not consumer-visible — the public holder embeds only the
@@ -1380,11 +1487,13 @@ def detect_call_graph_leaks(
 # legitimate namespaced type names like ``ns::detail::Impl`` into
 # ``ns::detail``, breaking the reachability lookup. So only the
 # ``STRUCT_FIELD_*`` kinds participate in stripping.
-_FIELD_LEVEL_LEAK_KINDS: frozenset[ChangeKind] = frozenset({
-    ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
-    ChangeKind.STRUCT_FIELD_REMOVED,
-    ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
-})
+_FIELD_LEVEL_LEAK_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+        ChangeKind.STRUCT_FIELD_REMOVED,
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+    }
+)
 
 
 def _root_type_name_for_change(c: Change) -> str:

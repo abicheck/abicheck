@@ -152,13 +152,34 @@ field alongside `public_reachable`/`reachability_kind`/`reachability_proof_path`
 each producer still sets it independently, and the proof path is still one
 formatted string.
 
-### Phase 2 — Graph core v2 — **ADR drafted, implementation not started**
+### Phase 2 — Graph core v2 — **ADR accepted; D1 (partial)/D2/D3/D5 (partial)/D6 (partial) implemented, D4 deliberately deferred**
 
 [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) records
-the D1-D6 decisions below (Proposed, pending sign-off) — the "needs its own
-ADR" gate this phase set for itself. Implementation (schema changes to
-`source_graph.py` and the audit of every module that reads `GraphNode.attrs`/
-`GraphEdge.attrs` directly) has not started.
+the D1-D6 decisions below — the "needs its own ADR" gate this phase set for
+itself. **D1's `relation_key` half, D2 (the evidence-preserving node/edge
+merge), D3 (the per-(kind,role) coverage matrix), a partial slice of D5
+(`TraversalPolicy` for the call-graph walk), and a two-tier slice of D6
+(proof-path preference order) are implemented** — see ADR-046's "D1
+implementation"/"D2 implementation"/"D3 implementation"/"D5
+implementation"/"D6 implementation" sections,
+`abicheck/buildsource/graph_facts.py`,
+`abicheck/buildsource/inline_graph_fold.py`, `abicheck/internal_leak.py`'s
+`TraversalPolicy`/`CALL_GRAPH_TRAVERSAL_POLICY`/`select_preferred_path`,
+`tests/test_source_graph_v2.py`, `tests/test_inline_changed_paths.py`, and
+`tests/test_internal_leak.py`'s `TestTraversalPolicy`/
+`TestSelectPreferredPath`. **D4 (`EntityResolver`/`SOURCE_GRAPH_VERSION = 2`)
+is deliberately deferred, not just unstarted** — see ADR-046's "D4:
+deliberately deferred" section: [ADR-048](../adr/048-canonical-entity-identity-and-graph-reconciliation.md)
+(G31 Phase B, shipped after ADR-046 was written) already delivers D4's
+practical value — safe old/new reconciliation and impact-path linking — via
+`entity_identity.CanonicalIdentity`, without touching `GraphNode.id` or
+bumping `SOURCE_GRAPH_VERSION`. A full D4 would still mean changing
+`GraphNode.id` generation across every graph producer plus a v1/v2 pack
+compatibility matrix — categorically larger and riskier than any slice
+landed in this phase, and deserving its own scoped design pass rather than
+being folded in here. D1's `occurrence_id` half, D4, the remaining
+`effect_transitions` piece of D5, and the remaining four tiers of D6 remain
+open follow-up work under the same accepted ADR.
 
 - `abicheck/buildsource/source_graph.py`: split edge identity into a
   `relation_key = (src, dst, kind, semantic_role)` (used for closure/diff) and
@@ -189,16 +210,29 @@ ADR" gate this phase set for itself. Implementation (schema changes to
   shapes the review distinguishes (layout/symbol-availability/source-contract/
   behavioral/deployment propagation) instead of leaving "don't walk through an
   ordinary out-of-line helper" as one detector's implicit knowledge
-  (`is_consumer_compiled_public_entry` today).
+  (`is_consumer_compiled_public_entry` today). **Partial:** `TraversalPolicy`
+  (`allowed_edges`, `stop_conditions`, `minimum_confidence` — real, wired
+  filtering, not a passthrough field) is implemented and reused by
+  `compute_call_graph_leak_paths` via the named `CALL_GRAPH_TRAVERSAL_POLICY`
+  instance; `effect_transitions` and adoption by `compute_leak_paths`'s
+  layout walk (a different, non-graph data model) remain open.
 - Proof-path selection preference order (consumer-proven > exact high-confidence
   path > public-header structural path > multi-producer-confirmed >
   reduced-confidence name resolution > virtual/indirect over-approximation),
   replacing plain shortest-BFS; keep `primary_path`/`alternative_paths[0..N]`/
-  `discarded_path_count` on the finding.
+  `discarded_path_count` on the finding. **Partial:** `select_preferred_path`
+  (`internal_leak.py`) implements the two tiers the layout walk's plain
+  `list[str]` paths already carry a signal for (value-propagating vs.
+  indirect/virtual), wired into `post_processing.py`'s layout-walk selection
+  only; the call-graph walk, the remaining four tiers, and the
+  `primary_path`/`alternative_paths`/`discarded_path_count` finding shape are
+  still open.
 
-**ADR-046 drafted** (identity/version bump + merge semantics change is
-exactly ADR-044's own bar for "needs a recorded decision"). Implementation
-proceeds once the ADR is reviewed/accepted.
+**ADR-046 accepted and partially implemented** — see the Phase 2 heading
+above for the current per-decision status (D1 partial/D2/D3/D5 partial/D6
+partial implemented, D4 deliberately deferred); this paragraph originally
+described the pre-implementation "needs a recorded decision" gate
+(ADR-044's own bar) before the ADR existed.
 
 ### Phase 3 — Reporting & root causes
 
@@ -335,6 +369,7 @@ validation, consumer/use-case attribution checks.
 
 New:
 ```text
+abicheck/buildsource/graph_facts.py  # GraphFact/FactConflict/merge (Phase 2 D2, DONE)
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3)
     engine.py           # ImpactEngine.assess(...) (Phase 3)
@@ -359,8 +394,13 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
 ## Tests
 
 - `tests/test_reachability_state.py` — Phase 1, done.
-- New per phase: `tests/test_impact_model.py` (Phase 3), `tests/test_source_graph_v2.py`
-  / `tests/test_entity_resolver.py` (Phase 2), `tests/test_consumer_graph.py`
+- `tests/test_source_graph_v2.py` — Phase 2 D1/D2, done.
+- `tests/test_internal_leak.py`'s `TestTraversalPolicy` — Phase 2 D5
+  (partial), done.
+- `tests/test_internal_leak.py`'s `TestSelectPreferredPath` — Phase 2 D6
+  (partial), done.
+- New per remaining phase: `tests/test_impact_model.py` (Phase 3),
+  `tests/test_entity_resolver.py` (Phase 2 D4), `tests/test_consumer_graph.py`
   / `tests/test_use_cases.py` (Phase 4), one `test_diff_<family>.py` per Phase
   5 graph family, `tests/test_root_cause_correlator.py` (Phase 6).
 - `tests/test_abi_examples.py` picks up `case194`-`case205` automatically once

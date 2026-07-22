@@ -47,6 +47,24 @@ from typing import TYPE_CHECKING, Any
 
 from .build_evidence import BuildEvidence, Confidence
 
+# GraphNode/GraphEdge live in graph_facts.py now (ADR-046 D1/D2/D3 schema
+# additions pushed this module to its AI-readiness line-count cap) and are
+# re-exported for backward compatibility (many modules do ``from
+# .source_graph import GraphNode``/``CONF_HIGH`` etc.) — the ``as``-aliases
+# make the re-export explicit for mypy's strict ``--no-implicit-reexport``.
+from .graph_facts import (
+    CONF_HIGH as CONF_HIGH,
+    CONF_REDUCED as CONF_REDUCED,
+    CONF_UNKNOWN as CONF_UNKNOWN,
+    FactConflict as FactConflict,
+    GraphEdge as GraphEdge,
+    GraphFact as GraphFact,
+    GraphNode as GraphNode,
+    ensure_facts_and_resolve,
+    merge_entity_facts,
+    register_fact,
+)
+
 if TYPE_CHECKING:
     from .source_abi import SourceAbiSurface, SourceEntity
 
@@ -140,12 +158,6 @@ EDGE_KINDS: frozenset[str] = frozenset(
     }
 )
 
-#: Confidence labels (ADR-031 D9). Mirrors the evidence-model vocabulary so the
-#: coverage report and graph speak the same language.
-CONF_HIGH = "high"
-CONF_REDUCED = "reduced"
-CONF_UNKNOWN = "unknown"
-
 #: L5 edge kinds that express a decl/type dependency (ADR-041 P0): a call, a
 #: non-call reference to a global/constant, a parameter/field type, or a base
 #: class. ``crosscheck.py``'s intra-version ``public_to_internal_dependency``
@@ -183,81 +195,6 @@ def _conf_from_build(conf: Confidence) -> str:
     if conf == Confidence.REDUCED:
         return CONF_REDUCED
     return CONF_UNKNOWN
-
-
-@dataclass
-class GraphNode:
-    """A single ABI/API-relevant graph node (ADR-031 D2)."""
-
-    id: str
-    kind: str  # one of NODE_KINDS (preserved even if unknown)
-    label: str = ""  # human-readable name/path (redacted upstream)
-    attrs: dict[str, Any] = field(default_factory=dict)
-    provenance: str = ""  # how this node was derived, e.g. "build_evidence"
-    confidence: str = CONF_UNKNOWN
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "kind": self.kind,
-            "label": self.label,
-            "attrs": dict(self.attrs),
-            "provenance": self.provenance,
-            "confidence": self.confidence,
-        }
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> GraphNode:
-        return cls(
-            id=str(d["id"]),
-            kind=str(d.get("kind", "file")),
-            label=str(d.get("label", "")),
-            attrs=dict(d.get("attrs", {})),
-            provenance=str(d.get("provenance", "")),
-            confidence=str(d.get("confidence", CONF_UNKNOWN)),
-        )
-
-
-@dataclass
-class GraphEdge:
-    """A directed edge between two nodes, with provenance + confidence (D2, D9).
-
-    ``attrs`` carries edge-kind-specific labels — most importantly the
-    ``call_kind``/``resolution`` pair for ``DECL_CALLS_DECL`` edges (ADR-031 D4),
-    which a future call-graph extractor populates.
-    """
-
-    src: str
-    dst: str
-    kind: str  # one of EDGE_KINDS (preserved even if unknown)
-    provenance: str = ""
-    confidence: str = CONF_UNKNOWN
-    attrs: dict[str, Any] = field(default_factory=dict)
-
-    def key(self) -> tuple[str, str, str]:
-        """Identity of an edge for diffing/de-duplication: (src, dst, kind)."""
-        return (self.src, self.dst, self.kind)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "edge": self.kind,
-            "src": self.src,
-            "dst": self.dst,
-            "provenance": self.provenance,
-            "confidence": self.confidence,
-            "attrs": dict(self.attrs),
-        }
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> GraphEdge:
-        return cls(
-            src=str(d["src"]),
-            dst=str(d["dst"]),
-            kind=str(d.get("edge", d.get("kind", ""))),
-            provenance=str(d.get("provenance", "")),
-            confidence=str(d.get("confidence", CONF_UNKNOWN)),
-            attrs=dict(d.get("attrs", {})),
-        )
 
 
 @dataclass
@@ -334,24 +271,84 @@ class SourceGraphSummary:
     degraded_passes: dict[str, bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        # De-dup indexes for O(1) add_node/add_edge. Built from whatever the
-        # constructor (or from_dict) seeded so incremental building stays cheap.
+        # ADR-046 D2: backfill/re-derive facts/resolved for anything
+        # constructed directly (bypassing add_node/add_edge), so every node
+        # reachable from this summary satisfies "facts is never empty,
+        # resolved is derived from facts". Must run *before* the de-dup
+        # indexes below (Codex review, fresh evidence): a constructor-seeded
+        # edge whose role lives only in `facts` (not yet mirrored into
+        # `attrs`) would otherwise have its `relation_key()` computed against
+        # an empty `attrs`/`resolved` view, indexing it under the wrong
+        # (blank-role) key before resolution ever populates the real one.
+        for n in self.nodes:
+            ensure_facts_and_resolve(n)
+        for e in self.edges:
+            ensure_facts_and_resolve(e)
+        # De-dup indexes for O(1) add_node/add_edge, seeded from whatever the
+        # constructor (or from_dict) provided. Edges dedup on relation_key()
+        # (src, dst, kind, role), not the coarser key() (ADR-046 D1, Codex
+        # review on PR #620): deduping on key() alone silently folded two
+        # real, role-distinct relations -- e.g. a function that both returns
+        # and takes the same private type, two DECL_HAS_TYPE edges -- into
+        # one edge object, so only one role ever survived to be found via
+        # relation_key() by anything walking graph.edges. key() itself is
+        # untouched (still (src, dst, kind)); diff_source_graph's coarser
+        # edge-set comparison keeps its pre-existing "one representative
+        # edge per (src, dst, kind)" precision either way.
         self._node_ids: set[str] = {n.id for n in self.nodes}
-        self._edge_keys: set[tuple[str, str, str]] = {e.key() for e in self.edges}
+        self._edge_keys: set[tuple[str, str, str, str]] = {
+            e.relation_key() for e in self.edges
+        }
+        self._node_by_id: dict[str, GraphNode] = {n.id: n for n in self.nodes}
+        self._edge_by_key: dict[tuple[str, str, str, str], GraphEdge] = {
+            e.relation_key(): e for e in self.edges
+        }
 
     # -- mutation helpers ---------------------------------------------------
 
     def add_node(self, node: GraphNode) -> None:
-        """Add a node, de-duplicating by id (first writer wins on facts)."""
+        """Add a node, or merge a second registration's facts into it (ADR-046
+        D2 — evidence-preserving, replaces v1 first-writer-wins). ``kind``/
+        ``label`` keep the first registration's value; only ``attrs`` merge.
+
+        Merges *node*'s full ``facts`` list, not just its top-level
+        ``provenance``/``confidence``/``attrs`` (Codex review, fresh
+        evidence): an *incoming* node that already carries multiple facts of
+        its own (e.g. re-added from an already evidence-merged graph) would
+        otherwise have its whole fact history collapsed into one flattened
+        fact, discarding the individual per-producer facts and any
+        ``conflicts`` it already recorded.
+        """
         if node.id not in self._node_ids:
+            ensure_facts_and_resolve(node)
             self.nodes.append(node)
             self._node_ids.add(node.id)
+            self._node_by_id[node.id] = node
+            return
+        merge_entity_facts(self._node_by_id[node.id], node)
 
     def add_edge(self, edge: GraphEdge) -> None:
-        """Add an edge, de-duplicating by (src, dst, kind)."""
-        if edge.key() not in self._edge_keys:
+        """Add an edge, or merge a second registration's facts into it — same
+        as :meth:`add_node`, keyed on :meth:`GraphEdge.relation_key`
+        (``(src, dst, kind, role)`` — ADR-046 D1) so two edges that only
+        differ by role stay distinct objects instead of one silently
+        swallowing the other's role. Merges *edge*'s full ``facts`` list on a
+        duplicate registration, same as :meth:`add_node`.
+
+        Resolves *edge* before computing its key (Codex review, fresh
+        evidence): an edge whose role lives only in ``facts`` (not yet
+        mirrored into ``attrs``) would otherwise have ``relation_key()``
+        computed against an empty ``attrs``/``resolved`` view and dedup on
+        the wrong (blank-role) key instead of its true, post-resolution one.
+        """
+        ensure_facts_and_resolve(edge)
+        rkey = edge.relation_key()
+        if rkey not in self._edge_keys:
             self.edges.append(edge)
-            self._edge_keys.add(edge.key())
+            self._edge_keys.add(rkey)
+            self._edge_by_key[rkey] = edge
+            return
+        merge_entity_facts(self._edge_by_key[rkey], edge)
 
     def has_node(self, node_id: str) -> bool:
         """Whether a node with ``node_id`` is already in the graph."""
@@ -398,11 +395,21 @@ class SourceGraphSummary:
 
         Order-independent (nodes/edges are sorted) so the same logical graph
         always hashes identically regardless of construction order.
+
+        Hashes on :meth:`GraphEdge.relation_key` (role-aware), not the
+        coarser :meth:`GraphEdge.key` (Codex review, fresh evidence): since
+        ``add_edge`` started deduping on ``relation_key`` (ADR-046 D1
+        follow-up), two edges that differ only by role — e.g. the same
+        ``DECL_HAS_TYPE`` edge changing from ``role="return"`` to
+        ``role="param"`` — are genuinely different graph content, but the
+        coarse key would hash them identically, silently hiding a real
+        change from anything keyed on ``graph_id`` (pack references, a
+        future content-addressed cache, comparison shortcuts).
         """
         canonical = {
             "schema_version": self.schema_version,
             "nodes": sorted((n.id, n.kind) for n in self.nodes),
-            "edges": sorted(e.key() for e in self.edges),
+            "edges": sorted(e.relation_key() for e in self.edges),
         }
         blob = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode(
             "utf-8"
@@ -827,11 +834,13 @@ _CALL_GRAPH_FALLBACK_PROVENANCE = "call_graph"
 #: through one of these backends is exactly as unproven as the call-graph
 #: fallback shape and must not be treated as a safe stopping point by
 #: default either.
-_NO_CONSUMER_COMPILED_SIGNAL_PROVENANCES = frozenset({
-    _CALL_GRAPH_FALLBACK_PROVENANCE,
-    "kythe",
-    "codeql",
-})
+_NO_CONSUMER_COMPILED_SIGNAL_PROVENANCES = frozenset(
+    {
+        _CALL_GRAPH_FALLBACK_PROVENANCE,
+        "kythe",
+        "codeql",
+    }
+)
 
 
 def is_consumer_compiled_node(node_id: str, node_by_id: dict[str, GraphNode]) -> bool:
@@ -1436,7 +1445,8 @@ def _augment_with_source_abi(
                 attrs={
                     "decl_kind": ent.kind,
                     "visibility": ent.visibility,
-                    "consumer_compiled_body": ent.identity() in consumer_compiled_identities,
+                    "consumer_compiled_body": ent.identity()
+                    in consumer_compiled_identities,
                 },
             )
         )
@@ -1637,8 +1647,10 @@ def fold_source_edges(
                 and not existing.attrs.get("defined_in_project")
                 and not existing.attrs.get("visibility")
             ):
-                existing.attrs["defined_in_project"] = True
-                existing.attrs["def_file"] = dst_file
+                # ADR-046 D2: route through register_fact (a direct
+                # existing.attrs[...] mutation is dropped on the next round-trip).
+                backfill = {"defined_in_project": True, "def_file": dst_file}
+                register_fact(existing, provenance, confidence, backfill)
         before = len(graph.edges)
         graph.add_edge(
             GraphEdge(
@@ -1881,7 +1893,15 @@ def localize_symbol(graph: SourceGraphSummary, symbol: str) -> dict[str, Any]:
 def diff_source_graph(
     old: SourceGraphSummary, new: SourceGraphSummary
 ) -> GraphSummaryDiff:
-    """Compute the structural delta from *old* to *new* (Phase 5 seed)."""
+    """Compute the structural delta from *old* to *new* (Phase 5 seed).
+
+    Edge comparison deliberately stays keyed on the coarse ``key()``
+    (ADR-046 D1 — "existing callers... are unaffected"), not
+    ``relation_key()``: when two role-distinct edges share a ``(src, dst,
+    kind)`` (e.g. a function that both returns and takes the same private
+    type), only one is a "representative" for this structural added/removed
+    comparison — role-level diff granularity is not implemented here.
+    """
     old_nodes = {n.id: n for n in old.nodes}
     new_nodes = {n.id: n for n in new.nodes}
     old_edges = {e.key(): e for e in old.edges}

@@ -673,6 +673,62 @@ def test_inline_graph_has_type_edges_when_clang_available(monkeypatch):
     assert any(e.kind == "TYPE_INHERITS" for e in graph.edges)
 
 
+def test_inline_graph_type_pass_marks_role_coverage_matrix(monkeypatch):
+    # ADR-046 D3: a confirmed full type-graph pass earns the finer
+    # per-(kind, role) extractor_passes keys alongside the family key.
+    from abicheck.buildsource import call_graph, type_graph
+    from abicheck.buildsource.inline_graph_fold import role_pass_covered
+    from abicheck.buildsource.type_graph import TypeEdge
+
+    class _FakeCallExtractor:
+        def __init__(self, *a: object, **k: object) -> None:
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build: BuildEvidence) -> list[object]:
+            return []
+
+    class _FakeTypeExtractor:
+        def __init__(self, *a: object, **k: object) -> None:
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+            self.last_jobs = 0
+            self.last_elapsed_s = 0.0
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build: BuildEvidence) -> list[TypeEdge]:
+            return [TypeEdge("ns::Widget", "ns::Base", "TYPE_INHERITS")]
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeTypeExtractor)
+    merged = _build_with_one_unit()
+    graph = inline._build_inline_graph(
+        merged, surface=None, with_call_graph=True, clang_bin="clang", extractors=[]
+    )
+    assert graph is not None
+    assert graph.extractor_passes["type_graph"] is True
+    assert graph.extractor_passes["type_graph:TYPE_INHERITS:base"] is True
+    assert graph.extractor_passes["type_graph:TYPE_HAS_FIELD_TYPE:field"] is True
+    assert graph.extractor_passes["type_graph:TYPE_HAS_FIELD_TYPE:alias"] is True
+    assert graph.extractor_passes["type_graph:DECL_HAS_TYPE:var"] is True
+    assert graph.extractor_passes["type_graph:DECL_HAS_TYPE:return"] is True
+    assert graph.extractor_passes["type_graph:DECL_HAS_TYPE:param"] is True
+    assert graph.extractor_passes["type_graph:DECL_REFERENCES_DECL:ref"] is True
+    # role_pass_covered() reads the finer key directly...
+    assert role_pass_covered(graph, "type_graph", "DECL_HAS_TYPE", "param") is True
+    # ...and falls back to the family-level flag for a role this matrix
+    # doesn't track (e.g. a made-up role) or a made-up pass name.
+    assert (
+        role_pass_covered(graph, "type_graph", "DECL_HAS_TYPE", "made_up_role") is True
+    )
+    assert role_pass_covered(graph, "made_up_pass", "DECL_HAS_TYPE", "param") is False
+
+
 def test_inline_graph_no_type_edges_when_clang_absent(monkeypatch):
     # Best-effort: a missing clang++ records a failed extractor row and leaves the
     # graph without type edges — never raises.
@@ -752,6 +808,10 @@ def test_inline_type_graph_scoped_to_changed_tus(monkeypatch):
     assert "type_graph" not in graph.extractor_passes
     assert graph.narrowed_passes["type_graph"] is True
     assert graph.narrowed_scope["type_graph"] == frozenset({"src/a.cpp"})
+    # ADR-046 D3: the narrowed family flag also earns the finer per-(kind,
+    # role) narrowed_passes keys.
+    assert graph.narrowed_passes["type_graph:DECL_HAS_TYPE:param"] is True
+    assert "type_graph:DECL_HAS_TYPE:param" not in graph.extractor_passes
 
 
 def test_inline_include_graph_scoped_to_changed_tus(monkeypatch):

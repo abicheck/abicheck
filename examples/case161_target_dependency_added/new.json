@@ -5,15 +5,24 @@
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
       "dst": "target:libcrypto",
       "edge": "TARGET_DEPENDS_ON",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "provenance": "",
+      "resolved": {},
       "src": "target:libdemo"
     }
   ],
   "external_graph_refs": [],
   "extractor_passes": {},
-  "graph_id": "sha256:cdb69f9708017235e37634434e59d9d2341ea1f98cd946c520c28ae4db085713",
+  "graph_id": "sha256:3c9766f3960d7ec6d5b48041e0bcec2dcf3ca8a48bcd07b69d74460ec2e9ec85",
   "indexes": {
     "by_binary_symbol": {},
     "by_file": {},
@@ -30,18 +39,36 @@
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "target:libdemo",
       "kind": "target",
       "label": "libdemo",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {}
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "target:libcrypto",
       "kind": "target",
       "label": "libcrypto",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {}
     }
   ],
   "schema_version": 1

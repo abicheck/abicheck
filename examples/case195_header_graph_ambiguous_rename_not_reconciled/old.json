@@ -5,9 +5,18 @@
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
       "dst": "type:demo::Config2",
       "edge": "SOURCE_DECLARES",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "provenance": "",
+      "resolved": {},
       "src": "hdr:include/demo/config2.h"
     },
     {
@@ -15,9 +24,22 @@
         "role": "field"
       },
       "confidence": "unknown",
+      "conflicts": [],
       "dst": "type:demo::detail::RawA",
       "edge": "TYPE_HAS_FIELD_TYPE",
+      "facts": [
+        {
+          "attrs": {
+            "role": "field"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "provenance": "",
+      "resolved": {
+        "role": "field"
+      },
       "src": "type:demo::Config2"
     },
     {
@@ -25,15 +47,28 @@
         "role": "field"
       },
       "confidence": "unknown",
+      "conflicts": [],
       "dst": "type:demo::detail::RawB",
       "edge": "TYPE_HAS_FIELD_TYPE",
+      "facts": [
+        {
+          "attrs": {
+            "role": "field"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "provenance": "",
+      "resolved": {
+        "role": "field"
+      },
       "src": "type:demo::Config2"
     }
   ],
   "external_graph_refs": [],
   "extractor_passes": {},
-  "graph_id": "sha256:a872fb103f4423f3315bba6d7e5d28c891999b899dd84d73605c55baaeab41fd",
+  "graph_id": "sha256:ecc9b830e5b58cf2e1c3b6f1daf496c5963399f3aaadcc80cf6669119fd1831a",
   "indexes": {
     "by_binary_symbol": {},
     "by_file": {},
@@ -49,18 +84,42 @@
         "visibility": "public_header"
       },
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "qualified_name": "demo::Config2",
+            "visibility": "public_header"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "type:demo::Config2",
       "kind": "record_type",
       "label": "demo::Config2",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {
+        "qualified_name": "demo::Config2",
+        "visibility": "public_header"
+      }
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "hdr:include/demo/config2.h",
       "kind": "header",
       "label": "include/demo/config2.h",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {}
     },
     {
       "attrs": {
@@ -69,10 +128,27 @@
         "visibility": "private_header"
       },
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "def_file": "include/demo/detail2.h",
+            "qualified_name": "demo::detail::RawA",
+            "visibility": "private_header"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "type:demo::detail::RawA",
       "kind": "record_type",
       "label": "demo::detail::RawA",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {
+        "def_file": "include/demo/detail2.h",
+        "qualified_name": "demo::detail::RawA",
+        "visibility": "private_header"
+      }
     },
     {
       "attrs": {
@@ -81,10 +157,27 @@
         "visibility": "private_header"
       },
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "def_file": "include/demo/detail2.h",
+            "qualified_name": "demo::detail::RawB",
+            "visibility": "private_header"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "type:demo::detail::RawB",
       "kind": "record_type",
       "label": "demo::detail::RawB",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {
+        "def_file": "include/demo/detail2.h",
+        "qualified_name": "demo::detail::RawB",
+        "visibility": "private_header"
+      }
     }
   ],
   "schema_version": 1

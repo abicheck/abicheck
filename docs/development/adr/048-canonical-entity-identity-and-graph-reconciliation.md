@@ -213,9 +213,13 @@ here and not implied by anything in this decision.
 
 ## Relationship to ADR-046
 
-ADR-046 remains **Proposed, not implemented** — this ADR does not implement
-it, supersede its Decision (D1–D6), or change its status. What this ADR
-*does* share with ADR-046 D4's `EntityResolver` proposal:
+At the time this ADR (G31 Phase B) was written, ADR-046 was Proposed and
+unimplemented; ADR-046's D2 (the evidence-preserving `facts`/`resolved`/
+`conflicts` node/edge merge, replacing `add_node`'s first-writer-wins) has
+since landed as a later, independent slice (G29 Phase 2). This ADR does not
+implement ADR-046's D1/D3-D6, supersede its Decision, or change its status
+beyond that D2 note. What this ADR *does* share with ADR-046 D4's
+`EntityResolver` proposal (still unimplemented):
 
 - Both use "the most specific identity available, aliases for everything
   else" as the organizing principle, and both fall back to a v1-style hash
@@ -223,20 +227,18 @@ it, supersede its Decision (D1–D6), or change its status. What this ADR
 - **This ADR's `entity_identity.CanonicalIdentity` is intentionally smaller
   in scope than ADR-046 D4's `EntityResolver`.** It resolves identity for
   reconciliation (D2) and impact-linking (D4 above) — it does not touch
-  `GraphNode.id`, does not bump `SOURCE_GRAPH_VERSION`, does not implement
-  ADR-046's evidence-preserving `facts`/`resolved`/`conflicts` merge (D2 in
-  that ADR — `add_node` keeps its existing first-writer-wins behavior,
-  unchanged by this ADR), does not split edge identity into
-  `relation_key`/`occurrence_id` (D1), does not add the per-(kind,role)
-  coverage matrix (D3), and does not formalize `TraversalPolicy` (D5) or the
-  six-tier proof-path preference order (D6).
-- Should ADR-046 later be implemented, `entity_identity.py`'s
+  `GraphNode.id`, does not bump `SOURCE_GRAPH_VERSION`, and predates (is
+  independent of) ADR-046 D2's evidence-preserving merge; it does not split
+  edge identity into `relation_key`/`occurrence_id` (D1), does not add the
+  per-(kind,role) coverage matrix (D3), and does not formalize
+  `TraversalPolicy` (D5) or the six-tier proof-path preference order (D6).
+- Should ADR-046 D4 later be implemented, `entity_identity.py`'s
   `CanonicalIdentity` is the natural first alias `EntityResolver.aliases`
   would fold in (not a competing identity scheme to reconcile away) — this
   ADR does not create a second, conflicting identity model for a future
-  ADR-046 implementation to have to unify; it is a strict subset of what
-  `EntityResolver` would eventually need, shipped now because Phase B needed
-  *a* working identity model today and ADR-046 remains unimplemented.
+  `EntityResolver` implementation to have to unify; it is a strict subset of
+  what `EntityResolver` would eventually need, shipped now because Phase B
+  needed *a* working identity model before ADR-046 D4 existed.
 
 ## Non-goals
 

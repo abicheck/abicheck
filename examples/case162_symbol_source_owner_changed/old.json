@@ -5,23 +5,41 @@
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
       "dst": "sym:_ZN4demo4initEv",
       "edge": "SOURCE_DECL_MAPS_TO_SYMBOL",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "provenance": "",
+      "resolved": {},
       "src": "decl:demo::init"
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
       "dst": "decl:demo::init",
       "edge": "SOURCE_DECLARES",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "provenance": "",
+      "resolved": {},
       "src": "hdr:include/demo/legacy.h"
     }
   ],
   "external_graph_refs": [],
   "extractor_passes": {},
-  "graph_id": "sha256:aa7c74fb919def5e3bd7d9d840cabfbe54ed9b4d3e8ef6a1ee6f0293bba3b8d5",
+  "graph_id": "sha256:60e6c7b0d33e7820284843ccc6350dd056d145215a5a460563e063513c8a29c9",
   "indexes": {
     "by_binary_symbol": {
       "sym:_ZN4demo4initEv": [
@@ -43,34 +61,70 @@
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "decl:demo::init",
       "kind": "source_decl",
       "label": "demo::init()",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {}
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "sym:_ZN4demo4initEv",
       "kind": "binary_symbol",
       "label": "demo::init",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {}
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "hdr:include/demo/legacy.h",
       "kind": "header",
       "label": "include/demo/legacy.h",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {}
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "hdr:include/demo/init.h",
       "kind": "header",
       "label": "include/demo/init.h",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {}
     }
   ],
   "schema_version": 1
