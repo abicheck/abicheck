@@ -300,12 +300,27 @@ def test_cpp20_detector_ignores_qualified_concept_used_as_pre_cxx20_type(tmp_pat
     in C++20 — a qualified reference to a type literally named "concept"
     (e.g. ``ns::concept C = {};``) is valid pre-C++20 code. A concept-name
     is always declared bare, directly after its own template<...> header,
-    never out-of-line via a scope-resolution qualifier, so "::concept"
-    can only mean the pre-C++20 identifier usage."""
+    so requiring that positive signal (rather than merely excluding a
+    "::" prefix) correctly excludes this qualified case too."""
     headers = _write(
         tmp_path,
         "a.h",
         "namespace ns { struct concept {}; }\nns::concept C = {};\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_unqualified_concept_used_as_pre_cxx20_type(tmp_path):
+    """Regression (Codex review, second round): excluding only a "::"
+    prefix still missed a plain, unqualified pre-C++20 use of "concept" as
+    an identifier, e.g. ``static concept C = {};`` with no template<...>
+    anywhere before it — a bare exclusion list can't cover every non-C++20
+    context, so the fix requires positive evidence of a preceding
+    template<...> header instead."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "struct concept {};\nstatic concept C = {};\n",
     )
     assert _detect_cpp20_headers(headers) is False
 
@@ -320,6 +335,21 @@ def test_cpp20_detector_still_accepts_template_concept_after_qualified_check(
         tmp_path,
         "a.h",
         "template<class T>\nconcept HasFoo = requires(T a, T b) { a.foo(b); };\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
+def test_cpp20_detector_accepts_concept_after_multiline_template_header(tmp_path):
+    """Non-regression: a template<...> header wrapped across several
+    physical lines (a common formatting style for long parameter lists,
+    with no backslash continuation) must still satisfy the preceding-">"
+    check on whichever line the header's closing bracket lands on."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<\n    class T\n>\nconcept C = true;\n",
     )
     assert _detect_cpp20_headers(headers) is True
     reqs = _find_cpp20_requirements(headers)

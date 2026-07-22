@@ -169,16 +169,26 @@ def _looks_like_requires_declarator(code: bytes, match_start: int) -> bool:
     return m is not None and m.group(1) not in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS
 
 
-def _looks_like_concept_declarator(code: bytes, match_start: int) -> bool:
-    """True if the concept-declaration candidate at *match_start* in *code*
-    is immediately preceded (skipping only whitespace) by ``::`` — a
-    qualified-name operator can never precede a genuine C++20 concept
-    declaration (a concept-name is always declared bare, directly after its
-    own ``template<...>`` header, never out-of-line via a scope-resolution
-    qualifier), so this can only mean "concept" is being used as an
-    ordinary pre-C++20 (qualified) type name, e.g. ``ns::concept C = {};``
-    (Codex review)."""
-    return code[:match_start].rstrip().endswith(b"::")
+def _looks_like_genuine_concept(
+    lookahead: bytes, match_start: int, prev_nonblank_code: bytes
+) -> bool:
+    """True only if the concept-declaration candidate is actually preceded
+    by a ``template<...>`` header's closing ``>`` — either earlier on the
+    same (possibly lookahead-joined) line, or as the last thing on the
+    previous non-blank code line when "concept" itself starts this one. A
+    concept-name is always declared bare, directly after its own
+    ``template<...>`` header, so requiring this positive signal (rather
+    than merely excluding a ``::`` prefix) is what actually distinguishes a
+    genuine declaration from "concept" being used as an ordinary pre-C++20
+    identifier anywhere else in a statement (Codex review: excluding only
+    ``::`` still missed a plain, unqualified pre-C++20 use like
+    ``static concept C = {};``)."""
+    same_line_prefix = lookahead[:match_start].rstrip()
+    if same_line_prefix.endswith(b">"):
+        return True
+    if not same_line_prefix:
+        return prev_nonblank_code.rstrip().endswith(b">")
+    return False
 
 
 _STRING_LITERAL_PATTERN = re.compile(rb'"(?:\\.|[^"\\\n])*"')
@@ -323,6 +333,11 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
         )
         logical_lines = _iter_logical_lines(content)
         n = len(logical_lines)
+        # Last non-blank line's own (un-extended) code, tracked across
+        # iterations — lets a concept-declaration candidate look backward
+        # for its template<...> header when "concept" itself starts a line
+        # (see _looks_like_genuine_concept).
+        prev_nonblank_code = b""
         for i, (start_no, logical) in enumerate(logical_lines):
             if _is_preprocessor_directive(logical):
                 continue
@@ -353,8 +368,8 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 lookahead_budget -= 1
             concept_match = _CPP20_CONCEPT_PATTERN.search(lookahead)
             requires_expr_match = _CPP20_REQUIRES_EXPR_PATTERN.search(lookahead)
-            if concept_match and not _looks_like_concept_declarator(
-                lookahead, concept_match.start()
+            if concept_match and _looks_like_genuine_concept(
+                lookahead, concept_match.start(), prev_nonblank_code
             ):
                 found.append(Cpp20Requirement("concept-declaration", str(p), start_no))
             elif requires_expr_match and not _looks_like_requires_declarator(
@@ -363,6 +378,8 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 found.append(Cpp20Requirement("requires-expression", str(p), start_no))
             elif _CPP20_REQUIRES_CLAUSE_PATTERN.search(lookahead):
                 found.append(Cpp20Requirement("requires-clause", str(p), start_no))
+            if code.strip():
+                prev_nonblank_code = code
     return found
 
 
