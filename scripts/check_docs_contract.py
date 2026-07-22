@@ -172,6 +172,29 @@ def _load_topics(f: Findings) -> dict[str, dict[str, object]] | None:
     return topics
 
 
+def _resolves_under(base: Path, value: str) -> Path | None:
+    """Join `value` onto `base` and return the resolved path, or None if it
+    doesn't stay under `base` — catches both `../` traversal and an absolute
+    `value`, which pathlib's `/` operator would otherwise honor outright
+    (`Path("/docs") / "/etc/passwd" == Path("/etc/passwd")`, silently
+    discarding `base`)."""
+    candidate = (base / value).resolve()
+    resolved_base = base.resolve()
+    if candidate != resolved_base and resolved_base not in candidate.parents:
+        return None
+    return candidate
+
+
+def _is_file_under(base: Path, value: str) -> bool:
+    candidate = _resolves_under(base, value)
+    return candidate is not None and candidate.is_file()
+
+
+def _exists_under(base: Path, value: str) -> bool:
+    candidate = _resolves_under(base, value)
+    return candidate is not None and candidate.exists()
+
+
 def _check_referenced_paths_exist(
     f: Findings, topics: dict[str, dict[str, object]]
 ) -> None:
@@ -186,10 +209,12 @@ def _check_referenced_paths_exist(
             value = entry.get(key)
             if value is None:
                 continue
-            if not (DOCS / str(value)).is_file():
+            if not _is_file_under(DOCS, str(value)):
                 f.err(
                     "ownership",
-                    f"topic {topic_id!r}: {key} {value!r} does not exist under docs/",
+                    f"topic {topic_id!r}: {key} {value!r} does not exist "
+                    "as a file under docs/ (or escapes it via '..'/an "
+                    "absolute path)",
                 )
         for key in ("task_pages", "allowed_summaries"):
             values = entry.get(key, [])
@@ -197,22 +222,24 @@ def _check_referenced_paths_exist(
                 f.err("ownership", f"topic {topic_id!r}: {key} must be a list")
                 continue
             for value in values:
-                if not (DOCS / str(value)).is_file():
+                if not _is_file_under(DOCS, str(value)):
                     f.err(
                         "ownership",
                         f"topic {topic_id!r}: {key} entry {value!r} does not "
-                        "exist under docs/",
+                        "exist as a file under docs/ (or escapes it via "
+                        "'..'/an absolute path)",
                     )
         fact_sources = entry.get("fact_sources", [])
         if not isinstance(fact_sources, list):
             f.err("ownership", f"topic {topic_id!r}: fact_sources must be a list")
         else:
             for value in fact_sources:
-                if not (ROOT / str(value)).exists():
+                if not _exists_under(ROOT, str(value)):
                     f.err(
                         "ownership",
                         f"topic {topic_id!r}: fact_sources entry {value!r} "
-                        "does not exist",
+                        "does not exist under the repo root (or escapes it "
+                        "via '..'/an absolute path)",
                     )
 
 

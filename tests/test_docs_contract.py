@@ -107,6 +107,47 @@ def test_referenced_paths_exist_flags_missing_fact_source() -> None:
     assert "definitely_not_a_real_module.py" in f.errors[0][1]
 
 
+def test_referenced_paths_exist_rejects_canonical_page_escaping_docs_via_dotdot() -> (
+    None
+):
+    """A topic can't claim a canonical_page outside docs/ via '../' even if
+    the escaped file happens to exist (regression test for the traversal gap
+    flagged in PR #619 review — `DOCS / "../README.md"` used to resolve to
+    the real repo-root README.md and pass the existence check)."""
+    topics = {"topic-a": {"canonical_page": "../README.md"}}
+    f = dc.Findings()
+    dc._check_referenced_paths_exist(f, topics)
+    assert len(f.errors) == 1
+    assert "escapes it" in f.errors[0][1]
+
+
+def test_referenced_paths_exist_rejects_absolute_path() -> None:
+    """pathlib's `/` operator honors an absolute right-hand side outright
+    (`DOCS / "/etc/passwd" == Path("/etc/passwd")`), silently discarding
+    DOCS — must be rejected regardless of whether the absolute target
+    exists, not treated as a valid in-tree path."""
+    topics = {"topic-a": {"canonical_page": "/definitely-not-a-real-path-xyz"}}
+    f = dc.Findings()
+    dc._check_referenced_paths_exist(f, topics)
+    assert len(f.errors) == 1
+    assert "escapes it" in f.errors[0][1]
+
+
+def test_resolves_under_accepts_a_real_in_tree_path(tmp_path: Path) -> None:
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "page.md").write_text("x", encoding="utf-8")
+    assert (
+        dc._resolves_under(tmp_path, "sub/page.md")
+        == (tmp_path / "sub" / "page.md").resolve()
+    )
+
+
+def test_resolves_under_rejects_dotdot_escape(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "definitely-not-under-tmp_path.md"
+    rel = str(Path("..") / outside.name)
+    assert dc._resolves_under(tmp_path, rel) is None
+
+
 # --- front matter: parsing --------------------------------------------------
 
 
