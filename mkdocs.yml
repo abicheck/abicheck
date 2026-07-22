@@ -144,6 +144,7 @@ nav:
   - Development:
     - Contributing:
       - Codebase Overview: development/codebase-overview.md
+      - Writing Documentation: development/documentation.md
       - Testing: development/testing.md
       - Performance: development/performance.md
       - Troubleshooting: troubleshooting.md

@@ -197,6 +197,10 @@ the topic is registered, or via the "Layout" table above otherwise) instead
 of starting a new file. If you do add a page, and it's the canonical owner
 of a topic covered above, register it in `docs/_meta/topics.yaml`.
 
+See [Writing Documentation](development/documentation.md) for this contract's
+human-readable companion — page-shape templates, worked before/after
+duplication fixes, the document lifecycle, and the PR checklist.
+
 ## Regenerating generated docs
 
 ```bash
