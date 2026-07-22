@@ -186,6 +186,24 @@ def test_cpp20_detector_still_detects_real_construct_after_raw_string(tmp_path):
     assert any(r.reason == "concept-declaration" and r.line == 2 for r in reqs)
 
 
+def test_cpp20_detector_ignores_requires_text_in_backslash_continued_string(tmp_path):
+    """Regression (Codex review): an ordinary string literal continued with
+    a real backslash-newline (a valid, if archaic, C/C++ feature) arrives
+    at the per-line scan with its backslash already spliced away by
+    ``_iter_logical_lines`` and a literal newline in its place. The plain
+    string-literal pattern deliberately refuses to match across a newline
+    (bounding an unterminated-literal mismatch to one line), so this left
+    the continued literal's body — including "requires" and "{" on either
+    side of the embedded newline — completely unstripped and visible to the
+    requires-expression pattern."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        'const char* s = "requires \\\n{ typename T::value_type; }";\n',
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_lookahead_stops_at_preprocessor_directive(tmp_path):
     """The line-join lookahead for a bare trailing "requires" must stop at a
     preprocessor directive rather than pulling its text into the scan

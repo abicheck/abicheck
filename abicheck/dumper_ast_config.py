@@ -182,6 +182,31 @@ def _strip_literals(line: bytes) -> bytes:
     return line
 
 
+# Newline-tolerant variants of the two patterns above, for use ONLY on a
+# chunk that has already been through _iter_logical_lines: that step splices
+# away a backslash-newline continuation, embedding a literal "\n" exactly
+# where the continuation was — so an ordinary string literal like
+# ``"requires \`` + newline + ``{ ... }"`` (a real, if archaic, C/C++
+# feature) arrives with the keyword and brace on either side of an embedded
+# newline the plain patterns above deliberately refuse to cross (bounding an
+# unterminated-literal mismatch to one line is the whole point there). A
+# single already-joined logical line has no such risk — any embedded
+# newline in it is a genuine continuation, not a boundary into unrelated
+# code — so it is safe to let ``.`` span it here (Codex review: this is what
+# let requires/concept text trapped inside a continued string literal reach
+# the structural pattern match).
+_JOINED_STRING_LITERAL_PATTERN = re.compile(rb'"(?:\\.|[^"\\])*"', re.DOTALL)
+_JOINED_CHAR_LITERAL_PATTERN = re.compile(rb"'(?:\\.|[^'\\])*'", re.DOTALL)
+
+
+def _strip_literals_joined(line: bytes) -> bytes:
+    """Like :func:`_strip_literals`, but tolerant of an embedded newline —
+    use only on output from :func:`_iter_logical_lines`."""
+    line = _JOINED_STRING_LITERAL_PATTERN.sub(b'""', line)
+    line = _JOINED_CHAR_LITERAL_PATTERN.sub(b"''", line)
+    return line
+
+
 def _iter_logical_lines(content: bytes) -> list[tuple[int, bytes]]:
     """Split *content* into ``(1-based start line, logical line)`` pairs.
 
@@ -256,7 +281,7 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
         for i, (start_no, logical) in enumerate(logical_lines):
             if _is_preprocessor_directive(logical):
                 continue
-            code = _strip_literals(logical)
+            code = _strip_literals_joined(logical)
             code = code.split(b"//")[0]
             # A bare "requires" trailing at the end of a line (no parameter
             # list or brace yet) means the construct's `(`/`{`/constraint
@@ -276,7 +301,7 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 and not _is_preprocessor_directive(logical_lines[j + 1][1])
             ):
                 j += 1
-                nxt = _strip_literals(logical_lines[j][1]).split(b"//")[0]
+                nxt = _strip_literals_joined(logical_lines[j][1]).split(b"//")[0]
                 lookahead += b"\n" + nxt
                 lookahead_budget -= 1
             if _CPP20_CONCEPT_PATTERN.search(lookahead):
