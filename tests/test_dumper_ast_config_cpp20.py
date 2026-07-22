@@ -1220,6 +1220,28 @@ def test_cpp20_detector_ignores_auto_variable_declaration(tmp_path):
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_decltype_auto(tmp_path):
+    """Regression (Codex review): ``decltype(auto)`` (valid since C++14)
+    puts the bare keyword ``auto`` directly inside a ``(`` — the identical
+    textual position as a genuine abbreviated parameter's enclosing ``(``
+    — but it is decltype's own argument, not a parameter list at all.
+    Without excluding it, a header whose only other C++20-looking
+    ingredient is an otherwise-harmless ``concept``-as-type-name shadow
+    (``struct concept {};``) still got force-parsed as C++20, where
+    "concept" is a keyword and the header fails."""
+    headers = _write(tmp_path, "a.h", "struct concept {};\ndecltype(auto) f();\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_detects_genuine_param_alongside_decltype_auto(tmp_path):
+    """Companion: a genuine abbreviated parameter must still be detected
+    even when the same declaration also uses ``decltype(auto)`` as its
+    return type — only the ``decltype(...)``'s own ``auto`` is excluded,
+    not every ``auto`` occurrence in the line."""
+    headers = _write(tmp_path, "a.h", "decltype(auto) f(auto x);\n")
+    assert _detect_cpp20_headers(headers) is True
+
+
 def test_cpp20_detector_ignores_trailing_return_type_auto(tmp_path):
     """A trailing-return-type ``auto`` (C++11+, ``auto f() -> int;``) must
     not be mistaken for a parameter's bare ``auto`` type."""

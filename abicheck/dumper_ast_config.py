@@ -372,20 +372,39 @@ def _is_lambda_param_list_open_paren(text: bytes, open_paren_pos: int) -> bool:
     return idx >= 0 and text[idx : idx + 1] == b"]"
 
 
+def _is_decltype_open_paren(text: bytes, open_paren_pos: int) -> bool:
+    """True if the ``(`` at *open_paren_pos* is a ``decltype`` specifier's
+    own parentheses — immediately preceded (skipping whitespace) by the
+    keyword ``decltype``. ``decltype(auto)`` (valid since C++14) puts the
+    bare keyword ``auto`` directly inside this ``(``, the identical
+    textual position as a genuine abbreviated parameter's enclosing
+    ``(`` — but it is decltype's own argument, not a parameter list at
+    all (Codex review)."""
+    idx = open_paren_pos - 1
+    while idx >= 0 and text[idx : idx + 1] in b" \t\r\n":
+        idx -= 1
+    end = idx + 1
+    while idx >= 0 and (text[idx : idx + 1].isalnum() or text[idx : idx + 1] == b"_"):
+        idx -= 1
+    return text[idx + 1 : end] == b"decltype"
+
+
 def _has_abbreviated_unconstrained_auto_param(lookahead: bytes) -> bool:
     """True if *lookahead* contains a bare (unconstrained) ``auto`` used
     directly as an ordinary function's parameter type (``void f(auto
     x);``) — the C++20 abbreviated function template form, distinct from
     the *constrained* form (``std::integral auto x``, handled separately
-    by :func:`_has_constrained_param_syntax`) and from a generic lambda's
+    by :func:`_has_constrained_param_syntax`), from a generic lambda's
     ``auto`` parameter (``[](auto x) { ... }``), which has been valid
     since C++14 and is excluded via :func:`_is_lambda_param_list_open_paren`
-    (Codex review). Only matches when nothing but an optional cv-qualifier
-    and/or attribute-specifier-seq (``[[maybe_unused]] auto x`` — Codex
-    review, second round) separates ``auto`` from its enclosing ``(``/
-    ``,`` — that position is unambiguous: a bare ``auto`` can never be a
-    parameter's default-argument expression or any other operand there,
-    only its type."""
+    (Codex review), and from ``decltype(auto)`` (also valid since C++14,
+    excluded via :func:`_is_decltype_open_paren` — Codex review, second
+    round). Only matches when nothing but an optional cv-qualifier and/or
+    attribute-specifier-seq (``[[maybe_unused]] auto x`` — Codex review,
+    third round) separates ``auto`` from its enclosing ``(``/``,`` — that
+    position is unambiguous: a bare ``auto`` can never be a parameter's
+    default-argument expression or any other operand there, only its
+    type."""
     for m in re.finditer(rb"\bauto\b", lookahead):
         prefix = _strip_trailing_declarator_specifiers(lookahead[: m.start()])
         prefix = _strip_trailing_attributes(prefix)
@@ -401,7 +420,9 @@ def _has_abbreviated_unconstrained_auto_param(lookahead: bytes) -> bool:
                 continue
         else:
             continue
-        if not _is_lambda_param_list_open_paren(lookahead, open_pos):
+        if not _is_lambda_param_list_open_paren(
+            lookahead, open_pos
+        ) and not _is_decltype_open_paren(lookahead, open_pos):
             return True
     return False
 
