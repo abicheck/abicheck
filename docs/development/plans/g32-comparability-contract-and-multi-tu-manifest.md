@@ -605,12 +605,17 @@ exist.
   (possibly-multi-document) JSON output as a stream of `{kind, target,
   ast}` contexts — real document-boundary streaming, not a bracket/string
   split; rejects trailing garbage and truncated documents.
-- Context selection is explicit: the manifest's/CLI's `frontend_context`
-  (`host` default, Phase B) is matched against the compiler-reported target triple
-  of each decoded context; a run producing only a mismatched context
-  (e.g. only `spir64` when `host` was requested) is `AST_CONTEXT_MISSING`,
-  an extraction failure — never a successful snapshot with the wrong
-  target silently selected.
+- Context selection is by **`kind`**, not by target-triple matching — the
+  manifest's/CLI's `frontend_context` (`host` default, Phase B) is matched
+  against each decoded context's `kind` field (`"host"`/`"device"`, read
+  directly from the compiler's own JSON output), never against the target
+  triple (`spir64`, etc.), which is diagnostic-only (ADR-050 D5). Three
+  outcomes: exactly one context with the requested `kind` → selected;
+  zero contexts with the requested `kind` (e.g. only a `spir64`/`device`
+  context when `host` was requested) → `AST_CONTEXT_MISSING`, an
+  extraction failure, never a successful snapshot with the wrong target
+  silently selected; more than one context sharing the requested `kind` →
+  `AST_CONTEXT_AMBIGUOUS`, never resolved by an implicit tiebreaker.
 - `dumper_clang.py`'s existing single-context assumption is generalized to
   call this module when the detected frontend is DPC++-capable; a plain
   (non-SYCL) clang/castxml invocation is unaffected — zero-context-stream
@@ -625,8 +630,14 @@ classifier).
 **Tests.** Fixture-driven parser tests against Phase 0's real captured
 output (multi-document, malformed/truncated variants added once the happy
 path is proven — matching the review's own "fixture-first, don't guess the
-parser" sequencing advice). `AST_CONTEXT_MISSING`/`AST_CONTEXT_AMBIGUOUS`
-error-path tests.
+parser" sequencing advice). Selection tests for all three outcomes: exactly
+one context with the requested `kind` selects correctly; zero contexts with
+the requested `kind` raises `AST_CONTEXT_MISSING`; two-or-more contexts
+sharing the requested `kind` raises `AST_CONTEXT_AMBIGUOUS`. A dedicated
+test asserting selection is by `kind`, not target-triple pattern-matching —
+a `{kind: "device", target: "spir64"}` context selected when `frontend_context`
+is `device`, and *not* rejected as a triple-mismatch, is the specific
+regression this criterion exists to prevent.
 
 **Example fixtures.** None required beyond Phase 0's captures — this phase
 is extraction-layer, not diff-layer; no new `ChangeKind`.
