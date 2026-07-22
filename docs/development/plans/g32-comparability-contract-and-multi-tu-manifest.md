@@ -110,7 +110,12 @@ Implements ADR-049 D1 and D2.
 **Goal & acceptance criteria.**
 - `AbiSnapshot.contract: ExtractionContract | None` (`model.py`) carries
   `profile_fingerprint`/`scope_fingerprint` plus the resolved inputs that
-  produced them.
+  produced them. `scope_fingerprint`'s hashed inputs include each TU's
+  `required`/`contributes_to_abi` flags, not just its includes/forced
+  includes (ADR-049 D1) — flipping `contributes_to_abi` changes which
+  declarations feed the ABI model without necessarily touching a TU's
+  includes, so leaving it out of the hash would let that exact class of
+  scope drift pass the gate undetected.
 - `serialization.SCHEMA_VERSION` is bumped (11 → 12) in the same change
   that starts writing `contract` — **not** treated as a free additive field
   the way ADR-041's advisory `extractor_passes`/`narrowed_passes` were (see
@@ -119,10 +124,17 @@ Implements ADR-049 D1 and D2.
   forward-version rejection, `serialization.py:557-567`, instead of
   producing an ordinary verdict on data it can't check).
 - `comparability.check_contracts_comparable(old, new)` raises
-  `ProfileMismatchError`/`ScopeMismatchError` (`errors.py`) when both sides
-  carry a `contract` and the fingerprints differ; a snapshot with no
-  `contract` field compares exactly as it does today (backward compatible
-  with every existing baseline).
+  `ProfileMismatchError`/`ScopeMismatchError` (`errors.py`) **only when
+  both sides carry a `contract`** and the fingerprints differ. A **mixed**
+  pair (one side has a `contract`, the other doesn't) is unambiguous, not
+  an implementer's judgment call: it takes the exact same code path as a
+  pair where neither side has one — never hard-fails, never becomes
+  `not_comparable` — so comparing a freshly-produced snapshot against a
+  pre-ADR stored CI baseline (a common real workflow) never regresses on
+  upgrade. It instead surfaces `UNKNOWN_PROFILE` as a RISK-tier,
+  non-authoritative annotation on the ordinary verdict that still gets
+  produced — same shape as the existing `SOURCE_FACT_COVERAGE_INCOMPLETE`
+  (`checker_policy.py:618`), not a second meaning for `not_comparable`.
 - The gate is wired at **all three** entry points in one phase, closing the
   gap AGENTS.md's "Known gaps" section already names for the depth
   contract rather than repeating the CLI-only mistake: `checker.compare`
@@ -175,14 +187,20 @@ row), `reporter.py`, `sarif.py`, `junit_report.py`,
 
 **Tests.** Unit tests for fingerprint stability (same manifest,
 independent-TU reordering unaffected; include-order-within-a-TU changes
-the fingerprint); a `SCHEMA_VERSION`-bump test asserting a pre-bump reader
-(a stubbed/patched `SCHEMA_VERSION`) hits the existing forward-version
-rejection on a `contract`-bearing snapshot rather than silently ignoring
-the field; `tests/test_report_schema.py` gains a `not_comparable` case
-validated against the updated `compare_report.schema.json`; gate unit tests
-for all three entry points; a `--diagnostic-comparison` end-to-end test; a
-backward-compat test asserting
-a contract-less snapshot pair compares unchanged.
+the fingerprint; flipping one TU's `contributes_to_abi` or `required` flag
+with its includes held identical also changes `scope_fingerprint`); a
+`SCHEMA_VERSION`-bump test asserting a pre-bump reader (a stubbed/patched
+`SCHEMA_VERSION`) hits the existing forward-version rejection on a
+`contract`-bearing snapshot rather than silently ignoring the field;
+`tests/test_report_schema.py` gains a `not_comparable` case validated
+against the updated `compare_report.schema.json`; gate unit tests for all
+three entry points; a `--diagnostic-comparison` end-to-end test; a
+backward-compat test asserting a contract-less snapshot pair compares
+unchanged; a **mixed-pair** test (one side `contract`, one side none)
+asserting the comparison never hard-fails and instead carries a
+`UNKNOWN_PROFILE` RISK-tier finding alongside an otherwise-ordinary
+verdict — the specific case the ADR calls out as unambiguous, not left to
+interpretation.
 
 **Example fixtures.** The Phase 0 "scope drift" pair, promoted to a real
 `examples/case2xx_profile_scope_mismatch_gate/` once the gate exists.

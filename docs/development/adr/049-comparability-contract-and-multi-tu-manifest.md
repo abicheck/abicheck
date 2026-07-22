@@ -117,11 +117,18 @@ no way to check.
 - `scope_fingerprint: str` — a `sha256:`-prefixed digest of the
   **manifest-normalized** analysis scope: the set of translation units (by
   `name`, not by list position), each TU's ordered includes and forced
-  includes, and the `public_header_paths`/`public_header_dirs`/filtering
-  policy already threaded through `dumper.py` today. Computed from the
-  *normalized* manifest (D3), not raw YAML bytes — reordering two
-  independent TU entries, or adding a comment, must not change the
-  fingerprint; reordering includes *within* one TU must.
+  includes, each TU's `required`/`contributes_to_abi` flags, and the
+  `public_header_paths`/`public_header_dirs`/filtering policy already
+  threaded through `dumper.py` today. The `contributes_to_abi` flag is a
+  hashed input, not just a manifest-validation detail (D3): flipping a TU
+  from `contributes_to_abi: false` to `true` changes which declarations
+  feed the ABI model without necessarily changing that TU's includes at
+  all, so a fingerprint computed only from includes/forced-includes would
+  let exactly the kind of scope drift this ADR exists to catch pass through
+  as "identical scope." Computed from the *normalized* manifest (D3), not
+  raw YAML bytes — reordering two independent TU entries, or adding a
+  comment, must not change the fingerprint; reordering includes *within*
+  one TU, or changing either flag, must.
 
 Both fingerprints live in a new `contract: ExtractionContract` sub-object on
 `AbiSnapshot` rather than flattening two more top-level fields onto an
@@ -156,11 +163,26 @@ that file — both must change in the same phase that starts emitting
 `not_comparable`, or JSON output goes invalid (or the published schema goes
 stale) the moment the gate first fires.
 
-A profile/scope fingerprint is only computed (and only gates) when both
-snapshots carry one; a snapshot from before this ADR (no `contract` field)
-compares exactly as it does today — this is an opt-in tightening for new
-snapshots, not a retroactive break of existing baselines. `UNKNOWN_PROFILE`
-is the report reason when one side has a contract and the other doesn't.
+**Mixed pairs (one side has a `contract`, the other doesn't) never hard-fail
+— this is unambiguous, not left to implementer discretion.** The backward-
+compatibility promise ("a snapshot from before this ADR compares exactly as
+it does today") is not a soft goal to reconcile with the gate; a
+contract-less snapshot's *absence* of evidence is exactly the "missing
+evidence must never manufacture a block" situation ADR-028 D3's authority
+rule already covers, extended here to the comparability contract instead of
+symbol facts. `check_contracts_comparable` therefore only ever raises
+`ProfileMismatchError`/`ScopeMismatchError` when **both** sides carry a
+`contract` and it mismatches — a mixed pair takes the exact same code path
+as a pair where neither side carries one, and comparing a newly-produced
+snapshot against a pre-ADR baseline (the common "upgrade abicheck, keep the
+stored CI baseline" workflow) never regresses into an unexpected
+`not_comparable` result. `UNKNOWN_PROFILE` is **not** a `not_comparable`
+reason and never blocks: it is a RISK-tier, non-authoritative annotation on
+an otherwise-ordinary verdict — same shape and same authority-rule
+justification as the existing `SOURCE_FACT_COVERAGE_INCOMPLETE`
+(`checker_policy.py:618`) — surfaced only for a mixed pair, to tell the
+reader "this comparison ran without being able to check profile/scope
+drift on one side," without withholding the verdict itself.
 
 ### D3. Manifest and real multi-TU dump
 
