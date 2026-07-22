@@ -546,6 +546,39 @@ class TestArchiveExtraction:
         assert outputs.get("channel") == "release-contract"
         assert "malformed" in outputs.get("message", "")
 
+    def test_archive_with_symlink_hard_fails_with_typed_outputs(
+        self, tmp_path: Path
+    ) -> None:
+        # A symlink-containing archive is a malformed baseline-set, the same
+        # class of failure as no-manifest/ambiguous-subdirectories above --
+        # it must carry the same typed outcome/bootstrap/message outputs, not
+        # fail before any outputs are written at all (Codex review).
+        baseline_dir = tmp_path / "baseline-src"
+        _write_manifest(baseline_dir, artifacts=[_target_artifact("libpvxs")])
+        (baseline_dir / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+        (baseline_dir / "evil-link").symlink_to(baseline_dir / "manifest.json")
+
+        archive_path = tmp_path / "baseline-symlink.tar.gz"
+        with tarfile.open(archive_path, "w:gz") as tf:
+            tf.add(baseline_dir, arcname=".")
+
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(archive_path),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_REQUIRED": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "symlink" in result.stdout
+        assert outputs.get("outcome") == "ambiguous"
+        assert outputs.get("bootstrap") == "false"
+        assert outputs.get("channel") == "release-contract"
+        assert "symlink" in outputs.get("message", "")
+
     def test_archive_with_ambiguous_subdirectories_hard_fails(
         self, tmp_path: Path
     ) -> None:

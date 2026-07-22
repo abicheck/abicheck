@@ -124,9 +124,14 @@ elif [[ -f "$BASELINE_PATH" ]]; then
   # snapshot-path/binaries-dir entry would follow, reading (or, chained with
   # a second archive, writing) outside $_EXTRACT_DIR -- a baseline-set has
   # no legitimate reason to contain one, so reject the whole extraction
-  # rather than silently following it (CodeRabbit review).
+  # rather than silently following it (CodeRabbit review). Uses
+  # _fail_ambiguous, not _fail: a symlink-containing archive is a malformed
+  # baseline-set, the same class of failure the manifest-shape check below
+  # reports as ambiguous, not a bare usage error -- a caller inspecting
+  # this Action's outputs (or running under continue-on-error) must see the
+  # same typed outcome/bootstrap/message shape for it (Codex review).
   if find "$BASELINE_DIR" -type l | grep -q .; then
-    _fail "baseline-set archive $BASELINE_PATH contains a symlink, which is not supported -- baseline-set archives must contain only plain files/directories."
+    _fail_ambiguous "baseline-set archive $BASELINE_PATH contains a symlink, which is not supported -- baseline-set archives must contain only plain files/directories."
   fi
   # An archive may itself contain one nested directory (e.g. the
   # profile-named dir the archive was built from) rather than manifest.json
