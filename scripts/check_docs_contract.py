@@ -138,14 +138,22 @@ def _rel(p: Path) -> str:
 
 def load_front_matter(path: Path) -> dict[str, object] | None:
     """Return the parsed YAML front-matter dict, or None if the file has
-    none. Raises yaml.YAMLError on malformed front matter (caller decides
-    how to report it)."""
+    none. Raises yaml.YAMLError on malformed front-matter YAML, or
+    ValueError if the front matter parses fine but isn't a mapping (e.g. a
+    bare YAML list or scalar) — both left for the caller to report, rather
+    than silently treating a non-mapping block as an empty-but-valid one."""
     text = path.read_text(encoding="utf-8")
     m = _FRONT_MATTER_RE.match(text)
     if not m:
         return None
     data = yaml.safe_load(m.group(1))
-    return data if isinstance(data, dict) else {}
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"front matter must be a YAML mapping, got {type(data).__name__}"
+        )
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -183,24 +191,37 @@ def _resolves_under(base: Path, value: str) -> Path | None:
     path that happens to resolve under `base` on this checkout but not on any
     other.
 
-    Existence is checked with a plain `.exists()` on the *raw, unresolved*
-    join, not `resolve()`/`resolve(strict=True)`: `resolve()` lexically
-    collapses `..` even through a phantom, nonexistent intermediate segment
-    (e.g. `missing/../index.md` resolves straight to the real `index.md`
-    even though `missing/` was never created) — and `strict=True` does not
-    reliably close that gap either: it raises on POSIX for a phantom
-    intermediate component, but Windows' `resolve(strict=True)` was observed
-    to still resolve straight through one (CI: windows-latest, PR #619). A
-    plain `.exists()` on the raw join is an actual stat()/traversal on every
-    platform, with no lexical shortcut, so it can't be fooled the same way.
-    Once existence is confirmed, `resolve()` is safe to use purely to
-    compute the canonical form for the escape-boundary check below."""
+    Existence of a `..`-bearing path can't be delegated to a single
+    filesystem call on every platform: `Path.resolve()` (strict or not)
+    lexically collapses `..` even through a phantom, nonexistent
+    intermediate segment (`missing/../index.md` resolves straight to the
+    real `index.md` even though `missing/` was never created) — and on
+    Windows, even a plain `.exists()`/`os.stat()` on the raw (unresolved)
+    path does the same lexical collapse as part of the OS's own path
+    normalization, unlike POSIX where a literal, unresolved traversal
+    through a nonexistent directory genuinely fails (CI: windows-latest,
+    PR #619 — two different fix attempts each worked on POSIX and silently
+    passed the phantom-component case on Windows anyway). So this walks
+    `value`'s components by hand: each `..` is only honored if the
+    accumulated path *so far* is a real, existing directory — the OS is
+    never asked to interpret a path with an unresolved `..` still in it, so
+    there's no per-platform lexical-normalization difference left to
+    exploit."""
     if Path(value).is_absolute():
         return None
-    raw = base / value
-    if not raw.exists():
+    current = base
+    for part in Path(value).parts:
+        if part == ".":
+            continue
+        if part == "..":
+            if not current.is_dir():
+                return None
+            current = current.parent
+        else:
+            current = current / part
+    if not current.exists():
         return None
-    candidate = raw.resolve()
+    candidate = current.resolve()
     resolved_base = base.resolve()
     if candidate != resolved_base and resolved_base not in candidate.parents:
         return None
@@ -327,11 +348,13 @@ def _check_front_matter_schema(
         rel_to_docs = path.relative_to(DOCS).as_posix()
         try:
             fm = load_front_matter(path)
-        except yaml.YAMLError as exc:
-            f.err("front-matter", f"{_rel(path)}: invalid front-matter YAML: {exc}")
+        except (yaml.YAMLError, ValueError) as exc:
+            f.err("front-matter", f"{_rel(path)}: invalid front matter: {exc}")
             continue
         if fm is None:
             continue
+        if fm.get("generated") is True:
+            continue  # generated pages don't carry the hand-authored schema
 
         doc_type = fm.get("doc_type")
         if doc_type is not None and doc_type not in _ALLOWED_DOC_TYPES:
@@ -427,7 +450,7 @@ def _check_canonical_pages_declare_ownership(
         page_path = resolved
         try:
             fm = load_front_matter(page_path)
-        except yaml.YAMLError:
+        except (yaml.YAMLError, ValueError):
             continue  # already reported by _check_front_matter_schema
         if fm is None:
             f.warn(
@@ -437,6 +460,8 @@ def _check_canonical_pages_declare_ownership(
                 "matter yet",
             )
             continue
+        if fm.get("generated") is True:
+            continue  # generated pages don't carry the hand-authored schema
         canonical_for = fm.get("canonical_for", [])
         if isinstance(canonical_for, list) and topic_id not in canonical_for:
             f.err(

@@ -259,6 +259,23 @@ def test_load_front_matter_raises_on_malformed_yaml(tmp_path: Path) -> None:
         dc.load_front_matter(page)
 
 
+def test_load_front_matter_raises_value_error_on_non_mapping(tmp_path: Path) -> None:
+    """Front matter that's valid YAML but not a mapping (e.g. a bare list)
+    must not be silently treated as an empty-but-valid block — that would
+    let malformed front matter pass the gate with no error (regression test
+    for the gap flagged in PR #619 review)."""
+    page = tmp_path / "page.md"
+    page.write_text("---\n- a\n- b\n---\n\n# Title\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="mapping"):
+        dc.load_front_matter(page)
+
+
+def test_load_front_matter_treats_empty_block_as_empty_dict(tmp_path: Path) -> None:
+    page = tmp_path / "page.md"
+    page.write_text("---\n\n---\n\n# Title\n", encoding="utf-8")
+    assert dc.load_front_matter(page) == {}
+
+
 # --- front matter: schema + ownership cross-checks (monkeypatched DOCS) ---
 
 
@@ -424,6 +441,36 @@ def test_front_matter_schema_accepts_valid_page(
     topics = {"topic-a": {"canonical_page": "page.md"}}
     f = dc.Findings()
     dc._check_front_matter_schema(f, topics)
+    assert f.errors == []
+
+
+def test_front_matter_schema_flags_non_mapping_front_matter(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "page.md").write_text(
+        "---\n- a\n- b\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, {})
+    assert any("invalid front matter" in msg for _, msg in f.errors)
+
+
+def test_front_matter_schema_skips_generated_pages(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A page marked generated: true must skip the doc_type/canonical_for
+    schema checks entirely, per docs/AGENTS.md's documented contract --
+    otherwise a generated page could fail the gate for content it doesn't
+    hand-author (regression test for the gap flagged in PR #619 review)."""
+    (tmp_path / "page.md").write_text(
+        "---\ndoc_type: not-a-real-type\ncanonical_for:\n  - unknown-topic\n"
+        "generated: true\n---\n\n# Title\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, {})
     assert f.errors == []
 
 
