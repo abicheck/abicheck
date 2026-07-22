@@ -174,8 +174,27 @@ _CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
 # the ordinary-identifier shape, where the keyword is the last token of
 # its (simple) declarator, directly followed by ``;``/``,``/``=``/``)``/
 # ``[`` instead.
+#
+# That lookahead alone still can't tell a genuine specifier from a
+# pre-C++20 header that instead declares a *type* literally named
+# "consteval"/"constinit" (``struct consteval {};``) and later
+# references it followed by another decl-specifier or cv-qualifier
+# (``consteval const *p;`` — legal pre-C++20: decl-specifier order is
+# flexible, so this means the same as ``const consteval *p;``) — the
+# textual shape is identical to a genuine ``consteval <type> <name>``
+# declaration (Codex review, third round). Mirrors
+# ``_CONCEPT_AS_TYPE_NAME_PATTERN``/``concept_type_shadowed`` exactly:
+# once a header is confirmed to declare "consteval"/"constinit" as an
+# ordinary type name anywhere, every bare occurrence in that header is
+# ambiguous and treated as non-genuine.
 _CPP20_CONSTEVAL_PATTERN = re.compile(rb"\bconsteval\b(?=\s+[A-Za-z_])")
 _CPP20_CONSTINIT_PATTERN = re.compile(rb"\bconstinit\b(?=\s+[A-Za-z_])")
+_CONSTEVAL_AS_TYPE_NAME_PATTERN = re.compile(
+    rb"\b(?:struct|class)\s+consteval\b|\busing\s+consteval\s*=|\btypedef\b[^;]*\bconsteval\s*;"
+)
+_CONSTINIT_AS_TYPE_NAME_PATTERN = re.compile(
+    rb"\b(?:struct|class)\s+constinit\b|\busing\s+constinit\s*=|\btypedef\b[^;]*\bconstinit\s*;"
+)
 
 # Constrained template parameters using a *standard-library* concept name in
 # place of ``typename``/``class`` (``template <std::integral T> void f(T);``)
@@ -895,6 +914,16 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
         concept_type_shadowed = bool(
             _CONCEPT_AS_TYPE_NAME_PATTERN.search(re.sub(rb"//[^\n]*", b"", content))
         )
+        # Same reasoning and "//"-comment-stripped-copy caveat as
+        # concept_type_shadowed above, for "consteval"/"constinit" used as
+        # an ordinary pre-C++20 type name (Codex review, third round).
+        _content_no_line_comments = re.sub(rb"//[^\n]*", b"", content)
+        consteval_type_shadowed = bool(
+            _CONSTEVAL_AS_TYPE_NAME_PATTERN.search(_content_no_line_comments)
+        )
+        constinit_type_shadowed = bool(
+            _CONSTINIT_AS_TYPE_NAME_PATTERN.search(_content_no_line_comments)
+        )
         logical_lines = _iter_logical_lines(content)
         n = len(logical_lines)
         # Last non-blank line's own (un-extended) code, tracked across
@@ -956,11 +985,11 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                         "abbreviated-function-template-parameter", str(p), start_no
                     )
                 )
-            elif _CPP20_CONSTEVAL_PATTERN.search(code):
+            elif not consteval_type_shadowed and _CPP20_CONSTEVAL_PATTERN.search(code):
                 found.append(
                     Cpp20Requirement("consteval-declaration", str(p), start_no)
                 )
-            elif _CPP20_CONSTINIT_PATTERN.search(code):
+            elif not constinit_type_shadowed and _CPP20_CONSTINIT_PATTERN.search(code):
                 found.append(
                     Cpp20Requirement("constinit-declaration", str(p), start_no)
                 )

@@ -1125,6 +1125,49 @@ def test_cpp20_detector_detects_consteval_with_auto_return_type(tmp_path):
     assert _detect_cpp20_headers(headers) is True
 
 
+def test_cpp20_detector_ignores_consteval_as_shadowed_type_name(tmp_path):
+    """Regression (Codex review, third round): the "followed by an
+    identifier-starting token" lookahead alone can't distinguish a genuine
+    specifier from a pre-C++20 header that instead declares a *type*
+    literally named "consteval" (``struct consteval {};``) and later
+    references it followed by another decl-specifier or cv-qualifier
+    (``consteval const *p;`` — legal pre-C++20: decl-specifier order is
+    flexible, so this means the same as ``const consteval *p;``) — the
+    textual shape is identical to a genuine ``consteval <type> <name>``
+    declaration. Once the header is confirmed to declare "consteval" as a
+    type anywhere, every bare occurrence must be treated as ambiguous,
+    mirroring the existing "concept" type-shadow check."""
+    headers = _write(tmp_path, "a.h", "struct consteval {};\nconsteval const *p;\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_constinit_as_shadowed_type_name(tmp_path):
+    """Companion: ``constinit`` shadowed as a type name via ``using``."""
+    headers = _write(tmp_path, "a.h", "using constinit = int;\nconstinit long x;\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_consteval_as_shadowed_typedef_type_name(tmp_path):
+    """Companion: shadowed via ``typedef`` rather than ``struct``/``using``."""
+    headers = _write(tmp_path, "a.h", "typedef int consteval;\nconsteval unsigned x;\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_commented_out_consteval_type_shadow(tmp_path):
+    """Companion: a *commented-out* ``struct consteval {};`` must not
+    suppress a genuine ``consteval`` declaration elsewhere in the same
+    header — mirrors the "concept" shadow check's identical comment
+    exclusion."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "// struct consteval {};\nconsteval int f() { return 1; }\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
 def test_cpp20_detector_detects_abbreviated_unconstrained_function_template(tmp_path):
     """Regression (Codex review): a bare (unconstrained) ``auto`` used
     directly as an ordinary function's parameter type (``void f(auto
