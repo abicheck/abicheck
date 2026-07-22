@@ -288,6 +288,37 @@ def test_front_matter_schema_flags_canonical_for_pointing_elsewhere(
     assert any("canonical_for" in msg for _, msg in f.errors)
 
 
+def test_front_matter_schema_flags_canonical_for_referencing_malformed_topic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A topics.yaml entry that's a scalar/list instead of a mapping (e.g.
+    `verdicts: concepts/verdicts.md`) must not crash the gate with an
+    AttributeError when a page's canonical_for references it — it should
+    report a clean error instead (regression test for the gap flagged in
+    PR #619 review)."""
+    (tmp_path / "page.md").write_text(
+        "---\ncanonical_for:\n  - topic-a\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    topics = {"topic-a": "concepts/verdicts.md"}
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)  # must not raise
+    assert any("not a mapping" in msg for _, msg in f.errors)
+
+
+def test_front_matter_schema_flags_summarizes_referencing_malformed_topic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "page.md").write_text(
+        "---\nsummarizes:\n  - topic-a\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    topics = {"topic-a": ["not", "a", "mapping"]}
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)  # must not raise
+    assert any("not a mapping" in msg for _, msg in f.errors)
+
+
 def test_front_matter_schema_accepts_canonical_for_via_equivalent_spelling(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -366,6 +366,13 @@ def _check_front_matter_schema(
                     f"{_rel(path)}: canonical_for references unknown topic "
                     f"{topic_id!r} (not in {_rel(TOPICS_FILE)})",
                 )
+            elif not isinstance(entry, dict):
+                f.err(
+                    "front-matter",
+                    f"{_rel(path)}: canonical_for references topic "
+                    f"{topic_id!r}, but its entry in {_rel(TOPICS_FILE)} is "
+                    "not a mapping",
+                )
             elif _docs_relative_key(entry.get("canonical_page")) != rel_to_docs:
                 f.err(
                     "front-matter",
@@ -386,6 +393,12 @@ def _check_front_matter_schema(
                     "front-matter",
                     f"{_rel(path)}: summarizes references unknown topic "
                     f"{topic_id!r} (not in {_rel(TOPICS_FILE)})",
+                )
+            elif not isinstance(entry, dict):
+                f.err(
+                    "front-matter",
+                    f"{_rel(path)}: summarizes references topic {topic_id!r}, "
+                    f"but its entry in {_rel(TOPICS_FILE)} is not a mapping",
                 )
             elif rel_to_docs not in _permitted_summary_pages(entry):
                 f.err(
