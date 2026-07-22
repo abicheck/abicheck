@@ -801,6 +801,25 @@ def test_cpp20_detector_ignores_unqualified_concept_used_as_pre_cxx20_type(tmp_p
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_variable_template_of_type_named_concept(
+    tmp_path,
+):
+    """Regression (Codex review, third round): even with a preceding
+    template<...> header, "concept" only became a reserved keyword in
+    C++20 — a pre-C++20 header can declare a type literally named
+    "concept" and use it in an ordinary variable template
+    (``template<class T> concept C = {};``, valid since C++14), which has
+    the identical textual shape as a genuine concept definition. The two
+    are distinguishable: a concept's constraint-expression is never just
+    a bare brace-init-list."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "struct concept {};\ntemplate<class T> concept C = {};\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_still_accepts_template_concept_after_qualified_check(
     tmp_path,
 ):

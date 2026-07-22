@@ -432,7 +432,7 @@ def _looks_like_requires_declarator(
 
 
 def _looks_like_genuine_concept(
-    lookahead: bytes, match_start: int, prev_nonblank_code: bytes
+    lookahead: bytes, match: re.Match[bytes], prev_nonblank_code: bytes
 ) -> bool:
     """True only if the concept-declaration candidate is actually preceded
     by a ``template<...>`` header's closing ``>`` — either earlier on the
@@ -444,8 +444,23 @@ def _looks_like_genuine_concept(
     genuine declaration from "concept" being used as an ordinary pre-C++20
     identifier anywhere else in a statement (Codex review: excluding only
     ``::`` still missed a plain, unqualified pre-C++20 use like
-    ``static concept C = {};``)."""
-    same_line_prefix = lookahead[:match_start].rstrip()
+    ``static concept C = {};``).
+
+    Even with a preceding template header, "concept" only became a
+    reserved keyword in C++20 — a pre-C++20 header can legally declare a
+    type literally named "concept" (``struct concept {};``) and then use
+    it in an ordinary *variable template* (``template<class T> concept C
+    = {};``, valid since C++14), which has the identical textual shape as
+    a genuine concept definition (Codex review, second round). The two
+    are distinguishable here: a concept's constraint-expression is never
+    just a bare brace-init-list — ``{}``/``{...}`` isn't a valid
+    constant-expression in that position — so a variable template's
+    aggregate/value-initialization (which *is* exactly that shape) can be
+    ruled out by checking whether the very first non-whitespace token
+    after "=" is ``{``."""
+    same_line_prefix = lookahead[: match.start()].rstrip()
+    if lookahead[match.end() :].lstrip().startswith(b"{"):
+        return False
     if same_line_prefix.endswith(b">"):
         return True
     if not same_line_prefix:
@@ -695,7 +710,7 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
             concept_match = _CPP20_CONCEPT_PATTERN.search(lookahead)
             requires_expr_match = _CPP20_REQUIRES_EXPR_PATTERN.search(lookahead)
             if concept_match and _looks_like_genuine_concept(
-                lookahead, concept_match.start(), prev_nonblank_code
+                lookahead, concept_match, prev_nonblank_code
             ):
                 found.append(Cpp20Requirement("concept-declaration", str(p), start_no))
             elif requires_expr_match and not _looks_like_requires_declarator(
