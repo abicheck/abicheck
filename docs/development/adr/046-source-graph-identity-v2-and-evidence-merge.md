@@ -14,8 +14,10 @@ implementation" for what's covered and what's deferred), and a two-tier
 proof-path preference (`internal_leak.select_preferred_path`, wired into
 `post_processing.py`'s layout-walk selection only — see "D6 implementation"
 for what's covered and what's deferred). D4 (`EntityResolver`/
-`SOURCE_GRAPH_VERSION = 2`) remains open — see "D1 implementation"/"D2
-implementation"/"D3 implementation"/"D5 implementation"/"D6 implementation"
+`SOURCE_GRAPH_VERSION = 2`) remains open, and is a deliberate stop, not an
+oversight — see "D4: deliberately deferred" below for why. See "D1
+implementation"/"D2 implementation"/"D3 implementation"/"D5 implementation"/
+"D6 implementation"
 below.
 **Decision maker:** (pending — recorded per repository convention, the same
 caveat ADR-048's header carries; a single-maintainer repo where merging the
@@ -534,6 +536,45 @@ preference order all remain open follow-up work under this same ADR — see
   `discarded_path_count` finding shape the Decision text describes, and the
   four evidence-requiring tiers listed above — this slice only replaces the
   layout walk's path-selection comparator, not the finding schema around it.
+
+## D4: deliberately deferred
+
+D4 (`EntityResolver`, USR-based canonical identity, `SOURCE_GRAPH_VERSION =
+2`) is the one Phase 2 decision this pass does **not** implement even
+partially — a deliberate scope stop, not an oversight, for two reasons:
+
+1. **[ADR-048](048-canonical-entity-identity-and-graph-reconciliation.md)
+   (G31 Phase B, accepted and implemented after this ADR was written)
+   already ships a narrower, working identity-resolution module —
+   `entity_identity.CanonicalIdentity` — that solves the two problems D4 was
+   actually motivated by: safe old/new reconciliation (ADR-048 D2's
+   `graph_reconcile.py`) and impact/proof-path linking (ADR-048 D4's
+   `graph_impact.py`). It does this **without** touching `GraphNode.id` or
+   bumping `SOURCE_GRAPH_VERSION` — both explicit non-goals ADR-048 itself
+   records. ADR-048's own "Relationship to ADR-046" section confirms the
+   two are compatible, not competing: `CanonicalIdentity` is "the natural
+   first alias `EntityResolver.aliases` would fold in," should D4 ever be
+   built.
+2. **A full D4 would still require changing `GraphNode.id` generation
+   itself** (`_decl_node_id`/`_type_node_id`/`_symbol_node_id` et al. in
+   `source_graph.py`) and bumping `SOURCE_GRAPH_VERSION` — a materially
+   larger, more invasive change than any other slice landed in this pass:
+   every producer that constructs a `GraphNode` (`source_graph.py`,
+   `call_graph.py`, `type_graph.py`, `header_graph.py`, `include_graph.py`,
+   the L4 `source_link.py` fold) would need updating in lockstep, plus a
+   genuine v1-pack/v2-graph compatibility test matrix — categorically
+   different in risk from D1/D3/D5/D6's single-call-site or single-module
+   slices, none of which touched node-id generation at all.
+
+Given ADR-048 already delivers D4's practical value with a smaller, safer
+footprint, and a full `GraphNode.id`/`SOURCE_GRAPH_VERSION=2` rewrite is a
+large undertaking that deserves its own scoped design pass rather than a
+drive-by addition at the tail of this one, D4 stays open. Should a future
+need arise that `entity_identity.CanonicalIdentity` genuinely cannot serve
+(e.g. an on-disk v2 pack format, or cross-TU USR-based node identity that
+`GraphNode.id` itself must carry), it should get the same "own ADR" bar
+noted at the top of this file's Context section — a bar this deferral
+respects rather than sidesteps.
 
 ## Non-goals
 

@@ -152,7 +152,7 @@ field alongside `public_reachable`/`reachability_kind`/`reachability_proof_path`
 each producer still sets it independently, and the proof path is still one
 formatted string.
 
-### Phase 2 — Graph core v2 — **ADR accepted; D1 (partial)/D2/D3/D5 (partial)/D6 (partial) slices implemented, D4 open**
+### Phase 2 — Graph core v2 — **ADR accepted; D1 (partial)/D2/D3/D5 (partial)/D6 (partial) implemented, D4 deliberately deferred**
 
 [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) records
 the D1-D6 decisions below — the "needs its own ADR" gate this phase set for
@@ -167,7 +167,17 @@ implementation"/"D6 implementation" sections,
 `TraversalPolicy`/`CALL_GRAPH_TRAVERSAL_POLICY`/`select_preferred_path`,
 `tests/test_source_graph_v2.py`, `tests/test_inline_changed_paths.py`, and
 `tests/test_internal_leak.py`'s `TestTraversalPolicy`/
-`TestSelectPreferredPath`. D1's `occurrence_id` half, D4, the remaining
+`TestSelectPreferredPath`. **D4 (`EntityResolver`/`SOURCE_GRAPH_VERSION = 2`)
+is deliberately deferred, not just unstarted** — see ADR-046's "D4:
+deliberately deferred" section: [ADR-048](../adr/048-canonical-entity-identity-and-graph-reconciliation.md)
+(G31 Phase B, shipped after ADR-046 was written) already delivers D4's
+practical value — safe old/new reconciliation and impact-path linking — via
+`entity_identity.CanonicalIdentity`, without touching `GraphNode.id` or
+bumping `SOURCE_GRAPH_VERSION`. A full D4 would still mean changing
+`GraphNode.id` generation across every graph producer plus a v1/v2 pack
+compatibility matrix — categorically larger and riskier than any slice
+landed in this phase, and deserving its own scoped design pass rather than
+being folded in here. D1's `occurrence_id` half, D4, the remaining
 `effect_transitions` piece of D5, and the remaining four tiers of D6 remain
 open follow-up work under the same accepted ADR.
 
