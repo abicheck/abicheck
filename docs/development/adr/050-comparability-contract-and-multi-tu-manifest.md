@@ -401,6 +401,25 @@ enum values. A `--diagnostic-comparison` opt-in flag (default off) downgrades
 the hard-fail to a tentative diff with `assurance: none` stamped on every
 finding, for exploratory use — never the default, and never silent.
 
+**`html_report.py` is a reporting surface too, not an omission this ADR can
+leave implicit.** AGENTS.md's own module map lists it alongside
+`reporter.py`/`sarif.py`/`junit_report.py` under "Reporting," and
+`service_render.py`'s format dispatch (`:87-99`) routes `--format html` to
+`generate_html_report(result: DiffResult, ...)` exactly like the other three
+route to their renderers. Two distinct gaps follow from `generate_html_report`
+requiring a real `DiffResult`: for the hard-gate `not_comparable` case, no
+`DiffResult` exists at all (the gate raises before any diff runs), so
+`service_render.render_output` must not attempt to call `generate_html_report`
+on that path — the front-end's exception handler renders (or declines to
+render) HTML the same way it assembles `verdict: null` JSON, rather than
+`generate_html_report` growing an optional-`DiffResult` parameter it was never
+designed to accept. For the mixed-pair `contract_coverage` case, a real
+`DiffResult` does exist, so `generate_html_report` needs to surface
+`contract_coverage` in its headline cards the same way the JSON/Markdown/SARIF/JUnit
+reporters do — silently dropping it there would make the HTML report the one
+output format that can't tell a reader the comparison ran on unequal
+evidence.
+
 **`verdict: null` is JSON-output shape, not a change to `checker_types.DiffResult`'s
 own typing — this needs to be explicit, or an implementer reasonably reads
 D2 as requiring `DiffResult.verdict: Verdict | None`.** `DiffResult`

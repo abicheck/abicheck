@@ -378,6 +378,21 @@ Implements ADR-050 D1 and D2.
 - Reporting: `reporter.py`/`sarif.py`/`junit_report.py` gain a
   `not_comparable` top-level result distinct from every existing verdict
   value — never coerced into `compatible`/`breaking`.
+- **`html_report.py`/`service_render.py` are the fourth reporting surface,
+  not an optional add-on.** AGENTS.md's own module map groups `html_report.py`
+  with `reporter.py`/`sarif.py`/`junit_report.py` under "Reporting," and
+  `service_render.py:87-99` routes `--format html` to
+  `generate_html_report(result: DiffResult, ...)` the same way it routes the
+  other three formats. Since `generate_html_report` requires a real
+  `DiffResult`, the `not_comparable` case (no `DiffResult` ever constructed)
+  means `render_output` must not call it at all on that path — the
+  gate-raising front-end handles HTML the same way it assembles `verdict: null`
+  JSON, without `generate_html_report` growing an optional-`DiffResult`
+  parameter. The mixed-pair `contract_coverage` case does produce a real
+  `DiffResult`, so `generate_html_report` gains a headline-card surface for
+  `contract_coverage`, matching the other three reporters — otherwise HTML is
+  the one format that can't tell a reader the comparison ran on unequal
+  evidence.
 - **`verdict: null` is JSON-output shape, not a `checker_types.DiffResult`
   typing change.** `DiffResult` (`verdict: Verdict = Verdict.NO_CHANGE`,
   non-nullable) is never constructed at all for a
@@ -461,7 +476,10 @@ separate call path), `cli_compare_release_helpers.py`
 table update), `docs/reference/exit-codes.md` (a
 new row in both the legacy and severity-aware tables, **and** the
 multi-library section, **and** the `compat check` table's `9` row), `reporter.py`,
-`sarif.py`, `junit_report.py`, `abicheck/schemas/compare_report.schema.json`,
+`sarif.py`, `junit_report.py`, `html_report.py` (`generate_html_report`'s
+`contract_coverage` headline card), `service_render.py` (`render_output`'s
+`--format html` branch skips `generate_html_report` on the `not_comparable`
+path instead of calling it with no `DiffResult`), `abicheck/schemas/compare_report.schema.json`,
 `abicheck/schemas/__init__.py` (`REPORT_SCHEMA_VERSION` bump),
 `docs/schemas/v1/compare_report.schema.json` (regenerated via
 `scripts/publish_schemas.py`, not hand-edited).
@@ -497,7 +515,12 @@ stricter);
 `tests/test_report_schema.py` gains a `not_comparable` case validated
 against the updated `compare_report.schema.json`, and its existing
 `test_docs_mirror_matches_packaged_schema` must still pass against the
-regenerated `docs/schemas/v1` copy; a root-relative-path fingerprint test
+regenerated `docs/schemas/v1` copy; an **HTML reporting** test asserting
+`render_output(..., fmt="html")` on a `not_comparable` path never reaches
+`generate_html_report` with a missing `DiffResult` (the front-end's exception
+handler owns that path instead), and a second test asserting a mixed-pair
+`contract_coverage` comparison's HTML output surfaces `contract_coverage`
+the same way its JSON/Markdown/SARIF/JUnit siblings do; a root-relative-path fingerprint test
 (the acceptance-criteria bullet above — same-tree-different-root compare
 must not fingerprint-mismatch); an exit-code test
 asserting `not_comparable` returns exactly `16`, never `0`, from
