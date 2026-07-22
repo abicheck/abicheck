@@ -464,13 +464,30 @@ extended for `--include` specifically into a new `SidedIncludePathParam`
 — `--header` and the other sided-path options keep the unchanged,
 2-tuple `SidedPathParam`, since only `--include` needs a label slot.
 `SidedIncludePathParam` recognizes an optional labeled form layered on
-top of the existing `[old=|new=|both=]PATH` grammar: `[old:|new:|both:]
-LABEL=PATH` — a colon-terminated side prefix (colon instead of `=` so it
-can't collide with the label's own `=`; unambiguous, since no existing
-`--include` value has ever started with `old:`/`new:`/`both:`), returning
-a `(side, label, path)` triple with `label=None` for every existing,
-unlabeled form (`PATH`, `old=PATH`, ...) so ordinary uses are
-byte-for-byte unaffected. A genuine two-checkout compare with
+top of the existing `[old=|new=|both=]PATH` grammar. **The labeled form
+requires the literal colon prefix — `old:`, `new:`, or `both:` — with no
+colon-less/bare labeled variant at all; the bracket in
+`[old:|new:|both:]LABEL=PATH` means "one of these three literal prefixes
+is present," never "the whole prefix segment, colon included, may be
+omitted while still parsing as `LABEL=PATH`."** Getting this backwards
+would silently break existing usage: `SidedPathParam.convert` (the type
+`--include` uses today) checks only `s.startswith("old=")` /
+`"new="` / `"both="`, so an ordinary external directory that happens to
+contain a literal `=` past that point — `build/config=asan/include`, a
+real, valid `--include` value today — never matches any of those three
+prefixes and falls through unchanged to `("both", Path(...))`. If the new
+type additionally tried a bare (colon-less) `LABEL=PATH` split on *any*
+value with no recognized prefix, `build/config=asan/include` would be
+reinterpreted as `label="build/config"`, `path="asan/include"` — a
+different compiler argument and a directory now wrongly eligible for the
+labeled per-slot token, breaking a currently-valid, unrelated value that
+never opted into labeling. The fix is definitional, not a runtime check to
+add: a value is only ever inspected for a label *after* one of the three
+literal `old:`/`new:`/`both:` prefixes has already matched; every other
+value — bare, `old=`/`new=`/`both=`-prefixed, or containing an unrelated
+`=` — takes the exact, unmodified path `SidedPathParam` already takes
+today, `label=None` unconditionally, `=` treated as an ordinary path
+character precisely as it is now. A genuine two-checkout compare with
 side-specific support-root paths under one shared logical identity is
 declared `--include old:support=old/src --include new:support=new/src`
 — same `support` label on both invocations (so the per-slot token below
@@ -490,6 +507,40 @@ section. This labeled `--include` form is a legacy-CLI-only addition: the
 manifest path (D3) already has no such gap, since a manifest TU can
 declare a per-TU forced-include for exactly this directory instead of
 relying on directory-tree inference.
+
+**`--include` is not one Click registration shared by `compare`/`dump`/`scan`
+— it is three separate ones today, and `SidedIncludePathParam` only fixes
+the one this section has been describing.** Verified against the actual
+code: `cli_options.py`'s `two_sided_input_options` (the `SIDED_PATH_PARAM`
+registration this section extends) is applied only to native `compare`;
+`dump_cmd`'s own `--include` (`cli.py:486`) is declared inline as a plain,
+non-sided `click.Path` (`dump` has one input, no old/new side concept at
+all, so it never carried `SidedPathParam` in the first place); `scan_cmd`'s
+own `--include` (`cli_scan.py:487-495`) is *also* declared inline, with its
+own separate `type=SIDED_PATH_PARAM` registration, not the `compare`
+decorator. Fixing only `compare`'s registration leaves a snapshot produced
+via `abicheck dump` or `abicheck scan --against` with no way to express a
+project-support label at all — `project_include_labels` stays empty for
+those commands, and a sibling support root a `dump`/`scan` invocation
+declares stays classified as external, reproducing the exact
+`PROFILE_MISMATCH` this whole fix exists to close, just on two commands
+instead of one. `scan_cmd`'s inline registration switches to
+`SidedIncludePathParam` too (it already has old=/new= side semantics
+identical to `compare`'s, scoping to the current artifact vs. the
+`--against` side); its `split_sided_paths(include_pairs)` call becomes
+`split_sided_include_paths(include_pairs)`. `dump_cmd`'s inline
+registration switches to the *same* `SidedIncludePathParam`, rather than
+inventing a second, `dump`-only label grammar: `dump` has no old/new side
+to scope, but reusing one type keeps one label syntax across all three
+commands instead of asking users to remember a different one for `dump`
+(`--include old:support=path` on `compare`/`scan`, `--include
+both:support=path` on `dump` — side is parsed but ignored downstream,
+since `dump` has nothing to split by side in the first place; the label
+and path are what `dump` actually consumes). A bare, colon-less
+`--include` value on `dump` behaves exactly as it does today (label=None,
+side ignored) — inventing a colon-less-on-`dump`-only label shape would
+reopen the exact bare-`LABEL=PATH` ambiguity just closed above, for no
+real benefit.
 This is a strict partition on `-I` *directories*, not individual files:
 `scope_fingerprint` owns everything under a project-owned root (declared
 or not); `profile_fingerprint` owns only external roots, in full.

@@ -362,11 +362,24 @@ Implements ADR-050 D1 and D2.
   and the rest keep the unchanged, 2-tuple `SidedPathParam`, since only
   `--include` needs a label slot. `SidedIncludePathParam` layers an
   optional labeled form on top of the existing `[old=|new=|both=]PATH`
-  grammar: `[old:|new:|both:]LABEL=PATH` — a colon-terminated side prefix
-  (colon instead of `=`, unambiguous since no `--include` value has ever
-  started with `old:`/`new:`/`both:`), returning a `(side, label, path)`
-  triple with `label=None` for every existing unlabeled form so ordinary
-  uses are byte-for-byte unaffected. A two-checkout compare with
+  grammar. **The labeled form requires the literal colon prefix — there is
+  no colon-less/bare `LABEL=PATH` variant at all.** `[old:|new:|both:]LABEL=PATH`
+  means "one of these three literal prefixes, colon included," never "the
+  prefix segment is optional, so a bare value is still tried as
+  `LABEL=PATH`." Getting this backwards breaks existing usage:
+  `SidedPathParam.convert` (today's `--include` type) only checks
+  `s.startswith("old=")`/`"new="`/`"both="`, so an ordinary directory
+  containing a literal `=` past that point — `build/config=asan/include`,
+  a valid `--include` value today — matches none of the three and falls
+  through unchanged to `("both", Path(...))`. A bare-`LABEL=PATH` reading
+  would instead reinterpret it as `label="build/config"`,
+  `path="asan/include"` — a different compiler argument, breaking a
+  currently-valid value that never opted into labeling. Fix: a value is
+  only ever split into a label after one of the three literal
+  `old:`/`new:`/`both:` prefixes has matched; every other value — bare,
+  `old=`/`new=`/`both=`-prefixed, or containing an unrelated `=` — takes
+  `SidedPathParam`'s existing, unmodified path, `label=None`
+  unconditionally. A two-checkout compare with
   side-specific paths for one shared logical root is declared `--include
   old:support=old/src --include new:support=new/src` — same `support`
   label on both invocations (so the per-slot token matches across sides
@@ -380,6 +393,40 @@ Implements ADR-050 D1 and D2.
   off of; asking for one avoids yet another path-shape heuristic. This
   labeled `--include` form is legacy-CLI-only: the manifest path (D3)
   already has no such gap via per-TU forced-includes.
+
+  **`--include` is three separate Click registrations today, not one —
+  `SidedIncludePathParam` only fixes `compare`'s.** Verified against the
+  actual code: `cli_options.py`'s `two_sided_input_options`
+  (`:206`, the `SIDED_PATH_PARAM` registration extended above) is applied
+  only at `cli.py:1513` (native `compare`). `dump_cmd`'s own `--include`
+  (`cli.py:486`) is a *separate*, inline registration — plain, non-sided
+  `click.Path` (`dump` has one input, never carried `SidedPathParam` at
+  all). `scan_cmd`'s own `--include` (`include_pairs`, `cli_scan.py:487-495`)
+  is *also* a separate inline registration, with its own
+  `type=SIDED_PATH_PARAM` — not `compare`'s decorator, and not touched by
+  extending it. Fixing only `two_sided_input_options` leaves `dump`/`scan`
+  with no way to express a label at all: `project_include_labels` stays
+  empty for snapshots produced through either command, and a sibling
+  support root declared via `dump --include .../src` or `scan --against
+  ... --include .../src` stays classified as external — reproducing this
+  whole fix's target bug on two more commands, not just leaving them
+  unimproved. Both need their own change: `scan_cmd`'s inline `--include`
+  switches `type=` to `SidedIncludePathParam` (it already has `old=`/`new=`
+  side semantics, current artifact vs. `--against`, identical to
+  `compare`'s), and its `split_sided_paths(include_pairs)` call
+  (`cli_scan.py:712`) becomes `split_sided_include_paths(include_pairs)`.
+  `dump_cmd`'s inline `--include` also switches to `SidedIncludePathParam`
+  — reusing the *same* type rather than inventing a second, `dump`-only
+  grammar, so there is one label syntax across all three commands instead
+  of a different one to remember for `dump` specifically; `dump` has no
+  side to scope, so its label form is always `--include
+  both:LABEL=PATH` (side parsed but ignored downstream — `dump`'s
+  `includes` never gets split by side in the first place, only label and
+  path are consumed). A colon-less `--include` value on `dump` keeps
+  today's exact behavior (`label=None`) for the same reason established
+  above: inventing a colon-less-on-`dump`-only labeled shape would reopen
+  the bare-`LABEL=PATH`-vs-ordinary-path-with-`=` ambiguity just closed,
+  for no benefit.
   `scope_fingerprint` owns everything
   under a project-owned root; `profile_fingerprint` owns only external
   roots, in full. **Excluding a project-owned directory's content must not
@@ -575,7 +622,14 @@ Implements ADR-050 D1 and D2.
   old:support=old/src` directly and asserts the side/label/path triple
   round-trips correctly through `SidedIncludePathParam`, and that a bare
   `--include old=v1/foo.h` still round-trips to `(side="old", label=None,
-  path=...)` unchanged.
+  path=...)` unchanged; a fourth assertion parses `--include
+  build/config=asan/include` (a bare, unprefixed value containing a
+  literal `=`, no `old:`/`new:`/`both:` colon prefix) and asserts it still
+  round-trips to `(side="both", label=None, path=Path("build/config=asan/include"))`
+  — proving the labeled form is only ever triggered by the literal colon
+  prefix, never inferred from an ambient `=` in an otherwise-ordinary
+  path, the exact regression a bare-`LABEL=PATH` grammar reading would
+  introduce (P2 review).
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -1077,7 +1131,16 @@ plain, unlabeled `--include` — and additionally returns a
 `dict[Path, str]` of resolved path → label for whichever entries carried
 one, while still returning the same flat `(both, old_only, new_only)`
 `Path` tuples `split_sided_paths` does, so the compiler-argv-building code
-that already consumes those tuples is unchanged).
+that already consumes those tuples is unchanged). **`--include` has two
+more, separate registrations that need the identical change, not covered
+by `cli_options.py` alone** (see the dedicated acceptance-criteria bullet
+above for why): `cli_scan.py` (`scan_cmd`'s own inline `--include`
+(`include_pairs`, `:487-495`) switches `type=` to `SidedIncludePathParam`
+too, and its `split_sided_paths(include_pairs)` call (`:712`) becomes
+`split_sided_include_paths(include_pairs)`), `cli.py` (`dump_cmd`'s own
+inline `--include` (`:486`, plain `click.Path` today) switches to the
+same `SidedIncludePathParam` as well, so `dump`/`scan`/`compare` share one
+label grammar rather than `dump` alone getting a second, narrower one).
 **Getting the label out of Click's parsed value is not enough — it still
 needs its own path down to `comparability.compute_extraction_contract`,
 the same per-layer threading already required (and already found
