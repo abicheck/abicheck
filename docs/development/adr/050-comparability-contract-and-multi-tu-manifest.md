@@ -372,20 +372,27 @@ schemes (legacy: 0/2/4; severity-aware, with any `--severity-*` flag:
 must never exit `0` in either scheme, or the exact failure mode this ADR
 exists to prevent (missing evidence reading as "safe") reappears one layer
 down, at the process-exit boundary instead of the JSON `verdict` field. D2
-reserves exit code **`8`** for `not_comparable` — pinned, not left as "a
-new code TBD" — in **both** schemes identically (legacy and
-severity-aware alike; `not_comparable` fires before any severity
+reserves exit code **`16`** for `not_comparable` — pinned, not left as "a
+new code TBD" — in **both** single-library schemes identically (legacy
+and severity-aware alike; `not_comparable` fires before any severity
 classification runs, so it is orthogonal to the flag that distinguishes
-the two schemes), continuing the existing legacy/severity-aware scheme's
-power-of-two pattern (0/1/2/4) one step further, and documented as its own
-row in both tables, not folded into either scheme's existing numbering.
-`8` is unused today in `compare`'s exit-code space (which tops out at `4`
-in both schemes — `compat`'s separate 3–11 error range is a different
+the two schemes), continuing the doubling pattern the codebase already
+uses across `compare`'s exit-code space one step further. **Not `8`**: an
+earlier draft of this decision picked `8` by checking only the two
+single-library tables (which top out at `4`) and missed that `compare`'s
+*release* (directory/package) table — a separate, already-published
+scheme — already assigns `8` to `--fail-on-removed-library`
+(`docs/reference/exit-codes.md:134-139`). Reusing `8` would have either
+silently clobbered the removed-library signal or left release-level CI
+unable to tell the two states apart; `16` is unused across *all three*
+tables (both single-library schemes and the release table), so it is
+documented as its own new row in all three, not folded into any existing
+scheme's numbering. (`compat`'s separate 3–11 error range is a different
 command's own codespace, per `docs/reference/exit-codes.md`'s per-command
-split, and does not constrain `compare`'s).
+split, and does not constrain `compare`'s either way.)
 
 **Release-level (directory/package) aggregation needs its own explicit
-precedence, not an implied one.** `cli_compare_release.py`'s
+precedence against *two* existing mechanisms, not one.** `cli_compare_release.py`'s
 `_RELEASE_VERDICT_ORDER` (`cli_compare_release_helpers.py:45`) already
 ranks per-library verdicts for the "worst verdict wins" release rollup —
 `NO_CHANGE` < `COMPATIBLE` < `COMPATIBLE_WITH_RISK` < `API_BREAK` <
@@ -400,7 +407,16 @@ dominates every other outcome in the same release, including a genuine
 `not_comparable` is a real rank in this ordering, a mixed release
 (one `not_comparable` library, one `BREAKING`, N `COMPATIBLE`) reports and
 exits as `not_comparable` overall, not silently as `BREAKING` or folded
-into a generic `ERROR`.
+into a generic `ERROR`. It must also dominate the **separate**
+`--fail-on-removed-library` mechanism (exit `8`), which today has its own
+scheme-dependent precedence against `ERROR`/`2`/`4` — unlike that existing
+rule, `not_comparable`'s precedence over removed-library exit `8` is
+**unconditional in both schemes**: a `not_comparable` result means the
+comparison couldn't establish what actually changed at all, so it cannot
+be trusted to have correctly detected a removal either — an apparent
+"library removed" reading from an incomparable pair is exactly the kind
+of unproven inference this ADR exists to block, not a real removal
+finding entitled to its own exit code.
 
 **Mixed pairs (one side has a `contract`, the other doesn't) never hard-fail
 — this is unambiguous, not left to implementer discretion.** The backward-

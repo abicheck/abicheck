@@ -275,28 +275,42 @@ Implements ADR-050 D1 and D2.
   so it's structurally unreachable by severity promotion rather than
   merely unreachable by the flags checked so far.
 - **The exit code is part of the published contract too, not an
-  afterthought — and it must be a pinned value, not "a new code TBD."**
-  `docs/reference/exit-codes.md` documents two co-existing `compare`
-  schemes (legacy: 0/2/4; severity-aware: 0/1/2/4) where `0`
-  means *compatible* in both. `not_comparable` must never exit `0` in
-  either scheme — otherwise the exact "missing evidence reads as safe"
-  failure this ADR exists to prevent reappears at the process-exit
-  boundary, undoing the JSON-level fix. This phase reserves exit code
-  **`8`** — identical in both schemes, since `not_comparable` fires before
-  severity classification ever runs — continuing the existing power-of-two
-  pattern, and adds it as its own row to both tables in
-  `docs/reference/exit-codes.md`, not folded into either scheme's existing
-  numbering. `8` is unused in `compare`'s own exit-code space today (which
-  tops out at `4` in both schemes).
+  afterthought — and it must be a pinned, actually-free value, not "a new
+  code TBD."** `docs/reference/exit-codes.md` documents two co-existing
+  single-library `compare` schemes (legacy: 0/2/4; severity-aware:
+  0/1/2/4) where `0` means *compatible* in both, **plus a separate
+  release/multi-library table** (directory/package inputs) that already
+  uses `0/2/4/8` — `8` is `--fail-on-removed-library`
+  (`docs/reference/exit-codes.md:134-139`), not free. `not_comparable`
+  must never exit `0` in either single-library scheme — otherwise the
+  exact "missing evidence reads as safe" failure this ADR exists to
+  prevent reappears at the process-exit boundary, undoing the JSON-level
+  fix. This phase reserves exit code **`16`** (not `8` — that collides
+  with the release table's existing removed-library code, a mistake an
+  earlier draft of this criterion made by checking only the two
+  single-library tables) — identical across all three tables, since
+  `not_comparable` fires before severity classification or the
+  removed-library check ever run — continuing the doubling pattern the
+  existing codes already use, and adds it as its own row to all three
+  tables in `docs/reference/exit-codes.md`, not folded into any existing
+  scheme's numbering.
 - **Release-level (directory/package) aggregation gets an explicit
-  precedence, not an implied one.** `cli_compare_release_helpers.py`'s
+  precedence against *two* existing mechanisms, not one.**
+  `cli_compare_release_helpers.py`'s
   `_RELEASE_VERDICT_ORDER` (currently `NO_CHANGE` < `COMPATIBLE` <
   `COMPATIBLE_WITH_RISK` < `API_BREAK` < `BREAKING` < `ERROR`, rank 5 as
   the ceiling) gains `not_comparable` at rank 6, above `ERROR` — a
   correctly-diagnosed `not_comparable` result carries less trustworthy
   information about a library than even a partial `ERROR`, so it
   dominates the release-level "worst verdict wins" rollup over every other
-  outcome in the same release, including a genuine crash. This is what
+  outcome in the same release, including a genuine crash. It also
+  dominates the separate `--fail-on-removed-library` mechanism
+  **unconditionally, in both schemes** — unlike that mechanism's own
+  existing scheme-dependent precedence against `ERROR`/`2`/`4`: a
+  `not_comparable` result means the comparison couldn't establish what
+  changed at all, so an apparent "library removed" reading from an
+  incomparable pair is an unproven inference, not a real removal finding
+  entitled to its own exit code. This is what
   makes the release fan-out fix (below) actually surface at the release
   level instead of being computed per-library and then silently
   outranked.
@@ -428,7 +442,7 @@ against the updated `compare_report.schema.json`, and its existing
 regenerated `docs/schemas/v1` copy; a root-relative-path fingerprint test
 (the acceptance-criteria bullet above — same-tree-different-root compare
 must not fingerprint-mismatch); an exit-code test
-asserting `not_comparable` returns exactly `8`, never `0`, from
+asserting `not_comparable` returns exactly `16`, never `0`, from
 both the legacy and severity-aware `compare` invocations; a **release
 fan-out** test asserting a `not_comparable`-triggering library inside a
 directory/package `compare` reports `verdict: "not_comparable"` in its
@@ -438,7 +452,13 @@ its fourth entry point; a **release-precedence** test asserting a mixed
 release (one `not_comparable` library, one `BREAKING`, N `COMPATIBLE`)
 reports and exits as `not_comparable` overall, proving
 `_RELEASE_VERDICT_ORDER`'s new rank actually wins the rollup rather than
-being silently outranked by the co-occurring `BREAKING`; gate unit tests
+being silently outranked by the co-occurring `BREAKING`; a
+**removed-library-precedence** test asserting a release combining a
+`not_comparable` library with a separately-removed library (triggering
+`--fail-on-removed-library`) exits `16`, not `8`, in *both* the legacy and
+severity-aware release schemes — proving `not_comparable`'s precedence
+over the removed-library mechanism is unconditional, unlike that
+mechanism's own existing scheme-dependent precedence; gate unit tests
 for all
 four entry points; a `--diagnostic-comparison` end-to-end test; a
 backward-compat test asserting a contract-less snapshot pair compares
