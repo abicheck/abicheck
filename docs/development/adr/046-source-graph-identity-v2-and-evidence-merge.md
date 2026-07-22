@@ -271,11 +271,14 @@ one arbitrary shortest path.
   resolved)` and `GraphEdge.relation_key()` — the `(src, dst, kind, role)`
   tuple, reading `role` from `resolved` (D2's merged view) when populated,
   falling back to raw `attrs` for a bare edge that hasn't gone through
-  `add_edge`/`ensure_facts_and_resolve` yet. Purely additive: `GraphEdge.key()`
-  keeps its exact `(src, dst, kind)` shape and every existing caller
-  (`SourceGraphSummary.add_edge`'s dedup, `diff_source_graph`'s edge-set
-  comparison) is unaffected — per the Decision text above, this is new
-  surface for role-aware code, not a behavior change to today's dedup/diff.
+  `add_edge`/`ensure_facts_and_resolve` yet. `GraphEdge.key()` keeps its
+  exact `(src, dst, kind)` shape and `diff_source_graph`'s edge-set
+  comparison keeps using it unchanged. **`SourceGraphSummary.add_edge`'s
+  dedup is not unaffected** — a same-PR follow-up fix (see "Follow-up fix:
+  `add_edge` dedup granularity" below) switched its dedup key from `key()`
+  to `relation_key()`, since deduping on the coarse key alone silently
+  folded two real, role-distinct edges into one before `relation_key()`
+  could ever observe both roles on a real, `add_edge`-built graph.
 - **Not implemented**: `occurrence_id` (the full, non-deduplicated
   per-call-site/per-configuration evidence trail one `relation_key` can back
   many of). The ADR's own Costs section flags this specifically as needing "a

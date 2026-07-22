@@ -241,8 +241,12 @@ class GraphEdge:
 
     def key(self) -> tuple[str, str, str]:
         """Identity for diffing/de-dup: (src, dst, kind) — ADR-046 D1's
-        coarsest (role-blind) projection, unchanged so every existing caller
-        is unaffected; role-aware code uses :meth:`relation_key`.
+        coarsest (role-blind) projection. Still used by
+        :func:`~abicheck.buildsource.source_graph.diff_source_graph`'s
+        edge-set comparison (deliberately role-blind there); no longer used
+        by ``SourceGraphSummary.add_edge``, which dedups on
+        :meth:`relation_key` instead (a follow-up fix — see that method's
+        docstring). Role-aware code should use :meth:`relation_key`.
         """
         return (self.src, self.dst, self.kind)
 
@@ -345,10 +349,13 @@ def edge_relation_key(
     (``GraphEdge.key()``), so two structurally different dependencies that
     happen to share that triple — e.g. a type used as a ``"return"`` type on
     one edge and as a ``"param"`` type on another, both ``DECL_HAS_TYPE`` —
-    stay distinguishable to code that needs that distinction. Existing
-    edge-set comparisons (``add_edge`` dedup, ``diff_source_graph``) keep
-    using the coarser ``key()`` unchanged; this is additive, for new
-    role-aware code only.
+    stay distinguishable to code that needs that distinction.
+    ``SourceGraphSummary.add_edge`` dedups on this role-aware key (a
+    follow-up fix, Codex review on PR #620 — deduping on the coarse
+    ``key()`` alone silently folded two real, role-distinct edges into one).
+    ``diff_source_graph``'s edge-set comparison deliberately keeps using the
+    coarser ``key()`` — role-level diff granularity is out of scope for this
+    ADR's D1 slice.
 
     D1's second half — ``occurrence_id`` (the full, non-deduplicated
     per-call-site/per-configuration evidence trail a ``relation_key`` can
