@@ -39,16 +39,22 @@ from __future__ import annotations
 
 import collections
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .buildsource.entity_identity import candidate_lookup_keys
+from .buildsource.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 
 if TYPE_CHECKING:
     from .buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
     from .model import AbiSnapshot, RecordType
+
+#: Local copy of graph_facts._CONFIDENCE_RANK (module-private there) — same
+#: duplication pattern as buildsource/type_graph.py's own local rank dict.
+_CONFIDENCE_RANK: dict[str, int] = {CONF_HIGH: 2, CONF_REDUCED: 1, CONF_UNKNOWN: 0}
 
 
 # ---------------------------------------------------------------------------
@@ -724,13 +730,52 @@ def _is_consumer_compiled_node(node_id: str, node_by_id: dict[str, GraphNode]) -
     return is_consumer_compiled_node(node_id, node_by_id)
 
 
+@dataclass(frozen=True)
+class TraversalPolicy:
+    """Named, reusable graph-walk rules (ADR-046 D5, partial).
+
+    Formalizes what was previously :func:`_consumer_compiled_reachability`'s
+    own hard-coded edge-kind set and stop check into one object a future
+    walk can construct and reuse instead of re-deriving the same rules
+    inline. ``stop_conditions`` matches the ADR's own polarity: True means
+    "do not expand past this node" — the node itself is still recorded as
+    reachable (its own removal/change is still consumer-visible), only its
+    outgoing edges are not queued for further descent.
+
+    Not implemented this slice: ``effect_transitions`` (how a walk's
+    precision label changes crossing a particular edge kind, e.g.
+    downgrading "exact" to "over-approximation" crossing a virtual-call
+    edge) — no current walk needs it, so adding it now would be speculative.
+    Also not (yet) adopted by :func:`compute_leak_paths`'s layout/type-graph
+    walk — that walk traverses ``RecordType``/typedef structures, not the L5
+    ``GraphNode``/``GraphEdge`` graph this policy shape describes, so it does
+    not naturally fit without first changing its data model, which is out of
+    scope here.
+    """
+
+    allowed_edges: frozenset[str]
+    stop_conditions: Callable[[str, dict[str, GraphNode]], bool]
+    minimum_confidence: str = CONF_UNKNOWN
+
+
+#: The call-graph leak walk's own rules (ADR-044 P1 item 1), reified as a
+#: policy instance instead of the inline edge_kinds/_is_consumer_compiled_node
+#: pair :func:`compute_call_graph_leak_paths` hard-coded before D5.
+CALL_GRAPH_TRAVERSAL_POLICY = TraversalPolicy(
+    allowed_edges=frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"}),
+    stop_conditions=lambda node_id, node_by_id: not _is_consumer_compiled_node(
+        node_id, node_by_id
+    ),
+)
+
+
 def _consumer_compiled_reachability(
     graph: SourceGraphSummary,
-    edge_kinds: frozenset[str],
+    policy: TraversalPolicy,
     entries: Iterable[str],
     node_by_id: dict[str, GraphNode],
 ) -> dict[str, tuple[frozenset[str], dict[str, GraphEdge]]]:
-    """BFS from each *entry*, restricted to consumer-compiled call chains.
+    """BFS from each *entry*, restricted per *policy* (ADR-046 D5).
 
     Unlike :func:`~abicheck.buildsource.source_graph_findings._dependency_reachability`
     (which this call-graph walk used before this fix), the traversal does not
@@ -750,9 +795,10 @@ def _consumer_compiled_reachability(
     reconstruct a proof path without a second, unrestricted graph walk that
     could show a route the restriction above would have rejected.
     """
+    min_rank = _CONFIDENCE_RANK.get(policy.minimum_confidence, 0)
     adjacency: dict[str, list[GraphEdge]] = {}
     for e in graph.edges:
-        if e.kind in edge_kinds:
+        if e.kind in policy.allowed_edges and _CONFIDENCE_RANK.get(e.confidence, 0) >= min_rank:
             adjacency.setdefault(e.src, []).append(e)
     out: dict[str, tuple[frozenset[str], dict[str, GraphEdge]]] = {}
     for entry in entries:
@@ -761,7 +807,7 @@ def _consumer_compiled_reachability(
         queue: collections.deque[str] = collections.deque([entry])
         while queue:
             node = queue.popleft()
-            if node != entry and not _is_consumer_compiled_node(node, node_by_id):
+            if node != entry and policy.stop_conditions(node, node_by_id):
                 continue
             for e in adjacency.get(node, []):
                 if e.dst in seen:
@@ -862,8 +908,7 @@ def compute_call_graph_leak_paths(
     from .buildsource.source_graph import is_consumer_compiled_public_entry
     from .buildsource.source_graph_findings import _format_dependency_path
 
-    edge_kinds = frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"})
-    if not any(e.kind in edge_kinds for e in graph.edges):
+    if not any(e.kind in CALL_GRAPH_TRAVERSAL_POLICY.allowed_edges for e in graph.edges):
         return {}
 
     node_by_id = {n.id: n for n in graph.nodes}
@@ -888,7 +933,7 @@ def compute_call_graph_leak_paths(
 
     internal_set = set(internal_namespaces)
     reachability = _consumer_compiled_reachability(
-        graph, edge_kinds, entries, node_by_id
+        graph, CALL_GRAPH_TRAVERSAL_POLICY, entries, node_by_id
     )
     result: dict[str, list[str]] = collections.defaultdict(list)
     for entry in entries:

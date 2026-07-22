@@ -1728,3 +1728,108 @@ class TestSelectPreferredPath:
     def test_single_path_returned_unchanged(self) -> None:
         only = ["Public", "field:x", "Internal"]
         assert select_preferred_path([only]) == only
+
+
+# ---------------------------------------------------------------------------
+# TraversalPolicy (ADR-046 D5, partial)
+# ---------------------------------------------------------------------------
+
+
+class TestTraversalPolicy:
+    """CALL_GRAPH_TRAVERSAL_POLICY reifies compute_call_graph_leak_paths's
+    own edge-kind/stop rules; a caller-supplied policy with a stricter
+    minimum_confidence or a custom stop predicate must actually change the
+    walk, not just be accepted and ignored."""
+
+    def test_call_graph_policy_allows_call_and_reference_edges(self) -> None:
+        from abicheck.internal_leak import CALL_GRAPH_TRAVERSAL_POLICY
+
+        assert CALL_GRAPH_TRAVERSAL_POLICY.allowed_edges == frozenset(
+            {"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"}
+        )
+
+    def test_minimum_confidence_excludes_low_confidence_edges(self) -> None:
+        from abicheck.buildsource.graph_facts import CONF_HIGH, CONF_REDUCED
+        from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
+        from abicheck.internal_leak import (
+            TraversalPolicy,
+            _consumer_compiled_reachability,
+        )
+
+        graph = SourceGraphSummary(
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://mid", "ns::detail::mid", "source"),
+            ],
+            edges=[
+                GraphEdge(
+                    src="decl://pub",
+                    dst="decl://mid",
+                    kind="DECL_CALLS_DECL",
+                    confidence=CONF_REDUCED,
+                )
+            ],
+        )
+        node_by_id = {n.id: n for n in graph.nodes}
+        permissive = TraversalPolicy(
+            allowed_edges=frozenset({"DECL_CALLS_DECL"}),
+            stop_conditions=lambda node_id, node_by_id: False,
+        )
+        strict = TraversalPolicy(
+            allowed_edges=frozenset({"DECL_CALLS_DECL"}),
+            stop_conditions=lambda node_id, node_by_id: False,
+            minimum_confidence=CONF_HIGH,
+        )
+        permissive_reach = _consumer_compiled_reachability(
+            graph, permissive, ["decl://pub"], node_by_id
+        )
+        strict_reach = _consumer_compiled_reachability(
+            graph, strict, ["decl://pub"], node_by_id
+        )
+        assert "decl://mid" in permissive_reach["decl://pub"][0]
+        assert "decl://mid" not in strict_reach["decl://pub"][0]
+
+    def test_stop_conditions_halts_expansion_but_keeps_node_reachable(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
+        from abicheck.internal_leak import (
+            TraversalPolicy,
+            _consumer_compiled_reachability,
+        )
+
+        graph = SourceGraphSummary(
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://mid", "ns::detail::mid", "source"),
+                _decl_node("decl://leaf", "ns::detail::leaf", "source"),
+            ],
+            edges=[
+                GraphEdge(src="decl://pub", dst="decl://mid", kind="DECL_CALLS_DECL"),
+                GraphEdge(src="decl://mid", dst="decl://leaf", kind="DECL_CALLS_DECL"),
+            ],
+        )
+        node_by_id = {n.id: n for n in graph.nodes}
+        stop_at_mid = TraversalPolicy(
+            allowed_edges=frozenset({"DECL_CALLS_DECL"}),
+            stop_conditions=lambda node_id, node_by_id: node_id == "decl://mid",
+        )
+        reachable, _ = _consumer_compiled_reachability(
+            graph, stop_at_mid, ["decl://pub"], node_by_id
+        )["decl://pub"]
+        assert "decl://mid" in reachable
+        assert "decl://leaf" not in reachable
+
+    def test_compute_call_graph_leak_paths_uses_the_shared_policy(self) -> None:
+        """End-to-end: the public entry point still routes through
+        CALL_GRAPH_TRAVERSAL_POLICY, not a re-derived edge set."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_REFERENCES_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert "ns::detail::helper" in paths

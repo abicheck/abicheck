@@ -500,3 +500,38 @@ class TestRelationKey:
         assert edge.relation_key() == edge_relation_key(
             edge.src, edge.dst, edge.kind, edge.resolved
         )
+
+
+class TestGraphIdRoleAware:
+    """compute_graph_id() must hash on relation_key(), not the coarse key()
+    (Codex review, follow-up to the add_edge dedup-granularity fix): once
+    add_edge started allowing role-distinct edges to coexist, a role-only
+    difference between two graphs is real content the graph_id must not
+    collide on."""
+
+    def _single_edge_graph(self, role: str) -> SourceGraphSummary:
+        g = SourceGraphSummary(
+            nodes=[
+                GraphNode(id="decl://a", kind="source_decl"),
+                GraphNode(id="type://T", kind="type"),
+            ],
+        )
+        g.add_edge(
+            GraphEdge(
+                src="decl://a",
+                dst="type://T",
+                kind="DECL_HAS_TYPE",
+                attrs={"role": role},
+            )
+        )
+        return g
+
+    def test_role_only_difference_changes_graph_id(self) -> None:
+        return_graph = self._single_edge_graph("return")
+        param_graph = self._single_edge_graph("param")
+        assert return_graph.compute_graph_id() != param_graph.compute_graph_id()
+
+    def test_same_role_is_stable(self) -> None:
+        a = self._single_edge_graph("return")
+        b = self._single_edge_graph("return")
+        assert a.compute_graph_id() == b.compute_graph_id()

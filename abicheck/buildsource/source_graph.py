@@ -378,11 +378,21 @@ class SourceGraphSummary:
 
         Order-independent (nodes/edges are sorted) so the same logical graph
         always hashes identically regardless of construction order.
+
+        Hashes on :meth:`GraphEdge.relation_key` (role-aware), not the
+        coarser :meth:`GraphEdge.key` (Codex review, fresh evidence): since
+        ``add_edge`` started deduping on ``relation_key`` (ADR-046 D1
+        follow-up), two edges that differ only by role — e.g. the same
+        ``DECL_HAS_TYPE`` edge changing from ``role="return"`` to
+        ``role="param"`` — are genuinely different graph content, but the
+        coarse key would hash them identically, silently hiding a real
+        change from anything keyed on ``graph_id`` (pack references, a
+        future content-addressed cache, comparison shortcuts).
         """
         canonical = {
             "schema_version": self.schema_version,
             "nodes": sorted((n.id, n.kind) for n in self.nodes),
-            "edges": sorted(e.key() for e in self.edges),
+            "edges": sorted(e.relation_key() for e in self.edges),
         }
         blob = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode(
             "utf-8"

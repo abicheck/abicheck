@@ -152,21 +152,24 @@ field alongside `public_reachable`/`reachability_kind`/`reachability_proof_path`
 each producer still sets it independently, and the proof path is still one
 formatted string.
 
-### Phase 2 — Graph core v2 — **ADR accepted; D1 (partial)/D2/D3/D6 (partial) slices implemented, D4/D5 open**
+### Phase 2 — Graph core v2 — **ADR accepted; D1 (partial)/D2/D3/D5 (partial)/D6 (partial) slices implemented, D4 open**
 
 [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) records
 the D1-D6 decisions below — the "needs its own ADR" gate this phase set for
 itself. **D1's `relation_key` half, D2 (the evidence-preserving node/edge
-merge), D3 (the per-(kind,role) coverage matrix), and a two-tier slice of D6
+merge), D3 (the per-(kind,role) coverage matrix), a partial slice of D5
+(`TraversalPolicy` for the call-graph walk), and a two-tier slice of D6
 (proof-path preference order) are implemented** — see ADR-046's "D1
-implementation"/"D2 implementation"/"D3 implementation"/"D6 implementation"
-sections, `abicheck/buildsource/graph_facts.py`,
+implementation"/"D2 implementation"/"D3 implementation"/"D5
+implementation"/"D6 implementation" sections,
+`abicheck/buildsource/graph_facts.py`,
 `abicheck/buildsource/inline_graph_fold.py`, `abicheck/internal_leak.py`'s
-`select_preferred_path`, `tests/test_source_graph_v2.py`,
-`tests/test_inline_changed_paths.py`, and `tests/test_internal_leak.py`'s
-`TestSelectPreferredPath`. D1's `occurrence_id` half, D4, D5, and the
-remaining four tiers of D6 remain open follow-up work under the same
-accepted ADR.
+`TraversalPolicy`/`CALL_GRAPH_TRAVERSAL_POLICY`/`select_preferred_path`,
+`tests/test_source_graph_v2.py`, `tests/test_inline_changed_paths.py`, and
+`tests/test_internal_leak.py`'s `TestTraversalPolicy`/
+`TestSelectPreferredPath`. D1's `occurrence_id` half, D4, the remaining
+`effect_transitions` piece of D5, and the remaining four tiers of D6 remain
+open follow-up work under the same accepted ADR.
 
 - `abicheck/buildsource/source_graph.py`: split edge identity into a
   `relation_key = (src, dst, kind, semantic_role)` (used for closure/diff) and
@@ -197,7 +200,12 @@ accepted ADR.
   shapes the review distinguishes (layout/symbol-availability/source-contract/
   behavioral/deployment propagation) instead of leaving "don't walk through an
   ordinary out-of-line helper" as one detector's implicit knowledge
-  (`is_consumer_compiled_public_entry` today).
+  (`is_consumer_compiled_public_entry` today). **Partial:** `TraversalPolicy`
+  (`allowed_edges`, `stop_conditions`, `minimum_confidence` — real, wired
+  filtering, not a passthrough field) is implemented and reused by
+  `compute_call_graph_leak_paths` via the named `CALL_GRAPH_TRAVERSAL_POLICY`
+  instance; `effect_transitions` and adoption by `compute_leak_paths`'s
+  layout walk (a different, non-graph data model) remain open.
 - Proof-path selection preference order (consumer-proven > exact high-confidence
   path > public-header structural path > multi-producer-confirmed >
   reduced-confidence name resolution > virtual/indirect over-approximation),
@@ -375,6 +383,8 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
 
 - `tests/test_reachability_state.py` — Phase 1, done.
 - `tests/test_source_graph_v2.py` — Phase 2 D1/D2, done.
+- `tests/test_internal_leak.py`'s `TestTraversalPolicy` — Phase 2 D5
+  (partial), done.
 - `tests/test_internal_leak.py`'s `TestSelectPreferredPath` — Phase 2 D6
   (partial), done.
 - New per remaining phase: `tests/test_impact_model.py` (Phase 3),

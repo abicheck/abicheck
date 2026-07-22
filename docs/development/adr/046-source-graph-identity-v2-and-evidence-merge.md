@@ -1,18 +1,22 @@
 # ADR-046: Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge
 
 **Date:** 2026-07-19
-**Status:** Accepted — D1, D2, D3, and a partial D6 slice implemented:
-role-aware edge identity (`GraphEdge.relation_key()`/`edge_relation_key`, the
-`relation_key` half of D1's split — `occurrence_id` remains open), the
-evidence-preserving node/edge merge (`GraphFact`/`FactConflict`/
-`merge_graph_facts`, replacing `SourceGraphSummary.add_node`/`add_edge`'s v1
-first-writer-wins drop), the per-(kind,role) coverage matrix for
-`inline_graph_fold.fold_type_graph`, and a two-tier proof-path preference
-(`internal_leak.select_preferred_path`, wired into `post_processing.py`'s
-layout-walk selection only — see "D6 implementation" for what's covered and
-what's deferred). D4 (`EntityResolver`/`SOURCE_GRAPH_VERSION = 2`) and D5
-(`TraversalPolicy`) remain open — see "D1 implementation"/"D2
-implementation"/"D3 implementation"/"D6 implementation" below.
+**Status:** Accepted — D1, D2, D3, a partial D5, and a partial D6 slice
+implemented: role-aware edge identity (`GraphEdge.relation_key()`/
+`edge_relation_key`, the `relation_key` half of D1's split — `occurrence_id`
+remains open), the evidence-preserving node/edge merge (`GraphFact`/
+`FactConflict`/`merge_graph_facts`, replacing `SourceGraphSummary.add_node`/
+`add_edge`'s v1 first-writer-wins drop), the per-(kind,role) coverage matrix
+for `inline_graph_fold.fold_type_graph`, a named `TraversalPolicy` reifying
+the call-graph leak walk's own edge-kind/stop/confidence rules
+(`internal_leak.TraversalPolicy`/`CALL_GRAPH_TRAVERSAL_POLICY` — see "D5
+implementation" for what's covered and what's deferred), and a two-tier
+proof-path preference (`internal_leak.select_preferred_path`, wired into
+`post_processing.py`'s layout-walk selection only — see "D6 implementation"
+for what's covered and what's deferred). D4 (`EntityResolver`/
+`SOURCE_GRAPH_VERSION = 2`) remains open — see "D1 implementation"/"D2
+implementation"/"D3 implementation"/"D5 implementation"/"D6 implementation"
+below.
 **Decision maker:** (pending — recorded per repository convention, the same
 caveat ADR-048's header carries; a single-maintainer repo where merging the
 implementing PR is the acceptance mechanism.)
@@ -329,6 +333,28 @@ path stay separate, with correct `relation_key()`s and no fact
 cross-contamination); `test_add_edge_dedups_true_duplicates_on_relation_key`
 confirms a genuine same-role duplicate still merges as before.
 
+### Follow-up fix: `compute_graph_id` hashed the coarse key (Codex review)
+
+A second gap the `add_edge` dedup-granularity fix above exposed: before that
+fix, two role-distinct edges sharing `(src, dst, kind)` could never coexist
+in one graph (the coarse dedup silently merged them), so `compute_graph_id`
+hashing `e.key()` (role-blind) was harmless — there was no role-only graph
+difference for it to miss. Once `add_edge` started keying on `relation_key()`,
+that stopped being true: two graphs differing only in which role an edge
+carries (e.g. the same `DECL_HAS_TYPE` edge as `role="return"` in one graph,
+`role="param"` in the other) are genuinely different content, but
+`compute_graph_id`'s edge list still canonicalized on the coarse key, so both
+graphs produced the identical `graph_id` — a real hash collision anything
+keyed on `graph_id` (a pack reference, a future content-addressed cache, a
+comparison shortcut) could silently miss.
+
+Fix: `compute_graph_id` now hashes `e.relation_key()` (role-aware) instead of
+`e.key()`. This changes the `graph_id` value computed for every graph, not
+just role-distinct ones (the tuple shape gains a role element throughout) —
+`graph_id` carries no documented cross-version stability contract today (only
+`SOURCE_GRAPH_VERSION` does), so this is a correctness fix, not a compat
+break.
+
 ## D2 implementation (G29 Phase 2, slice 1)
 
 Implemented as the first slice of Phase 2, chosen because D2 is the change
@@ -431,6 +457,45 @@ preference order all remain open follow-up work under this same ADR — see
   matrix key; a narrowed pass sets the narrowed-side keys only (never the
   family-level `extractor_passes` side); `role_pass_covered()`'s direct-hit
   and family-fallback behavior.
+
+## D5 implementation (G29 Phase 2, slice 5 — partial)
+
+- `abicheck/internal_leak.py`: `TraversalPolicy` (`allowed_edges`,
+  `stop_conditions`, `minimum_confidence`) and `CALL_GRAPH_TRAVERSAL_POLICY`
+  — the call-graph leak walk's own rules (`{DECL_CALLS_DECL,
+  DECL_REFERENCES_DECL}`, the existing `is_consumer_compiled_node` stop
+  check) reified as one named, reusable object instead of the inline
+  `edge_kinds` frozenset + hard-coded `_is_consumer_compiled_node` call
+  `_consumer_compiled_reachability`/`compute_call_graph_leak_paths` had
+  before. `stop_conditions` matches the Decision text's own polarity (True =
+  "do not expand past this node," the node itself still counts as
+  reachable) — the inverse sense of `is_consumer_compiled_node`, which the
+  policy's `stop_conditions` lambda negates.
+- `minimum_confidence` is real, wired filtering — `_consumer_compiled_reachability`
+  now skips any edge whose confidence rank is below the policy's floor
+  before building its adjacency map — not just a passthrough field. The
+  default `CONF_UNKNOWN` floor preserves today's behavior exactly (no edge
+  is excluded), so `compute_call_graph_leak_paths` is unchanged for every
+  existing caller; a policy built with a stricter floor (e.g. `CONF_HIGH`)
+  is new capability future code can opt into without this walk's own logic
+  changing again.
+- **Not implemented this slice**: `effect_transitions` (how a walk's
+  precision label changes crossing a particular edge kind) — no current
+  walk needs it, so it would be speculative surface with no caller.
+  `compute_leak_paths`'s layout/type-graph walk (the other of the two walks
+  D5's Decision text names) does **not** adopt `TraversalPolicy` — it
+  traverses `RecordType`/typedef structures, not the L5 `GraphNode`/
+  `GraphEdge` graph this policy shape describes, so it would need its own
+  data-model change first, which is out of scope here (matches the
+  same-shaped scoping decision D3 made for `inline_graph_fold` vs.
+  `header_graph.py`/the clang-plugin producer).
+- `tests/test_internal_leak.py` (`TestTraversalPolicy`): the shared policy's
+  `allowed_edges`; a custom policy's `minimum_confidence` actually excludes
+  a lower-confidence edge from reachability (not merely accepted and
+  ignored); a custom `stop_conditions` halts expansion past a chosen node
+  while still recording that node itself as reachable; the public
+  `compute_call_graph_leak_paths` entry point still routes through
+  `CALL_GRAPH_TRAVERSAL_POLICY` end to end.
 
 ## D6 implementation (G29 Phase 2, slice 4 — partial)
 
@@ -567,7 +632,8 @@ preference order all remain open follow-up work under this same ADR — see
   `role_pass_covered`/`_mark_role_coverage`, wired into `fold_type_graph`.
 - `abicheck/internal_leak.py` — `compute_leak_paths`/
   `compute_call_graph_leak_paths`, `is_consumer_compiled_node`/
-  `is_consumer_compiled_public_entry` (D5's starting point, not implemented),
+  `is_consumer_compiled_public_entry` (D5's starting point), `TraversalPolicy`/
+  `CALL_GRAPH_TRAVERSAL_POLICY` (D5, partial, implemented),
   `select_preferred_path` (D6, partial, implemented).
 - `abicheck/post_processing.py` — `MarkReachability` (PR #607), the
   root/qualified_name fallback pattern D4 centralizes (not implemented), now
@@ -576,7 +642,8 @@ preference order all remain open follow-up work under this same ADR — see
 - `tests/test_source_graph_v2.py` — D1/D2 unit tests, including the
   `add_edge` role-distinct-edge regression test.
 - `tests/test_inline_changed_paths.py` — D3 unit tests.
-- `tests/test_internal_leak.py` — `TestSelectPreferredPath` (D6 unit tests).
+- `tests/test_internal_leak.py` — `TestTraversalPolicy` (D5 unit tests),
+  `TestSelectPreferredPath` (D6 unit tests).
 - PR #607 review history — the concrete, repeated instances of identity/
   coverage-granularity bugs this ADR's Context section draws on.
 - [ADR-031](031-source-implementation-graph-augmentation.md), [ADR-041](041-compiler-facts-semantic-impact-graph.md), [ADR-044](044-reachability-aware-suppression.md), [ADR-048](048-canonical-entity-identity-and-graph-reconciliation.md)
