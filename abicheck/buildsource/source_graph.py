@@ -271,12 +271,23 @@ class SourceGraphSummary:
 
     def __post_init__(self) -> None:
         # De-dup indexes for O(1) add_node/add_edge, seeded from whatever the
-        # constructor (or from_dict) provided.
+        # constructor (or from_dict) provided. Edges dedup on relation_key()
+        # (src, dst, kind, role), not the coarser key() (ADR-046 D1, Codex
+        # review on PR #620): deduping on key() alone silently folded two
+        # real, role-distinct relations -- e.g. a function that both returns
+        # and takes the same private type, two DECL_HAS_TYPE edges -- into
+        # one edge object, so only one role ever survived to be found via
+        # relation_key() by anything walking graph.edges. key() itself is
+        # untouched (still (src, dst, kind)); diff_source_graph's coarser
+        # edge-set comparison keeps its pre-existing "one representative
+        # edge per (src, dst, kind)" precision either way.
         self._node_ids: set[str] = {n.id for n in self.nodes}
-        self._edge_keys: set[tuple[str, str, str]] = {e.key() for e in self.edges}
+        self._edge_keys: set[tuple[str, str, str, str]] = {
+            e.relation_key() for e in self.edges
+        }
         self._node_by_id: dict[str, GraphNode] = {n.id: n for n in self.nodes}
-        self._edge_by_key: dict[tuple[str, str, str], GraphEdge] = {
-            e.key(): e for e in self.edges
+        self._edge_by_key: dict[tuple[str, str, str, str], GraphEdge] = {
+            e.relation_key(): e for e in self.edges
         }
         # ADR-046 D2: backfill/re-derive facts/resolved for anything
         # constructed directly (bypassing add_node/add_edge), so every node
@@ -306,17 +317,20 @@ class SourceGraphSummary:
 
     def add_edge(self, edge: GraphEdge) -> None:
         """Add an edge, or merge a second registration's facts into it — same
-        as :meth:`add_node`, keyed on ``(src, dst, kind)`` (see
-        :meth:`GraphEdge.key`).
+        as :meth:`add_node`, keyed on :meth:`GraphEdge.relation_key`
+        (``(src, dst, kind, role)`` — ADR-046 D1) so two edges that only
+        differ by role stay distinct objects instead of one silently
+        swallowing the other's role.
         """
-        if edge.key() not in self._edge_keys:
+        rkey = edge.relation_key()
+        if rkey not in self._edge_keys:
             ensure_facts_and_resolve(edge)
             self.edges.append(edge)
-            self._edge_keys.add(edge.key())
-            self._edge_by_key[edge.key()] = edge
+            self._edge_keys.add(rkey)
+            self._edge_by_key[rkey] = edge
             return
         register_fact(
-            self._edge_by_key[edge.key()], edge.provenance, edge.confidence, edge.attrs
+            self._edge_by_key[rkey], edge.provenance, edge.confidence, edge.attrs
         )
 
     def has_node(self, node_id: str) -> bool:
@@ -1852,7 +1866,15 @@ def localize_symbol(graph: SourceGraphSummary, symbol: str) -> dict[str, Any]:
 def diff_source_graph(
     old: SourceGraphSummary, new: SourceGraphSummary
 ) -> GraphSummaryDiff:
-    """Compute the structural delta from *old* to *new* (Phase 5 seed)."""
+    """Compute the structural delta from *old* to *new* (Phase 5 seed).
+
+    Edge comparison deliberately stays keyed on the coarse ``key()``
+    (ADR-046 D1 — "existing callers... are unaffected"), not
+    ``relation_key()``: when two role-distinct edges share a ``(src, dst,
+    kind)`` (e.g. a function that both returns and takes the same private
+    type), only one is a "representative" for this structural added/removed
+    comparison — role-level diff granularity is not implemented here.
+    """
     old_nodes = {n.id: n for n in old.nodes}
     new_nodes = {n.id: n for n in new.nodes}
     old_edges = {e.key(): e for e in old.edges}

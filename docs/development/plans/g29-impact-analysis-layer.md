@@ -152,17 +152,21 @@ field alongside `public_reachable`/`reachability_kind`/`reachability_proof_path`
 each producer still sets it independently, and the proof path is still one
 formatted string.
 
-### Phase 2 — Graph core v2 — **ADR accepted; D1 (partial)/D2/D3 slices implemented, rest open**
+### Phase 2 — Graph core v2 — **ADR accepted; D1 (partial)/D2/D3/D6 (partial) slices implemented, D4/D5 open**
 
 [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) records
 the D1-D6 decisions below — the "needs its own ADR" gate this phase set for
 itself. **D1's `relation_key` half, D2 (the evidence-preserving node/edge
-merge), and D3 (the per-(kind,role) coverage matrix) are implemented** — see
-ADR-046's "D1 implementation"/"D2 implementation"/"D3 implementation"
+merge), D3 (the per-(kind,role) coverage matrix), and a two-tier slice of D6
+(proof-path preference order) are implemented** — see ADR-046's "D1
+implementation"/"D2 implementation"/"D3 implementation"/"D6 implementation"
 sections, `abicheck/buildsource/graph_facts.py`,
-`abicheck/buildsource/inline_graph_fold.py`, `tests/test_source_graph_v2.py`,
-and `tests/test_inline_changed_paths.py`. D1's `occurrence_id` half, D4, D5,
-and D6 below remain open follow-up work under the same accepted ADR.
+`abicheck/buildsource/inline_graph_fold.py`, `abicheck/internal_leak.py`'s
+`select_preferred_path`, `tests/test_source_graph_v2.py`,
+`tests/test_inline_changed_paths.py`, and `tests/test_internal_leak.py`'s
+`TestSelectPreferredPath`. D1's `occurrence_id` half, D4, D5, and the
+remaining four tiers of D6 remain open follow-up work under the same
+accepted ADR.
 
 - `abicheck/buildsource/source_graph.py`: split edge identity into a
   `relation_key = (src, dst, kind, semantic_role)` (used for closure/diff) and
@@ -198,7 +202,13 @@ and D6 below remain open follow-up work under the same accepted ADR.
   path > public-header structural path > multi-producer-confirmed >
   reduced-confidence name resolution > virtual/indirect over-approximation),
   replacing plain shortest-BFS; keep `primary_path`/`alternative_paths[0..N]`/
-  `discarded_path_count` on the finding.
+  `discarded_path_count` on the finding. **Partial:** `select_preferred_path`
+  (`internal_leak.py`) implements the two tiers the layout walk's plain
+  `list[str]` paths already carry a signal for (value-propagating vs.
+  indirect/virtual), wired into `post_processing.py`'s layout-walk selection
+  only; the call-graph walk, the remaining four tiers, and the
+  `primary_path`/`alternative_paths`/`discarded_path_count` finding shape are
+  still open.
 
 **ADR-046 drafted** (identity/version bump + merge semantics change is
 exactly ADR-044's own bar for "needs a recorded decision"). Implementation
@@ -364,7 +374,9 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
 ## Tests
 
 - `tests/test_reachability_state.py` — Phase 1, done.
-- `tests/test_source_graph_v2.py` — Phase 2 D2, done.
+- `tests/test_source_graph_v2.py` — Phase 2 D1/D2, done.
+- `tests/test_internal_leak.py`'s `TestSelectPreferredPath` — Phase 2 D6
+  (partial), done.
 - New per remaining phase: `tests/test_impact_model.py` (Phase 3),
   `tests/test_entity_resolver.py` (Phase 2 D4), `tests/test_consumer_graph.py`
   / `tests/test_use_cases.py` (Phase 4), one `test_diff_<family>.py` per Phase

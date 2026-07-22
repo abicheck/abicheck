@@ -198,13 +198,60 @@ class TestEdgeMerge:
         assert e.resolved == {"call_kind": "direct", "resolution": "exact"}
         assert e.conflicts == []
 
-    def test_add_edge_still_dedups_on_src_dst_kind(self) -> None:
+    def test_add_edge_dedups_true_duplicates_on_relation_key(self) -> None:
+        # Same (src, dst, kind, role) -- role empty on both -- still merges
+        # into one edge object, exactly like before ADR-046 D1.
         g = SourceGraphSummary()
         edge = GraphEdge(src="decl://a", dst="decl://b", kind="DECL_CALLS_DECL")
         g.add_edge(edge)
         g.add_edge(edge)
         assert len(g.edges) == 1
         assert g.has_node("decl://a") is False  # sanity: has_node is node-only
+
+    def test_add_edge_preserves_role_distinct_edges_as_separate_objects(
+        self,
+    ) -> None:
+        # Codex review on PR #620: a function that both returns and takes the
+        # same private type produces two real, role-distinct DECL_HAS_TYPE
+        # edges sharing (src, dst, kind). Deduping add_edge on the coarse
+        # key() alone folded the second into the first's facts, so only one
+        # role ever survived -- relation_key() could never actually expose
+        # both (src, dst, kind, "return") and (src, dst, kind, "param") from
+        # a graph built through add_edge, even though the capability existed.
+        g = SourceGraphSummary()
+        g.add_edge(
+            GraphEdge(
+                src="decl://f",
+                dst="type://T",
+                kind="DECL_HAS_TYPE",
+                provenance="type_graph",
+                confidence=CONF_HIGH,
+                attrs={"role": "return"},
+            )
+        )
+        g.add_edge(
+            GraphEdge(
+                src="decl://f",
+                dst="type://T",
+                kind="DECL_HAS_TYPE",
+                provenance="type_graph",
+                confidence=CONF_HIGH,
+                attrs={"role": "param"},
+            )
+        )
+        assert len(g.edges) == 2
+        relation_keys = {e.relation_key() for e in g.edges}
+        assert relation_keys == {
+            ("decl://f", "type://T", "DECL_HAS_TYPE", "return"),
+            ("decl://f", "type://T", "DECL_HAS_TYPE", "param"),
+        }
+        # Neither edge's own facts/resolved were contaminated by the other's.
+        for e in g.edges:
+            assert e.conflicts == []
+            assert len(e.facts) == 1
+        # The coarse key() still collapses both, as documented -- callers
+        # that only need family-level (not role-level) precision still can.
+        assert {e.key() for e in g.edges} == {("decl://f", "type://T", "DECL_HAS_TYPE")}
 
 
 class TestConstructorSeededGraphs:
@@ -377,9 +424,12 @@ class TestRelationKey:
         edge = GraphEdge(src="decl://a", dst="decl://b", kind="DECL_CALLS_DECL")
         assert edge.relation_key() == ("decl://a", "decl://b", "DECL_CALLS_DECL", "")
 
-    def test_relation_key_reads_role_from_merged_resolved_not_raw_attrs(self) -> None:
-        # register_fact's evidence-preserving merge is what relation_key must
-        # see -- not whichever fact happened to register first (ADR-046 D2).
+    def test_different_roles_never_merge_even_at_higher_confidence(self) -> None:
+        # Role is part of the dedup key (add_edge keys on relation_key(), not
+        # key() -- ADR-046 D1, Codex review on PR #620): two facts naming
+        # different roles are two distinct relations, full stop -- there is
+        # no "higher-confidence role wins" merge to test, because they never
+        # collapse onto one edge object regardless of confidence.
         g = SourceGraphSummary()
         g.add_edge(
             GraphEdge(
@@ -401,13 +451,39 @@ class TestRelationKey:
                 attrs={"role": "return"},
             )
         )
-        (edge,) = g.edges
-        assert edge.relation_key() == (
-            "decl://a",
-            "type://T",
-            "DECL_HAS_TYPE",
-            "return",
+        assert len(g.edges) == 2
+        assert {e.relation_key()[-1] for e in g.edges} == {"param", "return"}
+
+    def test_relation_key_reads_role_from_resolved_after_same_role_merge(
+        self,
+    ) -> None:
+        # Two facts that agree on role (so they DO merge into one edge) but
+        # differ on another attr -- relation_key() must reflect the merged
+        # resolved view, not whichever fact registered first.
+        g = SourceGraphSummary()
+        g.add_edge(
+            GraphEdge(
+                src="decl://a",
+                dst="type://T",
+                kind="DECL_HAS_TYPE",
+                provenance="weak",
+                confidence=CONF_REDUCED,
+                attrs={"role": "return", "resolution": "unresolved"},
+            )
         )
+        g.add_edge(
+            GraphEdge(
+                src="decl://a",
+                dst="type://T",
+                kind="DECL_HAS_TYPE",
+                provenance="strong",
+                confidence=CONF_HIGH,
+                attrs={"role": "return", "resolution": "exact"},
+            )
+        )
+        (edge,) = g.edges
+        assert edge.relation_key() == ("decl://a", "type://T", "DECL_HAS_TYPE", "return")
+        assert edge.resolved["resolution"] == "exact"
 
     def test_edge_relation_key_function_matches_method(self) -> None:
         g = SourceGraphSummary()

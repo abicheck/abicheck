@@ -1,15 +1,18 @@
 # ADR-046: Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge
 
 **Date:** 2026-07-19
-**Status:** Accepted — D1, D2, and D3 slices implemented: role-aware edge
-identity (`GraphEdge.relation_key()`/`edge_relation_key`, the `relation_key`
-half of D1's split — `occurrence_id` remains open), the evidence-preserving
-node/edge merge (`GraphFact`/`FactConflict`/`merge_graph_facts`, replacing
-`SourceGraphSummary.add_node`/`add_edge`'s v1 first-writer-wins drop), and the
-per-(kind,role) coverage matrix for `inline_graph_fold.fold_type_graph`. D4
-(`EntityResolver`/`SOURCE_GRAPH_VERSION = 2`), D5 (`TraversalPolicy`), and D6
-(proof-path preference order) remain open — see "D1 implementation"/"D2
-implementation"/"D3 implementation" below.
+**Status:** Accepted — D1, D2, D3, and a partial D6 slice implemented:
+role-aware edge identity (`GraphEdge.relation_key()`/`edge_relation_key`, the
+`relation_key` half of D1's split — `occurrence_id` remains open), the
+evidence-preserving node/edge merge (`GraphFact`/`FactConflict`/
+`merge_graph_facts`, replacing `SourceGraphSummary.add_node`/`add_edge`'s v1
+first-writer-wins drop), the per-(kind,role) coverage matrix for
+`inline_graph_fold.fold_type_graph`, and a two-tier proof-path preference
+(`internal_leak.select_preferred_path`, wired into `post_processing.py`'s
+layout-walk selection only — see "D6 implementation" for what's covered and
+what's deferred). D4 (`EntityResolver`/`SOURCE_GRAPH_VERSION = 2`) and D5
+(`TraversalPolicy`) remain open — see "D1 implementation"/"D2
+implementation"/"D3 implementation"/"D6 implementation" below.
 **Decision maker:** (pending — recorded per repository convention, the same
 caveat ADR-048's header carries; a single-maintainer repo where merging the
 implementing PR is the acceptance mechanism.)
@@ -296,6 +299,36 @@ module, `ensure_facts_and_resolve`/`register_fact` just type-hint
 (alongside the existing `CONF_HIGH`/`GraphFact`/`FactConflict` re-exports) so
 every existing `from .source_graph import GraphNode` call site is unaffected.
 
+### Follow-up fix: `add_edge` dedup granularity (Codex review)
+
+The first `relation_key` landing left a gap `relation_key()` itself could not
+close: `SourceGraphSummary.add_edge` still deduplicated on the coarse
+`GraphEdge.key()` triple (`src, dst, kind`), so two edges that differ only by
+role (e.g. the same function's return-type and parameter-type dependency on
+the same private type — `DECL_HAS_TYPE:return` vs. `DECL_HAS_TYPE:param`)
+were folded into one `GraphEdge` object by `register_fact` before either
+role's `relation_key()` could ever be observed on a real, `add_edge`-built
+graph. `relation_key()` worked correctly on hand-constructed test objects
+(which is why the original D1 tests missed this), but the actual ingestion
+path silently lost the second role's identity — the exact "role-distinct
+edges stay distinct" property D1 exists to guarantee.
+
+Fix: `add_edge`'s dedup key (and `__post_init__`'s edge-index construction)
+now use `relation_key()` (the 4-tuple including role) instead of `key()`.
+Two edges that only differ by role now persist as separate `GraphEdge`
+objects with independent `facts`/`resolved`/`conflicts`, instead of the
+second silently merging into the first's fact list under the wrong role.
+`diff_source_graph`'s edge-set comparison deliberately stays at the coarse
+`key()` granularity — an explicit, documented boundary matching the original
+"existing callers unaffected" promise, not an oversight — since role-level
+diff granularity is out of scope for this ADR's D1 slice.
+
+`tests/test_source_graph_v2.py`: `test_add_edge_preserves_role_distinct_edges_as_separate_objects`
+is the regression test (two role-distinct edges through the real `add_edge`
+path stay separate, with correct `relation_key()`s and no fact
+cross-contamination); `test_add_edge_dedups_true_duplicates_on_relation_key`
+confirms a genuine same-role duplicate still merges as before.
+
 ## D2 implementation (G29 Phase 2, slice 1)
 
 Implemented as the first slice of Phase 2, chosen because D2 is the change
@@ -399,6 +432,44 @@ preference order all remain open follow-up work under this same ADR — see
   family-level `extractor_passes` side); `role_pass_covered()`'s direct-hit
   and family-fallback behavior.
 
+## D6 implementation (G29 Phase 2, slice 4 — partial)
+
+- `abicheck/internal_leak.py`: `select_preferred_path(paths: list[list[str]])
+  -> list[str]` implements the two tiers this walk's own per-path signals
+  already support out of the Decision text's six-tier order — "exact" (a
+  value-propagating path, tier 2 in the six-tier list) and "virtual/indirect
+  over-approximation" (tier 6). A pointer/reference-only path never wins over
+  an available value-propagating one just because it's shorter (what plain
+  `min(paths, key=len)` did); within a tier, shortest still wins. The other
+  four tiers (consumer-proven, public-header structural, multi-producer-
+  confirmed, reduced-confidence name resolution) need structured per-hop
+  evidence (confidence, producer, `ScopeOrigin`) this walk's plain
+  `list[str]` path representation doesn't carry — not implemented.
+- Wired into exactly one call site: `post_processing.py`'s `MarkReachability`
+  layout-walk proof-path selection (the `reachable_types`-keyed branch). The
+  call-graph-walk's own `min(call_paths, key=len)` selection is **deliberately
+  left unchanged** — `call_paths` there are already-formatted strings with no
+  structured value/indirection signal to tier on, so `select_preferred_path`
+  cannot apply without first changing that walk's path representation, which
+  is out of scope for this slice.
+- `post_processing.py` was already at the AI-readiness 2000-line hard cap
+  before this change; wiring in `select_preferred_path` was paired with
+  collapsing the layout walk's separate `reachability_kind`
+  value-propagating-check and `reachability_proof_path` `min(...)` call into
+  one shared `preferred_path = select_preferred_path(paths)` — net negative
+  line count even after the new import, and the two derived fields are now
+  provably consistent (`reachability_kind` reads `"value_embedding"` exactly
+  when the selected proof path itself is value-propagating, not "any path
+  is" independently of which one gets shown).
+- `tests/test_internal_leak.py` (`TestSelectPreferredPath`): value-propagating
+  preferred over a shorter indirect path; shortest wins within the same tier;
+  a pointer/signature-only path beats a pure-indirect one; a single path
+  returns unchanged.
+- **Not implemented**: the `primary_path`/`alternative_paths[0..N]`/
+  `discarded_path_count` finding shape the Decision text describes, and the
+  four evidence-requiring tiers listed above — this slice only replaces the
+  layout walk's path-selection comparator, not the finding schema around it.
+
 ## Non-goals
 
 - **Not** a change to any `ChangeKind`'s default verdict or to
@@ -496,12 +567,16 @@ preference order all remain open follow-up work under this same ADR — see
   `role_pass_covered`/`_mark_role_coverage`, wired into `fold_type_graph`.
 - `abicheck/internal_leak.py` — `compute_leak_paths`/
   `compute_call_graph_leak_paths`, `is_consumer_compiled_node`/
-  `is_consumer_compiled_public_entry` (D5's starting point, not implemented).
+  `is_consumer_compiled_public_entry` (D5's starting point, not implemented),
+  `select_preferred_path` (D6, partial, implemented).
 - `abicheck/post_processing.py` — `MarkReachability` (PR #607), the
-  root/qualified_name fallback pattern D4 centralizes, `min(paths, key=len)`
-  proof-path selection D6 replaces (both not implemented).
-- `tests/test_source_graph_v2.py` — D2 unit tests.
+  root/qualified_name fallback pattern D4 centralizes (not implemented), now
+  calls `select_preferred_path` for its layout-walk proof-path selection (D6,
+  partial); the call-graph walk's own shortest-path selection is unchanged.
+- `tests/test_source_graph_v2.py` — D1/D2 unit tests, including the
+  `add_edge` role-distinct-edge regression test.
 - `tests/test_inline_changed_paths.py` — D3 unit tests.
+- `tests/test_internal_leak.py` — `TestSelectPreferredPath` (D6 unit tests).
 - PR #607 review history — the concrete, repeated instances of identity/
   coverage-granularity bugs this ADR's Context section draws on.
 - [ADR-031](031-source-implementation-graph-augmentation.md), [ADR-041](041-compiler-facts-semantic-impact-graph.md), [ADR-044](044-reachability-aware-suppression.md), [ADR-048](048-canonical-entity-identity-and-graph-reconciliation.md)
