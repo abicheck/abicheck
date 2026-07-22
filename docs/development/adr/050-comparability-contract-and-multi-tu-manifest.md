@@ -420,8 +420,41 @@ scope-adjacent, not environment, and is excluded from `profile_fingerprint`
 in its entirety, not file-by-file. A declared `-I` directory with no such
 relationship to any declared header is **external** and keeps the full
 per-file content digest described above — a genuine third-party dependency,
-where a change anywhere in it *is* meaningful profile drift. This is a
-strict partition on `-I` *directories*, not individual files:
+where a change anywhere in it *is* meaningful profile drift.
+
+**The ancestor rule alone misses a common, non-nested project layout: a
+support directory declared as a *sibling* of the public header root, not
+underneath it.** A public header `include/foo.h` frequently `#include`s a
+build-generated header from `generated/`, or a private implementation
+header from `src/` or `config/` — directories passed via their own
+`--include`, but not an ancestor of any declared `--header`, since they sit
+next to `include/`, not inside it. The ancestor rule classifies each of
+these as **external** today, so an ordinary edit to a build-generated or
+private support header — exactly the same routine-internal-change case
+the whole-directory exclusion above exists to protect — still flips
+`profile_fingerprint` and hard-fails the gate, on a project layout common
+enough (any CMake/Meson build with a generated-headers directory) that
+this is not the same "unusual declaration shape" class as the
+nested-vendor-dependency gap below; it is a routine one. The legacy CLI
+gains an explicit escape hatch for exactly this case: a new, side-scoped,
+**labeled** `--project-include <label>=<path>` option (`--project-include
+support=old/src --project-include support=new/src`, alongside the
+existing side-scoped `--include old=... --include new=...` convention,
+ADR-040) that asserts a declared `-I` directory is project-owned
+regardless of whether it is an ancestor of any declared header. Unlike
+`--include`, `--project-include` requires a `label` — not a path-derived
+name, a short user-supplied logical identifier, the same "name a TU
+instead of inferring one from path shape" choice the manifest path (D3)
+already makes for its `name` field — because an explicitly-declared
+support root has no natural "owned declared header" for the per-slot
+token below to derive from the way an ancestor-derived root does; asking
+the user for one avoids inventing yet another path-shape heuristic that
+could break in some other way, the repeated lesson of every rejected
+attempt in this section. `--project-include` is a legacy-CLI-only
+addition: the manifest path (D3) already has no such gap, since a
+manifest TU can declare a per-TU forced-include for exactly this
+directory instead of relying on directory-tree inference.
+This is a strict partition on `-I` *directories*, not individual files:
 `scope_fingerprint` owns everything under a project-owned root (declared
 or not); `profile_fingerprint` owns only external roots, in full.
 
@@ -443,19 +476,51 @@ failure mode this whole digest exists to close, reintroduced through the
 exclusion mechanism itself. The fix keeps the sequence positional: each
 declared `-I` directory still occupies its own slot in the ordered
 sequence, in declaration order; a project-owned slot's *content* is
-replaced with a single fixed sentinel value (a constant, not derived from
-the directory's path, name, or content) rather than being omitted, so two
-project-owned directories still compare equal to each other (no scope
-information leaks into `profile_fingerprint` through the sentinel) while
-their position relative to every external directory's real content digest
-is preserved. `-I project -I dep` therefore hashes
-`[SENTINEL, digest(dep)]` and `-I dep -I project` hashes
-`[digest(dep), SENTINEL]` — different sequences, different
-`profile_fingerprint`s, correctly flagging that the two extractions are not
-comparable, even though neither ordering's project-owned content
-individually affects the hash. The system/toolchain bucket is unaffected —
-it is explicitly unordered (see above) because its inputs were never part
-of a user-declared, precedence-bearing `-I` sequence to begin with.
+replaced with a per-slot logical token (not being omitted) rather than a
+single generic constant — **a single shared sentinel for every
+project-owned slot loses order information again, one level down, when
+there are two or more project-owned roots.** `-I include -I generated`
+vs. `-I generated -I include` (both directories project-owned, both
+byte-identical between old and new, but declared in swapped order) is the
+same ambiguous-`#include`-resolution problem as the project/external
+case above, and a shared constant sentinel hashes both orderings to the
+identical `[SENTINEL, SENTINEL]` sequence — silently losing exactly the
+order information this whole fix exists to keep. The token is instead
+derived per slot from one of two sources depending on *why* the slot is
+project-owned: for an **ancestor-derived** root, the **sorted set of
+declared `--header`/manifest TU names that directory is an ancestor of**
+(not its path, not its content) — two ancestor-derived directories that
+are ancestors of different declared headers get different tokens, so
+swapping their declared order changes the hashed sequence, while a
+directory that is ancestor of the *same* declared header set on both old
+and new sides still tokenizes identically regardless of its own mount
+point, consistent with `scope_fingerprint` already treating declared
+header *names* (not paths) as legitimate, already-tracked identity, so
+this leaks nothing beyond what `scope_fingerprint` exposes today; for an
+explicitly-declared **`--project-include`** support root (which owns no
+declared header by construction — that is exactly why it needed its own
+flag above), the token is its required user-supplied **`label`** instead,
+namespaced separately from the ancestor-derived token space so a label
+string can never accidentally collide with a declared header name.
+`-I project -I dep` (`project` ancestor of declared header `foo.h`)
+therefore hashes `[token(foo.h), digest(dep)]` and `-I dep -I project`
+hashes `[digest(dep), token(foo.h)]` — different sequences, different
+`profile_fingerprint`s, correctly flagging non-comparability; two
+ancestor-derived roots for different declared headers (`include/` →
+`foo.h`, a second header root → `bar.h`) produce distinguishable,
+order-sensitive tokens instead of collapsing to one interchangeable
+constant, and two `--project-include` roots (`--project-include
+support=old/src`, `--project-include generated=old/gen`) are
+distinguished by their distinct labels the same way. **Residual
+limitation, same class as the vendored-nested-dependency
+gap below:** two separately declared `-I` roots that are both ancestors of
+the *same* declared header (an outer directory and one of its own
+subdirectories, both passed as separate `-I` entries) tokenize identically
+and so remain order-indistinguishable from each other — an unusual
+declaration shape, not the routine case this fix targets. The
+system/toolchain bucket is unaffected — it is explicitly unordered (see
+above) because its inputs were never part of a user-declared,
+precedence-bearing `-I` sequence to begin with.
 A known, accepted residual gap: a vendored dependency nested *inside* a
 project-owned root (e.g. `include/thirdparty/foo.h` under the project's
 own `include/`) is swept into the project-owned exclusion along with

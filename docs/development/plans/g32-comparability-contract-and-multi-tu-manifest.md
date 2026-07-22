@@ -314,7 +314,26 @@ Implements ADR-050 D1 and D2.
   not, is excluded from `profile_fingerprint` entirely. A declared `-I`
   directory unrelated to any declared header is **external** and keeps the
   full per-file content digest — a real dependency, where a change
-  anywhere in it is meaningful drift. `scope_fingerprint` owns everything
+  anywhere in it is meaningful drift. **The ancestor rule misses a common
+  non-nested layout: a support directory declared as a *sibling* of the
+  public header root, not underneath it** — a build-generated headers
+  directory (`generated/`) or a private-implementation directory (`src/`,
+  `config/`) that `include/foo.h` `#include`s from, passed via its own
+  `--include` but never an ancestor of any declared `--header`. The
+  ancestor rule classifies these as external today, so an ordinary edit to
+  a generated or private support header still flips `profile_fingerprint`
+  on a routine CMake/Meson-style layout, not an edge case. Legacy CLI gains
+  a new, side-scoped, **labeled** `--project-include <label>=<path>` option
+  (`--project-include support=old/src --project-include support=new/src`,
+  alongside the existing `--include old=... --include new=...` side-scoping,
+  ADR-040) asserting a directory is project-owned regardless of ancestry.
+  `--project-include` requires a `label` (a user-supplied logical name, not
+  path-derived — the same choice D3's manifest `name` field already makes)
+  because a support root with no owned declared header has nothing for the
+  ancestor-derived per-slot token below to key off of; asking for one
+  avoids yet another path-shape heuristic. Legacy-CLI-only: the manifest
+  path (D3) already has no such gap via per-TU forced-includes.
+  `scope_fingerprint` owns everything
   under a project-owned root; `profile_fingerprint` owns only external
   roots, in full. **Excluding a project-owned directory's content must not
   also erase its position in the declared `-I` sequence.** `-I` order is
@@ -330,17 +349,41 @@ Implements ADR-050 D1 and D2.
   digest exists to close, reintroduced through the exclusion mechanism
   itself. The fix keeps the sequence **positional**: every declared `-I`
   directory keeps its own slot in declaration order; a project-owned
-  slot's content is replaced with one fixed sentinel constant (not derived
-  from the directory's path, name, or content — so no scope information
-  leaks into `profile_fingerprint`, and two project-owned directories
-  still compare equal to each other) instead of being omitted, so its
-  position relative to every external directory's real digest survives.
-  `-I project -I dep` hashes `[SENTINEL, digest(dep)]`; `-I dep -I
-  project` hashes `[digest(dep), SENTINEL]` — different sequences,
-  correctly flagged as non-comparable. The system/toolchain bucket stays
-  unordered, since its inputs were never part of a declared,
-  precedence-bearing `-I` sequence to begin with. **Known, accepted
-  residual gap:** a vendored dependency
+  slot's content is replaced with a **per-slot logical token**, not one
+  shared constant — a single generic sentinel for every project-owned
+  slot loses order information again, one level down, once there are two
+  or more project-owned roots: `-I include -I generated` vs. `-I
+  generated -I include` (both project-owned, byte-identical content,
+  swapped declared order) would both hash to the same `[SENTINEL,
+  SENTINEL]` sequence under one shared constant, silently losing the same
+  order information this fix exists to preserve. The token comes from one
+  of two sources depending on *why* the slot is project-owned: an
+  **ancestor-derived** root's token is the **sorted set of declared
+  `--header`/manifest TU names that directory is an ancestor of** (never
+  its path or content) — two ancestor-derived directories owning
+  different declared headers get different tokens (so swapping their
+  order changes the sequence), while a directory owning the same declared
+  header set tokenizes identically regardless of mount point, consistent
+  with `scope_fingerprint` already treating declared header *names* as
+  legitimate, already-tracked identity, so no new information leaks
+  through the token; a `--project-include` support root's token is its
+  required user-supplied **`label`** instead (it owns no declared header
+  by construction — that's exactly why it needed its own flag), namespaced
+  separately from the ancestor-derived token space so a label can never
+  collide with a header name. `-I project -I dep` (project ancestor of
+  declared `foo.h`) hashes `[token(foo.h), digest(dep)]`; `-I dep -I
+  project` hashes `[digest(dep), token(foo.h)]` — different, correctly
+  flagged as non-comparable; `--project-include support=old/src` vs. the
+  same directory declared last instead of first is distinguished the same
+  way via `token(support)`. **Residual limitation (same class as the
+  vendored-nested-dependency gap below):** two separately declared `-I`
+  roots that are both ancestors of the *same* declared header (an outer
+  directory and one of its own subdirectories, each passed as its own
+  `-I` entry) tokenize identically and stay order-indistinguishable from
+  each other — an unusual declaration shape, not the routine case this
+  fix targets. The system/toolchain bucket stays unordered, since its
+  inputs were never part of a declared, precedence-bearing `-I` sequence
+  to begin with. **Known, accepted residual gap:** a vendored dependency
   nested *inside* a project-owned root is swept into that exclusion too,
   so a content change confined there is invisible to `profile_fingerprint`
   on the legacy CLI path — the same "can't disambiguate from directory
@@ -364,7 +407,7 @@ Implements ADR-050 D1 and D2.
   the manifest file's own directory — none of these legacy-CLI cases
   exist there.
 
-  Thirteen dedicated tests (numbered 1–12, with 8b alongside 8) are non-negotiable for this phase to be considered
+  Fifteen dedicated tests (numbered 1–14, with 8b alongside 8) are non-negotiable for this phase to be considered
   done: (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
   identical trees under different roots asserts the resulting
   **`scope_fingerprint`s** match (not `profile_fingerprint` — headers are a
@@ -443,11 +486,37 @@ Implements ADR-050 D1 and D2.
   `--include new=/opt/dep --include new=/work/include` (`/work/include`
   project-owned on both sides via a shared `--header`, `/opt/dep`
   byte-identical on both sides) — produce *different* `profile_fingerprint`s,
-  proving the project-owned slot is replaced with a positional sentinel
-  rather than dropped: if the slot were simply omitted, both sides would
-  degrade to the same single-element `[digest(/opt/dep)]` sequence and
-  spuriously match despite the order swap being a genuine, ambiguity-
-  affecting difference in `#include` search precedence.
+  proving the project-owned slot is replaced with a positional per-slot
+  token rather than dropped: if the slot were simply omitted, both sides
+  would degrade to the same single-element `[digest(/opt/dep)]` sequence
+  and spuriously match despite the order swap being a genuine, ambiguity-
+  affecting difference in `#include` search precedence; (13) **two**
+  project-owned `-I` roots declared in swapped order — `old` declares
+  `--header old=old/include/foo.h --header old=old/generated/bar.h
+  --include old=old/include --include old=old/generated`, `new` declares
+  the identical, byte-identical-content pair but swapped:
+  `--include new=new/generated --include new=new/include` (both `foo.h`
+  and `bar.h` unchanged) — produce *different* `profile_fingerprint`s,
+  proving the per-slot token is derived from each root's own owned-header
+  set (`token(foo.h)` vs. `token(bar.h)`), not one shared constant: a
+  single generic sentinel for every project-owned slot would hash both
+  orderings to the same `[SENTINEL, SENTINEL]` sequence and spuriously
+  match, exactly the regression this per-slot-token fix (as opposed to
+  the simpler single-sentinel fix test (12) alone would validate) exists
+  to close; (14) a sibling support root declared via `--project-include`,
+  not nested under any declared `--header` — `old`/`new` both declare
+  `--header .../include/foo.h --include .../include --project-include
+  support=.../src` (`src/` a sibling of `include/`, containing a private
+  header `foo.h` `#include`s) — with a **content edit confined to `src/`'s
+  private header** between old and new leaves `profile_fingerprint`
+  matching, proving `--project-include` extends project-ownership to a
+  sibling directory the ancestor rule alone would otherwise classify as
+  external (and thus spuriously flip on this routine internal edit); a
+  companion assertion swapping `--project-include support=.../src` to
+  declaration-last on one side while an unrelated ancestor-derived root
+  keeps its position produces a *different* `profile_fingerprint`,
+  confirming the label-derived token participates in the same
+  order-sensitive sequence as every other project-owned slot.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -899,8 +968,14 @@ Implements ADR-050 D1 and D2.
   ADR-041's header-graph flag flip, which changed behavior for an
   already-common default-off-to-on transition.
 
-**Files & surfaces.** `model.py` (new `ExtractionContract`), new
-`abicheck/comparability.py` (fingerprint computation, `compute_extraction_contract`,
+**Files & surfaces.** `cli_options.py` (new side-scoped, labeled
+`--project-include <label>=<path>` option, alongside the existing
+`--include`/`--header` `SIDED_PATH_PARAM` family, ADR-040 — legacy CLI
+only, see the sibling-support-root acceptance-criteria bullet above),
+`model.py` (new `ExtractionContract`), new
+`abicheck/comparability.py` (fingerprint computation, `compute_extraction_contract`
+— its project-ownership predicate takes both ancestor-derived headers and
+declared `--project-include` labels as inputs, not headers alone —
 the gate, and `contract_coverage` metadata computation — no detector, since
 `UNKNOWN_PROFILE` is report metadata, not a `Change`; reuses
 `abicheck/buildsource/include_graph.py`'s existing `parse_depfile()` to turn
