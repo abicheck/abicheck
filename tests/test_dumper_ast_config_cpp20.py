@@ -1168,6 +1168,27 @@ def test_cpp20_detector_ignores_commented_out_consteval_type_shadow(tmp_path):
     assert any(r.reason == "consteval-declaration" for r in reqs)
 
 
+def test_cpp20_detector_detects_consteval_split_across_lines(tmp_path):
+    """Regression (Codex review, second round): a bare ``consteval``
+    trailing at the end of a line, with its declarator on the following
+    physical line (``consteval\\nint f();``), was never joined into the
+    same lookahead the way a trailing ``requires``/``concept`` already is
+    — the per-line scan only ever saw the two halves separately, neither
+    of which alone satisfies the "followed by an identifier" check."""
+    headers = _write(tmp_path, "a.h", "consteval\nint f() { return 1; }\n")
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
+def test_cpp20_detector_detects_constinit_split_across_lines(tmp_path):
+    """Companion: ``constinit`` split across lines."""
+    headers = _write(tmp_path, "a.h", "constinit\nextern int x;\n")
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "constinit-declaration" for r in reqs)
+
+
 def test_cpp20_detector_detects_abbreviated_unconstrained_function_template(tmp_path):
     """Regression (Codex review): a bare (unconstrained) ``auto`` used
     directly as an ordinary function's parameter type (``void f(auto

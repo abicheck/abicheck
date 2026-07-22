@@ -24,11 +24,21 @@ bundled Clang major version, never CastXML's own version. This module adds
 that gate: a supported range for CastXML itself plus a minimum bundled/linked
 Clang major, checked once before the L2 scan runs.
 
-The range tracks the conda-forge ``castxml`` feedstock's current release line
-(0.7.0, as of this writing) — see ``AGENTS.md`` P0 "raise the CastXML runtime
-gate". The legacy PyPI ``castxml`` distribution (last released well below
-this floor) is exactly what this gate is meant to catch and reject by
-default.
+The floor targets the legacy PyPI ``castxml`` distribution specifically
+(last released as 0.4.5 in 2018, with no bundled-Clang metadata at all) —
+that is exactly what this gate is meant to catch and reject by default. The
+floor is *not* pinned to conda-forge's current ``castxml`` feedstock line: the
+CastXML Superbuild (github.com/CastXML/CastXMLSuperbuild, what
+``action/install-castxml.sh`` installs and what most CI/CD consumers of this
+project actually run) tracks its own, much slower-moving internal version
+number — its latest active release as of this writing is still numbered
+0.6.x despite bundling a current LLVM/Clang (21.x) — so a floor calibrated to
+conda-forge's scale would reject every real-world Superbuild install
+indefinitely, including this repo's own pinned CI build. ``MIN_CASTXML``
+tracks the Superbuild's ``v0.6.11`` generation (Feb 2024), the first tag in
+its current, actively-maintained release line; ``MIN_CASTXML_CLANG_MAJOR``
+below carries the actual technical requirement (glibc sized-float types, the
+GCC 13+ ``__assume__`` attribute) that a "modern enough" build must satisfy.
 """
 
 from __future__ import annotations
@@ -38,8 +48,8 @@ from dataclasses import dataclass, field
 
 from packaging.version import InvalidVersion, Version
 
-# Supported CastXML version range for an authoritative L2 scan: >=0.7.0,<0.8.0.
-MIN_CASTXML = "0.7.0"
+# Supported CastXML version range for an authoritative L2 scan: >=0.6.11,<0.8.0.
+MIN_CASTXML = "0.6.11"
 MAX_CASTXML = "0.8.0"  # exclusive upper bound
 # Minimum bundled/linked Clang major version a supported CastXML build must
 # carry (glibc sized-float types and the GCC 13+ __assume__ attribute need

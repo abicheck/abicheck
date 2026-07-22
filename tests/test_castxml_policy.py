@@ -88,7 +88,10 @@ class TestEvaluateCastxmlVersion:
         assert REASON_VERSION_AT_OR_ABOVE_MAXIMUM in result.reasons
 
     def test_version_below_min_rejected(self):
-        result = evaluate_castxml_version(_version_text("0.6.20260105"))
+        # v0.6.5 predates the Superbuild's current actively-maintained
+        # release line (v0.6.11+, Feb 2024 onward) — a real, genuinely
+        # below-floor tag, not a synthetic value.
+        result = evaluate_castxml_version(_version_text("0.6.5"))
         assert result.supported is False
         assert REASON_VERSION_BELOW_MINIMUM in result.reasons
 
@@ -100,23 +103,37 @@ class TestEvaluateCastxmlVersion:
 
     def test_git_suffixed_below_min_rejected_on_version_not_unparseable(self):
         """Regression (Codex review): the CastXML Superbuild's own release
-        format is ``<version>-g<hash>`` (a bare ``-``, e.g. the pinned
-        action/install-castxml.sh build ``0.6.20260105-g9864b1e``) — PEP 440
-        only accepts that kind of suffix after a ``+`` separator, so a naive
+        format is ``<version>-g<hash>`` (a bare ``-``) — PEP 440 only accepts
+        that kind of suffix after a ``+`` separator, so a naive
         ``Version(...)`` call always raised ``InvalidVersion`` regardless of
-        whether the numeric release was actually in range. Must be rejected
-        for being below the floor, not for being unparseable."""
-        result = evaluate_castxml_version(_version_text("0.6.20260105-g9864b1e"))
+        whether the numeric release was actually in range. A below-floor
+        release must be rejected for being below the floor, not for being
+        unparseable."""
+        result = evaluate_castxml_version(_version_text("0.6.5-g1234567"))
         assert result.supported is False
         assert REASON_VERSION_BELOW_MINIMUM in result.reasons
         assert REASON_VERSION_UNPARSEABLE not in result.reasons
 
     def test_git_suffixed_in_range_accepted(self):
-        """A future Superbuild release in the supported range must be
-        accepted even with its git-describe suffix intact — this is what
-        lets action/install-castxml.sh's pin be bumped to a real >=0.7.0
-        Superbuild build without also needing a parser change."""
+        """A Superbuild release in the supported range must be accepted even
+        with its git-describe suffix intact."""
         result = evaluate_castxml_version(_version_text("0.7.0-g9864b1e"))
+        assert result.supported is True
+        assert result.reasons == []
+
+    def test_pinned_ci_castxml_build_accepted(self):
+        """Regression: this is the exact ``castxml --version`` output of the
+        build ``action/install-castxml.sh`` pins in CI
+        (``0.6.20260105-g9864b1e``, bundling Clang 21.1.8) — MIN_CASTXML is
+        calibrated to the CastXML Superbuild's own, much slower-moving
+        version-number scale specifically so this real-world build passes;
+        a floor copied from conda-forge's much faster-moving ``castxml``
+        feedstock numbering would reject it (and every other real Superbuild
+        install) indefinitely, since the Superbuild has never numbered a
+        release >=0.7.0 despite active maintenance and a current Clang."""
+        result = evaluate_castxml_version(
+            _version_text("0.6.20260105-g9864b1e", "21.1.8")
+        )
         assert result.supported is True
         assert result.reasons == []
 
@@ -130,13 +147,13 @@ class TestEvaluateCastxmlVersion:
     def test_rc_prerelease_with_git_suffix_stays_below_final_release(self):
         """Regression (Codex review): the documented CastXML version format
         allows an optional ``-rc<n>`` pre-release id before the git suffix
-        (e.g. ``0.7.0-rc1-gabc``). Converting the *first* hyphen to ``+``
+        (e.g. ``0.6.11-rc1-gabc``). Converting the *first* hyphen to ``+``
         (an earlier version of this fallback) folded the "-rc1" marker into
         the opaque local-version string, erasing its pre-release meaning and
-        making the build compare as >= the final 0.7.0 release it precedes
-        — a release candidate must stay below the floor, not be accepted as
-        equivalent to (or newer than) the final release."""
-        result = evaluate_castxml_version(_version_text("0.7.0-rc1-gabc"))
+        making the build compare as >= the final release (here, the floor
+        itself) it precedes — a release candidate must stay below the floor,
+        not be accepted as equivalent to (or newer than) the final release."""
+        result = evaluate_castxml_version(_version_text("0.6.11-rc1-gabc"))
         assert result.supported is False
         assert REASON_VERSION_BELOW_MINIMUM in result.reasons
         assert REASON_VERSION_UNPARSEABLE not in result.reasons

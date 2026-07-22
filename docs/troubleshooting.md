@@ -98,7 +98,7 @@ be scanned **without** `--lang c` (castxml always parses in a C++-aware mode).
 
 An authoritative L2 scan runs a version gate (`castxml_policy.py`) before
 parsing any header: it rejects a resolved `castxml` build outside the
-supported range (currently `>=0.7.0,<0.8.0`, bundled/linked Clang `>=18`).
+supported range (currently `>=0.6.11,<0.8.0`, bundled/linked Clang `>=18`).
 This most commonly fires against the legacy PyPI `castxml` distribution
 (`pip install castxml`), which is **not** a supported default scanner setup —
 `pip install abicheck` deliberately never installs CastXML for you, and the

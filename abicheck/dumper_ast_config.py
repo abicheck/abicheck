@@ -957,22 +957,29 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 continue
             code = _strip_literals_joined(logical)
             code = code.split(b"//")[0]
-            # A bare "requires" or "concept" trailing at the end of a line
-            # (no parameter list/brace/name yet) means the construct's
-            # continuation landed on a following physical line with no
-            # backslash join in between — the per-line scan otherwise never
-            # sees the two halves together (Codex review; the same gap
-            # applies symmetrically to "concept" split before its name, not
-            # just "requires" split before its "("/"{"/constraint). Pull in
-            # subsequent non-directive lines (bounded, so a stray trailing
-            # keyword in unrelated code can't scan unboundedly) until the
-            # bare-trailing condition no longer holds.
+            # A bare "requires"/"concept"/"consteval"/"constinit" trailing at
+            # the end of a line (no parameter list/brace/name yet, or for
+            # consteval/constinit no declarator following at all) means the
+            # construct's continuation landed on a following physical line
+            # with no backslash join in between — the per-line scan
+            # otherwise never sees the two halves together (Codex review;
+            # the same gap applies symmetrically to "concept" split before
+            # its name, not just "requires" split before its "("/"{"/
+            # constraint, and equally to consteval/constinit split before
+            # their own declarator, e.g. ``consteval\nint f();`` — Codex
+            # review, second round). Pull in subsequent non-directive lines
+            # (bounded, so a stray trailing keyword in unrelated code can't
+            # scan unboundedly) until the bare-trailing condition no longer
+            # holds.
             lookahead = code
             j = i
             lookahead_budget = 5
             while (
                 lookahead_budget > 0
-                and re.search(rb"\b(?:requires|concept)\s*$", lookahead.rstrip())
+                and re.search(
+                    rb"\b(?:requires|concept|consteval|constinit)\s*$",
+                    lookahead.rstrip(),
+                )
                 and j + 1 < n
                 and not _is_preprocessor_directive(logical_lines[j + 1][1])
             ):
@@ -1006,11 +1013,15 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                         "abbreviated-function-template-parameter", str(p), start_no
                     )
                 )
-            elif not consteval_type_shadowed and _CPP20_CONSTEVAL_PATTERN.search(code):
+            elif not consteval_type_shadowed and _CPP20_CONSTEVAL_PATTERN.search(
+                lookahead
+            ):
                 found.append(
                     Cpp20Requirement("consteval-declaration", str(p), start_no)
                 )
-            elif not constinit_type_shadowed and _CPP20_CONSTINIT_PATTERN.search(code):
+            elif not constinit_type_shadowed and _CPP20_CONSTINIT_PATTERN.search(
+                lookahead
+            ):
                 found.append(
                     Cpp20Requirement("constinit-declaration", str(p), start_no)
                 )
