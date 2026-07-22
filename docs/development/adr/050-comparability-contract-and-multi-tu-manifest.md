@@ -709,6 +709,25 @@ freshly-produced snapshot, and since D2's gate only ever raises when
 silently take the same code path as the intentionally-lenient mixed-pair
 case (D2) forever — the gate would be fully specified and fully inert.
 
+**"Every dump" means every dump that actually invoked an L2 header-AST
+frontend — a symbols-only/binary-only dump (no `--header`/`-H`, no
+manifest; native binaries fall back to this mode by design) attaches no
+`contract` at all, not a contract computed from unused inputs.**
+`profile_fingerprint` hashes the resolved compiler/macros/`-I` inputs a
+castxml/clang invocation actually used — for a symbols-only dump, no such
+invocation ever runs, so those fields describe nothing the snapshot
+actually depends on. Attaching a `profile_fingerprint` anyway (computed
+from whatever compile-context flags happen to be set on the CLI
+invocation, unused or not) would make two snapshots that are genuinely
+comparable at the L0/binary evidence tier spuriously mismatch on
+compile-context differences that never affected either snapshot — the
+opposite failure mode from the one D1/D2 exist to close, this time an
+*over*-counting bug instead of an under-counting one. `contract` staying
+`None` for a symbols-only dump is not a gap in D2's leniency rule; it is
+the existing "both sides `None` → gate doesn't fire" case (above) applying
+correctly to the one case where no L2 extraction happened on either side
+to disagree about in the first place.
+
 **The whole-snapshot cache is the same bypass by a different route, and it
 matters from day one, not just at D6's later cache-key extension.**
 `service_dump_cache.cached_run_dump` looks up `snapshot_cache` *before*

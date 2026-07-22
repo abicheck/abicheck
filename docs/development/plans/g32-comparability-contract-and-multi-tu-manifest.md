@@ -715,6 +715,20 @@ Implements ADR-050 D1 and D2.
   **both** sides carry one, two ordinary dumps would silently take the same
   code path as the intentionally-lenient mixed-pair case forever — a fully
   specified, fully inert gate.
+  **"Every dump" means every dump that actually ran an L2 header-AST
+  frontend — a symbols-only/binary-only dump (no `-H`/`--header`, no
+  manifest) attaches no `contract` at all, computed from nothing rather
+  than computed from unused inputs.** `profile_fingerprint` hashes the
+  resolved compiler/macros/`-I` inputs an actual castxml/clang invocation
+  used; a symbols-only dump never runs one, so those fields would describe
+  nothing the snapshot depends on. Attaching a fingerprint anyway (from
+  whatever compile-context flags happen to be set, used or not) would make
+  two genuinely comparable L0/binary-only snapshots spuriously mismatch on
+  compile-context differences that never affected either one — an
+  over-counting regression, not the under-counting bug this design
+  otherwise guards against. `contract` staying `None` here is not a gap in
+  the leniency rule below; it's that same rule correctly applying to the
+  one case where no L2 extraction ran on either side to disagree about.
 - **The whole-snapshot cache is the same bypass by a different route — this
   phase closes it too, not just Phase E's later cache-key work.**
   `service_dump_cache.cached_run_dump` looks up `snapshot_cache` *before*
@@ -1470,7 +1484,16 @@ comment despite the existing `ERROR`-only skip).
 
 **Tests.** A `dump()`-level test asserting a real (non-manifest) dump
 returns a snapshot with a populated, non-`None` `contract` — the specific
-gap that would otherwise leave the gate permanently inert. A **warm-cache**
+gap that would otherwise leave the gate permanently inert. A companion
+**symbols-only no-contract** test asserting a symbols-only dump (no
+`-H`/`--header`, no manifest) returns a snapshot with `contract is None`,
+and that comparing two such symbols-only snapshots produced under
+genuinely *different*, but entirely unused, compile-context flags
+(different `--gcc-path`/`--gcc-options`, neither ever invoking an L2
+frontend) leaves the pair comparable — never raising
+`ProfileMismatchError` on compile-context differences that never affected
+either snapshot, the specific over-counting regression this exemption
+exists to prevent. A **warm-cache**
 regression test: seed `snapshot_cache` with a pre-bump-version entry (no
 `contract`), call `cached_run_dump` for the same inputs post-bump, and
 assert it misses and rebuilds with `contract` populated rather than
@@ -1696,9 +1719,31 @@ Implements ADR-050 D3. The highest-risk phase — see Risk above.
   DPC++ flow needing a non-default context with nowhere to request it
   (ADR-050 D3). The legacy, non-manifest CLI path gains a matching
   `--frontend-context host|device` flag (default `host`).
+- **The per-TU loop and `TuFragment` handling land in a new sibling
+  module, not inline in `dumper.py` itself — `dumper.py` has zero lines of
+  headroom left before the AI-readiness file-size gate's hard cap.**
+  Verified against the actual repo: `dumper.py` is exactly `2000` lines
+  today (`wc -l`), and `scripts/check_ai_readiness.py`'s `file-size` check
+  ERRORs at `> 2000` — this phase's own new logic (the per-TU invocation
+  loop, `TuFragment` construction/normalization, manifest-driven dispatch)
+  would push it past that threshold immediately, failing a required CI
+  gate before any functional test even runs. This follows the same
+  established split precedent `dumper_castxml.py`/`dumper_clang.py`
+  already set for per-backend logic: a new `abicheck/dumper_manifest.py`
+  (or similarly-named sibling) holds the per-TU loop and `TuFragment`
+  construction; `dumper.py`'s own `dump()` gains only a thin
+  manifest-vs.-single-TU dispatch, calling into the new module rather than
+  growing its own body. Splitting `dumper.py` itself down first (moving
+  existing, unrelated logic out to reclaim headroom) is an alternative
+  this phase could also take, but the new-sibling-module route is
+  preferred since it needs no change to `dumper.py`'s existing, unrelated
+  content and matches the repo's own stated convention ("prefer extending
+  a split-out module over growing the parent toward the cap" —
+  `AGENTS.md`).
 - `dumper.py` gains a manifest-driven `dump()` path: one castxml/clang
   invocation per TU (shared base profile + that TU's own forced includes),
-  each producing a `TuFragment`. The existing single-header CLI path
+  each producing a `TuFragment`, via the new sibling module above. The
+  existing single-header CLI path
   becomes this path's one-TU special case (`legacy-main`) — same code, not
   a parallel implementation.
 - A manifest declaring TUs with different compilers/target triples is
@@ -1779,9 +1824,13 @@ and a new `ManifestValidationError` for every parse-time schema violation
 it raises — unknown fields, the `contributes_to_abi=True ⇒ required=True`
 invariant, and the heterogeneous-compiler/target-triple rejection above —
 self-contained to this phase, no dependency on Phase C's later
-`tu_merge.py`/`TuMergeError`), `abicheck/dumper.py`
-(per-TU invocation loop, `TuFragment` type, and the actual `--dump-manifest`
-termination point). `--dump-manifest` is a
+`tu_merge.py`/`TuMergeError`), new `abicheck/dumper_manifest.py`
+(the per-TU invocation loop and `TuFragment` type — not `dumper.py`
+itself, which is already at its 2000-line file-size cap with no headroom
+left, see the dedicated acceptance-criteria bullet above), `abicheck/dumper.py`
+(gains only the thin manifest-vs.-single-TU dispatch and the actual
+`--dump-manifest` termination point, delegating the per-TU work to the
+new sibling module). `--dump-manifest` is a
 shared-concept option across `dump` and `compare` (side-scoped on `compare`
 via `SIDED_PATH_PARAM`, bare on `dump` — see the acceptance-criteria bullet
 above), added as one decorator in `cli_options.py` and applied at `dump`'s
