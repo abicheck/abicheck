@@ -163,7 +163,12 @@ not a latent surprise discovered after Phase A ships.
   normalization + hashing pass over existing data, not new extraction.
   Unknown/unrecognized compiler flags are hashed by default (fail closed,
   matching the review's "unknown ⇒ contract-affecting until proven
-  otherwise" principle) rather than silently ignored.
+  otherwise" principle) rather than silently ignored. **`frontend_context`
+  (`host`/`device`, D5) is also one of these hashed fields, once D3/D5
+  introduce it** — this field doesn't exist at Phase-A-ships time (D1
+  ships before D3/D5), so it's necessarily added to the hash set later,
+  not omitted by design; see D5's own note for why this can't be deferred
+  once the field exists.
 - `scope_fingerprint: str` — a `sha256:`-prefixed digest of the
   **manifest-normalized** analysis scope: the set of translation units (by
   `name`, not by list position), each TU's ordered includes and forced
@@ -1109,18 +1114,35 @@ path (`None` — i.e. absent — on every ordinary comparison, matching
 `contract_coverage`'s own default).
 
 **`html_report.py` is a reporting surface too, not an omission this ADR can
-leave implicit.** AGENTS.md's own module map lists it alongside
+leave implicit — and it is not the only one that needs this treatment.**
+AGENTS.md's own module map lists it alongside
 `reporter.py`/`sarif.py`/`junit_report.py` under "Reporting," and
-`service_render.py`'s format dispatch (`:87-99`) routes `--format html` to
+`service_render.py`'s format dispatch (`:36-132`) routes `--format html` to
 `generate_html_report(result: DiffResult, ...)` exactly like the other three
-route to their renderers. Two distinct gaps follow from `generate_html_report`
-requiring a real `DiffResult`: for the hard-gate `not_comparable` case, no
+route to their renderers. **Verified against the actual code: `render_output`
+has five branches requiring a real `DiffResult` — `sarif` (`to_sarif_str`),
+`html` (`generate_html_report`), `junit` (`to_junit_xml`), `review`
+(`to_review_digest`), and the default `markdown` (`to_markdown`) — not
+`html` alone.** Two distinct gaps follow, for every one of these five, not
+just HTML: for the hard-gate `not_comparable` case, no
 `DiffResult` exists at all (the gate raises before any diff runs), so
-`service_render.render_output` must not attempt to call `generate_html_report`
-on that path — the front-end's exception handler renders (or declines to
-render) HTML the same way it assembles `verdict: null` JSON, rather than
-`generate_html_report` growing an optional-`DiffResult` parameter it was never
-designed to accept. For the mixed-pair `contract_coverage` case, a real
+`service_render.render_output` must not attempt to call any of these five
+renderers on that path — the front-end's exception handler renders (or
+declines to render) each requested format directly, the same way it
+assembles `verdict: null` JSON, rather than any of the five growing an
+optional-`DiffResult` parameter none was designed to accept. Two of these
+five carry a structured, externally-consumed schema and need a defined
+not-comparable shape, not just "skip the call": **SARIF** represents it as
+one `run` with `invocations[0].executionSuccessful: false` and a
+`toolExecutionNotifications` entry carrying the reason — SARIF's own
+mechanism for "the tool didn't complete analysis," so a downstream SARIF
+consumer (e.g. GitHub Code Scanning) can't misread an empty `results`
+array as a clean pass; **JUnit** represents it as one `<testsuite>` with a
+single `<testcase>` wrapping an `<error message="...">`, not a
+`<failure>` — JUnit's own convention for "the test itself couldn't run,"
+distinct from an ordinary reported ABI break. Markdown/review, being
+plain human-readable text with no schema to satisfy, get a simple "NOT
+COMPARABLE: `<reason>`" line. For the mixed-pair `contract_coverage` case, a real
 `DiffResult` does exist, so `generate_html_report` needs to surface
 `contract_coverage` in its headline cards the same way the JSON/Markdown/SARIF/JUnit
 reporters do — silently dropping it there would make the HTML report the one
@@ -1385,6 +1407,29 @@ Three outcomes, all extraction-time, none reaching D1's fingerprinting:
   is exactly the kind of "the extraction can't prove what it captured"
   situation this ADR's authority rule (ADR-028 D3) says must not be
   silently resolved in either direction.
+
+**Selecting the right context is not the same as the gate knowing which
+context was selected — `profile_fingerprint` must hash the resolved
+`frontend_context`/`kind`, or a host-vs-device mismatch passes D2's gate
+silently.** Two extractions requesting different `frontend_context`
+values (`host` on one side, `device` on the other) with identical
+compiler/target/macros/includes otherwise would parse genuinely different
+ASTs — different declarations, different macro state — but D1's
+`profile_fingerprint` field list (above) predates this section
+(`frontend_context` doesn't exist until D3/D5), so leaving it un-added
+would silently reopen exactly the under-counting bug D1 exists to close,
+one field short: a host/device extraction drift would be invisible to the
+gate, and any AST difference between the two contexts would surface as an
+ordinary reported `Change` — indistinguishable from a real ABI edit —
+instead of the pre-diff `not_comparable` this whole design exists to
+produce for exactly this class of drift. `profile_fingerprint`'s hashed
+fields therefore include the resolved `kind` (`"host"`/`"device"`) once
+this section's selection logic runs, not only the requested
+`frontend_context` string — the two would otherwise agree even when a
+`AST_CONTEXT_AMBIGUOUS`-adjacent frontend quirk resolved to a
+differently-labeled context on each side for the same requested value, an
+edge case the requested-string alone can't see but the actually-resolved
+`kind` can.
 
 A run that produces only a `spir64`/device context when `host` was
 requested is an extraction failure, not a successful-but-wrong snapshot.

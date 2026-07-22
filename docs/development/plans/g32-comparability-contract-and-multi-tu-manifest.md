@@ -1368,9 +1368,34 @@ all six of its columns, or the per-command detail tables gain their new
 codes while the one table meant to summarize them across commands goes
 stale the same day), `reporter.py`,
 `sarif.py`, `junit_report.py`, `html_report.py` (`generate_html_report`'s
-`contract_coverage` headline card), `service_render.py` (`render_output`'s
-`--format html` branch skips `generate_html_report` on the `not_comparable`
-path instead of calling it with no `DiffResult`), `abicheck/schemas/compare_report.schema.json`,
+`contract_coverage` headline card). **`service_render.render_output`
+has five branches that require a real `DiffResult` — `sarif`, `html`,
+`junit`, `review`, and the default `markdown` — not just `html`; every
+one needs the identical bypass, not only the one this bullet previously
+named.** Verified against the actual code (`service_render.py:36-132`):
+`to_sarif_str(result, ...)`, `generate_html_report(result, ...)`,
+`to_junit_xml(result, ...)`, `to_review_digest(result, ...)`, and the
+default `to_markdown(result, ...)` each take `result` as a required,
+non-`Optional` `DiffResult` positional argument — on the `not_comparable`
+path (no `DiffResult` ever constructed), calling any of them the normal
+way crashes or requires inventing a synthetic empty `DiffResult`, neither
+of which is what this ADR intends. The front-end's own exception handler
+therefore renders the not-comparable outcome directly, per format, the
+same way it already assembles `verdict: null` JSON, instead of calling
+`render_output` at all on this path: **SARIF** gets one `run` with
+`invocations[0].executionSuccessful: false` and a
+`toolExecutionNotifications` entry carrying the not-comparable reason —
+SARIF's own defined mechanism for "the tool didn't complete analysis,"
+so a SARIF consumer (e.g. GitHub Code Scanning) can't misread an empty
+`results` array as a clean pass; **JUnit** gets one `<testsuite>` with a
+single `<testcase>` wrapping an `<error message="...">` (not
+`<failure>` — JUnit's own convention for "the test itself couldn't run,"
+distinct from an ordinary reported ABI break, which stays a `<failure>`);
+**markdown/review** (human-readable, no schema to satisfy) get a plain
+"NOT COMPARABLE: `<reason>`" summary line. `service_render.py`
+(`render_output`'s `sarif`/`html`/`junit`/`review`/default-`markdown`
+branches are all skipped on the `not_comparable` path, not just `html`),
+`abicheck/schemas/compare_report.schema.json`,
 `abicheck/schemas/__init__.py` (`REPORT_SCHEMA_VERSION` bump),
 `docs/schemas/v1/compare_report.schema.json` (regenerated via
 `scripts/publish_schemas.py`, not hand-edited), `aggregate.py`
@@ -1414,10 +1439,22 @@ stricter);
 `tests/test_report_schema.py` gains a `not_comparable` case validated
 against the updated `compare_report.schema.json`, and its existing
 `test_docs_mirror_matches_packaged_schema` must still pass against the
-regenerated `docs/schemas/v1` copy; an **HTML reporting** test asserting
-`render_output(..., fmt="html")` on a `not_comparable` path never reaches
-`generate_html_report` with a missing `DiffResult` (the front-end's exception
-handler owns that path instead), and a second test asserting a mixed-pair
+regenerated `docs/schemas/v1` copy; a **multi-format not_comparable
+reporting** test suite asserting `render_output(..., fmt=...)` on a
+`not_comparable` path is never reached at all — for **each** of `sarif`,
+`html`, `junit`, `review`, and the default `markdown`, not only `html` —
+proving the front-end's own exception handler owns every one of those
+paths instead of calling `to_sarif_str`/`generate_html_report`/
+`to_junit_xml`/`to_review_digest`/`to_markdown` with a missing
+`DiffResult`; a dedicated **SARIF not-comparable** test asserting the
+emitted SARIF log has `invocations[0].executionSuccessful == false` and a
+`toolExecutionNotifications` entry carrying the not-comparable reason,
+never an empty `results` array that a SARIF consumer could misread as a
+clean pass; a dedicated **JUnit not-comparable** test asserting the
+emitted XML has exactly one `<testcase>` wrapping an `<error
+message="...">`, not a `<failure>` — proving JUnit's own
+couldn't-run-the-test convention is used, distinct from an ordinary
+reported ABI break; and a second test asserting a mixed-pair
 `contract_coverage` comparison's HTML output surfaces `contract_coverage`
 the same way its JSON/Markdown/SARIF/JUnit siblings do; a root-relative-path fingerprint test
 (the acceptance-criteria bullet above — same-tree-different-root compare
@@ -1974,6 +2011,23 @@ exist.
   extraction failure, never a successful snapshot with the wrong target
   silently selected; more than one context sharing the requested `kind` →
   `AST_CONTEXT_AMBIGUOUS`, never resolved by an implicit tiebreaker.
+- **The resolved `kind` must be folded into `profile_fingerprint`'s hashed
+  fields — selecting the right context is not the same as the gate
+  knowing which one was selected.** Phase A's `profile_fingerprint` field
+  list predates this phase (`frontend_context` doesn't exist until Phase
+  B/this phase), so it was never added there; leaving it un-added here
+  would silently reopen the exact under-counting bug Phase A exists to
+  close, one field short — two extractions requesting different
+  `frontend_context` values (`host` vs. `device`), otherwise identical in
+  compiler/target/macros/includes, parse genuinely different ASTs, but
+  D2's gate would never see the difference and any resulting AST
+  difference would surface as an ordinary reported `Change` instead of a
+  pre-diff `not_comparable`. `comparability.compute_extraction_contract`
+  gains the resolved `kind` as a hashed input, not just the *requested*
+  `frontend_context` string — the two would still agree even when an
+  ambiguity-adjacent frontend quirk resolved to a differently-labeled
+  context on each side for the same requested value, which the requested
+  string alone can't see but the actually-resolved `kind` can.
 - `dumper_clang.py`'s existing single-context assumption is generalized to
   call this module when the detected frontend is DPC++-capable; a plain
   (non-SYCL) clang/castxml invocation is unaffected.
@@ -2017,7 +2071,16 @@ asserting a DPC++-capable invocation whose decoded stream comes back empty
 `AST_CONTEXT_MISSING`, never silently falling back to the single-context
 path — proving the fallback distinguishes "genuinely not a multi-document
 invocation" from "was one, but decoded to nothing," the specific
-conflation this criterion exists to prevent.
+conflation this criterion exists to prevent. A **host/device
+profile-fingerprint mismatch** test asserting an old/new pair extracted
+with `frontend_context=host` on one side and `frontend_context=device` on
+the other, otherwise identical compiler/target/macros/includes, produces
+*different* `profile_fingerprint`s and raises `ProfileMismatchError` from
+D2's gate — proving the resolved `kind` actually reaches
+`compute_extraction_contract`'s hash, not just `sycl_context.py`'s
+selection logic; a companion assertion with the *same* `frontend_context`
+on both sides leaves `profile_fingerprint` matching, the routine case this
+fix must not break.
 
 **Example fixtures.** None required beyond Phase 0's captures — this phase
 is extraction-layer, not diff-layer; no new `ChangeKind`.
