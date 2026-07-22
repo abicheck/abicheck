@@ -407,12 +407,23 @@ def _looks_like_genuine_requires_clause(
     requires-expression form (:func:`_looks_like_requires_declarator`), a
     clause has no body to confirm, so the *only* positive signal
     available is the preceding template header — exactly the same
-    positive-signal-required design already used for ``concept``."""
+    positive-signal-required design already used for ``concept``.
+
+    A *trailing* requires-clause following a function's declarator (
+    ``template<class T> void f(T) requires std::integral<T>;``) is
+    equally genuine, signaled by the prefix ending in the parameter
+    list's closing ``)`` instead — Codex review. This is unambiguous:
+    nothing but a trailing specifier (cv/ref-qualifier, ``noexcept``, a
+    requires-clause, ...) can follow a function declarator's ``)``
+    before the terminating ``;``/``{`` in *any* C++ grammar, pre-C++20
+    included — there is no production for a second, unrelated statement
+    beginning right there with no separator."""
     same_line_prefix = lookahead[:match_start].rstrip()
-    if same_line_prefix.endswith(b">"):
+    if same_line_prefix.endswith(b">") or same_line_prefix.endswith(b")"):
         return True
     if not same_line_prefix:
-        return prev_nonblank_code.rstrip().endswith(b">")
+        prev = prev_nonblank_code.rstrip()
+        return prev.endswith(b">") or prev.endswith(b")")
     return False
 
 

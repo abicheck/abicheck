@@ -93,6 +93,43 @@ def test_cpp20_detector_accepts_template_requires_clause(tmp_path):
     assert any(r.reason == "requires-clause" for r in reqs)
 
 
+def test_cpp20_detector_accepts_trailing_requires_clause_after_declarator(
+    tmp_path,
+):
+    """Regression (Codex review): a *trailing* requires-clause following a
+    function's declarator (``template<class T> void f(T) requires
+    std::integral<T>;``) has its prefix end in the parameter list's
+    closing ``)``, not a template header's ``>`` — this is unambiguous,
+    since nothing but a trailing specifier can follow a function
+    declarator's ``)`` before the terminating ``;``/``{`` in any C++
+    grammar, pre-C++20 included."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <concepts>\ntemplate<class T> void f(T) requires std::integral<T>;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "requires-clause" for r in reqs)
+
+
+def test_cpp20_detector_accepts_trailing_requires_clause_on_own_line(
+    tmp_path,
+):
+    """Companion: the trailing-clause form split onto its own line after
+    the declarator (empty same-line prefix, falling back to
+    prev_nonblank_code ending in ")")."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <concepts>\n"
+        "template<class T>\nvoid f(T)\nrequires std::integral<T>;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "requires-clause" for r in reqs)
+
+
 def test_cpp20_detector_accepts_requires_expression(tmp_path):
     headers = _write(
         tmp_path,
