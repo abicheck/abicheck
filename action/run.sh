@@ -319,18 +319,33 @@ elif [[ "$MODE" == "compare" ]]; then
   add_sided_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
   add_sided_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
-  add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-  # Cross-compiler flags -- documented root-Action inputs, but previously
-  # only wired to dump mode's branch. Without them, a compare against a
-  # cross-target library silently falls back to the host toolchain/includes
-  # for header parsing and can produce false ABI results (Codex review).
-  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
-  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
-  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
-  if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
-    CMD+=(--nostdinc)
+  # The L2 compile-context flags (--ast-frontend/--gcc-*/--sysroot/
+  # --nostdinc) are rejected outright by the CLI (a UsageError, exit 64)
+  # for directory/package operands — the per-library release fan-out
+  # doesn't thread a CompileContext to each pair's header dump (Codex
+  # review: forwarding them unconditionally here turned a working release
+  # comparison into a hard failure the moment any of these Action inputs
+  # were configured). Gate them to the single-pair path, same as the
+  # release-only flags below are gated the other way, and warn instead of
+  # silently dropping a configured context.
+  if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+     || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+    if [[ -n "${INPUT_AST_FRONTEND:-}" || -n "${INPUT_GCC_PATH:-}" \
+          || -n "${INPUT_GCC_PREFIX:-}" || -n "${INPUT_GCC_OPTIONS:-}" \
+          || -n "${INPUT_SYSROOT:-}" || "${INPUT_NOSTDINC:-false}" == "true" ]]; then
+      echo "::warning::ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc are not applied to directory/package (release) comparisons — the per-library fan-out does not thread the L2 compile context to each pair's header dump. Compare the libraries individually to use them." >&2
+    fi
+  else
+    add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
+    add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
+    add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+    add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+    add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
+
+    if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
+      CMD+=(--nostdinc)
+    fi
   fi
 
   # Build/source evidence (--depth build/source) — new (candidate) side only.

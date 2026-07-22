@@ -41,19 +41,58 @@ _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
 _SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" ]]; then'
 
 _COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
-# All three modes' regions end at the nostdinc if-block; anchor past its
-# closing "fi" so the extracted fragment is syntactically complete.
+# dump/scan have no release fan-out, so their regions end at the nostdinc
+# if-block; anchor past its closing "fi" so the extracted fragment is
+# syntactically complete.
 _COMPILE_CONTEXT_END = (
     'if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then\n    CMD+=(--nostdinc)\n  fi'
 )
 
+# compare's region is structurally different (Codex review: these flags are
+# gated to the single-pair path there, since the release fan-out rejects
+# them outright) — it starts at the gating comment, not at the first
+# add_single_flag, and its nostdinc if-block is nested one level deeper
+# inside the release-style/single-pair if/else, ending at the *outer* "fi".
+_COMPARE_COMPILE_CONTEXT_START = (
+    "# The L2 compile-context flags (--ast-frontend/--gcc-*/--sysroot/"
+)
+_COMPARE_COMPILE_CONTEXT_END = (
+    'if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then\n'
+    "      CMD+=(--nostdinc)\n"
+    "    fi\n"
+    "  fi"
+)
 
-def _compile_context_region(mode_marker: str) -> str:
+# _is_release_style_operand is defined once, well before any mode branch;
+# compare's extracted region calls it, so the harness needs its real
+# definition rather than a hand-copied stub (same "parse the real file"
+# discipline as the rest of this module).
+_IS_RELEASE_STYLE_OPERAND_START = "_is_release_style_operand() {"
+_IS_RELEASE_STYLE_OPERAND_END = "\n}\n"
+
+
+def _is_release_style_operand_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_IS_RELEASE_STYLE_OPERAND_START)
+    end = text.index(_IS_RELEASE_STYLE_OPERAND_END, start) + len(
+        _IS_RELEASE_STYLE_OPERAND_END
+    )
+    return text[start:end]
+
+
+def _compile_context_region(
+    mode_marker: str, start_marker: str = _COMPILE_CONTEXT_START
+) -> str:
     """Extract one mode's compile-context flag-forwarding block verbatim."""
     text = RUN_SH.read_text(encoding="utf-8")
     mode_start = text.index(mode_marker)
-    start = text.index(_COMPILE_CONTEXT_START, mode_start)
-    end = text.index(_COMPILE_CONTEXT_END, start) + len(_COMPILE_CONTEXT_END)
+    start = text.index(start_marker, mode_start)
+    end_marker = (
+        _COMPARE_COMPILE_CONTEXT_END
+        if start_marker == _COMPARE_COMPILE_CONTEXT_START
+        else _COMPILE_CONTEXT_END
+    )
+    end = text.index(end_marker, start) + len(end_marker)
     return text[start:end]
 
 
@@ -86,14 +125,25 @@ _FULL_ENV = {
 }
 
 
-def _run_region(mode_marker: str, env_extra: dict[str, str]) -> list[str]:
+def _run_region(
+    mode_marker: str,
+    env_extra: dict[str, str],
+    start_marker: str = _COMPILE_CONTEXT_START,
+) -> tuple[list[str], str]:
     # add_single_flag is defined earlier in run.sh; redefine a minimal
     # equivalent here since only the compile-context region is extracted,
     # not the whole file (keeps the harness self-contained and fast).
-    harness = 'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\nCMD=()\n'
+    # _is_release_style_operand is extracted from the real file (only
+    # compare's region calls it, but defining it unconditionally is
+    # harmless for dump/scan).
+    harness = (
+        'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+        + _is_release_style_operand_source()
+        + "\nCMD=()\n"
+    )
     script = (
         harness
-        + _compile_context_region(mode_marker)
+        + _compile_context_region(mode_marker, start_marker)
         + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
     )
     env = {**os.environ, **env_extra}
@@ -104,14 +154,14 @@ def _run_region(mode_marker: str, env_extra: dict[str, str]) -> list[str]:
         env=env,
         check=True,
     )
-    return out.stdout.splitlines()
+    return out.stdout.splitlines(), out.stderr
 
 
 class TestCompileContextForwardingParity:
     """dump/compare/scan must forward the identical flag set."""
 
     def test_dump_forwards_all_six_flags(self) -> None:
-        cmd = _run_region(_DUMP_MODE_MARKER, _FULL_ENV)
+        cmd, _ = _run_region(_DUMP_MODE_MARKER, _FULL_ENV)
         assert "--ast-frontend" in cmd and "clang" in cmd
         assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
         assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
@@ -123,8 +173,15 @@ class TestCompileContextForwardingParity:
         """Regression: compare used to forward only --ast-frontend, behind a
         comment incorrectly claiming the rest are dump-only — the CLI's
         `compare` command has shared `compile_context_options` (ADR-037 D3)
-        the whole time."""
-        cmd = _run_region(_COMPARE_MODE_MARKER, _FULL_ENV)
+        the whole time. A single-pair (non-directory/package) old/new-library
+        is required here since compare's forwarding is now gated to that
+        path (see the release-style tests below)."""
+        env = {
+            **_FULL_ENV,
+            "INPUT_OLD_LIBRARY": "old.so",
+            "INPUT_NEW_LIBRARY": "new.so",
+        }
+        cmd, _ = _run_region(_COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START)
         assert "--ast-frontend" in cmd and "clang" in cmd
         assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
         assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
@@ -136,7 +193,7 @@ class TestCompileContextForwardingParity:
         """Regression: scan forwarded none of these, even though
         `cli_scan.py` shares the identical `compile_context_options`
         decorator with dump (ADR-037 D3 / ADR-035 amendment)."""
-        cmd = _run_region(_SCAN_MODE_MARKER, _FULL_ENV)
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, _FULL_ENV)
         assert "--ast-frontend" in cmd and "clang" in cmd
         assert "--gcc-path" in cmd and "/opt/gcc-14/bin/g++" in cmd
         assert "--gcc-prefix" in cmd and "aarch64-linux-gnu-" in cmd
@@ -145,13 +202,55 @@ class TestCompileContextForwardingParity:
         assert "--nostdinc" in cmd
 
     def test_compare_omits_unset_flags(self) -> None:
-        cmd = _run_region(_COMPARE_MODE_MARKER, {})
+        cmd, _ = _run_region(
+            _COMPARE_MODE_MARKER,
+            {"INPUT_OLD_LIBRARY": "old.so", "INPUT_NEW_LIBRARY": "new.so"},
+            _COMPARE_COMPILE_CONTEXT_START,
+        )
         assert "--gcc-path" not in cmd
         assert "--sysroot" not in cmd
         assert "--nostdinc" not in cmd
 
     def test_scan_omits_unset_flags(self) -> None:
-        cmd = _run_region(_SCAN_MODE_MARKER, {})
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, {})
         assert "--gcc-path" not in cmd
         assert "--sysroot" not in cmd
         assert "--nostdinc" not in cmd
+
+    def test_compare_skips_compile_context_for_release_style_operand(
+        self,
+    ) -> None:
+        """Regression (Codex review): the CLI hard-rejects these flags for
+        directory/package operands (a UsageError, exit 64) since the
+        per-library release fan-out never threads a CompileContext to each
+        pair's header dump — forwarding them unconditionally turned a
+        working release comparison into a hard failure the moment any of
+        these Action inputs were configured. A directory operand must skip
+        forwarding and warn instead."""
+        env = {
+            **_FULL_ENV,
+            "INPUT_OLD_LIBRARY": str(RUN_SH.parent),  # any real directory
+            "INPUT_NEW_LIBRARY": "new.so",
+        }
+        cmd, stderr = _run_region(
+            _COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START
+        )
+        assert "--ast-frontend" not in cmd
+        assert "--gcc-path" not in cmd
+        assert "--sysroot" not in cmd
+        assert "--nostdinc" not in cmd
+        assert "not applied to directory/package" in stderr
+
+    def test_compare_release_style_no_warning_when_context_unset(self) -> None:
+        """Companion: a plain directory/package compare with no compile-
+        context inputs configured must not emit the warning at all (only
+        when a flag was actually going to be dropped)."""
+        _, stderr = _run_region(
+            _COMPARE_MODE_MARKER,
+            {
+                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
+                "INPUT_NEW_LIBRARY": "new.so",
+            },
+            _COMPARE_COMPILE_CONTEXT_START,
+        )
+        assert "not applied to directory/package" not in stderr
