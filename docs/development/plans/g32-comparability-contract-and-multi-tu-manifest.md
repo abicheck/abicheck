@@ -185,13 +185,29 @@ Implements ADR-050 D1 and D2.
   verdict into a strictly less useful "couldn't tell" result. Fix:
   `check_contracts_comparable` inspects *which* resolved fields differ
   (the same per-field data `ExtractionContract` already stores for
-  reporting, not just the opaque hash), and when the *only* differing
-  fields are target/pointer-width/endianness, it does not raise —
-  `compare()` proceeds to the normal `diff_*` pipeline and lets the
-  existing platform detectors produce their own verdict. Any other
+  reporting, not just the opaque hash). Any other
   differing field still hard-fails as before, even alongside a
   co-occurring target difference — scoped to platform-identity fields
-  alone, not a general loosening.
+  alone, not a general loosening. **"Only the profile-fingerprint target
+  differs" is necessary but not sufficient — the carve-out must also
+  confirm the binaries themselves genuinely differ on that axis, or a
+  misconfigured extraction slips through uncaught.** A profile-only
+  target mismatch can happen with no real architecture difference at
+  all: a cross-compiler flag/`--gcc-prefix` set for only one side while
+  both `.so`/`.dll` files are genuinely the same architecture. In that
+  case `diff_platform.py` has no `elf_machine_changed`/etc. finding to
+  emit — the binaries never differed — so skipping the gate would let a
+  misconfigured, actually-non-comparable extraction through as an
+  ordinary diff, any AST artifact the wrong target introduced surfacing
+  as an apparently real `Change` with nothing flagging the underlying
+  problem. The carve-out therefore requires *both*: (1) the only
+  differing `profile_fingerprint` fields are target/pointer-width/
+  endianness, **and** (2) the snapshots' own binary-derived platform
+  metadata (the same header fields `elf_machine_changed` et al. already
+  read) shows a genuine difference on that same axis. Only when both hold
+  does `compare()` proceed instead of raising; (1) alone, with (2) false,
+  still raises `ProfileMismatchError` — an extraction misconfiguration,
+  not a legitimate cross-architecture compare.
 - **Both fingerprints hash root-relative paths, never raw absolute ones —
   the single highest-priority correctness requirement in this phase — and
   each normalizes against its *own* root, never a root shared across both.**
@@ -456,18 +472,28 @@ Implements ADR-050 D1 and D2.
   side semantics, current artifact vs. `--against`, identical to
   `compare`'s), and its `split_sided_paths(include_pairs)` call
   (`cli_scan.py:712`) becomes `split_sided_include_paths(include_pairs)`.
-  `dump_cmd`'s inline `--include` also switches to `SidedIncludePathParam`
-  — reusing the *same* type rather than inventing a second, `dump`-only
-  grammar, so there is one label syntax across all three commands instead
-  of a different one to remember for `dump` specifically; `dump` has no
-  side to scope, so its label form is always `--include
-  both:LABEL=PATH` (side parsed but ignored downstream — `dump`'s
-  `includes` never gets split by side in the first place, only label and
-  path are consumed). A colon-less `--include` value on `dump` keeps
-  today's exact behavior (`label=None`) for the same reason established
-  above: inventing a colon-less-on-`dump`-only labeled shape would reopen
-  the bare-`LABEL=PATH`-vs-ordinary-path-with-`=` ambiguity just closed,
-  for no benefit.
+  **`dump_cmd` cannot reuse `SidedIncludePathParam` as-is, though — doing
+  so silently breaks a currently-valid `dump --include` value.**
+  `SidedIncludePathParam` still honors the *unlabeled*
+  `[old=|new=|both=]PATH` grammar `SidedPathParam` already implements
+  (deliberate, so `compare`/`scan` — which already had this prefix rule —
+  don't change behavior). But `dump_cmd`'s `--include` is a plain
+  `click.Path` today and has *never* recognized `old=`/`new=`/`both=` as a
+  side prefix, so a directory literally named `old=foo/` is a valid,
+  existing value there; reusing `SidedIncludePathParam` wholesale would
+  newly start stripping that prefix on `dump` too, a real behavior change
+  unique to `dump` (unlike `compare`/`scan`, which already had it).
+  `dump_cmd` instead gets its own type, `LabeledIncludePathParam`: it
+  recognizes **only** the colon-terminated `both:LABEL=PATH` form (colon
+  was never meaningful to `dump`'s plain `click.Path` before, so adding it
+  is purely additive) and treats every other value — bare, or one that
+  happens to literally start with `old=`/`new=`/`both=` — as an ordinary,
+  unlabeled path exactly as `click.Path` does today, with no equals-form
+  side-prefix stripping at all. `dump`'s labeled form is therefore
+  `--include both:support=path` (only `both:` is accepted — there is no
+  real side concept, and no `old:`/`new:`, on a single-input command); a
+  value like `--include old=foo/` keeps meaning the literal directory
+  `old=foo/`, unchanged.
   `scope_fingerprint` owns everything
   under a project-owned root; `profile_fingerprint` owns only external
   roots, in full. **Excluding a project-owned directory's content must not
@@ -670,7 +696,15 @@ Implements ADR-050 D1 and D2.
   — proving the labeled form is only ever triggered by the literal colon
   prefix, never inferred from an ambient `=` in an otherwise-ordinary
   path, the exact regression a bare-`LABEL=PATH` grammar reading would
-  introduce (P2 review).
+  introduce (P2 review); a fifth assertion parses `dump --include
+  old=foo/` through `LabeledIncludePathParam` (`dump`'s own type, not
+  `SidedIncludePathParam`) and asserts it resolves to the literal
+  directory `Path("old=foo/")`, unlabeled — proving `dump`'s type never
+  strips an equals-form side prefix at all, the specific backward-compat
+  break reusing `SidedIncludePathParam` on `dump` would have introduced
+  (P2 review), alongside a companion assertion that `dump --include
+  both:support=path` still parses to `(label="support", path=Path("path"))`
+  through the same `dump`-specific type.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -1036,6 +1070,27 @@ Implements ADR-050 D1 and D2.
   ;;`), and `_maybe_post_pr_comment`'s `ERROR`-only skip is joined by an
   explicit exception that still posts for `NOT_COMPARABLE` — this result
   deserves the comment more than an ordinary pass, not less.
+  **Mapping the `VERDICT` string alone is not enough — the script's final
+  exit-code section never checks it, so the step still exits `0`.**
+  Verified against the actual code: `run.sh`'s final gate (`:1074-1145`)
+  starts `FINAL_EXIT=0` and only ever sets it to `1` inside branches keyed
+  on `ERROR`, or on `BREAKING`/`API_BREAK`/`FAIL`/`WARN`/`REMOVED_LIBRARY`/
+  `SEVERITY_ERROR`/`BUDGET_OVERFLOW` gated by their respective
+  `fail-on-*` inputs, across the `compare`/`scan`/`deps-compare`/`dump`
+  branches — there is no `NOT_COMPARABLE` check anywhere in that section.
+  Adding only the `case`-statement mapping above means `VERDICT` now
+  correctly *reads* `"NOT_COMPARABLE"`, but every mode's final-exit branch
+  still falls through unmatched and leaves `FINAL_EXIT=0` — a `compare`/
+  `scan`/`deps-compare` step whose underlying CLI exited `16`/`6`/`5` would
+  still report a **green** composite Action step, silently downgrading a
+  result that (per D2/the release-verdict-order fix elsewhere in this
+  plan) is supposed to be *more* blocking than an ordinary break, not
+  less. `NOT_COMPARABLE` gets its own unconditional check, alongside (not
+  gated by) the existing `ERROR` check at the top of the final-exit
+  section — not folded into any mode-specific `fail-on-*`-gated branch,
+  since (matching `ERROR`'s own treatment) whether a comparison could even
+  be attempted is not something a `fail-on-breaking`/`fail-on-api-break`
+  toggle should be able to opt out of.
 - **`html_report.py`/`service_render.py` are the fourth reporting surface,
   not an optional add-on.** AGENTS.md's own module map groups `html_report.py`
   with `reporter.py`/`sarif.py`/`junit_report.py` under "Reporting," and
@@ -1179,9 +1234,14 @@ above for why): `cli_scan.py` (`scan_cmd`'s own inline `--include`
 (`include_pairs`, `:487-495`) switches `type=` to `SidedIncludePathParam`
 too, and its `split_sided_paths(include_pairs)` call (`:712`) becomes
 `split_sided_include_paths(include_pairs)`), `cli.py` (`dump_cmd`'s own
-inline `--include` (`:486`, plain `click.Path` today) switches to the
-same `SidedIncludePathParam` as well, so `dump`/`scan`/`compare` share one
-label grammar rather than `dump` alone getting a second, narrower one).
+inline `--include` (`:486`, plain `click.Path` today) switches to a new,
+`dump`-specific `LabeledIncludePathParam` instead — not
+`SidedIncludePathParam` itself, which would silently start stripping
+`old=`/`new=`/`both=` off a `dump --include` value for the first time
+ever, breaking a directory literally named that way; `dump`'s type
+recognizes only the colon-terminated `both:LABEL=PATH` label form and
+leaves every other value, including one that happens to start with
+`old=`/`new=`/`both=`, untouched).
 **Getting the label out of Click's parsed value is not enough — it still
 needs its own path down to `comparability.compute_extraction_contract`,
 the same per-layer threading already required (and already found
@@ -1520,7 +1580,15 @@ otherwise identical in every other profile field, does **not** raise
 **plus** a genuinely different macro definition asserts the gate still
 raises `ProfileMismatchError` — proving the carve-out is scoped to
 target-only mismatches, not a blanket exemption whenever a target
-difference happens to be present; a **diagnostic-comparison API** test asserting `checker.compare(old, new,
+difference happens to be present; a **misconfigured-extraction** test
+asserting that when `profile_fingerprint`'s target component differs but
+the old/new binaries' *own* ELF/PE/Mach-O metadata is identical (a
+`--gcc-prefix` cross-compile flag applied to only one side, both actual
+`.so` files genuinely the same architecture), the gate still raises
+`ProfileMismatchError` rather than skipping — proving the carve-out
+requires artifact-confirmed platform drift, not merely a differing
+compile-context target, the specific misconfiguration this stricter
+condition exists to keep catching; a **diagnostic-comparison API** test asserting `checker.compare(old, new,
 diagnostic_comparison=True)` on a mismatched pair returns a real
 `DiffResult` (never raises) with `assurance == "none"` — proving the flag
 reaches the gate check itself, not just a CLI-level catch with nothing to
@@ -1582,7 +1650,16 @@ each map to `VERDICT="NOT_COMPARABLE"`, never the `*) VERDICT="ERROR"`
 fallback, plus a `_maybe_post_pr_comment` test asserting a `NOT_COMPARABLE`
 verdict still posts a PR comment despite the existing `ERROR`-only skip —
 proving the Action doesn't both misreport and silently suppress the one
-comment meant to surface a deliberate not-comparable result.
+comment meant to surface a deliberate not-comparable result. A
+**separate, dedicated final-exit** test asserting the composite Action
+step itself exits non-zero (not just that `VERDICT` reads correctly) for
+each of `compare`/`scan`/`deps-compare` given exit `16`/`6`/`5` — proving
+the mapping fix alone doesn't already cover this, since `run.sh`'s
+final-exit section is a separate code path from the `case`-statement
+mapping and, verified against the actual code, has no `NOT_COMPARABLE`
+branch of its own; without it, `FINAL_EXIT` stays `0` and the step
+reports green despite the underlying CLI call having failed to compare
+at all.
 
 **Example fixtures.** The Phase 0 "scope drift" pair stays a `tests/`-level
 fixture, not an `examples/case*/` catalog entry: `tests/test_validate_examples_unit.py`'s

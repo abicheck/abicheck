@@ -560,19 +560,32 @@ instead of one. `scan_cmd`'s inline registration switches to
 `SidedIncludePathParam` too (it already has old=/new= side semantics
 identical to `compare`'s, scoping to the current artifact vs. the
 `--against` side); its `split_sided_paths(include_pairs)` call becomes
-`split_sided_include_paths(include_pairs)`. `dump_cmd`'s inline
-registration switches to the *same* `SidedIncludePathParam`, rather than
-inventing a second, `dump`-only label grammar: `dump` has no old/new side
-to scope, but reusing one type keeps one label syntax across all three
-commands instead of asking users to remember a different one for `dump`
-(`--include old:support=path` on `compare`/`scan`, `--include
-both:support=path` on `dump` — side is parsed but ignored downstream,
-since `dump` has nothing to split by side in the first place; the label
-and path are what `dump` actually consumes). A bare, colon-less
-`--include` value on `dump` behaves exactly as it does today (label=None,
-side ignored) — inventing a colon-less-on-`dump`-only label shape would
-reopen the exact bare-`LABEL=PATH` ambiguity just closed above, for no
-real benefit.
+`split_sided_include_paths(include_pairs)`.
+
+**`dump_cmd` cannot reuse `SidedIncludePathParam` as-is — doing so
+silently breaks a currently-valid `dump --include` value, the exact class
+of regression this design has already had to catch twice for other
+grammars.** `SidedIncludePathParam` still honors the *unlabeled*
+`[old=|new=|both=]PATH` grammar `SidedPathParam` already implements —
+that's deliberate, so `compare`/`scan` (which already had this prefix
+rule) don't change behavior. But `dump_cmd`'s `--include` is a plain
+`click.Path` today: it has *never* recognized `old=`/`new=`/`both=` as a
+side prefix, so a directory literally named `old=foo/` is a valid,
+existing `--include` value there. Switching `dump_cmd` to
+`SidedIncludePathParam` wholesale would newly start stripping that prefix
+on `dump` too — a real, if narrow, behavior change on a flag that never
+had this ambiguity before, unlike `compare`/`scan`. `dump_cmd` therefore
+gets its own, `dump`-specific type, `LabeledIncludePathParam`: it
+recognizes **only** the colon-terminated `both:LABEL=PATH` form (colon
+was never meaningful to `dump`'s plain `click.Path` before, so adding it
+is purely additive) and treats *every other value* — bare, or one that
+happens to literally start with `old=`/`new=`/`both=` — as an ordinary,
+unlabeled path exactly as `click.Path` does today, with **no** equals-form
+side-prefix stripping at all. `dump`'s labeled form is therefore
+`--include both:support=path` (side is not a real concept for `dump`, so
+only `both:` is accepted — there is no `old:`/`new:` on a single-input
+command); a value like `--include old=foo/` keeps meaning the literal
+directory `old=foo/`, unchanged.
 This is a strict partition on `-I` *directories*, not individual files:
 `scope_fingerprint` owns everything under a project-owned root (declared
 or not); `profile_fingerprint` owns only external roots, in full.
@@ -780,15 +793,41 @@ gate therefore inspects *which* resolved fields differ, not only whether
 the overall hash differs: `check_contracts_comparable` computes the
 mismatch at field granularity (the same resolved fields
 `ExtractionContract` already stores so a report can show *what* differs,
-not just that the hashes don't match — D1), and when the *only* differing
-fields are target triple/pointer width/endianness, the gate does not
-raise — it lets `compare()` proceed to the normal `diff_*` pipeline, where
-`diff_platform.py`'s existing detectors take over and produce their own,
-already-correct verdict. Any *other* differing field (compiler family,
-macros, `-I` content, language standard) still hard-fails exactly as
-before, even if a target difference happens to co-occur with it — this
-carve-out is scoped to the platform-identity fields alone, not a general
-loosening of the gate.
+not just that the hashes don't match — D1). Any *other* differing field
+(compiler family, macros, `-I` content, language standard) still
+hard-fails exactly as before, even if a target difference happens to
+co-occur with it — this carve-out is scoped to the platform-identity
+fields alone, not a general loosening of the gate.
+
+**"Only the compile-context target differs" is necessary but not
+sufficient — the carve-out must also confirm the binaries themselves
+genuinely differ on that axis, or a misconfigured extraction slips
+through with nothing left to catch it.** A profile-only target mismatch
+can happen without the compared binaries actually targeting different
+architectures at all — a cross-compiler flag or `--gcc-prefix` set for
+only one side while both `.so`/`.dll` files are genuinely, say, `x86_64`
+is exactly this: `profile_fingerprint`'s target component differs (the
+*extraction* used a different target), but `diff_platform.py` has no
+`elf_machine_changed`/`elf_class_changed`/`elf_endianness_changed`
+finding to emit, because the binaries' own metadata never differed in the
+first place. Skipping the gate unconditionally in this case would let a
+misconfigured, genuinely non-comparable extraction proceed as an ordinary
+diff — any AST difference the wrong target introduced (a
+target-conditional `#ifdef` branch, a different `sizeof`) would surface
+as an apparently real reported `Change`, with no detector output to flag
+that anything was wrong, the opposite of "an artifact-backed detector
+already has a correct answer for this." The carve-out therefore requires
+*both* conditions, not just the profile-fingerprint one: (1) the only
+differing `profile_fingerprint` fields are target triple/pointer
+width/endianness, **and** (2) the old/new snapshots' own binary-derived
+platform metadata (the same ELF/PE/Mach-O header fields
+`elf_machine_changed` et al. already read) shows a genuine difference on
+that same axis. Only when both hold does the gate skip raising and let
+`compare()` proceed to `diff_platform.py`'s detectors; when (1) holds but
+(2) doesn't — the compile context's target differs but the real binaries
+agree — the gate still raises `ProfileMismatchError`, correctly treating
+it as an extraction misconfiguration rather than a legitimate
+cross-architecture comparison.
 
 **A fourth surface reaches `checker.compare` besides the three named
 above: `cli_compare_release.py`'s directory/package fan-out, and it needs
@@ -1100,7 +1139,19 @@ visible first-party consumer. `action/run.sh` gains a matching `VERDICT`
 value (e.g. `NOT_COMPARABLE`) for each new code, and
 `_maybe_post_pr_comment`'s `ERROR`-only skip is joined by an explicit
 carve-out that still posts for `NOT_COMPARABLE` — this result deserves the
-comment more than an ordinary pass, not less.
+comment more than an ordinary pass, not less. **Mapping the `VERDICT`
+string is necessary but not sufficient — `run.sh`'s separate final
+exit-code section has no `NOT_COMPARABLE` branch of its own, verified
+against the actual code (`:1074-1145`): it starts `FINAL_EXIT=0` and only
+ever sets it to `1` inside `ERROR`, or inside per-mode branches gated by
+their own `fail-on-*` inputs.** Adding only the `VERDICT` mapping leaves
+every mode's final-exit branch falling through unmatched, `FINAL_EXIT`
+staying `0` — a `compare`/`scan`/`deps-compare` step whose CLI exited
+`16`/`6`/`5` would still report a green composite Action step. This is
+fixed with its own unconditional check, alongside (not gated by, matching
+how `ERROR` itself is treated) the existing top-of-section `ERROR` check
+— whether a comparison could be attempted at all is not something a
+`fail-on-breaking`/`fail-on-api-break` toggle should be able to waive.
 
 **`assurance` is a single field on `DiffResult` (alongside
 `contract_coverage`), not a per-`Change` field.** A forced diagnostic
