@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -546,6 +547,18 @@ class TestArchiveExtraction:
         assert outputs.get("channel") == "release-contract"
         assert "malformed" in outputs.get("message", "")
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "git-bash's tar on windows-latest CI does not reliably "
+            "recreate a symlink as a real NTFS reparse point on extraction "
+            "(observed: the extracted tree has no symlink at all, so "
+            "run.sh's `find -type l` guard never fires and the baseline "
+            "resolves normally) -- an extraction-tooling limitation of the "
+            "Windows test runner, not a gap in run.sh's detection logic, "
+            "which the Linux/macOS lanes still exercise."
+        ),
+    )
     def test_archive_with_symlink_hard_fails_with_typed_outputs(
         self, tmp_path: Path
     ) -> None:
