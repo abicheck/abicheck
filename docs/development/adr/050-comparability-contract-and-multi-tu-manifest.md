@@ -770,6 +770,16 @@ state — dominating `exit_code()` regardless of `discovered_only`, matching
 the same "a `not_comparable` result must never read as safe" rule D2
 already applies to the native `compare`/`compat check`/`scan`/`deps
 compare` schemes and the release-level rollup's rank-6 precedence.
+**Pinned to `1`, not a new number:** `docs/reference/exit-codes.md`'s
+`aggregate` table already documents `1` as covering both a coverage gap
+and "a non-verdict per-report failure" (its own stated example being
+`scan`'s budget-overflow `5` folding in there) — `not_comparable` is
+exactly that same class of failure, so it joins the existing bucket rather
+than reserving a new disjoint code the way each *producer* command
+(`compare`/`scan`/`deps compare`) did for its own scheme; `aggregate`
+never invents a code per producer, it has one shared "not a clean verdict"
+bucket. Both the `aggregate` table and the `## Summary table` cross-command
+matrix in `docs/reference/exit-codes.md` gain the corresponding row.
 
 **The GitHub Action wrapper is another consumer with the same blind spot,
 one layer further from the Python package.** `action/run.sh` maps each

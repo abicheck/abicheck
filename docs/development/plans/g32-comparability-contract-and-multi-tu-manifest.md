@@ -721,9 +721,23 @@ Implements ADR-050 D1 and D2.
   consumer surface untouched so far. `aggregate.py` gains a way to tell a
   deliberate `not_comparable` report (its `reason` object is present) from
   a genuinely missing/corrupt one, and folds it into `exit_code()` as an
-  unconditionally blocking contribution — regardless of `discovered_only`,
-  matching the same precedence `_RELEASE_VERDICT_ORDER`'s rank-6 entry
-  already gives `not_comparable` in the release rollup.
+  unconditionally blocking contribution — regardless of `discovered_only`.
+  **The resulting code is pinned to `1`, not left to whatever an
+  implementer picks.** `docs/reference/exit-codes.md`'s own `aggregate`
+  table already establishes the precedent this fits, not a new one:
+  `1` is documented as covering both a coverage gap *and* "a non-verdict
+  per-report failure" (its own example being `scan`'s budget-overflow
+  exit `5` folding in there) — `not_comparable` is exactly that same class
+  of non-verdict per-report failure, so it folds into `aggregate`'s
+  existing `1`, the same way `scan`'s `5` already does, rather than
+  reserving a fifth disjoint number the way `compare`/`scan`/`deps compare`
+  each did for their *own* schemes (`aggregate` never invents a new code
+  per producer; it has one shared bucket for "this target isn't a clean
+  verdict"). `docs/reference/exit-codes.md`'s `aggregate` table gains an
+  explicit `not_comparable` row alongside the existing budget-overflow
+  example, and its `## Summary table` cross-command matrix gains a row
+  too, so both are updated in the same change, not just the aggregate
+  section in isolation.
 - **`action/run.sh` is another consumer with the same blind spot, one layer
   further from the Python package, and it compounds into a worse failure
   than a generic misreport.** Verified against the actual script:
@@ -1081,8 +1095,10 @@ comparison run under *every* `--severity-*` flag (`--severity-potential-breaking
 exits successfully — proving `contract_coverage` is structurally outside
 the findings list any severity flag scans, not merely untested against the
 one flag checked last time; an **aggregate not_comparable** test asserting
-`abicheck aggregate` in **discovered-only** mode exits non-zero when one
-target's report is `not_comparable` — never silently `0` — and a second
+`abicheck aggregate` in **discovered-only** mode exits exactly `1` when one
+target's report is `not_comparable` — never silently `0`, and not any
+other non-zero code either, matching the same bucket `scan`'s
+budget-overflow already folds into — and a second
 test asserting a `not_comparable` report is never conflated with a
 genuinely missing/corrupt one in `aggregate`'s rendered per-target output,
 proving the two "unavailable"-shaped states stay distinguishable; an
@@ -1186,14 +1202,20 @@ Implements ADR-050 D3. The highest-risk phase — see Risk above.
   `dump`'s stays a bare path (it only ever has one side).
 
 **Files & surfaces.** New `abicheck/dump_manifest.py`, `abicheck/dumper.py`
-(per-TU invocation loop, `TuFragment` type). `--dump-manifest` is a
+(per-TU invocation loop, `TuFragment` type, and the actual `--dump-manifest`
+termination point). `--dump-manifest` is a
 shared-concept option across `dump` and `compare` (side-scoped on `compare`
 via `SIDED_PATH_PARAM`, bare on `dump` — see the acceptance-criteria bullet
 above), added as one decorator in `cli_options.py` and applied at `dump`'s
 and `compare`'s existing declarations directly, not merely implied by
 registering a new command module — deliberately not named `--manifest`,
 which `@release_options` already registers on `compare` for the unrelated
-ADR-023 release manifest.
+ADR-023 release manifest. `cli_resolve.py` (`_resolve_compare_snapshots`
+and `_resolve_input` each gain the same manifest parameter, threaded
+through to `service.py`) and `service.py` (`resolve_input`/`run_dump` gain
+it too, the actual entry points into `dumper.py`) — see the dedicated
+acceptance-criteria bullet below for why every layer needs its own
+explicit update, not just `cli_compare_helpers.py`.
 **Declaring the Click option is not enough for `compare` — `cli_compare_helpers.py`
 needs the actual plumbing, the same gap already fixed once for the
 gate's own exception handling on this exact command.** `compare_cmd`
@@ -1203,10 +1225,24 @@ code — it already carries `manifest_path` for the unrelated ADR-023
 release manifest, confirming the pattern: a new Click option's dest must
 also appear here or it either raises "unexpected keyword argument" or
 never reaches the per-side dump resolution). `run_compare` gains the new
-`old_dump_manifest`/`new_dump_manifest` parameters and threads them into
-its per-side header/include resolution (`_resolve_compare_snapshots`),
-alongside the existing `except (ProfileMismatchError, ScopeMismatchError)`
-fix already planned there.
+`old_dump_manifest`/`new_dump_manifest` parameters — but `run_compare`
+itself is not the bottom of this chain either: it calls
+`cli_resolve._resolve_compare_snapshots`, which has its own large explicit
+signature (verified against the actual code — no manifest parameter today)
+and calls `cli_resolve._resolve_input` (also explicit, also no manifest
+parameter, "a thin CLI wrapper over `service.resolve_input`"), which calls
+`service.resolve_input`/`service.run_dump` — the actual entry points into
+`dumper.py`. Each of these four layers (`run_compare` →
+`_resolve_compare_snapshots` → `_resolve_input` →
+`service.resolve_input`/`run_dump`) has its own fixed, explicit
+keyword-argument signature with no existing manifest slot, so the new
+parameter must be threaded through every one of them individually, not
+just declared once at the top and assumed to flow — the exact mistake
+this ADR has already made and corrected once for `CompareRequest`
+(`run_compare_request` → `compare_snapshots`) earlier in this same phase.
+`dumper.dump()` is where it actually terminates, alongside the existing
+`except (ProfileMismatchError, ScopeMismatchError)` fix already planned
+in `run_compare`.
 **`--frontend-context` reaching `compile_context_options` means directory/package
 `compare` accepts it too — and must reject it, not silently ignore it.**
 The release/set-input fan-out (`cli_compare_release.py`) never threads a
@@ -1285,9 +1321,11 @@ manifest) coexist as distinct, independently-settable options on the same
 `compare` invocation — the specific collision this naming choice exists to
 avoid; and an end-to-end test asserting `compare old.so new.so
 --dump-manifest old=v1/abi.yml --dump-manifest new=v2/abi.yml` actually
-dumps each side from its own manifest through `run_compare`'s real
-resolution path (not just that Click accepts the flags) — proving
-`cli_compare_helpers.py`, not only `cli.py`, was updated. A **release
+dumps each side from its own manifest all the way through
+`dumper.dump()` (not just that Click accepts the flags, and not stopping
+at a mock of any intermediate layer) — proving `cli_compare_helpers.py`,
+`cli_resolve.py`, and `service.py` were all updated together, not just
+`cli.py`. A **release
 rejects `--frontend-context`** test asserting `compare old_dir new_dir
 --frontend-context device` fails fast via `cli_resolve.py`'s existing
 set-input guard, the same way it already fails fast for `--gcc-path`/
