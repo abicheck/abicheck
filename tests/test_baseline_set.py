@@ -195,16 +195,37 @@ def test_load_baseline_manifest_round_trip(tmp_path: Path) -> None:
 
 
 def test_resolve_target_not_found_required_is_hard_failure(tmp_path: Path) -> None:
-    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    # The baseline-path itself must not exist for the not_found/bootstrap
+    # case -- an *existing* directory with no manifest.json is a distinct,
+    # more concerning failure (see
+    # test_resolve_target_existing_dir_without_manifest_is_ambiguous below).
+    missing = tmp_path / "does-not-exist"
+    result = resolve_target(missing, target="libpvxs", profile=PROFILE, required=True)
     assert result.outcome == ResolveOutcome.NOT_FOUND
     assert result.bootstrap is False
     assert not result.ok
 
 
 def test_resolve_target_not_found_not_required_is_bootstrap(tmp_path: Path) -> None:
-    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=False)
+    missing = tmp_path / "does-not-exist"
+    result = resolve_target(missing, target="libpvxs", profile=PROFILE, required=False)
     assert result.outcome == ResolveOutcome.NOT_FOUND
     assert result.bootstrap is True
+
+
+def test_resolve_target_existing_dir_without_manifest_is_ambiguous(
+    tmp_path: Path,
+) -> None:
+    # An existing baseline-path directory (e.g. an empty/partial
+    # actions/cache restore) with no manifest.json inside it is malformed,
+    # not simply "unpublished" -- it must not silently bootstrap a
+    # required=False caller to a green run with zero comparison performed
+    # (Codex review).
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=False)
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert result.bootstrap is False
+    assert "does not contain a" in result.message
+    assert not result.ok
 
 
 def test_resolve_target_stale_schema(tmp_path: Path) -> None:
@@ -801,8 +822,9 @@ def _write_binary(baseline_dir: Path, rel_path: str) -> None:
 
 
 def test_resolve_bundle_not_found_required(tmp_path: Path) -> None:
+    missing = tmp_path / "does-not-exist"
     result = resolve_bundle(
-        tmp_path,
+        missing,
         bundle="pvxs-release",
         members=["libpvxs", "libpvxsIoc"],
         profile=PROFILE,
@@ -813,8 +835,9 @@ def test_resolve_bundle_not_found_required(tmp_path: Path) -> None:
 
 
 def test_resolve_bundle_not_found_bootstrap(tmp_path: Path) -> None:
+    missing = tmp_path / "does-not-exist"
     result = resolve_bundle(
-        tmp_path,
+        missing,
         bundle="pvxs-release",
         members=["libpvxs", "libpvxsIoc"],
         profile=PROFILE,
@@ -822,6 +845,21 @@ def test_resolve_bundle_not_found_bootstrap(tmp_path: Path) -> None:
     )
     assert result.outcome == ResolveOutcome.NOT_FOUND
     assert result.bootstrap is True
+
+
+def test_resolve_bundle_existing_dir_without_manifest_is_ambiguous(
+    tmp_path: Path,
+) -> None:
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs", "libpvxsIoc"],
+        profile=PROFILE,
+        required=False,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert result.bootstrap is False
+    assert "does not contain a" in result.message
 
 
 def test_resolve_bundle_wrong_profile(tmp_path: Path) -> None:

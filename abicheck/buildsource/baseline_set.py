@@ -376,18 +376,33 @@ def _load_manifest_or_result(
 ) -> tuple[BaselineManifest, None] | tuple[None, ResolveResult]:
     """Shared ``manifest.json`` load for :func:`resolve_target`/:func:`resolve_bundle`.
 
-    Converts both ways a load can fail into a typed :class:`ResolveResult`
-    instead of letting either escape as a raw exception: a missing manifest
-    becomes :data:`ResolveOutcome.NOT_FOUND` (with the usual bootstrap
-    split), and a manifest that exists but is corrupt/malformed (not valid
-    JSON, or not a JSON object) — a different failure than "not published
-    yet" — becomes :data:`ResolveOutcome.STALE_SCHEMA`, since either way this
-    resolver cannot understand the shape it's looking at. Without this, a
-    corrupt ``manifest.json`` (a truncated download, a hand edit) would raise
-    an unhandled ``ValueError`` all the way out of ``resolve_baseline.py``,
-    breaking the Action's typed-outcome contract for exactly the kind of
-    real baseline-resolution failure ADR-047 §6 exists to name.
+    Converts every way a load can fail into a typed :class:`ResolveResult`
+    instead of letting any of them escape as a raw exception or collapse
+    into the wrong outcome:
+
+    - ``baseline_dir`` itself does not exist becomes
+      :data:`ResolveOutcome.NOT_FOUND` (with the usual bootstrap split) --
+      the legitimate "nothing published for this channel yet" case.
+    - ``baseline_dir`` exists but has no ``manifest.json`` inside it (e.g.
+      an empty/partial ``actions/cache`` restore, or a stripped artifact
+      download) becomes :data:`ResolveOutcome.AMBIGUOUS`, not
+      ``not_found`` -- a directory a caller went to the trouble of staging
+      is a different, more concerning failure than "no baseline exists
+      yet" and must not silently bootstrap a `required: false` caller to a
+      green run with zero comparison performed (Codex review).
+    - a manifest that exists but is corrupt/malformed (not valid JSON, or
+      not a JSON object) -- a different failure than either of the above --
+      becomes :data:`ResolveOutcome.STALE_SCHEMA`, since this resolver
+      cannot understand the shape it's looking at. Without this, a corrupt
+      ``manifest.json`` (a truncated download, a hand edit) would raise an
+      unhandled ``ValueError`` all the way out of ``resolve_baseline.py``,
+      breaking the Action's typed-outcome contract for exactly the kind of
+      real baseline-resolution failure ADR-047 §6 exists to name.
     """
+    if not baseline_dir.is_dir():
+        return None, _not_found_result(
+            required, f"No baseline-set found at {baseline_dir} (path does not exist)."
+        )
     try:
         manifest = load_baseline_manifest(baseline_dir)
     except ValueError as exc:
@@ -401,8 +416,16 @@ def _load_manifest_or_result(
             ),
         )
     if manifest is None:
-        return None, _not_found_result(
-            required, f"No baseline-set found at {baseline_dir} (no manifest.json)."
+        return None, ResolveResult(
+            outcome=ResolveOutcome.AMBIGUOUS,
+            message=(
+                f"{baseline_dir} exists but does not contain a "
+                f"{BASELINE_MANIFEST_FILENAME} -- this looks like an "
+                "empty/partial cache restore or stripped artifact "
+                "directory, not simply an unpublished baseline (a "
+                "baseline-path that does not exist at all is the "
+                "not_found/bootstrap case)."
+            ),
         )
     return manifest, None
 

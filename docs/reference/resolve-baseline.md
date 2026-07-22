@@ -41,7 +41,7 @@ storage-backend table) — `actions/cache`, `actions/download-artifact`, or
 
 | Input | Required | Default | Meaning |
 |-------|----------|---------|---------|
-| `baseline-path` | yes | — | A directory already containing `manifest.json` (+ per-target snapshots, and `binaries/` for a bundle), **or** a `.tar.zst`/`.tar.gz`/`.tgz`/`.tar` archive of the same, extracted automatically. A path that doesn't exist is `not_found`, not a usage error. |
+| `baseline-path` | yes | — | A directory already containing `manifest.json` (+ per-target snapshots, and `binaries/` for a bundle), **or** a `.tar.zst`/`.tar.gz`/`.tgz`/`.tar` archive of the same, extracted automatically. A path that doesn't exist at all is `not_found`, not a usage error. A path that **does** exist (directory or extracted archive) but has no `manifest.json` inside it — e.g. an empty/partial `actions/cache` restore — is `ambiguous`, not `not_found`: it never bootstraps a `required: false` caller to a green run. |
 | `channel` | yes | — | `release-contract` \| `accepted-main` \| `explicit` \| a project-defined custom channel. Recorded on the output only — this Action trusts the caller already staged the right baseline-path for this channel. |
 | `kind` | no | `target` | `target` or `bundle`. |
 | `target` | when `kind: target` | — | Target id to resolve. |
@@ -72,9 +72,9 @@ caller explicitly opts in with `required: false`:
 
 | `outcome` | Job exit | When |
 |-----------|----------|------|
-| `not_found` (bootstrap) | `0` | No baseline set exists for `channel` yet, and `required: false`. |
-| `not_found` (required) | `1` | No baseline set exists for `channel` yet, and `required: true` (default) — a typo in the channel name, a missing release asset, or a cache-resolution bug must never produce a green branch-protection status with zero comparison performed. |
-| `ambiguous` | `1` | The baseline set exists but this target isn't in it (or, for `kind: bundle`, one or more declared members have no staged binary in `binaries/`). |
+| `not_found` (bootstrap) | `0` | `baseline-path` itself does not exist, and `required: false`. |
+| `not_found` (required) | `1` | `baseline-path` itself does not exist, and `required: true` (default) — a typo in the channel name, a missing release asset, or a cache-resolution bug must never produce a green branch-protection status with zero comparison performed. |
+| `ambiguous` | `1` | `baseline-path` exists but has no `manifest.json` (e.g. an empty/partial cache restore — a different, more concerning failure than "nothing published yet"); or the manifest exists but this target isn't in it; or, for `kind: bundle`, one or more declared members have no staged binary in `binaries/`. |
 | `wrong_profile` | `1` | The baseline set was built for a different `profile.id`. |
 | `stale_schema` | `1` | `manifest.json`'s `manifest_version` is newer/older than this resolver understands. |
 | `incompatible_evidence` | `1` | The baseline's recorded evidence producer (`wrapper`/`clang-plugin`/`replay`) disagrees with the candidate's, per `candidate-build-output`'s `evidence_producer` block — an infrastructure mismatch, not an ABI finding. |

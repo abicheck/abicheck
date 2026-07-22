@@ -243,6 +243,30 @@ class TestFailureTaxonomy:
         assert outputs.get("outcome") == "not_found"
         assert outputs.get("bootstrap") == "true"
 
+    def test_existing_dir_without_manifest_is_ambiguous_not_bootstrap(
+        self, tmp_path: Path
+    ) -> None:
+        # An existing baseline-path directory (e.g. an empty/partial
+        # actions/cache restore) with no manifest.json inside must not be
+        # treated the same as "no baseline published yet" -- even under
+        # required: false, this is a malformed baseline, not a legitimate
+        # bootstrap (Codex review).
+        empty_dir = tmp_path / "restored-but-empty"
+        empty_dir.mkdir()
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(empty_dir),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_REQUIRED": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert outputs.get("outcome") == "ambiguous"
+        assert outputs.get("bootstrap") == "false"
+
     def test_ambiguous_target_missing_from_set(self, tmp_path: Path) -> None:
         baseline_dir = tmp_path / "baseline"
         _write_manifest(baseline_dir, artifacts=[_target_artifact("libpvxsIoc")])
