@@ -254,8 +254,8 @@ By default, `abicheck compare` exits with the verdict:
 | `4` | `BREAKING` | Binary ABI break |
 | `64` | — | Invalid invocation (bad args/options, unreadable input) — outside the verdict space |
 
-> **Note:** passing any `--severity-*` flag (as the recipes below do) switches
-> `compare` to **severity-aware** exit codes: `0` = no error-level findings,
+> **Note:** passing any `--severity-*` flag switches `compare` to
+> **severity-aware** exit codes: `0` = no error-level findings,
 > `1` = error-level findings in addition/quality categories, `2` = in
 > potential-breaking, `4` = in ABI-breaking. The shape stays the same —
 > `0` passes, `4` is worst — but `1` then means a *finding*, not a tool error.
@@ -266,11 +266,10 @@ Other commands add their own codes on top of this space — `scan` can exit `5`
 per-command matrix, including `compat` mode, is the
 [Exit Codes reference](reference/exit-codes.md).
 
-Passing any `--severity-*` flag switches to a finer-grained exit-code scheme
-instead, and suppressions/policies/baselines all interact with the same
-pipeline before it — see [CI Gating](user-guide/ci-gating.md) for how those
-pieces fit together, [Severity Configuration](user-guide/severity.md) for the
-severity-aware codes and policy recipes, and the
+Suppressions/policies/baselines all interact with the same pipeline before
+the exit code is computed — see [CI Gating](user-guide/ci-gating.md) for how
+those pieces fit together, [Severity Configuration](user-guide/severity.md)
+for the full severity-aware scheme and policy recipes, and the
 [GitHub Action](user-guide/github-action.md) for the fastest way to wire this
 into CI (it installs Python/castxml/abicheck and runs the comparison in a few
 lines of YAML).

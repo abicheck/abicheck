@@ -44,7 +44,7 @@ pick the shape that matches the question it answers:
 Answers *"walk me through doing this end to end."* Sequential, one path, no
 mid-tutorial forks.
 
-```
+```text
 # <Outcome-oriented title>
 Outcome
 Prerequisites
@@ -58,7 +58,7 @@ Next step
 Answers *"how do I do this one specific thing?"* Assumes the reader already
 has the mental model; links to the explanation page instead of re-deriving it.
 
-```
+```text
 # <Task-oriented title>
 When to use this
 Procedure
@@ -72,7 +72,7 @@ Answers *"why does this work this way?"* Owns the mental model for a topic —
 if `docs/_meta/topics.yaml` has a `canonical_page` for this subject, this is
 its role.
 
-```
+```text
 # <Concept name>
 In one minute
 Mental model / mechanism

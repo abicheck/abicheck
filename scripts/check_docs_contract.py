@@ -47,6 +47,7 @@ check_usecase_docs_sync.py — this runs after `pip install -e .`, not before
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from collections import defaultdict
@@ -89,7 +90,7 @@ _DUPLICATE_SCAN_EXCLUDE_NAMES = frozenset({"CLAUDE.md", "AGENTS.md"})
 _MIN_DUPLICATE_WORDS = 40
 
 _FRONT_MATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
-_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+_FENCE_RE = re.compile(r"(`{3,}|~{3,}).*?\1", re.DOTALL)
 
 
 class Findings:
@@ -648,6 +649,7 @@ def _check_duplicate_paragraphs(f: Findings) -> None:
 
 
 def main() -> int:
+    argparse.ArgumentParser(description=__doc__).parse_args()
     f = Findings()
     topics = _load_topics(f)
     if topics is not None:
