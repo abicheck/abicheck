@@ -116,6 +116,37 @@ def test_referenced_paths_exist_flags_missing_canonical_page() -> None:
     assert "does/not/exist.md" in f.errors[0][1]
 
 
+def test_referenced_paths_exist_flags_null_canonical_page() -> None:
+    """`canonical_page:` with no value parses as YAML null — the required-
+    field check must treat that as missing, not as "key present, optional
+    value absent, skip validation" (regression test for the gap flagged in
+    PR #619 review: a topic with a null canonical_page previously passed
+    silently with no narrative owner at all)."""
+    topics = {"topic-a": {"canonical_page": None}}
+    f = dc.Findings()
+    dc._check_referenced_paths_exist(f, topics)
+    assert len(f.errors) == 1
+    assert "missing required 'canonical_page'" in f.errors[0][1]
+
+
+def test_canonical_page_uniqueness_ignores_topic_with_null_canonical_page() -> None:
+    topics = {"topic-a": {"canonical_page": None}, "topic-b": {"canonical_page": None}}
+    f = dc.Findings()
+    dc._check_canonical_page_uniqueness(f, topics)
+    # Both null -- not a real duplicate-ownership conflict (that's reported
+    # separately, as two missing-required-field errors by
+    # _check_referenced_paths_exist).
+    assert f.errors == []
+
+
+def test_canonical_pages_declare_ownership_ignores_null_canonical_page() -> None:
+    topics = {"topic-a": {"canonical_page": None}}
+    f = dc.Findings()
+    dc._check_canonical_pages_declare_ownership(f, topics)
+    assert f.errors == []
+    assert f.warnings == []
+
+
 def test_referenced_paths_exist_flags_missing_fact_source() -> None:
     topics = {
         "topic-a": {

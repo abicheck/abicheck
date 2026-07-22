@@ -181,20 +181,26 @@ def _resolves_under(base: Path, value: str) -> Path | None:
     Path("/etc/passwd")`, silently discarding `base`) — checking only the
     *resolved* result would still wrongly accept a machine-local absolute
     path that happens to resolve under `base` on this checkout but not on any
-    other. Resolves with `strict=True`: a *non*-strict resolve() lexically
+    other.
+
+    Existence is checked with a plain `.exists()` on the *raw, unresolved*
+    join, not `resolve()`/`resolve(strict=True)`: `resolve()` lexically
     collapses `..` even through a phantom, nonexistent intermediate segment
-    (e.g. `missing/../index.md` resolves to the real `index.md` even though
-    `missing/` was never created), which would let a broken registry entry
-    pass this check and then raise an unhandled FileNotFoundError the first
-    time a caller actually opens it via a plain (unresolved) join instead of
-    this function's result. Also catches `../` traversal proper, via the
-    resolved-parents check below."""
+    (e.g. `missing/../index.md` resolves straight to the real `index.md`
+    even though `missing/` was never created) — and `strict=True` does not
+    reliably close that gap either: it raises on POSIX for a phantom
+    intermediate component, but Windows' `resolve(strict=True)` was observed
+    to still resolve straight through one (CI: windows-latest, PR #619). A
+    plain `.exists()` on the raw join is an actual stat()/traversal on every
+    platform, with no lexical shortcut, so it can't be fooled the same way.
+    Once existence is confirmed, `resolve()` is safe to use purely to
+    compute the canonical form for the escape-boundary check below."""
     if Path(value).is_absolute():
         return None
-    try:
-        candidate = (base / value).resolve(strict=True)
-    except OSError:
+    raw = base / value
+    if not raw.exists():
         return None
+    candidate = raw.resolve()
     resolved_base = base.resolve()
     if candidate != resolved_base and resolved_base not in candidate.parents:
         return None
@@ -229,7 +235,7 @@ def _check_referenced_paths_exist(
     f: Findings, topics: dict[str, dict[str, object]]
 ) -> None:
     for topic_id, entry in topics.items():
-        if not isinstance(entry, dict) or "canonical_page" not in entry:
+        if not isinstance(entry, dict) or not entry.get("canonical_page"):
             f.err(
                 "ownership",
                 f"topic {topic_id!r}: missing required 'canonical_page' field",
@@ -278,7 +284,7 @@ def _check_canonical_page_uniqueness(
 ) -> None:
     owners: dict[str, list[str]] = defaultdict(list)
     for topic_id, entry in topics.items():
-        if isinstance(entry, dict) and "canonical_page" in entry:
+        if isinstance(entry, dict) and entry.get("canonical_page"):
             owners[_docs_relative_key(entry["canonical_page"])].append(topic_id)
     for page, topic_ids in owners.items():
         if len(topic_ids) > 1:
@@ -400,7 +406,7 @@ def _check_canonical_pages_declare_ownership(
     front matter at all. Missing front matter entirely is only a WARN (the
     schema is being rolled out incrementally, not required repo-wide yet)."""
     for topic_id, entry in topics.items():
-        if not isinstance(entry, dict) or "canonical_page" not in entry:
+        if not isinstance(entry, dict) or not entry.get("canonical_page"):
             continue
         resolved = _resolves_under(DOCS, str(entry["canonical_page"]))
         if resolved is None or not resolved.is_file():
