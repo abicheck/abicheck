@@ -761,8 +761,6 @@ def classify_change_surface(
     """
     if change.kind.value in _NEVER_FILTER_KIND_NAMES:
         return True, None
-    if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
-        return _classify_hidden_friend_surface(change, surf_old, surf_new)
     # Python-level API and CPython load-contract findings (G23/G14) live on a
     # distinct evidence axis from the C/C++ export surface: their ``symbol`` is a
     # dotted Python name the header-surface classifier cannot place, and demoting
@@ -775,7 +773,16 @@ def classify_change_surface(
         # If either side lacks a resolvable surface we cannot confidently
         # place a finding as private on *both* versions — keep everything
         # rather than risk hiding a real change from the unresolved side.
+        # Hidden-friend findings must go through this guard too (Codex
+        # review): dispatching to _classify_hidden_friend_surface before
+        # this check let it demote from whichever side happens to have
+        # resolvable origin data, even when the other side (e.g. an
+        # ELF-only baseline) offers nothing to cross-check against —
+        # exactly the mixed-evidence case this guard exists to protect
+        # every other kind of finding from.
         return True, None
+    if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
+        return _classify_hidden_friend_surface(change, surf_old, surf_new)
 
     if unions is None:
         unions = surface_unions(surf_old, surf_new)

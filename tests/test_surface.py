@@ -1331,6 +1331,38 @@ class TestHiddenFriendSurface:
         )
         assert classify_change_surface(c, s_old, s_new) == (True, None)
 
+    def test_unresolvable_side_blocks_hidden_friend_demotion(self):
+        """Regression (Codex review): when either side lacks a resolvable
+        surface (e.g. an ELF-only baseline with no header data at all), the
+        classifier cannot confidently place a finding as private on *both*
+        versions — every other kind of finding is protected by the
+        resolvable-guard, and hidden-friend findings must be too. Demoting
+        from the one resolvable side's confidently-private owner while the
+        other side offers nothing to cross-check is exactly the
+        mixed-evidence hazard that guard exists to prevent."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            elf_only_mode=True,
+            functions=[_fn("public_api", vis=Visibility.ELF_ONLY)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("point", origin=ScopeOrigin.PRIVATE_HEADER)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        assert s_old.resolvable is False
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (True, None)
+
 
 # ── widening overlay (ADR-024 §D6 / Phase 4) ─────────────────────────────────
 
