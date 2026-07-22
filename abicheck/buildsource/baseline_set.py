@@ -45,6 +45,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .. import serialization
+
 #: The only ``manifest_version`` ``actions/baseline/build_manifest.py`` has
 #: ever emitted. A resolver that doesn't recognize the value on a real
 #: manifest reports ``stale_schema`` instead of guessing at an unfamiliar
@@ -512,6 +514,30 @@ def _schema_and_profile_check(
                 f"baseline-set was built for profile {manifest.profile!r}, "
                 f"not the requested {profile!r} -- never compare across "
                 "profiles."
+            ),
+            manifest_path=manifest_path,
+        )
+    # manifest_version above is this resolver's own manifest.json shape;
+    # snapshot_schema is the *separate* schema of the .abicheck.json
+    # snapshots it references (serialization.SCHEMA_VERSION) -- a baseline
+    # built by a newer abicheck than this checkout's installed reader would
+    # otherwise still report `resolved` here (only manifest_version was
+    # checked) and fail opaquely in the later compare step instead of
+    # surfacing the typed stale_schema outcome resolve-baseline exists to
+    # give callers (Codex review). A missing snapshot_schema (an
+    # older/hand-authored manifest) has nothing to compare, so it no-ops,
+    # same as the digest checks below.
+    if (
+        manifest.snapshot_schema is not None
+        and manifest.snapshot_schema > serialization.SCHEMA_VERSION
+    ):
+        return ResolveResult(
+            outcome=ResolveOutcome.STALE_SCHEMA,
+            message=(
+                f"baseline-set's snapshot_schema {manifest.snapshot_schema!r} "
+                "is newer than this checkout's installed reader supports "
+                f"(up to schema_version {serialization.SCHEMA_VERSION}) -- "
+                "upgrade abicheck before resolving against this baseline-set."
             ),
             manifest_path=manifest_path,
         )

@@ -30,6 +30,7 @@ from pathlib import Path
 
 import pytest
 
+from abicheck import serialization
 from abicheck.buildsource.baseline_set import (
     BASELINE_MANIFEST_FILENAME,
     ResolveOutcome,
@@ -47,6 +48,7 @@ def _write_manifest(
     *,
     manifest_version: int | None = 1,
     profile: str = PROFILE,
+    snapshot_schema: int | None = 9,
     fact_set: dict | None = None,
     artifacts: list[dict] | None = None,
 ) -> None:
@@ -55,7 +57,7 @@ def _write_manifest(
         "manifest_version": manifest_version,
         "project_ref": "v1.0.0",
         "profile": profile,
-        "snapshot_schema": 9,
+        "snapshot_schema": snapshot_schema,
         "fact_set": fact_set,
         "artifacts": artifacts if artifacts is not None else [],
     }
@@ -188,6 +190,51 @@ def test_resolve_target_stale_schema(tmp_path: Path) -> None:
     )
     result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
     assert result.outcome == ResolveOutcome.STALE_SCHEMA
+
+
+def test_resolve_target_snapshot_schema_newer_than_reader_is_stale_schema(
+    tmp_path: Path,
+) -> None:
+    # manifest_version (this resolver's own manifest.json shape) is a
+    # separate axis from snapshot_schema (the referenced .abicheck.json
+    # snapshots' serialization.SCHEMA_VERSION) -- a baseline built by a
+    # newer abicheck than this checkout's installed reader must be caught
+    # here as stale_schema, not silently reported resolved only to fail
+    # opaquely in the later compare step (Codex review).
+    _write_manifest(
+        tmp_path,
+        snapshot_schema=serialization.SCHEMA_VERSION + 1,
+        artifacts=[_target_artifact("libpvxs")],
+    )
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.STALE_SCHEMA
+    assert "snapshot_schema" in result.message
+
+
+def test_resolve_target_snapshot_schema_at_reader_version_resolves(
+    tmp_path: Path,
+) -> None:
+    _write_manifest(
+        tmp_path,
+        snapshot_schema=serialization.SCHEMA_VERSION,
+        artifacts=[_target_artifact("libpvxs")],
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_target_missing_snapshot_schema_is_a_noop(tmp_path: Path) -> None:
+    # An older/hand-authored manifest with no snapshot_schema field has
+    # nothing to compare against -- must not be treated as "newer than
+    # supported" by accident (same no-op-on-absence contract as the digest
+    # checks).
+    _write_manifest(
+        tmp_path, snapshot_schema=None, artifacts=[_target_artifact("libpvxs")]
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.RESOLVED
 
 
 def test_resolve_target_wrong_profile(tmp_path: Path) -> None:
