@@ -185,6 +185,18 @@ Implements ADR-050 D1 and D2.
   failure from the one this fix exists to close; taking the parent
   directory first preserves the filename (`v1/foo.h` → root `v1/`,
   normalized `foo.h`).
+  **Known, accepted limitation: this only preserves the basename, not the
+  header's own subpath.** `old=old/include/foo.h` and
+  `new=new/private/foo.h` both normalize to `foo.h` — correct for the
+  intended two-checkout case, but identical to what a genuine relocation
+  (public `include/` → `private/`) would also produce; the rule cannot
+  tell the two apart, since both examples share the same shape (a single
+  header, differing parent name) and opposite correct answers — the same
+  "undecidable from path shape alone" limitation this document already
+  accepts for `-I` directories below, now also true for single-header
+  `scope_fingerprint`. Not a new heuristic to chase: the manifest path
+  (D3) has no such gap, since a manifest's TU paths are explicit declared
+  identities, not inferred from directory shape.
   **`profile_fingerprint`'s `-I` directories are fingerprinted by resolved
   content, not by path shape — three path-shape heuristics were tried and
   rejected in turn (ADR-050 D1 records all three in full); a fourth,
@@ -563,6 +575,28 @@ Implements ADR-050 D1 and D2.
   library and then silently outranked by a co-occurring `BREAKING`, and
   `docs/reference/exit-codes.md`'s multi-library section documents both
   together.
+- **This `"not_comparable"` string entry is a different JSON document from
+  the canonical `verdict: null` shape, by design, not a second incompatible
+  contract for the same shape.** `_compare_one_library`'s return dict feeds
+  `summary.json`'s top-level `verdict` (`worst_verdict`) and its nested
+  `libraries` array — both already string-only fields today (the existing
+  `"ERROR"` case is exactly this: a non-`Verdict`-enum sentinel string, the
+  same class `"not_comparable"` joins). That document was never governed by
+  `compare_report.schema.json` — it's `cli_compare_release.py`'s own
+  long-standing summary shape, extended in its own established idiom.
+  Separately, when `--output-dir` is set, `_compare_one_library`'s success
+  path *also* writes a full per-library report (`{stem}.json`) via
+  `to_json(result)` — that file **is** governed by
+  `compare_report.schema.json`, and for a `not_comparable` library must use
+  the canonical `verdict: null` + `reason` shape, assembled the same way
+  every other front-end's exception handler assembles it (there is no
+  `DiffResult` to call `to_json` on). The two documents disagreeing in
+  shape isn't an inconsistency to fix — each already followed its own
+  distinct schema before this ADR existed. `aggregate.py`'s not-comparable
+  detection (which reads whichever of these two shapes it's actually
+  pointed at) must check both: `verdict is None` for a canonical
+  `compare_report.schema.json` document, or `verdict == "not_comparable"`
+  for a release `summary.json`/per-library entry.
 - **A fifth entry point needs its own exit code, not the fourth one's.**
   `abicheck/compat/cli.py`'s ABICC-compatible `compat check` command calls
   `checker.compare` directly (`from ..checker import compare`, the call

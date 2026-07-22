@@ -224,6 +224,28 @@ identically and wrongly pass the gate. Taking the parent directory first
 means a lone header's basename survives normalization (`v1/foo.h` → root
 `v1/`, normalized path `foo.h`).
 
+**Known, accepted limitation: this rule only preserves the basename, not
+the header's own subpath, so it can't distinguish a harmless checkout-root
+difference from a genuine relocation between two single-header inputs that
+happen to share a basename.** `old=old/include/foo.h` and
+`new=new/private/foo.h` both normalize to the identical `foo.h` — correct
+for the intended ADR-040 case (`old=v1/foo.h`/`new=v2/foo.h`, the same
+logical header at two checkout-version labels), but the identical
+normalization also fires when `foo.h` genuinely moved from a public
+`include/` directory to a `private/` one between the two sides — a real
+scope change (arguably: has the header stopped being public?) that this
+rule cannot tell apart from the harmless case, since both examples have the
+same shape (a single header, differing parent directory name) and opposite
+correct answers — the identical structural reason no `-I`-directory
+path-shape heuristic could be made correct either (see below). This is not
+solved by a cleverer rule; it's the same "undecidable from path shape
+alone" limitation this ADR already accepts for `-I` directories, now
+recorded for the single-header `scope_fingerprint` case too. The
+manifest-driven path (D3) has no such gap: a manifest's TU paths are
+explicit, declared identities, not inferred from directory shape, so a
+manifest that moved a header from one section to another would show up as
+a real, explicit scope change, not a silent non-event.
+
 **`profile_fingerprint`'s `-I` directories are fingerprinted by *resolved
 content*, not by path shape — three path-shape heuristics were tried and
 rejected in turn before landing here, worth recording in full so none of
@@ -537,6 +559,30 @@ aggregator and exit-code computation (`docs/reference/exit-codes.md`'s
 multi-library section) are extended to recognize that verdict value the
 same way the single-library path does, rather than folding it into
 `"ERROR"`.
+
+**This `"not_comparable"` string entry is a different JSON document from
+the canonical `verdict: null` shape, by design, not a second incompatible
+contract for the same shape.** `_compare_one_library`'s return dict feeds
+`summary.json`'s top-level `verdict` (`worst_verdict`) and its nested
+`libraries` array — both already string-only fields today (the existing
+`"ERROR"` case is exactly this: a non-`Verdict`-enum sentinel string, the
+same class `"not_comparable"` joins). That JSON document is not, and never
+was, governed by `compare_report.schema.json` — it is
+`cli_compare_release.py`'s own long-standing summary shape, extended in
+its own established idiom. Separately, when `--output-dir` is set,
+`_compare_one_library`'s success path *also* writes a full per-library
+report (`{stem}.json`) via `to_json(result)` — that file **is** governed
+by `compare_report.schema.json`, and for a `not_comparable` library it
+must use the canonical `verdict: null` + `reason` shape, assembled the
+same way every other front-end's exception handler assembles it (there is
+no `DiffResult` to call `to_json` on). The two documents disagreeing in
+shape is not an inconsistency to fix; each already followed its own
+distinct schema before this ADR existed, and each keeps doing so now —
+`aggregate.py`'s not-comparable detection (which reads whichever of these
+two document shapes it was actually pointed at) must check both: `verdict
+is None` for a canonical `compare_report.schema.json` document, or
+`verdict == "not_comparable"` for a release `summary.json`/per-library
+entry.
 
 **A fifth surface calls `checker.compare` directly, with its own,
 independent exit-code contract that this ADR must not silently
