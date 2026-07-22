@@ -835,3 +835,154 @@ def test_duplicate_paragraph_scan_excludes_generated_case_pages(
     f = dc.Findings()
     dc._check_duplicate_paragraphs(f)
     assert f.warnings == []
+
+
+def test_duplicate_paragraph_scan_flags_short_duplicate_table(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A copy-pasted table is exactly the accidental-duplication pattern this
+    scan targets, even well under the 40-word prose threshold -- tables get
+    their own, much lower floor (regression test for the gap noted while
+    addressing PR #619 feedback: a short table could previously slip past
+    the flat word-count check)."""
+    table = "| A | B |\n|---|---|\n| 1 | 2 |\n"
+    (tmp_path / "a.md").write_text(f"# A\n\n{table}\n", encoding="utf-8")
+    (tmp_path / "b.md").write_text(f"# B\n\n{table}\n", encoding="utf-8")
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_duplicate_paragraphs(f)
+    assert f.errors == []
+    assert len(f.warnings) == 1
+    assert "a.md" in f.warnings[0][1] and "b.md" in f.warnings[0][1]
+
+
+def test_duplicate_paragraph_scan_still_ignores_tiny_tables(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Even the lower table floor shouldn't fire on a trivial 1x2 table --
+    it needs the same _MIN_DUPLICATE_TABLE_WORDS floor as any other block."""
+    tiny_table = "| A | B |\n"
+    (tmp_path / "a.md").write_text(f"# A\n\n{tiny_table}\n", encoding="utf-8")
+    (tmp_path / "b.md").write_text(f"# B\n\n{tiny_table}\n", encoding="utf-8")
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_duplicate_paragraphs(f)
+    assert f.warnings == []
+
+
+# ---------------------------------------------------------------------------
+# Terminology registry
+# ---------------------------------------------------------------------------
+
+
+def test_load_terminology_missing_file_returns_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "TERMINOLOGY_FILE", tmp_path / "terminology.yaml")
+    f = dc.Findings()
+    assert dc._load_terminology(f) is None
+    assert f.errors == []
+
+
+def test_load_terminology_invalid_yaml_is_reported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bad = tmp_path / "terminology.yaml"
+    bad.write_text("terms: [unclosed\n", encoding="utf-8")
+    monkeypatch.setattr(dc, "TERMINOLOGY_FILE", bad)
+    f = dc.Findings()
+    assert dc._load_terminology(f) is None
+    assert any("invalid YAML" in msg for _, msg in f.errors)
+
+
+def test_check_terminology_entries_flags_missing_canonical_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_terminology_entries(f, {"ABI": {"short_definition": "x"}})
+    assert any("missing required 'canonical_page'" in msg for _, msg in f.errors)
+
+
+def test_check_terminology_entries_flags_nonexistent_canonical_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_terminology_entries(
+        f, {"ABI": {"canonical_page": "missing.md", "short_definition": "x"}}
+    )
+    assert any("does not exist" in msg for _, msg in f.errors)
+
+
+def test_check_terminology_entries_flags_missing_short_definition(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_terminology_entries(f, {"ABI": {"canonical_page": "owner.md"}})
+    assert any("missing required 'short_definition'" in msg for _, msg in f.errors)
+
+
+def test_check_terminology_entries_allows_two_terms_sharing_a_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Unlike topics.yaml's canonical_page, terminology canonical_page is not
+    required to be unique -- ABI and API legitimately share one page."""
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_terminology_entries(
+        f,
+        {
+            "ABI": {"canonical_page": "owner.md", "short_definition": "a"},
+            "API": {"canonical_page": "owner.md", "short_definition": "b"},
+        },
+    )
+    assert f.errors == []
+
+
+def test_check_duplicate_term_definitions_flags_redefinition_elsewhere(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("# Owner\n\n**ABI** is the thing.\n")
+    (tmp_path / "other.md").write_text(
+        "# Other\n\n**ABI** is a binary contract explained again here.\n"
+    )
+    f = dc.Findings()
+    terms = {"ABI": {"canonical_page": "owner.md", "short_definition": "x"}}
+    dc._check_duplicate_term_definitions(f, terms)
+    assert f.errors == []
+    assert len(f.warnings) == 1
+    assert "other.md" in f.warnings[0][1]
+
+
+def test_check_duplicate_term_definitions_ignores_canonical_page_itself(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("# Owner\n\n**ABI** is the thing.\n")
+    f = dc.Findings()
+    terms = {"ABI": {"canonical_page": "owner.md", "short_definition": "x"}}
+    dc._check_duplicate_term_definitions(f, terms)
+    assert f.warnings == []
+
+
+def test_check_duplicate_term_definitions_ignores_mere_mention(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Just mentioning or linking to a term on another page is not a
+    redefinition -- only an actual bolded-term-plus-definition-connector
+    pattern should fire, or ordinary correct usage would be flagged
+    constantly."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("# Owner\n\n**ABI** is the thing.\n")
+    (tmp_path / "other.md").write_text(
+        "# Other\n\nSee [ABI](owner.md) for details on **ABI** compatibility.\n"
+    )
+    f = dc.Findings()
+    terms = {"ABI": {"canonical_page": "owner.md", "short_definition": "x"}}
+    dc._check_duplicate_term_definitions(f, terms)
+    assert f.warnings == []

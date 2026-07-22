@@ -58,6 +58,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 TOPICS_FILE = DOCS / "_meta" / "topics.yaml"
+TERMINOLOGY_FILE = DOCS / "_meta" / "terminology.yaml"
 
 _ALLOWED_DOC_TYPES = frozenset(
     {
@@ -88,6 +89,10 @@ _DUPLICATE_SCAN_EXCLUDE_PREFIXES = (
 _DUPLICATE_SCAN_EXCLUDE_NAMES = frozenset({"CLAUDE.md", "AGENTS.md"})
 
 _MIN_DUPLICATE_WORDS = 40
+# Tables get a much lower floor than prose (see _is_table_block): a short,
+# copy-pasted reference table is exactly the accidental-duplication pattern
+# this scan targets, not just long paragraphs.
+_MIN_DUPLICATE_TABLE_WORDS = 10
 
 _FRONT_MATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
 _FENCE_RE = re.compile(r"(`{3,}|~{3,}).*?\1", re.DOTALL)
@@ -587,6 +592,111 @@ def _check_canonical_pages_declare_ownership(
 
 
 # ---------------------------------------------------------------------------
+# Terminology registry checks
+# ---------------------------------------------------------------------------
+
+
+def _load_terminology(f: Findings) -> dict[str, dict[str, object]] | None:
+    if not TERMINOLOGY_FILE.is_file():
+        # Unlike topics.yaml, terminology.yaml has no hard floor of pilot
+        # content required to exist -- absence is not reported as an error,
+        # only its presence-and-well-formedness once it exists.
+        return None
+    try:
+        data = yaml.safe_load(TERMINOLOGY_FILE.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        f.err("terminology", f"{_rel(TERMINOLOGY_FILE)}: invalid YAML: {exc}")
+        return None
+    if not isinstance(data, dict) or "terms" not in data:
+        f.err("terminology", f"{_rel(TERMINOLOGY_FILE)}: missing top-level 'terms' key")
+        return None
+    terms = data["terms"]
+    if not isinstance(terms, dict):
+        f.err("terminology", f"{_rel(TERMINOLOGY_FILE)}: 'terms' must be a mapping")
+        return None
+    return terms
+
+
+def _check_terminology_entries(
+    f: Findings, terms: dict[str, dict[str, object]]
+) -> None:
+    """Unlike topics.yaml's canonical_page, a term's canonical_page need not
+    be unique -- two terms (e.g. ABI/API) may legitimately share a defining
+    page. Only existence and required-field presence are checked here."""
+    for term, entry in terms.items():
+        if not isinstance(entry, dict):
+            f.err("terminology", f"term {term!r}: entry must be a mapping")
+            continue
+        canonical_page = entry.get("canonical_page")
+        if not canonical_page:
+            f.err(
+                "terminology",
+                f"term {term!r}: missing required 'canonical_page' field",
+            )
+        elif not _is_file_under(DOCS, str(canonical_page)):
+            f.err(
+                "terminology",
+                f"term {term!r}: canonical_page {canonical_page!r} does not "
+                "exist as a file under docs/ (or escapes it via '..'/an "
+                "absolute path)",
+            )
+        if not entry.get("short_definition"):
+            f.err(
+                "terminology",
+                f"term {term!r}: missing required 'short_definition' field",
+            )
+        aliases = entry.get("aliases", [])
+        if not isinstance(aliases, list):
+            f.err("terminology", f"term {term!r}: aliases must be a list")
+
+
+_DEFINITION_CONNECTORS = (
+    r"is\b",
+    r"means\b",
+    r"refers to\b",
+    r"stands for\b",
+    r"—",
+    r"--",
+)
+
+
+def _term_definition_re(term: str) -> re.Pattern[str]:
+    connectors = "|".join(_DEFINITION_CONNECTORS)
+    return re.compile(rf"\*\*{re.escape(term)}\*\*\s+(?:{connectors})")
+
+
+def _check_duplicate_term_definitions(
+    f: Findings, terms: dict[str, dict[str, object]]
+) -> None:
+    """WARN if a page other than a term's registered canonical_page appears
+    to define it itself (a bolded term immediately followed by a definition
+    connector, e.g. "**ABI** -- ..." or "**ABI** is ..."), rather than
+    linking to the canonical definition. Deliberately narrow: this only
+    fires on an actual define-the-term pattern, not on the term merely being
+    mentioned or linked -- a broader "term appears on another page" check
+    would flag ordinary, correct usage constantly."""
+    for term, entry in terms.items():
+        if not isinstance(entry, dict) or not entry.get("canonical_page"):
+            continue
+        canonical_key = _docs_relative_key(entry["canonical_page"])
+        pattern = _term_definition_re(term)
+        for path in _iter_duplicate_scan_files():
+            if _docs_relative_key(str(path.relative_to(DOCS))) == canonical_key:
+                continue
+            text = _strip_front_matter(path.read_text(encoding="utf-8"))
+            text = _FENCE_RE.sub("", text)
+            if pattern.search(text):
+                f.warn(
+                    "terminology",
+                    f"{_rel(path)}: appears to define {term!r} itself "
+                    f"(a bolded term followed by a definition connector) "
+                    f"instead of linking to its canonical_page "
+                    f"({entry['canonical_page']!r} in "
+                    f"{_rel(TERMINOLOGY_FILE)})",
+                )
+
+
+# ---------------------------------------------------------------------------
 # Duplicate-paragraph scan (advisory)
 # ---------------------------------------------------------------------------
 
@@ -625,12 +735,27 @@ def _iter_duplicate_scan_files() -> list[Path]:
     return files
 
 
+def _is_table_block(block: str) -> bool:
+    """True if an (already whitespace-normalized) block is a Markdown table
+    -- its first cell starts with `|`. Tables are exempt from the 40-word
+    prose threshold below: a short severity/exit-code table copied verbatim
+    is exactly the kind of accidental duplication this scan exists to catch,
+    even at just a few rows."""
+    return block.startswith("|")
+
+
 def _check_duplicate_paragraphs(f: Findings) -> None:
     by_block: dict[str, set[str]] = defaultdict(set)
     for path in _iter_duplicate_scan_files():
         rel = _rel(path)
         for block in _extract_blocks(path.read_text(encoding="utf-8")):
-            if len(block.split()) < _MIN_DUPLICATE_WORDS:
+            word_count = len(block.split())
+            min_words = (
+                _MIN_DUPLICATE_TABLE_WORDS
+                if _is_table_block(block)
+                else _MIN_DUPLICATE_WORDS
+            )
+            if word_count < min_words:
                 continue
             by_block[block].add(rel)
 
@@ -657,6 +782,10 @@ def main() -> int:
         _check_canonical_page_uniqueness(f, topics)
         _check_front_matter_schema(f, topics)
         _check_canonical_pages_declare_ownership(f, topics)
+    terms = _load_terminology(f)
+    if terms is not None:
+        _check_terminology_entries(f, terms)
+        _check_duplicate_term_definitions(f, terms)
     _check_duplicate_paragraphs(f)
     return f.report()
 

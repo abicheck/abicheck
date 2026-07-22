@@ -78,7 +78,8 @@ elsewhere in the nav — keep links pointing at the real file path.
   in nav).
 - `development/` — contributor-facing docs (architecture, parity status,
   goals, ADRs in `development/adr/`).
-- `_meta/` — machine-consumed registries only (currently `topics.yaml`). Not
+- `_meta/` — machine-consumed registries only (`topics.yaml`, topic
+  ownership; `terminology.yaml`, per-term definition ownership). Not
   published as site pages: mkdocs only builds `*.md` files, and this
   directory intentionally contains none. Don't add a `README.md` here
   without also excluding it from the nav-coverage check the way
@@ -139,9 +140,31 @@ duplication, not a structural ownership conflict):
 
 - a `canonical_page` without any front matter at all (the schema below is
   being rolled out incrementally — see "Rollout status");
-- an identical, long (40+ word) paragraph appearing verbatim in two or more
+- an identical, long (40+ word) paragraph, or an identical Markdown table
+  (much lower floor — 10+ words, since a short copy-pasted reference table
+  is exactly this scan's target case), appearing verbatim in two or more
   manual (non-generated) pages — usually a sign one of them should be a
-  summary-with-link instead of a second explanation.
+  summary-with-link instead of a second explanation;
+- a page other than a `terminology.yaml` term's registered `canonical_page`
+  appearing to define that term itself (see "Terminology registry" below).
+
+## Terminology registry
+
+`docs/_meta/terminology.yaml` is `topics.yaml`'s counterpart for individual
+terms rather than whole topics: each entry names the one page responsible
+for defining a term (`canonical_page`) and a one-sentence `short_definition`.
+Unlike a topic's `canonical_page`, a term's `canonical_page` need not be
+unique — two terms (e.g. ABI and API) may legitimately share one defining
+page. `check_docs_contract.py` enforces, as **errors**, that every entry has
+a `canonical_page` that exists and a `short_definition`; as a **warning**, it
+flags any other page that appears to *define* a registered term itself (a
+bolded term immediately followed by a definition connector — "is", "means",
+"—", etc. — not just a mention or a link) instead of linking back to the
+term's `canonical_page`. This is deliberately narrow: it only catches an
+actual re-definition pattern, so ordinary correct usage of a term elsewhere
+never triggers it. Add an entry only for a term that already shows up
+defined in more than one or two places — a term used on exactly one page
+doesn't need one.
 
 ## Page front matter
 

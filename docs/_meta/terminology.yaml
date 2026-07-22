@@ -1,0 +1,125 @@
+# Terminology registry — the machine-checked map of "where is this term
+# actually defined", separate from docs/_meta/topics.yaml's *topic*
+# ownership (a term is a single word/phrase; a topic is a subject a whole
+# page can be about). Two terms may legitimately share a canonical_page
+# (e.g. ABI and API are both defined on the same page) — that is NOT the
+# uniqueness conflict topics.yaml enforces for canonical_page.
+#
+# Purpose: scripts/check_docs_contract.py's duplicate-paragraph scanner
+# catches accidental verbatim re-explanation, but a *second, differently
+# worded* definition of the same term drifting out of sync with the first
+# is a distinct failure mode it can't catch by text-matching alone. This
+# registry names the one page responsible for each term's definition, so a
+# reviewer (or a future stricter check) has a single place to check a new
+# definition against instead of grepping the whole corpus.
+#
+# Schema (each key under `terms` is the canonical display form of the term):
+#   canonical_page:  REQUIRED. Path relative to docs/ of the page that
+#                     defines this term. Does not have to be unique across
+#                     terms (unlike topics.yaml's canonical_page).
+#   short_definition: REQUIRED. One sentence, kept here so a page that only
+#                     needs a quick gloss (a tooltip, a glossary index) can
+#                     pull it without re-deriving the wording — this is the
+#                     one place that one-sentence phrasing lives.
+#   aliases:          Optional list of other spellings/forms used in prose
+#                     that refer to the same term (e.g. full expansions).
+#
+# This is a *pilot* covering terms that already appear across several pages
+# today. Extend it when a new term shows up in more than one or two places
+# — a term used on exactly one page doesn't need an entry here.
+
+schema_version: 1
+
+terms:
+  ABI:
+    canonical_page: concepts/abi-api-handling.md
+    short_definition: >-
+      Application Binary Interface — the binary-level contract between a
+      compiled library and its consumers: symbol names, calling
+      conventions, struct/class layout, vtable order.
+    aliases:
+      - Application Binary Interface
+
+  API:
+    canonical_page: concepts/abi-api-handling.md
+    short_definition: >-
+      Application Programming Interface — the source-level contract
+      (declarations, signatures, semantics) a caller compiles against.
+    aliases:
+      - Application Programming Interface
+
+  ChangeKind:
+    canonical_page: reference/change-kinds.md
+    short_definition: >-
+      One of the enumerated, individually-classified kinds of ABI/API
+      change abicheck detects (e.g. func_removed, type_size_changed).
+
+  Verdict:
+    canonical_page: concepts/verdicts.md
+    short_definition: >-
+      The overall compatibility result of a compare run (e.g. NO_CHANGE,
+      COMPATIBLE, API_BREAK, BREAKING), derived from the detected changes.
+
+  Severity:
+    canonical_page: user-guide/severity.md
+    short_definition: >-
+      The configurable error/warning/info level assigned to each of the
+      four issue categories (abi_breaking, potential_breaking,
+      quality_issues, addition), controlling exit codes independently of
+      the verdict.
+
+  Baseline:
+    canonical_page: user-guide/baseline-management.md
+    short_definition: >-
+      The prior snapshot or library a `compare` run diffs the new build
+      against — a plain JSON snapshot or binary, not a CLI-managed registry.
+
+  Suppression:
+    canonical_page: user-guide/suppressions.md
+    short_definition: >-
+      A rule that waives a specific matching change before verdict and
+      severity are computed, tallied separately rather than silently
+      dropped.
+
+  Policy Profile:
+    canonical_page: user-guide/policies.md
+    short_definition: >-
+      A named (or custom YAML) mapping from change kind to impact
+      (COMPATIBLE/API_BREAK/BREAKING) that can reclassify the same change
+      differently depending on the consumer contract (e.g. strict_abi vs.
+      sdk_vendor).
+    aliases:
+      - Policy
+
+  Evidence Tier:
+    canonical_page: concepts/evidence-and-detectability.md
+    short_definition: >-
+      One of the L0-L4 (binary / +debug-info / +headers / +build /
+      +source) input-quality levels that determine what a comparison can
+      and cannot see.
+    aliases:
+      - Depth
+      - Evidence Level
+
+  Public Surface:
+    canonical_page: concepts/abi-surface.md
+    short_definition: >-
+      The subset of a library's symbols and types reachable by an external
+      consumer — what scoping rules decide counts as public vs. internal.
+
+  PIMPL:
+    canonical_page: user-guide/api-surface-intelligence.md
+    short_definition: >-
+      "Pointer to implementation" — a complete public wrapper type whose
+      only data member is a pointer to a hidden implementation type; the
+      wrapper's own layout is part of the ABI, only the hidden pointee is
+      invisible to callers.
+    aliases:
+      - Pointer to Implementation
+
+  Opaque Pointer:
+    canonical_page: user-guide/api-surface-intelligence.md
+    short_definition: >-
+      A type whose complete definition is never visible in the public
+      include closure and that public functions only ever cross by
+      pointer, so callers cannot `sizeof` or embed it.
