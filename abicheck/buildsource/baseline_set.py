@@ -1,0 +1,469 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Baseline-set resolution (ADR-047 §4/§6, G30 P1.2).
+
+A *baseline-set* is what ``actions/baseline`` produces: ``manifest.json``
+plus one ``.abicheck.json`` snapshot per library — and, for a bundle-scoped
+baseline (ADR-047 §8's S14 correction, staged by a future G30 P1.6 change to
+``actions/baseline``), a ``binaries/`` directory of each member's real ELF
+binary, since ``abicheck/bundle.py``'s ``build_bundle_snapshot()`` skips
+non-ELF inputs and cannot read a bundle's old side from JSON snapshots alone.
+
+This module is the shared reader/resolver ``actions/resolve-baseline`` uses
+(and any future bundle-mode ``check-target`` call would reuse, per the G30
+plan's "extract a shared helper rather than duplicating the schema/digest-
+check code" note): parse a baseline-set directory's ``manifest.json`` and
+resolve ``channel × target/bundle × profile`` down to one of ADR-047 §6's
+five typed failure outcomes, or success — **never** a compatibility verdict.
+
+Reads ``manifest.json``'s raw JSON directly with defensive ``.get()`` access,
+mirroring ``actions/baseline/build_manifest.py``'s own reading philosophy for
+snapshot files (applied one level up, to the manifest itself) — a corrupt or
+hand-edited manifest.json produces a structured resolve outcome, never a
+Python traceback. Pure: reads files, never runs a tool or fetches anything
+(fetching from a baseline channel's storage backend is the calling
+workflow's job, per ADR-047 §10).
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+#: The only ``manifest_version`` ``actions/baseline/build_manifest.py`` has
+#: ever emitted. A resolver that doesn't recognize the value on a real
+#: manifest reports ``stale_schema`` instead of guessing at an unfamiliar
+#: shape.
+SUPPORTED_MANIFEST_VERSIONS = frozenset({1})
+
+#: Filename ``actions/baseline`` writes the baseline-set descriptor to,
+#: inside a baseline-set directory. ADR-047 §3's "Filename reconciliation"
+#: note: ``baseline-set.json`` is this ADR's schema/doc term for the file's
+#: *content*, not a different on-disk name — the real file stays
+#: ``manifest.json``, unchanged from what ``actions/baseline`` already
+#: produces today.
+BASELINE_MANIFEST_FILENAME = "manifest.json"
+
+#: Subdirectory (relative to a baseline-set directory) a bundle-scoped
+#: baseline stages member ELF binaries into (ADR-047 §6/§8 S14 correction).
+#: Not populated by ``actions/baseline`` yet (G30 P1.6) — a hand-authored
+#: fixture directory is how this module's bundle resolution is exercised
+#: until then, the same "defines the contract, no producer yet" scoping
+#: G30 P1.1 used for ``build-output.json``.
+BASELINE_BINARIES_DIRNAME = "binaries"
+
+
+class ResolveOutcome:
+    """ADR-047 §6's ``resolve-baseline`` outcome taxonomy, plus ``RESOLVED``.
+
+    Kept as plain string constants (not an ``enum.Enum``) so a Python caller
+    and the Action's ``outcome`` output (a bare string written to
+    ``GITHUB_OUTPUT``) share one literal vocabulary with no serialization
+    step in between.
+    """
+
+    RESOLVED = "resolved"
+    NOT_FOUND = "not_found"
+    AMBIGUOUS = "ambiguous"
+    WRONG_PROFILE = "wrong_profile"
+    STALE_SCHEMA = "stale_schema"
+    INCOMPATIBLE_EVIDENCE = "incompatible_evidence"
+
+
+#: Every outcome value :func:`resolve_target`/:func:`resolve_bundle` can
+#: return — the six branches of ADR-047 §6's table (five failure rows plus
+#: the resolved/success case).
+ALL_OUTCOMES = frozenset(
+    {
+        ResolveOutcome.RESOLVED,
+        ResolveOutcome.NOT_FOUND,
+        ResolveOutcome.AMBIGUOUS,
+        ResolveOutcome.WRONG_PROFILE,
+        ResolveOutcome.STALE_SCHEMA,
+        ResolveOutcome.INCOMPATIBLE_EVIDENCE,
+    }
+)
+
+
+@dataclass
+class BaselineArtifact:
+    """One ``manifest.json`` ``artifacts[]`` entry (``build_manifest.py``).
+
+    Only the fields this module's resolution logic actually reads — not a
+    full mirror of every key ``build_manifest.py`` writes (``git_commit``,
+    ``created_at``, ``build_id``, ``dump_provenance``, ...), which stay
+    whatever the manifest happens to carry and are never round-tripped
+    through this dataclass.
+    """
+
+    library: str = ""
+    artifact: str = ""
+    snapshot: str = ""
+    #: Path (relative to the baseline-set directory, e.g.
+    #: ``"binaries/libpvxs.so.1.5"``) to this member's staged ELF binary —
+    #: only present for a bundle-scoped baseline (ADR-047 §8 S14). Empty for
+    #: an ordinary (non-bundle) baseline-set entry.
+    binary: str = ""
+    sha256: str = ""
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BaselineArtifact:
+        return cls(
+            library=str(d.get("library") or ""),
+            artifact=str(d.get("artifact") or ""),
+            snapshot=str(d.get("snapshot") or ""),
+            binary=str(d.get("binary") or ""),
+            sha256=str(d.get("sha256") or ""),
+        )
+
+
+@dataclass
+class BaselineManifest:
+    """Parsed ``manifest.json`` (``actions/baseline/build_manifest.py``)."""
+
+    manifest_version: int | None = None
+    project_ref: str = ""
+    profile: str = ""
+    snapshot_schema: int | None = None
+    fact_set: dict[str, Any] | None = None
+    artifacts: list[BaselineArtifact] = field(default_factory=list)
+
+    def artifact_for(self, library: str) -> BaselineArtifact | None:
+        for entry in self.artifacts:
+            if entry.library == library:
+                return entry
+        return None
+
+
+def load_baseline_manifest(baseline_dir: Path | str) -> BaselineManifest | None:
+    """Read ``<baseline_dir>/manifest.json``.
+
+    Returns ``None`` if the file doesn't exist — the ordinary "no baseline
+    set here" case a caller turns into :data:`ResolveOutcome.NOT_FOUND`, not
+    an exception. Raises ``ValueError`` if the file exists but is not a
+    readable JSON object: a genuinely corrupt manifest is a different
+    problem than "no baseline published yet" and must not be silently
+    treated the same way.
+    """
+    path = Path(baseline_dir) / BASELINE_MANIFEST_FILENAME
+    if not path.is_file():
+        return None
+    with path.open(encoding="utf-8") as fh:
+        try:
+            data = json.load(fh)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path} is not valid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must contain a JSON object.")
+
+    artifacts_raw = data.get("artifacts")
+    artifacts = (
+        [BaselineArtifact.from_dict(a) for a in artifacts_raw if isinstance(a, dict)]
+        if isinstance(artifacts_raw, list)
+        else []
+    )
+    manifest_version = data.get("manifest_version")
+    snapshot_schema = data.get("snapshot_schema")
+    fact_set = data.get("fact_set")
+    return BaselineManifest(
+        manifest_version=manifest_version
+        if isinstance(manifest_version, int)
+        else None,
+        project_ref=str(data.get("project_ref") or ""),
+        profile=str(data.get("profile") or ""),
+        snapshot_schema=snapshot_schema if isinstance(snapshot_schema, int) else None,
+        fact_set=fact_set if isinstance(fact_set, dict) else None,
+        artifacts=artifacts,
+    )
+
+
+@dataclass
+class ResolveResult:
+    """The result of one :func:`resolve_target`/:func:`resolve_bundle` call."""
+
+    outcome: str
+    message: str
+    #: ``True`` only for the :data:`ResolveOutcome.NOT_FOUND` bootstrap case
+    #: (``required=False`` and no baseline set exists yet) — an advisory,
+    #: non-fatal outcome. ``False`` for every other outcome, including a
+    #: ``required=True`` ``not_found``, which is a hard failure.
+    bootstrap: bool = False
+    manifest_path: str | None = None
+    #: ``kind: target`` only.
+    snapshot_path: str | None = None
+    #: ``kind: bundle`` only.
+    binaries_dir: str | None = None
+    binary_paths: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return self.outcome == ResolveOutcome.RESOLVED
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "outcome": self.outcome,
+            "message": self.message,
+            "bootstrap": self.bootstrap,
+            "manifest_path": self.manifest_path or "",
+            "snapshot_path": self.snapshot_path or "",
+            "binaries_dir": self.binaries_dir or "",
+            "binary_paths": dict(self.binary_paths),
+        }
+
+
+def _not_found_result(required: bool, message: str) -> ResolveResult:
+    return ResolveResult(
+        outcome=ResolveOutcome.NOT_FOUND,
+        message=message,
+        bootstrap=not required,
+    )
+
+
+def _evidence_incompatibility(
+    manifest: BaselineManifest, candidate_evidence_producer: dict[str, Any] | None
+) -> str | None:
+    """ADR-047 §6's ``incompatible_evidence`` check.
+
+    Compares the baseline's recorded ``fact_set.producer``/``producer_version``
+    (``build_manifest.py``'s own ADR-038 C.8-derived identity, e.g.
+    ``"wrapper"``/``"replay"``/``"clang-plugin"`` plus a tool version) against
+    the candidate build's ``build-output.json`` ``evidence_producer`` block
+    (ADR-047 §2: ``{"kind", "tool", "version"}``). Only compares when *both*
+    sides declare an evidence identity — a plain header/binary-depth check on
+    either side has nothing to compare and is never penalized for a producer
+    mismatch that doesn't actually affect it.
+    """
+    if not candidate_evidence_producer:
+        return None
+    candidate_kind = str(candidate_evidence_producer.get("kind") or "")
+    if not candidate_kind:
+        return None
+    baseline_fact_set = manifest.fact_set
+    if not baseline_fact_set:
+        return None
+    baseline_producer = str(baseline_fact_set.get("producer") or "")
+    if not baseline_producer:
+        return None
+    if baseline_producer != candidate_kind:
+        return (
+            f"baseline's evidence producer is {baseline_producer!r} but the "
+            f"candidate build's evidence producer is {candidate_kind!r} -- "
+            "comparing source-depth evidence across different producers "
+            "(e.g. wrapper vs. replay) is an infrastructure incompatibility, "
+            "not an ABI finding (ADR-047 §6)."
+        )
+    candidate_version = str(candidate_evidence_producer.get("version") or "")
+    baseline_producer_version = str(baseline_fact_set.get("producer_version") or "")
+    if (
+        candidate_version
+        and baseline_producer_version
+        and candidate_version != baseline_producer_version
+    ):
+        return (
+            f"baseline's evidence producer version is "
+            f"{baseline_producer_version!r} but the candidate build's is "
+            f"{candidate_version!r} -- a producer version change can alter "
+            "the evidence recipe (fact_set.py's comparability rules), so "
+            "this is treated as an infrastructure incompatibility rather "
+            "than silently comparing anyway (ADR-047 §6)."
+        )
+    return None
+
+
+def _schema_and_profile_check(
+    manifest: BaselineManifest, profile: str, manifest_path: str
+) -> ResolveResult | None:
+    """Shared ``stale_schema``/``wrong_profile`` checks for target and bundle
+    resolution -- returns ``None`` when both pass."""
+    if manifest.manifest_version not in SUPPORTED_MANIFEST_VERSIONS:
+        return ResolveResult(
+            outcome=ResolveOutcome.STALE_SCHEMA,
+            message=(
+                f"baseline-set manifest_version {manifest.manifest_version!r} "
+                "is not one this resolver understands (supported: "
+                f"{sorted(SUPPORTED_MANIFEST_VERSIONS)}) -- upgrade the "
+                "resolve-baseline Action, or regenerate the baseline-set "
+                "with a compatible actions/baseline version."
+            ),
+            manifest_path=manifest_path,
+        )
+    if manifest.profile != profile:
+        return ResolveResult(
+            outcome=ResolveOutcome.WRONG_PROFILE,
+            message=(
+                f"baseline-set was built for profile {manifest.profile!r}, "
+                f"not the requested {profile!r} -- never compare across "
+                "profiles."
+            ),
+            manifest_path=manifest_path,
+        )
+    return None
+
+
+def resolve_target(
+    baseline_dir: Path | str,
+    *,
+    target: str,
+    profile: str,
+    required: bool = True,
+    candidate_evidence_producer: dict[str, Any] | None = None,
+) -> ResolveResult:
+    """Resolve ``channel × target × profile`` (ADR-047 §6) to one snapshot.
+
+    ``channel`` itself is not a parameter here: this module trusts the
+    caller already selected the right physical ``baseline_dir`` for the
+    requested channel (see ``actions/resolve-baseline/action.yml``'s
+    ``baseline-path`` input doc) — this function only resolves *within* that
+    directory.
+    """
+    baseline_dir = Path(baseline_dir)
+    manifest = load_baseline_manifest(baseline_dir)
+    if manifest is None:
+        return _not_found_result(
+            required, f"No baseline-set found at {baseline_dir} (no manifest.json)."
+        )
+    manifest_path = str(baseline_dir / BASELINE_MANIFEST_FILENAME)
+
+    schema_or_profile_failure = _schema_and_profile_check(
+        manifest, profile, manifest_path
+    )
+    if schema_or_profile_failure is not None:
+        return schema_or_profile_failure
+
+    artifact = manifest.artifact_for(target)
+    if artifact is None:
+        known = sorted(a.library for a in manifest.artifacts if a.library)
+        return ResolveResult(
+            outcome=ResolveOutcome.AMBIGUOUS,
+            message=(
+                f"target {target!r} is not in this baseline-set's manifest "
+                f"(known targets: {known})."
+            ),
+            manifest_path=manifest_path,
+        )
+
+    incompatible = _evidence_incompatibility(manifest, candidate_evidence_producer)
+    if incompatible:
+        return ResolveResult(
+            outcome=ResolveOutcome.INCOMPATIBLE_EVIDENCE,
+            message=incompatible,
+            manifest_path=manifest_path,
+        )
+
+    if not artifact.snapshot:
+        return ResolveResult(
+            outcome=ResolveOutcome.AMBIGUOUS,
+            message=f"target {target!r}'s manifest entry has no snapshot filename.",
+            manifest_path=manifest_path,
+        )
+    snapshot_path = baseline_dir / artifact.snapshot
+    if not snapshot_path.is_file():
+        return ResolveResult(
+            outcome=ResolveOutcome.AMBIGUOUS,
+            message=(
+                f"target {target!r}'s manifest entry names snapshot "
+                f"{artifact.snapshot!r}, but that file does not exist under "
+                f"{baseline_dir}."
+            ),
+            manifest_path=manifest_path,
+        )
+
+    return ResolveResult(
+        outcome=ResolveOutcome.RESOLVED,
+        message=f"resolved target {target!r} at profile {profile!r}.",
+        manifest_path=manifest_path,
+        snapshot_path=str(snapshot_path),
+    )
+
+
+def resolve_bundle(
+    baseline_dir: Path | str,
+    *,
+    bundle: str,
+    members: list[str],
+    profile: str,
+    required: bool = True,
+    candidate_evidence_producer: dict[str, Any] | None = None,
+) -> ResolveResult:
+    """Resolve ``channel × bundle × profile`` (ADR-047 §6/§8 S14 correction).
+
+    Unlike :func:`resolve_target`, a bundle's resolution unit is not a single
+    snapshot: ``abicheck/bundle.py``'s ``build_bundle_snapshot()`` builds its
+    cross-library graph from real ELF binaries and explicitly skips non-ELF
+    (including JSON snapshot) inputs, so this returns paths to every member's
+    **staged binary** under the baseline-set's ``binaries/`` directory
+    instead. Every listed *member* must have one, or the whole bundle
+    resolution reports ``ambiguous`` — a partially-staged bundle baseline
+    would otherwise silently produce a bundle report missing one member's
+    old-side data.
+    """
+    baseline_dir = Path(baseline_dir)
+    manifest = load_baseline_manifest(baseline_dir)
+    if manifest is None:
+        return _not_found_result(
+            required, f"No baseline-set found at {baseline_dir} (no manifest.json)."
+        )
+    manifest_path = str(baseline_dir / BASELINE_MANIFEST_FILENAME)
+
+    schema_or_profile_failure = _schema_and_profile_check(
+        manifest, profile, manifest_path
+    )
+    if schema_or_profile_failure is not None:
+        return schema_or_profile_failure
+
+    incompatible = _evidence_incompatibility(manifest, candidate_evidence_producer)
+    if incompatible:
+        return ResolveResult(
+            outcome=ResolveOutcome.INCOMPATIBLE_EVIDENCE,
+            message=incompatible,
+            manifest_path=manifest_path,
+        )
+
+    binaries_dir = baseline_dir / BASELINE_BINARIES_DIRNAME
+    missing: list[str] = []
+    binary_paths: dict[str, str] = {}
+    for member in members:
+        artifact = manifest.artifact_for(member)
+        if artifact is None or not artifact.binary:
+            missing.append(member)
+            continue
+        resolved = baseline_dir / artifact.binary
+        if not resolved.is_file():
+            missing.append(member)
+            continue
+        binary_paths[member] = str(resolved)
+
+    if missing:
+        return ResolveResult(
+            outcome=ResolveOutcome.AMBIGUOUS,
+            message=(
+                f"bundle {bundle!r}'s member(s) {sorted(missing)} have no "
+                f"staged binary in this baseline-set's "
+                f"{BASELINE_BINARIES_DIRNAME}/ directory -- a bundle-scoped "
+                "baseline must stage every member's ELF binary (ADR-047 "
+                "§6/§8 S14), not just its snapshot."
+            ),
+            manifest_path=manifest_path,
+        )
+
+    return ResolveResult(
+        outcome=ResolveOutcome.RESOLVED,
+        message=f"resolved bundle {bundle!r} ({len(binary_paths)} member(s)) at profile {profile!r}.",
+        manifest_path=manifest_path,
+        binaries_dir=str(binaries_dir),
+        binary_paths=binary_paths,
+    )
