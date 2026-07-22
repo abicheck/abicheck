@@ -505,7 +505,8 @@ def test_front_matter_schema_accepts_summarizes_via_equivalent_spelling(
     round-trip too, the same way canonical_page comparisons already do
     (regression test for the gap flagged in PR #619 review)."""
     (tmp_path / "page.md").write_text(
-        "---\nsummarizes:\n  - topic-a\n---\n\n# Title\n", encoding="utf-8"
+        "---\nsummarizes:\n  - topic-a\n---\n\nSee [owner](owner.md).\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(dc, "DOCS", tmp_path)
     topics = {"topic-a": {"canonical_page": "owner.md", "task_pages": ["./page.md"]}}
@@ -530,13 +531,60 @@ def test_front_matter_schema_accepts_summarizes_for_each_permitted_role(
     role_value: object,
 ) -> None:
     (tmp_path / "page.md").write_text(
-        "---\nsummarizes:\n  - topic-a\n---\n\n# Title\n", encoding="utf-8"
+        "---\nsummarizes:\n  - topic-a\n---\n\nSee [owner](owner.md).\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(dc, "DOCS", tmp_path)
     topics = {"topic-a": {"canonical_page": "owner.md", role_key: role_value}}
     f = dc.Findings()
     dc._check_front_matter_schema(f, topics)
     assert f.errors == []
+
+
+def test_front_matter_schema_flags_summarizes_without_a_link_back(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Being a permitted summarizer (registered in topics.yaml) isn't the
+    same as actually linking back -- a page can't restate a topic and
+    satisfy the contract just by declaring the front-matter claim
+    (regression test for the gap flagged in PR #619 review: real pages in
+    this repo had exactly this problem)."""
+    (tmp_path / "page.md").write_text(
+        "---\nsummarizes:\n  - topic-a\n---\n\nNo link to the owner here.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    topics = {"topic-a": {"canonical_page": "owner.md", "task_pages": ["page.md"]}}
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)
+    assert any("no Markdown link" in msg for _, msg in f.errors)
+
+
+def test_front_matter_schema_accepts_link_with_anchor_and_title(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A link may carry an anchor and/or a title suffix
+    (`owner.md#section "title"`) -- both must be stripped before comparing
+    against the target path."""
+    (tmp_path / "page.md").write_text(
+        '---\nsummarizes:\n  - topic-a\n---\n\nSee [owner](owner.md#section "the owner page").\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    topics = {"topic-a": {"canonical_page": "owner.md", "task_pages": ["page.md"]}}
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)
+    assert f.errors == []
+
+
+def test_page_links_to_ignores_external_links(tmp_path: Path) -> None:
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(
+        "[external](https://example.com/owner.md)\n[mail](mailto:a@b.com)\n",
+        encoding="utf-8",
+    )
+    assert dc._page_links_to(page, "owner.md") is False
 
 
 def test_front_matter_schema_accepts_valid_page(

@@ -17,6 +17,10 @@ abicheck does not only diff symbols one at a time — it also reasons about the
 single-snapshot surface metrics, idiom & anti-pattern recognition, and
 **pattern-aware verdicts** that modulate a diff using that knowledge.
 
+These metrics and idioms run over your **public surface** — see
+[What Is Part of Your ABI Surface?](../concepts/abi-surface.md) for what
+counts as public vs. internal and how scoping decides it.
+
 > **History note:** this used to be a standalone `abicheck surface-report`
 > command. The ADR-043 CLI reset removed it with no direct replacement command
 > (it was judged below the five-command bar) — the underlying functions below

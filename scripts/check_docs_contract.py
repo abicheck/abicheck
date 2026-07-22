@@ -341,6 +341,30 @@ def _permitted_summary_pages(entry: dict[str, object]) -> set[str]:
     return pages
 
 
+_MD_LINK_TARGET_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+
+
+def _page_links_to(path: Path, target_rel_to_docs: str) -> bool:
+    """True if `path`'s Markdown body contains a relative link resolving to
+    `target_rel_to_docs` (a docs/-relative POSIX path). The whole point of
+    `summarizes` is "link back to the canonical page instead of restating
+    it" — being a permitted summarizer (registered in topics.yaml) isn't
+    the same as actually doing that, so this enforces the link exists."""
+    text = _strip_front_matter(path.read_text(encoding="utf-8"))
+    for m in _MD_LINK_TARGET_RE.finditer(text):
+        href = m.group(1).strip().split(" ", 1)[0].split("#", 1)[0]
+        if not href or "://" in href or href.startswith(("mailto:", "/")):
+            continue
+        resolved = (path.parent / href).resolve()
+        try:
+            resolved_rel = resolved.relative_to(DOCS.resolve()).as_posix()
+        except ValueError:
+            continue
+        if resolved_rel == target_rel_to_docs:
+            return True
+    return False
+
+
 def _check_front_matter_schema(
     f: Findings, topics: dict[str, dict[str, object]]
 ) -> None:
@@ -468,6 +492,17 @@ def _check_front_matter_schema(
                     f"task_pages/reference_page/allowed_summaries in "
                     f"{_rel(TOPICS_FILE)} — either add it there or drop the "
                     "summarizes claim",
+                )
+            elif entry.get("canonical_page") and not _page_links_to(
+                path, _docs_relative_key(entry["canonical_page"])
+            ):
+                f.err(
+                    "front-matter",
+                    f"{_rel(path)}: claims summarizes {topic_id!r}, but "
+                    f"contains no Markdown link to that topic's "
+                    f"canonical_page ({entry['canonical_page']!r}) — the "
+                    "whole point of summarizes is to link back rather than "
+                    "restate the topic on its own",
                 )
 
 

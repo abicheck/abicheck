@@ -47,7 +47,7 @@ four stages (the numbers match the diagram above):
    the build; it is tallied separately (`suppressed_count` in the JSON
    output).
 3. **Score (verdict + severity).** The surviving changes produce the overall
-   verdict (`NO_CHANGE` … `BREAKING`) and, when
+   [verdict](../concepts/verdicts.md) (`NO_CHANGE` … `BREAKING`) and, when
    [severity](severity.md) is configured, per-category
    (`abi_breaking` / `potential_breaking` / `quality_issues` / `addition`)
    severity levels.
