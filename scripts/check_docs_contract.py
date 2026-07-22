@@ -361,18 +361,28 @@ def _check_front_matter_schema(
             continue  # generated pages don't carry the hand-authored schema
 
         doc_type = fm.get("doc_type")
-        if doc_type is not None and doc_type not in _ALLOWED_DOC_TYPES:
-            f.err(
-                "front-matter",
-                f"{_rel(path)}: doc_type {doc_type!r} not in "
-                f"{sorted(_ALLOWED_DOC_TYPES)}",
-            )
+        if doc_type is not None:
+            if not isinstance(doc_type, str):
+                # `x not in a_frozenset_of_str` requires x to be hashable --
+                # an unhashable value (a YAML list/mapping, e.g. a malformed
+                # "doc_type: [how-to]") would otherwise raise TypeError
+                # before this gate can report anything.
+                f.err("front-matter", f"{_rel(path)}: doc_type must be a string")
+            elif doc_type not in _ALLOWED_DOC_TYPES:
+                f.err(
+                    "front-matter",
+                    f"{_rel(path)}: doc_type {doc_type!r} not in "
+                    f"{sorted(_ALLOWED_DOC_TYPES)}",
+                )
         level = fm.get("level")
-        if level is not None and level not in _ALLOWED_LEVELS:
-            f.err(
-                "front-matter",
-                f"{_rel(path)}: level {level!r} not in {sorted(_ALLOWED_LEVELS)}",
-            )
+        if level is not None:
+            if not isinstance(level, str):
+                f.err("front-matter", f"{_rel(path)}: level must be a string")
+            elif level not in _ALLOWED_LEVELS:
+                f.err(
+                    "front-matter",
+                    f"{_rel(path)}: level {level!r} not in {sorted(_ALLOWED_LEVELS)}",
+                )
         audience = fm.get("audience")
         if audience is not None and not isinstance(audience, list):
             f.err("front-matter", f"{_rel(path)}: audience must be a list")
@@ -380,12 +390,15 @@ def _check_front_matter_schema(
         if depends_on is not None and not isinstance(depends_on, list):
             f.err("front-matter", f"{_rel(path)}: depends_on must be a list")
         lifecycle = fm.get("lifecycle")
-        if lifecycle is not None and lifecycle not in _ALLOWED_LIFECYCLES:
-            f.err(
-                "front-matter",
-                f"{_rel(path)}: lifecycle {lifecycle!r} not in "
-                f"{sorted(_ALLOWED_LIFECYCLES)}",
-            )
+        if lifecycle is not None:
+            if not isinstance(lifecycle, str):
+                f.err("front-matter", f"{_rel(path)}: lifecycle must be a string")
+            elif lifecycle not in _ALLOWED_LIFECYCLES:
+                f.err(
+                    "front-matter",
+                    f"{_rel(path)}: lifecycle {lifecycle!r} not in "
+                    f"{sorted(_ALLOWED_LIFECYCLES)}",
+                )
 
         canonical_for = fm.get("canonical_for", [])
         if not isinstance(canonical_for, list):

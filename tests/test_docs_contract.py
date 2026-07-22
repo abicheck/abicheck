@@ -306,6 +306,46 @@ def test_front_matter_schema_flags_unknown_doc_type(
     assert any("doc_type" in msg for _, msg in f.errors)
 
 
+def test_front_matter_schema_flags_non_scalar_doc_type(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`doc_type: [how-to]` (a list, not a scalar) is unhashable -- checking
+    membership in the allowed-values frozenset would crash with a TypeError
+    before the gate can report anything (regression test for the gap flagged
+    in PR #619 review)."""
+    (tmp_path / "page.md").write_text(
+        "---\ndoc_type:\n  - how-to\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, {})  # must not raise
+    assert any("doc_type must be a string" in msg for _, msg in f.errors)
+
+
+def test_front_matter_schema_flags_non_scalar_level(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "page.md").write_text(
+        "---\nlevel:\n  beginner: true\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, {})  # must not raise
+    assert any("level must be a string" in msg for _, msg in f.errors)
+
+
+def test_front_matter_schema_flags_non_scalar_lifecycle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "page.md").write_text(
+        "---\nlifecycle:\n  - active\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, {})  # must not raise
+    assert any("lifecycle must be a string" in msg for _, msg in f.errors)
+
+
 def test_front_matter_schema_flags_scalar_audience(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
