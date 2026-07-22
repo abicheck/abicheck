@@ -175,6 +175,21 @@ def test_cpp20_detector_ignores_requires_text_in_delimited_raw_string(tmp_path):
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_accepts_concept_declaration_split_across_lines(tmp_path):
+    """Symmetric line-split gap for "concept": a bare "concept" keyword at
+    the end of a line, with its name/definition starting the next line and
+    no backslash continuation in between, was never joined by the
+    lookahead — which previously only triggered on a trailing "requires"."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<class T>\nconcept\nHasFoo = true;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
 def test_cpp20_detector_ignores_requires_text_in_punctuation_delimited_raw_string(
     tmp_path,
 ):

@@ -290,20 +290,22 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 continue
             code = _strip_literals_joined(logical)
             code = code.split(b"//")[0]
-            # A bare "requires" trailing at the end of a line (no parameter
-            # list or brace yet) means the construct's `(`/`{`/constraint
-            # landed on a following physical line with no backslash join in
-            # between — the per-line scan otherwise never sees the two
-            # halves together (Codex review). Pull in subsequent non-
-            # directive lines (bounded, so a stray trailing "requires" in
-            # unrelated code can't scan unboundedly) until the bare-trailing
-            # condition no longer holds.
+            # A bare "requires" or "concept" trailing at the end of a line
+            # (no parameter list/brace/name yet) means the construct's
+            # continuation landed on a following physical line with no
+            # backslash join in between — the per-line scan otherwise never
+            # sees the two halves together (Codex review; the same gap
+            # applies symmetrically to "concept" split before its name, not
+            # just "requires" split before its "("/"{"/constraint). Pull in
+            # subsequent non-directive lines (bounded, so a stray trailing
+            # keyword in unrelated code can't scan unboundedly) until the
+            # bare-trailing condition no longer holds.
             lookahead = code
             j = i
             lookahead_budget = 5
             while (
                 lookahead_budget > 0
-                and re.search(rb"\brequires\s*$", lookahead.rstrip())
+                and re.search(rb"\b(?:requires|concept)\s*$", lookahead.rstrip())
                 and j + 1 < n
                 and not _is_preprocessor_directive(logical_lines[j + 1][1])
             ):
