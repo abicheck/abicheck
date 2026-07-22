@@ -123,31 +123,50 @@ Implements ADR-050 D1 and D2.
   includes, so leaving it out of the hash would let that exact class of
   scope drift pass the gate undetected.
 - **Both fingerprints hash root-relative paths, never raw absolute ones —
-  the single highest-priority correctness requirement in this phase.**
+  the single highest-priority correctness requirement in this phase — and
+  each normalizes against its *own* root, never a root shared across both.**
   `compare`'s side-scoped `--header old=v1/foo.h --header new=v2/foo.h` /
   `--include old=inc1 --include new=inc2` (ADR-040) is the ordinary
   two-checkout compare workflow, and its old/new sides necessarily resolve
   to different absolute paths even for an identical logical surface.
   Hashing absolute paths directly would fingerprint-mismatch and hard-fail
   *every routine compare* as `not_comparable` — breaking the gate's primary
-  use case on day one. Each side's paths are normalized relative to that
-  side's own resolution root (legacy CLI path: the common ancestor
-  **directory** of that side's inputs — each header's *parent* directory
-  plus each include directory itself, **not** the header paths taken
-  literally; manifest path: the manifest file's own directory) before
-  hashing (ADR-050 D1). Deriving the root from header paths directly instead
+  use case on day one. `scope_fingerprint`'s root (header/TU paths) and
+  `profile_fingerprint`'s root (`-I` include-search directories) are
+  computed **separately**, from each category's own paths only — an
+  earlier revision of this criterion combined them into one shared root,
+  which breaks the moment an external dependency `-I` directory (e.g.
+  `--include old=/opt/dep --include new=/opt/dep`, commonly identical and
+  well outside either checkout) shares no meaningful prefix with the
+  project headers: the combined common ancestor collapses to `/`, so the
+  header paths normalize right back to their diverging checkout roots
+  (`work/v1/foo.h` vs. `work/v2/foo.h`) and `scope_fingerprint` mismatches
+  anyway — the exact bug this whole fix exists to close, reintroduced by
+  mixing an unrelated path category into the same root computation.
+  Each root (legacy CLI path: the common ancestor **directory** of that
+  side's own paths in that one category — each header's *parent* directory
+  for `scope_fingerprint`, each `-I` directory itself for
+  `profile_fingerprint`; manifest path: the manifest file's own directory
+  for both) before
+  hashing (ADR-050 D1). Deriving a root from header paths directly instead
   of their parents breaks the single-header-per-side case — the common
   ancestor of a one-element path set is that whole path, so `old=v1/foo.h`
   and `new=v2/bar.h` would both normalize to the same empty marker and hash
   identically despite being different scopes, the opposite failure from the
   one this fix exists to close; taking the parent directory first preserves
-  the filename (`v1/foo.h` → root `v1/`, normalized `foo.h`). A dedicated
-  test using `--header old=v1/foo.h --header new=v2/foo.h` against
-  logically identical trees under different roots, asserting the resulting
-  `profile_fingerprint`s match — **and** a second test asserting
+  the filename (`v1/foo.h` → root `v1/`, normalized `foo.h`). Three
+  dedicated tests are non-negotiable for this phase to be considered done:
+  (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
+  identical trees under different roots asserts the resulting
+  **`scope_fingerprint`s** match (not `profile_fingerprint` — headers are a
+  scope input, and a test that only checks `profile_fingerprint` here can
+  pass while `scope_fingerprint` still hard-fails on raw header paths); (2)
   `old=v1/foo.h`/`new=v2/bar.h` (genuinely different header names) produce
-  *different* fingerprints — is non-negotiable for this phase to be
-  considered done.
+  *different* `scope_fingerprint`s; (3) adding an identical, out-of-checkout
+  `--include old=/opt/dep --include new=/opt/dep` alongside case (1)'s
+  headers still leaves `scope_fingerprint` matching — the specific
+  external-dependency-directory regression this criterion exists to
+  prevent.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls

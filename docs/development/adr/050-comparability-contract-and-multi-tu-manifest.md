@@ -168,36 +168,59 @@ not a latent surprise discovered after Phase A ships.
 side-specific ones — this is not optional, it protects abicheck's single
 most common workflow.** `compare` already supports side-scoped
 `--header old=v1/foo.h --header new=v2/foo.h` and
-`--include old=inc1 --include new=inc2` (ADR-040, `cli_options.py:230+`)
+`--include old=inc1 --include new=inc2` (ADR-040, `cli_options.py:225+`)
 for the ordinary two-checkout-tree comparison — the old and new sides
 *necessarily* resolve to different absolute paths even when they cover the
 identical logical surface, precisely because they live in different
 checkouts. Hashing resolved absolute paths directly would make every
 routine `compare` invocation fingerprint-mismatch and hard-fail as
 `not_comparable` — the gate would break its primary use case on day one,
-the exact inverse of what it's for. Each side's header/include/forced-
-include paths are therefore normalized **relative to that side's own
-resolution root** before folding into either fingerprint: for the legacy,
-non-manifest CLI path, the root is the common ancestor **directory** of
-that side's own inputs — each header path's *parent* directory and each
-include directory itself, not the header paths taken literally (a pure
-function of that side's own inputs, no new flag needed). Computing it from
-the header paths directly, rather than their parents, degenerates in the
-single-header-per-side case that's actually the common one: the "common
-prefix" of a one-element path set is that whole path, so `old=v1/foo.h`
-and `new=v2/bar.h` would both normalize their sole header to the same
-empty/root marker, losing the filename entirely — two genuinely different
-public scopes would then hash identically and wrongly pass the gate, the
-opposite failure from the one this fix exists to close. Taking the parent
-directory first means a lone header's basename survives normalization
-(`v1/foo.h` → root `v1/`, normalized path `foo.h`); for the manifest-driven
-path (D3), the root is the manifest file's own directory. Two sides with
-the same logical directory layout (`include/foo.h` under each side's own
-root) normalize to identical relative paths and produce equal fingerprints
-regardless of where
-each checkout happens to live on disk; a side whose logical layout actually
-differs (a header moved to a different relative location) still changes the
-fingerprint, correctly.
+the exact inverse of what it's for.
+
+**The two fingerprints normalize their path inputs *separately*, each
+against its own root — they must not share one combined root.**
+`scope_fingerprint`'s inputs are header/TU paths (the declared surface);
+`profile_fingerprint`'s inputs are `-I` include-*search* directories (how
+the compiler resolves `#include`, not what's declared). Header paths and
+include-search directories commonly point to unrelated places on disk — a
+project's own headers live under the checkout root, while `-I` dependency
+directories (`--include old=/opt/dep --include new=/opt/dep`, a shared,
+often *identical*, external path on both sides) can sit anywhere,
+including well outside either checkout. Computing one shared root from
+*both* categories together — a mistake an earlier revision of this
+paragraph made — lets an out-of-checkout `-I` directory drag the common
+ancestor up to the filesystem root (`/`) once it shares no meaningful
+prefix with the project headers, which reintroduces the exact bug this
+fix exists to close: the header paths then normalize relative to `/`, so
+`old=/work/v1/foo.h` and `new=/work/v2/foo.h` still carry their diverging
+checkout roots (`work/v1/foo.h` vs. `work/v2/foo.h`) into
+`scope_fingerprint`, hard-failing an otherwise-identical comparison.
+
+For the legacy, non-manifest CLI path: `scope_fingerprint`'s root is the
+common ancestor **directory** of that side's own header paths' *parent*
+directories only (never `-I` directories); `profile_fingerprint`'s root is
+computed the same way but from that side's own `-I` directories only,
+independently. Computing either root from bare paths, rather than parent
+directories, degenerates in the single-entry case that's actually the
+common one: the "common prefix" of a one-element path set is that whole
+path, so `old=v1/foo.h` and `new=v2/bar.h` would both normalize their sole
+header to the same empty/root marker, losing the filename entirely — two
+genuinely different public scopes would then hash identically and wrongly
+pass the gate, the opposite failure from the one this fix exists to close.
+Taking the parent directory first means a lone header's basename survives
+normalization (`v1/foo.h` → root `v1/`, normalized path `foo.h`); for the
+manifest-driven path (D3), both roots are the manifest file's own
+directory (a manifest's `includes`/`forced_includes` and its base
+profile's search paths are declared relative to one document, so no
+external-directory contamination is possible there). Two sides with the
+same logical directory layout (`include/foo.h` under each side's own
+header root, `/opt/dep` identical or side-scoped independently under its
+own `-I` root) normalize to identical relative paths in both fingerprints
+and produce equal results regardless of where each checkout happens to
+live on disk or where its dependency directories are mounted; a side whose
+logical layout actually differs (a header moved to a different relative
+location, or a genuinely different dependency version under a differently
+laid-out path) still changes the corresponding fingerprint, correctly.
 
 Both fingerprints live in a new `contract: ExtractionContract | None` field
 on `AbiSnapshot` rather than flattening two more top-level fields onto an
