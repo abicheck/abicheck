@@ -840,6 +840,22 @@ def test_cpp20_detector_ignores_concept_typed_variable_template_any_initializer(
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_commented_out_concept_type_shadow(tmp_path):
+    """Regression (Codex review, fifth round): the concept-type-shadow
+    check was computed before "//" line comments are stripped (only
+    raw strings/literals/block comments are blanked at that point) — a
+    "// struct concept {};" comment must never make a *real* concept
+    declaration elsewhere in the header look ambiguous and get rejected."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "// struct concept {};\ntemplate<class T> concept C = true;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
 def test_cpp20_detector_still_accepts_template_concept_after_qualified_check(
     tmp_path,
 ):

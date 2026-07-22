@@ -71,6 +71,22 @@ class TestEvaluateCastxmlVersion:
         assert result.supported is False
         assert REASON_VERSION_AT_OR_ABOVE_MAXIMUM in result.reasons
 
+    def test_prerelease_of_next_line_rejected(self):
+        """Regression (Codex review): a plain PEP 440 comparison sorts a
+        prerelease of the next line (0.8.0-rc1) *below* final 0.8.0, so it
+        slipped past both the minimum and maximum checks entirely and
+        would have run as an unvalidated 0.8 build."""
+        result = evaluate_castxml_version(_version_text("0.8.0-rc1"))
+        assert result.supported is False
+        assert REASON_VERSION_AT_OR_ABOVE_MAXIMUM in result.reasons
+
+    def test_dev_release_of_next_line_rejected(self):
+        """Companion: a dev-release spelling of the same next-line
+        prerelease."""
+        result = evaluate_castxml_version(_version_text("0.8.0.dev1"))
+        assert result.supported is False
+        assert REASON_VERSION_AT_OR_ABOVE_MAXIMUM in result.reasons
+
     def test_version_below_min_rejected(self):
         result = evaluate_castxml_version(_version_text("0.6.20260105"))
         assert result.supported is False

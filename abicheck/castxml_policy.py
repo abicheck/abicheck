@@ -159,7 +159,16 @@ def evaluate_castxml_version(raw_output: str) -> CastxmlVersionCheck:
     if parsed is not None:
         if parsed < Version(MIN_CASTXML):
             reasons.append(REASON_VERSION_BELOW_MINIMUM)
-        elif parsed >= Version(MAX_CASTXML):
+        # Compare the *release* segment alone (parsed.base_version strips
+        # any pre/post/dev/local qualifiers) against the upper bound —
+        # Codex review: a plain ``Version`` comparison sorts a prerelease
+        # of the next line (0.8.0-rc1, 0.8.0.dev1) *below* final 0.8.0,
+        # so it slipped through this gate entirely (neither below the
+        # minimum nor at/above the maximum) and would have run as an
+        # unvalidated 0.8 build. The minimum-side check above is left
+        # using the raw pre-release-aware comparison, since a prerelease
+        # of the minimum itself (0.7.0-rc1) must still sort below it.
+        elif Version(parsed.base_version) >= Version(MAX_CASTXML):
             reasons.append(REASON_VERSION_AT_OR_ABOVE_MAXIMUM)
 
     if clang_major_minor is None:

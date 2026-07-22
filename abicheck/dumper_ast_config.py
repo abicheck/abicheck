@@ -699,8 +699,17 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
         # complete. Once "concept" is confirmed to name a real type in
         # this header, every bare "concept NAME = ..." match in it is
         # ambiguous and treated as non-genuine — see
-        # ``_looks_like_genuine_concept``.
-        concept_type_shadowed = bool(_CONCEPT_AS_TYPE_NAME_PATTERN.search(content))
+        # ``_looks_like_genuine_concept``. Checked against a *separate*,
+        # additionally "//"-line-comment-stripped copy of the content
+        # (raw strings/literals/block comments are already blanked in
+        # ``content`` itself at this point, but not "//" comments, which
+        # are only stripped per-logical-line further below) — a
+        # "// struct concept {};" comment must never make a *real*
+        # concept declaration elsewhere in the header look ambiguous
+        # (Codex review, fifth round).
+        concept_type_shadowed = bool(
+            _CONCEPT_AS_TYPE_NAME_PATTERN.search(re.sub(rb"//[^\n]*", b"", content))
+        )
         logical_lines = _iter_logical_lines(content)
         n = len(logical_lines)
         # Last non-blank line's own (un-extended) code, tracked across
