@@ -638,16 +638,41 @@ Implements ADR-050 D3. The highest-risk phase — see Risk above.
   diagnostic command that prints the normalized manifest and both D1
   fingerprints without running extraction — cheap to run in CI before
   committing to a full dump.
+- **`--manifest` must be side-scoped on `compare`, not a single shared
+  path.** `dump` produces one snapshot from one manifest, so a bare
+  `--manifest path` is correct there. `compare OLD_INPUT NEW_INPUT` is
+  different: it already dumps both sides from independently-rooted
+  header/include trees via `--header`/`--include`'s `old=`/`new=` prefix
+  convention (`SIDED_PATH_PARAM`, ADR-040) precisely because old and new
+  live under different roots. A single unsided `--manifest v1/abi.yml`
+  would either apply the same manifest to both sides (unable to express
+  the normal two-checkout case) or leave no way to also pass `v2/abi.yml`
+  for the new side. `compare`'s `--manifest` therefore reuses
+  `SIDED_PATH_PARAM` exactly like `--header`/`--include` do — `--manifest
+  old=v1/abi.yml --manifest new=v2/abi.yml` — while `dump`'s stays a bare
+  path (it only ever has one side).
 
 **Files & surfaces.** New `abicheck/dump_manifest.py`, `abicheck/dumper.py`
-(per-TU invocation loop, `TuFragment` type). `--manifest`/
-`--frontend-context` are shared-concept options per multiple existing
-commands (`dump` and `compare`), so — following `cli_options.py`'s own
-existing convention for `-v/--verbose`, `output_options(...)`, and
-`lang_option(...)` — they're added as one shared decorator in
-`cli_options.py` and applied at `dump`'s and `compare`'s existing
-declarations directly (wherever those already live: `cli.py`), not merely
-implied by registering a new command module. New `cli_dump_manifest.py`
+(per-TU invocation loop, `TuFragment` type). `--manifest` is a shared-concept
+option across `dump` and `compare` (side-scoped on `compare` via
+`SIDED_PATH_PARAM`, bare on `dump` — see the acceptance-criteria bullet
+above), added as one decorator in `cli_options.py` and applied at `dump`'s
+and `compare`'s existing declarations directly, not merely implied by
+registering a new command module.
+**`--frontend-context` is not a `dump`/`compare`-only option — it belongs in
+the existing `compile_context_options` decorator (`cli_options.py`), the same
+shared L2 compile-context family `dump`, `compare`, *and* `cli_scan.py`'s
+`scan_cmd` already apply (`# dump↔scan L2 compile-context parity (ADR-037
+D3)`), not a new, narrower decorator applied only to two of those three.**
+Leaving `scan` out would strand the one-shot `abicheck scan --against`
+workflow on the `host` default with no way to request `device` — the same
+SYCL/DPC++ target a `scan`-driven audit can already reach via that command's
+side-aware `-H`/`-I` options. Adding `--frontend-context` to
+`compile_context_options` itself means `scan` picks it up automatically, the
+same way it already inherits `--ast-frontend` and the cross-toolchain
+`--gcc-*`/`--sysroot`/`--nostdinc` flags from that decorator, with no
+separate `scan_cmd` edit required beyond that decorator already being
+applied there today. New `cli_dump_manifest.py`
 sibling command module for the genuinely new `plan --manifest` command
 only (per the root `CLAUDE.md`'s "larger command → sibling module"
 convention) — registering it is not implicit: `cli.py`'s bottom
@@ -666,7 +691,15 @@ accepted/defaulted/rejected-when-invalid). `dumper.py` multi-TU
 integration tests (`@pytest.mark.integration`, needs castxml/clang) using
 Phase 0's fixtures. A `plan --manifest` unit test asserting it never invokes
 a compiler. A `--frontend-context` CLI-flag unit test for the legacy
-(non-manifest) path, mirroring the manifest-field test.
+(non-manifest) path, mirroring the manifest-field test. A **side-scoped
+`compare --manifest`** test asserting `compare old.so new.so --manifest
+old=v1/abi.yml --manifest new=v2/abi.yml` dumps each side from its own
+manifest (not both from one), plus a `dump --manifest path` test confirming
+the single-sided form is unaffected. A **`scan --frontend-context`**
+regression test asserting `abicheck scan --against` accepts `device` and
+threads it into the L2 header frontend the same way `dump`/`compare` do,
+proving `compile_context_options` (not a `dump`/`compare`-only decorator) is
+what carries the flag.
 
 **Example fixtures.** Phase 0's ODR-safe and external-STL-noise pairs,
 wired through the real manifest path end to end.
