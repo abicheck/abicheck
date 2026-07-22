@@ -62,8 +62,15 @@ def _run_action(
     """Invoke the real script end-to-end with a GITHUB_OUTPUT file."""
     github_output = cwd / "github_output"
     github_output.write_text("")
+    # Strip any inherited INPUT_* from the host/CI environment before
+    # overlaying env_extra: the input-validation negative tests (e.g.
+    # test_missing_baseline_path_fails) assert failure purely on an input's
+    # *absence*, and a leaked INPUT_* value would make those tests pass for
+    # the wrong reason (or stop failing) instead of exercising the real
+    # guard (CodeRabbit review).
+    base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
     env = {
-        **os.environ,
+        **base_env,
         "GITHUB_OUTPUT": str(github_output),
         "ACTION_PATH": str(ACTION_DIR),
         **env_extra,
@@ -112,11 +119,17 @@ def _write_manifest(
 
 
 def _target_artifact(name: str) -> dict:
+    # No real "sha256" -- these shell-level tests aren't about digest
+    # verification (that's covered at the unit level in
+    # tests/test_baseline_set.py), and an empty/absent recorded digest makes
+    # resolve_target()'s digest check a no-op rather than a false mismatch
+    # against whatever placeholder snapshot content each test happens to
+    # write.
     return {
         "library": name,
         "artifact": f"build/{name}.so",
         "snapshot": f"{name}.abicheck.json",
-        "sha256": "deadbeef",
+        "sha256": "",
     }
 
 
@@ -251,6 +264,29 @@ class TestFailureTaxonomy:
         )
         assert result.returncode == 1
         assert outputs.get("outcome") == "stale_schema"
+
+    def test_corrupt_manifest_is_a_typed_outcome_not_a_traceback(
+        self, tmp_path: Path
+    ) -> None:
+        # A manifest.json that exists but isn't valid JSON (partial
+        # download, hand edit) must still produce the Action's typed
+        # outcome/message contract, not let a Python ValueError escape
+        # resolve_baseline.py unhandled (Codex review).
+        baseline_dir = tmp_path / "baseline"
+        baseline_dir.mkdir(parents=True)
+        (baseline_dir / "manifest.json").write_text("{not valid json", encoding="utf-8")
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(baseline_dir),
+                "INPUT_CHANNEL": "accepted-main",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert outputs.get("outcome") == "stale_schema"
+        assert outputs.get("message")
 
     def test_incompatible_evidence(self, tmp_path: Path) -> None:
         baseline_dir = tmp_path / "baseline"

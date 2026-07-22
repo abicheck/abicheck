@@ -45,17 +45,43 @@ from abicheck.buildsource.baseline_set import (
 _EXIT_USAGE_ERROR = 64
 
 
-def _print_outputs(result: ResolveResult) -> None:
-    # One line per GITHUB_OUTPUT key. `message` is always built from f-strings
-    # with no embedded newlines (see baseline_set.py), so a plain key=value
-    # line is safe here -- no GITHUB_OUTPUT heredoc delimiter needed.
-    print(f"outcome={result.outcome}")
-    print(f"bootstrap={'true' if result.bootstrap else 'false'}")
-    print(f"manifest-path={result.manifest_path or ''}")
-    print(f"snapshot-path={result.snapshot_path or ''}")
-    print(f"binaries-dir={result.binaries_dir or ''}")
-    print(f"binary-paths={json.dumps(result.binary_paths)}")
-    print(f"message={result.message}")
+def _print_outputs(result: ResolveResult) -> int:
+    """Print ``key=value`` lines ``run.sh`` forwards to ``GITHUB_OUTPUT``.
+
+    Returns ``0`` normally, or :data:`_EXIT_USAGE_ERROR` if any value
+    contains a newline -- run.sh appends these lines to ``$GITHUB_OUTPUT``
+    as-is, one `key=value` pair per line, so an embedded newline in a value
+    would corrupt that file's parsing and could inject/override an
+    unrelated output key a later step reads. `message`/`binary-paths` are
+    normally safe (built via `!r`-escaped f-strings / ``json.dumps``, which
+    never emit a literal newline), but `manifest-path`/`snapshot-path`/
+    `binaries-dir` are plain filesystem paths traceable back to a
+    caller-supplied `baseline-path` (or an archive-nested directory name) --
+    checking every field uniformly here is simpler and more robust than
+    trusting each value's construction to stay newline-free forever
+    (CodeRabbit review).
+    """
+    fields = {
+        "outcome": result.outcome,
+        "bootstrap": "true" if result.bootstrap else "false",
+        "manifest-path": result.manifest_path or "",
+        "snapshot-path": result.snapshot_path or "",
+        "binaries-dir": result.binaries_dir or "",
+        "binary-paths": json.dumps(result.binary_paths),
+        "message": result.message,
+    }
+    for key, value in fields.items():
+        if "\n" in value or "\r" in value:
+            print(
+                f"::error::internal error: resolve-baseline output {key!r} "
+                "contains a newline, which would corrupt GITHUB_OUTPUT -- "
+                "refusing to write it.",
+                file=sys.stderr,
+            )
+            return _EXIT_USAGE_ERROR
+    for key, value in fields.items():
+        print(f"{key}={value}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -126,7 +152,9 @@ def main(argv: list[str] | None = None) -> int:
             candidate_evidence_producer=candidate_evidence_producer,
         )
 
-    _print_outputs(result)
+    output_status = _print_outputs(result)
+    if output_status != 0:
+        return output_status
 
     if result.outcome == ResolveOutcome.RESOLVED:
         return 0

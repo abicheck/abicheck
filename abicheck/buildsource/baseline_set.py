@@ -39,6 +39,7 @@ workflow's job, per ADR-047 §10).
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,6 +66,103 @@ BASELINE_MANIFEST_FILENAME = "manifest.json"
 #: until then, the same "defines the contract, no producer yet" scoping
 #: G30 P1.1 used for ``build-output.json``.
 BASELINE_BINARIES_DIRNAME = "binaries"
+
+# Keys that vary between two dumps/replays of otherwise ABI-identical
+# content -- timestamps, source-file mtimes, and wall-clock/cache-state
+# counters -- so a stable content hash must strip all of them, not hash raw
+# file bytes. Ported verbatim from actions/baseline/build_manifest.py's own
+# private copy of this list (which now imports compute_snapshot_content_hash
+# below instead of keeping its own): this is the ONE place both the
+# baseline-set producer and this resolver's digest-verification check
+# compute a snapshot's stable content hash, so they can never silently drift
+# apart and disagree on what "unchanged content" means.
+_VOLATILE_TOP_LEVEL_KEYS = ("created_at", "source_mtime", "source_mtime_epoch")
+_VOLATILE_BUILD_SOURCE_MANIFEST_KEYS = ("created_at",)
+_VOLATILE_BUILD_SOURCE_PACK_KEYS = ("path_hint",)
+_VOLATILE_COVERAGE_KEYS = (
+    "cache_lookup_s",
+    "extract_s",
+    "link_s",
+    "elapsed_s",
+    "cache_misses",
+    "cache_hits",
+    "extractor_jobs",
+)
+_VOLATILE_MANIFEST_COVERAGE_ROW_KEYS = ("detail", "elapsed_s")
+_VOLATILE_MANIFEST_EXTRACTOR_ROW_KEYS = ("detail", "started_at", "finished_at")
+
+
+def _strip_row_keys(rows: Any, volatile_keys: tuple[str, ...]) -> Any:
+    if not isinstance(rows, list):
+        return rows
+    return [
+        {k: v for k, v in row.items() if k not in volatile_keys}
+        if isinstance(row, dict)
+        else row
+        for row in rows
+    ]
+
+
+def strip_volatile_snapshot_fields(raw: dict[str, Any]) -> dict[str, Any]:
+    """Strip fields that vary run-to-run without the snapshot's actual
+    ABI/source-fact content changing (see the constants above) -- the
+    stable-content view :func:`compute_snapshot_content_hash` hashes."""
+    stable = dict(raw)
+    for key in _VOLATILE_TOP_LEVEL_KEYS:
+        stable.pop(key, None)
+
+    build_source_pack = stable.get("build_source_pack")
+    if isinstance(build_source_pack, dict):
+        build_source_pack = dict(build_source_pack)
+        for key in _VOLATILE_BUILD_SOURCE_PACK_KEYS:
+            build_source_pack.pop(key, None)
+        stable["build_source_pack"] = build_source_pack
+
+    build_source = stable.get("build_source")
+    if isinstance(build_source, dict):
+        build_source = dict(build_source)
+
+        manifest = build_source.get("manifest")
+        if isinstance(manifest, dict):
+            manifest = dict(manifest)
+            for key in _VOLATILE_BUILD_SOURCE_MANIFEST_KEYS:
+                manifest.pop(key, None)
+            if "coverage" in manifest:
+                manifest["coverage"] = _strip_row_keys(
+                    manifest["coverage"], _VOLATILE_MANIFEST_COVERAGE_ROW_KEYS
+                )
+            if "extractors" in manifest:
+                manifest["extractors"] = _strip_row_keys(
+                    manifest["extractors"], _VOLATILE_MANIFEST_EXTRACTOR_ROW_KEYS
+                )
+            build_source["manifest"] = manifest
+
+        source_abi = build_source.get("source_abi")
+        if isinstance(source_abi, dict):
+            source_abi = dict(source_abi)
+            coverage = source_abi.get("coverage")
+            if isinstance(coverage, dict):
+                coverage = dict(coverage)
+                for key in _VOLATILE_COVERAGE_KEYS:
+                    coverage.pop(key, None)
+                source_abi["coverage"] = coverage
+            build_source["source_abi"] = source_abi
+
+        stable["build_source"] = build_source
+
+    return stable
+
+
+def compute_snapshot_content_hash(raw: dict[str, Any]) -> str:
+    """The per-artifact ``sha256`` ``manifest.json`` records for a snapshot
+    (``actions/baseline/build_manifest.py``) -- hashes the *stable* view
+    (volatile fields stripped), not the raw file bytes, so re-dumping
+    ABI-identical content on a different run/host doesn't change the digest.
+    """
+    stable = strip_volatile_snapshot_fields(raw)
+    return hashlib.sha256(
+        json.dumps(stable, sort_keys=True).encode("utf-8")
+    ).hexdigest()
 
 
 class ResolveOutcome:
@@ -233,6 +331,42 @@ def _not_found_result(required: bool, message: str) -> ResolveResult:
     )
 
 
+def _load_manifest_or_result(
+    baseline_dir: Path, required: bool
+) -> tuple[BaselineManifest, None] | tuple[None, ResolveResult]:
+    """Shared ``manifest.json`` load for :func:`resolve_target`/:func:`resolve_bundle`.
+
+    Converts both ways a load can fail into a typed :class:`ResolveResult`
+    instead of letting either escape as a raw exception: a missing manifest
+    becomes :data:`ResolveOutcome.NOT_FOUND` (with the usual bootstrap
+    split), and a manifest that exists but is corrupt/malformed (not valid
+    JSON, or not a JSON object) — a different failure than "not published
+    yet" — becomes :data:`ResolveOutcome.STALE_SCHEMA`, since either way this
+    resolver cannot understand the shape it's looking at. Without this, a
+    corrupt ``manifest.json`` (a truncated download, a hand edit) would raise
+    an unhandled ``ValueError`` all the way out of ``resolve_baseline.py``,
+    breaking the Action's typed-outcome contract for exactly the kind of
+    real baseline-resolution failure ADR-047 §6 exists to name.
+    """
+    try:
+        manifest = load_baseline_manifest(baseline_dir)
+    except ValueError as exc:
+        return None, ResolveResult(
+            outcome=ResolveOutcome.STALE_SCHEMA,
+            message=(
+                f"{baseline_dir / BASELINE_MANIFEST_FILENAME} exists but "
+                f"could not be read as a baseline-set manifest: {exc} -- "
+                "treated as an unrecognized/unparseable schema, the same as "
+                "a manifest_version this resolver doesn't understand."
+            ),
+        )
+    if manifest is None:
+        return None, _not_found_result(
+            required, f"No baseline-set found at {baseline_dir} (no manifest.json)."
+        )
+    return manifest, None
+
+
 def _evidence_incompatibility(
     manifest: BaselineManifest, candidate_evidence_producer: dict[str, Any] | None
 ) -> str | None:
@@ -264,7 +398,7 @@ def _evidence_incompatibility(
             f"candidate build's evidence producer is {candidate_kind!r} -- "
             "comparing source-depth evidence across different producers "
             "(e.g. wrapper vs. replay) is an infrastructure incompatibility, "
-            "not an ABI finding (ADR-047 §6)."
+            "not an ABI finding (ADR-047 section 6)."
         )
     candidate_version = str(candidate_evidence_producer.get("version") or "")
     baseline_producer_version = str(baseline_fact_set.get("producer_version") or "")
@@ -279,7 +413,7 @@ def _evidence_incompatibility(
             f"{candidate_version!r} -- a producer version change can alter "
             "the evidence recipe (fact_set.py's comparability rules), so "
             "this is treated as an infrastructure incompatibility rather "
-            "than silently comparing anyway (ADR-047 §6)."
+            "than silently comparing anyway (ADR-047 section 6)."
         )
     return None
 
@@ -314,6 +448,48 @@ def _schema_and_profile_check(
     return None
 
 
+def _snapshot_digest_issue(
+    target: str, snapshot_path: Path, expected_sha256: str
+) -> str | None:
+    """Verify a resolved snapshot's content against the manifest's recorded
+    digest -- ``None`` when it matches (or the manifest recorded no digest
+    to check, an older/hand-authored manifest).
+
+    Without this, a truncated/corrupted/silently-replaced snapshot file (a
+    partial artifact download, a stale cache restore) would still resolve as
+    ``resolved`` purely because a file with the right name exists on disk --
+    letting ``compare`` consume the wrong old-side content and report a
+    verdict from data that was never actually part of this baseline set
+    (Codex review).
+    """
+    if not expected_sha256:
+        return None
+    try:
+        with snapshot_path.open(encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        return (
+            f"target {target!r}'s snapshot {snapshot_path.name!r} could not "
+            f"be read to verify its digest: {exc} -- the baseline-set is "
+            "corrupt or was truncated."
+        )
+    if not isinstance(raw, dict):
+        return (
+            f"target {target!r}'s snapshot {snapshot_path.name!r} does not "
+            "contain a JSON object -- the baseline-set is corrupt."
+        )
+    actual_sha256 = compute_snapshot_content_hash(raw)
+    if actual_sha256 != expected_sha256:
+        return (
+            f"target {target!r}'s snapshot {snapshot_path.name!r} content "
+            f"digest does not match the manifest (expected "
+            f"{expected_sha256!r}, got {actual_sha256!r}) -- the baseline-"
+            "set is corrupt, was tampered with, or was truncated/replaced "
+            "after the manifest was written."
+        )
+    return None
+
+
 def resolve_target(
     baseline_dir: Path | str,
     *,
@@ -331,11 +507,10 @@ def resolve_target(
     directory.
     """
     baseline_dir = Path(baseline_dir)
-    manifest = load_baseline_manifest(baseline_dir)
-    if manifest is None:
-        return _not_found_result(
-            required, f"No baseline-set found at {baseline_dir} (no manifest.json)."
-        )
+    manifest, failure = _load_manifest_or_result(baseline_dir, required)
+    if failure is not None:
+        return failure
+    assert manifest is not None
     manifest_path = str(baseline_dir / BASELINE_MANIFEST_FILENAME)
 
     schema_or_profile_failure = _schema_and_profile_check(
@@ -382,6 +557,14 @@ def resolve_target(
             manifest_path=manifest_path,
         )
 
+    digest_issue = _snapshot_digest_issue(target, snapshot_path, artifact.sha256)
+    if digest_issue:
+        return ResolveResult(
+            outcome=ResolveOutcome.AMBIGUOUS,
+            message=digest_issue,
+            manifest_path=manifest_path,
+        )
+
     return ResolveResult(
         outcome=ResolveOutcome.RESOLVED,
         message=f"resolved target {target!r} at profile {profile!r}.",
@@ -412,11 +595,10 @@ def resolve_bundle(
     old-side data.
     """
     baseline_dir = Path(baseline_dir)
-    manifest = load_baseline_manifest(baseline_dir)
-    if manifest is None:
-        return _not_found_result(
-            required, f"No baseline-set found at {baseline_dir} (no manifest.json)."
-        )
+    manifest, failure = _load_manifest_or_result(baseline_dir, required)
+    if failure is not None:
+        return failure
+    assert manifest is not None
     manifest_path = str(baseline_dir / BASELINE_MANIFEST_FILENAME)
 
     schema_or_profile_failure = _schema_and_profile_check(
@@ -455,7 +637,7 @@ def resolve_bundle(
                 f"staged binary in this baseline-set's "
                 f"{BASELINE_BINARIES_DIRNAME}/ directory -- a bundle-scoped "
                 "baseline must stage every member's ELF binary (ADR-047 "
-                "§6/§8 S14), not just its snapshot."
+                "section 6/section 8 S14), not just its snapshot."
             ),
             manifest_path=manifest_path,
         )

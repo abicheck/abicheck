@@ -293,7 +293,9 @@ well as in the test suite).
 
 Implements ADR-047 §4/§6. New composite Action; consumes a baseline-set
 archive/cache entry + `channel`/`target`/`profile` inputs; outputs a
-resolved snapshot path or one of the five typed failure states.
+resolved snapshot path (a resolved bundle instead returns staged member
+binary paths, per the S14 correction below) or one of the five typed
+failure states.
 **Input gap, flagged by review: candidate evidence metadata is missing
 from this list, and the `incompatible_evidence` outcome cannot be detected
 without it.** §6's taxonomy requires `resolve-baseline` to reject a

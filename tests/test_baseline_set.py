@@ -32,6 +32,7 @@ import pytest
 from abicheck.buildsource.baseline_set import (
     BASELINE_MANIFEST_FILENAME,
     ResolveOutcome,
+    compute_snapshot_content_hash,
     load_baseline_manifest,
     resolve_bundle,
     resolve_target,
@@ -65,11 +66,19 @@ def _write_manifest(
 def _target_artifact(
     name: str, *, snapshot: bool = True, extra: dict | None = None
 ) -> dict:
+    # No "sha256" by default -- an empty/absent recorded digest means
+    # resolve_target()'s digest-verification check has nothing to compare
+    # against and no-ops (see _snapshot_digest_issue), so tests that aren't
+    # specifically about digest verification aren't coupled to the exact
+    # bytes a fixture snapshot happens to contain. Tests that DO want digest
+    # verification pass extra={"sha256": compute_snapshot_content_hash(...)}
+    # explicitly (see the TestSnapshotDigestVerification-equivalent cases
+    # below).
     entry = {
         "library": name,
         "artifact": f"build/{name}.so",
         "snapshot": f"{name}.abicheck.json" if snapshot else "",
-        "sha256": "deadbeef",
+        "sha256": "",
     }
     if extra:
         entry.update(extra)
@@ -275,6 +284,88 @@ def test_resolve_target_resolved(tmp_path: Path) -> None:
     assert result.bootstrap is False
     assert result.snapshot_path == str(tmp_path / "libpvxs.abicheck.json")
     assert result.manifest_path == str(tmp_path / BASELINE_MANIFEST_FILENAME)
+
+
+def test_resolve_target_digest_match_resolves(tmp_path: Path) -> None:
+    snapshot_content = {"library": "libpvxs", "schema_version": 9}
+    real_digest = compute_snapshot_content_hash(snapshot_content)
+    _write_manifest(
+        tmp_path,
+        artifacts=[_target_artifact("libpvxs", extra={"sha256": real_digest})],
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text(
+        json.dumps(snapshot_content), encoding="utf-8"
+    )
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_target_digest_mismatch_is_ambiguous(tmp_path: Path) -> None:
+    # A truncated/replaced snapshot file (partial download, stale cache
+    # restore) must never resolve just because a file with the right name
+    # exists -- the manifest's recorded digest is what actually vouches for
+    # its content (Codex review).
+    _write_manifest(
+        tmp_path,
+        artifacts=[_target_artifact("libpvxs", extra={"sha256": "0" * 64})],
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text(
+        json.dumps({"library": "libpvxs", "schema_version": 9}), encoding="utf-8"
+    )
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "digest does not match" in result.message
+
+
+def test_resolve_target_digest_ignores_volatile_fields(tmp_path: Path) -> None:
+    # created_at is stripped before hashing (same convention as
+    # actions/baseline/build_manifest.py) -- a snapshot re-dumped with a
+    # fresh timestamp but otherwise identical content must still verify.
+    original = {
+        "library": "libpvxs",
+        "schema_version": 9,
+        "created_at": "2026-01-01T00:00:00Z",
+    }
+    real_digest = compute_snapshot_content_hash(original)
+    _write_manifest(
+        tmp_path,
+        artifacts=[_target_artifact("libpvxs", extra={"sha256": real_digest})],
+    )
+    redumped = {
+        "library": "libpvxs",
+        "schema_version": 9,
+        "created_at": "2026-07-22T12:00:00Z",
+    }
+    (tmp_path / "libpvxs.abicheck.json").write_text(
+        json.dumps(redumped), encoding="utf-8"
+    )
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_target_corrupt_manifest_is_stale_schema_not_a_traceback(
+    tmp_path: Path,
+) -> None:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / BASELINE_MANIFEST_FILENAME).write_text(
+        "{not valid json", encoding="utf-8"
+    )
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.STALE_SCHEMA
+    assert not result.ok
+
+
+def test_resolve_bundle_corrupt_manifest_is_stale_schema(tmp_path: Path) -> None:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / BASELINE_MANIFEST_FILENAME).write_text("[]", encoding="utf-8")
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.STALE_SCHEMA
 
 
 # ── resolve_bundle ────────────────────────────────────────────────────────

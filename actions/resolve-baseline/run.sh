@@ -5,7 +5,7 @@
 # See actions/resolve-baseline/action.yml for the input/output contract and
 # actions/resolve-baseline/resolve_baseline.py for the pure resolution logic
 # (abicheck/buildsource/baseline_set.py).
-set -uo pipefail
+set -euo pipefail
 
 _fail() {
   echo "::error::$1"
@@ -23,6 +23,14 @@ REQUIRED="${INPUT_REQUIRED:-true}"
 CANDIDATE_BUILD_OUTPUT="${INPUT_CANDIDATE_BUILD_OUTPUT:-}"
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
+# A newline in channel would corrupt the `channel=$CHANNEL` line this
+# script later appends to $GITHUB_OUTPUT (each line there is a plain
+# key=value pair) -- rejecting it up front is simpler and equally safe as
+# heredoc-encoding it, and channel is always meant to be a short identifier
+# anyway (Codex/CodeRabbit review).
+case "$CHANNEL" in
+  *$'\n'*) _fail "channel input must not contain a newline." ;;
+esac
 case "$KIND" in
   target | bundle) ;;
   *) _fail "kind '$KIND' is not recognized. Use 'target' or 'bundle'." ;;
@@ -52,24 +60,47 @@ elif [[ -f "$BASELINE_PATH" ]]; then
   _EXTRACT_DIR=$(mktemp -d)
   BASELINE_DIR="$_EXTRACT_DIR"
   echo "::group::Extract baseline-set archive $BASELINE_PATH"
+  # Stage the archive at a bash-native temp path before handing it to tar's
+  # -f rather than passing $BASELINE_PATH directly: on a Windows runner,
+  # $BASELINE_PATH is a native "C:\..." path, and GNU tar's archive-name
+  # parser treats a colon-containing -f argument as a [user@]host:file
+  # remote-tape spec (the classic drive-letter gotcha) instead of a local
+  # file, failing with "Cannot connect to C: resolve failed". $_EXTRACT_DIR
+  # (bash's own mktemp -d) never has this problem, so copying into it once
+  # sidesteps the issue for every tar variant without depending on
+  # --force-local support, which isn't guaranteed identical across GNU tar
+  # and macOS's bsdtar.
+  _ARCHIVE_COPY="$_EXTRACT_DIR.archive-input"
+  cp "$BASELINE_PATH" "$_ARCHIVE_COPY" || _fail "failed to stage $BASELINE_PATH for extraction."
   case "$BASELINE_PATH" in
     *.tar.zst)
-      tar --zstd -xf "$BASELINE_PATH" -C "$BASELINE_DIR" \
+      tar --zstd -xf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \
         || _fail "failed to extract $BASELINE_PATH (tar --zstd)."
       ;;
     *.tar.gz | *.tgz)
-      tar -xzf "$BASELINE_PATH" -C "$BASELINE_DIR" \
+      tar -xzf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \
         || _fail "failed to extract $BASELINE_PATH (tar -xzf)."
       ;;
     *.tar)
-      tar -xf "$BASELINE_PATH" -C "$BASELINE_DIR" \
+      tar -xf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \
         || _fail "failed to extract $BASELINE_PATH (tar -xf)."
       ;;
     *)
+      rm -f "$_ARCHIVE_COPY" || true
       _fail "baseline-path '$BASELINE_PATH' is a file but not a recognized archive (.tar.zst/.tar.gz/.tgz/.tar)."
       ;;
   esac
+  rm -f "$_ARCHIVE_COPY" || true
   echo "::endgroup::"
+  # Reject any symlink the archive planted: a crafted/compromised baseline
+  # archive could stage a symlink at the path a later resolved
+  # snapshot-path/binaries-dir entry would follow, reading (or, chained with
+  # a second archive, writing) outside $_EXTRACT_DIR -- a baseline-set has
+  # no legitimate reason to contain one, so reject the whole extraction
+  # rather than silently following it (CodeRabbit review).
+  if find "$BASELINE_DIR" -type l | grep -q .; then
+    _fail "baseline-set archive $BASELINE_PATH contains a symlink, which is not supported -- baseline-set archives must contain only plain files/directories."
+  fi
   # An archive may itself contain one nested directory (e.g. the
   # profile-named dir the archive was built from) rather than manifest.json
   # at its root -- if there's no manifest.json at the extraction root but

@@ -38,119 +38,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Keys that vary between two dumps/replays of otherwise ABI-identical
-# content -- timestamps, source-file mtimes, and wall-clock/cache-state
-# counters -- so a stable content hash must strip all of them, not hash raw
-# file bytes. This started as a single `created_at` pop and grew by three
-# separate review rounds (top-level created_at, then the nested
-# build_source.manifest.created_at, then this fuller set) as each left
-# something volatile behind; kept as one explicit list instead of another
-# one-off pop so the next volatile field lands here too (Codex review).
-_VOLATILE_TOP_LEVEL_KEYS = ("created_at", "source_mtime", "source_mtime_epoch")
-_VOLATILE_BUILD_SOURCE_MANIFEST_KEYS = ("created_at",)
-# BuildSourceRef.path_hint (abicheck/buildsource/model.py) -- the out-of-band
-# pack's on-disk location, documented on the field itself as "advisory only".
-# cli_buildsource.py's embed_build_source() defaults it to the --sources/
-# --build-info operand path when the caller doesn't pass a name hint, so the
-# same ABI/source facts dumped from a relative abicheck_inputs/ vs an
-# absolute restored pack path get a different path_hint and therefore a
-# different per-artifact sha256/content-digest, even though nothing semantic
-# changed (Codex review). content_hash/coverage_summary, the ref's other two
-# fields, are real content identity and stay.
-_VOLATILE_BUILD_SOURCE_PACK_KEYS = ("path_hint",)
-# Populated by abicheck/buildsource/source_replay.py's replay producer (and
-# inline.py's cache bookkeeping) -- wall-clock durations and cache hit/miss
-# counts that depend on the runner's cache warmth and load, not on the
-# semantic source-fact content itself.
-_VOLATILE_COVERAGE_KEYS = (
-    "cache_lookup_s",
-    "extract_s",
-    "link_s",
-    "elapsed_s",
-    "cache_misses",
-    "cache_hits",
-    # The replay producer's own parallelism setting (CPU count or
-    # ABICHECK_L4_JOBS), not a property of the extracted content -- the
-    # same ABI/source facts replayed on a differently-sized runner would
-    # otherwise still churn the digest (Codex review).
-    "extractor_jobs",
-)
-# LayerCoverage rows (abicheck/buildsource/model.py) embedded at
-# build_source.manifest.coverage: build_inline_coverage() (buildsource/
-# inline.py) copies the same cache/timing state into each row's "detail"
-# (a free-form human string that can embed "cache X/Y hit (Z%)" and
-# "N.NNs") and "elapsed_s" -- a *third* place the same volatile info
-# leaks into, after source_abi.coverage and build_source.manifest itself.
-# "layer"/"status"/"confidence" are the semantic identity; "detail" is by
-# its own docstring presentational, so both are dropped rather than parsed.
-_VOLATILE_MANIFEST_COVERAGE_ROW_KEYS = ("detail", "elapsed_s")
-# ExtractorRecord rows (abicheck/buildsource/model.py) embedded at
-# build_source.manifest.extractors: inline_graph_fold.py appends
-# "N.NNs, jobs=M" (last_elapsed_s/last_jobs) to a row's "detail", and
-# started_at/finished_at are ISO 8601 wall-clock bounds -- runner
-# load/CPU count and collection time, not source-fact content, so a
-# fourth leak of the same volatile-info-in-a-row-field shape. name/
-# version/status/inputs/artifacts/command/command_hash/capabilities/
-# diagnostics are the semantic identity and stay.
-_VOLATILE_MANIFEST_EXTRACTOR_ROW_KEYS = ("detail", "started_at", "finished_at")
-
-
-def _strip_row_keys(rows: Any, volatile_keys: tuple[str, ...]) -> Any:
-    if not isinstance(rows, list):
-        return rows
-    return [
-        {k: v for k, v in row.items() if k not in volatile_keys}
-        if isinstance(row, dict)
-        else row
-        for row in rows
-    ]
-
-
-def _strip_volatile_fields(raw: dict[str, Any]) -> dict[str, Any]:
-    stable = dict(raw)
-    for key in _VOLATILE_TOP_LEVEL_KEYS:
-        stable.pop(key, None)
-
-    build_source_pack = stable.get("build_source_pack")
-    if isinstance(build_source_pack, dict):
-        build_source_pack = dict(build_source_pack)
-        for key in _VOLATILE_BUILD_SOURCE_PACK_KEYS:
-            build_source_pack.pop(key, None)
-        stable["build_source_pack"] = build_source_pack
-
-    build_source = stable.get("build_source")
-    if isinstance(build_source, dict):
-        build_source = dict(build_source)
-
-        manifest = build_source.get("manifest")
-        if isinstance(manifest, dict):
-            manifest = dict(manifest)
-            for key in _VOLATILE_BUILD_SOURCE_MANIFEST_KEYS:
-                manifest.pop(key, None)
-            if "coverage" in manifest:
-                manifest["coverage"] = _strip_row_keys(
-                    manifest["coverage"], _VOLATILE_MANIFEST_COVERAGE_ROW_KEYS
-                )
-            if "extractors" in manifest:
-                manifest["extractors"] = _strip_row_keys(
-                    manifest["extractors"], _VOLATILE_MANIFEST_EXTRACTOR_ROW_KEYS
-                )
-            build_source["manifest"] = manifest
-
-        source_abi = build_source.get("source_abi")
-        if isinstance(source_abi, dict):
-            source_abi = dict(source_abi)
-            coverage = source_abi.get("coverage")
-            if isinstance(coverage, dict):
-                coverage = dict(coverage)
-                for key in _VOLATILE_COVERAGE_KEYS:
-                    coverage.pop(key, None)
-                source_abi["coverage"] = coverage
-            build_source["source_abi"] = source_abi
-
-        stable["build_source"] = build_source
-
-    return stable
+# Volatile-field stripping + the per-artifact content-hash algorithm now
+# live in abicheck.buildsource.baseline_set (G30 P1.2) -- the ONE place both
+# this producer and resolve-baseline's digest-verification check compute a
+# snapshot's stable content hash, so the two can never silently drift apart
+# and disagree on what "unchanged content" means. This script still has no
+# dependency on abicheck's AbiSnapshot/schema internals beyond that one pure
+# utility function -- it keeps reading raw JSON directly, per its own
+# docstring above.
+from abicheck.buildsource.baseline_set import compute_snapshot_content_hash
 
 
 def _read_snapshot_meta(path: Path) -> dict[str, Any]:
@@ -159,11 +55,8 @@ def _read_snapshot_meta(path: Path) -> dict[str, Any]:
     # Hash the snapshot with volatile fields removed, not the raw file
     # bytes: dumper.py/collect-facts stamp several fields fresh on every run
     # (absent SOURCE_DATE_EPOCH) even when the actual ABI/source-fact
-    # content is identical -- see _strip_volatile_fields above.
-    stable = _strip_volatile_fields(raw)
-    sha256 = hashlib.sha256(
-        json.dumps(stable, sort_keys=True).encode("utf-8")
-    ).hexdigest()
+    # content is identical -- see compute_snapshot_content_hash's docstring.
+    sha256 = compute_snapshot_content_hash(raw)
     fact_set = None
     build_source = raw.get("build_source")
     if isinstance(build_source, dict):
