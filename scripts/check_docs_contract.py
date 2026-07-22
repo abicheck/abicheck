@@ -281,18 +281,22 @@ def _check_canonical_page_uniqueness(
 
 
 def _permitted_summary_pages(entry: dict[str, object]) -> set[str]:
-    """The set of docs/-relative pages a topic's registry entry permits to
-    reference it via `summarizes` — its worked_example, reference_page, and
-    every task_pages/allowed_summaries entry."""
+    """The set of normalized docs/-relative pages a topic's registry entry
+    permits to reference it via `summarizes` — its worked_example,
+    reference_page, and every task_pages/allowed_summaries entry.
+    Normalized through `_docs_relative_key` (not just `str()`) so an
+    equivalent-but-differently-spelled registry entry (e.g.
+    `./user-guide/scan-levels.md`) still matches a page's resolved
+    `rel_to_docs`, the same way `canonical_page` comparisons already do."""
     pages: set[str] = set()
     for key in ("worked_example", "reference_page"):
         value = entry.get(key)
         if value is not None:
-            pages.add(str(value))
+            pages.add(_docs_relative_key(value))
     for key in ("task_pages", "allowed_summaries"):
         values = entry.get(key, [])
         if isinstance(values, list):
-            pages.update(str(v) for v in values)
+            pages.update(_docs_relative_key(v) for v in values)
     return pages
 
 

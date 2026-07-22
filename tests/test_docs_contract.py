@@ -288,6 +288,23 @@ def test_front_matter_schema_flags_summarizes_page_not_registered_for_topic(
     assert any("not registered as that topic's" in msg for _, msg in f.errors)
 
 
+def test_front_matter_schema_accepts_summarizes_via_equivalent_spelling(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The registry can spell a task_pages entry as `./page.md`; the page
+    itself is just `page.md` — these must compare equal for the summarizes
+    round-trip too, the same way canonical_page comparisons already do
+    (regression test for the gap flagged in PR #619 review)."""
+    (tmp_path / "page.md").write_text(
+        "---\nsummarizes:\n  - topic-a\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    topics = {"topic-a": {"canonical_page": "owner.md", "task_pages": ["./page.md"]}}
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)
+    assert f.errors == []
+
+
 @pytest.mark.parametrize(
     "role_key,role_value",
     [
