@@ -123,12 +123,20 @@ class FindingDecision:
     would need ``suppression.SuppressionOutcome`` threaded through
     :func:`.engine.assess_change`'s caller, not done yet (ADR-050
     "Deliberately not implemented this slice").
+
+    ``verdict_override`` is deliberately not named "demotion" — a
+    ``Change.effective_verdict`` override (ADR-025 A4/D4.1) can *raise* a
+    finding's category too (e.g. ``STDLIB_IMPLEMENTATION_CHANGED`` promoted
+    to ``BREAKING`` when layout evidence proves public ``std::`` embedding),
+    not just lower it. Labeling every override a demotion would misrepresent
+    an escalation as a downgrade to a consumer keying off this field (Codex
+    review).
     """
 
     state: str = "kept"  # "kept" | "suppressed"
     reason_code: str | None = None
     suppression_rule: str | None = None
-    demotion: str | None = None
+    verdict_override: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         d: dict[str, object] = {"state": self.state}
@@ -136,8 +144,8 @@ class FindingDecision:
             d["reason_code"] = self.reason_code
         if self.suppression_rule is not None:
             d["suppression_rule"] = self.suppression_rule
-        if self.demotion is not None:
-            d["demotion"] = self.demotion
+        if self.verdict_override is not None:
+            d["verdict_override"] = self.verdict_override
         return d
 
 
@@ -172,7 +180,7 @@ class ImpactAssessment:
             or self.confidence != Confidence.HIGH
             or self.decision.state != "kept"
             or self.decision.reason_code is not None
-            or self.decision.demotion is not None
+            or self.decision.verdict_override is not None
             or self.correlated_change_kind is not None
             or self.evidence_category is not None
         )

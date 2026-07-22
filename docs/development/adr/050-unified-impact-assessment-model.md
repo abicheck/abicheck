@@ -58,18 +58,28 @@ producers already set; no producer's own logic changes in this slice.
 New `abicheck/impact/model.py`:
 
 - `ProofStep` — one typed node/edge reference (`step_type`, `label`, `kind`,
-  `role`, `confidence`), the dataclass counterpart of one entry in
-  `graph_impact.structured_proof_path`'s `list[dict]` shape.
+  `role`, `confidence`, `node_id`), the dataclass counterpart of one entry in
+  `graph_impact.structured_proof_path`'s `list[dict]` shape. `node_id`
+  carries a node entry's stable `id` separately from its (possibly
+  colliding across nodes) human-readable `label` — see "Follow-up fixes"
+  below.
 - `GraphProofPath` — `root` (the public entry label, when known), `target`
-  (the finding's own subject), `is_direct`, `steps` (a `tuple[ProofStep,
-  ...]`, empty when only the human-readable rendering is available), `prose`
-  (the existing `reachability_proof_path` string, kept verbatim rather than
-  re-derived — there is exactly one producer of that string today and
-  duplicating its logic here would be a second, driftable implementation).
+  (the finding's actually-affected subject — the last node of the
+  structured path when one is attached, falling back to `Change.symbol`
+  only for a prose-only or absent path; see "Follow-up fixes" below for why
+  `symbol` alone is not always correct), `is_direct`, `steps` (a
+  `tuple[ProofStep, ...]`, empty when only the human-readable rendering is
+  available), `prose` (the existing `reachability_proof_path` string, kept
+  verbatim rather than re-derived — there is exactly one producer of that
+  string today and duplicating its logic here would be a second, driftable
+  implementation).
 - `FindingDecision` — `state` (`"kept"` / `"suppressed"`), `reason_code` (from
-  `Change.modulation_reason` when a pattern-aware rule fired), `demotion`
-  (from `Change.effective_verdict` when set), `suppression_rule` (left
-  `None` in this slice — see "Deliberately not implemented" below).
+  `Change.modulation_reason` when a pattern-aware rule fired),
+  `verdict_override` (from `Change.effective_verdict` when set —
+  deliberately not named "demotion": an override can raise a finding's
+  category too, not just lower it; see "Follow-up fixes" below),
+  `suppression_rule` (left `None` in this slice — see "Deliberately not
+  implemented" below).
 - `ImpactAssessment` — `reachability_state`, `public_reachable`,
   `reachability_kind`, `confidence`, `proof_path: GraphProofPath | None`,
   `decision: FindingDecision`, `evidence_category`, `correlated_change_kind`.
@@ -116,7 +126,8 @@ full JSON report) gains:
   the fix for the gap this ADR's Context section describes.
 - `impact_assessment` — present only when it carries information beyond
   the all-defaults case (a proof path exists, `reachability_state` is not
-  `UNKNOWN`, `public_reachable` is true, a modulation/demotion fired, or
+  `UNKNOWN`, `public_reachable` is true, `confidence` is not `HIGH`, the
+  decision `state` is not `"kept"`, a modulation/verdict-override fired, or
   `correlated_change_kind`/`evidence_category` is set) — matching this
   function's existing convention of only emitting a key when there is
   something to say, rather than padding every one of the (typically
@@ -155,6 +166,53 @@ gains `reachability_state` (enum, matching `ReachabilityState`'s three
 values) and `impact_assessment` (object, matching `ImpactAssessment.to_dict()`'s
 shape) on each `changes[]` entry; `scripts/publish_schemas.py` republishes
 the synced copy under `docs/schemas/v1/`.
+
+## Follow-up fixes (Codex review)
+
+Four gaps in the initial slice-1 landing, each caught by automated review on
+the same PR and fixed before merge:
+
+- **`has_signal()` missed three of `ImpactAssessment`'s own non-default
+  states.** The initial gate checked `proof_path`/`reachability_state`/
+  `public_reachable`/`decision.reason_code`/`decision.verdict_override`
+  (then still named `demotion`) /`correlated_change_kind`/
+  `evidence_category`, but not `confidence != HIGH` or `decision.state !=
+  "kept"`. A finding whose *only* non-default field was a reduced
+  confidence (e.g. the vtable/RTTI layout findings in
+  `diff_elf_layout.py`, which set `Confidence.MEDIUM` with no
+  reachability/proof metadata) or a plain suppressed decision with no other
+  metadata would silently never get an `impact_assessment` at all — the one
+  object meant to carry exactly that signal. Fixed by adding both checks;
+  `tests/test_impact_model.py`'s `test_non_high_confidence_has_signal`/
+  `test_suppressed_state_has_signal` are the regression tests.
+- **`ProofStep.from_dict` dropped the node `id`.** `graph_impact.structured_proof_path`
+  emits a stable `id` per node distinct from its human-readable `label` (two
+  different internal declarations can share a label). The initial
+  conversion used `id` only as a `label` fallback and discarded it
+  otherwise, so `impact_assessment.proof_path.steps` could not disambiguate
+  two same-label nodes or let a consumer walk back to the graph without
+  also reading the old top-level `impact_proof_path` field — defeating the
+  "single object" point of this slice. Fixed by adding `ProofStep.node_id`,
+  populated from the raw `id` and re-emitted in `to_dict()` as `"id"`.
+- **`GraphProofPath.target` used `Change.symbol` even when a structured
+  path pointed elsewhere.** `source_graph_findings._internal_dependency_findings`
+  (`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`) sets `Change.symbol` to the
+  *public entry* label the walk started from — identical to
+  `affected_public_roots[0]` — not the internal declaration/type it
+  reached. Using `symbol` as `target` made `target == root` for every such
+  finding, pointing a JSON/SARIF consumer at the API entry instead of the
+  actually-affected internal entity. Fixed by deriving `target` from the
+  last node of the structured path when one is present, falling back to
+  `symbol` only for a prose-only or absent path (`engine._proof_path_target`).
+- **`FindingDecision.demotion` mislabeled escalations.** `Change.effective_verdict`
+  (ADR-025 A4/D4.1) can *raise* a finding's category, not just lower it —
+  e.g. `STDLIB_IMPLEMENTATION_CHANGED` promoted to `BREAKING` once layout
+  evidence proves public `std::` embedding. Serializing that as
+  `"demotion": "BREAKING"` contradicts the finding's own severity and misleads
+  a consumer keying off `decision`. Renamed the field (and JSON/SARIF key) to
+  `verdict_override` — a neutral name that carries `effective_verdict`'s
+  value regardless of direction — before this slice reached any release, so
+  no compatibility shim was needed.
 
 ## Deliberately not implemented this slice
 

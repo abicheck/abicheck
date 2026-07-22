@@ -30,6 +30,26 @@ from ..checker_policy import Confidence, ReachabilityState
 from .model import FindingDecision, GraphProofPath, ImpactAssessment, ProofStep
 
 
+def _proof_path_target(change: Any, steps: tuple[ProofStep, ...]) -> str:
+    """The subject the proof path actually points at.
+
+    For most findings ``Change.symbol`` already *is* the affected subject
+    (e.g. a ``func_removed`` on an internal helper). But a structured path
+    attached via ``buildsource.graph_impact.attach_impact_metadata`` (e.g.
+    ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED``) sets ``symbol`` to the
+    *public entry point* the walk started from, not the internal
+    declaration/type it reached -- using ``symbol`` there would make
+    ``target`` equal ``root``, pointing a consumer at the API entry instead
+    of the actual affected internal entity (Codex review). When structured
+    steps are present, the last node in the path is that entity; fall back
+    to ``symbol`` only for prose-only (or absent) paths.
+    """
+    last_node = next((s for s in reversed(steps) if s.step_type == "node"), None)
+    if last_node is not None:
+        return last_node.label
+    return str(getattr(change, "symbol", "") or "")
+
+
 def _build_proof_path(change: Any) -> GraphProofPath | None:
     impact_proof_path = getattr(change, "impact_proof_path", None)
     affected_roots = getattr(change, "affected_public_roots", None)
@@ -40,7 +60,7 @@ def _build_proof_path(change: Any) -> GraphProofPath | None:
     steps = tuple(ProofStep.from_dict(raw) for raw in (impact_proof_path or []))
     root = affected_roots[0] if affected_roots else None
     return GraphProofPath(
-        target=str(getattr(change, "symbol", "") or ""),
+        target=_proof_path_target(change, steps),
         root=root,
         is_direct=is_direct,
         steps=steps,
@@ -60,7 +80,9 @@ def assess_change(change: Any, *, suppressed: bool = False) -> ImpactAssessment:
     decision = FindingDecision(
         state="suppressed" if suppressed else "kept",
         reason_code=getattr(change, "modulation_reason", None),
-        demotion=effective_verdict.value if effective_verdict is not None else None,
+        verdict_override=(
+            effective_verdict.value if effective_verdict is not None else None
+        ),
     )
     return ImpactAssessment(
         reachability_state=getattr(

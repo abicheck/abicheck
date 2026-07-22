@@ -67,9 +67,12 @@ independently-nullable keys:
   `prose` is the human-readable rendering. `steps` is empty when only the
   prose rendering is available.
 - `decision` records whether the finding was kept or suppressed, and (when a
-  [pattern-aware modulation](../user-guide/api-surface-intelligence.md) fired)
-  the reason code and the verdict it was demoted to. `suppression_rule` is
-  not populated yet — see ADR-050.
+  [pattern-aware modulation](../user-guide/api-surface-intelligence.md) or
+  other classification override fired) the reason code and
+  `verdict_override` — the overridden verdict, which can be a downgrade
+  *or* an escalation (e.g. a `std::`-embedding proof promoting
+  `STDLIB_IMPLEMENTATION_CHANGED` to `BREAKING`), not always a demotion.
+  `suppression_rule` is not populated yet — see ADR-050.
 - `evidence_category`/`correlated_change_kind` mirror the finding's own
   top-level fields when set.
 

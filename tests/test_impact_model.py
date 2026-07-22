@@ -112,14 +112,14 @@ class TestFindingDecision:
     def test_default_is_kept_with_no_extras(self) -> None:
         assert FindingDecision().to_dict() == {"state": "kept"}
 
-    def test_suppressed_with_demotion(self) -> None:
+    def test_suppressed_with_verdict_override(self) -> None:
         decision = FindingDecision(
-            state="suppressed", reason_code="pattern_x", demotion="compatible"
+            state="suppressed", reason_code="pattern_x", verdict_override="compatible"
         )
         d = decision.to_dict()
         assert d["state"] == "suppressed"
         assert d["reason_code"] == "pattern_x"
-        assert d["demotion"] == "compatible"
+        assert d["verdict_override"] == "compatible"
         assert "suppression_rule" not in d
 
 
@@ -144,8 +144,10 @@ class TestImpactAssessmentHasSignal:
         )
         assert assessment.has_signal() is True
 
-    def test_demotion_has_signal(self) -> None:
-        assessment = ImpactAssessment(decision=FindingDecision(demotion="compatible"))
+    def test_verdict_override_has_signal(self) -> None:
+        assessment = ImpactAssessment(
+            decision=FindingDecision(verdict_override="compatible")
+        )
         assert assessment.has_signal() is True
 
     def test_suppressed_state_has_signal(self) -> None:
@@ -257,6 +259,32 @@ class TestAssessChange:
         assert assessment.proof_path.steps[1].step_type == "edge"
         assert assessment.proof_path.steps[1].kind == "DECL_CALLS_DECL"
         assert assessment.proof_path.steps[2].node_id == "decl://helper"
+        assert assessment.proof_path.target == "helper"
+
+    def test_target_derives_from_last_node_not_symbol_when_symbol_is_the_root(
+        self,
+    ) -> None:
+        """Mirrors PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
+        (source_graph_findings._internal_dependency_findings): Change.symbol
+        is set to the *public entry* label, identical to
+        affected_public_roots[0], while the actually-affected internal
+        entity is the last node of the structured path. target must not
+        collapse onto root just because symbol == root (Codex review)."""
+        change = _change(
+            symbol="pub",
+            affected_public_roots=["pub"],
+            impact_proof_path=[
+                {"type": "node", "id": "decl://pub", "label": "pub"},
+                {"type": "edge", "kind": "DECL_REFERENCES_DECL"},
+                {"type": "node", "id": "type://Internal", "label": "ns::Internal"},
+            ],
+            impact_is_direct=False,
+        )
+        assessment = assess_change(change)
+        assert assessment.proof_path is not None
+        assert assessment.proof_path.root == "pub"
+        assert assessment.proof_path.target == "ns::Internal"
+        assert assessment.proof_path.target != assessment.proof_path.root
 
     def test_suppressed_flag_sets_decision_state(self) -> None:
         change = _change()
@@ -264,7 +292,7 @@ class TestAssessChange:
         assert assessment.decision.state == "suppressed"
         assert assessment.has_signal() is True
 
-    def test_modulation_and_demotion_carried_into_decision(self) -> None:
+    def test_modulation_and_verdict_override_carried_into_decision(self) -> None:
         change = _change(
             modulation_reason="idiom_pattern_matched",
             modulation_rule="rule-1",
@@ -272,8 +300,19 @@ class TestAssessChange:
         )
         assessment = assess_change(change)
         assert assessment.decision.reason_code == "idiom_pattern_matched"
-        assert assessment.decision.demotion == "COMPATIBLE"
+        assert assessment.decision.verdict_override == "COMPATIBLE"
         assert assessment.has_signal() is True
+
+    def test_verdict_override_also_carries_escalations_not_just_demotions(
+        self,
+    ) -> None:
+        """effective_verdict can *raise* a finding's category too (e.g.
+        STDLIB_IMPLEMENTATION_CHANGED promoted to BREAKING when layout
+        evidence proves public std:: embedding) -- the field name must not
+        imply every override is a downgrade (Codex review)."""
+        change = _change(effective_verdict=Verdict.BREAKING)
+        assessment = assess_change(change)
+        assert assessment.decision.verdict_override == "BREAKING"
 
     def test_evidence_category_and_correlated_kind_pass_through(self) -> None:
         change = _change(
