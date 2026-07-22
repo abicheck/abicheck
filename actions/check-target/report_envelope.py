@@ -103,8 +103,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--gate-mode", default="local", choices=["local", "deferred", "advisory"]
     )
-    parser.add_argument("--evidence-ok", choices=["true", "false"], default="true")
-    parser.add_argument("--degraded-reason", default="")
     parser.add_argument("--resolve-outcome", default="")
     parser.add_argument("--resolve-message", default="")
     parser.add_argument("--project", default="")
@@ -187,8 +185,6 @@ def main(argv: list[str] | None = None) -> int:
             baseline_channel=args.baseline_channel,
             requested_depth=args.requested_depth,
             gate_mode=args.gate_mode,
-            evidence_ok=args.evidence_ok == "true",
-            degraded_reason=args.degraded_reason or None,
             project=project,
             head_sha=head_sha,
             base_ref=base_ref,

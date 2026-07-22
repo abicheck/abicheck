@@ -90,7 +90,6 @@ _BASE_IDENTITY = {
     "INPUT_BASELINE_CHANNEL": "accepted-main",
     "INPUT_REQUESTED_DEPTH": "headers",
     "INPUT_GATE_MODE": "local",
-    "INPUT_EVIDENCE_PRODUCER": "",
     "INPUT_PROJECT": "epics-base/pvxs",
     "INPUT_HEAD_SHA": "deadbeef",
     "INPUT_BASE_REF": "main",
@@ -99,7 +98,12 @@ _BASE_IDENTITY = {
 
 
 def _write_compare_report(
-    path: Path, *, verdict: str = "BREAKING", exit_code: int = 4
+    path: Path,
+    *,
+    verdict: str = "BREAKING",
+    exit_code: int = 4,
+    old_depth: str = "headers",
+    new_depth: str = "headers",
 ) -> None:
     path.write_text(
         json.dumps(
@@ -107,6 +111,8 @@ def _write_compare_report(
                 "report_schema_version": "2.12",
                 "library": "libpvxs",
                 "verdict": verdict,
+                "old_evidence_depth": old_depth,
+                "new_evidence_depth": new_depth,
                 "severity": {
                     "config": {},
                     "categories": {},
@@ -412,23 +418,32 @@ class TestFinalizeBootstrap:
     not RUN_SH.is_file(), reason="actions/check-target/run.sh not found"
 )
 class TestFinalizeEvidenceDegradation:
-    def test_source_depth_degrades_without_ready_wrapper_pack(
+    """ADR-047 §7's effective_depth reads the real achieved depth straight
+    from the analysis report's own old_evidence_depth/new_evidence_depth --
+    correct regardless of *how* that depth was achieved (a composed
+    collect-facts producer, or a direct --build-info/--sources input with no
+    producer at all -- the case an earlier producer-based heuristic here got
+    wrong, Codex review)."""
+
+    def test_source_depth_degrades_when_report_only_reached_headers(
         self, tmp_path: Path
     ) -> None:
         report_path = tmp_path / "analysis.json"
-        _write_compare_report(report_path, verdict="COMPATIBLE", exit_code=0)
+        _write_compare_report(
+            report_path,
+            verdict="COMPATIBLE",
+            exit_code=0,
+            old_depth="headers",
+            new_depth="headers",
+        )
         result, _ = _run_finalize(
             {
                 **_BASE_IDENTITY,
                 "INPUT_REQUESTED_DEPTH": "source",
-                "INPUT_EVIDENCE_PRODUCER": "wrapper",
                 "RESOLVE_RAN": "true",
                 "RESOLVE_OUTCOME": "resolved",
                 "ANALYSIS_RAN": "true",
                 "ANALYSIS_REPORT_PATH": str(report_path),
-                "COLLECT_VERIFY_RAN": "true",
-                "COLLECT_VERIFY_OUTCOME": "success",
-                "COLLECT_VERIFY_READY": "false",
             },
             tmp_path,
         )
@@ -438,21 +453,55 @@ class TestFinalizeEvidenceDegradation:
         assert report["effective_depth"] == "headers"
         assert report["check_evidence_coverage"]["state"] == "degraded"
 
-    def test_source_depth_stays_when_wrapper_pack_ready(self, tmp_path: Path) -> None:
+    def test_source_depth_stays_when_report_reached_source(
+        self, tmp_path: Path
+    ) -> None:
         report_path = tmp_path / "analysis.json"
-        _write_compare_report(report_path, verdict="COMPATIBLE", exit_code=0)
+        _write_compare_report(
+            report_path,
+            verdict="COMPATIBLE",
+            exit_code=0,
+            old_depth="source",
+            new_depth="source",
+        )
         result, _ = _run_finalize(
             {
                 **_BASE_IDENTITY,
                 "INPUT_REQUESTED_DEPTH": "source",
-                "INPUT_EVIDENCE_PRODUCER": "wrapper",
                 "RESOLVE_RAN": "true",
                 "RESOLVE_OUTCOME": "resolved",
                 "ANALYSIS_RAN": "true",
                 "ANALYSIS_REPORT_PATH": str(report_path),
-                "COLLECT_VERIFY_RAN": "true",
-                "COLLECT_VERIFY_OUTCOME": "success",
-                "COLLECT_VERIFY_READY": "true",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        assert report["effective_depth"] == "source"
+        assert report["check_evidence_coverage"]["state"] == "complete"
+
+    def test_source_depth_via_direct_build_info_with_no_producer_is_not_degraded(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact Codex-flagged regression: evidence-producer is unset
+        (a producer-less check using --build-info/--sources directly), but
+        the analysis genuinely reached source depth on both sides."""
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(
+            report_path,
+            verdict="COMPATIBLE",
+            exit_code=0,
+            old_depth="source",
+            new_depth="source",
+        )
+        result, _ = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_REQUESTED_DEPTH": "source",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
             },
             tmp_path,
         )

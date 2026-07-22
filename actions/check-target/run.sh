@@ -17,7 +17,6 @@ PROFILE="${INPUT_PROFILE:?}"
 BASELINE_CHANNEL="${INPUT_BASELINE_CHANNEL:?}"
 REQUESTED_DEPTH="${INPUT_REQUESTED_DEPTH:?}"
 GATE_MODE="${INPUT_GATE_MODE:-local}"
-EVIDENCE_PRODUCER="${INPUT_EVIDENCE_PRODUCER:-}"
 PROJECT="${INPUT_PROJECT:-}"
 HEAD_SHA="${INPUT_HEAD_SHA:-}"
 BASE_REF="${INPUT_BASE_REF:-}"
@@ -30,12 +29,6 @@ RESOLVE_MESSAGE="${RESOLVE_MESSAGE:-}"
 
 ANALYSIS_RAN="${ANALYSIS_RAN:-false}"
 ANALYSIS_REPORT_PATH="${ANALYSIS_REPORT_PATH:-}"
-
-COLLECT_VERIFY_RAN="${COLLECT_VERIFY_RAN:-false}"
-COLLECT_VERIFY_OUTCOME="${COLLECT_VERIFY_OUTCOME:-}"
-COLLECT_VERIFY_READY="${COLLECT_VERIFY_READY:-}"
-COLLECT_REPLAY_RAN="${COLLECT_REPLAY_RAN:-false}"
-COLLECT_REPLAY_OUTCOME="${COLLECT_REPLAY_OUTCOME:-}"
 
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 REPORT_OUT="check-target-report.json"
@@ -62,29 +55,6 @@ else
   MODE="augment"
 fi
 
-# ── Evidence-availability signal feeding effective_depth degradation ───────
-EVIDENCE_OK="false"
-DEGRADED_REASON=""
-case "$EVIDENCE_PRODUCER" in
-  wrapper | clang-plugin)
-    if [[ "$COLLECT_VERIFY_RAN" == "true" && "$COLLECT_VERIFY_OUTCOME" == "success" && "$COLLECT_VERIFY_READY" == "true" ]]; then
-      EVIDENCE_OK="true"
-    else
-      DEGRADED_REASON="collect_facts_not_ready"
-    fi
-    ;;
-  replay)
-    if [[ "$COLLECT_REPLAY_RAN" == "true" && "$COLLECT_REPLAY_OUTCOME" == "success" ]]; then
-      EVIDENCE_OK="true"
-    else
-      DEGRADED_REASON="source_replay_failed"
-    fi
-    ;;
-  *)
-    DEGRADED_REASON="no_evidence_producer_configured"
-    ;;
-esac
-
 ENVELOPE_ARGS=(
   --mode "$MODE"
   --report-out "$REPORT_OUT"
@@ -93,8 +63,6 @@ ENVELOPE_ARGS=(
   --baseline-channel "$BASELINE_CHANNEL"
   --requested-depth "$REQUESTED_DEPTH"
   --gate-mode "$GATE_MODE"
-  --evidence-ok "$EVIDENCE_OK"
-  --degraded-reason "$DEGRADED_REASON"
   --project "$PROJECT"
   --head-sha "$HEAD_SHA"
   --base-ref "$BASE_REF"

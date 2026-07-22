@@ -597,15 +597,72 @@ properties (`report_schema_version` bumped `2.12` → `2.13`,
 `abicheck/schemas/__init__.py`); `docs/reference/check-target.md` (new,
 linked from mkdocs nav) documents the full contract, and
 `docs/reference/resolve-baseline.md`'s "not built yet" status note is
-updated to point at it. `tests/test_check_report.py` (35 cases) covers the
-pure logic; `tests/test_action_check_target.py` (22 cases) covers
-`validate-inputs.sh`/`run.sh`'s bash orchestration end-to-end, including
-every `gate-mode` × outcome (resolved/operational-error/bootstrap)
-combination and the evidence-degradation branch; `test-check-target` in
+updated to point at it. `tests/test_check_report.py` (100% line/branch
+coverage of `check_report.py`) covers the pure logic;
+`tests/test_action_check_target.py` covers `validate-inputs.sh`/`run.sh`'s
+bash orchestration end-to-end, including every `gate-mode` × outcome
+(resolved/operational-error/bootstrap) combination and the
+effective-depth-degradation branch; `test-check-target` in
 `.github/workflows/test-action.yml` is the required end-to-end fixture job,
 exercising the real nested `uses:` composition (`resolve-baseline` → the
 root Action → the finalize step) against real `abicheck compare` output,
 not simulated env vars.
+
+**Two real, confirmed bugs found and fixed via PR review after initial
+implementation (PR #625), not anticipated above:**
+
+- **Effective-depth degradation was computed from the wrong signal.** The
+  first implementation guessed `effective_depth`/`check_evidence_coverage`
+  from whether the composed `collect-facts` step reported readiness — but a
+  caller can legitimately reach build/source depth via a direct `build-info`/
+  `sources` input with **no** `collect-facts` composition at all (the
+  "producer-less" path this same page's input table already documents). That
+  heuristic misreported a real build/source-depth result as `degraded` purely
+  because no producer step ran (Codex review). **Fixed by reading the
+  authoritative signal the tool itself already emits**, not inferring one:
+  `abicheck compare --format json` always carries `old_evidence_depth`/
+  `new_evidence_depth` (`cli_compare_helpers._fold_evidence_depth_into_json`,
+  unconditional for JSON output) and `scan`'s JSON carries `level.depth` — the
+  real depth *achieved*, independent of how it was achieved. Renamed
+  `resolve_effective_depth(requested_depth, evidence_ok, degraded_reason)` to
+  `derive_effective_depth(report, requested_depth)`, dropped the
+  `evidence-ok`/`degraded-reason` plumbing from `report_envelope.py`/`run.sh`/
+  `action.yml`'s finalize step entirely (the `collect-facts` composition
+  steps themselves are unchanged — they still produce the pack the analysis
+  step consumes; only the *finalize* step's now-redundant success/readiness
+  reads were removed). For `compare`, the shallower of the two sides is the
+  check's own achieved depth (a build/source result on only one side isn't a
+  build/source-depth comparison); a report deeper than requested is reported
+  honestly as achieved, not capped down to the request.
+- **Nested `uses: ./x` steps do not resolve against this Action's own
+  repository when consumed externally — a real, confirmed architectural gap,
+  not a false positive.** Verified independently (GitHub Community Discussion
+  actions/runner#1348 "Local composite actions always relative to top level
+  repository"; confirmed `uses:` accepts no expressions at all, ruling out a
+  dynamic-reference workaround) before fixing: a relative `uses: ./x` step
+  inside a composite Action **always** resolves against `$GITHUB_WORKSPACE`
+  — the *calling workflow's* own checkout — never against the repository
+  that contains the composite Action doing the `uses:`. `check-target`'s
+  nested `uses: ./actions/resolve-baseline`/`./actions/collect-facts`/`./`
+  (root Action) therefore only ever worked because the added
+  `test-check-target` fixture happens to invoke `check-target` from *within*
+  `abicheck/abicheck`'s own workflow — the one case where the caller's
+  checkout and this Action's own repository are the same thing. A real
+  external consumer (`uses: abicheck/abicheck/actions/check-target@v1` from
+  their own repository, exactly as this page's own examples show) would have
+  every nested `uses:` fail before ever reaching baseline resolution. Fixed
+  by adding an unconditional `Checkout abicheck (for nested Action
+  composition)` step (first thing `check-target` does, before any nested
+  `uses:`) that checks out `${{ github.action_repository ||
+  github.repository }}` at `${{ github.action_ref || github.sha }}` into a
+  side directory (`.abicheck-check-target-src`, `persist-credentials:
+  false`), and rewrote every nested `uses:` to reference that directory
+  instead of bare `./`. The `||` fallback makes this correct for both the
+  external-reference case (`github.action_repository`/`github.action_ref`
+  set) and the local same-repository case
+  (`.github/workflows/test-action.yml`'s own `uses: ./actions/check-target`,
+  where both are empty) without a conditional branch — `uses:` cannot itself
+  be an expression, so the checkout step had to be unconditional instead.
 
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 

@@ -274,6 +274,41 @@ runs:
         INPUT_CONTRACT_FILE: ${{ inputs.contract-file }}
       run: bash "${{ github.action_path }}/validate-inputs.sh"
 
+    # ── Self-checkout for nested composite Actions ──────────────────────────
+    # A relative `uses: ./x` step ALWAYS resolves against $GITHUB_WORKSPACE
+    # (the calling workflow's own checkout) -- never against the repository
+    # that contains *this* composite Action. This is a well-documented
+    # GitHub Actions limitation (github/docs: "When referencing an action
+    # using a relative path, the path is always relative to
+    # $GITHUB_WORKSPACE"; see also actions/runner#1348). When check-target
+    # is consumed externally (`uses: abicheck/abicheck/actions/check-target@
+    # v1` from a caller's own repository), a bare `uses: ./actions/
+    # resolve-baseline` below would resolve against the CALLER's own
+    # checkout, which has no such path, and fail before ever reaching
+    # baseline resolution -- confirmed by review; the existing
+    # test-action.yml fixture never caught this because it invokes
+    # check-target from *within* this same repository, the one case where a
+    # bare relative path happens to already work. Fix: check out this exact
+    # abicheck/abicheck ref into a side directory of the caller's own
+    # workspace first, then reference every nested Action relative to that
+    # directory instead of bare `./`. `github.action_repository`/
+    # `github.action_ref` are only set for a remote `owner/repo/path@ref`
+    # reference; for a local `uses: ./actions/check-target` call within this
+    # same repository (as `.github/workflows/test-action.yml` does), both
+    # are empty, so this falls back to `github.repository`/`github.sha` --
+    # checking out the same repo/commit the caller's own workspace already
+    # has, redundant but harmless. This step is unconditional rather than
+    # branching on which case applies, because `uses:` does not accept
+    # expressions -- there is no way to make the *reference itself*
+    # conditional, only its inputs.
+    - name: Checkout abicheck (for nested Action composition)
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ github.action_repository || github.repository }}
+        ref: ${{ github.action_ref || github.sha }}
+        path: .abicheck-check-target-src
+        persist-credentials: false
+
     - name: Set up Python
       uses: actions/setup-python@v6
       with:
@@ -290,7 +325,7 @@ runs:
       id: resolve
       if: inputs.baseline-channel != 'none'
       continue-on-error: true
-      uses: ./actions/resolve-baseline
+      uses: ./.abicheck-check-target-src/actions/resolve-baseline
       with:
         baseline-path: ${{ inputs.baseline-path }}
         channel: ${{ inputs.baseline-channel }}
@@ -313,7 +348,7 @@ runs:
         (inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') &&
         (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved')
       continue-on-error: true
-      uses: ./actions/collect-facts
+      uses: ./.abicheck-check-target-src/actions/collect-facts
       with:
         phase: 'verify'
         producer: ${{ inputs.evidence-producer }}
@@ -326,7 +361,7 @@ runs:
         inputs.evidence-producer == 'replay' &&
         (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved')
       continue-on-error: true
-      uses: ./actions/collect-facts
+      uses: ./.abicheck-check-target-src/actions/collect-facts
       with:
         phase: 'auto'
         producer: 'replay'
@@ -341,7 +376,7 @@ runs:
       id: analysis
       if: inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved'
       continue-on-error: true
-      uses: ./
+      uses: ./.abicheck-check-target-src
       with:
         mode: ${{ inputs.baseline-channel == 'none' && 'scan' || 'compare' }}
         old-library: ${{ inputs.kind == 'bundle' && steps.resolve.outputs.binaries-dir || steps.resolve.outputs.snapshot-path }}
@@ -393,7 +428,6 @@ runs:
         INPUT_BASELINE_CHANNEL: ${{ inputs.baseline-channel }}
         INPUT_REQUESTED_DEPTH: ${{ inputs.requested-depth }}
         INPUT_GATE_MODE: ${{ inputs.gate-mode }}
-        INPUT_EVIDENCE_PRODUCER: ${{ inputs.evidence-producer }}
         INPUT_PROJECT: ${{ inputs.project }}
         INPUT_HEAD_SHA: ${{ inputs.head-sha }}
         INPUT_BASE_REF: ${{ inputs.base-ref }}
@@ -406,10 +440,5 @@ runs:
         ANALYSIS_OUTCOME: ${{ steps.analysis.outcome }}
         ANALYSIS_VERDICT: ${{ steps.analysis.outputs.verdict }}
         ANALYSIS_REPORT_PATH: ${{ steps.analysis.outputs.report-path }}
-        COLLECT_VERIFY_RAN: ${{ steps.collect_verify.outcome != 'skipped' }}
-        COLLECT_VERIFY_OUTCOME: ${{ steps.collect_verify.outcome }}
-        COLLECT_VERIFY_READY: ${{ steps.collect_verify.outputs.ready }}
-        COLLECT_REPLAY_RAN: ${{ steps.collect_replay.outcome != 'skipped' }}
-        COLLECT_REPLAY_OUTCOME: ${{ steps.collect_replay.outcome }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

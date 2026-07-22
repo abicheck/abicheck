@@ -132,24 +132,65 @@ def build_check_id(
     return check_id
 
 
-def resolve_effective_depth(
-    requested_depth: str, *, evidence_ok: bool, degraded_reason: str | None = None
+#: Ladder order (shallow -> deep), matching EVIDENCE_DEPTH_VALUES.
+_DEPTH_RANK = {"binary": 0, "headers": 1, "build": 2, "source": 3}
+
+
+def derive_effective_depth(
+    report: dict[str, Any], requested_depth: str
 ) -> tuple[str, dict[str, Any]]:
     """Compute ``effective_depth``/``check_evidence_coverage`` (ADR-047 §7).
 
-    ``binary``/``headers`` depth never needs build/source evidence, so it's
-    always "complete". ``build``/``source`` depth degrades to ``headers``
-    when the caller reports the requested evidence wasn't actually available
-    (e.g. a wrapper/clang-plugin pack that never reached ``phase: verify``,
-    or a replay step that failed to resolve a compile database) -- never
-    silently rendering as an unqualified pass at the requested depth.
+    Reads the depth the underlying ``compare``/``scan`` run *actually*
+    achieved straight from its own JSON output -- ``old_evidence_depth``/
+    ``new_evidence_depth`` (``compare``, always present for ``--format
+    json`` via ``cli_compare_helpers._fold_evidence_depth_into_json``) or
+    ``level.depth`` (``scan``, ``ScanOutcome.to_dict``) -- rather than
+    inferring it from which collect-facts producer step ran. This is the
+    authoritative signal: it's correct for every way a caller can supply
+    build/source evidence (a composed ``collect-facts`` producer, or a
+    direct out-of-band ``build-info``/``sources`` input with no producer at
+    all -- a case an earlier, producer-based heuristic here got wrong,
+    reporting a real build/source-depth result as "degraded" purely because
+    no ``collect-facts`` step ran, flagged by review). For ``compare``, the
+    shallower of the two sides is the check's own achieved depth (a
+    build/source result on only one side isn't a build/source-depth
+    *comparison*). Reports deeper than requested (e.g. real headers given
+    for a ``binary``-depth request) are reported honestly as achieved, not
+    capped down to the request.
     """
     validate_evidence_depth("requested_depth", requested_depth)
-    if requested_depth in ("binary", "headers") or evidence_ok:
-        return requested_depth, {"state": "complete", "reasons": []}
-    return "headers", {
+    old_d = report.get("old_evidence_depth")
+    new_d = report.get("new_evidence_depth")
+    achieved: str | None = None
+    source = ""
+    if (
+        isinstance(old_d, str)
+        and isinstance(new_d, str)
+        and old_d in _DEPTH_RANK
+        and new_d in _DEPTH_RANK
+    ):
+        achieved = old_d if _DEPTH_RANK[old_d] <= _DEPTH_RANK[new_d] else new_d
+        source = "compare"
+    else:
+        level = report.get("level")
+        scan_depth = level.get("depth") if isinstance(level, dict) else None
+        if isinstance(scan_depth, str) and scan_depth in _DEPTH_RANK:
+            achieved = scan_depth
+            source = "scan"
+    if achieved is None:
+        # Neither signal is present -- shouldn't happen for real compare/scan
+        # --format json output, but trust the request rather than silently
+        # guessing "complete" for whatever this report actually is.
+        return requested_depth, {
+            "state": "unknown",
+            "reasons": ["no_depth_signal_in_report"],
+        }
+    if _DEPTH_RANK[achieved] >= _DEPTH_RANK[requested_depth]:
+        return achieved, {"state": "complete", "reasons": []}
+    return achieved, {
         "state": "degraded",
-        "reasons": [degraded_reason or "evidence_not_available"],
+        "reasons": [f"{source}_achieved_{achieved}"],
     }
 
 
@@ -201,8 +242,6 @@ def augment_report(
     baseline_channel: str,
     requested_depth: str,
     gate_mode: str,
-    evidence_ok: bool,
-    degraded_reason: str | None = None,
     project: str | None = None,
     head_sha: str | None = None,
     base_ref: str | None = None,
@@ -218,9 +257,7 @@ def augment_report(
         raise ValueError(f"gate_mode must be one of {GATE_MODES}, got {gate_mode!r}")
     out = dict(report)
     check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
-    effective_depth, coverage = resolve_effective_depth(
-        requested_depth, evidence_ok=evidence_ok, degraded_reason=degraded_reason
-    )
+    effective_depth, coverage = derive_effective_depth(report, requested_depth)
     out["report_schema_version"] = REPORT_SCHEMA_VERSION
     out["check_id"] = check_id
     out["target_id"] = check_id

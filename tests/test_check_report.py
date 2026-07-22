@@ -33,8 +33,8 @@ from abicheck.buildsource.check_report import (
     build_bootstrap_report,
     build_check_id,
     build_operational_error_report,
+    derive_effective_depth,
     final_exit_code,
-    resolve_effective_depth,
     validate_identifier,
 )
 
@@ -71,42 +71,100 @@ class TestBuildCheckId:
         with pytest.raises(ValueError):
             build_check_id("lib@pvxs", "p", "c", "headers")
 
+    def test_rejects_unsafe_profile(self):
+        with pytest.raises(ValueError):
+            build_check_id("libpvxs", "p@bad", "c", "headers")
 
-class TestResolveEffectiveDepth:
-    @pytest.mark.parametrize("depth", ["binary", "headers"])
-    def test_binary_and_headers_never_degrade(self, depth):
-        effective, coverage = resolve_effective_depth(depth, evidence_ok=False)
+    def test_rejects_unsafe_channel(self):
+        with pytest.raises(ValueError):
+            build_check_id("libpvxs", "p", "c#bad", "headers")
+
+
+class TestDeriveEffectiveDepth:
+    """ADR-047 §7's authoritative-signal design: read the depth actually
+    achieved straight from the compare/scan report's own output, never from
+    a caller-supplied heuristic (Codex review: an earlier collect-facts-
+    producer-based heuristic misreported a real build/source-depth result
+    achieved via a direct --build-info/--sources input, with no producer
+    step at all, as "degraded")."""
+
+    @pytest.mark.parametrize("depth", ["binary", "headers", "build", "source"])
+    def test_compare_report_matching_depth_is_complete(self, depth):
+        report = {"old_evidence_depth": depth, "new_evidence_depth": depth}
+        effective, coverage = derive_effective_depth(report, depth)
         assert effective == depth
         assert coverage == {"state": "complete", "reasons": []}
 
-    @pytest.mark.parametrize("depth", ["build", "source"])
-    def test_build_and_source_stay_when_evidence_ok(self, depth):
-        effective, coverage = resolve_effective_depth(depth, evidence_ok=True)
-        assert effective == depth
-        assert coverage["state"] == "complete"
-
-    @pytest.mark.parametrize("depth", ["build", "source"])
-    def test_build_and_source_degrade_to_headers_without_evidence(self, depth):
-        effective, coverage = resolve_effective_depth(
-            depth, evidence_ok=False, degraded_reason="wrapper_pack_empty_for_target"
-        )
+    def test_compare_report_takes_shallower_side(self):
+        report = {"old_evidence_depth": "source", "new_evidence_depth": "headers"}
+        effective, coverage = derive_effective_depth(report, "source")
         assert effective == "headers"
         assert coverage == {
             "state": "degraded",
-            "reasons": ["wrapper_pack_empty_for_target"],
+            "reasons": ["compare_achieved_headers"],
         }
 
-    def test_default_reason_when_none_given(self):
-        _, coverage = resolve_effective_depth("source", evidence_ok=False)
-        assert coverage["reasons"] == ["evidence_not_available"]
+    def test_compare_report_shallower_than_requested_degrades(self):
+        report = {"old_evidence_depth": "headers", "new_evidence_depth": "headers"}
+        effective, coverage = derive_effective_depth(report, "source")
+        assert effective == "headers"
+        assert coverage["state"] == "degraded"
+        assert coverage["reasons"] == ["compare_achieved_headers"]
+
+    def test_compare_report_deeper_than_requested_is_honestly_reported(self):
+        """Achieving more than requested isn't a degradation -- report the
+        real depth, don't artificially cap it down to the request."""
+        report = {"old_evidence_depth": "source", "new_evidence_depth": "source"}
+        effective, coverage = derive_effective_depth(report, "binary")
+        assert effective == "source"
+        assert coverage["state"] == "complete"
+
+    def test_scan_report_level_depth_used_when_no_compare_fields(self):
+        report = {"level": {"depth": "build", "source_method": "s4"}}
+        effective, coverage = derive_effective_depth(report, "build")
+        assert effective == "build"
+        assert coverage["state"] == "complete"
+
+    def test_scan_report_shallower_than_requested_degrades(self):
+        report = {"level": {"depth": "headers"}}
+        effective, coverage = derive_effective_depth(report, "source")
+        assert effective == "headers"
+        assert coverage == {"state": "degraded", "reasons": ["scan_achieved_headers"]}
+
+    def test_no_depth_signal_falls_back_to_requested_as_unknown(self):
+        effective, coverage = derive_effective_depth({}, "source")
+        assert effective == "source"
+        assert coverage == {
+            "state": "unknown",
+            "reasons": ["no_depth_signal_in_report"],
+        }
+
+    def test_malformed_level_field_is_treated_as_no_signal(self):
+        effective, coverage = derive_effective_depth({"level": "not-a-dict"}, "headers")
+        assert effective == "headers"
+        assert coverage["state"] == "unknown"
+
+    def test_non_string_evidence_depth_fields_are_ignored(self):
+        report = {"old_evidence_depth": 1, "new_evidence_depth": None}
+        effective, coverage = derive_effective_depth(report, "headers")
+        assert coverage["state"] == "unknown"
+        assert effective == "headers"
+
+    def test_rejects_bad_requested_depth(self):
+        with pytest.raises(ValueError):
+            derive_effective_depth({}, "bogus")
 
 
 class TestAugmentReport:
-    def _base_compare_report(self, verdict="BREAKING", exit_code=4):
+    def _base_compare_report(
+        self, verdict="BREAKING", exit_code=4, old_depth="headers", new_depth="headers"
+    ):
         return {
             "report_schema_version": "2.12",
             "library": "libpvxs",
             "verdict": verdict,
+            "old_evidence_depth": old_depth,
+            "new_evidence_depth": new_depth,
             "severity": {
                 "config": {},
                 "categories": {},
@@ -118,13 +176,12 @@ class TestAugmentReport:
 
     def test_writes_identity_fields(self):
         out = augment_report(
-            self._base_compare_report(),
+            self._base_compare_report(old_depth="source", new_depth="source"),
             name="libpvxs",
             profile_id="linux-x86_64-gcc13-release",
             baseline_channel="accepted-main",
             requested_depth="source",
             gate_mode="local",
-            evidence_ok=True,
         )
         assert (
             out["check_id"] == "libpvxs@linux-x86_64-gcc13-release#accepted-main@source"
@@ -135,6 +192,23 @@ class TestAugmentReport:
         assert out["requested_depth"] == "source"
         assert out["effective_depth"] == "source"
         assert out["check_evidence_coverage"] == {"state": "complete", "reasons": []}
+        assert out["report_schema_version"] != "2.12"  # bumped to the current version
+
+    def test_degrades_effective_depth_from_real_report_signal(self):
+        """The Codex-flagged bug: a producer-less build/source check (direct
+        --build-info/--sources, no collect-facts composition) must not be
+        misreported as degraded just because no producer step ran -- the
+        real signal comes from the report itself."""
+        out = augment_report(
+            self._base_compare_report(old_depth="source", new_depth="source"),
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="source",
+            gate_mode="local",
+        )
+        assert out["effective_depth"] == "source"
+        assert out["check_evidence_coverage"]["state"] == "complete"
 
     def test_dual_writes_compatibility_verdict_matching_legacy_casing(self):
         out = augment_report(
@@ -144,7 +218,6 @@ class TestAugmentReport:
             baseline_channel="c",
             requested_depth="headers",
             gate_mode="local",
-            evidence_ok=True,
         )
         assert out["verdict"] == "BREAKING"
         assert out["compatibility_verdict"] == "BREAKING"
@@ -157,7 +230,6 @@ class TestAugmentReport:
             baseline_channel="c",
             requested_depth="headers",
             gate_mode="local",
-            evidence_ok=True,
         )
         assert out["policy_gate_decision"] == "fail"
 
@@ -168,7 +240,6 @@ class TestAugmentReport:
             baseline_channel="c",
             requested_depth="headers",
             gate_mode="local",
-            evidence_ok=True,
         )
         assert clean["policy_gate_decision"] == "pass"
 
@@ -181,7 +252,6 @@ class TestAugmentReport:
                 baseline_channel="c",
                 requested_depth="headers",
                 gate_mode=gate_mode,
-                evidence_ok=True,
             )
             assert out["severity"]["exit_code"] == 4
             assert out["severity"]["blocking"] is True
@@ -199,7 +269,6 @@ class TestAugmentReport:
             baseline_channel="c",
             requested_depth="headers",
             gate_mode="advisory",
-            evidence_ok=True,
         )
         assert out["severity"]["exit_code"] == 0
         assert out["severity"]["blocking"] is False
@@ -214,6 +283,7 @@ class TestAugmentReport:
             "scan_schema_version": "1.1",
             "verdict": "BREAKING",
             "exit_code": 4,
+            "level": {"depth": "headers"},
         }
         out = augment_report(
             scan_report,
@@ -222,10 +292,56 @@ class TestAugmentReport:
             baseline_channel="c",
             requested_depth="headers",
             gate_mode="advisory",
-            evidence_ok=True,
         )
         assert out["exit_code"] == 0
         assert out["compatibility_verdict"] == "BREAKING"
+
+    def test_scan_report_with_no_severity_block_defaults_pass(self):
+        scan_report = {
+            "scan_schema_version": "1.1",
+            "verdict": "COMPATIBLE",
+            "exit_code": 0,
+            "level": {"depth": "headers"},
+        }
+        out = augment_report(
+            scan_report,
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert out["policy_gate_decision"] == "pass"
+
+    def test_malformed_severity_exit_code_treated_as_pass(self):
+        report = self._base_compare_report()
+        report["severity"]["exit_code"] = "not-an-int"
+        out = augment_report(
+            report,
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert out["policy_gate_decision"] == "pass"
+
+    def test_malformed_scan_exit_code_treated_as_pass(self):
+        report = {
+            "scan_schema_version": "1.1",
+            "verdict": "COMPATIBLE",
+            "exit_code": "not-an-int",
+            "level": {"depth": "headers"},
+        }
+        out = augment_report(
+            report,
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert out["policy_gate_decision"] == "pass"
 
     def test_analysis_cli_error_populates_operational_errors(self):
         out = augment_report(
@@ -235,13 +351,93 @@ class TestAugmentReport:
             baseline_channel="c",
             requested_depth="headers",
             gate_mode="local",
-            evidence_ok=True,
         )
         assert out["verdict"] == "ERROR"
         assert "compatibility_verdict" not in out
         assert out["operational_errors"] == [
             {"kind": "analysis_error", "message": "bad flag combination"}
         ]
+
+    def test_advisory_neutralize_is_a_no_op_when_report_has_no_gate_block(self):
+        out = augment_report(
+            {"verdict": OPERATIONAL_ERROR_VERDICT, "error": "usage error"},
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert "severity" not in out
+        assert "exit_code" not in out
+
+    def test_analysis_cli_error_with_no_message_gets_a_generic_one(self):
+        out = augment_report(
+            {"verdict": OPERATIONAL_ERROR_VERDICT},
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert out["operational_errors"] == [
+            {"kind": "analysis_error", "message": "the analysis step failed"}
+        ]
+
+    def test_existing_operational_errors_are_not_overwritten(self):
+        out = augment_report(
+            self._base_compare_report(verdict="COMPATIBLE", exit_code=0),
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert out["operational_errors"] == []
+
+    def test_existing_publication_is_not_overwritten(self):
+        report = self._base_compare_report()
+        report["publication"] = {"state": "failed", "channels": []}
+        out = augment_report(
+            report,
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert out["publication"] == {"state": "failed", "channels": []}
+
+    def test_optional_identity_fields_omitted_when_none(self):
+        out = augment_report(
+            self._base_compare_report(),
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert "project" not in out
+        assert "head_sha" not in out
+        assert "base_ref" not in out
+        assert "action_version" not in out
+
+    def test_optional_identity_fields_set_when_provided(self):
+        out = augment_report(
+            self._base_compare_report(),
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+            project="epics-base/pvxs",
+            head_sha="deadbeef",
+            base_ref="main",
+            action_version="abicheck/abicheck@v1",
+        )
+        assert out["project"] == "epics-base/pvxs"
+        assert out["head_sha"] == "deadbeef"
+        assert out["base_ref"] == "main"
+        assert out["action_version"] == "abicheck/abicheck@v1"
 
     def test_rejects_unknown_gate_mode(self):
         with pytest.raises(ValueError):
@@ -252,7 +448,6 @@ class TestAugmentReport:
                 baseline_channel="c",
                 requested_depth="headers",
                 gate_mode="bogus",
-                evidence_ok=True,
             )
 
     def test_does_not_mutate_input(self):
@@ -265,7 +460,6 @@ class TestAugmentReport:
             baseline_channel="c",
             requested_depth="headers",
             gate_mode="advisory",
-            evidence_ok=True,
         )
         assert original == snapshot
 
@@ -281,6 +475,9 @@ class TestBuildOperationalErrorReport:
             resolve_message="baseline built for a different profile.",
             project="epics-base/pvxs",
             head_sha="deadbeef",
+            base_ref="main",
+            tool_version="abicheck 0.x.y",
+            action_version="abicheck/abicheck@v1",
         )
         assert report["verdict"] == OPERATIONAL_ERROR_VERDICT
         assert "severity" not in report
@@ -295,7 +492,25 @@ class TestBuildOperationalErrorReport:
         assert report["publication"] == {"state": "skipped", "channels": []}
         assert report["project"] == "epics-base/pvxs"
         assert report["head_sha"] == "deadbeef"
+        assert report["base_ref"] == "main"
+        assert report["tool_version"] == "abicheck 0.x.y"
+        assert report["action_version"] == "abicheck/abicheck@v1"
         assert report["check_id"] == report["target_id"]
+
+    def test_optional_fields_omitted_when_not_given(self):
+        report = build_operational_error_report(
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="accepted-main",
+            requested_depth="headers",
+            resolve_outcome="not_found",
+            resolve_message="no baseline set exists.",
+        )
+        assert "project" not in report
+        assert "head_sha" not in report
+        assert "base_ref" not in report
+        assert "tool_version" not in report
+        assert "action_version" not in report
 
 
 class TestBuildBootstrapReport:
@@ -306,6 +521,11 @@ class TestBuildBootstrapReport:
             baseline_channel="release-contract",
             requested_depth="headers",
             resolve_message="no baseline set exists yet.",
+            project="epics-base/pvxs",
+            head_sha="deadbeef",
+            base_ref="main",
+            tool_version="abicheck 0.x.y",
+            action_version="abicheck/abicheck@v1",
         )
         assert report["verdict"] == BOOTSTRAP_VERDICT
         assert report["verdict"] not in {
@@ -319,6 +539,23 @@ class TestBuildBootstrapReport:
         assert report["baseline_bootstrap"] is True
         assert report["operational_errors"] == []
         assert report["policy_gate_decision"] == "pass"
+        assert report["message"] == "no baseline set exists yet."
+        assert report["project"] == "epics-base/pvxs"
+        assert report["tool_version"] == "abicheck 0.x.y"
+
+    def test_optional_fields_omitted_when_not_given(self):
+        report = build_bootstrap_report(
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="release-contract",
+            requested_depth="headers",
+            resolve_message="no baseline set exists yet.",
+        )
+        assert "project" not in report
+        assert "head_sha" not in report
+        assert "base_ref" not in report
+        assert "tool_version" not in report
+        assert "action_version" not in report
 
 
 class TestFinalExitCode:
