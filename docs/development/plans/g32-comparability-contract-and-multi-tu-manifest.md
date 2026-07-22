@@ -66,7 +66,7 @@ directly on A: its cache-key half targets the manifest's
 pre-dump cache-key inputs (see Phase E) — and its scheduling half schedules
 Phase B's per-TU loop.
 
-```
+```text
 Phase 0 (fixtures) ──┬──▶ Phase A (contract + gate)
                       │
                       ├──▶ Phase B (manifest/multi-TU) ─┬─▶ Phase C (compatible merge)
