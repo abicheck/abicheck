@@ -184,9 +184,13 @@ _CPP20_STD_CONCEPT_NAMES = (
     rb"strict_weak_order|sortable|mergeable|permutable|indirect_unary_predicate|"
     rb"indirect_binary_predicate|indirect_equivalence_relation|"
     rb"indirect_strict_weak_order|indirectly_regular_unary_invocable|"
+    rb"indirectly_unary_invocable|indirectly_readable|indirectly_writable|"
+    rb"indirectly_swappable|indirectly_movable_storable|indirectly_movable|"
+    rb"indirectly_copyable_storable|indirectly_copyable|indirectly_comparable|"
     rb"weakly_incrementable|incrementable|input_or_output_iterator|"
-    rb"sentinel_for|input_iterator|output_iterator|forward_iterator|"
-    rb"bidirectional_iterator|random_access_iterator|contiguous_iterator"
+    rb"sentinel_for|sized_sentinel_for|input_iterator|output_iterator|"
+    rb"forward_iterator|bidirectional_iterator|random_access_iterator|"
+    rb"contiguous_iterator"
 )
 _CPP20_STD_RANGES_CONCEPT_NAMES = (
     rb"range|borrowed_range|sized_range|view|input_range|output_range|"

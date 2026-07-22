@@ -636,6 +636,27 @@ def test_cpp20_detector_detects_std_concept_constrained_template_parameter(tmp_p
     assert any(r.reason == "constrained-template-parameter" for r in reqs)
 
 
+def test_cpp20_detector_detects_indirectly_readable_constrained_parameter(tmp_path):
+    """Regression (Codex review): the standard concept name list omitted
+    the ``<iterator>`` ``indirectly_*`` family (``indirectly_readable``,
+    ``indirectly_writable``, ``indirectly_swappable``,
+    ``indirectly_movable[_storable]``, ``indirectly_copyable[_storable]``,
+    ``indirectly_comparable``, ``indirectly_unary_invocable``) and
+    ``sized_sentinel_for`` — a header whose only C++20 signal is one of
+    these (a `template` constrained on it, no ``concept``/``requires``
+    keyword anywhere) was parsed in C++ mode via the bare ``template``
+    keyword but without ``-std=gnu++20``, so the concept itself was
+    unavailable on a C++17-default toolchain and the L2 scan failed."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <iterator>\ntemplate <std::indirectly_readable I> void f(I);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "constrained-template-parameter" for r in reqs)
+
+
 def test_cpp20_detector_detects_std_ranges_concept_constrained_template_parameter(
     tmp_path,
 ):
