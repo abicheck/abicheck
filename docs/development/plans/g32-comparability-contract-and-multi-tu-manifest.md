@@ -59,20 +59,34 @@ D's parser and `host`-default path don't depend on B, though selecting a
 *non-default* context needs Phase B's `frontend_context` field/flag to
 request it (see Phase D). Phase C starts only after Phase B lands, since
 it operates on the `TuFragment` contract Phase B defines and produces —
-it is not a third parallel branch alongside B and D. E depends on B, not
-directly on A: its cache-key half targets the manifest's full computed
-`scope_fingerprint` (TU names, per-TU ordered includes/forced-includes,
-`contributes_to_abi`/`required` flags — Phase B's schema), which genuinely
-is pre-dump-computable for a manifest-driven dump; `profile_fingerprint`
+it is not a third parallel branch alongside B and D. **E depends on
+*both* A and B — not on B alone.** `scope_fingerprint` as a *type* and
+*computation* (`ExtractionContract`, `comparability.compute_extraction_contract`)
+is Phase A's deliverable; Phase B only adds the manifest-driven *inputs*
+(TU names, per-TU ordered includes/forced-includes,
+`contributes_to_abi`/`required` flags) that feed that same, already-existing
+computation for a manifest-driven dump — Phase B does not invent
+`scope_fingerprint` itself. Phase E's cache-key half also concretely
+builds on Phase A's own cache-key work, not just its types: Phase E's own
+acceptance criteria say outright that "Phase A's own order-sensitivity fix
+(dropping `sorted(...)` for `headers`/`includes`) already closes the
+remaining gap that mattered for the legacy CLI path" (see Phase E) — a
+direct reference to work this same plan places in Phase A, not a
+restatement of something Phase E redoes. Starting E after B alone, with A
+unmerged, leaves either no `ExtractionContract`/`scope_fingerprint`
+machinery to hash at all, or an ad hoc reimplementation that risks
+drifting from whatever Phase A's gate actually computes — silently
+defeating the whole "cache key must track what the gate checks" premise
+this phase exists for. `profile_fingerprint`
 is the one that can never be a pre-dump cache-key input, on either path
 (see Phase E) — and its scheduling half schedules Phase B's per-TU loop.
 
 ```text
-Phase 0 (fixtures) ──┬──▶ Phase A (contract + gate)
-                      │
-                      ├──▶ Phase B (manifest/multi-TU) ─┬─▶ Phase C (compatible merge)
+                      ┌──▶ Phase A (contract + gate) ──────────┐
+                      │                                        │
+Phase 0 (fixtures) ───┼──▶ Phase B (manifest/multi-TU) ─┬──────┴─▶ Phase E (scheduling + cache)
                       │                                 │
-                      │                                 └─▶ Phase E (scheduling + cache)
+                      │                                 └─▶ Phase C (compatible merge)
                       └──▶ Phase D (SYCL host/device context)
 ```
 
@@ -1180,12 +1194,31 @@ this is a silent-loss bug, not a crash — harder to notice than the
 `diagnostic_comparison: bool = False` parameter, passed by name into the
 `compare_snapshots(diagnostic_comparison=diagnostic_comparison, ...)` call
 at `:1464`, mirroring how `old_dump_manifest`/`new_dump_manifest` are
-threaded through this same function. `cli_compare_release.py`
+threaded through this same function. **`cli_compare_release.py` needs the
+`diagnostic_comparison` parameter itself threaded, not just an exception
+branch — it does not go through `CompareRequest`/`run_compare_request` at
+all, so the `run_compare_request` reachability test elsewhere in this plan
+proves nothing about this path.** Verified against the actual code:
+`_compare_one_library` calls `_run_compare_pair` (`:91-141`), whose own
+docstring states it "routes through the single Tier-2 chokepoint
+(`service.run_compare`, ADR-037 D1)" — the *legacy keyword shim*, not
+`run_compare_request`/`CompareRequest`. `_run_compare_pair`'s own fixed,
+explicit signature has no `diagnostic_comparison` slot today, and its
+`service.run_compare(...)` call (`:124-141`) only forwards what it already
+names — so even with `service.run_compare` itself gaining the parameter
+(above), a value would never reach it through this path without both
+`_run_compare_pair` and `_compare_one_library` also naming it explicitly
+and threading it through, the identical multi-layer gap already found
+(twice) for `--dump-manifest`/`--frontend-context` elsewhere in this
+phase. `cli_compare_release.py`
 (`_compare_one_library`'s dedicated
 `except (ProfileMismatchError, ScopeMismatchError)` branch, ordered before
 `except Exception` — see the release-fan-out acceptance-criteria bullet
 above; this is not covered by the CLI's own exit-code handling, it is a
-separate call path), `cli_compare_release_helpers.py`
+separate call path — **plus** `_run_compare_pair`'s and
+`_compare_one_library`'s own new `diagnostic_comparison: bool = False`
+parameters, threaded into `_run_compare_pair`'s `service.run_compare(...)`
+call), `cli_compare_release_helpers.py`
 (`_RELEASE_VERDICT_ORDER`'s new rank-6 `not_comparable` entry),
 `compat/cli.py` (new `try`/`except (ProfileMismatchError, ScopeMismatchError)`
 wrapping the `compare()` call — there is no surrounding `try` there today —
@@ -1332,8 +1365,23 @@ test proving the Python API exposes the identical parameter, not only
 `cli.py`'s flag; a **`CompareRequest` reachability** test asserting
 `service.run_compare_request(CompareRequest(..., diagnostic_comparison=True))`
 on a mismatched pair also returns the tentative `DiffResult` rather than
-raising — proving the flag is reachable through the front-end chokepoint
-`compare-release`/`appcompat` go through; an **`mcp_server.abi_compare`
+raising — proving the flag reaches CLI/MCP `compare`'s own chokepoint;
+**this test does *not* cover `compare-release` or `appcompat`, which do
+not go through `CompareRequest`/`run_compare_request` at all (see their
+own dedicated bullets above) — each needs its own dedicated test instead**:
+a **`compare-release` diagnostic-comparison** test asserting
+`_run_compare_pair(..., diagnostic_comparison=True)` on a mismatched
+old/new pair returns a tentative `(DiffResult, ...)` tuple rather than
+raising, proving the parameter actually reaches `_run_compare_pair`'s own
+`service.run_compare(...)` call, not just `service.run_compare` itself;
+and two **`appcompat` diagnostic-comparison** tests asserting
+`check_appcompat(..., diagnostic_comparison=True)` and
+`check_plugin_host_contract(..., diagnostic_comparison=True)` each return
+a tentative result on a mismatched pair instead of raising, alongside a
+companion assertion that *without* the flag, both still raise
+`ProfileMismatchError`/`ScopeMismatchError` uncaught — the documented
+default this phase deliberately keeps (see the `appcompat.py` bullet
+above); an **`mcp_server.abi_compare`
 not_comparable** test asserting a mismatched pair through `abi_compare`
 (the default, non-diagnostic path) returns `{"status": "not_comparable",
 "reason": ...}`, never the generic `{"status": "error"}` its existing
@@ -1788,7 +1836,15 @@ is extraction-layer, not diff-layer; no new `ChangeKind`.
 Implements ADR-050 D6. The cache-key half targets the manifest's full
 computed `scope_fingerprint` (TU names, per-TU ordered includes/
 forced-includes, and `contributes_to_abi`/`required` flags together), so
-it depends on Phase B (the manifest schema those inputs live on) — not on
+it depends on **both** Phase A and Phase B — not Phase B alone.
+`scope_fingerprint` as a type and computation
+(`ExtractionContract`/`comparability.compute_extraction_contract`) is
+Phase A's deliverable; Phase B only supplies the manifest-driven *inputs*
+that feed it for a manifest-driven dump, it doesn't invent the fingerprint
+itself. This phase's own acceptance criteria below also build directly on
+Phase A's cache-key fix (the `sorted(...)`-dropping order-sensitivity
+change), not merely on Phase A's types — so starting this phase with A
+unmerged leaves nothing concrete to extend. Not on
 `profile_fingerprint`, which can **never** be a pre-dump cache-key input at
 all, on either path (see the acceptance-criteria bullet below for why).
 `scope_fingerprint` is the one exception: for a manifest-driven dump it's

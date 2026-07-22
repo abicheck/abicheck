@@ -718,6 +718,23 @@ is None` for a canonical `compare_report.schema.json` document, or
 `verdict == "not_comparable"` for a release `summary.json`/per-library
 entry.
 
+**`cli_compare_release.py` also needs `diagnostic_comparison` itself
+threaded, not just the exception branch above — it does not go through
+`CompareRequest`/`run_compare_request`, so fixing that chokepoint doesn't
+reach it.** `_compare_one_library` calls `_run_compare_pair`
+(`cli_compare_release.py:91-141`), whose own docstring says it "routes
+through the single Tier-2 chokepoint (`service.run_compare`, ADR-037
+D1)" — the legacy keyword shim, a different function from
+`run_compare_request`. `_run_compare_pair`'s own fixed, explicit signature
+has no `diagnostic_comparison` slot, and its `service.run_compare(...)`
+call only forwards parameters it already names, so giving
+`service.run_compare` the parameter (above) is not sufficient on its own.
+`_run_compare_pair` and `_compare_one_library` each gain their own
+`diagnostic_comparison: bool = False` parameter, threaded into
+`_run_compare_pair`'s `service.run_compare(...)` call — the same
+multi-layer threading this ADR has already had to apply more than once
+elsewhere.
+
 **A fifth surface calls `checker.compare` directly, with its own,
 independent exit-code contract that this ADR must not silently
 break: `abicheck/compat/cli.py`'s ABICC-compatible `compat check`
@@ -848,16 +865,25 @@ it.** `CompareRequest` (`api_types.py:125`) is, by its own docstring, "the
 single input to `run_compare`" that "every front-end (CLI, MCP,
 `compare-release` fan-out, `appcompat`)" assembles and hands to
 `service.run_compare_request` — the actual ADR-037 D1/D2 classification
-chokepoint, one level above `compare_snapshots`. **The docstring's own
-"appcompat" claim doesn't hold up against the actual code, the same kind
-of docstring/reality gap already caught once below for `mcp_server`:**
-`appcompat.py`'s `check_appcompat`/`check_plugin_host_contract` call
-`compare_snapshots(...)` directly too (see the dedicated bullet further
-below) — so "every documented front-end goes through `CompareRequest`" is
-already not literally true today; the CLI/MCP-facing front-ends this
-paragraph is really about (the ones a `--diagnostic-comparison` flag or
-equivalent API parameter needs to reach) are the ones this fix threads it
-through. `run_compare_request`
+chokepoint, one level above `compare_snapshots`. **Neither the "appcompat"
+nor the "`compare-release` fan-out" half of that docstring claim holds up
+against the actual code, the same kind of docstring/reality gap already
+caught once below for `mcp_server`:** `appcompat.py`'s
+`check_appcompat`/`check_plugin_host_contract` call `compare_snapshots(...)`
+directly (see the dedicated bullet further below), and
+`cli_compare_release.py`'s `_compare_one_library` → `_run_compare_pair`
+calls `service.run_compare` — the *legacy keyword shim*, whose own
+docstring says it "routes through the single Tier-2 chokepoint
+(`service.run_compare`, ADR-037 D1)," not `run_compare_request` — so
+"every documented front-end goes through `CompareRequest`" is already not
+literally true today for either. Both get their own dedicated
+`diagnostic_comparison` threading below (`appcompat.py`'s own bullet;
+`cli_compare_release.py`'s own bullet) rather than inheriting reachability
+from this fix — a test asserting `run_compare_request` accepts
+`diagnostic_comparison` proves nothing about either path. The
+CLI/MCP-facing front-ends this paragraph is really about (the ones a
+`--diagnostic-comparison` flag or equivalent API parameter needs to
+reach) are the ones this fix threads it through. `run_compare_request`
 calls `compare_snapshots(old, new, suppression=..., policy=..., ...,
 env_matrix=...)` today with a fixed keyword list that has no slot for this
 flag; adding `diagnostic_comparison` only to `compare_snapshots` itself
