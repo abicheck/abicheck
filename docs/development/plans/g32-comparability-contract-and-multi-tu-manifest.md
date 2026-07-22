@@ -224,6 +224,20 @@ Implements ADR-050 D1 and D2.
   as-cache-key work (a different gap: a pure profile change with identical
   headers not invalidating) and cannot be deferred to it without leaving
   the gate inert for every warm-cache user until Phase E ships.
+- **A third cache gap, ongoing rather than one-time, also lands here:**
+  `_cache_key()` (`snapshot_cache.py:159,168`) hashes `sorted(headers)`/
+  `sorted(includes)` — order-*insensitive* — while D1's fingerprints are
+  order-*sensitive* for the same inputs (`-I a -I b` vs. `-I b -I a`).
+  Reordering flags between two runs can therefore hit the cache under the
+  sorted key and return an `AbiSnapshot` whose `contract` fingerprints were
+  computed once, for whichever order first populated that entry — never
+  recomputed for the new order, since a cache hit skips `dump()` entirely.
+  This phase drops `sorted(...)` for `headers`/`includes` in `_cache_key()`
+  and hashes them in caller-supplied order instead; deferring this to
+  Phase E doesn't help, since Phase E's cache-key work addresses a
+  different, narrower gap (identical header *content*, pure profile
+  change) and wouldn't by itself make the existing sorted hashing
+  order-preserving.
 - `serialization.SCHEMA_VERSION` is bumped (11 → 12) in the same change
   that starts writing `contract` — **not** treated as a free additive field
   the way ADR-041's advisory `extractor_passes`/`narrowed_passes` were. The
@@ -388,8 +402,9 @@ the gate, and `contract_coverage` metadata computation — no detector, since
 `UNKNOWN_PROFILE` is report metadata, not a `Change`), `dumper.py` (`dump()`
 calls `compute_extraction_contract(...)` and attaches it to every returned
 snapshot — see the acceptance-criteria bullet above; this is not optional
-plumbing), `snapshot_cache.py` (`_SNAPSHOT_CACHE_VERSION` bump — see the
-warm-cache acceptance-criteria bullet above), `errors.py`
+plumbing), `snapshot_cache.py` (`_SNAPSHOT_CACHE_VERSION` bump and the
+`_cache_key()` order-preserving `headers`/`includes` hashing — see the two
+warm-cache acceptance-criteria bullets above), `errors.py`
 (`ProfileMismatchError`/`ScopeMismatchError`/`IncompatibleSnapshotSchemaError`),
 `serialization.py` (`SCHEMA_VERSION` bump,
 `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION` threshold + the
@@ -419,8 +434,12 @@ regression test: seed `snapshot_cache` with a pre-bump-version entry (no
 `contract`), call `cached_run_dump` for the same inputs post-bump, and
 assert it misses and rebuilds with `contract` populated rather than
 serving the stale hit — the cache-layer analogue of the `dump()` test
-above, closing the same class of bypass through a different code path.
-Unit tests for fingerprint stability (same manifest,
+above, closing the same class of bypass through a different code path. A
+**cache order-sensitivity** test: call `cached_run_dump` with
+`includes=[a, b]`, then again with `includes=[b, a]` (same set, reordered)
+— assert the second call is a cache **miss**, not a hit serving the first
+call's `contract.profile_fingerprint`, proving `_cache_key()` no longer
+sorts these inputs away. Unit tests for fingerprint stability (same manifest,
 independent-TU reordering unaffected; include-order-within-a-TU changes
 the fingerprint; flipping one TU's `contributes_to_abi` or `required` flag
 with its includes held identical also changes `scope_fingerprint`); a

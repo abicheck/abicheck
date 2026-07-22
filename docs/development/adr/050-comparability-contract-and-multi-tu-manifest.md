@@ -306,6 +306,31 @@ identical header content not invalidating the cache); this one closes
 D6's phase without leaving the gate inert for every warm-cache user in the
 interim.
 
+**A third, ongoing cache gap — not a one-time migration issue like the
+two above — also has to land in this phase: `_cache_key()`'s own hashing
+is order-*insensitive*, while D1's fingerprints are explicitly
+order-*sensitive*.** `snapshot_cache._cache_key()` (`:159,168`) iterates
+`sorted(headers)`/`sorted(includes)` when building the cache key — so
+`-I a -I b` and `-I b -I a` hash identically today. That was already a
+latent correctness gap independent of this ADR (include-search order
+affects real header shadowing/resolution in the underlying compile,
+regardless of caching), but D1 makes it acutely consequential: a caller
+that reorders `-I`/header flags between two runs would get a cache *hit*
+under the sorted key, and `cached_run_dump` returns that cached
+`AbiSnapshot` — whose `contract.profile_fingerprint`/`scope_fingerprint`
+were computed once, for whichever order happened to populate the cache
+entry first — without ever re-running `compute_extraction_contract(...)`
+for the new order. The comparability gate would then be working from a
+fingerprint that doesn't reflect the actual current invocation, in either
+direction: a real reorder-driven profile change could be silently
+cache-masked as unchanged, or an immaterial reorder could keep comparing
+against a stale fingerprint from a differently-ordered prior run. Fixed
+by dropping `sorted(...)` for `headers`/`includes` in `_cache_key()` and
+hashing them in caller-supplied order instead — landing in this phase,
+not deferred to D6, since D6's cache-key work addresses a different,
+narrower gap (a pure profile change with *identical* header content) and
+does not by itself make order-sensitive hashing order-preserving.
+
 ### D2. Comparability gate — hard-fail before symbol diff, not a RISK finding
 
 New `ProfileMismatchError` / `ScopeMismatchError` (`errors.py`), raised from
