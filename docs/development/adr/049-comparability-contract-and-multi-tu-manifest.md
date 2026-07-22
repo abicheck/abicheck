@@ -296,21 +296,39 @@ as a pair where neither side carries one, and comparing a newly-produced
 snapshot against a pre-ADR baseline (the common "upgrade abicheck, keep the
 stored CI baseline" workflow) never regresses into an unexpected
 `not_comparable` result. `UNKNOWN_PROFILE` is **not** a `not_comparable`
-reason and never blocks: it is a RISK-tier, non-authoritative annotation on
-an otherwise-ordinary verdict — same shape and same authority-rule
-justification as the existing `SOURCE_FACT_COVERAGE_INCOMPLETE`
-(`checker_policy.py:618`) — surfaced only for a mixed pair, to tell the
+reason and never blocks: it is a non-authoritative annotation on
+an otherwise-ordinary verdict, surfaced only for a mixed pair, to tell the
 reader "this comparison ran without being able to check profile/scope
-drift on one side," without withholding the verdict itself. Since
-`SOURCE_FACT_COVERAGE_INCOMPLETE` is itself a real `ChangeKind`, not a
-free-floating report string, `UNKNOWN_PROFILE` is registered the same way,
-through the repository's standard four-step procedure (`ChangeKind` enum
-entry in `checker_policy.py`, one `ChangeKindMeta` entry in a
-`change_registry*.py` module with `default_verdict` placing it in
-`RISK_KINDS`, a detector in `comparability.py` wired via
-`@registry.detector(...)`, and a unit test) — not an ad-hoc string that
-would trip the AI-readiness `changekind-partition`/`changekind-detector`
-gates or bypass the registry's completeness assertion.
+drift on one side," without withholding the verdict itself.
+
+**`UNKNOWN_PROFILE` is `COMPATIBLE_KINDS`/`QUALITY_KINDS`-tier, deliberately
+not `RISK_KINDS`, even though it is registered the same way and reported
+the same way as the existing `SOURCE_FACT_COVERAGE_INCOMPLETE`
+(`checker_policy.py:618`).** The two differ in what they mean, not just in
+name: `SOURCE_FACT_COVERAGE_INCOMPLETE` reports genuine *per-comparison*
+evidence uncertainty (a fact family that happened to fail or come back
+partial *this run*) — a `--severity-potential-breaking=error`/
+`--severity-preset strict` user reasonably wants that to fail their build,
+since it means this specific comparison can't be trusted. `UNKNOWN_PROFILE`
+is different in kind: it fires purely because one side predates this ADR,
+which is a one-time rollout artifact untied to any change in the library
+being compared, and will recur on *every* comparison against *every*
+not-yet-regenerated baseline until that baseline is refreshed. Classifying
+it `RISK_KINDS` would mean `potential_breaking` promotion turns it into a
+mass, abicheck-version-triggered CI failure the instant a team with strict
+severity settings upgrades — exactly the "upgrading abicheck breaks an
+unrelated, unchanged CI pipeline" regression this section's backward-
+compatibility promise exists to rule out, just relocated from the
+`not_comparable` layer to the severity-exit-code layer. `UNKNOWN_PROFILE`
+is therefore registered through the repository's standard four-step
+procedure (`ChangeKind` enum entry in `checker_policy.py`, one
+`ChangeKindMeta` entry in a `change_registry*.py` module with
+`default_verdict` placing it in `COMPATIBLE_KINDS`'s `QUALITY_KINDS`
+subset, a detector in `comparability.py` wired via
+`@registry.detector(...)`, and a unit test) — a real `ChangeKind`, not an
+ad-hoc string (avoiding the AI-readiness `changekind-partition`/
+`changekind-detector` gates), but one that never contributes to
+`potential_breaking` severity promotion under any `--severity-*` flag.
 
 ### D3. Manifest and real multi-TU dump
 

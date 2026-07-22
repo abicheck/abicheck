@@ -191,19 +191,32 @@ Implements ADR-049 D1 and D2.
   pair where neither side has one — never hard-fails, never becomes
   `not_comparable` — so comparing a freshly-produced snapshot against a
   pre-ADR stored CI baseline (a common real workflow) never regresses on
-  upgrade. It instead surfaces `UNKNOWN_PROFILE` as a RISK-tier,
-  non-authoritative annotation on the ordinary verdict that still gets
-  produced — same shape as the existing `SOURCE_FACT_COVERAGE_INCOMPLETE`
-  (`checker_policy.py:618`), not a second meaning for `not_comparable`.
-  `UNKNOWN_PROFILE` is registered as a real `ChangeKind` via the repo's
-  standard four-step procedure (AGENTS.md "Adding a new ChangeKind"), the
-  same as `SOURCE_FACT_COVERAGE_INCOMPLETE` was — enum entry
-  (`checker_policy.py`), one `ChangeKindMeta` entry with `default_verdict`
-  placing it in `RISK_KINDS` (a `change_registry*.py` module), a detector in
-  `comparability.py` wired via `@registry.detector(...)`, and a unit test.
-  Not an ad-hoc report string: that would trip the AI-readiness
-  `changekind-partition`/`changekind-detector` gates or bypass the
-  registry's own import-time completeness assertion.
+  upgrade — **including under strict severity settings, not only the
+  default ones.** It surfaces `UNKNOWN_PROFILE` as a non-authoritative
+  annotation on the ordinary verdict that still gets produced, but
+  classified `COMPATIBLE_KINDS`/`QUALITY_KINDS`-tier, **not** `RISK_KINDS`
+  — deliberately different from the existing `SOURCE_FACT_COVERAGE_INCOMPLETE`
+  (`checker_policy.py:618`) it otherwise resembles. `SOURCE_FACT_COVERAGE_INCOMPLETE`
+  reports genuine per-comparison evidence uncertainty, which a
+  `--severity-potential-breaking=error`/`--severity-preset strict` user
+  reasonably wants to fail their build on. `UNKNOWN_PROFILE` fires purely
+  from comparing against a pre-this-ADR baseline — a one-time rollout
+  artifact untied to any real library change, recurring on every
+  comparison until that baseline is regenerated. Classifying it
+  `RISK_KINDS` would let `potential_breaking` promotion turn it into a
+  mass CI failure the moment a team with strict severity settings upgrades
+  abicheck — exactly the regression the "never regresses on upgrade"
+  promise above exists to rule out, just at the severity-exit-code layer
+  instead of `not_comparable`. `UNKNOWN_PROFILE` is registered as a real
+  `ChangeKind` via the repo's standard four-step procedure (AGENTS.md
+  "Adding a new ChangeKind") — enum entry (`checker_policy.py`), one
+  `ChangeKindMeta` entry with `default_verdict` placing it in
+  `COMPATIBLE_KINDS`'s `QUALITY_KINDS` subset (a `change_registry*.py`
+  module), a detector in `comparability.py` wired via
+  `@registry.detector(...)`, and a unit test. Not an ad-hoc report string:
+  that would trip the AI-readiness `changekind-partition`/
+  `changekind-detector` gates or bypass the registry's own import-time
+  completeness assertion.
 - **The exit code is part of the published contract too, not an
   afterthought.** `docs/reference/exit-codes.md` documents two co-existing
   `compare` schemes (legacy: 0/2/4; severity-aware: 0/1/2/4) where `0`
@@ -317,9 +330,14 @@ three entry points; a `--diagnostic-comparison` end-to-end test; a
 backward-compat test asserting a contract-less snapshot pair compares
 unchanged; a **mixed-pair** test (one side `contract`, one side none)
 asserting the comparison never hard-fails and instead carries a
-`UNKNOWN_PROFILE` RISK-tier finding alongside an otherwise-ordinary
+`UNKNOWN_PROFILE` `QUALITY_KINDS` finding alongside an otherwise-ordinary
 verdict — the specific case the ADR calls out as unambiguous, not left to
-interpretation.
+interpretation; a **severity-neutrality** test asserting a mixed-pair
+comparison run with `--severity-potential-breaking=error` (or
+`--severity-preset strict`) still exits successfully — `UNKNOWN_PROFILE`
+must never itself trigger `potential_breaking` promotion, or the "never
+regresses on upgrade" promise breaks for exactly the users who opted into
+strict severity gating.
 
 **Example fixtures.** The Phase 0 "scope drift" pair, promoted to a real
 `examples/case2xx_profile_scope_mismatch_gate/` once the gate exists.
@@ -363,7 +381,14 @@ Implements ADR-049 D3. The highest-risk phase — see Risk above.
 **Files & surfaces.** New `abicheck/dump_manifest.py`, `abicheck/dumper.py`
 (per-TU invocation loop, `TuFragment` type), new `cli_dump_manifest.py`
 sibling command module (per the root `CLAUDE.md`'s "larger command → sibling
-module" convention), `cli_dump_helpers.py` (extend
+module" convention) — registering it is not implicit: `cli.py`'s bottom
+side-effect `from . import (...)` block gains `cli_dump_manifest`, or the
+new `plan --manifest`/`dump --manifest` commands never attach to `main` at
+all, and `pyproject.toml`'s `disallow_untyped_decorators = false` override
+list gains `abicheck.cli_dump_manifest` alongside the existing per-module
+entries, or the typed-decorator mypy lane fails on its `@click` decorators
+(both required steps of the root `CLAUDE.md`'s "Adding a new top-level
+command" procedure, steps 3–4) — `cli_dump_helpers.py` (extend
 `resolve_dump_depth`/`check_requested_depth_satisfied` to operate per-TU).
 
 **Tests.** Manifest parser unit tests (the invariant violation, duplicate
