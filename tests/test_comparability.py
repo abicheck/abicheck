@@ -523,6 +523,40 @@ def test_13b_two_project_owned_slots_with_same_basename_swapped_order_differs(
     assert order_a.profile_fingerprint != order_b.profile_fingerprint
 
 
+def test_13c_nested_project_owned_slots_owning_same_header_swapped_order_differs(
+    tmp_path,
+):
+    # Codex review (PR #624): two NESTED/overlapping project-owned roots
+    # (-I work and -I work/include) that both own the exact SAME declared
+    # header must still tokenize distinctly per slot. Unlike test_13b's
+    # separate-roots case, the GLOBAL root-relative header identity alone is
+    # identical here regardless of which of the two dirs owns it (there's
+    # only one header, one identity) -- so before this fix, swapping
+    # declared_includes order produced the identical include_sequence either
+    # way, silently losing order-sensitivity for exactly the kind of nested
+    # -I setup where order genuinely changes #include resolution.
+    foo = _write(tmp_path / "work" / "include" / "foo.h", "int f(void);\n")
+    order_a = compute_extraction_contract(
+        declared_headers=[foo],
+        l2_frontend_ran=True,
+        declared_includes=[
+            IncludeDir(tmp_path / "work"),
+            IncludeDir(tmp_path / "work" / "include"),
+        ],
+        depfile_resolved_paths=[foo],
+    )
+    order_b = compute_extraction_contract(
+        declared_headers=[foo],
+        l2_frontend_ran=True,
+        declared_includes=[
+            IncludeDir(tmp_path / "work" / "include"),
+            IncludeDir(tmp_path / "work"),
+        ],
+        depfile_resolved_paths=[foo],
+    )
+    assert order_a.profile_fingerprint != order_b.profile_fingerprint
+
+
 # ---------------------------------------------------------------------------
 # labeled sibling support root (test 14 -- semantic core only; the CLI
 # grammar itself is not implemented yet, see this module's own docstring)

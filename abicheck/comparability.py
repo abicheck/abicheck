@@ -213,8 +213,21 @@ def _slot_token_for_ancestor(
     declared_headers: Sequence[Path],
     header_identities: dict[Path, str],
 ) -> str:
-    owned_header_identities = sorted(
-        header_identities[h]
+    # Codex review (PR #624): pair each owned header's GLOBAL root-relative
+    # identity (disambiguates the same-basename-under-two-separate-roots case
+    # already fixed once -- e.g. `include/foo.h` vs. `generated/foo.h`) with
+    # its identity RELATIVE TO THIS SPECIFIC include dir (disambiguates two
+    # NESTED/overlapping project-owned roots, e.g. `-I work` and
+    # `-I work/include`, that both own the exact same header). Global
+    # identity alone is identical for both slots in the nested case -- e.g.
+    # both would tokenize as `hdrs:[["foo.h", ...]]` regardless of which
+    # dir owns it -- silently losing the order-sensitivity a swapped
+    # `-I work -I work/include` vs. `-I work/include -I work` is supposed to
+    # preserve. The dir-relative component is always safe to compute here:
+    # ownership (checked by the filter below) means `inc.path` is already
+    # an ancestor-or-equal of `h`, so `h.relative_to(inc.path)` never raises.
+    owned = sorted(
+        (header_identities[h], str(_resolved(h).relative_to(_resolved(inc.path))))
         for h in declared_headers
         if _is_ancestor_or_equal(inc.path, h)
     )
@@ -222,7 +235,7 @@ def _slot_token_for_ancestor(
     # identity string is not guaranteed comma-free, so an unescaped join
     # could let two structurally different owned-header sets collapse to
     # the same token — the identical class of bug reported for macro_ops.
-    return "hdrs:" + json.dumps(owned_header_identities)
+    return "hdrs:" + json.dumps(owned)
 
 
 def _attribute_file(
