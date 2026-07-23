@@ -197,6 +197,39 @@ def test_adr_index_nav_sync_accepts_heading_style_status(car, tmp_path, monkeypa
     assert f.errors == []
 
 
+def test_adr_index_nav_sync_finds_replacement_link_on_wrapped_status_line(
+    car, tmp_path, monkeypatch
+):
+    """A Status paragraph that wraps across multiple physical lines (already
+    real usage in this repo) must still have its replacement link found even
+    when the link falls on a continuation line, not the first one
+    (regression test for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n"
+        "| [002](002-example.md) | Example 2 | |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded -- this decision was revisited\n"
+        "and replaced by [ADR-002](002-example.md) after further review.\n"
+    )
+    (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
 def test_adr_index_nav_sync_catches_superseded_without_replacement_link(
     car, tmp_path, monkeypatch
 ):
@@ -342,6 +375,28 @@ def test_adr_index_nav_sync_rejects_self_link_as_replacement(
     f = car.Findings()
     car.check_adr_index_and_nav_sync(f)
     assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
+def test_adr_status_text_joins_wrapped_lines(car):
+    text = "# ADR-001\n\n**Status:** Superseded, replaced by\n[ADR-002](002-x.md).\n"
+    assert car._adr_status_text(text) == (
+        "Superseded, replaced by [ADR-002](002-x.md)."
+    )
+
+
+def test_adr_status_text_stops_at_blank_line(car):
+    text = "# ADR-001\n\n**Status:** Accepted.\n\nMore prose that isn't status.\n"
+    assert car._adr_status_text(text) == "Accepted."
+
+
+def test_adr_status_text_stops_at_next_bold_field(car):
+    text = "# ADR-001\n\n**Status:** Accepted.\n**Decision maker:** Someone.\n"
+    assert car._adr_status_text(text) == "Accepted."
+
+
+def test_adr_status_text_stops_at_heading(car):
+    text = "# ADR-001\n\n**Status:** Accepted.\n## Context\n\nBody.\n"
+    assert car._adr_status_text(text) == "Accepted."
 
 
 def test_no_hard_file_size_violations(car):

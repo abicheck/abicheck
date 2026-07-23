@@ -1507,8 +1507,13 @@ _ADR_FILE_RE = re.compile(r"^\d{3}-.+\.md$")
 #: An ADR's status, either as an inline bold label ("**Status:** Accepted —
 #: ...") or as its own heading ("## Status\n\nAccepted — ..."). Both
 #: conventions are in active use across the existing 51 ADRs.
-_ADR_STATUS_INLINE_RE = re.compile(r"^\*\*Status:\*\*\s*(.+)$", re.MULTILINE)
-_ADR_STATUS_HEADING_RE = re.compile(r"^## Status\s*\n+(.+)$", re.MULTILINE)
+_ADR_STATUS_INLINE_START_RE = re.compile(r"^\*\*Status:\*\*[ \t]*(.*)$")
+_ADR_STATUS_HEADING_START_RE = re.compile(r"^## Status[ \t]*$")
+#: A line that ends the Status paragraph's continuation: a new bolded
+#: field label (`**Decision maker:** ...`), a heading, or a `---` rule.
+_ADR_STATUS_CONTINUATION_STOP_RE = re.compile(
+    r"^\s*\*\*[^*\n]+:\*\*|^\s*#|^\s*-{3,}\s*$"
+)
 
 _ADR_REPLACEMENT_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
@@ -1549,13 +1554,39 @@ def _links_to_another_adr(status: str, adr_dir: Path, own_path: Path) -> bool:
 
 
 def _adr_status_text(text: str) -> str | None:
-    m = _ADR_STATUS_INLINE_RE.search(text)
-    if m:
-        return m.group(1)
-    m = _ADR_STATUS_HEADING_RE.search(text)
-    if m:
-        return m.group(1)
-    return None
+    """Return the full Status paragraph -- not just its first physical line
+    -- for either the inline (`**Status:** ...`) or heading (`## Status`)
+    convention. Several real ADRs already wrap their status across multiple
+    lines; capturing only the first line would hide a genuine replacement
+    link that happens to fall on a continuation line from
+    _links_to_another_adr()."""
+    lines = text.split("\n")
+    start: int | None = None
+    first_content: str | None = None
+    for i, line in enumerate(lines):
+        m = _ADR_STATUS_INLINE_START_RE.match(line)
+        if m:
+            start, first_content = i, m.group(1)
+            break
+        if _ADR_STATUS_HEADING_START_RE.match(line):
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j < len(lines):
+                start, first_content = j, lines[j]
+            break
+    if start is None:
+        return None
+    parts = [first_content] if first_content is not None else []
+    j = start + 1
+    while j < len(lines):
+        nxt = lines[j]
+        if not nxt.strip() or _ADR_STATUS_CONTINUATION_STOP_RE.match(nxt):
+            break
+        parts.append(nxt)
+        j += 1
+    result = " ".join(p.strip() for p in parts).strip()
+    return result or None
 
 
 def check_adr_index_and_nav_sync(f: Findings) -> None:
