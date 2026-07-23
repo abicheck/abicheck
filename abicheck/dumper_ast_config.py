@@ -146,6 +146,16 @@ _CPP20_CONCEPT_PATTERN = re.compile(rb"\bconcept\s+\w+\s*=")  # concept Addable 
 _CONCEPT_AS_TYPE_NAME_PATTERN = re.compile(
     rb"\b(?:struct|class)\s+concept\b|\busing\s+concept\s*=|\btypedef\b[^;]*\bconcept\s*;"
 )
+# "requires" only became a reserved keyword in C++20 too — a pre-C++20 header
+# can legally declare a type literally named "requires" and reference it in a
+# variable-template declaration (``template<class T> requires value = {};``),
+# whose bare ``requires\s+\w`` shape directly after a template header's
+# closing ``>`` is textually identical to a genuine requires-clause (Codex
+# review). Mirrors ``_CONCEPT_AS_TYPE_NAME_PATTERN``/``concept_type_shadowed``
+# exactly.
+_REQUIRES_AS_TYPE_NAME_PATTERN = re.compile(
+    rb"\b(?:struct|class)\s+requires\b|\busing\s+requires\s*=|\btypedef\b[^;]*\brequires\s*;"
+)
 _CPP20_REQUIRES_EXPR_PATTERN = re.compile(
     rb"\brequires\s*[(\{]"
 )  # requires(T a, T b) { ... }  OR the parameterless requires { ... } form
@@ -683,7 +693,10 @@ def _looks_like_genuine_concept(
 
 
 def _looks_like_genuine_requires_clause(
-    lookahead: bytes, match_start: int, prev_nonblank_code: bytes
+    lookahead: bytes,
+    match_start: int,
+    prev_nonblank_code: bytes,
+    requires_type_shadowed: bool,
 ) -> bool:
     """True only if the requires-*clause* candidate (the bare, non-
     parenthesized ``requires Foo<T>`` form matched by
@@ -700,6 +713,16 @@ def _looks_like_genuine_requires_clause(
     clause has no body to confirm, so the *only* positive signal
     available is the preceding template header — exactly the same
     positive-signal-required design already used for ``concept``.
+
+    That template-header check alone still can't tell a genuine clause
+    from a pre-C++20 header that declares a *type* literally named
+    "requires" and uses it as a variable template's type
+    (``template<class T> requires value = {};`` — the template header's
+    closing ``>`` directly precedes "requires" either way) — Codex
+    review, sixth round. Once *requires_type_shadowed* confirms "requires"
+    names a real type anywhere in the header, every candidate here is
+    ambiguous and treated as non-genuine, mirroring
+    ``concept_type_shadowed``.
 
     A *trailing* requires-clause following a function's declarator (
     ``template<class T> void f(T) requires std::integral<T>;``) is
@@ -744,6 +767,8 @@ def _looks_like_genuine_requires_clause(
     ``->`` to be declarator-adjacent via
     :func:`_has_declarator_adjacent_trailing_arrow` rather than a bare
     substring search — Codex review, fifth round."""
+    if requires_type_shadowed:
+        return False
     same_line_prefix = _strip_trailing_declarator_specifiers(
         lookahead[:match_start].rstrip()
     )
@@ -1030,6 +1055,11 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
         concept_type_shadowed = bool(
             _CONCEPT_AS_TYPE_NAME_PATTERN.search(_content_no_line_comments)
         )
+        # Same reasoning as concept_type_shadowed above, for "requires" used
+        # as an ordinary pre-C++20 type name (Codex review).
+        requires_type_shadowed = bool(
+            _REQUIRES_AS_TYPE_NAME_PATTERN.search(_content_no_line_comments)
+        )
         # Same reasoning and "//"-comment-stripped-copy caveat as
         # concept_type_shadowed above, for "consteval"/"constinit" used as
         # an ordinary pre-C++20 type name (Codex review, third round).
@@ -1098,7 +1128,10 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
             elif (
                 clause_match := _CPP20_REQUIRES_CLAUSE_PATTERN.search(lookahead)
             ) and _looks_like_genuine_requires_clause(
-                lookahead, clause_match.start(), prev_nonblank_code
+                lookahead,
+                clause_match.start(),
+                prev_nonblank_code,
+                requires_type_shadowed,
             ):
                 found.append(Cpp20Requirement("requires-clause", str(p), start_no))
             elif _has_constrained_param_syntax(lookahead):

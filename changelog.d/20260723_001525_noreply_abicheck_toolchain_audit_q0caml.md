@@ -59,7 +59,12 @@ it should read in CHANGELOG.md. Delete the other sections.
   an `#elif 1`/`#elif true` arm fires, every later sibling arm in the same
   chain is unconditionally unreachable in any build configuration, so
   masking resumes for them too instead of staying lifted for the rest of
-  the chain.
+  the chain. Separately, a pre-C++20 header declaring a type literally
+  named `requires` and using it in a variable template
+  (`template<class T> requires value = {};`) is no longer misread as a
+  genuine requires-clause — the preceding-template-header positive signal
+  alone couldn't distinguish the two shapes, mirroring the existing
+  consteval/constinit/concept type-shadow checks.
 
 -->
 <!--

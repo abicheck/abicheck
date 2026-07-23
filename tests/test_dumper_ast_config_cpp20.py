@@ -1147,6 +1147,36 @@ def test_cpp20_detector_ignores_constinit_as_shadowed_type_name(tmp_path):
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_requires_as_shadowed_type_name(tmp_path):
+    """Regression (Codex review, sixth round): "requires" only became a
+    reserved keyword in C++20 — a pre-C++20 header can legally declare a
+    type literally named "requires" and use it as a variable template's
+    type (``template<class T> requires value = {};``). The template
+    header's closing ``>`` directly precedes "requires" either way, so
+    the preceding-template-header positive signal alone can't distinguish
+    this from a genuine requires-clause; mirrors the existing
+    consteval/constinit/concept type-shadow checks."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "struct requires {};\ntemplate<class T> requires value = {};\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_still_detects_genuine_requires_clause(tmp_path):
+    """Companion: an actual requires-clause (no shadowed type name
+    anywhere in the header) must still be detected."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<class T> requires std::integral<T> void f(T);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "requires-clause" for r in reqs)
+
+
 def test_cpp20_detector_ignores_consteval_as_shadowed_typedef_type_name(tmp_path):
     """Companion: shadowed via ``typedef`` rather than ``struct``/``using``."""
     headers = _write(tmp_path, "a.h", "typedef int consteval;\nconsteval unsigned x;\n")
