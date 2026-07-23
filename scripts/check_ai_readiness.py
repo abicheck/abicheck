@@ -1523,15 +1523,15 @@ _ADR_REF_LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\[([^\]]*)\]")
 _ADR_REF_DEF_RE = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 
 
-def _adr_href_resolves_elsewhere(
-    href: str, adr_dir: Path, resolved_adr_dir: Path, resolved_own_path: Path
-) -> bool:
-    """True if `href` resolves to another real ADR file inside `adr_dir` --
-    *other than* the ADR making the claim. Checking only the link target's
-    basename against _ADR_FILE_RE isn't enough, since a link like
-    `[plan](../notes/002-plan.md)` has a basename that matches the ADR
-    filename pattern while actually pointing outside the ADR directory
-    entirely."""
+def _resolve_adr_href_target(
+    href: str, adr_dir: Path, resolved_adr_dir: Path
+) -> Path | None:
+    """Resolve a Markdown link target found somewhere under `adr_dir` to the
+    real ADR file it points at, or None if it doesn't resolve to one.
+    Checking only the link target's basename against _ADR_FILE_RE isn't
+    enough, since a link like `[plan](../notes/002-plan.md)` has a basename
+    that matches the ADR filename pattern while actually pointing outside
+    the ADR directory entirely."""
     href_path = href.strip()
     if href_path.startswith("<"):
         # CommonMark's angle-bracket link destination form ([text](<url>))
@@ -1547,16 +1547,23 @@ def _adr_href_resolves_elsewhere(
         href_path = href_path.split(" ", 1)[0]
     href_path = href_path.split("#", 1)[0]
     if not href_path or "://" in href_path or href_path.startswith(("mailto:", "/")):
-        return False
+        return None
     basename = href_path.split("/")[-1]
     if not _ADR_FILE_RE.match(basename):
-        return False
+        return None
     resolved = (adr_dir / href_path).resolve()
-    return (
-        resolved.parent == resolved_adr_dir
-        and resolved.is_file()
-        and resolved != resolved_own_path
-    )
+    if resolved.parent == resolved_adr_dir and resolved.is_file():
+        return resolved
+    return None
+
+
+def _adr_href_resolves_elsewhere(
+    href: str, adr_dir: Path, resolved_adr_dir: Path, resolved_own_path: Path
+) -> bool:
+    """True if `href` resolves to another real ADR file inside `adr_dir` --
+    *other than* the ADR making the claim."""
+    resolved = _resolve_adr_href_target(href, adr_dir, resolved_adr_dir)
+    return resolved is not None and resolved != resolved_own_path
 
 
 def _links_to_another_adr(
@@ -1637,6 +1644,29 @@ def _adr_status_text(text: str) -> str | None:
     return result or None
 
 
+def _index_links_to_adr(
+    index_text: str, adr_dir: Path, resolved_adr_dir: Path, target: Path
+) -> bool:
+    """True if `index_text` (docs/development/adr/index.md's full content)
+    contains an actual Markdown link (inline or reference-style) resolving
+    to `target`. A bare mention of the filename in prose or a code sample
+    isn't enough -- MkDocs doesn't turn plain text into a navigable link, so
+    that wouldn't make the ADR reachable from the published index page."""
+    for href in _ADR_REPLACEMENT_LINK_RE.findall(index_text):
+        if _resolve_adr_href_target(href, adr_dir, resolved_adr_dir) == target:
+            return True
+    definitions = {
+        label.strip().casefold(): url
+        for label, url in _ADR_REF_DEF_RE.findall(index_text)
+    }
+    for link_text, label in _ADR_REF_LINK_RE.findall(index_text):
+        key = (label or link_text).strip().casefold()
+        url = definitions.get(key)
+        if url and _resolve_adr_href_target(url, adr_dir, resolved_adr_dir) == target:
+            return True
+    return False
+
+
 def check_adr_index_and_nav_sync(f: Findings) -> None:
     """Every docs/development/adr/*.md file must be linked from index.md,
     and the ADR index itself must be listed in mkdocs.yml's nav.
@@ -1664,6 +1694,7 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
     if not adr_dir.is_dir():
         return
     index_text = _read(adr_dir / "index.md")
+    resolved_adr_dir = adr_dir.resolve()
     nav_refs = _collect_mkdocs_nav_refs()
     index_nav_target = "development/adr/index.md"
     if nav_refs and index_nav_target not in nav_refs:
@@ -1676,7 +1707,7 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
     for md in sorted(adr_dir.glob("*.md")):
         if md.name == "index.md" or not _ADR_FILE_RE.match(md.name):
             continue
-        if md.name not in index_text:
+        if not _index_links_to_adr(index_text, adr_dir, resolved_adr_dir, md.resolve()):
             f.err(
                 "adr-index-nav-sync",
                 f"docs/development/adr/{md.name}: not linked from "

@@ -125,6 +125,70 @@ def test_adr_index_and_nav_sync_catches_missing_index_nav_entry(
     )
 
 
+def test_adr_index_nav_sync_rejects_bare_filename_mention_as_link(
+    car, tmp_path, monkeypatch
+):
+    """A bare mention of the ADR filename in prose or a code sample (not an
+    actual Markdown link) must not satisfy the "linked from index.md"
+    requirement -- MkDocs doesn't turn plain text into a navigable link, so
+    the ADR would still be unreachable from the published index page even
+    though its filename appears somewhere in the file."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "See `001-example.md` for details on this decision.\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("not linked from" in msg for _, msg in f.errors), (
+        f"expected a not-linked-from-index error, got: {f.errors}"
+    )
+
+
+def test_adr_index_nav_sync_accepts_reference_style_index_link(
+    car, tmp_path, monkeypatch
+):
+    """index.md may link an ADR using reference-style syntax
+    ([001][adr-001] with a [adr-001]: 001-example.md definition) instead of
+    an inline link -- MkDocs renders both identically, so both must satisfy
+    the "linked from index.md" requirement."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001][adr-001] | Example | Accepted |\n\n[adr-001]: 001-example.md\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
 def test_adr_index_nav_sync_does_not_require_individual_adr_in_nav(
     car, tmp_path, monkeypatch
 ):
