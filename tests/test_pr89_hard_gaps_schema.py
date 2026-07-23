@@ -600,20 +600,23 @@ class TestSchemaVersionBaseline:
         assert len(snap2.elf.symbols) == 1
 
 
-    def test_future_schema_version_warns(self) -> None:
-        """Loading a snapshot with schema_version > SCHEMA_VERSION must emit UserWarning."""
+    def test_future_schema_version_hard_rejects(self) -> None:
+        """Loading a snapshot with schema_version >=
+        _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION must raise
+        IncompatibleSnapshotSchemaError (ADR-050 D1), not merely warn — a
+        verdict-blocking field (AbiSnapshot.contract) was introduced at that
+        threshold, and warn-and-continue would let this reader silently
+        compare two possibly-incomparable snapshots."""
+        from abicheck.errors import IncompatibleSnapshotSchemaError
+
         snap = _snap()
         d = snapshot_to_dict(snap)
         d["schema_version"] = 999
-        import warnings
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            result = snapshot_from_dict(d)
-        assert any("schema_version 999" in str(warning.message) for warning in w), (
-            f"Expected UserWarning about schema_version 999, got: {[str(ww.message) for ww in w]}"
-        )
-        # Data should still load (best-effort)
-        assert result.library == snap.library
+        try:
+            snapshot_from_dict(d)
+            raise AssertionError("expected IncompatibleSnapshotSchemaError")
+        except IncompatibleSnapshotSchemaError as exc:
+            assert "999" in str(exc)
 
 
     def test_not_in_api_break_kinds(self) -> None:
