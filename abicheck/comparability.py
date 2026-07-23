@@ -299,17 +299,19 @@ def compute_extraction_contract(
       (and not under a declared header's own parent) feeds one additional,
       unordered **system/toolchain bucket**, appended last.
     """
-    l2_inputs_present = bool(
-        l2_frontend_ran
-        or compiler_family
-        or declared_includes
-        or depfile_resolved_paths
-        or macro_ops
-    )
     scope_inputs_present = bool(
         declared_headers or public_header_paths or public_header_dirs
     )
-    if not l2_inputs_present and not scope_inputs_present:
+    # Gated on l2_frontend_ran alone (Codex review, PR #624), not on whether
+    # any L2-shaped keyword argument happens to be non-empty: the profile
+    # block below only ever runs `if l2_frontend_ran:`, so a caller that
+    # passes e.g. declared_includes/macro_ops without also setting
+    # l2_frontend_ran=True (no L2 invocation actually ran) must not make
+    # this function return a non-None "empty shell" ExtractionContract whose
+    # profile_fingerprint AND scope_fingerprint are both None — checker.py's
+    # contract_coverage logic keys off whether `contract is None` at all, so
+    # such a shell would misreport as full contract coverage.
+    if not l2_frontend_ran and not scope_inputs_present:
         return None
 
     profile_fingerprint: str | None = None

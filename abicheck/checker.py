@@ -593,13 +593,26 @@ def compare(
     """
     mismatch = check_contracts_comparable(old, new, diagnostic=diagnostic_comparison)
     assurance = "none" if mismatch is not None else None
-    # ADR-050 D2 — set only when exactly one side carries a ``contract`` at
-    # all (both/neither is the ordinary case check_contracts_comparable
-    # already treats leniently): a fresh header-AST dump compared against a
-    # pre-ADR-050 stored baseline, or a symbols-only side against a full L2
-    # side. Report-level metadata, not a Change/ChangeKind finding.
+    # ADR-050 D2 — set when either fingerprint is mixed (exactly one side
+    # has it) between old and new, mirroring check_contracts_comparable's
+    # own per-fingerprint-independent gating (Codex review, PR #624: a
+    # per-``contract``-object check misses the case where both sides carry
+    # a real contract but only one has a profile_fingerprint — e.g. a
+    # symbols-only side with only scope provenance compared against a full
+    # L2 side — which check_contracts_comparable correctly skips the
+    # profile check for, but a coarse "contract is None" comparison would
+    # still report as fully covered even though that axis was never
+    # actually checked). Report-level metadata, not a Change/ChangeKind
+    # finding.
+    old_profile = old.contract.profile_fingerprint if old.contract else None
+    new_profile = new.contract.profile_fingerprint if new.contract else None
+    old_scope = old.contract.scope_fingerprint if old.contract else None
+    new_scope = new.contract.scope_fingerprint if new.contract else None
     contract_coverage = (
-        "partial" if (old.contract is None) != (new.contract is None) else None
+        "partial"
+        if (old_profile is None) != (new_profile is None)
+        or (old_scope is None) != (new_scope is None)
+        else None
     )
 
     # Discover any diff_* detector modules not already imported above, then run

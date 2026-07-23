@@ -108,6 +108,32 @@ def test_compare_contract_coverage_partial_when_exactly_one_side_has_a_contract(
     assert result.assurance is None  # comparable pair; no mismatch to bypass
 
 
+def test_compare_contract_coverage_partial_when_only_profile_fingerprint_is_mixed(
+    tmp_path,
+):
+    # Codex review (PR #624): both sides carry a real contract, but only the
+    # full-L2 side has a profile_fingerprint (the symbols-only side has only
+    # scope provenance) -- check_contracts_comparable correctly skips the
+    # profile check for this pair (an ordinary depth difference), but
+    # contract_coverage must still disclose that the profile axis was never
+    # actually checked, not report full coverage just because neither
+    # `contract` object is None.
+    h_old = tmp_path / "old" / "foo.h"
+    h_new = tmp_path / "new" / "foo.h"
+    h_old.parent.mkdir(parents=True)
+    h_new.parent.mkdir(parents=True)
+    h_old.write_text("int f(void);\n")
+    h_new.write_text("int f(void);\n")
+    symbols_only = compute_extraction_contract(public_header_paths=[h_old])
+    full_l2 = compute_extraction_contract(
+        declared_headers=[h_new], l2_frontend_ran=True
+    )
+    old = _snap("1.0", symbols_only)
+    new = _snap("2.0", full_l2)
+    result = compare(old, new)
+    assert result.contract_coverage == "partial"
+
+
 def test_compare_contract_coverage_none_when_both_sides_comparable(tmp_path):
     h_old = tmp_path / "v1" / "foo.h"
     h_new = tmp_path / "v2" / "foo.h"

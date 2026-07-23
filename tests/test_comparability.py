@@ -537,6 +537,25 @@ def test_symbols_only_with_no_provenance_returns_no_contract():
     assert compute_extraction_contract(l2_frontend_ran=False) is None
 
 
+def test_l2_shaped_kwargs_without_l2_frontend_ran_still_returns_no_contract(tmp_path):
+    # Codex review (PR #624): passing L2-shaped keyword arguments
+    # (declared_includes, macro_ops, compiler_family) without also setting
+    # l2_frontend_ran=True (no L2 invocation actually ran, and no scope
+    # inputs either) must not produce a non-None "empty shell"
+    # ExtractionContract whose profile_fingerprint AND scope_fingerprint are
+    # both None -- that would misreport as real contract coverage to
+    # checker.compare's contract_coverage logic.
+    dep = _write(tmp_path / "dep" / "d.h", "int g(void);\n")
+    contract = compute_extraction_contract(
+        l2_frontend_ran=False,
+        compiler_family="gcc",
+        declared_includes=[IncludeDir(tmp_path / "dep")],
+        depfile_resolved_paths=[dep],
+        macro_ops=[("D", "FOO=1")],
+    )
+    assert contract is None
+
+
 def test_symbols_only_public_header_paths_are_root_relative_not_absolute(tmp_path):
     # Codex review (PR #624): a symbols-only dump's public_header_paths must
     # normalize the same root-relative way declared_headers does, or an
