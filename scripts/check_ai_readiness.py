@@ -1543,7 +1543,10 @@ _ADR_STATUS_CONTINUATION_STOP_RE = re.compile(
 #: otherwise matches the same pattern as a real link.
 _ADR_REPLACEMENT_LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 _ADR_REF_LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\[([^\]]*)\]")
-_ADR_REF_DEF_RE = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
+#: CommonMark allows a link reference definition to be indented 0-3 spaces
+#: -- anchoring straight to column 0 would miss a validly-indented
+#: definition (PR #619 review).
+_ADR_REF_DEF_RE = re.compile(r"^[ \t]{0,3}\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 
 #: A fenced-code opening delimiter (``` or ~~~, 3+ repeats, optional leading
 #: indent up to 3 spaces per CommonMark, optional trailing info string).

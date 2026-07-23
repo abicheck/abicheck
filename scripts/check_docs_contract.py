@@ -400,7 +400,11 @@ def _permitted_summary_pages(entry: dict[str, object]) -> set[str]:
 _MD_LINK_TARGET_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 _BACKTICK_RUN_RE = re.compile(r"`+")
 _MD_REF_LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\[([^\]]*)\]")
-_MD_REF_DEF_RE = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
+#: CommonMark allows a link reference definition to be indented 0-3 spaces
+#: (same as other block constructs) -- anchoring straight to column 0 would
+#: miss a validly-indented definition, e.g. "  [owner]: owner.md" (PR #619
+#: review).
+_MD_REF_DEF_RE = re.compile(r"^[ \t]{0,3}\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 

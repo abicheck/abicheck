@@ -343,6 +343,37 @@ def test_adr_index_nav_sync_accepts_reference_style_index_link(
     assert f.errors == []
 
 
+def test_adr_index_nav_sync_accepts_indented_reference_definition(
+    car, tmp_path, monkeypatch
+):
+    """CommonMark allows a link reference definition to be indented 0-3
+    spaces, same as other block constructs -- a definition anchored
+    strictly to column 0 would miss a validly-indented one (regression test
+    for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001][adr-001] | Example | Accepted |\n\n  [adr-001]: 001-example.md\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
 def test_adr_index_nav_sync_ignores_link_syntax_inside_fenced_code(
     car, tmp_path, monkeypatch
 ):

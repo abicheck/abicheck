@@ -800,6 +800,23 @@ def test_page_links_to_reference_style_label_is_case_insensitive(
     assert dc._page_links_to(page, "owner.md") is True
 
 
+def test_page_links_to_recognises_indented_reference_definition(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CommonMark allows a link reference definition to be indented 0-3
+    spaces, same as other block constructs -- a definition anchored
+    strictly to column 0 would miss a validly-indented one, e.g. inside a
+    list item (regression test for the gap flagged in PR #619 review)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(
+        "See [the owner][owner-ref] for details.\n\n  [owner-ref]: owner.md\n",
+        encoding="utf-8",
+    )
+    assert dc._page_links_to(page, "owner.md") is True
+
+
 def test_page_links_to_reference_style_ignores_unresolved_label(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
