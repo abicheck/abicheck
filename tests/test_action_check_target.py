@@ -177,6 +177,37 @@ class TestValidateInputs:
         )
         assert result.returncode == 64
 
+    def test_missing_baseline_channel_fails_with_required_message(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression (CodeRabbit review): baseline-channel was previously a
+        bare `:?` parameter expansion, which fires on empty but exits 1 with
+        a raw bash message and no `::error::` annotation -- diverging from
+        every other required-input check here. Must now use the same
+        exit-64 + `::error::` `_fail` convention as name/profile."""
+        env = dict(_BASE_IDENTITY)
+        del env["INPUT_BASELINE_CHANNEL"]
+        result = _run(VALIDATE_SH, env, tmp_path)
+        assert result.returncode == 64
+        assert "::error::baseline-channel input is required." in result.stdout
+
+    def test_missing_requested_depth_fails_with_required_message_not_enum_message(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression (CodeRabbit review): same `:?` -> `_fail` conversion
+        as baseline-channel above. Also pins the check ordering: the
+        required-input check must run BEFORE the requested-depth enum/case
+        validation, or an empty value would instead be caught there with
+        the less precise "not recognized" message (an empty string never
+        matches any case pattern, so it falls through to that branch's
+        catch-all arm)."""
+        env = dict(_BASE_IDENTITY)
+        del env["INPUT_REQUESTED_DEPTH"]
+        result = _run(VALIDATE_SH, env, tmp_path)
+        assert result.returncode == 64
+        assert "::error::requested-depth input is required." in result.stdout
+        assert "not recognized" not in result.stdout
+
     def test_unknown_kind_fails(self, tmp_path: Path) -> None:
         result = _run(
             VALIDATE_SH,
@@ -877,3 +908,63 @@ class TestStaleAnalysisOutputIsCleanedBeforeEachRun:
         assert analysis_step["with"]["output-file"] == "check-target-analysis.json", (
             "the cleanup step must target the same filename the analysis step writes"
         )
+
+
+@pytest.mark.skipif(
+    not (ACTION_DIR / "action.yml").is_file(),
+    reason="actions/check-target/action.yml not found",
+)
+class TestReplaySourcesForwardedWithDefault:
+    """Regression (Codex review): actions/collect-facts's replay phase
+    defaults an unset `sources` input to '.' internally
+    (actions/collect-facts/run.sh: ``SOURCES="${INPUT_SOURCES:-.}"``) but
+    never surfaces that resolved value as an output -- it only prints a
+    notice telling the caller to pass `sources: $SOURCES` straight to
+    dump/scan/compare. check-target's analysis step was instead forwarding
+    the raw, still-empty `inputs.sources`, and action/run.sh's
+    `add_single_flag` skips `--sources` entirely for an empty value -- so a
+    check with `evidence-producer: replay` and `sources:` left unset would
+    pass the collect-facts step but then run compare/scan with NO source
+    evidence at all, silently missing source-only findings at
+    requested-depth: build/source. action.yml must forward the same
+    resolved default collect-facts used.
+    """
+
+    def test_sources_expression_matches_collect_facts_own_default(self) -> None:
+        import yaml
+
+        action_yml = ACTION_DIR / "action.yml"
+        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        steps = data["runs"]["steps"]
+        analysis_step = next(s for s in steps if s.get("name") == "Run analysis")
+        expr = analysis_step["with"]["sources"]
+        assert expr == (
+            "${{ inputs.sources != '' && inputs.sources || "
+            "(inputs.evidence-producer == 'replay' && '.' || '') }}"
+        ), (
+            "the analysis step's `sources` must fall back to '.' for "
+            "evidence-producer: replay when inputs.sources is empty, "
+            "mirroring collect-facts' own default -- a bare "
+            "`${{ inputs.sources }}` forward would leave --sources unset "
+            "entirely for that case"
+        )
+
+    @staticmethod
+    def _resolve(sources: str, evidence_producer: str) -> str:
+        """Pure-Python mirror of the GitHub Actions ternary asserted above,
+        to pin down its actual selection behavior independent of the raw
+        expression string."""
+        if sources != "":
+            return sources
+        return "." if evidence_producer == "replay" else ""
+
+    def test_empty_sources_defaults_to_dot_only_for_replay(self) -> None:
+        assert self._resolve("", "replay") == "."
+        assert self._resolve("", "wrapper") == ""
+        assert self._resolve("", "clang-plugin") == ""
+        assert self._resolve("", "") == ""
+
+    def test_explicit_sources_always_wins(self) -> None:
+        assert self._resolve("./mysrc", "replay") == "./mysrc"
+        assert self._resolve("./mysrc", "wrapper") == "./mysrc"
+        assert self._resolve("./mysrc", "") == "./mysrc"

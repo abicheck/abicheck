@@ -3,10 +3,12 @@
 `actions/check-target` composes [`resolve-baseline`](resolve-baseline.md) +
 `collect-facts` + the root `abicheck/abicheck` Action into **one resolved
 check** — [ADR-047](../development/adr/047-github-actions-integration-model.md)
-§4's single high-level primitive — and always emits the
-[report envelope](#report-envelope-adr-047-7) (§7), regardless of whether
-the baseline resolved, was a bootstrap "no baseline yet" pass, or failed
-outright.
+§4's single high-level primitive — and, once its own input validation
+passes, always emits the [report envelope](#report-envelope-adr-047-7)
+(§7), regardless of whether the baseline resolved, was a bootstrap "no
+baseline yet" pass, or failed outright. An invalid invocation (e.g. a
+missing required input, or an unsupported input combination) is rejected
+up front, before any of that, and produces no report or outputs at all.
 
 > **Status.** This page documents the `actions/check-target` composite
 > Action shipped in G30 P1.3. The reusable workflows that generate a
@@ -30,9 +32,11 @@ outright.
 3. **Runs the analysis** — the root Action's `compare` mode against the
    resolved baseline, or (`baseline-channel: none`) `scan` mode with no
    `--against` (a one-build audit).
-4. **Always writes the report envelope**, even when steps 1 or 3 failed —
-   the internal resolve/analysis steps run with `continue-on-error: true`
-   specifically so this step always runs (ADR-047 §7).
+4. **Writes the report envelope**, once input validation (the very first
+   step) has passed — even when steps 1 or 3 above then fail, since the
+   internal resolve/analysis steps run with `continue-on-error: true`
+   specifically so this step always runs afterward (ADR-047 §7). A
+   validation failure short-circuits before any of steps 1-4 run at all.
 5. **Owns its own composite exit code**, per `gate-mode` (below) — the very
    last thing this Action does, never an implicit pass-through of an
    internal step's raw exit code.
@@ -141,9 +145,14 @@ Every run writes a single JSON report at
 hard-code the filename, since running `check-target` more than once in the
 same job, e.g. the same target against two baseline channels, would
 otherwise overwrite an earlier run's report), starting from whatever the
-underlying `compare`/`scan` run already produced
-(`abicheck/reporter.py`'s existing shape — `report_schema_version: "2.13"`)
-and layering on:
+underlying `compare`/`scan` run already produced and layering on the
+fields below. For a normal single-library `compare` (the common case),
+that starting shape is `abicheck/reporter.py`'s existing compare-report
+shape (`report_schema_version: "2.13"`). A `baseline-channel: none` audit
+instead starts from a `scan` report (its own `scan_schema_version` shape),
+and a `kind: bundle` check starts from the CLI's per-library release
+fan-out summary (`libraries`/`old_dir`, no schema-version marker of its
+own) — neither of those two carries `report_schema_version`.
 
 - `check_id`/`target_id` — always the same, fully-qualified,
   depth-suffixed value, so `abicheck aggregate`'s exact-match lookup lines

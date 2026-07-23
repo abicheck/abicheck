@@ -14,13 +14,50 @@ TARGET_KIND="${INPUT_TARGET_KIND:-library}"
 NAME="${INPUT_NAME:-}"
 PROFILE="${INPUT_PROFILE:-}"
 BUNDLE_MEMBERS="${INPUT_BUNDLE_MEMBERS:-[]}"
-BASELINE_CHANNEL="${INPUT_BASELINE_CHANNEL:?baseline-channel input is required}"
+BASELINE_CHANNEL="${INPUT_BASELINE_CHANNEL:-}"
 BASELINE_PATH="${INPUT_BASELINE_PATH:-}"
 GATE_MODE="${INPUT_GATE_MODE:-local}"
-REQUESTED_DEPTH="${INPUT_REQUESTED_DEPTH:?requested-depth input is required}"
+REQUESTED_DEPTH="${INPUT_REQUESTED_DEPTH:-}"
 EVIDENCE_PRODUCER="${INPUT_EVIDENCE_PRODUCER:-}"
 CONSUMER_BINARY="${INPUT_CONSUMER_BINARY:-}"
 CONTRACT_FILE="${INPUT_CONTRACT_FILE:-}"
+
+# ── Required-input checks run before the enum/case validations below, so an
+# empty required input (name, profile, baseline-channel, requested-depth)
+# gets the clearer "input is required" message instead of being caught by
+# a case statement's generic "not recognized" branch first (an empty string
+# never matches any case pattern, so it would otherwise fall through to
+# that branch's *) arm).
+if [[ -z "$NAME" ]]; then
+  _fail "name input is required."
+fi
+if [[ -z "$PROFILE" ]]; then
+  # action.yml declares profile: required: true, but GitHub Actions does
+  # NOT actually enforce `required: true` for composite-action inputs --
+  # it's documentation only; an omitted input simply arrives as an empty
+  # string (github.com/orgs/community/discussions/26777). Without this
+  # check, a workflow that forgot `profile:` would sail past this step and
+  # only fail deep inside run.sh's `PROFILE="${INPUT_PROFILE:?}"` bash
+  # parameter expansion -- which aborts the finalize step immediately,
+  # before report_envelope.py ever runs, so the check produces no
+  # check-target-report*.json/outputs at all despite ADR-047 §7's "the
+  # report-envelope step always executes" contract (Codex review).
+  _fail "profile input is required."
+fi
+if [[ -z "$BASELINE_CHANNEL" ]]; then
+  # baseline-channel is declared required: true, same GitHub-Actions-doesn't-
+  # enforce-required-inputs caveat as profile above -- was previously a bare
+  # `:?` parameter expansion, which does fire on empty but exits 1 with a raw
+  # bash stderr message and no `::error::` annotation, diverging from every
+  # other required-input check here (CodeRabbit review).
+  _fail "baseline-channel input is required."
+fi
+if [[ -z "$REQUESTED_DEPTH" ]]; then
+  # Same rationale as baseline-channel above. Must run before the
+  # REQUESTED_DEPTH case statement below, or an empty value would instead
+  # get caught there with the less precise "not recognized" message.
+  _fail "requested-depth input is required."
+fi
 
 case "$KIND" in
   target | bundle) ;;
@@ -42,22 +79,6 @@ case "$EVIDENCE_PRODUCER" in
   "" | wrapper | clang-plugin | replay) ;;
   *) _fail "evidence-producer '$EVIDENCE_PRODUCER' is not recognized. Use '' (none), 'wrapper', 'clang-plugin', or 'replay' -- a misspelled value silently skips fact collection instead of failing loud." ;;
 esac
-if [[ -z "$NAME" ]]; then
-  _fail "name input is required."
-fi
-if [[ -z "$PROFILE" ]]; then
-  # action.yml declares profile: required: true, but GitHub Actions does
-  # NOT actually enforce `required: true` for composite-action inputs --
-  # it's documentation only; an omitted input simply arrives as an empty
-  # string (github.com/orgs/community/discussions/26777). Without this
-  # check, a workflow that forgot `profile:` would sail past this step and
-  # only fail deep inside run.sh's `PROFILE="${INPUT_PROFILE:?}"` bash
-  # parameter expansion -- which aborts the finalize step immediately,
-  # before report_envelope.py ever runs, so the check produces no
-  # check-target-report*.json/outputs at all despite ADR-047 §7's "the
-  # report-envelope step always executes" contract (Codex review).
-  _fail "profile input is required."
-fi
 if [[ "$KIND" == "bundle" ]]; then
   if [[ "$TARGET_KIND" != "library" ]]; then
     _fail "target-kind must be 'library' when kind is 'bundle' -- app-consumer/plugin-contract are single-target concepts."

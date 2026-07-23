@@ -2,8 +2,8 @@
 
 - **`actions/check-target` composite Action** — composes `actions/resolve-baseline`,
   `actions/collect-facts`, and the root Action into one resolved ABI/API check
-  (ADR-047 §4, G30 P1.3), always emitting the report-identity envelope (§7):
-  unconditional depth-suffixed `check_id`/`target_id`, the new
+  (ADR-047 §4, G30 P1.3), emitting the report-identity envelope (§7) for
+  every validated invocation: unconditional depth-suffixed `check_id`/`target_id`, the new
   `compatibility_verdict`/`policy_gate_decision`/`check_evidence_coverage`/
   `operational_errors`/`publication` fields alongside the legacy `verdict`/
   `severity` fields `abicheck/aggregate.py` already parses. Supports
@@ -31,7 +31,10 @@
   produced. The internal per-invocation analysis output is now cleared
   before every analysis attempt, so a job that runs `check-target` more
   than once can't have a later invocation's crashed analysis silently pick
-  up an earlier invocation's stale report file. See
+  up an earlier invocation's stale report file. An `evidence-producer:
+  replay` check that leaves `sources:` unset now forwards the same `.`
+  default `collect-facts` already resolves internally, instead of silently
+  running the comparison with no source evidence at all. See
   `docs/reference/check-target.md`.
 
 <!--

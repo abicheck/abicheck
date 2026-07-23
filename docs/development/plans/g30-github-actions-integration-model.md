@@ -834,10 +834,18 @@ one follow-up commit:
   when `verdict` is one of the five real values, and `verdict`'s enum grew
   `ERROR`/`NO_BASELINE` (additive, consistent with the existing
   `report_schema_version` MINOR-bump convention for new enum members).
-  Verified against all four shapes by hand: a full compare report validates
-  and still rejects a truncated one, and both sentinel envelopes (plus the
-  minimal pre-existing release-fan-out `{library, verdict: "ERROR", error}`
-  shape) now validate. `docs/schemas/v1/compare_report.schema.json`
+  Verified by hand: a full compare report validates and still rejects a
+  truncated one, and both sentinel envelopes validate once `augment_report`
+  has stamped `report_schema_version` onto them. The pre-existing per-
+  library release-fan-out's own minimal `{library, verdict: "ERROR",
+  error}` entry (`cli_compare_release.py`, not new to this task) does
+  **not** validate on its own -- it never carries `report_schema_version`
+  at all, and this schema's `required` still demands that field
+  unconditionally regardless of `verdict`. That's fine: it's a per-library
+  entry inside the release fan-out's own `libraries` list, never a
+  `compare_report.schema.json` document in its own right, and (per the
+  next round below) the fan-out's top-level summary is deliberately never
+  stamped with this schema's marker either. `docs/schemas/v1/compare_report.schema.json`
   re-synced via `scripts/publish_schemas.py`.
 
 The same review round separately caught that the schema fix above didn't
@@ -1127,6 +1135,106 @@ precedent for the same kind of `action.yml`-only fix. New
 in `tests/test_action_check_target.py` asserts the cleanup step exists,
 is unconditional (no `if:`), sits immediately before "Run analysis", and
 targets the same filename the analysis step's `output-file` writes.
+
+A tenth round of Codex review then caught a related but distinct evidence-
+forwarding gap: `actions/collect-facts`'s replay phase defaults an unset
+`sources` input to `.` internally (confirmed by reading its `run.sh`:
+`SOURCES="${INPUT_SOURCES:-.}"`), but that resolved value is never
+surfaced as an output — the phase only prints a notice telling the caller
+to "pass `sources: $SOURCES` directly to dump/scan/compare". check-target's
+"Run analysis" step was instead forwarding the raw, still-empty
+`inputs.sources` straight through, and `action/run.sh`'s `add_single_flag`
+helper (confirmed by reading it) omits `--sources` entirely for an empty
+value. The net effect: an `evidence-producer: replay` check that leaves
+`sources:` unset — a supported, documented configuration, since replay's
+whole point is "a bare `sources:` pointer, no build step needed" — would
+pass the collect-facts step cleanly and then silently run `compare`/`scan`
+with zero source evidence, missing any source-only finding at
+`requested-depth: build`/`source` without any error or warning. Fixed by
+changing the analysis step's `sources:` forward from a bare
+`${{ inputs.sources }}` to
+`${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer
+== 'replay' && '.' || '') }}`, mirroring collect-facts' own default
+exactly for the one producer where an empty `sources` is meaningful and
+expected; wrapper/clang-plugin/no-producer checks are unaffected since
+they route source evidence through `build-info`, not `sources`, so the
+fallback only ever fires for `evidence-producer: replay`. New
+`TestReplaySourcesForwardedWithDefault` in
+`tests/test_action_check_target.py`: one test pins the exact expression
+string against the parsed YAML (so an accidental edit back to a bare
+forward fails loud), and two more independently exercise a pure-Python
+mirror of the ternary's actual selection semantics (empty `sources`
+resolves to `.` only for `replay`; any explicit `sources` value always
+wins) — the same structural-plus-semantic pairing used for the report-path
+scoping fix's `test_action_yml_format_input_has_no_static_default`-style
+precedent, since `action.yml`'s own step orchestration still needs a real
+GitHub Actions runner to exercise end-to-end.
+
+CodeRabbit's first full review pass on the PR then raised three findings.
+First, `validate-inputs.sh`'s `baseline-channel`/`requested-depth` inputs
+(both `required: true`) were still using the bare `:?` parameter-expansion
+pattern the `profile` fix above replaced — `:?` does fire on an empty
+value, but exits 1 with a raw bash stderr message and no `::error::`
+annotation, diverging from the exit-64 `_fail` convention every other
+required-input check here uses. Fixed by converting both to the same
+`-z`/`_fail` pattern as `name`/`profile`. Doing so exposed a real ordering
+bug the mechanical conversion would otherwise have introduced silently:
+`requested-depth` already has a `case` statement validating it against
+`binary`/`headers`/`build`/`source`, and that case statement ran *before*
+where the new required-check would have been added — an empty value never
+matches any case pattern, so it would have been caught there first with
+the vaguer "requested-depth '' is not recognized" message, making the new
+"requested-depth input is required" check dead code. Fixed by moving all
+four required-input checks (`name`, `profile`, `baseline-channel`,
+`requested-depth`) to run as a block before any of the enum/case
+validations, restoring the same "required check fires before the enum
+check" ordering the original `:?` expansions had for free (parameter
+expansion runs at variable-assignment time, before any of the script's
+`case` statements). New
+`test_missing_baseline_channel_fails_with_required_message`/
+`test_missing_requested_depth_fails_with_required_message_not_enum_message`
+in `tests/test_action_check_target.py` — the second one asserts
+`"not recognized" not in result.stdout` specifically to pin the ordering,
+not just the exit code.
+
+Second, `docs/reference/check-target.md`'s "always emits the report
+envelope... regardless of whether the baseline resolved... or failed
+outright" claim (twice, in the intro and in the "What it does" numbered
+list) didn't account for the `profile`-required fix two rounds above:
+an invalid invocation (missing `name`/`profile`/`baseline-channel`/
+`requested-depth`, or any of `validate-inputs.sh`'s other rejected
+combinations) is now rejected by the very first step, before
+`report_envelope.py` ever runs, producing no report or outputs at all.
+Reworded both spots to qualify the guarantee as applying once input
+validation has passed, and `changelog.d/20260722_232114_noreply_g30_implementation_t5o3or.md`'s
+matching "always emitting" phrase similarly.
+
+Third, and most substantively: `docs/reference/check-target.md`'s Report
+envelope section described the starting shape check-target's own analysis
+step produces as unconditionally `abicheck/reporter.py`'s compare-report
+shape (`report_schema_version: "2.13"`) — but by the time of this round,
+the scan/bundle shape-awareness fix (several rounds above) had already
+made clear that's only true for a normal single-library `compare`; a
+`baseline-channel: none` audit starts from a `scan_schema_version` shape
+and a `kind: bundle` check starts from the CLI's per-library release
+fan-out summary, neither of which carries `report_schema_version` at all.
+Reworded to name all three starting shapes explicitly instead of
+implying one shape covers every case. The same finding also flagged a
+factually incorrect claim in this plan document itself, in the schema-fix
+round's own "verified against all four shapes by hand" sentence: it
+claimed the pre-existing per-library release-fan-out's minimal
+`{library, verdict: "ERROR", error}` entry "now validates" against
+`compare_report.schema.json`. Re-verified by hand with `jsonschema.validate`
+against the actual schema: it does **not** — that minimal dict never
+carries `report_schema_version`, and the schema's top-level `required`
+demands that field unconditionally, independent of the `verdict`-gated
+`allOf`/`if`/`then` branch. The claim was never actually exercised by any
+test; corrected the sentence to say so, and noted that this is harmless in
+practice since that dict is a per-library entry inside the fan-out's own
+`libraries` list, never validated as a `compare_report.schema.json`
+document in its own right — the fan-out's actual top-level summary is the
+`libraries`/`old_dir` shape the later round already documented as never
+receiving this schema's marker.
 
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
