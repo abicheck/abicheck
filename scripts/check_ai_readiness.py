@@ -1513,16 +1513,20 @@ _ADR_STATUS_HEADING_RE = re.compile(r"^## Status\s*\n+(.+)$", re.MULTILINE)
 _ADR_REPLACEMENT_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
 
-def _links_to_another_adr(status: str, adr_dir: Path) -> bool:
+def _links_to_another_adr(status: str, adr_dir: Path, own_path: Path) -> bool:
     """True if `status` contains a Markdown link that resolves to another
-    real ADR file inside `adr_dir` -- checking only the link target's
-    basename against _ADR_FILE_RE isn't enough, since a link like
-    `[plan](../notes/002-plan.md)` has a basename that matches the ADR
-    filename pattern while actually pointing outside the ADR directory
-    entirely. And it must be more than "any link at all" -- a "Superseded"
-    status could otherwise link to unrelated context (e.g. a plan doc
-    explaining why) and still satisfy a bare "has a link" check."""
+    real ADR file inside `adr_dir` -- *other than* `own_path` itself.
+    Checking only the link target's basename against _ADR_FILE_RE isn't
+    enough, since a link like `[plan](../notes/002-plan.md)` has a basename
+    that matches the ADR filename pattern while actually pointing outside
+    the ADR directory entirely. It must also be more than "any link at
+    all" -- a "Superseded" status could otherwise link to unrelated context
+    (e.g. a plan doc explaining why) and still satisfy a bare "has a link"
+    check, or even link to itself ("Superseded by [this ADR](001-x.md)"
+    inside 001-x.md) and still satisfy a bare "resolves to a real ADR file"
+    check."""
     resolved_adr_dir = adr_dir.resolve()
+    resolved_own_path = own_path.resolve()
     for href in _ADR_REPLACEMENT_LINK_RE.findall(status):
         href_path = href.split("#", 1)[0].strip()
         if (
@@ -1535,7 +1539,11 @@ def _links_to_another_adr(status: str, adr_dir: Path) -> bool:
         if not _ADR_FILE_RE.match(basename):
             continue
         resolved = (adr_dir / href_path).resolve()
-        if resolved.parent == resolved_adr_dir and resolved.is_file():
+        if (
+            resolved.parent == resolved_adr_dir
+            and resolved.is_file()
+            and resolved != resolved_own_path
+        ):
             return True
     return False
 
@@ -1606,7 +1614,7 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
             continue
         leading_word = re.split(r"[\s—.,;-]", status.strip(), maxsplit=1)[0]
         if leading_word.lower() == "superseded" and not _links_to_another_adr(
-            status, adr_dir
+            status, adr_dir, md
         ):
             f.err(
                 "adr-index-nav-sync",

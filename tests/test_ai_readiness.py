@@ -314,6 +314,36 @@ def test_adr_index_nav_sync_rejects_adr_shaped_link_outside_adr_dir(
     assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
 
 
+def test_adr_index_nav_sync_rejects_self_link_as_replacement(
+    car, tmp_path, monkeypatch
+):
+    """A "Superseded" status linking to its own file (e.g. copy-paste error,
+    or a link intended for a different ADR that was never updated) must not
+    satisfy the replacement-link requirement -- the target must be an ADR
+    *other than* the one making the claim (regression test for the gap
+    flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded by [this ADR](001-example.md).\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
 def test_no_hard_file_size_violations(car):
     """Files over ERROR_LINES must be in LARGE_FILE_ALLOWLIST."""
     f = car.Findings()

@@ -763,9 +763,15 @@ _DEFINITION_CONNECTORS = (
 )
 
 
-def _term_definition_re(term: str) -> re.Pattern[str]:
+def _term_definition_re(names: list[str]) -> re.Pattern[str]:
+    """Build a regex that fires on a bolded-definition pattern for `names[0]`
+    (the canonical term) *or any of its registered aliases* -- a page
+    defining "**Application Binary Interface** is ..." owns the same
+    registry entry as "**ABI**" and must be caught the same way, or the
+    one-definition-owner rule silently misses every alias spelling."""
     connectors = "|".join(_DEFINITION_CONNECTORS)
-    return re.compile(rf"\*\*{re.escape(term)}\*\*\s+(?:{connectors})")
+    alternation = "|".join(re.escape(n) for n in names)
+    return re.compile(rf"\*\*(?:{alternation})\*\*\s+(?:{connectors})")
 
 
 def _check_duplicate_term_definitions(
@@ -785,7 +791,13 @@ def _check_duplicate_term_definitions(
         if not canonical_page or not isinstance(canonical_page, str):
             continue
         canonical_key = _docs_relative_key(canonical_page)
-        pattern = _term_definition_re(term)
+        aliases = entry.get("aliases", [])
+        names = (
+            [term] + [a for a in aliases if isinstance(a, str)]
+            if isinstance(aliases, list)
+            else [term]
+        )
+        pattern = _term_definition_re(names)
         for path in _iter_duplicate_scan_files():
             if _docs_relative_key(str(path.relative_to(DOCS))) == canonical_key:
                 continue

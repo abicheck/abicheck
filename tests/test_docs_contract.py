@@ -1199,6 +1199,33 @@ def test_check_duplicate_term_definitions_flags_redefinition_elsewhere(
     assert "other.md" in f.warnings[0][1]
 
 
+def test_check_duplicate_term_definitions_flags_alias_redefinition(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A registered alias (e.g. "Application Binary Interface" for "ABI")
+    must be scanned the same way as the canonical term -- a page redefining
+    only the alias spelling previously slipped past the check entirely
+    (regression test for the gap flagged in PR #619 review)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("# Owner\n\n**ABI** is the thing.\n")
+    (tmp_path / "other.md").write_text(
+        "# Other\n\n**Application Binary Interface** is a binary contract "
+        "explained again here.\n"
+    )
+    f = dc.Findings()
+    terms = {
+        "ABI": {
+            "canonical_page": "owner.md",
+            "short_definition": "x",
+            "aliases": ["Application Binary Interface"],
+        }
+    }
+    dc._check_duplicate_term_definitions(f, terms)
+    assert f.errors == []
+    assert len(f.warnings) == 1
+    assert "other.md" in f.warnings[0][1]
+
+
 def test_check_duplicate_term_definitions_ignores_canonical_page_itself(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
