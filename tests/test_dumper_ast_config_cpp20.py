@@ -1240,6 +1240,48 @@ def test_cpp20_detector_still_shadows_active_if_zero_consteval_type(tmp_path):
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_detects_construct_in_active_else_arm_of_if_zero(tmp_path):
+    """Regression (Codex review): ``#if 0``'s guard is unconditionally
+    false, so its ``#else`` arm is unconditionally reachable — a genuine
+    C++20 construct written only there must still be detected. Masking the
+    whole ``#if 0``...``#endif`` span (including the active ``#else`` arm)
+    previously hid it."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint dummy;\n#else\ntemplate<class T> concept C = true;\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" and r.line == 4 for r in reqs)
+
+
+def test_cpp20_detector_detects_construct_in_else_after_elif(tmp_path):
+    """Companion: the same reachable-``#else`` reasoning holds when an
+    ``#elif`` (whose condition this heuristic can't evaluate) sits between
+    the ``#if 0`` and the ``#else`` — the construct in ``#else`` must still
+    be found."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n#elif 0\nint b;\n#else\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
+def test_cpp20_detector_still_ignores_truly_inactive_if_zero_without_else(tmp_path):
+    """Companion: an ``#if 0`` block with *no* ``#else`` stays fully masked
+    — nothing in it is reachable, so it must not itself trigger detection."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\ntemplate<class T> concept C = true;\n#endif\nint x;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_ignores_nested_if_zero_constinit_type_shadow(tmp_path):
     """Companion: a nested ``#ifdef`` inside a disabled ``#if 0`` region
     must not confuse the matching-``#endif`` depth tracking and re-activate

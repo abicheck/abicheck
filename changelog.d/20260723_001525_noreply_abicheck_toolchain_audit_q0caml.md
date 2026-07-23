@@ -51,7 +51,9 @@ it should read in CHANGELOG.md. Delete the other sections.
   scan itself, wrongly marking an otherwise pre-C++20 header as needing
   C++20. Inactive `#if 0`/`#if false` regions (including nested directives
   and CRLF line endings) are now stripped once, up front, before both
-  scans run.
+  scans run — while a reachable `#else`/`#elif` arm of the same guard is
+  left untouched, so a genuine construct written only there is still
+  detected.
 
 -->
 <!--

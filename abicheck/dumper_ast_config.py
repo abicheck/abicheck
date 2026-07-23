@@ -871,6 +871,7 @@ def _is_preprocessor_directive(line: bytes) -> bool:
 
 _PP_IF_OPEN_PATTERN = re.compile(rb"^[ \t]*#[ \t]*(?:if|ifdef|ifndef)\b")
 _PP_IF_ZERO_PATTERN = re.compile(rb"^[ \t]*#[ \t]*if[ \t]+(?:0+|false)[ \t]*$")
+_PP_ELSE_OR_ELIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*(?:else|elif)\b")
 _PP_ENDIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*endif\b")
 
 
@@ -883,6 +884,17 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
     ``*_type_shadowed`` scan otherwise sees the inactive type definition and
     wrongly treats a real C++20 declaration as ambiguous. Line count is
     preserved so this can be composed with the rest of the shadow scan.
+
+    Only the ``#if 0``/``#if false`` arm itself is masked: an ``#else`` at
+    the same nesting level is unconditionally reachable (the guard is
+    unconditionally false), and an ``#elif`` there has a condition this
+    heuristic can't evaluate — both stop the masking from that line on
+    (Codex review) rather than blanking all the way to the matching
+    ``#endif``, which previously hid a genuine construct written in the
+    active arm of a permanently-false guard. Treating an unevaluated
+    ``#elif`` as possibly-active is the conservative direction here: it can
+    only cause C++20 mode to be requested when not strictly needed, never
+    the reverse (a real C++20 header parsed without it and failing).
     """
     lines = content.split(b"\n")
     out: list[bytes] = []
@@ -898,8 +910,16 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
         if depth:
             if _PP_IF_OPEN_PATTERN.match(line):
                 depth += 1
-            elif _PP_ENDIF_PATTERN.match(line):
+                out.append(b"")
+                continue
+            if _PP_ENDIF_PATTERN.match(line):
                 depth -= 1
+                out.append(b"")
+                continue
+            if depth == 1 and _PP_ELSE_OR_ELIF_PATTERN.match(line):
+                depth = 0
+                out.append(line)
+                continue
             out.append(b"")
             continue
         if _PP_IF_ZERO_PATTERN.match(line):
