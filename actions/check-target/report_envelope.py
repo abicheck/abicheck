@@ -190,7 +190,14 @@ def main(argv: list[str] | None = None) -> int:
             base_ref=base_ref,
             action_version=action_version,
         )
-        operational_error = report.get("verdict") == "ERROR"
+        # augment_report already classifies any non-compatibility verdict
+        # (the literal "ERROR", or a scan guard sentinel like
+        # "BUDGET_OVERFLOW"/"EVIDENCE_CONTRACT_ERROR") as operational by
+        # populating operational_errors -- reuse that instead of
+        # re-deriving it from verdict alone, which used to miss the scan
+        # guard sentinels entirely and let gate-mode: deferred/advisory
+        # silently swallow them (Codex review).
+        operational_error = bool(report.get("operational_errors"))
 
     real_exit_code = 0
     if args.mode == "augment":

@@ -682,3 +682,50 @@ class TestFinalizeEvidenceDegradation:
         report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert report["effective_depth"] == "source"
         assert report["check_evidence_coverage"]["state"] == "complete"
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/check-target/run.sh not found"
+)
+class TestFinalizeScanGuardSentinel:
+    """A baseline-channel: none scan run that hits a guard (--budget
+    exceeded, service_scan.py's BUDGET_OVERFLOW) is not a compatibility
+    finding -- the scan never completed its comparison. gate-mode: deferred/
+    advisory must not turn that into a quiet pass the way they do for a real
+    BREAKING/API_BREAK compatibility verdict (Codex review)."""
+
+    @pytest.mark.parametrize("gate_mode", ["local", "deferred", "advisory"])
+    def test_budget_overflow_always_fails_regardless_of_gate_mode(
+        self, gate_mode: str, tmp_path: Path
+    ) -> None:
+        report_path = tmp_path / "analysis.json"
+        report_path.write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.1",
+                    "verdict": "BUDGET_OVERFLOW",
+                    "exit_code": 5,
+                    "level": {"depth": "headers"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "none",
+                "INPUT_GATE_MODE": gate_mode,
+                "RESOLVE_RAN": "false",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1, result.stderr
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["operational_errors"] == [
+            {
+                "kind": "scan_guard_triggered",
+                "message": "the analysis reported a non-compatibility verdict: 'BUDGET_OVERFLOW'",
+            }
+        ]

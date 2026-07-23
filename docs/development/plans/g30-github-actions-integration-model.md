@@ -909,6 +909,63 @@ A sixth review round on the same commit caught two more real issues:
   `test_publication_defaults_to_skipped_not_a_false_claim` case in
   `tests/test_check_report.py`.
 
+A sixth round of Codex review caught two more issues, both fixed in one
+follow-up commit: the fixed report filename risked collisions across
+multiple `check-target` invocations in the same job, and `augment_report`'s
+operational-error classification missed scan guard sentinels.
+
+- **A fixed `check-target-report.json` filename collides across multiple
+  `check-target` invocations in the same job** — e.g. the same target
+  checked against two baseline channels, or several targets checked without
+  per-step output directories. Each call overwrote the previous one's
+  report file, so an earlier step's own `report-path` output would end up
+  pointing at a *later* check's envelope by the time anything read it.
+  Fixed: the filename is now scoped to
+  `check-target-report-<name>-<profile>-<baseline_channel>-<requested_depth>.json`,
+  sanitized via `tr -c 'A-Za-z0-9._-' '_'` (a slug helper) so an
+  unsanitized identifier component can't affect the filesystem path
+  regardless of when Python-side identifier validation runs. Deriving the
+  name from the check's own already-unique identity components was chosen
+  over adding a new caller-specified output path input, since no caller
+  input was actually needed. New
+  `test_two_invocations_in_the_same_job_do_not_overwrite_each_others_report`
+  in `tests/test_action_check_target.py` runs two finalize calls against
+  the same `tmp_path` and asserts both report files survive with distinct
+  content. `docs/reference/check-target.md` updated to document the
+  filename pattern and point at the `report-path` output instead of
+  hard-coding the old name. (Mechanically, every test hard-coding the old
+  filename was switched to read `outputs["report-path"]` instead, since the
+  filename is no longer predictable from the identity fixture alone.)
+- **`augment_report`'s operational-error classification only checked
+  `verdict == "ERROR"`, missing scan guard sentinels** — a
+  `baseline-channel: none` scan run that exceeds `--budget` (or hits
+  `service_scan.py`'s other guard, `EVIDENCE_CONTRACT_ERROR`) gets
+  `verdict: "BUDGET_OVERFLOW"`/`"EVIDENCE_CONTRACT_ERROR"` and a nonzero
+  `exit_code`, and the root Action's own `run.sh` already treats
+  `BUDGET_OVERFLOW` as an always-failing guard (never gated by a
+  `fail-on-*` flag, unlike `BREAKING`/`API_BREAK`) — confirmed by grepping
+  `action/run.sh`. But neither of these verdict strings is `"ERROR"` or one
+  of the five real `Verdict` values, so the old classifier fell through to
+  the "else: leave `operational_errors` empty" branch, and
+  `report_envelope.py`'s own `operational_error = report.get("verdict") ==
+  "ERROR"` check missed it too — meaning `gate-mode: deferred`/`advisory`
+  would return exit `0` for a scan that never actually completed its
+  comparison, silently turning an infrastructure guard trip into a green
+  check, in direct contradiction of `final_exit_code`'s own documented rule
+  that "deferred only defers the *compatibility* verdict's effect on exit
+  code, never operational errors." Fixed: `augment_report` now treats *any*
+  verdict outside the five real `Verdict` values (not just the literal
+  `"ERROR"`) as operational, populating `operational_errors` with a new
+  `"scan_guard_triggered"` kind for the non-`"ERROR"` case;
+  `report_envelope.py` now derives its own `operational_error` flag by
+  reusing `augment_report`'s already-computed `operational_errors` list
+  rather than re-deriving it from `verdict` a second, narrower way. New
+  `test_scan_guard_sentinel_verdicts_are_operational_errors` (parametrized
+  over both guard strings) in `tests/test_check_report.py`, and
+  `TestFinalizeScanGuardSentinel::test_budget_overflow_always_fails_regardless_of_gate_mode`
+  (parametrized over all three `gate-mode` values) in
+  `tests/test_action_check_target.py`.
+
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
 Implements ADR-047 §4/§5 (`run-plan.json` generation + matrix + trailing

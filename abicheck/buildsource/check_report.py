@@ -300,7 +300,8 @@ def augment_report(
     out["policy_gate_decision"] = "fail" if real_exit_code != 0 else "pass"
     if raw_verdict in LEGACY_VERDICT_VALUES:
         out["compatibility_verdict"] = raw_verdict
-    if raw_verdict == OPERATIONAL_ERROR_VERDICT:
+        out.setdefault("operational_errors", [])
+    elif raw_verdict == OPERATIONAL_ERROR_VERDICT:
         out["operational_errors"] = [
             {
                 "kind": "analysis_error",
@@ -308,7 +309,23 @@ def augment_report(
             }
         ]
     else:
-        out.setdefault("operational_errors", [])
+        # Any other verdict string a scan run can produce (e.g. "BUDGET_OVERFLOW",
+        # "EVIDENCE_CONTRACT_ERROR" -- service_scan.py's guard sentinels) is not
+        # a compatibility finding either -- it's the scan never completing its
+        # comparison at all, the same class of problem as an analysis CLI error,
+        # not something ADR-047 §7's "deferred only defers the *compatibility*
+        # verdict" rule was ever meant to cover. Treated as operational so
+        # gate-mode: deferred/advisory can't turn a guard failure into a quiet
+        # pass (Codex review).
+        out["operational_errors"] = [
+            {
+                "kind": "scan_guard_triggered",
+                "message": str(
+                    report.get("error")
+                    or f"the analysis reported a non-compatibility verdict: {raw_verdict!r}"
+                ),
+            }
+        ]
     # check-target's own nested analysis step always disables add-job-summary/
     # pr-comment/upload-sarif (action.yml's "Run analysis" step), and the
     # finalize step itself only writes the report JSON to disk + sets

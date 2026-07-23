@@ -440,6 +440,39 @@ class TestAugmentReport:
             {"kind": "analysis_error", "message": "the analysis step failed"}
         ]
 
+    @pytest.mark.parametrize(
+        "guard_verdict", ["BUDGET_OVERFLOW", "EVIDENCE_CONTRACT_ERROR"]
+    )
+    def test_scan_guard_sentinel_verdicts_are_operational_errors(self, guard_verdict):
+        """A scan guard sentinel (service_scan.py's BUDGET_OVERFLOW/
+        EVIDENCE_CONTRACT_ERROR) is not a compatibility finding -- the scan
+        never completed its comparison at all. Must be classified
+        operational (populating operational_errors) so gate-mode: deferred/
+        advisory can't turn a guard failure into a quiet pass (Codex
+        review) -- it was previously only checking verdict == "ERROR"."""
+        out = augment_report(
+            {
+                "scan_schema_version": "1.1",
+                "verdict": guard_verdict,
+                "exit_code": 5 if guard_verdict == "BUDGET_OVERFLOW" else 1,
+                "level": {"depth": "headers"},
+            },
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert out["verdict"] == guard_verdict
+        assert "compatibility_verdict" not in out
+        assert out["operational_errors"] == [
+            {
+                "kind": "scan_guard_triggered",
+                "message": f"the analysis reported a non-compatibility verdict: {guard_verdict!r}",
+            }
+        ]
+        assert out["policy_gate_decision"] == "fail"
+
     def test_existing_operational_errors_are_not_overwritten(self):
         out = augment_report(
             self._base_compare_report(verdict="COMPATIBLE", exit_code=0),

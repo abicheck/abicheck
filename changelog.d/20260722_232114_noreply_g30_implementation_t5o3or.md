@@ -14,7 +14,11 @@
   scoping flag). `kind: bundle` compares a directory of member binaries and
   fails fast rather than silently degrading if `requested-depth: build`/`source`
   is asked of it, since the underlying per-library release engine can't collect
-  that evidence for a directory operand. See `docs/reference/check-target.md`.
+  that evidence for a directory operand. A `baseline-channel: none` scan run
+  that hits a guard (e.g. `--budget` exceeded) is treated as an operational
+  error rather than a deferrable compatibility finding, so `gate-mode:
+  deferred`/`advisory` can't turn a guard failure into a quiet pass. See
+  `docs/reference/check-target.md`.
 
 <!--
 ### Changed
