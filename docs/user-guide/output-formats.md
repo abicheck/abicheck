@@ -202,8 +202,9 @@ abicheck compare old.json new.json --report-mode leaf
 Groups findings that share a root cause under one entry, instead of listing
 every change individually — e.g. an internal helper's `func_removed` finding
 and the `internal_symbol_required_by_public_api` overlay finding that names
-it both land in the same group. **JSON output only** (`--format json`); other
-formats render as `full`. This is a first slice reusing the existing
+it both land in the same group. Supported for `--format json`/`markdown`/
+`text`; `sarif`/`junit` render as `full` (no `codeFlows`/testsuite grouping
+equivalent yet). This is a first slice reusing the existing
 `Change.caused_by_type` field (see [ADR-051](../development/adr/051-unified-impact-assessment-model.md));
 a future slice (G29 Phase 6) will additionally correlate consumer-overlay
 findings that don't share a `caused_by_type` today.
@@ -225,6 +226,22 @@ abicheck compare old.json new.json --report-mode root-cause --format json
   "root_cause_count": 1,
   "changes": ["... the same findings, flat, for backward compatibility ..."]
 }
+```
+
+The Markdown/text rendering groups the same way, one `### root` heading per
+group instead of `--report-mode full`'s severity-bucketed sections:
+
+```bash
+abicheck compare old.json new.json --report-mode root-cause
+```
+
+```markdown
+## Root Causes (1)
+
+### `ns::internal::helper` (2 findings)
+
+- **func_removed**: helper removed
+- **internal_symbol_required_by_public_api**: required
 ```
 
 ## `--show-impact`

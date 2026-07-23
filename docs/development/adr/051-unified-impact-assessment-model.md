@@ -335,15 +335,11 @@ root-cause grouping, deliberately scoped to JSON only:
   compatibility, `--report-mode leaf` included, so root-cause mode does
   too rather than breaking that contract).
 - **`--report-mode root-cause`** added to the CLI's `click.Choice`.
-  Deliberately **JSON-only**: `reporter_markdown.to_markdown` and
-  `sarif.py`/`junit_report.py` do not gain a matching branch, so
-  `--format text`/`markdown`/`sarif`/`junit` silently render as `full` —
-  the exact same precedent `--report-mode leaf` already set for
-  SARIF/JUnit (neither module's rendering function even accepts a
-  `report_mode` parameter today). Building the markdown/text rendering
-  too would roughly double this slice's size for a human-facing view
-  the JSON-consuming CI/tooling use case (the primary motivation) doesn't
-  need yet; left for a follow-up slice if real usage asks for it.
+  Initially **JSON-only** (Slice 4 below adds markdown/text); `sarif.py`/
+  `junit_report.py` still do not gain a matching branch, so `--format sarif`/
+  `junit` render as `full` — the same precedent `--report-mode leaf` already
+  set for those two formats (neither module's rendering function even
+  accepts a `report_mode` parameter today).
 - `REPORT_SCHEMA_VERSION` 2.13 → 2.14 (two new additive, root-cause-mode-only
   top-level keys: `root_causes`, `root_cause_count`).
 
@@ -377,6 +373,30 @@ root-cause grouping, deliberately scoped to JSON only:
   which folds additional `(key, root, entry)` triples into an
   already-built root-cause payload, called from the same fold-in.
 
+## Slice 4 — `--report-mode root-cause` markdown/text rendering
+
+Landed in a follow-up commit on the same PR. Adds `reporter_markdown._to_markdown_root_cause`,
+wired into `to_markdown`'s dispatch alongside the existing `leaf` branch —
+covers both `--format markdown` and the default `--format text` output
+(`to_markdown` backs both; there is no separate "text" renderer). Renders one
+`### root (N findings)` heading per root-cause group instead of `full` mode's
+severity-bucketed sections, reusing `_format_change_md` for each finding's
+line (kind, description, old/new value, impact) so the per-finding detail
+matches every other markdown mode.
+
+To let markdown and JSON share the exact same grouping decision without a
+markdown → JSON import (this module is a leaf `reporter_markdown` imports
+into; `reporter` re-exports its names, never the reverse — see that module's
+own docstring), the grouping logic itself moved: `_finding_id`,
+`_root_cause_key_and_display`, and a new `_group_changes_by_root_cause`
+(factored out of `_to_json_root_cause`, which now calls it too) all now live
+in `reporter_markdown.py`, with `reporter.py` importing them back via its
+existing re-export block. Both renderers therefore call the identical
+grouping function — they cannot disagree about which findings share a root
+cause the way two independently-written implementations could drift.
+`--report-mode root-cause` still renders as `full` for `--format sarif`/
+`junit` (unchanged from Slice 3).
+
 ## Deliberately not implemented this slice
 
 Per the "ship each phase independently" mitigation this initiative committed
@@ -408,11 +428,12 @@ remaining four tiers):
   CLAUDE.md "M1-3") exists to prevent — a real regression here would be to
   suppression correctness, not just to this reporting layer. Left for a
   dedicated slice.
-- **`--report-mode root-cause`'s markdown/text rendering, and the full
-  `RootCauseCorrelator` correlation across consumer-overlay findings that
-  don't share a `caused_by_type` today** — Slice 3 above ships the JSON-only,
-  `caused_by_type`-based first cut; Phase 6's `RootCauseCorrelator` is the
-  fuller job.
+- **The full `RootCauseCorrelator` correlation across consumer-overlay
+  findings that don't share a `caused_by_type` today** — Slices 3-4 above
+  ship the `caused_by_type`-based first cut (now in both JSON and
+  markdown/text); Phase 6's `RootCauseCorrelator` is the fuller job that adds
+  correlation for findings with no `caused_by_type` link at all. `--format
+  sarif`/`junit` still render `root-cause` mode as `full`.
 - **Stable `finding_id`/`occurrence_id`/`root_cause_id`/`impact_group_id`
   identifiers independent of `description` text** — `reporter._finding_id`
   already exists (schema 2.3) and is stable across repeated runs, but (unlike

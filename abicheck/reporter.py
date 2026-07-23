@@ -67,12 +67,16 @@ from .reporter_markdown import (
     _build_library_files_section as _build_library_files_section,
     _build_severity_sections as _build_severity_sections,
     _build_severity_summary_md as _build_severity_summary_md,
+    _finding_id as _finding_id,
     _fmt_size as _fmt_size,
     _footer_lines as _footer_lines,
     _format_change_md as _format_change_md,
     _format_leaf_type_change as _format_leaf_type_change,
+    _group_changes_by_root_cause as _group_changes_by_root_cause,
+    _root_cause_key_and_display as _root_cause_key_and_display,
     _section_severity_label as _section_severity_label,
     _to_markdown_leaf as _to_markdown_leaf,
+    _to_markdown_root_cause as _to_markdown_root_cause,
     apply_show_only as apply_show_only,
     operation_for_kind as operation_for_kind,
     to_markdown as to_markdown,
@@ -415,35 +419,6 @@ def _to_json_leaf(
     return json.dumps(d, indent=indent)
 
 
-def _root_cause_key_and_display(
-    caused_by_type: str | None,
-    symbol: str | None,
-    kind_value: str,
-    finding_id: str,
-    *,
-    referenced_causes: frozenset[str] = frozenset(),
-) -> tuple[str, str]:
-    """Grouping key + display root for one root-cause finding: ``caused_by_type``
-    when set, else its own ``symbol`` -- but only as a *grouping* key when
-    some other finding's ``caused_by_type`` actually names that symbol
-    (Codex review: two independent findings that merely share a symbol with
-    no producer-set correlation, e.g. ``func_return_changed`` and
-    ``func_params_changed`` both on ``foo``, must stay singleton -- the
-    first-slice contract is that only ``caused_by_type`` correlates
-    findings). Otherwise a unique per-finding key, with the symbol (or, if
-    empty, the kind) still used as the *display* root. Shared by
-    :func:`_to_json_root_cause` and the scoped-gate fold-in in
-    ``cli_compare_fold.py``, which appends synthetic findings afterwards.
-    """
-    if caused_by_type:
-        return caused_by_type, caused_by_type
-    if symbol:
-        if symbol in referenced_causes:
-            return symbol, symbol
-        return f"finding:{finding_id}", symbol
-    return f"finding:{finding_id}", kind_value
-
-
 def _add_entries_to_root_causes(
     d: dict[str, object],
     keyed_entries: list[tuple[str, str, dict[str, object]]],
@@ -516,43 +491,23 @@ def _to_json_root_cause(
     # key so `changes` (flat, backward-compatible -- every existing report
     # mode provides it, `_to_json_leaf` included) and `root_causes[].findings`
     # never drift from each other.
-    entries = [
-        _change_to_dict(
+    entry_by_id = {
+        id(c): _change_to_dict(
             c, policy=effective_policy, kind_sets=eff_sets, policy_file=result.policy_file
         )
         for c in changes
-    ]
-    # A symbol only earns the "grouping" reading of the caused_by_type/symbol
-    # fallback when some *other* finding's caused_by_type actually names it --
-    # otherwise two independent findings that merely share a symbol (e.g.
-    # func_return_changed and func_params_changed both on "foo") would wrongly
-    # collapse into one root cause (Codex review).
-    referenced_causes = frozenset(c.caused_by_type for c in changes if c.caused_by_type)
-    groups: dict[str, list[dict[str, object]]] = {}
-    roots: dict[str, str] = {}
-    order: list[str] = []
-    for c, entry in zip(changes, entries):
-        key, root_display = _root_cause_key_and_display(
-            c.caused_by_type,
-            c.symbol,
-            c.kind.value,
-            str(entry["finding_id"]),
-            referenced_causes=referenced_causes,
-        )
-        if key not in groups:
-            groups[key] = []
-            roots[key] = root_display
-            order.append(key)
-        groups[key].append(entry)
+    }
+    entries = [entry_by_id[id(c)] for c in changes]
+    grouped = _group_changes_by_root_cause(changes)
 
     root_causes = [
         {
             "root_cause_id": hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
-            "root": roots[key],
-            "finding_count": len(groups[key]),
-            "findings": groups[key],
+            "root": root_display,
+            "finding_count": len(group_changes),
+            "findings": [entry_by_id[id(c)] for c in group_changes],
         }
-        for key in order
+        for key, root_display, group_changes in grouped
     ]
 
     d = _build_json_base(result)
@@ -908,42 +863,6 @@ def to_json(
     _add_policy_overrides(d, result)
     _add_trailing_fields(d, result, show_impact, show_only)
     return json.dumps(d, indent=indent)
-
-
-def _finding_id(c: object) -> str:
-    """Stable per-finding fingerprint (schema 2.3, additive).
-
-    Deterministic across repeated runs of the same comparison, so a
-    consumer can tell "is this the same finding" across two report runs
-    (e.g. to correlate a suppression/waiver, or diff two CI runs' findings)
-    without relying on array order or index — neither of which abicheck
-    guarantees stays stable release to release.
-
-    Derived only from fields that identify the finding's *identity* (kind,
-    symbol, old/new value, source location, description) — deliberately
-    excluding ``severity``/``evidence_status``, which are policy-derived and
-    would make the same underlying finding hash differently under a
-    different ``--policy``.
-
-    ``description`` is included as a discriminator: two findings of the same
-    kind on the same symbol with the same old/new value and no distinct
-    source location (e.g. ``param_pointer_level_changed`` on two different
-    parameters of one function, both going from pointer-depth 1 to 2) would
-    otherwise collide on an identical id even though they are different
-    findings — ``description`` embeds the per-finding detail (parameter
-    name/index, member name, …) that disambiguates them.
-    """
-    key = "\x1f".join(
-        [
-            str(getattr(getattr(c, "kind", None), "value", getattr(c, "kind", ""))),
-            str(getattr(c, "symbol", None) or ""),
-            str(getattr(c, "old_value", None) or ""),
-            str(getattr(c, "new_value", None) or ""),
-            str(getattr(c, "source_location", None) or ""),
-            str(getattr(c, "description", None) or ""),
-        ]
-    )
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
 _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {

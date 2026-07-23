@@ -22,6 +22,7 @@ so it stays a leaf; ``reporter`` re-exports these names for backward compat.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -623,6 +624,191 @@ def _to_markdown_leaf(
     return "\n".join(lines)
 
 
+def _finding_id(c: object) -> str:
+    """Stable per-finding fingerprint (schema 2.3, additive).
+
+    Deterministic across repeated runs of the same comparison, so a
+    consumer can tell "is this the same finding" across two report runs
+    (e.g. to correlate a suppression/waiver, or diff two CI runs' findings)
+    without relying on array order or index — neither of which abicheck
+    guarantees stays stable release to release.
+
+    Derived only from fields that identify the finding's *identity* (kind,
+    symbol, old/new value, source location, description) — deliberately
+    excluding ``severity``/``evidence_status``, which are policy-derived and
+    would make the same underlying finding hash differently under a
+    different ``--policy``.
+
+    ``description`` is included as a discriminator: two findings of the same
+    kind on the same symbol with the same old/new value and no distinct
+    source location (e.g. ``param_pointer_level_changed`` on two different
+    parameters of one function, both going from pointer-depth 1 to 2) would
+    otherwise collide on an identical id even though they are different
+    findings — ``description`` embeds the per-finding detail (parameter
+    name/index, member name, …) that disambiguates them.
+
+    Lives here (not ``reporter.py``) so this leaf module can also key
+    ``--report-mode root-cause`` markdown groups without importing back from
+    ``reporter`` (which would form an import cycle); ``reporter`` re-exports
+    it for backward compat, same as every other name in this module.
+    """
+    key = "\x1f".join(
+        [
+            str(getattr(getattr(c, "kind", None), "value", getattr(c, "kind", ""))),
+            str(getattr(c, "symbol", None) or ""),
+            str(getattr(c, "old_value", None) or ""),
+            str(getattr(c, "new_value", None) or ""),
+            str(getattr(c, "source_location", None) or ""),
+            str(getattr(c, "description", None) or ""),
+        ]
+    )
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def _root_cause_key_and_display(
+    caused_by_type: str | None,
+    symbol: str | None,
+    kind_value: str,
+    finding_id: str,
+    *,
+    referenced_causes: frozenset[str] = frozenset(),
+) -> tuple[str, str]:
+    """Grouping key + display root for one root-cause finding: ``caused_by_type``
+    when set, else its own ``symbol`` -- but only as a *grouping* key when
+    some other finding's ``caused_by_type`` actually names that symbol
+    (Codex review: two independent findings that merely share a symbol with
+    no producer-set correlation, e.g. ``func_return_changed`` and
+    ``func_params_changed`` both on ``foo``, must stay singleton -- the
+    first-slice contract is that only ``caused_by_type`` correlates
+    findings). Otherwise a unique per-finding key, with the symbol (or, if
+    empty, the kind) still used as the *display* root. Shared by
+    :func:`abicheck.reporter._to_json_root_cause`, :func:`_to_markdown_root_cause`,
+    and the scoped-gate fold-in in ``cli_compare_fold.py``, which appends
+    synthetic findings afterwards.
+    """
+    if caused_by_type:
+        return caused_by_type, caused_by_type
+    if symbol:
+        if symbol in referenced_causes:
+            return symbol, symbol
+        return f"finding:{finding_id}", symbol
+    return f"finding:{finding_id}", kind_value
+
+
+def _group_changes_by_root_cause(
+    changes: list[Change],
+) -> list[tuple[str, str, list[Change]]]:
+    """Group ``changes`` into root-cause buckets, in first-seen order.
+
+    Returns ``(key, root_display, changes_in_group)`` triples. ``key`` is the
+    raw grouping key (a stable hash of it becomes ``root_cause_id``);
+    ``root_display`` is the human-readable root shown to a consumer. Shared
+    by the JSON and markdown ``--report-mode root-cause`` renderers so the
+    two formats can never disagree about which findings share a root cause
+    (Codex review; see :func:`_root_cause_key_and_display` for the key/display
+    rules, including the ``referenced_causes`` guard against grouping
+    independent findings that merely share a symbol).
+    """
+    referenced_causes = frozenset(c.caused_by_type for c in changes if c.caused_by_type)
+    groups: dict[str, list[Change]] = {}
+    roots: dict[str, str] = {}
+    order: list[str] = []
+    for c in changes:
+        key, root_display = _root_cause_key_and_display(
+            c.caused_by_type,
+            c.symbol,
+            c.kind.value,
+            _finding_id(c),
+            referenced_causes=referenced_causes,
+        )
+        if key not in groups:
+            groups[key] = []
+            roots[key] = root_display
+            order.append(key)
+        groups[key].append(c)
+    return [(key, roots[key], groups[key]) for key in order]
+
+
+def _to_markdown_root_cause(
+    result: DiffResult,
+    show_only: str | None = None,
+    show_recommendation: bool = False,
+    *,
+    severity_config: SeverityConfig | None = None,
+) -> str:
+    """``--report-mode root-cause`` markdown rendering (G29 Phase 3 slice 4, ADR-051).
+
+    Groups findings under one heading per root cause instead of full mode's
+    severity-bucketed sections -- root-cause mode's point is "what's the
+    minimal set of things that actually broke", not "what severity bucket
+    does each finding independently fall into".
+    """
+    v = result.verdict
+    emoji = _VERDICT_EMOJI[v]
+    label = _VERDICT_LABEL[v]
+
+    lines: list[str] = [
+        f"# ABI Report: {result.library} (root-cause view)",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| **Old version** | `{result.old_version}` |",
+        f"| **New version** | `{result.new_version}` |",
+        f"| **Verdict** | {emoji} `{label}` |",
+        "",
+    ]
+
+    if show_recommendation:
+        _append_recommendation_section(lines, result)
+
+    changes = list(result.changes)
+    if show_only:
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+        lines.append(
+            f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
+        )
+        lines.append("")
+
+    if severity_config is not None:
+        lines += _build_severity_summary_md(
+            changes,
+            severity_config,
+            all_changes=list(result.changes),
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+
+    groups = _group_changes_by_root_cause(changes)
+    if groups:
+        lines += [f"## Root Causes ({len(groups)})", ""]
+        for _key, root_display, group_changes in groups:
+            plural = "" if len(group_changes) == 1 else "s"
+            lines.append(f"### `{root_display}` ({len(group_changes)} finding{plural})")
+            lines.append("")
+            for c in group_changes:
+                lines.append(_format_change_md(c))
+            lines.append("")
+
+    if not changes:
+        if show_only and result.changes:
+            lines.append("_No changes match the current filter._")
+        else:
+            lines.append("_No ABI changes detected._")
+
+    _append_redundancy_note(lines, result)
+    _append_suppression_note(lines, result)
+
+    lines += _footer_lines()
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Markdown output
 # ---------------------------------------------------------------------------
@@ -1086,6 +1272,16 @@ def to_markdown(
             _to_markdown_leaf(
                 result,
                 show_impact=show_impact,
+                show_only=show_only,
+                show_recommendation=show_recommendation,
+                severity_config=severity_config,
+            )
+        )
+
+    if report_mode == "root-cause":
+        return _out(
+            _to_markdown_root_cause(
+                result,
                 show_only=show_only,
                 show_recommendation=show_recommendation,
                 severity_config=severity_config,

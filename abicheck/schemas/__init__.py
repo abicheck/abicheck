@@ -153,13 +153,14 @@ from typing import Any
 #:       ``correlated_change_kind`` -- present only when it carries
 #:       information beyond the all-defaults case).
 #:   2.14: added two additive optional top-level keys, present only under
-#:       ``--report-mode root-cause`` (G29 Phase 3 slice 3, ADR-051) --
+#:       ``--report-mode root-cause`` (G29 Phase 3 slices 3-4, ADR-051) --
 #:       ``root_causes`` (groups ``changes`` by ``Change.caused_by_type``,
 #:       falling back to the change's own symbol for an ungrouped finding)
-#:       and ``root_cause_count``. A first, JSON-only slice of the plan's
-#:       root-cause grouping -- ``root_cause_id`` is a stable hash of the
-#:       grouping key, not the eventual G29 Phase 6 ``RootCauseCorrelator``'s
-#:       own identifier scheme.
+#:       and ``root_cause_count``. This schema field is JSON-specific by
+#:       nature, but the same grouping also renders for ``--format
+#:       markdown``/text (slice 4) -- ``root_cause_id`` is a stable hash of
+#:       the grouping key, not the eventual G29 Phase 6
+#:       ``RootCauseCorrelator``'s own identifier scheme.
 REPORT_SCHEMA_VERSION = "2.14"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as

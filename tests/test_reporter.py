@@ -626,6 +626,57 @@ class TestRootCauseReporter:
         assert d["scope"]["manual_review_required"] is True
 
 
+class TestRootCauseMarkdown:
+    """G29 Phase 3 slice 4 (ADR-051): --report-mode root-cause markdown/text
+    rendering, sharing reporter._group_changes_by_root_cause with the JSON
+    renderer so the two formats can never disagree about grouping."""
+
+    def test_groups_findings_sharing_caused_by_type(self):
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        overlay = Change(
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
+            "required", caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root, overlay])
+        md = to_markdown(r, report_mode="root-cause")
+        assert "## Root Causes (1)" in md
+        assert "### `ns::internal::helper` (2 findings)" in md
+        assert "func_removed" in md
+        assert "internal_symbol_required_by_public_api" in md
+
+    def test_independent_findings_sharing_a_symbol_stay_separate(self):
+        a = Change(ChangeKind.FUNC_RETURN_CHANGED, "foo", "return type changed")
+        b = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "parameter changed")
+        r = _result(Verdict.BREAKING, changes=[a, b])
+        md = to_markdown(r, report_mode="root-cause")
+        assert "## Root Causes (2)" in md
+        assert md.count("### `foo` (1 finding)") == 2
+
+    def test_show_only_filters_root_cause_groups(self):
+        breaking = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
+        addition = Change(ChangeKind.FUNC_ADDED, "ns::pub_new", "added")
+        r = _result(Verdict.BREAKING, changes=[breaking, addition])
+        md = to_markdown(r, report_mode="root-cause", show_only="breaking")
+        assert "ns::internal::helper" in md
+        assert "ns::pub_new" not in md
+        assert "Filtered by: `--show-only breaking`" in md
+
+    def test_no_changes_reports_no_abi_changes(self):
+        md = to_markdown(_result(Verdict.NO_CHANGE), report_mode="root-cause")
+        assert "No ABI changes detected" in md
+        assert "Root Causes" not in md
+
+    def test_carries_severity_summary(self):
+        from abicheck.severity import PRESET_DEFAULT
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        md = to_markdown(r, report_mode="root-cause", severity_config=PRESET_DEFAULT)
+        assert "## Severity Configuration" in md
+
+
 class TestMarkdownReporter:
     def test_no_change_contains_no_change(self):
         md = to_markdown(_result(Verdict.NO_CHANGE))
