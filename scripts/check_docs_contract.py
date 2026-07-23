@@ -840,6 +840,8 @@ def _check_duplicate_term_definitions(
                 continue
             text = _strip_front_matter(path.read_text(encoding="utf-8"))
             text = _strip_fenced_code(text)
+            text = _strip_inline_code(text)
+            text = _HTML_COMMENT_RE.sub("", text)
             if pattern.search(text):
                 f.warn(
                     "terminology",

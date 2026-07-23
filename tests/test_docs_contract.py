@@ -1290,6 +1290,42 @@ def test_check_duplicate_term_definitions_flags_alias_redefinition(
     assert "other.md" in f.warnings[0][1]
 
 
+def test_check_duplicate_term_definitions_ignores_inline_code_example(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A definition-shaped pattern inside an inline code span (e.g. a page
+    showing "`**ABI** is ...`" as a documentation-style example) renders as
+    literal code, not a real bolded definition -- it must not trigger the
+    redefinition warning (regression test for the gap flagged in PR #619
+    review, the same stripping _page_links_to already applies)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("# Owner\n\n**ABI** is the thing.\n")
+    (tmp_path / "other.md").write_text(
+        "# Other\n\nExample: `**ABI** is a term used elsewhere`.\n"
+    )
+    f = dc.Findings()
+    terms = {"ABI": {"canonical_page": "owner.md", "short_definition": "x"}}
+    dc._check_duplicate_term_definitions(f, terms)
+    assert f.warnings == []
+
+
+def test_check_duplicate_term_definitions_ignores_html_comment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A definition-shaped pattern hidden inside an HTML comment is
+    invisible when MkDocs renders the page -- it must not trigger the
+    redefinition warning."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("# Owner\n\n**ABI** is the thing.\n")
+    (tmp_path / "other.md").write_text(
+        "# Other\n\n<!-- **ABI** is defined here for reference -->\n"
+    )
+    f = dc.Findings()
+    terms = {"ABI": {"canonical_page": "owner.md", "short_definition": "x"}}
+    dc._check_duplicate_term_definitions(f, terms)
+    assert f.warnings == []
+
+
 def test_check_duplicate_term_definitions_ignores_canonical_page_itself(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
