@@ -595,6 +595,22 @@ def test_declared_headers_and_public_header_paths_share_one_scope_identity(tmp_p
     assert full_l2.scope_fingerprint == symbols_only.scope_fingerprint
 
 
+def test_merged_headers_field_deduplicates_the_same_header_named_twice(tmp_path):
+    # Codex review (PR #624): a side that names the same logical header
+    # through BOTH declared_headers and public_header_paths (a full L2 dump
+    # that also passes --public-header for that same file, a real CLI
+    # combination) must fingerprint identically to a side naming it only
+    # once -- without deduplication the first side's merged "headers" list
+    # would retain a duplicate entry ["foo.h", "foo.h"], mismatching a
+    # single-entry ["foo.h"] side purely on element count.
+    h = _write(tmp_path / "include" / "foo.h", "int f(void);\n")
+    named_twice = compute_extraction_contract(
+        declared_headers=[h], public_header_paths=[h]
+    )
+    named_once = compute_extraction_contract(declared_headers=[h])
+    assert named_twice.scope_fingerprint == named_once.scope_fingerprint
+
+
 # ---------------------------------------------------------------------------
 # unreadable header content fails extraction outright (no silent sentinel)
 # ---------------------------------------------------------------------------

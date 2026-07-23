@@ -422,7 +422,15 @@ def compute_extraction_contract(
         root = Path(os.path.commonpath(root_candidates))
 
         def _normalize(paths: Sequence[Path]) -> list[str]:
-            return sorted(str(_resolved(p).relative_to(root)) for p in paths)
+            # sorted(set(...)), not sorted(...) (Codex review, PR #624): the
+            # same logical header reaching this function through both
+            # declared_headers and public_header_paths on one side (e.g. a
+            # full L2 dump that also passes --public-header for the same
+            # file) must not retain a duplicate entry a side naming it only
+            # once wouldn't have -- ["foo.h", "foo.h"] vs. ["foo.h"] would
+            # otherwise mismatch on element count alone, despite describing
+            # the identical declared surface.
+            return sorted({str(_resolved(p).relative_to(root)) for p in paths})
 
         # json.dumps, not a raw "|" join (Codex review, PR #624, same class
         # of bug already fixed for macro_ops/include_sequence above): a
