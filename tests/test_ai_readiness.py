@@ -498,7 +498,7 @@ def test_adr_index_nav_sync_accepts_heading_style_status(car, tmp_path, monkeypa
         "| [001](001-example.md) | Example | |\n", encoding="utf-8"
     )
     (adr_dir / "001-example.md").write_text(
-        "# ADR-001\n\n## Status\n\nAccepted — implemented.\n"
+        "# ADR-001\n\n## Status\n\nAccepted — implemented.\n", encoding="utf-8"
     )
     (fake_root / "mkdocs.yml").write_text(
         "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
