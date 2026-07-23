@@ -211,56 +211,80 @@ def _fold_scoped_compat_into_text(
         full_summary = payload.get("summary")
         if isinstance(changes_list, list):
             from .checker_policy import EvidenceStatus, ReachabilityState
-            from .reporter import _change_to_dict
+            from .reporter import (
+                _add_entries_to_root_causes,
+                _change_to_dict,
+                _finding_id,
+                _root_cause_key_and_display,
+            )
 
             eff_sets = result._effective_kind_sets()
             scoped_only, missing_labels, blocks, missing_kind = (
                 _resolve_scoped_gate_findings(result, severity_config, show_only)
             )
+            # G29 Phase 3 slice 3 (ADR-051, Codex review): these synthetic
+            # entries are appended to `changes` after `_to_json_root_cause`
+            # already grouped `result.changes` into `root_causes` -- without
+            # tracking their own grouping key/root here too, a scoped run
+            # whose only gated issue is one of these would report a nonempty
+            # `changes` array next to `root_cause_count: 0`, losing the only
+            # gate failure for a root-cause consumer.
+            root_cause_entries: list[tuple[str, str, dict[str, object]]] = []
             for c in scoped_only:
-                changes_list.append(
-                    _change_to_dict(
-                        c,
-                        policy=result.policy or "strict_abi",
-                        kind_sets=eff_sets,
-                        policy_file=result.policy_file,
-                        # Codex review: a scoped-only change (PE_ORDINAL_RETARGETED,
-                        # CONSUMER_REQUIRED_SYMBOL_REMOVED, CONSUMER_RUNTIME_LOAD_FAILED)
-                        # is proven by the real consumer's own import table/execution,
-                        # not by an artifact-level library diff -- evidence_status_for_change
-                        # would otherwise report "artifact_proven" purely from the kind's
-                        # BREAKING/RISK category, same as appcompat_to_json's own
-                        # CONSUMER_PROVEN override for this exact finding shape.
-                        evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
-                    )
+                entry = _change_to_dict(
+                    c,
+                    policy=result.policy or "strict_abi",
+                    kind_sets=eff_sets,
+                    policy_file=result.policy_file,
+                    # Codex review: a scoped-only change (PE_ORDINAL_RETARGETED,
+                    # CONSUMER_REQUIRED_SYMBOL_REMOVED, CONSUMER_RUNTIME_LOAD_FAILED)
+                    # is proven by the real consumer's own import table/execution,
+                    # not by an artifact-level library diff -- evidence_status_for_change
+                    # would otherwise report "artifact_proven" purely from the kind's
+                    # BREAKING/RISK category, same as appcompat_to_json's own
+                    # CONSUMER_PROVEN override for this exact finding shape.
+                    evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
                 )
+                changes_list.append(entry)
+                key, root_display = _root_cause_key_and_display(
+                    c.caused_by_type, c.symbol, c.kind.value, _finding_id(c)
+                )
+                root_cause_entries.append((key, root_display, entry))
             for label in missing_labels:
-                changes_list.append(
-                    {
-                        "kind": missing_kind,
-                        "symbol": label,
-                        "description": (
-                            f"Required symbol/version '{label}' is missing "
-                            "from the new library."
-                        ),
-                        "old_value": None,
-                        "new_value": None,
-                        "severity": "breaking" if blocks else "compatible",
-                        "relevant_to_gate": True,
-                        "blocks_gate": blocks,
-                        # G29 Phase 3 slice 1 (ADR-051, Codex review): a
-                        # missing-contract label has no backing Change for
-                        # _change_to_dict/assess_change to read (unlike the
-                        # scoped_only loop above, which already routes
-                        # through _change_to_dict and picks up
-                        # reachability_state for free). reachability_state is
-                        # "always present" for every changes[] entry per D3
-                        # -- a missing symbol/version is a hard absence, not
-                        # a reachability question, so UNKNOWN (not proven
-                        # either way) is the honest, consistent value here.
-                        "reachability_state": ReachabilityState.UNKNOWN.value,
-                    }
+                entry = {
+                    "kind": missing_kind,
+                    "symbol": label,
+                    "description": (
+                        f"Required symbol/version '{label}' is missing "
+                        "from the new library."
+                    ),
+                    "old_value": None,
+                    "new_value": None,
+                    "severity": "breaking" if blocks else "compatible",
+                    "relevant_to_gate": True,
+                    "blocks_gate": blocks,
+                    # G29 Phase 3 slice 1 (ADR-051, Codex review): a
+                    # missing-contract label has no backing Change for
+                    # _change_to_dict/assess_change to read (unlike the
+                    # scoped_only loop above, which already routes
+                    # through _change_to_dict and picks up
+                    # reachability_state for free). reachability_state is
+                    # "always present" for every changes[] entry per D3
+                    # -- a missing symbol/version is a hard absence, not
+                    # a reachability question, so UNKNOWN (not proven
+                    # either way) is the honest, consistent value here.
+                    "reachability_state": ReachabilityState.UNKNOWN.value,
+                }
+                changes_list.append(entry)
+                # A missing-contract label has no caused_by_type and its
+                # `symbol` is the label itself, which is always non-empty --
+                # so this always keys on the label, never the finding_id
+                # fallback (mirrors the non-empty-symbol branch above).
+                key, root_display = _root_cause_key_and_display(
+                    None, label, missing_kind, ""
                 )
+                root_cause_entries.append((key, root_display, entry))
+            _add_entries_to_root_causes(payload, root_cause_entries)
             # `summary` above was computed from result.changes *before*
             # scoped_only/missing_labels were appended to `changes` here --
             # so a scoped run whose only gating issue is one of these

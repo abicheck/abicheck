@@ -26,3 +26,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `impact_assessment.decision.suppression_rule` was silently absent for
   these. Fixed by applying the same attribution in
   `post_processing._merge_findings_respecting_suppression`.
+
+- **`--report-mode root-cause` grouping edge cases** (ADR-051 follow-up):
+  two or more findings that both lack `caused_by_type` and carry an empty
+  `symbol` (e.g. `SOURCE_FACT_COVERAGE_INCOMPLETE`,
+  `SOURCE_BINARY_PROVENANCE_MISMATCH`) no longer collapse into one fake
+  shared root cause keyed on `""` — each now keys uniquely, matching the
+  contract that only `caused_by_type` correlates findings. Separately, a
+  `--used-by`/`--required-symbol` scoped gate whose only failure is a
+  synthetic scoped-only change or missing-contract label (folded into
+  `changes[]` after `root_causes` is built) is now folded into
+  `root_causes`/`root_cause_count` too, instead of only the flat
+  `changes[]`.

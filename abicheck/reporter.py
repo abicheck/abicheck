@@ -415,6 +415,61 @@ def _to_json_leaf(
     return json.dumps(d, indent=indent)
 
 
+def _root_cause_key_and_display(
+    caused_by_type: str | None,
+    symbol: str | None,
+    kind_value: str,
+    finding_id: str,
+) -> tuple[str, str]:
+    """Grouping key + display root for one root-cause finding: ``caused_by_type``
+    when set, else a non-empty ``symbol``, else a unique per-finding key (an
+    empty-symbol/no-caused_by_type fallback would wrongly collapse unrelated
+    aggregate findings onto one shared ``""`` group). Shared by
+    :func:`_to_json_root_cause` and the scoped-gate fold-in in
+    ``cli_compare_fold.py``, which appends synthetic findings afterwards.
+    """
+    if caused_by_type:
+        return caused_by_type, caused_by_type
+    if symbol:
+        return symbol, symbol
+    return f"finding:{finding_id}", kind_value
+
+
+def _add_entries_to_root_causes(
+    d: dict[str, object],
+    keyed_entries: list[tuple[str, str, dict[str, object]]],
+) -> None:
+    """Fold additional ``(key, root_display, entry)`` triples into an
+    already-built ``--report-mode root-cause`` payload, for synthetic
+    scoped-gate entries computed after :func:`_to_json_root_cause` already
+    grouped ``result.changes`` (else they'd sit in ``changes[]`` but never in
+    ``root_causes``). No-op if *d* has no ``root_causes`` list.
+    """
+    root_causes = d.get("root_causes")
+    if not isinstance(root_causes, list):
+        return
+    by_id = {
+        group["root_cause_id"]: group
+        for group in root_causes
+        if isinstance(group, dict)
+    }
+    for key, root_display, entry in keyed_entries:
+        root_cause_id = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+        group = by_id.get(root_cause_id)
+        if group is None:
+            group = {
+                "root_cause_id": root_cause_id,
+                "root": root_display,
+                "finding_count": 0,
+                "findings": [],
+            }
+            root_causes.append(group)
+            by_id[root_cause_id] = group
+        group["findings"].append(entry)
+        group["finding_count"] = len(group["findings"])
+    d["root_cause_count"] = len(root_causes)
+
+
 def _to_json_root_cause(
     result: DiffResult,
     indent: int = 2,
@@ -462,27 +517,9 @@ def _to_json_root_cause(
     roots: dict[str, str] = {}
     order: list[str] = []
     for c, entry in zip(changes, entries):
-        if c.caused_by_type:
-            # A derived/overlay finding naming its root cause -- groups with
-            # the root finding itself, whose own `symbol` is that same name.
-            key = c.caused_by_type
-        elif c.symbol:
-            # The root finding's own identity: a non-empty symbol is a real,
-            # meaningful correlation key (an overlay elsewhere may reference
-            # it via caused_by_type, above).
-            key = c.symbol
-        else:
-            # No real root-cause correlation available and no symbol to key
-            # on either -- key uniquely by finding_id rather than collapsing
-            # onto a shared "" (Codex review: several aggregate findings,
-            # e.g. SOURCE_FACT_COVERAGE_INCOMPLETE/SOURCE_BINARY_PROVENANCE_MISMATCH,
-            # are constructed with symbol="" and no caused_by_type, so falling
-            # back to the bare symbol collapsed every one of them into one
-            # fake shared root cause -- contradicting this slice's own
-            # contract that only caused_by_type correlates findings,
-            # everything else stays singleton).
-            key = f"finding:{entry['finding_id']}"
-        root_display = c.caused_by_type or c.symbol or c.kind.value
+        key, root_display = _root_cause_key_and_display(
+            c.caused_by_type, c.symbol, c.kind.value, str(entry["finding_id"])
+        )
         if key not in groups:
             groups[key] = []
             roots[key] = root_display

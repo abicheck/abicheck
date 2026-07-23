@@ -347,6 +347,25 @@ root-cause grouping, deliberately scoped to JSON only:
 - `REPORT_SCHEMA_VERSION` 2.13 → 2.14 (two new additive, root-cause-mode-only
   top-level keys: `root_causes`, `root_cause_count`).
 
+**Follow-up fixes (Codex review), same PR:**
+
+- The `caused_by_type` → `symbol` fallback originally collapsed every
+  finding with neither set (empty `symbol`, no `caused_by_type` — e.g.
+  `SOURCE_FACT_COVERAGE_INCOMPLETE`/`SOURCE_BINARY_PROVENANCE_MISMATCH`)
+  onto one shared `root: ""` group. Fixed with a three-tier key
+  (`_root_cause_key_and_display` in `reporter.py`): `caused_by_type`, else
+  non-empty `symbol`, else a unique per-finding key — so uncorrelated
+  anonymous findings stay singleton.
+- The `--used-by`/`--required-symbol` scoped-gate fold-in
+  (`cli_compare_fold._fold_scoped_compat_into_text`) appends its
+  synthetic scoped-only/missing-contract entries to the flat `changes[]`
+  *after* `_to_json_root_cause` has already built `root_causes` — so a
+  scoped gate whose only failure is one of these synthetic entries
+  reported `root_cause_count: 0`, losing the only gate failure for a
+  root-cause consumer. Fixed via `reporter._add_entries_to_root_causes`,
+  which folds additional `(key, root, entry)` triples into an
+  already-built root-cause payload, called from the same fold-in.
+
 ## Deliberately not implemented this slice
 
 Per the "ship each phase independently" mitigation this initiative committed

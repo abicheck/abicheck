@@ -1729,6 +1729,51 @@ class TestUsedByScoping:
         # UNKNOWN value rather than silently omitting the field.
         assert entry["reachability_state"] == "unknown"
 
+    def test_root_cause_mode_includes_scoped_only_change(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Codex review: --report-mode root-cause groups result.changes before
+        # the scoped fold-in appends scoped_only_changes to `changes` -- a
+        # scoped run whose only gated issue is one of these must still show
+        # up in root_causes, not just the flat backward-compat `changes[]`.
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--format", "json", "--report-mode", "root-cause",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        assert data["root_cause_count"] == 1
+        group = data["root_causes"][0]
+        assert group["root"] == "ordinal:5"
+        assert group["findings"][0]["kind"] == "pe_ordinal_retargeted"
+
+    def test_root_cause_mode_includes_missing_symbol_label(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Same gap as above, for a missing required symbol with no backing
+        # Change (scoped_missing_labels, not scoped_only_changes).
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--format", "json", "--report-mode", "root-cause",
+        )
+        data = json.loads(result.stdout)
+        assert data["root_cause_count"] == 1
+        group = data["root_causes"][0]
+        assert group["root"] == "needed_symbol"
+        assert group["findings"][0]["kind"] == "used_by_missing_symbol"
+
     def test_json_uncovered_missing_symbol_not_blocking_under_demoted_severity(
         self, tmp_path, monkeypatch
     ) -> None:
