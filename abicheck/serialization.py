@@ -86,28 +86,47 @@ from .model import (
 #     observable in saved baselines instead of only in transient logs.
 # v12: ADR-050 D1 — ``AbiSnapshot.contract`` (profile/scope fingerprints
 #     proving the extraction contract two snapshots were compared under).
-#     Unlike every earlier bump, this one is *verdict-blocking*: an old
-#     reader that doesn't recognize ``contract`` would silently compare two
+#     Unlike every earlier bump, this one is *verdict-blocking*: a reader
+#     that doesn't recognize ``contract`` would silently compare two
 #     possibly-incomparable snapshots and produce an ordinary, wrong verdict
 #     — exactly the failure mode ADR-050 exists to close. See
-#     ``_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION`` below: a reader whose
-#     own ``SCHEMA_VERSION`` is below this bump hard-rejects a v12+ snapshot
-#     instead of warn-and-continuing past it.
+#     ``_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION`` below:
+#     ``snapshot_from_dict``'s hard-rejection guard protects any reader BUILT
+#     FROM THIS COMMIT ONWARD whose own ``SCHEMA_VERSION`` constant is below
+#     a future verdict-blocking bump's threshold — it cannot, and structurally
+#     never could, retroactively protect an already-released pre-v12 install
+#     (e.g. a deployed abicheck whose ``SCHEMA_VERSION`` is 11): such a reader
+#     simply does not contain this guard's code at all, so it falls through
+#     to the ordinary warn-and-continue path every earlier additive bump got,
+#     silently drops the unrecognized ``contract`` key, and produces an
+#     ordinary verdict (Codex review, PR #624) — no in-band schema-version
+#     change can close that gap for code that already shipped without it.
+#     `checker.compare`'s ``contract_coverage="partial"`` disclosure (ADR-050
+#     D2) is the mitigation available for exactly this case: a pair where one
+#     side's contract was dropped (by an old reader, or because it was never
+#     populated) is reported as partially covered rather than silently full,
+#     even though it isn't hard-blocked. As of this PR no real producer
+#     populates ``contract`` yet (``dumper.py`` wiring is separate, later
+#     work), so there is no snapshot in the wild today for an old reader to
+#     mis-handle.
 SCHEMA_VERSION: int = 12
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
 
 # ADR-050 D1 — the schema version at which a verdict-blocking field
-# (``AbiSnapshot.contract``) was first introduced. A reader whose own
-# SCHEMA_VERSION predates this constant has no code path that even looks for
-# ``contract`` — reading a snapshot at or above this version therefore hard-
-# rejects via IncompatibleSnapshotSchemaError, rather than the ordinary
-# warn-and-continue behavior every other additive bump gets. See
-# ``snapshot_from_dict``'s guard, which fires only when the snapshot's
-# version is BOTH newer than this reader's SCHEMA_VERSION AND at or above
-# this threshold — not merely "this reader predates the threshold," which
-# would stop protecting the moment a reader's own SCHEMA_VERSION reaches it.
+# (``AbiSnapshot.contract``) was first introduced. This constant only takes
+# effect inside code that already contains this guard (this commit onward);
+# it cannot retroactively make an already-released, pre-this-commit reader
+# (whose own code simply doesn't have this check) hard-reject — that reader
+# falls through to its old warn-and-continue path regardless of what this
+# constant says (Codex review, PR #624; see the v12 note above for the full
+# scope of what this guard can and cannot protect). Within code that DOES
+# contain this guard, ``snapshot_from_dict`` raises IncompatibleSnapshotSchemaError
+# whenever the snapshot's version is BOTH newer than this reader's own
+# SCHEMA_VERSION AND at or above this threshold — not merely "this reader
+# predates the threshold," which would stop protecting the moment a reader's
+# own SCHEMA_VERSION reaches it.
 _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION = 12
 
 
