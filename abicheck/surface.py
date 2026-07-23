@@ -125,6 +125,25 @@ _HIDDEN_FRIEND_KIND_NAMES: frozenset[str] = frozenset(
     }
 )
 
+
+def is_hidden_friend_finding(change: Change) -> bool:
+    """True when *change* is a ``hidden_friend_removed``/``hidden_friend_added``.
+
+    Used by manifest-scoped comparison (``compare --post-manifest``, in
+    ``post_processing.FilterNonPublicSurface._run_allowlist``) to keep a
+    hidden friend out of the *concrete exported symbol* demotion check
+    (Codex review): a hidden friend can never produce a real export, but its
+    mangled name can still appear in a header/L2 snapshot's function list —
+    the same list ``_snapshot_export_ids`` reads from, with no visibility
+    filter — so it would otherwise be misread as "a real export not in the
+    committed manifest" and silently demoted, hiding a genuine public ADL
+    break. The allowlist path doesn't go through
+    :func:`classify_change_surface`/``_classify_hidden_friend_surface`` at
+    all, so ``is_symbol_level_finding`` alone isn't enough there.
+    """
+    return change.kind.value in _HIDDEN_FRIEND_KIND_NAMES
+
+
 # Findings whose ``symbol`` field identifies a type (or a member under a type)
 # rather than a function/variable symbol. These must be classified through
 # type reachability before consulting the symbol universe: in C++ especially,

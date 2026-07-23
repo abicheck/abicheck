@@ -41,9 +41,12 @@ def _cfn(name: str, ret: str = "void", params: tuple[str, ...] = ()) -> Function
     )
 
 
-def _snap(functions: list[Function], types: list[RecordType] | None = None) -> AbiSnapshot:
-    return AbiSnapshot(library="libpost.so", version="1", functions=functions,
-                       types=types or [])
+def _snap(
+    functions: list[Function], types: list[RecordType] | None = None
+) -> AbiSnapshot:
+    return AbiSnapshot(
+        library="libpost.so", version="1", functions=functions, types=types or []
+    )
 
 
 def test_private_kernel_churn_demoted_under_manifest_scope() -> None:
@@ -79,13 +82,25 @@ def test_type_layout_break_kept_under_manifest_scope() -> None:
     # silently drop a type-level change).
     old = _snap(
         [_cfn("pp_use", params=("Widget *",))],
-        types=[RecordType(name="Widget", kind="struct", size_bits=64,
-                          fields=[TypeField(name="x", type="int")])],
+        types=[
+            RecordType(
+                name="Widget",
+                kind="struct",
+                size_bits=64,
+                fields=[TypeField(name="x", type="int")],
+            )
+        ],
     )
     new = _snap(
         [_cfn("pp_use", params=("Widget *",))],
-        types=[RecordType(name="Widget", kind="struct", size_bits=128,
-                          fields=[TypeField(name="x", type="long")])],
+        types=[
+            RecordType(
+                name="Widget",
+                kind="struct",
+                size_bits=128,
+                fields=[TypeField(name="x", type="long")],
+            )
+        ],
     )
     scoped = compare(old, new, public_surface_allowlist={"pp_use"})
     # The layout change is retained (kept), not demoted off the surface.
@@ -105,8 +120,9 @@ def test_manifest_allowlist_matches_exactly_not_by_suffix() -> None:
     snap = _snap([_cfn("pp_foo"), _cfn("internal::pp_foo")])
     ctx = PipelineContext(old=snap, new=_snap([]), public_surface_allowlist={"pp_foo"})
     committed = Change(kind=ChangeKind.FUNC_REMOVED, symbol="pp_foo", description="")
-    namespaced = Change(kind=ChangeKind.FUNC_REMOVED, symbol="internal::pp_foo",
-                        description="")
+    namespaced = Change(
+        kind=ChangeKind.FUNC_REMOVED, symbol="internal::pp_foo", description=""
+    )
 
     kept = FilterNonPublicSurface().run([committed, namespaced], ctx)
     assert committed in kept and namespaced not in kept
@@ -123,16 +139,22 @@ def test_force_public_ignored_in_manifest_scope_without_header_scoping() -> None
     snap = _snap([_cfn("pp_foo"), _cfn("__pp_impl")])
     finding = Change(kind=ChangeKind.FUNC_REMOVED, symbol="__pp_impl", description="")
 
-    off = PipelineContext(old=snap, new=_snap([_cfn("pp_foo")]),
-                          public_surface_allowlist={"pp_foo"},
-                          force_public_symbols={"__pp_impl"})
+    off = PipelineContext(
+        old=snap,
+        new=_snap([_cfn("pp_foo")]),
+        public_surface_allowlist={"pp_foo"},
+        force_public_symbols={"__pp_impl"},
+    )
     assert finding not in FilterNonPublicSurface().run([finding], off)  # ignored
 
     finding2 = Change(kind=ChangeKind.FUNC_REMOVED, symbol="__pp_impl", description="")
-    on = PipelineContext(old=snap, new=_snap([_cfn("pp_foo")]),
-                         public_surface_allowlist={"pp_foo"},
-                         force_public_symbols={"__pp_impl"},
-                         scope_to_public_surface=True)
+    on = PipelineContext(
+        old=snap,
+        new=_snap([_cfn("pp_foo")]),
+        public_surface_allowlist={"pp_foo"},
+        force_public_symbols={"__pp_impl"},
+        scope_to_public_surface=True,
+    )
     assert finding2 in FilterNonPublicSurface().run([finding2], on)  # honored
 
 
@@ -144,12 +166,26 @@ def test_removed_contract_symbols_recovers_non_default_demotion() -> None:
     from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
     from abicheck.post_manifest import removed_contract_symbols
 
-    old = AbiSnapshot(library="l", version="1", elf=ElfMetadata(
-        soname="l.so", symbols=[
-            ElfSymbol(name="pp_old", sym_type=SymbolType.FUNC, is_default=True)]))
-    new = AbiSnapshot(library="l", version="2", elf=ElfMetadata(
-        soname="l.so", symbols=[
-            ElfSymbol(name="pp_old", sym_type=SymbolType.FUNC, is_default=False)]))
+    old = AbiSnapshot(
+        library="l",
+        version="1",
+        elf=ElfMetadata(
+            soname="l.so",
+            symbols=[
+                ElfSymbol(name="pp_old", sym_type=SymbolType.FUNC, is_default=True)
+            ],
+        ),
+    )
+    new = AbiSnapshot(
+        library="l",
+        version="2",
+        elf=ElfMetadata(
+            soname="l.so",
+            symbols=[
+                ElfSymbol(name="pp_old", sym_type=SymbolType.FUNC, is_default=False)
+            ],
+        ),
+    )
     assert removed_contract_symbols(old, new) == {"pp_old"}
 
 
@@ -209,6 +245,43 @@ def test_loader_level_finding_survives_manifest_scope() -> None:
     assert not ctx.out_of_surface
 
 
+def test_hidden_friend_removal_survives_manifest_scope() -> None:
+    # Codex: a hidden friend can never appear in an ELF/PE/Mach-O export
+    # table by construction, but its mangled name still shows up in a
+    # header/L2 snapshot's function list -- the same list
+    # _snapshot_export_ids reads with no visibility filter. Without the
+    # hidden-friend exclusion, is_symbol_level_finding(c) and "sym in
+    # export_ids" both come back True, so the removal reads as "a real
+    # export missing from the committed manifest" and gets silently
+    # demoted -- hiding a genuine public ADL break.
+    from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
+
+    snap_old = _snap([_cfn("pp_foo")])
+    hidden_friend = Function(
+        name="operator==",
+        mangled="_ZN2ns3FooeqERKS0_S1_",
+        return_type="bool",
+        params=[Param(name="a", type="const Foo&"), Param(name="b", type="const Foo&")],
+        visibility=Visibility.HIDDEN,
+        is_hidden_friend=True,
+    )
+    snap_old.functions.append(hidden_friend)
+    snap_new = _snap([_cfn("pp_foo")])
+    ctx = PipelineContext(
+        old=snap_old, new=snap_new, public_surface_allowlist={"pp_foo"}
+    )
+    finding = Change(
+        kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+        symbol=hidden_friend.mangled,
+        old_value=hidden_friend.name,
+        description="",
+    )
+
+    kept = FilterNonPublicSurface().run([finding], ctx)
+    assert finding in kept
+    assert finding not in ctx.out_of_surface
+
+
 def test_metadata_only_private_export_is_demoted() -> None:
     # Codex: a private __pp_* helper present only in platform export metadata
     # (ELF .dynsym) — not in DWARF functions/variables — must still be
@@ -216,13 +289,17 @@ def test_metadata_only_private_export_is_demoted() -> None:
     from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
     from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
 
-    elf = ElfMetadata(soname="libpost.so", symbols=[
-        ElfSymbol(name="__pp_impl", sym_type=SymbolType.FUNC),
-    ])
+    elf = ElfMetadata(
+        soname="libpost.so",
+        symbols=[
+            ElfSymbol(name="__pp_impl", sym_type=SymbolType.FUNC),
+        ],
+    )
     snap = AbiSnapshot(library="libpost.so", version="1", elf=elf)
     ctx = PipelineContext(old=snap, new=snap, public_surface_allowlist={"pp_foo"})
-    finding = Change(kind=ChangeKind.SYMBOL_TYPE_CHANGED, symbol="__pp_impl",
-                     description="")
+    finding = Change(
+        kind=ChangeKind.SYMBOL_TYPE_CHANGED, symbol="__pp_impl", description=""
+    )
 
     kept = FilterNonPublicSurface().run([finding], ctx)
     assert finding not in kept
@@ -238,87 +315,160 @@ def test_is_symbol_level_finding_partitions_kinds() -> None:
     assert not is_symbol_level_finding(_c(ChangeKind.TYPE_FIELD_REMOVED))
 
 
-def test_compare_cli_post_manifest_flag_scopes_to_committed_surface(tmp_path: Path) -> None:
+def test_compare_cli_post_manifest_flag_scopes_to_committed_surface(
+    tmp_path: Path,
+) -> None:
     # End-to-end: `compare old.json new.json --post-manifest m.json` loads the
     # manifest, scopes to its pp_* surface, and demotes private kernel churn.
     old_p = tmp_path / "old.json"
     new_p = tmp_path / "new.json"
-    old_p.write_text(snapshot_to_json(_snap([_cfn("pp_foo"), _cfn("__pp_foo_impl")])),
-                     encoding="utf-8")
+    old_p.write_text(
+        snapshot_to_json(_snap([_cfn("pp_foo"), _cfn("__pp_foo_impl")])),
+        encoding="utf-8",
+    )
     new_p.write_text(snapshot_to_json(_snap([_cfn("pp_foo")])), encoding="utf-8")
 
     manifest = tmp_path / "m.json"
-    manifest.write_text(json.dumps({
-        "post_abi": 1,
-        "exports": [{"name": "foo", "c_symbol": "pp_foo",
-                     "params": ["Float64"], "return_dtype": "Float64"}],
-    }), encoding="utf-8")
+    manifest.write_text(
+        json.dumps(
+            {
+                "post_abi": 1,
+                "exports": [
+                    {
+                        "name": "foo",
+                        "c_symbol": "pp_foo",
+                        "params": ["Float64"],
+                        "return_dtype": "Float64",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     res = CliRunner().invoke(
-        main, ["compare", str(old_p), str(new_p), "--post-manifest", str(manifest),
-               "--format", "json"],
+        main,
+        [
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--post-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        ],
     )
     assert res.exit_code == 0, res.output  # kernel churn demoted -> compatible
-    doc = json.loads(res.output[res.output.find("{"):])
+    doc = json.loads(res.output[res.output.find("{") :])
     demoted = json.dumps(doc.get("surface_scope", {}))
     assert "__pp_foo_impl" in demoted
 
 
-def test_post_manifest_ledger_shown_even_with_no_scope_public_headers(tmp_path: Path) -> None:
+def test_post_manifest_ledger_shown_even_with_no_scope_public_headers(
+    tmp_path: Path,
+) -> None:
     # Codex: a manifest allowlist scopes the comparison independently of header
     # scoping. Combined with --no-scope-public-headers, demoted findings must
     # still appear in the surface_scope ledger — a clean verdict must not hide
     # that filtering happened.
     old_p = tmp_path / "old.json"
     new_p = tmp_path / "new.json"
-    old_p.write_text(snapshot_to_json(_snap([_cfn("pp_foo"), _cfn("__pp_foo_impl")])),
-                     encoding="utf-8")
+    old_p.write_text(
+        snapshot_to_json(_snap([_cfn("pp_foo"), _cfn("__pp_foo_impl")])),
+        encoding="utf-8",
+    )
     new_p.write_text(snapshot_to_json(_snap([_cfn("pp_foo")])), encoding="utf-8")
 
     manifest = tmp_path / "m.json"
-    manifest.write_text(json.dumps({
-        "post_abi": 1,
-        "exports": [{"name": "foo", "c_symbol": "pp_foo",
-                     "params": ["Float64"], "return_dtype": "Float64"}],
-    }), encoding="utf-8")
+    manifest.write_text(
+        json.dumps(
+            {
+                "post_abi": 1,
+                "exports": [
+                    {
+                        "name": "foo",
+                        "c_symbol": "pp_foo",
+                        "params": ["Float64"],
+                        "return_dtype": "Float64",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     res = CliRunner().invoke(
-        main, ["compare", str(old_p), str(new_p), "--post-manifest", str(manifest),
-               "--no-scope-public-headers", "--format", "json"],
+        main,
+        [
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--post-manifest",
+            str(manifest),
+            "--no-scope-public-headers",
+            "--format",
+            "json",
+        ],
     )
     assert res.exit_code == 0, res.output
-    doc = json.loads(res.output[res.output.find("{"):])
+    doc = json.loads(res.output[res.output.find("{") :])
     assert "surface_scope" in doc, "ledger hidden despite manifest scoping"
     assert "__pp_foo_impl" in json.dumps(doc["surface_scope"])
 
 
-def test_compare_cli_post_manifest_keeps_omitted_old_pp_symbol_in_scope(tmp_path: Path) -> None:
+def test_compare_cli_post_manifest_keeps_omitted_old_pp_symbol_in_scope(
+    tmp_path: Path,
+) -> None:
     # Regression: a new manifest that omits a still-exported old pp_* wrapper
     # must not be able to scope that wrapper's ABI changes out of the verdict.
     old_p = tmp_path / "old.json"
     new_p = tmp_path / "new.json"
     old_p.write_text(
-        snapshot_to_json(_snap([_cfn("pp_foo"), _cfn("pp_undeclared", "int", ("int",))])),
+        snapshot_to_json(
+            _snap([_cfn("pp_foo"), _cfn("pp_undeclared", "int", ("int",))])
+        ),
         encoding="utf-8",
     )
     new_p.write_text(
-        snapshot_to_json(_snap([_cfn("pp_foo"), _cfn("pp_undeclared", "long", ("long",))])),
+        snapshot_to_json(
+            _snap([_cfn("pp_foo"), _cfn("pp_undeclared", "long", ("long",))])
+        ),
         encoding="utf-8",
     )
 
     manifest = tmp_path / "m.json"
-    manifest.write_text(json.dumps({
-        "post_abi": 1,
-        "exports": [{"name": "foo", "c_symbol": "pp_foo",
-                     "params": ["Float64"], "return_dtype": "Float64"}],
-    }), encoding="utf-8")
+    manifest.write_text(
+        json.dumps(
+            {
+                "post_abi": 1,
+                "exports": [
+                    {
+                        "name": "foo",
+                        "c_symbol": "pp_foo",
+                        "params": ["Float64"],
+                        "return_dtype": "Float64",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     res = CliRunner().invoke(
-        main, ["compare", str(old_p), str(new_p), "--post-manifest", str(manifest),
-               "--no-scope-public-headers", "--format", "json"],
+        main,
+        [
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--post-manifest",
+            str(manifest),
+            "--no-scope-public-headers",
+            "--format",
+            "json",
+        ],
     )
     assert res.exit_code == 4, res.output
-    doc = json.loads(res.output[res.output.find("{"):])
+    doc = json.loads(res.output[res.output.find("{") :])
     assert doc["verdict"] == "BREAKING"
     assert "pp_undeclared" in json.dumps(doc.get("changes", []))
     assert "pp_undeclared" not in json.dumps(doc.get("surface_scope", {}))
@@ -330,18 +480,29 @@ def test_contract_scope_allowlist_unions_old_committed_symbols() -> None:
     # in-surface so manifest omissions cannot hide their ABI changes.
     from abicheck.post_manifest import contract_scope_allowlist, parse_manifest
 
-    manifest = parse_manifest({"post_abi": 1, "exports": [{
-        "name": "foo", "c_symbol": "pp_foo", "params": ["Float64"],
-        "return_dtype": "Float64"}]})
-    old = _snap([_cfn("pp_foo"), _cfn("pp_removed"), _cfn("pp_undeclared"),
-                 _cfn("__pp_impl")])
+    manifest = parse_manifest(
+        {
+            "post_abi": 1,
+            "exports": [
+                {
+                    "name": "foo",
+                    "c_symbol": "pp_foo",
+                    "params": ["Float64"],
+                    "return_dtype": "Float64",
+                }
+            ],
+        }
+    )
+    old = _snap(
+        [_cfn("pp_foo"), _cfn("pp_removed"), _cfn("pp_undeclared"), _cfn("__pp_impl")]
+    )
     new = _snap([_cfn("pp_foo"), _cfn("pp_undeclared")])
 
     allow = contract_scope_allowlist(manifest, old, new)
-    assert "pp_foo" in allow            # committed
-    assert "pp_removed" in allow        # removed committed wrapper -> kept in-surface
-    assert "pp_undeclared" in allow      # old committed wrapper -> kept in-surface
-    assert "__pp_impl" not in allow     # private kernel -> demoted
+    assert "pp_foo" in allow  # committed
+    assert "pp_removed" in allow  # removed committed wrapper -> kept in-surface
+    assert "pp_undeclared" in allow  # old committed wrapper -> kept in-surface
+    assert "__pp_impl" not in allow  # private kernel -> demoted
 
 
 def test_contract_scope_allowlist_excludes_removed_data_variables() -> None:
@@ -351,18 +512,34 @@ def test_contract_scope_allowlist_excludes_removed_data_variables() -> None:
     from abicheck.model import Variable
     from abicheck.post_manifest import contract_scope_allowlist, parse_manifest
 
-    manifest = parse_manifest({"post_abi": 1, "exports": [{
-        "name": "foo", "c_symbol": "pp_foo", "params": ["Float64"],
-        "return_dtype": "Float64"}]})
-    old = AbiSnapshot(library="l", version="1", functions=[_cfn("pp_foo")],
-                      variables=[Variable(name="pp_data", mangled="pp_data", type="int")])
+    manifest = parse_manifest(
+        {
+            "post_abi": 1,
+            "exports": [
+                {
+                    "name": "foo",
+                    "c_symbol": "pp_foo",
+                    "params": ["Float64"],
+                    "return_dtype": "Float64",
+                }
+            ],
+        }
+    )
+    old = AbiSnapshot(
+        library="l",
+        version="1",
+        functions=[_cfn("pp_foo")],
+        variables=[Variable(name="pp_data", mangled="pp_data", type="int")],
+    )
     new = _snap([_cfn("pp_foo")])  # pp_data variable removed
 
     allow = contract_scope_allowlist(manifest, old, new)
     assert "pp_data" not in allow
 
 
-def test_compare_cli_malformed_post_manifest_is_clean_usage_error(tmp_path: Path) -> None:
+def test_compare_cli_malformed_post_manifest_is_clean_usage_error(
+    tmp_path: Path,
+) -> None:
     # A malformed --post-manifest must produce a clean usage error, not a raw
     # traceback (the load is wrapped in click.UsageError).
     old_p = tmp_path / "old.json"
@@ -373,7 +550,8 @@ def test_compare_cli_malformed_post_manifest_is_clean_usage_error(tmp_path: Path
     bad.write_text("{ not valid json", encoding="utf-8")
 
     res = CliRunner().invoke(
-        main, ["compare", str(old_p), str(new_p), "--post-manifest", str(bad)],
+        main,
+        ["compare", str(old_p), str(new_p), "--post-manifest", str(bad)],
     )
     assert res.exit_code != 0
     assert "--post-manifest" in res.output and "invalid JSON" in res.output
@@ -387,9 +565,19 @@ def test_contract_scope_allowlist_recovers_hidden_wrapper() -> None:
     from abicheck.model import Visibility
     from abicheck.post_manifest import contract_scope_allowlist, parse_manifest
 
-    manifest = parse_manifest({"post_abi": 1, "exports": [{
-        "name": "foo", "c_symbol": "pp_foo", "params": ["Float64"],
-        "return_dtype": "Float64"}]})
+    manifest = parse_manifest(
+        {
+            "post_abi": 1,
+            "exports": [
+                {
+                    "name": "foo",
+                    "c_symbol": "pp_foo",
+                    "params": ["Float64"],
+                    "return_dtype": "Float64",
+                }
+            ],
+        }
+    )
     old = _snap([_cfn("pp_foo"), _cfn("pp_hidden")])
     hidden = _cfn("pp_hidden")
     hidden.visibility = Visibility.HIDDEN
@@ -407,22 +595,42 @@ def test_compare_cli_removed_committed_wrapper_still_breaks(tmp_path: Path) -> N
     # omits it. Its symbol still lives in the old binary.
     old_p = tmp_path / "old.json"
     new_p = tmp_path / "new.json"
-    old_p.write_text(snapshot_to_json(_snap([_cfn("pp_foo"), _cfn("pp_removed")])),
-                     encoding="utf-8")
+    old_p.write_text(
+        snapshot_to_json(_snap([_cfn("pp_foo"), _cfn("pp_removed")])), encoding="utf-8"
+    )
     new_p.write_text(snapshot_to_json(_snap([_cfn("pp_foo")])), encoding="utf-8")
 
     manifest = tmp_path / "new.json.manifest"
-    manifest.write_text(json.dumps({
-        "post_abi": 2,  # pp_removed dropped from v2 manifest
-        "exports": [{"name": "foo", "c_symbol": "pp_foo",
-                     "params": ["Float64"], "return_dtype": "Float64"}],
-    }), encoding="utf-8")
+    manifest.write_text(
+        json.dumps(
+            {
+                "post_abi": 2,  # pp_removed dropped from v2 manifest
+                "exports": [
+                    {
+                        "name": "foo",
+                        "c_symbol": "pp_foo",
+                        "params": ["Float64"],
+                        "return_dtype": "Float64",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     res = CliRunner().invoke(
-        main, ["compare", str(old_p), str(new_p), "--post-manifest", str(manifest),
-               "--format", "json"],
+        main,
+        [
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--post-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        ],
     )
     assert res.exit_code != 0, res.output  # removed committed wrapper -> breaking
-    doc = json.loads(res.output[res.output.find("{"):])
+    doc = json.loads(res.output[res.output.find("{") :])
     # pp_removed must be a live finding, not demoted to the filtered ledger.
     assert "pp_removed" not in json.dumps(doc.get("surface_scope", {}))
