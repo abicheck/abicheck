@@ -19,13 +19,16 @@ from pathlib import Path
 import pytest
 
 from abicheck.comparability import (
+    ComparabilityMismatch,
     IncludeDir,
     check_contracts_comparable,
     compute_extraction_contract,
 )
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
+from abicheck.macho_metadata import MachoMetadata
 from abicheck.model import AbiSnapshot, ExtractionContract
+from abicheck.pe_metadata import PeMetadata
 
 
 def _write(path: Path, content: str) -> Path:
@@ -413,6 +416,31 @@ def test_symbols_only_with_no_provenance_returns_no_contract():
     assert compute_extraction_contract(l2_frontend_ran=False) is None
 
 
+def test_symbols_only_public_header_paths_are_root_relative_not_absolute(tmp_path):
+    # Codex review (PR #624): a symbols-only dump's public_header_paths must
+    # normalize the same root-relative way declared_headers does, or an
+    # ordinary two-checkout compare relying only on --public-header
+    # provenance would spuriously ScopeMismatchError on checkout-root paths
+    # alone.
+    old_contract = compute_extraction_contract(
+        public_header_paths=[tmp_path / "checkout-old" / "include" / "foo.h"]
+    )
+    new_contract = compute_extraction_contract(
+        public_header_paths=[tmp_path / "checkout-new" / "include" / "foo.h"]
+    )
+    assert old_contract.scope_fingerprint == new_contract.scope_fingerprint
+
+
+def test_symbols_only_public_header_dirs_are_root_relative_not_absolute(tmp_path):
+    old_contract = compute_extraction_contract(
+        public_header_dirs=[tmp_path / "checkout-old" / "api" / "include"]
+    )
+    new_contract = compute_extraction_contract(
+        public_header_dirs=[tmp_path / "checkout-new" / "api" / "include"]
+    )
+    assert old_contract.scope_fingerprint == new_contract.scope_fingerprint
+
+
 # ---------------------------------------------------------------------------
 # unreadable header content fails extraction outright (no silent sentinel)
 # ---------------------------------------------------------------------------
@@ -521,6 +549,18 @@ def test_gate_platform_identity_carve_out_still_raises_when_binaries_agree():
         check_contracts_comparable(old, new)
 
 
+def test_gate_platform_identity_carve_out_covers_elf_class_change():
+    # Codex review (PR #624): EM_RISCV shares e_machine/EI_DATA across word
+    # sizes, so an RV32 -> RV64 change (a genuine elf_class_changed) must
+    # still be recognized as a real binary-platform axis difference, not
+    # masked by identical machine/endianness alone.
+    old_contract = compute_extraction_contract(l2_frontend_ran=True, pointer_width=32)
+    new_contract = compute_extraction_contract(l2_frontend_ran=True, pointer_width=64)
+    old = _snap(old_contract, elf=ElfMetadata(machine="EM_RISCV", elf_class=32))
+    new = _snap(new_contract, elf=ElfMetadata(machine="EM_RISCV", elf_class=64))
+    check_contracts_comparable(old, new)  # must not raise
+
+
 def test_gate_carve_out_does_not_cover_a_co_occurring_non_platform_field(tmp_path):
     # The carve-out is scoped to target/pointer-width/endianness alone: a
     # target mismatch alongside a genuinely different compiler_family must
@@ -539,3 +579,88 @@ def test_gate_carve_out_does_not_cover_a_co_occurring_non_platform_field(tmp_pat
     new = _snap(new_contract, elf=ElfMetadata(machine="EM_AARCH64"))
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
+
+
+def test_gate_platform_identity_carve_out_covers_pe():
+    old_contract = compute_extraction_contract(
+        l2_frontend_ran=True, target_triple="x86_64-pc-windows-msvc"
+    )
+    new_contract = compute_extraction_contract(
+        l2_frontend_ran=True, target_triple="aarch64-pc-windows-msvc"
+    )
+    old = _snap(old_contract, pe=PeMetadata(machine="IMAGE_FILE_MACHINE_AMD64"))
+    new = _snap(new_contract, pe=PeMetadata(machine="IMAGE_FILE_MACHINE_ARM64"))
+    check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_platform_identity_carve_out_covers_macho():
+    old_contract = compute_extraction_contract(
+        l2_frontend_ran=True, target_triple="x86_64-apple-darwin"
+    )
+    new_contract = compute_extraction_contract(
+        l2_frontend_ran=True, target_triple="arm64-apple-darwin"
+    )
+    old = _snap(old_contract, macho=MachoMetadata(cpu_type="X86_64"))
+    new = _snap(new_contract, macho=MachoMetadata(cpu_type="ARM64"))
+    check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_carve_out_does_not_apply_without_any_binary_platform_metadata():
+    # Neither side carries elf/pe/macho metadata at all -- _binary_platform_axis
+    # returns None for both, so the carve-out cannot confirm a genuine
+    # architecture difference and the mismatch still raises.
+    old_contract = compute_extraction_contract(
+        l2_frontend_ran=True, target_triple="x86_64-linux-gnu"
+    )
+    new_contract = compute_extraction_contract(
+        l2_frontend_ran=True, target_triple="aarch64-linux-gnu"
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(_snap(old_contract), _snap(new_contract))
+
+
+# ---------------------------------------------------------------------------
+# diagnostic=True mode: --diagnostic-comparison's escape hatch
+# ---------------------------------------------------------------------------
+
+
+def test_gate_diagnostic_mode_returns_descriptor_instead_of_raising_on_scope(tmp_path):
+    old_h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
+    new_h = _write(tmp_path / "v2" / "bar.h", "int f(void);\n")
+    old = _snap(compute_extraction_contract(declared_headers=[old_h]))
+    new = _snap(compute_extraction_contract(declared_headers=[new_h]))
+    result = check_contracts_comparable(old, new, diagnostic=True)
+    assert isinstance(result, ComparabilityMismatch)
+    assert result.kind == "scope"
+
+
+def test_gate_diagnostic_mode_returns_descriptor_instead_of_raising_on_profile(
+    tmp_path,
+):
+    dep_old = _write(tmp_path / "d1" / "dep.h", "struct Dep { int x; };\n")
+    dep_new = _write(tmp_path / "d2" / "dep.h", "struct Dep { int x; int y; };\n")
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            declared_includes=[IncludeDir(tmp_path / "d1")],
+            depfile_resolved_paths=[dep_old],
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            declared_includes=[IncludeDir(tmp_path / "d2")],
+            depfile_resolved_paths=[dep_new],
+        )
+    )
+    result = check_contracts_comparable(old, new, diagnostic=True)
+    assert isinstance(result, ComparabilityMismatch)
+    assert result.kind == "profile"
+
+
+def test_gate_diagnostic_mode_returns_none_when_comparable(tmp_path):
+    old_h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
+    new_h = _write(tmp_path / "v2" / "foo.h", "int f(void);\n")
+    old = _snap(compute_extraction_contract(declared_headers=[old_h]))
+    new = _snap(compute_extraction_contract(declared_headers=[new_h]))
+    assert check_contracts_comparable(old, new, diagnostic=True) is None

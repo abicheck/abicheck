@@ -16,24 +16,35 @@
 and the gate that proves two snapshots were extracted comparably before
 ``compare`` is allowed to produce a verdict.
 
-**Scope of this module today (ADR-050 "Phase A, slice 1" — see
+**Scope of this module today (ADR-050 "Phase A, slice 2" — see
 ``docs/development/plans/g32-comparability-contract-and-multi-tu-manifest.md``
-Phase A): the fingerprint algorithm and the gate itself, as pure,
-independently unit-tested functions.** Not yet wired in:
+Phase A): the fingerprint algorithm and the gate, wired into
+``checker.compare`` (the Tier-1 core) only.** Every snapshot produced today
+still has ``contract=None`` (see below), so the gate stays fully inert in
+practice until that changes — but the call site itself, and the
+``diagnostic_comparison``/``contract_coverage``/``assurance`` plumbing
+around it, are real. Not yet wired in:
 
 - ``dumper.py`` does not call :func:`compute_extraction_contract` yet, so
   every freshly-produced snapshot still has ``contract=None`` — the gate
-  below is fully specified but currently inert in the real CLI/API surface.
-- :func:`check_contracts_comparable` is not yet called from
-  ``checker.compare`` or any of the ADR's other six entry points
-  (``service.py``, ``mcp_server.py``, ``cli_compare_release.py``,
-  ``compat/cli.py``, ``cli_scan.py``, ``stack_checker.py``).
+  is fully wired into ``checker.compare`` but currently inert for that
+  reason, not because the call site is missing.
+- :func:`check_contracts_comparable` is not yet called from any of the
+  ADR's other six entry points (``service.py``'s ``CompareRequest``/
+  ``run_compare_request``/legacy ``run_compare`` shim, ``mcp_server.py``,
+  ``cli_compare_release.py``, ``compat/cli.py``, ``cli_scan.py``,
+  ``stack_checker.py``) — only ``checker.compare`` itself calls it so far,
+  so a caller reaching `compare()` **only** through one of those wrappers
+  (every real front-end today) still can't reach ``diagnostic_comparison``
+  or observe a raised mismatch as anything but an unhandled exception.
 - The legacy-CLI labeled ``--include old:LABEL=PATH`` grammar
   (``SidedIncludePathParam``) does not exist yet; this module accepts a
   resolved ``label`` per :class:`IncludeDir` directly; only the CLI-parsing
   glue that would populate it from a command line is missing.
-- ``snapshot_cache.py``'s cache-key order-sensitivity fix is not part of
-  this module.
+- ``snapshot_cache.py``'s cache-key order-sensitivity fix, the new exit
+  codes, and every reporter (``reporter.py``/``sarif.py``/
+  ``junit_report.py``/``html_report.py``)/``aggregate.py``/``action/run.sh``
+  change the ADR's D2 section calls for are not part of this module either.
 
 These are tracked as explicit follow-up work, not silently dropped scope.
 
@@ -112,17 +123,6 @@ def _is_ancestor_or_equal(root: Path, path: Path) -> bool:
     root = _resolved(root)
     path = _resolved(path)
     return path == root or root in path.parents
-
-
-def _common_ancestor_of_parents(paths: Sequence[Path]) -> Path | None:
-    """The common ancestor **directory** of ``paths``' own *parent*
-    directories (never of the paths themselves) — taking the parent first
-    is what keeps a single-header side's basename from collapsing to an
-    empty/root marker (ADR-050 D1)."""
-    if not paths:
-        return None
-    parents = [str(_resolved(p).parent) for p in paths]
-    return Path(os.path.commonpath(parents))
 
 
 def _content_hash(path: Path) -> str:
@@ -346,19 +346,36 @@ def compute_extraction_contract(
     scope_fingerprint: str | None = None
     scope_fields: dict[str, str] = {}
     if scope_inputs_present:
-        root = _common_ancestor_of_parents(declared_headers)
-        if root is not None:
-            normalized_headers = sorted(
-                str(_resolved(h).relative_to(root)) for h in declared_headers
-            )
-        else:
-            normalized_headers = []
+        # All three scope-identity inputs normalize against one shared,
+        # side-local root — never raw absolute paths (Codex review, PR
+        # #624): a lone `--public-header`/`--public-header-dir` provenance
+        # input (the symbols-only-with-provenance case, no declared_headers
+        # at all) is exactly as checkout-root-dependent as declared_headers,
+        # and hashing it unnormalized would make an ordinary two-checkout
+        # compare relying only on public-header provenance spuriously
+        # ScopeMismatchError. declared_headers/public_header_paths are
+        # files (use their parent for the root, preserving the basename,
+        # the same single-entry-preserving trick used everywhere else in
+        # this function); public_header_dirs are
+        # themselves directories, so their *own* parent is the analogous
+        # root candidate (preserving the directory's own basename the same
+        # way a lone header's basename survives).
+        # root_candidates is never empty here: scope_inputs_present is true
+        # (checked above) iff at least one of these same three sequences is
+        # non-empty.
+        root_candidates = [
+            str(_resolved(p).parent)
+            for p in (*declared_headers, *public_header_paths, *public_header_dirs)
+        ]
+        root = Path(os.path.commonpath(root_candidates))
+
+        def _normalize(paths: Sequence[Path]) -> list[str]:
+            return sorted(str(_resolved(p).relative_to(root)) for p in paths)
+
         scope_fields = {
-            "headers": "|".join(normalized_headers),
-            "public_header_paths": "|".join(
-                sorted(str(p) for p in public_header_paths)
-            ),
-            "public_header_dirs": "|".join(sorted(str(p) for p in public_header_dirs)),
+            "headers": "|".join(_normalize(declared_headers)),
+            "public_header_paths": "|".join(_normalize(public_header_paths)),
+            "public_header_dirs": "|".join(_normalize(public_header_dirs)),
         }
         scope_fingerprint = _sha256_of(*[scope_fields[k] for k in SCOPE_FIELD_KEYS])
 
@@ -370,17 +387,30 @@ def compute_extraction_contract(
     )
 
 
-def _binary_platform_axis(snap: AbiSnapshot) -> tuple[str, str, str] | None:
+def _binary_platform_axis(snap: AbiSnapshot) -> tuple[str, ...] | None:
     """Read the same binary-header platform-identity fields
     ``elf_machine_changed``/``elf_class_changed``/``elf_endianness_changed``
     (and PE/Mach-O equivalents) already detect directly, so the profile
     carve-out below can confirm a target-only mismatch corresponds to a
     genuine architecture difference rather than a misconfigured extraction.
-    Returns None when no binary-derived platform metadata is available."""
+    Returns None when no binary-derived platform metadata is available.
+
+    Includes ELF's ``elf_class`` (32/64-bit) alongside ``machine``/``ei_data``
+    (Codex review, PR #624) — a family that shares ``e_machine`` and
+    endianness across word sizes (e.g. ``EM_RISCV`` RV32 vs. RV64) would
+    otherwise produce an identical axis on both sides despite a genuine
+    class change, making the carve-out below wrongly refuse to defer to
+    ``diff_platform.py``'s more specific ``elf_class_changed``.
+    """
     if snap.elf is not None:
         elf_machine = getattr(snap.elf, "machine", "")
         if elf_machine:
-            return ("elf", elf_machine, getattr(snap.elf, "ei_data", ""))
+            return (
+                "elf",
+                elf_machine,
+                getattr(snap.elf, "ei_data", ""),
+                str(getattr(snap.elf, "elf_class", "")),
+            )
     if snap.pe is not None:
         pe_machine = getattr(snap.pe, "machine", "")
         if pe_machine:
@@ -392,7 +422,20 @@ def _binary_platform_axis(snap: AbiSnapshot) -> tuple[str, str, str] | None:
     return None
 
 
-def check_contracts_comparable(old: AbiSnapshot, new: AbiSnapshot) -> None:
+@dataclass(frozen=True)
+class ComparabilityMismatch:
+    """Returned by :func:`check_contracts_comparable` in ``diagnostic=True``
+    mode instead of raising — describes the one mismatch that would
+    otherwise have raised (scope is checked first, so a scope mismatch
+    shadows a co-occurring profile one, same as the raising path)."""
+
+    kind: str  # "scope" | "profile"
+    reason: str
+
+
+def check_contracts_comparable(
+    old: AbiSnapshot, new: AbiSnapshot, *, diagnostic: bool = False
+) -> ComparabilityMismatch | None:
     """ADR-050 D2 — the comparability gate. Raises :class:`ProfileMismatchError`
     or :class:`ScopeMismatchError` when both sides carry the corresponding
     fingerprint and it differs; does nothing (including when one or both
@@ -417,6 +460,12 @@ def check_contracts_comparable(old: AbiSnapshot, new: AbiSnapshot) -> None:
     differ on that axis, this is a misconfigured extraction (e.g. a
     cross-compiler flag set for only one side), not a legitimate
     cross-architecture compare, and still raises.
+
+    ``diagnostic=True`` (ADR-050's ``--diagnostic-comparison`` escape hatch)
+    downgrades a hard-fail into a :class:`ComparabilityMismatch` descriptor
+    returned to the caller instead of raised — the one sanctioned way to
+    force a tentative diff through a genuine contract mismatch. ``None`` is
+    returned (in either mode) when the pair is comparable.
     """
     old_contract = old.contract
     new_contract = new.contract
@@ -428,12 +477,15 @@ def check_contracts_comparable(old: AbiSnapshot, new: AbiSnapshot) -> None:
         and new_contract.scope_fingerprint is not None
         and old_contract.scope_fingerprint != new_contract.scope_fingerprint
     ):
-        raise ScopeMismatchError(
+        reason = (
             "old and new snapshots do not cover the same declared surface "
             "(scope_fingerprint mismatch) — the comparison is not "
             "comparable. This commonly means a manifest/CLI-flag drift "
             "between the two extraction runs, not a real API change."
         )
+        if diagnostic:
+            return ComparabilityMismatch(kind="scope", reason=reason)
+        raise ScopeMismatchError(reason)
 
     if (
         old_contract is not None
@@ -453,10 +505,15 @@ def check_contracts_comparable(old: AbiSnapshot, new: AbiSnapshot) -> None:
             old_axis = _binary_platform_axis(old)
             new_axis = _binary_platform_axis(new)
             if old_axis is not None and new_axis is not None and old_axis != new_axis:
-                return  # genuine cross-architecture compare; diff_platform.py handles it
-        raise ProfileMismatchError(
+                return None  # genuine cross-architecture compare; diff_platform.py handles it
+        reason = (
             "old and new snapshots were extracted under different compile "
             f"contexts (profile_fingerprint mismatch; differing fields: "
             f"{', '.join(sorted(differing)) or 'unknown'}) — the comparison "
             "is not comparable."
         )
+        if diagnostic:
+            return ComparabilityMismatch(kind="profile", reason=reason)
+        raise ProfileMismatchError(reason)
+
+    return None
