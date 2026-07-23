@@ -733,6 +733,7 @@ def _to_markdown_root_cause(
     result: DiffResult,
     show_only: str | None = None,
     show_recommendation: bool = False,
+    show_impact: bool = False,
     *,
     severity_config: SeverityConfig | None = None,
 ) -> str:
@@ -804,6 +805,9 @@ def _to_markdown_root_cause(
 
     _append_redundancy_note(lines, result)
     _append_suppression_note(lines, result)
+
+    if show_impact:
+        lines += _build_impact_table(result, displayed_changes=changes)
 
     lines += _footer_lines()
     return "\n".join(lines)
@@ -1284,6 +1288,7 @@ def to_markdown(
                 result,
                 show_only=show_only,
                 show_recommendation=show_recommendation,
+                show_impact=show_impact,
                 severity_config=severity_config,
             )
         )

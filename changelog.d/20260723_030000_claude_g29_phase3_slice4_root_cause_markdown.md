@@ -13,4 +13,6 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   function moved to `reporter_markdown.py` (`_group_changes_by_root_cause`,
   alongside `_finding_id`/`_root_cause_key_and_display`) so the JSON and
   markdown renderers share one grouping decision instead of risking drift
-  between two implementations. See `docs/user-guide/output-formats.md`.
+  between two implementations. `--show-impact` (Codex review) appends the
+  same Impact Summary table full/leaf markdown already support. See
+  `docs/user-guide/output-formats.md`.

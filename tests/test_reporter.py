@@ -676,6 +676,17 @@ class TestRootCauseMarkdown:
         md = to_markdown(r, report_mode="root-cause", severity_config=PRESET_DEFAULT)
         assert "## Severity Configuration" in md
 
+    def test_show_impact_appends_impact_table(self):
+        """Codex review: --show-impact silently dropped the Impact Summary
+        table under --report-mode root-cause, unlike full/leaf markdown."""
+        c = Change(
+            ChangeKind.TYPE_SIZE_CHANGED, "X", "size changed",
+            affected_symbols=["f"], caused_count=1,
+        )
+        r = _result(Verdict.BREAKING, changes=[c])
+        md = to_markdown(r, report_mode="root-cause", show_impact=True)
+        assert "Impact Summary" in md
+
 
 class TestMarkdownReporter:
     def test_no_change_contains_no_change(self):

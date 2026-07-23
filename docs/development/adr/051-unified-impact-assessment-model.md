@@ -385,9 +385,9 @@ line (kind, description, old/new value, impact) so the per-finding detail
 matches every other markdown mode.
 
 To let markdown and JSON share the exact same grouping decision without a
-markdown → JSON import (this module is a leaf `reporter_markdown` imports
-into; `reporter` re-exports its names, never the reverse — see that module's
-own docstring), the grouping logic itself moved: `_finding_id`,
+markdown → JSON import (`reporter_markdown.py` is a leaf module `reporter.py`
+imports from, never the reverse — see that module's own docstring), the
+grouping logic itself moved: `_finding_id`,
 `_root_cause_key_and_display`, and a new `_group_changes_by_root_cause`
 (factored out of `_to_json_root_cause`, which now calls it too) all now live
 in `reporter_markdown.py`, with `reporter.py` importing them back via its
@@ -396,6 +396,13 @@ grouping function — they cannot disagree about which findings share a root
 cause the way two independently-written implementations could drift.
 `--report-mode root-cause` still renders as `full` for `--format sarif`/
 `junit` (unchanged from Slice 3).
+
+**Follow-up fix (Codex review), same PR:** the initial version of
+`_to_markdown_root_cause` did not accept/forward `show_impact`, so
+`--report-mode root-cause --show-impact` silently dropped the Impact
+Summary table that full/leaf markdown both append. Fixed by threading
+`show_impact` through to `_build_impact_table`, matching the other two
+markdown modes.
 
 ## Deliberately not implemented this slice
 
