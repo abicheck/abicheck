@@ -52,6 +52,13 @@ it should read in CHANGELOG.md. Delete the other sections.
   requesting `--depth build`/`source` evidence had no way to actually reach the
   CLI's evidence flags. Now forwarded (scoped to the new/candidate side for
   `sources`/`build-info`, matching `compare`'s own `new=`-prefixed syntax).
+- **GitHub Action `compare` mode no longer forwards `--depth`/`--sources`/
+  `--build-info`/`--config` for directory or package operands** — the CLI's
+  per-library release fan-out rejects those flags outright for that shape, so
+  every `check-target` `kind: bundle` check (or any other directory/package
+  `compare` invocation) with a baseline resolved would fail as a usage error
+  before comparing anything. `action/run.sh` now skips that flag block when
+  either operand is a directory/package.
 
 <!--
 ### Performance

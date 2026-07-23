@@ -331,10 +331,21 @@ elif [[ "$MODE" == "compare" ]]; then
   # dropped in compare mode (only dump/scan forwarded them) — a real gap
   # flagged by review: a --depth build/source compare request had no way to
   # actually reach the CLI's evidence flags at all.
-  add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
-  add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
-  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  add_single_flag "--depth" "${INPUT_DEPTH:-}"
+  #
+  # Skipped entirely when either operand is a directory/package: the CLI's
+  # per-library release fan-out (ADR-037 D7) doesn't collect inline
+  # build/source evidence and rejects --sources/--build-info/--config/--depth
+  # outright for that shape (_reject_evidence_flags_for_set_inputs) — passing
+  # them here would turn every directory/package (e.g. check-target's
+  # kind: bundle) comparison into a hard usage error instead of the intended
+  # comparison (Codex review).
+  if ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+     && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+    add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
+    add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
+    add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+    add_single_flag "--depth" "${INPUT_DEPTH:-}"
+  fi
 
   # Format — for SARIF, always write to a file so upload-sarif can find it.
   # sarif/html are rejected by the CLI itself (a clear UsageError, exit 64)

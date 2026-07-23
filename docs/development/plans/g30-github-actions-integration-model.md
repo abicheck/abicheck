@@ -764,6 +764,32 @@ that the shell logic looks right on paper; `tests/test_action_check_target.py`
 gained cases for both new collect-facts-failure branches and the
 `evidence-producer` validation.
 
+A fourth round of Codex review then caught a regression the evidence-
+forwarding fix above (73f1143) itself introduced: **`action.yml` always
+sets `depth: inputs.requested-depth` on the analysis step**, and for
+`kind: bundle` (or any directory/package comparison), `old-library`/
+`new-library` are directories, which routes `compare` through the CLI's
+per-library release fan-out (ADR-037 D7) — and that fan-out's own
+`_reject_evidence_flags_for_set_inputs` rejects `--depth`/`--sources`/
+`--build-info` outright as a `UsageError`, since the per-library fan-out
+never collects inline build/source evidence for a set input. Confirmed
+by reading `abicheck/cli_resolve.py`'s `_reject_evidence_flags_for_set_inputs`
+and its call site in `cli_compare_helpers.py` (fires whenever either operand
+classifies as `directory`/`package`). Before this fix, **every** `kind:
+bundle` check-target invocation with a resolved baseline would fail as a
+hard usage/orchestration error before ever producing the intended bundle
+comparison — `requested-depth` stays required in the envelope identity
+regardless, only the CLI flag was wrong to force. Fixed by gating the
+`--sources`/`--build-info`/`--config`/`--depth` block in `action/run.sh`'s
+`compare` branch on `action/run.sh`'s existing `_is_release_style_operand`
+helper (already used a few lines above to skip `--secondary-format` for the
+same directory/package shape) — checked against both `old-library` and
+`new-library`, matching the CLI's own either-side rejection condition.
+`tests/test_action_run_sh_compare_build_source.py` gained a
+`TestCompareModeSkipsEvidenceFlagsForDirectoryOperands` class proving the
+flags are omitted when either operand is a directory, even when the
+corresponding evidence inputs are set.
+
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
 Implements ADR-047 §4/§5 (`run-plan.json` generation + matrix + trailing

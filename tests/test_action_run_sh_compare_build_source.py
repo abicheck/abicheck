@@ -139,3 +139,49 @@ class TestCompareModeForwardsBuildSourceEvidence:
         assert "--build-info" not in cmd
         assert "--config" not in cmd
         assert "--depth" not in cmd
+
+
+class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:
+    """The CLI's per-library release fan-out (directory/package operands --
+    e.g. check-target's kind: bundle) rejects --sources/--build-info/
+    --config/--depth outright (_reject_evidence_flags_for_set_inputs) --
+    forwarding them here would turn every bundle comparison into a hard
+    usage error instead of running it (Codex review, PR #625)."""
+
+    def test_directory_new_library_gets_no_evidence_flags(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old-bundle"
+        new_dir = tmp_path / "new-bundle"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        cmd = _run_compare(
+            {
+                "INPUT_OLD_LIBRARY": str(old_dir),
+                "INPUT_NEW_LIBRARY": str(new_dir),
+                "INPUT_SOURCES": "/src",
+                "INPUT_BUILD_INFO": "/build",
+                "INPUT_BUILD_CONFIG": "/cfg.yml",
+                "INPUT_DEPTH": "source",
+            },
+            tmp_path,
+        )
+        assert "--sources" not in cmd
+        assert "--build-info" not in cmd
+        assert "--config" not in cmd
+        assert "--depth" not in cmd
+
+    def test_directory_old_library_alone_also_skips_evidence_flags(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old-bundle"
+        old_dir.mkdir()
+        new_json = tmp_path / "new.json"
+        new_json.write_text("{}", encoding="utf-8")
+        cmd = _run_compare(
+            {
+                "INPUT_OLD_LIBRARY": str(old_dir),
+                "INPUT_NEW_LIBRARY": str(new_json),
+                "INPUT_DEPTH": "build",
+            },
+            tmp_path,
+        )
+        assert "--depth" not in cmd
