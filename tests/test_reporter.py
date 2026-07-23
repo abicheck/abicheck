@@ -521,6 +521,34 @@ class TestRootCauseReporter:
         d = json.loads(to_json(r, report_mode="root-cause"))
         assert d["root_cause_count"] == 1
         assert d["root_causes"][0]["root"] == "ns::pub_new"
+
+    def test_anonymous_findings_with_no_symbol_stay_separate(self):
+        """Codex review: SOURCE_FACT_COVERAGE_INCOMPLETE/
+        SOURCE_BINARY_PROVENANCE_MISMATCH (source_diff.py) are both
+        constructed with symbol="" and no caused_by_type -- a bare-symbol
+        grouping fallback would collapse every such aggregate finding into
+        one fake shared root cause ("" == ""), even though none of them
+        actually correlate. Each must stay its own singleton group."""
+        a = Change(
+            ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE,
+            "",
+            "L4 source-fact evidence incomplete",
+        )
+        b = Change(
+            ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH,
+            "",
+            "source tree does not match binary",
+        )
+        r = _result(Verdict.COMPATIBLE_WITH_RISK, changes=[a, b])
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert d["root_cause_count"] == 2
+        kinds = {group["findings"][0]["kind"] for group in d["root_causes"]}
+        assert kinds == {
+            "source_fact_coverage_incomplete",
+            "source_binary_provenance_mismatch",
+        }
+        ids = {group["root_cause_id"] for group in d["root_causes"]}
+        assert len(ids) == 2
         assert d["root_causes"][0]["finding_count"] == 1
 
     def test_root_cause_id_is_stable_for_the_same_root(self):
@@ -562,9 +590,7 @@ class TestRootCauseReporter:
         breaking = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
         addition = Change(ChangeKind.FUNC_ADDED, "ns::pub_new", "added")
         r = _result(Verdict.BREAKING, changes=[breaking, addition])
-        d = json.loads(
-            to_json(r, report_mode="root-cause", show_only="breaking")
-        )
+        d = json.loads(to_json(r, report_mode="root-cause", show_only="breaking"))
         roots = {group["root"] for group in d["root_causes"]}
         assert roots == {"ns::internal::helper"}
 

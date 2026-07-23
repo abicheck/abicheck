@@ -459,18 +459,40 @@ def _to_json_root_cause(
         for c in changes
     ]
     groups: dict[str, list[dict[str, object]]] = {}
+    roots: dict[str, str] = {}
     order: list[str] = []
     for c, entry in zip(changes, entries):
-        key = c.caused_by_type or c.symbol
+        if c.caused_by_type:
+            # A derived/overlay finding naming its root cause -- groups with
+            # the root finding itself, whose own `symbol` is that same name.
+            key = c.caused_by_type
+        elif c.symbol:
+            # The root finding's own identity: a non-empty symbol is a real,
+            # meaningful correlation key (an overlay elsewhere may reference
+            # it via caused_by_type, above).
+            key = c.symbol
+        else:
+            # No real root-cause correlation available and no symbol to key
+            # on either -- key uniquely by finding_id rather than collapsing
+            # onto a shared "" (Codex review: several aggregate findings,
+            # e.g. SOURCE_FACT_COVERAGE_INCOMPLETE/SOURCE_BINARY_PROVENANCE_MISMATCH,
+            # are constructed with symbol="" and no caused_by_type, so falling
+            # back to the bare symbol collapsed every one of them into one
+            # fake shared root cause -- contradicting this slice's own
+            # contract that only caused_by_type correlates findings,
+            # everything else stays singleton).
+            key = f"finding:{entry['finding_id']}"
+        root_display = c.caused_by_type or c.symbol or c.kind.value
         if key not in groups:
             groups[key] = []
+            roots[key] = root_display
             order.append(key)
         groups[key].append(entry)
 
     root_causes = [
         {
             "root_cause_id": hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
-            "root": key,
+            "root": roots[key],
             "finding_count": len(groups[key]),
             "findings": groups[key],
         }
