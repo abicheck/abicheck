@@ -376,9 +376,12 @@ def _permitted_summary_pages(entry: dict[str, object]) -> set[str]:
     return pages
 
 
-_MD_LINK_TARGET_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+#: (?<!!) excludes image syntax (`![alt](src)` / `![alt][label]`) -- an
+#: image embed is not a navigable link, even though its bracket/paren shape
+#: otherwise matches the same pattern as a real link.
+_MD_LINK_TARGET_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 _BACKTICK_RUN_RE = re.compile(r"`+")
-_MD_REF_LINK_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
+_MD_REF_LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\[([^\]]*)\]")
 _MD_REF_DEF_RE = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 
 

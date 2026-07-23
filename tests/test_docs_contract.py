@@ -587,6 +587,45 @@ def test_page_links_to_ignores_external_links(tmp_path: Path) -> None:
     assert dc._page_links_to(page, "owner.md") is False
 
 
+def test_page_links_to_ignores_image_syntax(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`![alt](owner.md)` is an image embed, not a navigable link -- MkDocs
+    renders it as a broken <img>, not a backlink, even though its bracket/
+    paren shape otherwise matches the inline-link regex (regression test for
+    the gap flagged in PR #619 review)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text("![owner](owner.md)\n", encoding="utf-8")
+    assert dc._page_links_to(page, "owner.md") is False
+
+
+def test_page_links_to_ignores_reference_style_image_syntax(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text("![owner][owner-ref]\n\n[owner-ref]: owner.md\n", encoding="utf-8")
+    assert dc._page_links_to(page, "owner.md") is False
+
+
+def test_page_links_to_still_finds_real_link_alongside_image(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The image-exclusion fix must not swallow a genuine link elsewhere on
+    the same page."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(
+        "![diagram](diagram.png)\n\nSee [owner](owner.md) for details.\n",
+        encoding="utf-8",
+    )
+    assert dc._page_links_to(page, "owner.md") is True
+
+
 def test_page_links_to_ignores_links_inside_fenced_code_blocks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
