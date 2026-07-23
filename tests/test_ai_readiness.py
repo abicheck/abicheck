@@ -94,10 +94,13 @@ def test_adr_index_and_nav_sync_holds(car):
     assert f.errors == [], f"ADR index/nav drift: {f.errors}"
 
 
-def test_adr_index_and_nav_sync_catches_missing_nav_entry(car, tmp_path, monkeypatch):
-    """Regression test for the real bug this check exists to catch: ADR-041
-    was accepted and linked from index.md but never added to mkdocs.yml, so
-    it was never published to the site nav."""
+def test_adr_index_and_nav_sync_catches_missing_index_nav_entry(
+    car, tmp_path, monkeypatch
+):
+    """The ADR index page itself (not each individual ADR -- that
+    requirement was relaxed, see test_adr_index_nav_sync_does_not_require_
+    individual_adr_in_nav below) must be listed in mkdocs.yml nav, since
+    every ADR is reachable only through it."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
     adr_dir = fake_docs / "development" / "adr"
@@ -105,7 +108,9 @@ def test_adr_index_and_nav_sync_catches_missing_nav_entry(car, tmp_path, monkeyp
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | Accepted |\n", encoding="utf-8"
     )
-    (adr_dir / "001-example.md").write_text("# ADR-001\n", encoding="utf-8")
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
     (fake_root / "mkdocs.yml").write_text(
         "nav:\n  - Home: index.md\n", encoding="utf-8"
     )
@@ -115,9 +120,798 @@ def test_adr_index_and_nav_sync_catches_missing_nav_entry(car, tmp_path, monkeyp
 
     f = car.Findings()
     car.check_adr_index_and_nav_sync(f)
-    assert any("mkdocs.yml nav" in msg for _, msg in f.errors), (
-        f"expected a missing-from-nav error, got: {f.errors}"
+    assert any("ADR index itself" in msg for _, msg in f.errors), (
+        f"expected a missing-index-from-nav error, got: {f.errors}"
     )
+
+
+def test_adr_index_and_nav_sync_ignores_commented_out_index_nav_entry(
+    car, tmp_path, monkeypatch
+):
+    """A nav entry commented out of mkdocs.yml (`# - ADR Index:
+    development/adr/index.md`) is not published navigation -- a raw
+    whole-file regex scan for `.md` paths would still find it, incorrectly
+    satisfying the "ADR index must be in nav" requirement (regression test
+    for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | Accepted |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  # - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("ADR index itself" in msg for _, msg in f.errors), (
+        f"expected a missing-index-from-nav error, got: {f.errors}"
+    )
+
+
+def test_strip_yaml_line_comment_preserves_quoted_hash(car):
+    """A '#' inside a quoted string is not a YAML comment marker and must
+    be preserved -- only a '#' at line start or preceded by whitespace
+    starts a real comment."""
+    assert car._strip_yaml_line_comment("  - Title: 'a#b.md'") == (
+        "  - Title: 'a#b.md'"
+    )
+    assert (
+        car._strip_yaml_line_comment("  - Title: page.md  # trailing note")
+        == "  - Title: page.md  "
+    )
+    assert car._strip_yaml_line_comment("# fully commented") == ""
+
+
+def test_adr_index_nav_sync_ignores_link_hidden_in_html_comment(
+    car, tmp_path, monkeypatch
+):
+    """A link hidden inside an HTML comment (`<!-- [001](001-example.md)
+    -->`) is invisible when MkDocs renders index.md -- it must not satisfy
+    the "linked from index.md" requirement any more than a code sample
+    would (regression test for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "<!-- [001](001-example.md) -->\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("not linked from" in msg for _, msg in f.errors), (
+        f"expected a not-linked-from-index error, got: {f.errors}"
+    )
+
+
+def test_adr_index_nav_sync_rejects_replacement_link_hidden_in_inline_code(
+    car, tmp_path, monkeypatch
+):
+    """A Superseded ADR whose replacement pointer is wrapped in inline code
+    (`Superseded by \\`[ADR-002](002-example.md)\\``) renders as literal
+    code in MkDocs, not a navigable link -- it must not satisfy the
+    replacement-link requirement (regression test for the gap flagged in
+    PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | Superseded |\n"
+        "| [002](002-example.md) | Replacement | Accepted |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded by `[ADR-002](002-example.md)`\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "002-example.md").write_text(
+        "# ADR-002\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors), (
+        f"expected a missing-replacement-link error, got: {f.errors}"
+    )
+
+
+def test_adr_index_nav_sync_rejects_replacement_link_hidden_in_comment(
+    car, tmp_path, monkeypatch
+):
+    """Same as above, but the replacement link is hidden in an HTML comment
+    instead of inline code."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | Superseded |\n"
+        "| [002](002-example.md) | Replacement | Accepted |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded. <!-- [ADR-002](002-example.md) -->\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "002-example.md").write_text(
+        "# ADR-002\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors), (
+        f"expected a missing-replacement-link error, got: {f.errors}"
+    )
+
+
+def test_adr_index_nav_sync_rejects_bare_filename_mention_as_link(
+    car, tmp_path, monkeypatch
+):
+    """A bare mention of the ADR filename in prose or a code sample (not an
+    actual Markdown link) must not satisfy the "linked from index.md"
+    requirement -- MkDocs doesn't turn plain text into a navigable link, so
+    the ADR would still be unreachable from the published index page even
+    though its filename appears somewhere in the file."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "See `001-example.md` for details on this decision.\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("not linked from" in msg for _, msg in f.errors), (
+        f"expected a not-linked-from-index error, got: {f.errors}"
+    )
+
+
+def test_adr_index_nav_sync_accepts_reference_style_index_link(
+    car, tmp_path, monkeypatch
+):
+    """index.md may link an ADR using reference-style syntax
+    ([001][adr-001] with a [adr-001]: 001-example.md definition) instead of
+    an inline link -- MkDocs renders both identically, so both must satisfy
+    the "linked from index.md" requirement."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001][adr-001] | Example | Accepted |\n\n[adr-001]: 001-example.md\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
+def test_adr_index_nav_sync_accepts_indented_reference_definition(
+    car, tmp_path, monkeypatch
+):
+    """CommonMark allows a link reference definition to be indented 0-3
+    spaces, same as other block constructs -- a definition anchored
+    strictly to column 0 would miss a validly-indented one (regression test
+    for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001][adr-001] | Example | Accepted |\n\n  [adr-001]: 001-example.md\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
+def test_adr_index_nav_sync_ignores_link_syntax_inside_fenced_code(
+    car, tmp_path, monkeypatch
+):
+    """A fenced code sample demonstrating Markdown link syntax (e.g. showing
+    an author how to add an index row) must not count as a real link to the
+    ADR it mentions -- MkDocs renders a code block verbatim, not as a
+    navigable link, so an ADR only "linked" from inside one is still
+    unreachable from the published index page (regression test for the gap
+    flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "Add a new row like this:\n\n"
+        "```\n| [001](001-example.md) | Example | Accepted |\n```\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("not linked from" in msg for _, msg in f.errors), (
+        f"expected a not-linked-from-index error, got: {f.errors}"
+    )
+
+
+def test_adr_index_nav_sync_ignores_link_syntax_inside_inline_code(
+    car, tmp_path, monkeypatch
+):
+    """Same as the fenced-code case above, but for a single-backtick inline
+    code span instead of a ``` block."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "Example row: `[001](001-example.md)`\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("not linked from" in msg for _, msg in f.errors), (
+        f"expected a not-linked-from-index error, got: {f.errors}"
+    )
+
+
+def test_adr_index_nav_sync_does_not_require_individual_adr_in_nav(
+    car, tmp_path, monkeypatch
+):
+    """Relaxed rule: an ADR linked from index.md is reachable, and the index
+    itself is in nav -- an individual ADR entry is no longer required."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | Accepted |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
+def test_adr_index_nav_sync_catches_missing_status(car, tmp_path, monkeypatch):
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text("# ADR-001\n\nNo status here.\n")
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("missing a Status" in msg for _, msg in f.errors)
+
+
+def test_adr_index_nav_sync_accepts_heading_style_status(car, tmp_path, monkeypatch):
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n## Status\n\nAccepted — implemented.\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
+def test_adr_index_nav_sync_finds_replacement_link_on_wrapped_status_line(
+    car, tmp_path, monkeypatch
+):
+    """A Status paragraph that wraps across multiple physical lines (already
+    real usage in this repo) must still have its replacement link found even
+    when the link falls on a continuation line, not the first one
+    (regression test for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n"
+        "| [002](002-example.md) | Example 2 | |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded -- this decision was revisited\n"
+        "and replaced by [ADR-002](002-example.md) after further review.\n"
+    )
+    (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
+def test_adr_index_nav_sync_catches_superseded_without_replacement_link(
+    car, tmp_path, monkeypatch
+):
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded, no pointer to what replaced it.\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
+def test_adr_index_nav_sync_catches_superseded_colon_without_replacement_link(
+    car, tmp_path, monkeypatch
+):
+    """ "Superseded:" (colon, no separating whitespace/dash before the rest
+    of the sentence) must still be recognized as a Superseded status -- the
+    leading-word split previously didn't treat ':' as a delimiter, leaving
+    the token "Superseded:" which never matched the plain "superseded"
+    comparison, silently skipping the replacement-link requirement
+    (regression test for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded: no pointer to what replaced it.\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
+def test_adr_index_nav_sync_catches_bold_superseded_without_replacement_link(
+    car, tmp_path, monkeypatch
+):
+    """ "**Superseded**" (the word itself wrapped in Markdown emphasis) must
+    also be recognized -- the leading token would otherwise be
+    "**Superseded**" with the asterisks still attached, never matching the
+    plain "superseded" comparison (regression test for the gap flagged in
+    PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** **Superseded** by nothing in particular.\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
+def test_adr_index_nav_sync_accepts_superseded_with_replacement_link(
+    car, tmp_path, monkeypatch
+):
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n"
+        "| [002](002-example.md) | Example 2 | |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded by [ADR-002](002-example.md).\n"
+    )
+    (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
+def test_adr_index_nav_sync_accepts_angle_bracket_replacement_link(
+    car, tmp_path, monkeypatch
+):
+    """CommonMark's angle-bracket link destination form ([text](<url>)) is
+    a valid, MkDocs-rendered link -- the `<`/`>` wrapper must not end up as
+    part of the resolved path and cause a false "doesn't link to its
+    replacement" error (regression test for the gap flagged in PR #619
+    review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n"
+        "| [002](002-example.md) | Example 2 | |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded by [ADR-002](<002-example.md>).\n"
+    )
+    (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
+def test_adr_index_nav_sync_accepts_replacement_link_with_title(
+    car, tmp_path, monkeypatch
+):
+    """A link may carry an optional title after the destination
+    ([text](url "title")) -- the title text must not stay glued to the
+    basename and prevent it from matching the ADR filename pattern
+    (regression test for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n"
+        "| [002](002-example.md) | Example 2 | |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        '# ADR-001\n\n**Status:** Superseded by [ADR-002](002-example.md "replacement").\n'
+    )
+    (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
+def test_adr_index_nav_sync_accepts_reference_style_replacement_link(
+    car, tmp_path, monkeypatch
+):
+    """A reference-style replacement link ([ADR-002][replacement] plus a
+    [replacement]: 002-example.md definition elsewhere in the file) is a
+    valid, MkDocs-rendered link -- the inline-only scan previously missed
+    it entirely (regression test for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n"
+        "| [002](002-example.md) | Example 2 | |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded by [ADR-002][replacement].\n\n"
+        "[replacement]: 002-example.md\n"
+    )
+    (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert f.errors == []
+
+
+def test_adr_index_nav_sync_rejects_image_syntax_as_replacement(
+    car, tmp_path, monkeypatch
+):
+    """`![ADR-002](002-example.md)` is an image embed, not a navigable
+    link -- it must not satisfy the replacement-link requirement even
+    though its bracket/paren shape otherwise matches a real link
+    (regression test for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n"
+        "| [002](002-example.md) | Example 2 | |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded ![ADR-002](002-example.md).\n"
+    )
+    (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
+def test_adr_index_nav_sync_rejects_unrelated_link_as_replacement(
+    car, tmp_path, monkeypatch
+):
+    """A "Superseded" status with a link to something that isn't another ADR
+    file (e.g. a plan doc explaining the context) must not satisfy the
+    replacement-link requirement -- any link at all was previously accepted
+    (regression test for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded, see "
+        "[the plan doc](../plans/some-plan.md) for context.\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
+def test_adr_index_nav_sync_rejects_adr_shaped_link_outside_adr_dir(
+    car, tmp_path, monkeypatch
+):
+    """A link whose *basename* matches the ADR filename pattern but whose
+    target resolves outside docs/development/adr/ (e.g. a coincidentally
+    numbered file in a notes/ directory) must not satisfy the
+    replacement-link requirement -- basename-only matching previously
+    accepted it (regression test for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    notes_dir = fake_docs / "notes"
+    notes_dir.mkdir(parents=True)
+    (notes_dir / "002-plan.md").write_text("# Plan\n", encoding="utf-8")
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded, see "
+        "[the plan](../../notes/002-plan.md) for context.\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
+def test_adr_index_nav_sync_rejects_self_link_as_replacement(
+    car, tmp_path, monkeypatch
+):
+    """A "Superseded" status linking to its own file (e.g. copy-paste error,
+    or a link intended for a different ADR that was never updated) must not
+    satisfy the replacement-link requirement -- the target must be an ADR
+    *other than* the one making the claim (regression test for the gap
+    flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded by [this ADR](001-example.md).\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
+def test_adr_status_text_joins_wrapped_lines(car):
+    text = "# ADR-001\n\n**Status:** Superseded, replaced by\n[ADR-002](002-x.md).\n"
+    assert car._adr_status_text(text) == (
+        "Superseded, replaced by [ADR-002](002-x.md)."
+    )
+
+
+def test_adr_status_text_stops_at_blank_line(car):
+    text = "# ADR-001\n\n**Status:** Accepted.\n\nMore prose that isn't status.\n"
+    assert car._adr_status_text(text) == "Accepted."
+
+
+def test_adr_status_text_stops_at_next_bold_field(car):
+    text = "# ADR-001\n\n**Status:** Accepted.\n**Decision maker:** Someone.\n"
+    assert car._adr_status_text(text) == "Accepted."
+
+
+def test_adr_status_text_stops_at_heading(car):
+    text = "# ADR-001\n\n**Status:** Accepted.\n## Context\n\nBody.\n"
+    assert car._adr_status_text(text) == "Accepted."
+
+
+def test_adr_status_text_rejects_empty_heading_style_status(car):
+    """An empty `## Status` section immediately followed by the next
+    heading (no actual status content) must be treated as a missing
+    status, not silently accept that heading's own text as the status
+    (regression test for the gap flagged in PR #619 review)."""
+    text = "# ADR-001\n\n## Status\n\n## Context\n\nBody.\n"
+    assert car._adr_status_text(text) is None
 
 
 def test_no_hard_file_size_violations(car):

@@ -1,3 +1,15 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+  - contributor
+level: intermediate
+summarizes:
+  - platform-support-matrix
+lifecycle: active
+generated: false
+---
+
 # Architecture
 
 ## Overview
@@ -13,13 +25,10 @@ weaker layers are blind to and suppresses false positives they would raise. See
 the model, and [Evidence & Detectability](evidence-and-detectability.md) for the
 conceptual companion.
 
-**Supported platforms and binary formats:**
-
-| Platform | Binary format | Binary metadata | Header AST (castxml) | Debug info cross-check |
-|----------|--------------|:---------------:|:--------------------:|:----------------------:|
-| Linux | ELF (`.so`) | Yes (pyelftools) | Yes (GCC, Clang) | Yes (DWARF) |
-| Windows | PE/COFF (`.dll`) | Yes (pefile) | Yes (MSVC, MinGW) | Yes (PDB) |
-| macOS | Mach-O (`.dylib`) | Yes (macholib) | Yes (Clang, GCC) | Yes (DWARF) |
+abicheck supports Linux (ELF), Windows (PE/COFF), and macOS (Mach-O), each with
+full binary-metadata, header-AST, and debug-info cross-check support — see the
+[platform support matrix](limitations.md#platform-support-matrix) for the
+per-platform tool/format breakdown.
 
 ---
 

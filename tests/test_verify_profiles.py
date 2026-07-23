@@ -226,9 +226,14 @@ def test_pre_commit_runs_ai_readiness() -> None:
 def test_ci_ai_readiness_job_calls_verify_py() -> None:
     ci = _read(".github/workflows/ci.yml")
     assert "scripts/verify.py --profile pr --only ai-readiness" in ci
-    assert "fp-rate" in ci and "tier-accuracy" in ci and "usecase-docs-sync" in ci
     assert (
-        "scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,repo-facts"
+        "fp-rate" in ci
+        and "tier-accuracy" in ci
+        and "usecase-docs-sync" in ci
+        and "docs-contract" in ci
+    )
+    assert (
+        "scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,docs-contract,repo-facts"
         in ci
     )
 

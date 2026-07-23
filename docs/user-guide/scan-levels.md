@@ -1,3 +1,15 @@
+---
+doc_type: how-to
+audience:
+  - library-maintainer
+  - ci-owner
+level: beginner
+summarizes:
+  - evidence-model
+lifecycle: active
+generated: false
+---
+
 # Source-scan depth (`abicheck scan`)
 
 `abicheck scan` is the one-shot orchestrator over `dump`/`compare`: it classifies

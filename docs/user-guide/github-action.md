@@ -56,6 +56,12 @@ for the full matrix-dump-then-compare walkthrough.
 
 ## Inputs
 
+The tables below group inputs by task, with just enough detail to pick the
+right ones for your workflow. For the exhaustive, generated field-by-field
+list (every input/output, its exact default, and full description straight
+from `action.yml`), see the
+[GitHub Action Inputs/Outputs Reference](../reference/github-action-inputs.md).
+
 ### Library inputs
 
 | Input | Required | Description |

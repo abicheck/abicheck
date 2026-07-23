@@ -109,7 +109,7 @@ abicheck compare libfoo.abi.json build/libfoo.so --header new=include/
 Snapshots and binaries mix freely on either side of `compare`; the input
 format is auto-detected. ABIXML files are **not** readable by abicheck —
 re-dump each stored baseline once from the original binary (see
-[Baseline Management](baseline-management.md) for storage recipes).
+[Storing Baselines](baseline-storage.md) for storage recipes).
 
 ## Package comparison: `abipkgdiff` → `compare` on directories/packages
 

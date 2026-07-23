@@ -46,13 +46,13 @@ jobs:
       - name: Install package (for FP-rate / tier-accuracy / doc-sync / repo-facts gates)
         run: pip install -e ".[dev]"
       # Scoping FP-rate gate (ADR-024 §7), per-tier accuracy gate, the use-case
-      # docs sync gate, and repo_facts.json freshness — routed through
-      # scripts/verify.py, the same implementation `pixi run check` and
-      # `python scripts/verify.py --profile pr` run locally (CLAUDE.md
-      # "M0-3"), so this job can't silently diverge from the local PR-profile
-      # definition of done.
-      - name: Scoping / tier-accuracy / doc-sync / repo-facts gates
-        run: python scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,repo-facts
+      # docs sync gate, the docs/AGENTS.md ownership contract gate, and
+      # repo_facts.json freshness — routed through scripts/verify.py, the
+      # same implementation `pixi run check` and `python scripts/verify.py
+      # --profile pr` run locally (CLAUDE.md "M0-3"), so this job can't
+      # silently diverge from the local PR-profile definition of done.
+      - name: Scoping / tier-accuracy / doc-sync / docs-contract / repo-facts gates
+        run: python scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,docs-contract,repo-facts
       - name: Per-tier accuracy matrix (step-summary artifact)
         if: always()
         run: python scripts/check_tier_accuracy.py --markdown >> "$GITHUB_STEP_SUMMARY"

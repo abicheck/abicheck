@@ -47,6 +47,8 @@ nav:
       - Producing Source Facts: user-guide/producing-source-facts.md
       - Output Formats: user-guide/output-formats.md
       - Baseline Management: user-guide/baseline-management.md
+      - Creating and Comparing a Baseline: user-guide/create-baseline.md
+      - Storing Baselines: user-guide/baseline-storage.md
     - CI & Gating:
       - CI Gating Pipeline: user-guide/ci-gating.md
       - GitHub Action: user-guide/github-action.md
@@ -101,6 +103,7 @@ nav:
     - Platforms: reference/platforms.md
     - Tool Comparison: reference/tool-comparison.md
     - ABICC Flag Reference: reference/abicc-flags.md
+    - GitHub Action Inputs/Outputs: reference/github-action-inputs.md
   # Track 1 (educational): what ABI/API compatibility is and how to manage it,
   # from first principles (series part 0) to expert-level design guidance.
   - ABI/API Handling & Recommendations:
@@ -146,6 +149,7 @@ nav:
   - Development:
     - Contributing:
       - Codebase Overview: development/codebase-overview.md
+      - Writing Documentation: development/documentation.md
       - Testing: development/testing.md
       - Performance: development/performance.md
       - Troubleshooting: troubleshooting.md
@@ -162,62 +166,11 @@ nav:
       - SYCL test/abi Coverage: reference/sycl-test-abi-coverage.md
     - ADR:
       - Overview: development/adr/index.md
-      - "001: Technology Stack": development/adr/001-technology-stack.md
-      - "002: Multi-Binary Release Compare": development/adr/002-multi-binary-release-compare.md
-      - "003: Data Source Architecture": development/adr/003-data-source-architecture.md
-      - "004: Report Filtering & Dedup": development/adr/004-report-filtering-and-deduplication.md
-      - "005: Application Compat Check": development/adr/005-application-compat-check.md
-      - "006: Package-Level Comparison": development/adr/006-package-level-comparison.md
-      - "007: BTF & CTF Debug Formats": development/adr/007-btf-ctf-debug-formats.md
-      - "008: Full-Stack Dependency Validation": development/adr/008-full-stack-dependency-validation.md
-      - "009: Verdict System and Exit Codes": development/adr/009-verdict-system-and-exit-codes.md
-      - "010: Policy Profile System": development/adr/010-policy-profile-system.md
-      - "011: Change Classification Taxonomy": development/adr/011-change-classification-taxonomy.md
-      - "012: ABICC Compatibility Layer": development/adr/012-abicc-compatibility-layer.md
-      - "013: Suppression System": development/adr/013-suppression-system.md
-      - "014: Output Format Strategy": development/adr/014-output-format-strategy.md
-      - "015: Snapshot Serialization": development/adr/015-snapshot-serialization.md
-      - "016: Visibility Model": development/adr/016-visibility-model.md
-      - "017: GitHub Action": development/adr/017-github-action.md
-      - "018: Cross-Platform Support": development/adr/018-cross-platform-support.md
-      - "019: Testing Strategy": development/adr/019-testing-strategy.md
-      - "020a: Build-Context Capture": development/adr/020-build-context-capture.md
-      - "020b: SYCL & Heterogeneous Stack": development/adr/020-sycl-and-heterogeneous-stack-support.md
-      - "021a: Debug Artifact Resolution": development/adr/021-debug-artifact-resolution.md
-      - "021b: MCP Security Model": development/adr/021-mcp-security-model.md
-      - "022: Baseline Registry": development/adr/022-baseline-registry.md
-      - "023: Bundle-Aware Analysis": development/adr/023-bundle-aware-multi-binary-analysis.md
-      - "024: Public ABI Surface Resolution": development/adr/024-public-abi-surface-resolution.md
-      - "025: PR-Diff Source Evaluation": development/adr/025-pr-diff-source-evaluation.md
-      - "026: Source-Only Evidence Boundary": development/adr/026-source-only-undetectable-changes.md
-      - "027: API Surface Intelligence": development/adr/027-api-surface-intelligence.md
-      - "028: Source & Build Evidence Pack": development/adr/028-source-build-evidence-pack.md
-      - "029: Build Graph & Toolchain Context": development/adr/029-build-graph-toolchain-context-capture.md
-      - "030: Source ABI Replay": development/adr/030-source-abi-replay-and-linked-source-surface.md
-      - "031: Source Graph Augmentation": development/adr/031-source-implementation-graph-augmentation.md
-      - "032: Evidence Extractor Plugins": development/adr/032-evidence-extractor-plugin-interface.md
-      - "033: Evidence CI Rollout": development/adr/033-ci-rollout-performance-and-validation.md
-      - "034: Managed-Runtime & Non-C Frontends": development/adr/034-managed-runtime-and-non-c-abi-frontends.md
-      - "035: PR-Tier Source Intelligence & Cross-Check": development/adr/035-pr-tier-source-intelligence-and-crosscheck.md
-      - "036: Report View-Model & Canonical Severity": development/adr/036-report-view-model.md
-      - "037: CLI Interface Contract": development/adr/037-cli-interface-contract.md
-      - "038: Working With Sources": development/adr/038-build-integrated-fact-collection-variants.md
-      - "039: Build-Context Reconciliation": development/adr/039-build-context-reconciliation.md
-      - "040: compare Surface Reduction": development/adr/040-compare-surface-reduction.md
-      - "041: Compiler-Facts Semantic Impact Graph": development/adr/041-compiler-facts-semantic-impact-graph.md
-      - "042: CompatibilityDecision/GateDecision Separation": development/adr/042-compatibility-and-gate-decision-separation.md
-      - "043: Pre-1.0 CLI Surface Reset": development/adr/043-cli-pre-1.0-surface-reset.md
-      - "044: Reachability-Aware Suppression": development/adr/044-reachability-aware-suppression.md
-      - "045: Identity-Based Old/New Entity Matching": development/adr/045-identity-based-old-new-entity-matching.md
-      - "046: Source Graph Identity v2": development/adr/046-source-graph-identity-v2-and-evidence-merge.md
-      - "047: GitHub Actions Integration Model": development/adr/047-github-actions-integration-model.md
-      - "048: Canonical Entity Identity and Graph Reconciliation": development/adr/048-canonical-entity-identity-and-graph-reconciliation.md
-      - "049: Contract Relevance and Compatibility Configuration": development/adr/049-contract-relevance-and-compatibility-configuration.md
-      - "050: Comparability Contract & Multi-TU Manifest": development/adr/050-comparability-contract-and-multi-tu-manifest.md
 
 # Agent instructions are repo-internal context, not published documentation.
 exclude_docs: |
   CLAUDE.md
+  AGENTS.md
 
 plugins:
   - search
