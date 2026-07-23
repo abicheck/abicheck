@@ -320,6 +320,64 @@ elif [[ "$MODE" == "compare" ]]; then
   add_sided_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
+  # Cross-compiler flags -- documented root-Action inputs, but previously
+  # only wired to dump mode's branch. Without them, a compare against a
+  # cross-target library silently falls back to the host toolchain/includes
+  # for header parsing and can produce false ABI results (Codex review).
+  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
+
+  # Build/source evidence (--depth build/source) — new (candidate) side only.
+  # The old side's evidence, if any, already lives in whatever
+  # old-library/abi-baseline snapshot was resolved (e.g. a baseline archive
+  # built with its own embedded build_source) — this Action has no live old-
+  # side source tree to point --sources/--build-info at in compare mode, so
+  # these inputs scope to `new=` unconditionally rather than exposing a
+  # second old-sources/old-build-info input pair. Previously silently
+  # dropped in compare mode (only dump/scan forwarded them) — a real gap
+  # flagged by review: a --depth build/source compare request had no way to
+  # actually reach the CLI's evidence flags at all.
+  #
+  # --sources/--build-info/--depth are skipped entirely when either operand
+  # is a directory/package: the CLI's per-library release fan-out (ADR-037
+  # D7) doesn't collect inline build/source evidence and rejects those three
+  # outright for that shape (_reject_evidence_flags_for_set_inputs) —
+  # passing them here would turn every directory/package (e.g.
+  # check-target's kind: bundle) comparison into a hard usage error instead
+  # of the intended comparison (Codex review).
+  #
+  # --config is NOT one of the flags that rejection covers (cli_resolve.py's
+  # set-input evidence-flags allowlist lists only depth/sources/build_info)
+  # — the release fan-out still consumes the project
+  # .abicheck.yml for severity/scope/suppression/exit-code settings
+  # (_resolve_compare_config runs before the directory/package dispatch), so
+  # it stays unconditional; an earlier fix lumped it in with the three
+  # rejected flags and silently dropped a bundle caller's build-config
+  # (Codex review, second round).
+  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+     || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+    # A caller that explicitly asked for build/source-depth evidence (via
+    # --depth build/source, or by supplying --sources/--build-info/
+    # --compile-db directly) against a directory/package operand would
+    # otherwise have that request silently dropped: the flags above are
+    # skipped rather than forwarded, so the comparison would quietly run
+    # without the requested evidence and could miss a source-only break
+    # while still reporting a clean/normal result -- fail loud instead
+    # (Codex review; --depth binary/headers is fine to drop silently, since
+    # nothing was actually requested that this shape can't provide).
+    if [[ "${INPUT_DEPTH:-}" == "build" || "${INPUT_DEPTH:-}" == "source" \
+       || -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]]; then
+      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support --depth build/source or inline --sources/--build-info/--compile-db evidence -- the CLI's per-library release fan-out never collects it, so the requested evidence would silently never be gathered and a source-only break could be missed. Compare the libraries individually (mode: compare with single-file operands) to use build/source-depth evidence."
+      exit 1
+    fi
+  else
+    add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
+    add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
+    add_single_flag "--depth" "${INPUT_DEPTH:-}"
+  fi
 
   # Format — for SARIF, always write to a file so upload-sarif can find it.
   # sarif/html are rejected by the CLI itself (a clear UsageError, exit 64)
@@ -506,6 +564,14 @@ elif [[ "$MODE" == "scan" ]]; then
   add_flag "-I" "${INPUT_INCLUDE:-}"
   add_sided_flag "-I" "old" "${INPUT_OLD_INCLUDE:-}"
   add_sided_flag "-I" "new" "${INPUT_NEW_INCLUDE:-}"
+
+  # Cross-compiler flags -- documented root-Action inputs, but previously
+  # only wired to dump mode's branch (Codex review, same gap as compare
+  # mode above).
+  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
   # Build-source evidence inputs (L3/L4/L5)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"

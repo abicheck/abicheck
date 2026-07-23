@@ -376,7 +376,7 @@ bundle resolution, and archive extraction (flat and one-level-nested).
 `docs/reference/resolve-baseline.md` (new, linked from mkdocs nav)
 documents the Action's contract.
 
-### P1.3 — `actions/check-target`
+### P1.3 — `actions/check-target` — **done**
 
 **Scope note, required by review — this item is not done until the S22/S23
 root-action gap is resolved, not merely acknowledged.** ADR-047 §4 flags
@@ -505,6 +505,736 @@ already exercises the root action per AGENTS.md's tag-pinning note on that
 file — extend it, don't create a parallel test harness); add a
 multi-profile-same-target fixture case asserting `aggregate` does not
 collide/error.
+
+**Status:** implemented. **First required sub-task (S22/S23 root-action
+gap) — resolved, correcting the ADR's own stale premise:** re-reading
+`action.yml`/`action/run.sh` as they exist today (not as ADR-047 §3/§4
+describe them) shows `used-by`/`verify-runtime`/`required-symbol`/
+`required-symbols` are already declared inputs, already forwarded to
+`compare --used-by`/`--required-symbol`/`--required-symbols`
+(`action/run.sh:377-386`) — added by #570/#579, both landed *before*
+ADR-047 (#610) was written. The ADR's "the root action.yml cannot express
+`--used-by`/`--required-symbols` today" finding (§3) was already false at
+the time it was written; neither of its two proposed fixes (extend
+`action.yml`, or have `check-target` call the CLI directly) was needed.
+`check-target` simply exposes its own `target-kind: library|app-consumer|
+plugin-contract` input and forwards `consumer-binary`/`contract-file` to
+the root Action's existing `used-by`/`required-symbols` inputs when
+building its nested `Run analysis` step. The *other* gap ADR-047 §3
+correctly identifies — the "library redirect" (an `app-consumer`/
+`plugin-contract` target's baseline/candidate lookup must resolve through
+its `library` field, while the check's own identity stays the contract
+target's name) — is real and is implemented via a separate
+`baseline-target` input (defaults to `name`; the caller sets it to the
+referenced library's id), keeping `resolve-baseline`'s lookup key and the
+report envelope's `check_id`/`target_id` deliberately distinct, per §3.
+**Second required sub-task (`baseline: none` bypass) — implemented as a
+real branch, not documentation:** `action.yml`'s `Resolve baseline` step
+carries `if: inputs.baseline-channel != 'none'`, and every downstream step
+(`Run analysis`, the two `collect-facts` steps) conditions on
+`inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome ==
+'resolved'` — a skipped `resolve` step's outputs are empty strings, so this
+expression evaluates correctly with no separate branch needed.
+`baseline-channel: none` runs `mode: scan` (no `--against`) instead of
+`compare`, matching S5's audit path exactly; `tests/test_action_check_target.py::
+TestFinalizeAugmentMode::test_baseline_channel_none_skips_resolve_and_still_augments`
+covers it end-to-end at the shell level, and `test-check-target` in
+`.github/workflows/test-action.yml` exercises the full YAML composition
+(including this bypass's sibling branches) against a real `abicheck
+compare` run. **Third/fourth required sub-tasks (unconditional depth-suffixed
+`check_id`/`target_id`, dual-write, `gate-mode`-aware neutralization,
+`continue-on-error` + trailing finalize step) — all implemented exactly as
+specified,** in a new pure module, `abicheck/buildsource/check_report.py`
+(`build_check_id`, `resolve_effective_depth`, `augment_report`,
+`build_operational_error_report`, `build_bootstrap_report`,
+`final_exit_code`), backing a thin CLI wrapper
+(`actions/check-target/report_envelope.py`, mirroring
+`resolve_baseline.py`'s pattern) that `run.sh` drives. **A real gap found
+and closed during implementation, not anticipated by the ADR:** the root
+Action's *legacy* (no `--severity-*` flag) compare exit scheme omits the
+`severity` JSON block entirely — confirmed by running `abicheck compare`
+directly — which would leave `gate-mode: advisory` with nothing to
+neutralize and let `abicheck/aggregate.py`'s `GateInfo.from_report_data`
+fall back to `legacy_from_verdict(verdict)`, still deriving a blocking gate
+from the real `BREAKING`/`API_BREAK` verdict regardless of `gate-mode`.
+Fixed by giving `check-target`'s own `severity-preset` input a `'default'`
+default (root `action.yml`'s own input is deliberately left unset) instead
+of leaving it unset, so the nested `Run analysis` step always requests the
+severity-aware scheme and a `severity` block is always present to dual-write
+and (for `advisory`) neutralize. `deferred` reports keep that block's real
+`exit_code`/`blocking` untouched by design — `check-project.yml`'s future
+trailing `aggregate` job (P1.4) needs the real value to compute the gate
+centrally; only `advisory` zeroes it. Verified end-to-end by hand (not only
+via the test suite): staged a real `manifest.json` + snapshot, ran
+`actions/resolve-baseline/run.sh`, then a real `abicheck compare
+--severity-preset default`, then `actions/check-target/run.sh`'s finalize
+step, for all three `gate-mode` values, confirming the exit
+codes/persisted-severity behavior documented above. The S14 bundle-scoped
+path is implemented as ADR-047 §8's correction actually resolves it: no
+separate "bundle compare" CLI command exists (`compare-release` is
+intentionally unregistered on `main`, invoked only by `compare`'s own
+directory-operand fan-out per ADR-037 D7), so `kind: bundle` simply hands
+`resolve-baseline`'s `binaries-dir` output to the same nested `Run analysis`
+step as a directory `old-library` — `compare`'s existing directory fan-out
+handles the rest. `actions/baseline` still doesn't stage a `binaries/`
+directory (G30 P1.6, not built here), so this path is exercised against a
+hand-authored fixture in the same "defines the contract, no producer yet"
+scoping P1.1/P1.2 already used. **The multi-profile-same-target `aggregate`
+non-collision fixture is deferred to P1.4, not skipped:** `check-target` on
+its own never invokes `aggregate` or produces more than one report per
+call, so there is nothing to fan in yet; `build_check_id`'s own uniqueness
+across `requested_depth` is unit-tested here
+(`tests/test_check_report.py::TestBuildCheckId::
+test_unconditional_depth_suffix_disambiguates_shadow_checks`), and the real
+multi-check `aggregate` fixture belongs with P1.4's `run-plan.json`
+generator, which is what actually produces more than one `check-target`
+call to fan in. `abicheck/schemas/compare_report.schema.json` gained
+`compatibility_verdict`/`policy_gate_decision`/`check_evidence_coverage`/
+`operational_errors`/`publication`/`baseline_bootstrap`/`project`/
+`head_sha`/`base_ref`/`tool_version`/`action_version` as additive/optional
+properties (`report_schema_version` bumped `2.12` → `2.13`,
+`scan_schema_version` `1.1` → `1.2`, both documented in
+`abicheck/schemas/__init__.py`); `docs/reference/check-target.md` (new,
+linked from mkdocs nav) documents the full contract, and
+`docs/reference/resolve-baseline.md`'s "not built yet" status note is
+updated to point at it. `tests/test_check_report.py` (100% line/branch
+coverage of `check_report.py`) covers the pure logic;
+`tests/test_action_check_target.py` covers `validate-inputs.sh`/`run.sh`'s
+bash orchestration end-to-end, including every `gate-mode` × outcome
+(resolved/operational-error/bootstrap) combination and the
+effective-depth-degradation branch; `test-check-target` in
+`.github/workflows/test-action.yml` is the required end-to-end fixture job,
+exercising the real nested `uses:` composition (`resolve-baseline` → the
+root Action → the finalize step) against real `abicheck compare` output,
+not simulated env vars.
+
+**Two real, confirmed bugs found and fixed via PR review after initial
+implementation (PR #625), not anticipated above:**
+
+- **Effective-depth degradation was computed from the wrong signal.** The
+  first implementation guessed `effective_depth`/`check_evidence_coverage`
+  from whether the composed `collect-facts` step reported readiness — but a
+  caller can legitimately reach build/source depth via a direct `build-info`/
+  `sources` input with **no** `collect-facts` composition at all (the
+  "producer-less" path this same page's input table already documents). That
+  heuristic misreported a real build/source-depth result as `degraded` purely
+  because no producer step ran (Codex review). **Fixed by reading the
+  authoritative signal the tool itself already emits**, not inferring one:
+  `abicheck compare --format json` always carries `old_evidence_depth`/
+  `new_evidence_depth` (`cli_compare_helpers._fold_evidence_depth_into_json`,
+  unconditional for JSON output) and `scan`'s JSON carries `level.depth` — the
+  real depth *achieved*, independent of how it was achieved. Renamed
+  `resolve_effective_depth(requested_depth, evidence_ok, degraded_reason)` to
+  `derive_effective_depth(report, requested_depth)`, dropped the
+  `evidence-ok`/`degraded-reason` plumbing from `report_envelope.py`/`run.sh`/
+  `action.yml`'s finalize step entirely (the `collect-facts` composition
+  steps themselves are unchanged — they still produce the pack the analysis
+  step consumes; only the *finalize* step's now-redundant success/readiness
+  reads were removed). For `compare`, the shallower of the two sides is the
+  check's own achieved depth (a build/source result on only one side isn't a
+  build/source-depth comparison); a report deeper than requested is reported
+  honestly as achieved, not capped down to the request.
+- **Nested `uses: ./x` steps do not resolve against this Action's own
+  repository when consumed externally — a real, confirmed architectural gap,
+  not a false positive.** Verified independently (GitHub Community Discussion
+  actions/runner#1348 "Local composite actions always relative to top level
+  repository"; confirmed `uses:` accepts no expressions at all, ruling out a
+  dynamic-reference workaround) before fixing: a relative `uses: ./x` step
+  inside a composite Action **always** resolves against `$GITHUB_WORKSPACE`
+  — the *calling workflow's* own checkout — never against the repository
+  that contains the composite Action doing the `uses:`. `check-target`'s
+  nested `uses: ./actions/resolve-baseline`/`./actions/collect-facts`/`./`
+  (root Action) therefore only ever worked because the added
+  `test-check-target` fixture happens to invoke `check-target` from *within*
+  `abicheck/abicheck`'s own workflow — the one case where the caller's
+  checkout and this Action's own repository are the same thing. A real
+  external consumer (`uses: abicheck/abicheck/actions/check-target@v1` from
+  their own repository, exactly as this page's own examples show) would have
+  every nested `uses:` fail before ever reaching baseline resolution. Fixed
+  by adding an unconditional `Checkout abicheck (for nested Action
+  composition)` step (first thing `check-target` does, before any nested
+  `uses:`) that checks out `${{ github.action_repository ||
+  github.repository }}` at `${{ github.action_ref || github.sha }}` into a
+  side directory (`.abicheck-check-target-src`, `persist-credentials:
+  false`), and rewrote every nested `uses:` to reference that directory
+  instead of bare `./`. The `||` fallback makes this correct for both the
+  external-reference case (`github.action_repository`/`github.action_ref`
+  set) and the local same-repository case
+  (`.github/workflows/test-action.yml`'s own `uses: ./actions/check-target`,
+  where both are empty) without a conditional branch — `uses:` cannot itself
+  be an expression, so the checkout step had to be unconditional instead.
+
+**A third bug, in the fix for the second one above, caught by the real CI
+run of the new `test-check-target` fixture (job 89082423642) rather than by
+review or local testing — the self-checkout step read back its own
+identity, not check-target's.** `github.action_repository`/`github.
+action_ref` describe whichever action is *about to run* — the runner
+updates them while preparing each step, including composite-nested ones,
+**before** evaluating that same step's own `with:` expressions. The
+`Checkout abicheck (for nested Action composition)` step's own `with:`
+block read `${{ github.action_repository || github.repository }}`/`${{
+github.action_ref || github.sha }}` directly — but by the time those
+expressions were evaluated, the context had already flipped to describe
+*that step's own target*, `actions/checkout@v6`. The real CI run confirmed
+this exactly: the step's resolved `with:` logged `repository:
+actions/checkout` / `ref: v6`, checking out the wrong repository entirely
+and leaving `.abicheck-check-target-src/actions/resolve-baseline` empty —
+`Resolve baseline` then failed with "Can't find 'action.yml' ... Did you
+forget to run actions/checkout". **Fixed** by adding a `Capture this
+Action's identity` step (`id: identity`, a plain `run:` step, the first
+thing `check-target` does) that reads `github.action_repository`/`github.
+action_ref` into `$GITHUB_OUTPUT` before any nested `uses:` step has a
+chance to overwrite them, and pointing the checkout step's `with:` at `${{
+steps.identity.outputs.repository }}`/`${{ steps.identity.outputs.ref }}`
+instead of reading the raw context directly. The `action-version` input's
+default (evaluated once, before any of check-target's own steps run —
+a different, earlier timing than the checkout step's `with:`, so it was
+never affected by this specific bug) gained the same `||` fallback for
+consistency, so a local same-repo test run reports a real identity instead
+of an empty `"@"`.
+
+**A fourth, fifth, and sixth real bug, all caught by a second Codex review
+round, all fixed:**
+
+- **The root `action.yml`'s `compare` mode branch never forwarded
+  `sources`/`build-info`/`compile-db`/`build-config`/`depth` at all** —
+  confirmed by grepping `action/run.sh`: those five inputs were only wired
+  in the `dump`/`scan` branches (`action.yml`'s own input descriptions said
+  "Used by scan and dump modes," which was accurate but incomplete —
+  `compare` genuinely supports `--sources`/`--build-info`/`--depth`/
+  `--config` directly, confirmed via `abicheck compare --help`). This meant
+  a `check-target` build/source-depth check against a real baseline (the
+  normal, non-audit `compare`-mode path) had no way to actually reach the
+  CLI's evidence flags — `requested-depth: source` would silently only ever
+  achieve `headers`, regardless of what `sources`/`build-info` were set to.
+  Fixed by adding the missing forwarding to `action/run.sh`'s `compare`
+  branch, scoped to the **new (candidate) side only**
+  (`--sources new=...`/`--build-info new=...`, falling back to `compile-db`
+  when `build-info` is unset, matching `dump` mode's own fallback) — the old
+  side's evidence, if any, is expected to already be embedded in whatever
+  baseline snapshot was resolved; this Action has no live old-side source
+  tree to point at in `compare` mode. `action.yml`'s five input descriptions
+  updated to document the new `compare`-mode support. This is a general fix
+  to the root Action, benefiting any direct `compare`-mode caller wanting
+  build/source-depth evidence, not `check-target`-specific.
+- **A collect-facts verify/replay failure was never checked before running
+  analysis** — `collect_verify`/`collect_replay` run with
+  `continue-on-error: true` (correctly, so the finalize step always runs),
+  but the `Run analysis` step's own `if:` only checked
+  `resolve.outcome == 'resolved'`, never `collect_verify`/`collect_replay`'s
+  outcome — so a broken/empty wrapper or clang-plugin pack (a real
+  `collect-facts phase: verify` failure) would still be handed to `compare`
+  as `--build-info`, silently running the comparison against invalid
+  evidence and reporting a plain degraded-or-normal result instead of the
+  operational error it actually is. Fixed by adding
+  `steps.collect_verify.outcome != 'failure' && steps.collect_replay.outcome
+  != 'failure'` to the analysis step's `if:`, and giving `run.sh`'s finalize
+  logic two new, specific `operational-error` branches (ahead of the
+  generic "analysis produced no report" catch-all) so the resulting report
+  names collection failure specifically, not an ambiguous unexplained gap.
+- **`validate-inputs.sh` never validated `evidence-producer`** — every other
+  enum-like input (`kind`/`target-kind`/`gate-mode`/`requested-depth`) is
+  checked up front, but a misspelled `evidence-producer` value would just
+  silently fall through the `case` statement composing `collect-facts`
+  (neither `wrapper`/`clang-plugin`/`replay` branch matches), skipping fact
+  collection entirely with no error — a build/source-depth check would then
+  silently run at whatever depth the analysis naturally reached, never
+  telling the caller their typo was ignored. Fixed by adding the same
+  `case` validation for `evidence-producer`
+  (`''`/`wrapper`/`clang-plugin`/`replay`) as every other enum input already
+  has.
+
+Also, separately: the two synthesized envelope builders
+(`build_operational_error_report`/`build_bootstrap_report`) wrote
+`compatibility_verdict: null` — schema-invalid, since the schema declares
+that field a plain string enum with no null alternative (Codex review,
+third round). Fixed by omitting the key entirely for those two cases
+instead (matching how `augment_report` already only sets it when there's a
+real value) — the broader "these two envelope shapes don't satisfy compare's
+full `required` field list either" question Codex also raised is real but
+out of scope here, matching the same precedent ADR-047 §7 already
+established for the pre-existing `verdict: "ERROR"` enum gap (a known,
+accepted limitation of the sentinel-envelope pattern, not something this
+task resolves).
+
+`tests/test_action_run_sh_compare_build_source.py` (new) runs the real
+`action/run.sh` end-to-end against a fake `abicheck` stub on `$PATH` to
+prove the evidence-forwarding fix reaches the actual command line, not just
+that the shell logic looks right on paper; `tests/test_action_check_target.py`
+gained cases for both new collect-facts-failure branches and the
+`evidence-producer` validation.
+
+A fourth round of Codex review then caught a regression the evidence-
+forwarding fix above (73f1143) itself introduced: **`action.yml` always
+sets `depth: inputs.requested-depth` on the analysis step**, and for
+`kind: bundle` (or any directory/package comparison), `old-library`/
+`new-library` are directories, which routes `compare` through the CLI's
+per-library release fan-out (ADR-037 D7) — and that fan-out's own
+`_reject_evidence_flags_for_set_inputs` rejects `--depth`/`--sources`/
+`--build-info` outright as a `UsageError`, since the per-library fan-out
+never collects inline build/source evidence for a set input. Confirmed
+by reading `abicheck/cli_resolve.py`'s `_reject_evidence_flags_for_set_inputs`
+and its call site in `cli_compare_helpers.py` (fires whenever either operand
+classifies as `directory`/`package`). Before this fix, **every** `kind:
+bundle` check-target invocation with a resolved baseline would fail as a
+hard usage/orchestration error before ever producing the intended bundle
+comparison — `requested-depth` stays required in the envelope identity
+regardless, only the CLI flag was wrong to force. Fixed by gating the
+`--sources`/`--build-info`/`--config`/`--depth` block in `action/run.sh`'s
+`compare` branch on `action/run.sh`'s existing `_is_release_style_operand`
+helper (already used a few lines above to skip `--secondary-format` for the
+same directory/package shape) — checked against both `old-library` and
+`new-library`, matching the CLI's own either-side rejection condition.
+`tests/test_action_run_sh_compare_build_source.py` gained a
+`TestCompareModeSkipsEvidenceFlagsForDirectoryOperands` class proving the
+flags are omitted when either operand is a directory, even when the
+corresponding evidence inputs are set.
+
+A fifth round of Codex review then caught three more issues, all fixed in
+one follow-up commit:
+
+- **The directory/package guard above over-suppressed `--config` too** —
+  `--config` is not one of the flags `_reject_evidence_flags_for_set_inputs`
+  actually rejects (`_EVIDENCE_SET_INPUT_FLAGS` lists only `depth`/`sources`/
+  `build_info`); the release fan-out still consumes the project
+  `.abicheck.yml` for severity/scope/suppression/exit-code settings
+  (`_resolve_compare_config` runs before the directory/package dispatch), so
+  a bundle caller's `build-config` was being silently dropped. Fixed by
+  pulling `--config` out of the release-style-operand guard entirely — it
+  now always reaches the CLI, matching every other compare mode.
+- **`target-kind: app-consumer`/`plugin-contract` combined with
+  `baseline-channel: none` silently ran an unscoped audit** —
+  `baseline-channel: none` routes the analysis step to `scan`, but `scan`
+  has no `--used-by`/`--required-symbols` equivalent at all (confirmed via
+  `abicheck scan --help`); those flags only exist in the `compare` branch of
+  `action/run.sh`. A contract check with no baseline therefore ran as a
+  plain unscoped scan under the contract target's name and could pass
+  without ever checking the consumer/plugin contract it claimed to. Fixed
+  by rejecting the combination up front in `validate-inputs.sh` — there is
+  no way to honor a contract scope without a two-sided comparison, so
+  failing loud (rather than trying to thread `--used-by`/`--required-symbols`
+  through a mode that structurally can't use them) is the correct fix.
+- **The operational-error/bootstrap sentinel envelopes still didn't validate
+  against `compare_report.schema.json`** — the earlier `compatibility_verdict:
+  null` fix (third review round, above) only addressed one field; the schema
+  unconditionally required compare-specific fields (`library`, `old_file`,
+  `summary`, `changes`, `policy`, `suppression`, `detectors`, `confidence`,
+  `evidence_tier`, `evidence_tiers`, ...) and restricted `verdict` to the
+  five real `Verdict` values, so `build_operational_error_report`/
+  `build_bootstrap_report`'s `verdict: "ERROR"`/`"NO_BASELINE"` envelopes —
+  and the pre-existing per-library release fan-out's own `verdict: "ERROR"`
+  shape in `cli_compare_release.py` (not new to this task) — never actually
+  validated, confirmed by running `jsonschema.validate` against both shapes
+  by hand. The "out of scope, mirrors an accepted ADR-047 §7 gap" reply
+  given in the third round was too quick to wave this away as unfixable;
+  Codex's fourth pass on it correctly pushed back with concrete schema
+  evidence. Fixed properly this time: `compare_report.schema.json`'s
+  top-level `required` now only demands `report_schema_version`/`verdict`,
+  an `allOf`/`if`/`then` requires the full compare-specific field list only
+  when `verdict` is one of the five real values, and `verdict`'s enum grew
+  `ERROR`/`NO_BASELINE` (additive, consistent with the existing
+  `report_schema_version` MINOR-bump convention for new enum members).
+  Verified by hand: a full compare report validates and still rejects a
+  truncated one, and both sentinel envelopes validate once `augment_report`
+  has stamped `report_schema_version` onto them. The pre-existing per-
+  library release-fan-out's own minimal `{library, verdict: "ERROR",
+  error}` entry (`cli_compare_release.py`, not new to this task) does
+  **not** validate on its own -- it never carries `report_schema_version`
+  at all, and this schema's `required` still demands that field
+  unconditionally regardless of `verdict`. That's fine: it's a per-library
+  entry inside the release fan-out's own `libraries` list, never a
+  `compare_report.schema.json` document in its own right, and (per the
+  next round below) the fan-out's top-level summary is deliberately never
+  stamped with this schema's marker either. `docs/schemas/v1/compare_report.schema.json`
+  re-synced via `scripts/publish_schemas.py`.
+
+The same review round separately caught that the schema fix above didn't
+cover every report shape `augment_report` can receive: a successful
+`baseline-channel: none` scan report (its own `scan_schema_version` shape --
+`level`/`risk`/`coverage`/... , no `library`/`old_file`/`summary`/`changes`)
+or a `kind: bundle` directory-compare report (the per-library release
+fan-out's own summary shape -- `verdict`/`old_dir`/`new_dir`/`libraries`,
+also no singular `library`/`old_file`/`summary`/`changes`) still got
+`report_schema_version` stamped onto them unconditionally, same as a normal
+single-pair compare report. Confirmed by reading `scan_engine.py`'s report
+dict and `cli_compare_release_helpers.py`'s `_format_release_json` by hand
+— neither shape has ever had a schema, let alone this one. A downstream
+validator selecting a schema by `report_schema_version`'s presence would
+pick `compare_report.schema.json` for either shape and reject it against
+that schema's real-verdict branch. Fixed in `augment_report`: a report
+carrying `scan_schema_version` gets that field bumped to the current
+`SCAN_SCHEMA_VERSION` instead of also gaining `report_schema_version`; a
+report shaped like the release fan-out's summary (`libraries` + `old_dir`
+present) gets neither schema marker, since that shape has never had one to
+claim. ADR-047 §7's identity/policy-gate-decision fields (`check_id`,
+`policy_gate_decision`, etc.) are unaffected either way — only the schema
+marker choice is shape-aware now. New
+`test_scan_report_gets_scan_schema_version_not_report_schema_version` /
+`test_bundle_release_report_gets_no_schema_version_stamp` cases in
+`tests/test_check_report.py`.
+
+A sixth review round on the same commit caught two more real issues:
+
+- **A `kind: bundle` (or any directory/package `compare`) request for
+  build/source-depth evidence was silently downgraded instead of failing** —
+  the directory/package guard added earlier (fifth round) correctly stopped
+  forwarding `--depth`/`--sources`/`--build-info` to avoid the CLI's hard
+  rejection, but that meant a caller who explicitly asked for
+  `requested-depth: build`/`source` (or supplied `--sources`/`--build-info`/
+  `--compile-db` directly) had that request silently dropped: the
+  comparison would still run and report a normal/clean result, just without
+  ever actually gathering the requested evidence — a source-only break
+  could be missed with no signal anything was wrong (`effective_depth` even
+  falls into `derive_effective_depth`'s "no depth signal in report" branch,
+  which trusts the *request* rather than reporting a real degradation, since
+  the release fan-out's own JSON never carries `old_evidence_depth`/
+  `new_evidence_depth` at all). Fixed in two places: `action/run.sh` now
+  exits with an explicit error when a directory/package operand is combined
+  with `--depth build`/`source` or an explicit `--sources`/`--build-info`/
+  `--compile-db` (covers any direct caller of the root Action, not just
+  check-target) — `--depth binary`/`headers` against a directory/package
+  operand is untouched, since nothing requested there is actually
+  unservable. `actions/check-target/validate-inputs.sh` additionally
+  rejects `kind: bundle` combined with `requested-depth: build`/`source` up
+  front, before `resolve-baseline`/`collect-facts` even run, for a cheaper
+  and clearer failure than waiting for the nested analysis step to fail.
+  New `TestCompareModeFailsFastOnUnservableDirectoryEvidenceRequest` class
+  in `tests/test_action_run_sh_compare_build_source.py` (four failure cases
+  plus one confirming `headers` depth still succeeds) and
+  `test_bundle_kind_rejects_build_depth`/`test_bundle_kind_rejects_source_depth`/
+  `test_bundle_kind_allows_headers_depth` in `tests/test_action_check_target.py`.
+- **`augment_report`'s successful-path `publication` default was simply
+  false** — it defaulted every successful report's `publication` to
+  `{"state": "published", "channels": ["job_summary"]}`, but check-target's
+  own "Run analysis" step always passes `add-job-summary: 'false'`,
+  `pr-comment: 'false'`, `upload-sarif: 'false'` to the nested root Action
+  (confirmed by reading `action.yml`), and the finalize step itself only
+  writes the report JSON to disk plus `GITHUB_OUTPUT` values — nothing is
+  actually published anywhere for a real check-target run. The
+  operational-error/bootstrap sentinel envelopes already got this right
+  (`{"state": "skipped", "channels": []}`); only the common success-path
+  default was wrong. Fixed to match. New
+  `test_publication_defaults_to_skipped_not_a_false_claim` case in
+  `tests/test_check_report.py`.
+
+A sixth round of Codex review caught two more issues, both fixed in one
+follow-up commit: the fixed report filename risked collisions across
+multiple `check-target` invocations in the same job, and `augment_report`'s
+operational-error classification missed scan guard sentinels.
+
+- **A fixed `check-target-report.json` filename collides across multiple
+  `check-target` invocations in the same job** — e.g. the same target
+  checked against two baseline channels, or several targets checked without
+  per-step output directories. Each call overwrote the previous one's
+  report file, so an earlier step's own `report-path` output would end up
+  pointing at a *later* check's envelope by the time anything read it.
+  Fixed: the filename is now scoped to
+  `check-target-report-<name>-<profile>-<baseline_channel>-<requested_depth>.json`,
+  sanitized via `tr -c 'A-Za-z0-9._-' '_'` (a slug helper) so an
+  unsanitized identifier component can't affect the filesystem path
+  regardless of when Python-side identifier validation runs. Deriving the
+  name from the check's own already-unique identity components was chosen
+  over adding a new caller-specified output path input, since no caller
+  input was actually needed. New
+  `test_two_invocations_in_the_same_job_do_not_overwrite_each_others_report`
+  in `tests/test_action_check_target.py` runs two finalize calls against
+  the same `tmp_path` and asserts both report files survive with distinct
+  content. `docs/reference/check-target.md` updated to document the
+  filename pattern and point at the `report-path` output instead of
+  hard-coding the old name. (Mechanically, every test hard-coding the old
+  filename was switched to read `outputs["report-path"]` instead, since the
+  filename is no longer predictable from the identity fixture alone.)
+- **`augment_report`'s operational-error classification only checked
+  `verdict == "ERROR"`, missing scan guard sentinels** — a
+  `baseline-channel: none` scan run that exceeds `--budget` (or hits
+  `service_scan.py`'s other guard, `EVIDENCE_CONTRACT_ERROR`) gets
+  `verdict: "BUDGET_OVERFLOW"`/`"EVIDENCE_CONTRACT_ERROR"` and a nonzero
+  `exit_code`, and the root Action's own `run.sh` already treats
+  `BUDGET_OVERFLOW` as an always-failing guard (never gated by a
+  `fail-on-*` flag, unlike `BREAKING`/`API_BREAK`) — confirmed by grepping
+  `action/run.sh`. But neither of these verdict strings is `"ERROR"` or one
+  of the five real `Verdict` values, so the old classifier fell through to
+  the "else: leave `operational_errors` empty" branch, and
+  `report_envelope.py`'s own `operational_error = report.get("verdict") ==
+  "ERROR"` check missed it too — meaning `gate-mode: deferred`/`advisory`
+  would return exit `0` for a scan that never actually completed its
+  comparison, silently turning an infrastructure guard trip into a green
+  check, in direct contradiction of `final_exit_code`'s own documented rule
+  that "deferred only defers the *compatibility* verdict's effect on exit
+  code, never operational errors." Fixed: `augment_report` now treats *any*
+  verdict outside the five real `Verdict` values (not just the literal
+  `"ERROR"`) as operational, populating `operational_errors` with a new
+  `"scan_guard_triggered"` kind for the non-`"ERROR"` case;
+  `report_envelope.py` now derives its own `operational_error` flag by
+  reusing `augment_report`'s already-computed `operational_errors` list
+  rather than re-deriving it from `verdict` a second, narrower way. New
+  `test_scan_guard_sentinel_verdicts_are_operational_errors` (parametrized
+  over both guard strings) in `tests/test_check_report.py`, and
+  `TestFinalizeScanGuardSentinel::test_budget_overflow_always_fails_regardless_of_gate_mode`
+  (parametrized over all three `gate-mode` values) in
+  `tests/test_action_check_target.py`.
+
+A seventh round of Codex review caught two more issues, both fixed in one
+follow-up commit:
+
+- **A removed-library gate on a bundle/directory compare could silently
+  pass `gate-mode: local`** — `abicheck compare`'s per-library release
+  engine gives `--fail-on-removed-library` its own dedicated exit code (8),
+  applied "in preference to the severity code"
+  (`cli_compare_release_helpers._exit_compare_release`'s own docstring) —
+  meaning the persisted JSON report's `severity.exit_code` can read `0`
+  (e.g. `verdict: COMPATIBLE_WITH_RISK`, the removal only shows up in
+  `unmatched_old`) even though the real CLI process exited 8. Since
+  `augment_report`'s `real_exit_code` was computed purely from the report
+  body, and `report_envelope.py`'s own `real_exit_code` variable did the
+  same, `gate-mode: local` would read `real_exit_code: 0` and both the
+  composite job exit code and the persisted `policy_gate_decision` would
+  read as a clean pass — silently allowing a removed library the caller
+  explicitly asked to gate on. Confirmed by reading
+  `_exit_compare_release`'s docstring and code directly. Fixed: the nested
+  root Action's own real `exit-code` output is now captured
+  (`actions/check-target/action.yml`'s finalize step gains
+  `ANALYSIS_EXIT_CODE: ${{ steps.analysis.outputs.exit-code }}`), forwarded
+  through `run.sh` (defensively defaulted to 0 for anything not a clean
+  non-negative integer) and `report_envelope.py`'s new
+  `--analysis-exit-code` flag, and folded into `augment_report`'s
+  `real_exit_code` via `max()` alongside whatever the report body itself
+  says — the same precedence pattern `_exit_compare_release` already uses
+  internally. `report_envelope.py`'s own `real_exit_code` (used for
+  `final_exit_code()`) applies the identical fold, so the persisted
+  `policy_gate_decision` field and the actual composite exit code agree.
+  Scoped deliberately to `gate-mode: local`'s correctness, the most severe
+  form of the bug (the job silently passed outright); `gate-mode: deferred`
+  still defers to `check-project.yml`'s trailing `aggregate` job, and
+  `abicheck/aggregate.py`'s own `GateInfo.from_report_data` reads only the
+  persisted `severity.exit_code` (unaffected by this fix, since that field
+  is deliberately left untouched — only the gate *decision* folds in the
+  analysis exit code, not the persisted severity block itself) — so a
+  removed-library gate on a `deferred` bundle check can still be missed by
+  a later `aggregate` pass; that gap is in `aggregate.py` itself, predates
+  this task, and applies to any consumer of `compare`'s bundle JSON output
+  relying on `severity.exit_code` alone, not something check-target
+  introduced or is positioned to fix on its own. New
+  `test_analysis_exit_code_overrides_a_clean_severity_block`/
+  `test_analysis_exit_code_of_zero_does_not_flip_a_clean_report` in
+  `tests/test_check_report.py`, and
+  `test_analysis_exit_code_folds_into_local_gate_even_with_clean_severity`
+  (full `run.sh` + `report_envelope.py` integration) in
+  `tests/test_action_check_target.py`.
+- **`compare`/`scan` modes never forwarded cross-compiler flags** —
+  `--gcc-path`/`--gcc-prefix`/`--gcc-options`/`--sysroot` are documented
+  root-Action inputs and `abicheck compare --help-all`/`abicheck scan
+  --help` both expose the equivalent CLI flags, but `action/run.sh` only
+  ever wired them into `dump` mode's branch — confirmed by grepping the
+  file. A `check-target` compare/scan needing a cross compiler or sysroot
+  to parse headers correctly would silently fall back to the host
+  toolchain/includes and could produce false ABI results for cross-target
+  libraries. Fixed by adding the same four `add_single_flag` calls to both
+  the `compare` and `scan` branches (check-target's own `action.yml`
+  already forwarded these inputs to the nested root Action's `with:` block
+  — the gap was entirely inside `action/run.sh`). New
+  `TestCompareModeForwardsCrossCompilerFlags`/
+  `TestScanModeForwardsCrossCompilerFlags` classes in
+  `tests/test_action_run_sh_compare_build_source.py`, each running the real
+  `run.sh` end-to-end against a fake `abicheck` stub to prove the flags
+  reach the actual command line.
+
+Codex's second pass on the same PR then pushed back on the removed-library
+fix above being incomplete: escalating `policy_gate_decision`/the local
+exit code isn't enough on its own, because `gate-mode: deferred` relies on
+`check-project.yml`'s trailing `aggregate` job, and
+`abicheck.aggregate.GateInfo.from_report_data` reads **only** the persisted
+`severity.exit_code` — it has no way to see `policy_gate_decision` or the
+analysis step's raw exit code at all (confirmed by reading
+`from_report_data` directly). Without also updating the persisted
+`severity` block, a removed-library gate on a `deferred` bundle check would
+still be silently missed by a later `aggregate` pass, even though the
+check's own composite exit code was already correct. Fixed properly this
+time: when `analysis_exit_code == 8` (the specific, well-known
+`--fail-on-removed-library` sentinel — confirmed by reading
+`_exit_compare_release`'s full body that it's the *only* value that
+diverges from `severity_exit_code` in the severity-aware scheme check-target
+always uses), `augment_report` now also escalates the persisted
+`severity` block itself: `exit_code` → 4, `blocking` → `True`,
+`"abi_breaking"` added to `blocking_categories` (a whole library
+disappearing is unambiguously an ABI break) — landing on 4 specifically
+because it's the ceiling of `aggregate.py`'s own `_VALID_GATE_EXIT = {0, 1,
+2, 4}`; writing the literal `8` there would make `aggregate.py`'s strict,
+fail-closed `from_report_data` raise `_MalformedGate` instead of silently
+missing the gate, which is arguably worse (it would crash the *entire*
+aggregate computation, not just misjudge one target). The escalation only
+ever raises an already-`< 4` severity block, never downgrades one already
+at the ceiling, and is a no-op when no `severity` block exists at all (a
+scan-shaped report — exit 8 only ever comes from the release/bundle
+compare path in the first place, but the check stays defensive). New
+`test_removed_library_exit_code_escalates_persisted_severity`/
+`test_removed_library_escalation_does_not_downgrade_an_already_worse_severity`/
+`test_removed_library_escalation_only_triggers_on_exit_code_8`/
+`test_removed_library_escalation_is_a_no_op_without_a_severity_block` in
+`tests/test_check_report.py`; a real end-to-end proof
+(`test_removed_library_gate_survives_deferred_mode_for_a_real_aggregate_read`
+in `tests/test_action_check_target.py`) feeds the persisted report straight
+into the actual `abicheck.aggregate.GateInfo.from_report_data` for
+`gate-mode: deferred` and asserts it reads a blocking gate — not just that
+the shell/Python logic looks right on paper.
+
+An eighth round of Codex review then caught that `profile` — declared
+`required: true` in `action.yml` — was never actually validated anywhere:
+`validate-inputs.sh` checks `name` but never read `INPUT_PROFILE` at all,
+and the "Validate check-target inputs" step's own env block didn't even
+forward it. This matters because **GitHub Actions does not actually
+enforce `required: true` for composite-action inputs** — confirmed via
+`github.com/orgs/community/discussions/26777` and GitHub's own metadata-
+syntax docs: an omitted required input simply arrives as an empty string,
+with no automatic failure. Without an explicit check, a workflow that
+forgot `profile:` would sail past validation and only fail deep inside
+`run.sh`'s `PROFILE="${INPUT_PROFILE:?}"` bash parameter expansion, which
+aborts the finalize step immediately — before `report_envelope.py` ever
+runs — so the check would produce no `check-target-report*.json` and no
+outputs at all, despite ADR-047 §7's "the report-envelope step always
+executes" contract. Fixed: `INPUT_PROFILE: ${{ inputs.profile }}` added to
+the validate step's env block, and `validate-inputs.sh` now fails loud
+(exit 64, matching every other required-input check there) when `profile`
+is empty, the same way it already does for `name`. New
+`test_missing_profile_fails_here_not_deep_in_run_sh` in
+`tests/test_action_check_target.py`.
+
+A ninth round of Codex review then found that the per-check report-filename
+fix (above) only scoped the *final envelope* — the internal analysis-step
+output, `check-target-analysis.json`, is still a single fixed workspace-
+relative path shared by every `check-target` invocation in a job. If a job
+runs check-target twice and the *second* invocation's nested root Action
+crashes before ever writing its own report (e.g. a CLI usage/config error),
+`action/run.sh`'s "only emit report-path when a real report file was
+produced" check (confirmed by reading it: `if [[ -n "${OUTPUT_FILE:-}" &&
+-f "${OUTPUT_FILE}" ]]`) tests file *existence*, not freshness — so it would
+find the *first* invocation's still-present file and report it as this
+run's own `report-path`. The finalize step would then augment the
+*previous* check's JSON as if it were the current check's real result, and
+with `gate-mode: deferred`/`advisory` that silently turns a genuine
+operational failure into a false pass, since `operational_errors` would be
+read from the stale (successful) report instead. Considered giving the
+analysis output a per-check filename too, the same way the final envelope
+already is, but rejected it: the final envelope's filename is built from a
+`_slug()`-sanitized `name`/`profile`/`baseline-channel`/`requested-depth`,
+and no such sanitization runs before the analysis step — interpolating
+those raw input values into a second filename here would trade a staleness
+bug for a path-injection one. Fixed instead by adding an unconditional
+"Clean stale analysis output" step (`rm -f check-target-analysis.json`)
+immediately before "Run analysis" in `action.yml`, deliberately *not*
+gated behind "Run analysis"'s own `if:` — a same-job resolve/collect
+failure that skips analysis this run must still clear out whatever a prior
+invocation left behind, or the next invocation in the same job would find
+it. Since `action.yml`'s own step orchestration needs a real GitHub Actions
+runner to exercise end-to-end (no way to unit-test the composite steps
+directly, per this section's existing testing approach), verified via a
+structural assertion over the parsed YAML instead — mirroring
+`test_action_validate_inputs.py`'s `TestUnsetFormatUsesEachModesOwnDefault`
+precedent for the same kind of `action.yml`-only fix. New
+`TestStaleAnalysisOutputIsCleanedBeforeEachRun::test_cleanup_step_runs_unconditionally_immediately_before_analysis`
+in `tests/test_action_check_target.py` asserts the cleanup step exists,
+is unconditional (no `if:`), sits immediately before "Run analysis", and
+targets the same filename the analysis step's `output-file` writes.
+
+A tenth round of Codex review then caught a related but distinct evidence-
+forwarding gap: `actions/collect-facts`'s replay phase defaults an unset
+`sources` input to `.` internally (confirmed by reading its `run.sh`:
+`SOURCES="${INPUT_SOURCES:-.}"`), but that resolved value is never
+surfaced as an output — the phase only prints a notice telling the caller
+to "pass `sources: $SOURCES` directly to dump/scan/compare". check-target's
+"Run analysis" step was instead forwarding the raw, still-empty
+`inputs.sources` straight through, and `action/run.sh`'s `add_single_flag`
+helper (confirmed by reading it) omits `--sources` entirely for an empty
+value. The net effect: an `evidence-producer: replay` check that leaves
+`sources:` unset — a supported, documented configuration, since replay's
+whole point is "a bare `sources:` pointer, no build step needed" — would
+pass the collect-facts step cleanly and then silently run `compare`/`scan`
+with zero source evidence, missing any source-only finding at
+`requested-depth: build`/`source` without any error or warning. Fixed by
+changing the analysis step's `sources:` forward from a bare
+`${{ inputs.sources }}` to
+`${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer
+== 'replay' && '.' || '') }}`, mirroring collect-facts' own default
+exactly for the one producer where an empty `sources` is meaningful and
+expected; wrapper/clang-plugin/no-producer checks are unaffected since
+they route source evidence through `build-info`, not `sources`, so the
+fallback only ever fires for `evidence-producer: replay`. New
+`TestReplaySourcesForwardedWithDefault` in
+`tests/test_action_check_target.py`: one test pins the exact expression
+string against the parsed YAML (so an accidental edit back to a bare
+forward fails loud), and two more independently exercise a pure-Python
+mirror of the ternary's actual selection semantics (empty `sources`
+resolves to `.` only for `replay`; any explicit `sources` value always
+wins) — the same structural-plus-semantic pairing used for the report-path
+scoping fix's `test_action_yml_format_input_has_no_static_default`-style
+precedent, since `action.yml`'s own step orchestration still needs a real
+GitHub Actions runner to exercise end-to-end.
+
+CodeRabbit's first full review pass on the PR then raised three findings.
+First, `validate-inputs.sh`'s `baseline-channel`/`requested-depth` inputs
+(both `required: true`) were still using the bare `:?` parameter-expansion
+pattern the `profile` fix above replaced — `:?` does fire on an empty
+value, but exits 1 with a raw bash stderr message and no `::error::`
+annotation, diverging from the exit-64 `_fail` convention every other
+required-input check here uses. Fixed by converting both to the same
+`-z`/`_fail` pattern as `name`/`profile`. Doing so exposed a real ordering
+bug the mechanical conversion would otherwise have introduced silently:
+`requested-depth` already has a `case` statement validating it against
+`binary`/`headers`/`build`/`source`, and that case statement ran *before*
+where the new required-check would have been added — an empty value never
+matches any case pattern, so it would have been caught there first with
+the vaguer "requested-depth '' is not recognized" message, making the new
+"requested-depth input is required" check dead code. Fixed by moving all
+four required-input checks (`name`, `profile`, `baseline-channel`,
+`requested-depth`) to run as a block before any of the enum/case
+validations, restoring the same "required check fires before the enum
+check" ordering the original `:?` expansions had for free (parameter
+expansion runs at variable-assignment time, before any of the script's
+`case` statements). New
+`test_missing_baseline_channel_fails_with_required_message`/
+`test_missing_requested_depth_fails_with_required_message_not_enum_message`
+in `tests/test_action_check_target.py` — the second one asserts
+`"not recognized" not in result.stdout` specifically to pin the ordering,
+not just the exit code.
+
+Second, `docs/reference/check-target.md`'s "always emits the report
+envelope... regardless of whether the baseline resolved... or failed
+outright" claim (twice, in the intro and in the "What it does" numbered
+list) didn't account for the `profile`-required fix two rounds above:
+an invalid invocation (missing `name`/`profile`/`baseline-channel`/
+`requested-depth`, or any of `validate-inputs.sh`'s other rejected
+combinations) is now rejected by the very first step, before
+`report_envelope.py` ever runs, producing no report or outputs at all.
+Reworded both spots to qualify the guarantee as applying once input
+validation has passed, and `changelog.d/20260722_232114_noreply_g30_implementation_t5o3or.md`'s
+matching "always emitting" phrase similarly.
+
+Third, and most substantively: `docs/reference/check-target.md`'s Report
+envelope section described the starting shape check-target's own analysis
+step produces as unconditionally `abicheck/reporter.py`'s compare-report
+shape (`report_schema_version: "2.13"`) — but by the time of this round,
+the scan/bundle shape-awareness fix (several rounds above) had already
+made clear that's only true for a normal single-library `compare`; a
+`baseline-channel: none` audit starts from a `scan_schema_version` shape
+and a `kind: bundle` check starts from the CLI's per-library release
+fan-out summary, neither of which carries `report_schema_version` at all.
+Reworded to name all three starting shapes explicitly instead of
+implying one shape covers every case. The same finding also flagged a
+factually incorrect claim in this plan document itself, in the schema-fix
+round's own "verified against all four shapes by hand" sentence: it
+claimed the pre-existing per-library release-fan-out's minimal
+`{library, verdict: "ERROR", error}` entry "now validates" against
+`compare_report.schema.json`. Re-verified by hand with `jsonschema.validate`
+against the actual schema: it does **not** — that minimal dict never
+carries `report_schema_version`, and the schema's top-level `required`
+demands that field unconditionally, independent of the `verdict`-gated
+`allOf`/`if`/`then` branch. The claim was never actually exercised by any
+test; corrected the sentence to say so, and noted that this is harmless in
+practice since that dict is a per-library entry inside the fan-out's own
+`libraries` list, never validated as a `compare_report.schema.json`
+document in its own right — the fan-out's actual top-level summary is the
+`libraries`/`old_dir` shape the later round already documented as never
+receiving this schema's marker.
 
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 

@@ -143,7 +143,21 @@ from typing import Any
 #:       primitives G30 P1 will add (``resolve-baseline``, ``check-target``)
 #:       have a report-level place to record a check's identity. Omitted
 #:       entirely (never emitted as null) when unset.
-REPORT_SCHEMA_VERSION = "2.12"
+#:   2.13: added the remaining ADR-047 §7 report-envelope keys --
+#:       ``compatibility_verdict`` (``Verdict``-cased mirror of the legacy
+#:       ``verdict`` field), ``policy_gate_decision`` (``"pass"``/``"fail"``),
+#:       ``check_evidence_coverage`` (``{state, reasons}``, not
+#:       ``layer_coverage`` -- deliberately a different name/shape than that
+#:       existing per-layer array, see §7's field-naming corrections),
+#:       ``operational_errors`` (list of ``{kind, message}``), ``publication``
+#:       (``{state, channels}``), ``project``, ``head_sha``, ``base_ref``,
+#:       ``action_version``, and ``tool_version``. Populated by
+#:       ``actions/check-target`` (G30 P1.3, ``abicheck.buildsource.
+#:       check_report``), which reads/rewrites a report file after the CLI
+#:       has already produced it -- nothing in the CLI/service layer sets
+#:       these directly either, same as 2.12's five keys. All additive/
+#:       optional; omitted entirely (never emitted as null) when unset.
+REPORT_SCHEMA_VERSION = "2.13"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -160,7 +174,14 @@ REPORT_SCHEMA_VERSION = "2.12"
 #:       ``baseline_channel`` — mirroring compare's 2.12 report-identity
 #:       envelope (ADR-047 §7, G30 P0.3). Reserved for G30 P1; not yet
 #:       populated. Omitted entirely (never emitted as null) when unset.
-SCAN_SCHEMA_VERSION = "1.1"
+#: 1.2 — mirrors compare's 2.13 bump: the remaining ADR-047 §7 keys
+#:       (``compatibility_verdict``, ``policy_gate_decision``,
+#:       ``check_evidence_coverage``, ``operational_errors``,
+#:       ``publication``, ``project``, ``head_sha``, ``base_ref``,
+#:       ``action_version``, ``tool_version``), populated the same way by
+#:       ``actions/check-target`` (G30 P1.3) for a ``scan``-mode audit
+#:       check (ADR-047 S5).
+SCAN_SCHEMA_VERSION = "1.2"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"
