@@ -193,6 +193,10 @@ def _filter_suppressed_changes(
     for c in changes:
         outcome = suppression.evaluate(c)
         if outcome.suppressed:
+            if outcome.matched_rule is not None:
+                c.suppression_rule = (
+                    outcome.matched_rule.label or outcome.matched_rule.reason
+                )
             suppressed.append(c)
             continue
         visible.append(c)
@@ -275,6 +279,10 @@ def _filter_pattern_synthetic(
     for c in kept[pre_pattern_count:]:
         outcome = suppression.evaluate(c)
         if outcome.suppressed:
+            if outcome.matched_rule is not None:
+                c.suppression_rule = (
+                    outcome.matched_rule.label or outcome.matched_rule.reason
+                )
             suppressed.append(c)
             # Drop this synthetic finding's disclosure row too, so a
             # fully-suppressed handle/opaque/anti-pattern transition does

@@ -71,15 +71,21 @@ def _build_proof_path(change: Any) -> GraphProofPath | None:
 def assess_change(change: Any, *, suppressed: bool = False) -> ImpactAssessment:
     """Derive an ``ImpactAssessment`` from *change*'s existing fields.
 
-    *suppressed* is caller-supplied: nothing on ``Change`` itself records
-    which rule (if any) suppressed it, so the caller — which already knows
-    whether it is rendering ``DiffResult.changes`` or
-    ``DiffResult.suppressed_changes`` — passes it explicitly.
+    *suppressed* is caller-supplied: whether *this* call site is rendering
+    ``DiffResult.changes`` or ``DiffResult.suppressed_changes`` is not
+    recoverable from *change* alone. ``Change.suppression_rule`` (G29 Phase 3
+    slice 2, ADR-050 follow-up) *is* set directly on the change by whichever
+    suppression call site moved it into ``suppressed_changes``
+    (``checker._filter_suppressed_changes``/``_filter_pattern_synthetic``,
+    ``post_processing.ApplySuppression``), so it is read unconditionally
+    here rather than gated on *suppressed* — reading it for a *kept* change
+    is harmless (it is never set on one).
     """
     effective_verdict = getattr(change, "effective_verdict", None)
     decision = FindingDecision(
         state="suppressed" if suppressed else "kept",
         reason_code=getattr(change, "modulation_reason", None),
+        suppression_rule=getattr(change, "suppression_rule", None),
         verdict_override=(
             effective_verdict.value if effective_verdict is not None else None
         ),

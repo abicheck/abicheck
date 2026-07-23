@@ -72,7 +72,10 @@ independently-nullable keys:
   `verdict_override` — the overridden verdict, which can be a downgrade
   *or* an escalation (e.g. a `std::`-embedding proof promoting
   `STDLIB_IMPLEMENTATION_CHANGED` to `BREAKING`), not always a demotion.
-  `suppression_rule` is not populated yet — see ADR-050.
+  `suppression_rule` names the suppression rule that actually suppressed a
+  finding (its `label`, falling back to its `reason`) — present only on a
+  `suppression.suppressed_changes[]` entry, and only when the matching rule
+  set either field.
 - `evidence_category`/`correlated_change_kind` mirror the finding's own
   top-level fields when set.
 

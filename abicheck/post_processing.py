@@ -1073,6 +1073,8 @@ class ApplySuppression:
         for c in changes:
             outcome = ctx.suppression.evaluate(c)
             if outcome.suppressed:
+                if outcome.matched_rule is not None:
+                    c.suppression_rule = outcome.matched_rule.label or outcome.matched_rule.reason
                 ctx.suppressed.append(c)
                 continue
             filtered.append(c)

@@ -1,7 +1,7 @@
-# ADR-050: Unified Impact Assessment Model (G29 Phase 3, slice 1)
+# ADR-050: Unified Impact Assessment Model (G29 Phase 3, slices 1-2)
 
 **Date:** 2026-07-22
-**Status:** Accepted — slice 1 implemented.
+**Status:** Accepted — slices 1 and 2 implemented.
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 3's own
 "needs its own ADR" gate — [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s
@@ -92,10 +92,10 @@ New `abicheck/impact/model.py`:
 ImpactAssessment` — a pure function, no I/O, no graph traversal of its own.
 It only reads attributes already on the `Change` object passed in.
 `suppressed` is a caller-supplied flag (the caller already knows whether it
-is rendering `DiffResult.changes` or `DiffResult.suppressed_changes`; nothing
-on `Change` itself records which rule suppressed it — seeding
-`FindingDecision.suppression_rule` would need `suppression.py`'s
-`SuppressionOutcome` threaded through, not implemented this slice).
+is rendering `DiffResult.changes` or `DiffResult.suppressed_changes`).
+`FindingDecision.suppression_rule` is read from `Change.suppression_rule`
+unconditionally (not gated on `suppressed`, since the field is never set on
+a kept change) — see "Slice 2" below for how that field gets populated.
 
 ### D2. Direction: `ImpactAssessment` derives from `Change`, not the reverse
 
@@ -268,6 +268,43 @@ the same PR and fixed before merge:
   no stronger claim to make. No `impact_assessment`/`impactAssessment` is
   added (there is no signal beyond the default to report).
 
+## Slice 2 — `FindingDecision.suppression_rule`
+
+Landed in a follow-up commit on the same PR, closing the one slice-1 gap that
+did not need a new ADR decision (only new data on an existing, already-public
+field) — `SuppressionOutcome` gained a fourth field rather than reusing an
+existing one:
+
+- **`suppression.SuppressionOutcome.matched_rule: Suppression | None`** —
+  the rule that actually suppressed a change, when `suppressed` is `True`.
+  Before this, `SuppressionList.evaluate`'s success branch returned
+  `SuppressionOutcome(suppressed=True)` with no record of *which* rule
+  matched — `withheld_rule`/`withheld_unknown_rule` only ever covered the
+  two *refused*-match diagnostics (ADR-044 D4), never the ordinary
+  successful-suppress case.
+- **`Change.suppression_rule: str | None`** — a new, additive `Change`
+  field (matching the precedent every other G29/ADR-048 field on `Change`
+  already set: default `None`, no existing caller affected). Set to
+  `matched_rule.label or matched_rule.reason` (both are optional/free-form
+  on a `Suppression` rule, so this can still end up `None`) at the three
+  call sites that move a change into `DiffResult.suppressed_changes`:
+  `checker._filter_suppressed_changes`, `checker._filter_pattern_synthetic`,
+  `post_processing.ApplySuppression.run`. **Not** the two call sites in
+  `appcompat.py`/`cli_compare_helpers.py` — those discard a suppressed
+  consumer/runtime overlay `Change` outright (never append it anywhere), so
+  there is no `Change` object left for the label to matter to.
+- `engine.assess_change` reads `Change.suppression_rule` into
+  `FindingDecision.suppression_rule` unconditionally (see D1 above) —
+  `reporter._suppressed_change_entry` (Slice 1's suppression-audit-trail
+  fix) picks it up with no further wiring, since it already calls
+  `assess_change(c, suppressed=True)` for every entry in
+  `suppressed_changes[]`.
+
+`post_processing.py` was already at the AI-readiness 2000-line hard cap
+(same constraint D6's implementation in ADR-046 hit) — the `ApplySuppression`
+change is a single-line assignment specifically to stay at the cap rather
+than push it over.
+
 ## Deliberately not implemented this slice
 
 Per the "ship each phase independently" mitigation this initiative committed
@@ -287,9 +324,18 @@ remaining four tiers):
   of `ImpactAssessment` entirely rather than added as permanently-`None`
   fields.
 - **The D2 direction flip** (`Change` fields becoming derived from
-  `ImpactAssessment` rather than the reverse) — see D2 above.
-- **`FindingDecision.suppression_rule`** — needs `SuppressionOutcome`
-  threading; left `None`.
+  `ImpactAssessment` rather than the reverse) — deliberately not attempted.
+  This touches the core control flow of five producer modules at once
+  (`post_processing.MarkReachability`, `source_graph_findings.py`,
+  `internal_leak.py`, `suppression.py`, `appcompat.py`), several of them
+  performance-sensitive graph walks under active suppression-safety
+  guarantees (ADR-044) — the same risk class this ADR's own D2 section
+  already flagged. Forcing it through in the same pass as slices 1-2 would
+  be exactly the kind of rushed, high-blast-radius change the "needs its
+  own ADR/scoped design pass" bar (this ADR's own header, ADR-046 D4, and
+  CLAUDE.md "M1-3") exists to prevent — a real regression here would be to
+  suppression correctness, not just to this reporting layer. Left for a
+  dedicated slice.
 - **`--report-mode root-cause`** — needs Phase 6's `RootCauseCorrelator` to
   group by; there is nothing to group by yet.
 - **Stable `finding_id`/`occurrence_id`/`root_cause_id`/`impact_group_id`
@@ -348,10 +394,13 @@ by and do not depend on anything in this slice being done differently.
 ## References
 
 - `abicheck/impact/model.py`, `abicheck/impact/engine.py`
-- `abicheck/reporter.py` — `_change_to_dict`
-- `abicheck/sarif.py` — `_build_result`
+- `abicheck/reporter.py` — `_change_to_dict`, `_leaf_entry`, `_suppressed_change_entry`
+- `abicheck/sarif.py` — `_result_for`, `_missing_contract_result`
+- `abicheck/cli_compare_fold.py` — `_fold_scoped_compat_into_text`
+- `abicheck/suppression.py` — `SuppressionOutcome.matched_rule`
+- `abicheck/checker.py`, `abicheck/post_processing.py` — `Change.suppression_rule` set at suppression time
 - `abicheck/schemas/compare_report.schema.json`, `abicheck/schemas/__init__.py`
-- `tests/test_impact_model.py`
+- `tests/test_impact_model.py`, `tests/test_suppression.py`, `tests/test_sarif.py`, `tests/test_cov95_cli.py`
 - `docs/concepts/impact-analysis.md`
 - [G29](../plans/g29-impact-analysis-layer.md) — Phase 3
 - [ADR-044](044-reachability-aware-suppression.md),

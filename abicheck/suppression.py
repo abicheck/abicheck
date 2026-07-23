@@ -638,11 +638,18 @@ class SuppressionOutcome:
     rule's selectors matched but the change's ``reachability_state`` was
     ``UNKNOWN`` rather than proven-unreachable, distinct from the
     public-reachable-break case ``withheld_rule`` covers.
+
+    ``matched_rule`` (G29 Phase 3 slice 2, ADR-050 follow-up) is the rule
+    that actually suppressed the change when ``suppressed`` is True — before
+    this, a successful match returned no record of *which* rule fired, so a
+    caller moving the change into ``DiffResult.suppressed_changes`` had
+    nothing to attribute the suppression to.
     """
 
     suppressed: bool
     withheld_rule: Suppression | None = None
     withheld_unknown_rule: Suppression | None = None
+    matched_rule: Suppression | None = None
 
 
 class SuppressionList:
@@ -782,7 +789,7 @@ class SuppressionList:
         withheld_unknown_rule: Suppression | None = None
         for s in self._suppressions:
             if s.matches(change, today=today):
-                return SuppressionOutcome(suppressed=True)
+                return SuppressionOutcome(suppressed=True, matched_rule=s)
             if withheld_rule is None and s.would_withhold(change, today=today):
                 withheld_rule = s
             if withheld_unknown_rule is None and s.would_withhold_unknown_reachability(

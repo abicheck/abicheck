@@ -415,7 +415,7 @@
             },
             "decision": {
               "type": "object",
-              "description": "Whether this finding was kept or suppressed, and why. suppression_rule is not yet populated (ADR-050 'Deliberately not implemented this slice'). verdict_override carries Change.effective_verdict's value verbatim when set -- an override can raise a finding's category (e.g. STDLIB_IMPLEMENTATION_CHANGED promoted to BREAKING) as well as lower it, so this is not always a downgrade despite the name of the underlying mechanism.",
+              "description": "Whether this finding was kept or suppressed, and why. suppression_rule (G29 Phase 3 slice 2, ADR-050 follow-up) is the label (falling back to reason) of the Suppression rule that actually suppressed the change -- present only for a suppressed entry whose matching rule set either field. verdict_override carries Change.effective_verdict's value verbatim when set -- an override can raise a finding's category (e.g. STDLIB_IMPLEMENTATION_CHANGED promoted to BREAKING) as well as lower it, so this is not always a downgrade despite the name of the underlying mechanism.",
               "properties": {
                 "state": { "type": "string", "enum": ["kept", "suppressed"] },
                 "reason_code": { "type": "string" },

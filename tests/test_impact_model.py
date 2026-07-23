@@ -295,6 +295,20 @@ class TestAssessChange:
         assert assessment.decision.state == "suppressed"
         assert assessment.has_signal() is True
 
+    def test_suppression_rule_read_from_change(self) -> None:
+        """G29 Phase 3 slice 2 (ADR-050 follow-up): Change.suppression_rule
+        (set by checker.py/post_processing.py at suppression time) flows
+        into FindingDecision.suppression_rule -- the piece slice 1 left
+        unwired."""
+        change = _change(suppression_rule="workaround-123")
+        assessment = assess_change(change, suppressed=True)
+        assert assessment.decision.suppression_rule == "workaround-123"
+
+    def test_suppression_rule_none_for_kept_change(self) -> None:
+        change = _change()
+        assessment = assess_change(change)
+        assert assessment.decision.suppression_rule is None
+
     def test_modulation_and_verdict_override_carried_into_decision(self) -> None:
         change = _change(
             modulation_reason="idiom_pattern_matched",
@@ -376,3 +390,22 @@ class TestReporterIntegration:
         entry = payload["suppression"]["suppressed_changes"][0]
         assert entry["reachability_state"] == "unknown"
         assert entry["impact_assessment"]["decision"]["state"] == "suppressed"
+
+    def test_suppressed_changes_carry_suppression_rule_label(self) -> None:
+        """G29 Phase 3 slice 2 (ADR-050 follow-up): a suppressed change
+        already carrying Change.suppression_rule (set by checker.py/
+        post_processing.py at suppression time) surfaces it in
+        impact_assessment.decision.suppression_rule end to end."""
+        change = _change(suppression_rule="workaround-123")
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            suppressed_changes=[change],
+            suppressed_count=1,
+        )
+        payload = json.loads(reporter.to_json(result))
+        entry = payload["suppression"]["suppressed_changes"][0]
+        assert entry["impact_assessment"]["decision"]["suppression_rule"] == (
+            "workaround-123"
+        )

@@ -119,10 +119,13 @@ class GraphProofPath:
 class FindingDecision:
     """Whether a finding was kept or suppressed, and why.
 
-    ``suppression_rule`` is deliberately left ``None`` in this slice — it
-    would need ``suppression.SuppressionOutcome`` threaded through
-    :func:`.engine.assess_change`'s caller, not done yet (ADR-050
-    "Deliberately not implemented this slice").
+    ``suppression_rule`` (G29 Phase 3 slice 2, ADR-050 follow-up) is the
+    label (falling back to ``reason``) of the ``Suppression`` rule that
+    actually suppressed the change, read from ``Change.suppression_rule`` —
+    set directly on the change by whichever suppression call site moved it
+    into ``DiffResult.suppressed_changes``. ``None`` for a kept change, and
+    for a suppressed one whose matching rule set neither ``label`` nor
+    ``reason``.
 
     ``verdict_override`` is deliberately not named "demotion" — a
     ``Change.effective_verdict`` override (ADR-025 A4/D4.1) can *raise* a
