@@ -577,6 +577,39 @@ def test_front_matter_schema_accepts_link_with_anchor_and_title(
     assert f.errors == []
 
 
+def test_resolve_href_strips_angle_bracket_destination(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CommonMark's angle-bracket link destination form (`[text](<url>)`,
+    used to allow spaces/special characters in the URL) must not leave the
+    `<`/`>` characters as part of the resolved path -- MkDocs renders it as
+    an ordinary link (regression test for the gap flagged in PR #619
+    review)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    assert dc._resolve_href(page, "<owner.md>") == "owner.md"
+
+
+def test_resolve_href_strips_angle_bracket_destination_with_anchor_and_title(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    assert dc._resolve_href(page, '<owner.md#section> "title"') == "owner.md"
+
+
+def test_page_links_to_recognises_angle_bracket_link(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text("See [owner](<owner.md>) for details.\n", encoding="utf-8")
+    assert dc._page_links_to(page, "owner.md") is True
+
+
 def test_page_links_to_ignores_external_links(tmp_path: Path) -> None:
     (tmp_path / "owner.md").write_text("x", encoding="utf-8")
     page = tmp_path / "page.md"

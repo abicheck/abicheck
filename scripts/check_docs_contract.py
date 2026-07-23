@@ -425,10 +425,19 @@ def _strip_inline_code(text: str) -> str:
 
 
 def _resolve_href(path: Path, href: str) -> str | None:
-    """Clean a Markdown link target (strip an optional title/anchor) and
-    resolve it to a docs/-relative POSIX path, or None if it's external,
-    absolute, or doesn't resolve under `DOCS`."""
-    href = href.strip().split(" ", 1)[0].split("#", 1)[0]
+    """Clean a Markdown link target (strip an optional title/anchor, and an
+    optional CommonMark angle-bracket destination wrapper -- `[text](<url>)`
+    is valid Markdown, and MkDocs renders it as a normal link, so `<` and `>`
+    must not end up as part of the resolved filesystem path) and resolve it
+    to a docs/-relative POSIX path, or None if it's external, absolute, or
+    doesn't resolve under `DOCS`."""
+    href = href.strip()
+    if href.startswith("<"):
+        end = href.find(">")
+        href = href[1:end] if end != -1 else href[1:]
+    else:
+        href = href.split(" ", 1)[0]
+    href = href.split("#", 1)[0]
     if not href or "://" in href or href.startswith(("mailto:", "/")):
         return None
     resolved = (path.parent / href).resolve()
