@@ -125,6 +125,53 @@ def test_adr_index_and_nav_sync_catches_missing_index_nav_entry(
     )
 
 
+def test_adr_index_and_nav_sync_ignores_commented_out_index_nav_entry(
+    car, tmp_path, monkeypatch
+):
+    """A nav entry commented out of mkdocs.yml (`# - ADR Index:
+    development/adr/index.md`) is not published navigation -- a raw
+    whole-file regex scan for `.md` paths would still find it, incorrectly
+    satisfying the "ADR index must be in nav" requirement (regression test
+    for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | Accepted |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  # - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("ADR index itself" in msg for _, msg in f.errors), (
+        f"expected a missing-index-from-nav error, got: {f.errors}"
+    )
+
+
+def test_strip_yaml_line_comment_preserves_quoted_hash(car):
+    """A '#' inside a quoted string is not a YAML comment marker and must
+    be preserved -- only a '#' at line start or preceded by whitespace
+    starts a real comment."""
+    assert car._strip_yaml_line_comment("  - Title: 'a#b.md'") == (
+        "  - Title: 'a#b.md'"
+    )
+    assert (
+        car._strip_yaml_line_comment("  - Title: page.md  # trailing note")
+        == "  - Title: page.md  "
+    )
+    assert car._strip_yaml_line_comment("# fully commented") == ""
+
+
 def test_adr_index_nav_sync_ignores_link_hidden_in_html_comment(
     car, tmp_path, monkeypatch
 ):

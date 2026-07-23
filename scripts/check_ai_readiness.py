@@ -1412,17 +1412,40 @@ def check_examples_readme_sync(f: Findings) -> None:
 _MKDOCS_MD_REF_RE = re.compile(r"[:\s]\s*([A-Za-z0-9._/-]+\.md)\b")
 
 
+def _strip_yaml_line_comment(line: str) -> str:
+    """Drop a YAML comment from one line: a `#` that starts a comment (at
+    line start, or preceded by whitespace) and isn't inside a quoted
+    string. Without this, a nav entry commented out to remove it from
+    publication (`# - ADR Index: development/adr/index.md`) would still be
+    picked up by a raw whole-file regex scan, making a page look reachable
+    from nav when it no longer is (PR #619 review)."""
+    in_single = in_double = False
+    for i, ch in enumerate(line):
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == "#" and not in_single and not in_double:
+            if i == 0 or line[i - 1] in " \t":
+                return line[:i]
+    return line
+
+
 def _collect_mkdocs_nav_refs() -> set[str]:
     """Extract every .md path referenced in mkdocs.yml.
 
     We deliberately don't depend on PyYAML — the script is stdlib-only and
     runs before pip install in CI. A regex over the nav block is good
     enough: mkdocs nav entries are always plain ``Title: path.md`` lines.
+    Comments are stripped first (see _strip_yaml_line_comment) so a
+    commented-out entry doesn't count as a real one.
     """
     mkdocs = ROOT / "mkdocs.yml"
     if not mkdocs.is_file():
         return set()
-    text = _read(mkdocs)
+    text = "\n".join(
+        _strip_yaml_line_comment(line) for line in _read(mkdocs).split("\n")
+    )
     return {m.group(1).strip() for m in _MKDOCS_MD_REF_RE.finditer(text)}
 
 
