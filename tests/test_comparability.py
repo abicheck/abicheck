@@ -341,6 +341,51 @@ def test_pass_through_flags_absent_on_both_sides_is_unaffected(tmp_path):
     assert old.profile_fingerprint == new.profile_fingerprint
 
 
+def test_pass_through_flag_path_operand_ignores_checkout_root(tmp_path):
+    # Codex review (PR #624): a path-valued pass-through operand (e.g. the
+    # forced-include target of `-include /checkout-old/force.h`) must be
+    # content-hashed, not hashed as its raw checkout-root-dependent
+    # absolute string -- byte-identical forced-include content must
+    # fingerprint identically regardless of which checkout it was
+    # extracted from.
+    old_force = _write(tmp_path / "old" / "force.h", "#define FORCED 1\n")
+    new_force = _write(tmp_path / "new" / "force.h", "#define FORCED 1\n")
+    old = compute_extraction_contract(
+        l2_frontend_ran=True, pass_through_flags=["-include", old_force]
+    )
+    new = compute_extraction_contract(
+        l2_frontend_ran=True, pass_through_flags=["-include", new_force]
+    )
+    assert old.profile_fingerprint == new.profile_fingerprint
+
+
+def test_pass_through_flag_path_operand_content_change_differs(tmp_path):
+    old_force = _write(tmp_path / "old" / "force.h", "#define FORCED 1\n")
+    new_force = _write(tmp_path / "new" / "force.h", "#define FORCED 2\n")
+    old = compute_extraction_contract(
+        l2_frontend_ran=True, pass_through_flags=["-include", old_force]
+    )
+    new = compute_extraction_contract(
+        l2_frontend_ran=True, pass_through_flags=["-include", new_force]
+    )
+    assert old.profile_fingerprint != new.profile_fingerprint
+
+
+def test_pass_through_flag_str_and_path_do_not_collide(tmp_path):
+    # A raw str element must not be indistinguishable from a Path element's
+    # content hash -- the "str:"/"path:" tag prevents e.g. a literal flag
+    # string that happens to equal some file's content hash from silently
+    # matching a genuinely different Path-derived fingerprint.
+    force = _write(tmp_path / "force.h", "#define FORCED 1\n")
+    as_path = compute_extraction_contract(
+        l2_frontend_ran=True, pass_through_flags=["-include", force]
+    )
+    as_str = compute_extraction_contract(
+        l2_frontend_ran=True, pass_through_flags=["-include", str(force)]
+    )
+    assert as_path.profile_fingerprint != as_str.profile_fingerprint
+
+
 def test_ancestor_slot_token_with_comma_in_header_name_does_not_collide(tmp_path):
     # One project-owned slot owning a single header literally named
     # "a.h,b.h" must not fingerprint identically to one project-owned slot

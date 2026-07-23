@@ -319,7 +319,7 @@ def compute_extraction_contract(
     pointer_width: int | None = None,
     endianness: str | None = None,
     macro_ops: Sequence[tuple[str, str]] = (),
-    pass_through_flags: Sequence[str] = (),
+    pass_through_flags: Sequence[str | Path] = (),
     declared_headers: Sequence[Path] = (),
     declared_includes: Sequence[IncludeDir] = (),
     depfile_resolved_paths: Sequence[Path] = (),
@@ -349,15 +349,22 @@ def compute_extraction_contract(
     whether an L2 frontend ran rather than this function guessing from
     which fields happen to be non-empty.
 
-    ``pass_through_flags`` is an ordered, opaque list of repeatable
-    frontend flags with ABI-relevant preprocessing order (e.g.
-    ``-include a.h -include b.h``) hashed *in the given order*, unlike the
-    sorted/unordered depfile buckets below (Codex review, PR #624): such a
-    flag forces preprocessing content whose order can change macro/pragma
-    state even when the resolved dependency *set* the depfile reports is
-    identical between two extraction runs. This function does not parse or
-    validate the flags themselves — the CLI/manifest glue that would
-    collect them from a real invocation is separate, not-yet-built work.
+    ``pass_through_flags`` is an ordered list of repeatable frontend flags
+    with ABI-relevant preprocessing order (e.g. ``-include a.h -include
+    b.h``) hashed *in the given order*, unlike the sorted/unordered depfile
+    buckets below (Codex review, PR #624): such a flag forces preprocessing
+    content whose order can change macro/pragma state even when the
+    resolved dependency *set* the depfile reports is identical between two
+    extraction runs. Each element is either a bare ``str`` (opaque flag
+    text, hashed as literal content) or a ``Path`` naming a real file the
+    flag references (e.g. a forced-include target) — a ``Path`` element is
+    content-hashed, never hashed as its raw string form, since its
+    checkout-root-dependent absolute path (Codex review, PR #624) is
+    exactly the class of noise this whole algorithm strips everywhere
+    else. This function does not otherwise parse or validate the flags —
+    the CLI/manifest glue that would collect them (and classify which
+    operands are paths) from a real invocation is separate, not-yet-built
+    work.
 
     ``-I`` **ownership and tokenization** (the load-bearing part of
     ``profile_fingerprint``):
@@ -500,6 +507,25 @@ def compute_extraction_contract(
                 seen_header_identities.add(identity)
                 header_sequence.append(identity)
 
+        # Path-valued pass-through operands are content-hashed, never
+        # hashed as their raw string form (Codex review, PR #624): a
+        # forced-include flag like `-include /checkout-old/force.h` names
+        # a real file, and that file's checkout-root-dependent absolute
+        # path is exactly the class of noise this whole algorithm exists
+        # to strip everywhere else -- old/new checkouts using
+        # `/checkout-old/...` vs. `/checkout-new/...` must not
+        # fingerprint differently for byte-identical forced-include
+        # content. A `str` element (the flag name itself, or a non-path
+        # operand) is opaque and hashed as literal text; there is no
+        # principled root to normalize a forced-include path against (it
+        # need not fall under any declared header or -I directory at
+        # all), so it gets the same treatment as the unattributed
+        # system/toolchain bucket: content only, no path.
+        normalized_pass_through = [
+            f"path:{_content_hash(item)}" if isinstance(item, Path) else f"str:{item}"
+            for item in pass_through_flags
+        ]
+
         profile_fields = {
             "compiler_family": compiler_family or "",
             "compiler_version": compiler_version or "",
@@ -528,7 +554,7 @@ def compute_extraction_contract(
             # caller-supplied ordered flag list, not parsed or validated --
             # dumper.py's actual `-include`/other repeatable-flag wiring is
             # separate, not-yet-built work (see this module's docstring).
-            "pass_through_flags": json.dumps(list(pass_through_flags)),
+            "pass_through_flags": json.dumps(normalized_pass_through),
             "include_sequence": json.dumps(slot_tokens),
             "header_sequence": json.dumps(header_sequence),
         }
