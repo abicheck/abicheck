@@ -1056,8 +1056,24 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
     Conservative and directive/literal/comment-aware: only definition-site
     syntax in actual code counts, never the same keywords appearing inside a
     preprocessor diagnostic message, a string/char literal, or a comment.
+
+    Two passes over *header_paths*, not one: *header_paths* is the whole
+    aggregate header set castxml/clang parses together as a single
+    translation unit, so a pre-C++20 compatibility type shadowing
+    "concept"/"requires"/"consteval"/"constinit" (Codex review) can live in
+    one file (a shared ``compat.hpp``) while the ambiguous bare use sits in
+    another (``api.hpp``) — a per-file shadow check would see only
+    ``api.hpp``'s own content and miss it, wrongly forcing C++20 mode on
+    the whole aggregate (Codex review, sixth round). The first pass reads
+    and preprocesses every file and ORs each shadow flag across all of
+    them; the second reuses that same preprocessed content to run the
+    per-line scan against the now aggregate-wide flags.
     """
-    found: list[Cpp20Requirement] = []
+    per_file: list[tuple[Path, bytes]] = []
+    concept_type_shadowed = False
+    requires_type_shadowed = False
+    consteval_type_shadowed = False
+    constinit_type_shadowed = False
     for p in header_paths:
         try:
             content = p.read_bytes()
@@ -1085,9 +1101,9 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
         # variable template of that type via *any* expression convertible
         # to it (not just a brace-init-list, which only covered the
         # aggregate-init case), so no per-initializer-shape check can be
-        # complete. Once "concept" is confirmed to name a real type in
-        # this header, every bare "concept NAME = ..." match in it is
-        # ambiguous and treated as non-genuine — see
+        # complete. Once "concept" is confirmed to name a real type
+        # anywhere in the aggregate, every bare "concept NAME = ..." match
+        # in it is ambiguous and treated as non-genuine — see
         # ``_looks_like_genuine_concept``. Checked against a *separate*,
         # additionally "//"-line-comment-stripped copy of the content
         # (raw strings/literals/block comments are already blanked in
@@ -1099,26 +1115,30 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
         # Also strip out #if 0/#if false regions before any of the three
         # shadow scans below — a disabled compatibility stub must not shadow
         # a genuine keyword used elsewhere in the header (Codex review).
-        _content_no_line_comments = _strip_inactive_if_zero_blocks(
+        content_no_line_comments = _strip_inactive_if_zero_blocks(
             re.sub(rb"//[^\n]*", b"", content)
         )
-        concept_type_shadowed = bool(
-            _CONCEPT_AS_TYPE_NAME_PATTERN.search(_content_no_line_comments)
+        per_file.append((p, content_no_line_comments))
+        concept_type_shadowed = concept_type_shadowed or bool(
+            _CONCEPT_AS_TYPE_NAME_PATTERN.search(content_no_line_comments)
         )
         # Same reasoning as concept_type_shadowed above, for "requires" used
         # as an ordinary pre-C++20 type name (Codex review).
-        requires_type_shadowed = bool(
-            _REQUIRES_AS_TYPE_NAME_PATTERN.search(_content_no_line_comments)
+        requires_type_shadowed = requires_type_shadowed or bool(
+            _REQUIRES_AS_TYPE_NAME_PATTERN.search(content_no_line_comments)
         )
         # Same reasoning and "//"-comment-stripped-copy caveat as
         # concept_type_shadowed above, for "consteval"/"constinit" used as
         # an ordinary pre-C++20 type name (Codex review, third round).
-        consteval_type_shadowed = bool(
-            _CONSTEVAL_AS_TYPE_NAME_PATTERN.search(_content_no_line_comments)
+        consteval_type_shadowed = consteval_type_shadowed or bool(
+            _CONSTEVAL_AS_TYPE_NAME_PATTERN.search(content_no_line_comments)
         )
-        constinit_type_shadowed = bool(
-            _CONSTINIT_AS_TYPE_NAME_PATTERN.search(_content_no_line_comments)
+        constinit_type_shadowed = constinit_type_shadowed or bool(
+            _CONSTINIT_AS_TYPE_NAME_PATTERN.search(content_no_line_comments)
         )
+
+    found: list[Cpp20Requirement] = []
+    for p, _content_no_line_comments in per_file:
         # Scan the same #if-0-stripped content the shadow checks above use —
         # a genuine consteval/constinit/concept/requires construct written
         # only inside a disabled #if 0 block must not itself mark the header

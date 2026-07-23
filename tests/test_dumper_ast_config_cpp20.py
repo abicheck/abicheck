@@ -1445,6 +1445,36 @@ def test_cpp20_detector_detects_abbreviated_unconstrained_function_template(tmp_
     assert any(r.reason == "abbreviated-function-template-parameter" for r in reqs)
 
 
+def test_cpp20_detector_carries_concept_shadow_across_header_set(tmp_path):
+    """Regression (Codex review, sixth round): *header_paths* is the whole
+    aggregate header set castxml/clang parse together as one translation
+    unit, so a type literally named "concept" declared in one file
+    (``compat.hpp``) shadows a bare "concept" use in a *different* file
+    of the same set (``api.hpp``) just as much as it would within a
+    single file — a per-file-only shadow check misses this split-file
+    case entirely and wrongly forces C++20 mode on the whole aggregate."""
+    compat = tmp_path / "compat.hpp"
+    compat.write_bytes(b"struct concept {};\n")
+    api = tmp_path / "api.hpp"
+    api.write_bytes(b"template<class T> concept C = 1;\n")
+    assert _detect_cpp20_headers([compat, api]) is False
+    # Order in the header set must not matter.
+    assert _detect_cpp20_headers([api, compat]) is False
+
+
+def test_cpp20_detector_still_detects_genuine_concept_across_header_set(tmp_path):
+    """Companion: a genuine concept declaration in one file of a
+    multi-file header set, with no shadowing type anywhere in the set,
+    must still be detected."""
+    other = tmp_path / "other.hpp"
+    other.write_bytes(b"struct Widget {};\n")
+    api = tmp_path / "api.hpp"
+    api.write_bytes(b"template<class T> concept D = true;\n")
+    assert _detect_cpp20_headers([other, api]) is True
+    reqs = _find_cpp20_requirements([other, api])
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
 def test_cpp20_detector_detects_custom_concept_constrained_auto_param(tmp_path):
     """Regression (Codex review): an abbreviated function parameter
     constrained by a *project-defined* concept (``void f(MyConcept auto
