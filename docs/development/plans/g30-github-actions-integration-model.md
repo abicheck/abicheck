@@ -664,6 +664,35 @@ implementation (PR #625), not anticipated above:**
   where both are empty) without a conditional branch — `uses:` cannot itself
   be an expression, so the checkout step had to be unconditional instead.
 
+**A third bug, in the fix for the second one above, caught by the real CI
+run of the new `test-check-target` fixture (job 89082423642) rather than by
+review or local testing — the self-checkout step read back its own
+identity, not check-target's.** `github.action_repository`/`github.
+action_ref` describe whichever action is *about to run* — the runner
+updates them while preparing each step, including composite-nested ones,
+**before** evaluating that same step's own `with:` expressions. The
+`Checkout abicheck (for nested Action composition)` step's own `with:`
+block read `${{ github.action_repository || github.repository }}`/`${{
+github.action_ref || github.sha }}` directly — but by the time those
+expressions were evaluated, the context had already flipped to describe
+*that step's own target*, `actions/checkout@v6`. The real CI run confirmed
+this exactly: the step's resolved `with:` logged `repository:
+actions/checkout` / `ref: v6`, checking out the wrong repository entirely
+and leaving `.abicheck-check-target-src/actions/resolve-baseline` empty —
+`Resolve baseline` then failed with "Can't find 'action.yml' ... Did you
+forget to run actions/checkout". **Fixed** by adding a `Capture this
+Action's identity` step (`id: identity`, a plain `run:` step, the first
+thing `check-target` does) that reads `github.action_repository`/`github.
+action_ref` into `$GITHUB_OUTPUT` before any nested `uses:` step has a
+chance to overwrite them, and pointing the checkout step's `with:` at `${{
+steps.identity.outputs.repository }}`/`${{ steps.identity.outputs.ref }}`
+instead of reading the raw context directly. The `action-version` input's
+default (evaluated once, before any of check-target's own steps run —
+a different, earlier timing than the checkout step's `with:`, so it was
+never affected by this specific bug) gained the same `||` fallback for
+consistency, so a local same-repo test run reports a real identity instead
+of an empty `"@"`.
+
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
 Implements ADR-047 §4/§5 (`run-plan.json` generation + matrix + trailing

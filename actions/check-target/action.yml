@@ -234,7 +234,7 @@ inputs:
   action-version:
     description: 'Recorded in the report envelope as the abicheck Action ref that ran this check.'
     required: false
-    default: ${{ format('{0}@{1}', github.action_repository, github.action_ref) }}
+    default: ${{ format('{0}@{1}', github.action_repository || github.repository, github.action_ref || github.sha) }}
 
 outputs:
   outcome:
@@ -274,6 +274,30 @@ runs:
         INPUT_CONTRACT_FILE: ${{ inputs.contract-file }}
       run: bash "${{ github.action_path }}/validate-inputs.sh"
 
+    # ── Capture this Action's own identity before any nested `uses:` step ──
+    # overwrites it. `github.action_repository`/`github.action_ref` describe
+    # whichever action is *about to run* -- the runner updates them as it
+    # prepares each step, including composite-nested ones, and critically
+    # **before** evaluating that same step's own `with:` expressions. A
+    # first attempt at the self-checkout step below read `github.
+    # action_repository`/`github.action_ref` directly in its own `with:`
+    # block and got back its own target's identity (`actions/checkout`/
+    # `v6`) instead of check-target's -- confirmed against a real CI run
+    # (job 89082423642). Reading them here instead, in a plain `run:` step
+    # that is the *first* thing check-target does, captures the correct
+    # values before anything nested has a chance to overwrite them.
+    - name: Capture this Action's identity
+      id: identity
+      shell: bash
+      env:
+        ACTION_REPOSITORY: ${{ github.action_repository }}
+        ACTION_REF: ${{ github.action_ref }}
+        FALLBACK_REPOSITORY: ${{ github.repository }}
+        FALLBACK_REF: ${{ github.sha }}
+      run: |
+        echo "repository=${ACTION_REPOSITORY:-$FALLBACK_REPOSITORY}" >> "$GITHUB_OUTPUT"
+        echo "ref=${ACTION_REF:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
+
     # ── Self-checkout for nested composite Actions ──────────────────────────
     # A relative `uses: ./x` step ALWAYS resolves against $GITHUB_WORKSPACE
     # (the calling workflow's own checkout) -- never against the repository
@@ -291,21 +315,18 @@ runs:
     # bare relative path happens to already work. Fix: check out this exact
     # abicheck/abicheck ref into a side directory of the caller's own
     # workspace first, then reference every nested Action relative to that
-    # directory instead of bare `./`. `github.action_repository`/
-    # `github.action_ref` are only set for a remote `owner/repo/path@ref`
-    # reference; for a local `uses: ./actions/check-target` call within this
-    # same repository (as `.github/workflows/test-action.yml` does), both
-    # are empty, so this falls back to `github.repository`/`github.sha` --
-    # checking out the same repo/commit the caller's own workspace already
-    # has, redundant but harmless. This step is unconditional rather than
-    # branching on which case applies, because `uses:` does not accept
-    # expressions -- there is no way to make the *reference itself*
-    # conditional, only its inputs.
+    # directory instead of bare `./`. For a local `uses: ./actions/
+    # check-target` call within this same repository (as `.github/
+    # workflows/test-action.yml` does), `github.action_repository`/
+    # `github.action_ref` are empty, so the identity step above falls back
+    # to `github.repository`/`github.sha` -- checking out the same repo/
+    # commit the caller's own workspace already has, redundant but
+    # harmless.
     - name: Checkout abicheck (for nested Action composition)
       uses: actions/checkout@v6
       with:
-        repository: ${{ github.action_repository || github.repository }}
-        ref: ${{ github.action_ref || github.sha }}
+        repository: ${{ steps.identity.outputs.repository }}
+        ref: ${{ steps.identity.outputs.ref }}
         path: .abicheck-check-target-src
         persist-credentials: false
 
