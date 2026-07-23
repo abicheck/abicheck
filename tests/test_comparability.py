@@ -268,13 +268,24 @@ def test_9_10_unattributed_depfile_path_still_hashed_into_system_bucket(tmp_path
 
 
 def test_11_generated_driver_tu_excluded_from_bucketing(tmp_path):
+    # The driver files live OUTSIDE any project-owned directory (not under
+    # old_h's/new_h's parent, and no matching --include for their own
+    # directory either) so they would otherwise land in the unordered
+    # system/toolchain bucket, not get excluded by project-ownership alone
+    # (CodeRabbit review, PR #624: the original version of this test placed
+    # the driver file inside the already-project-owned header directory, so
+    # the assertion passed even without the generated_driver_path exclusion
+    # -- it tested nothing). Their content genuinely differs (embedding the
+    # side-specific absolute #include path dumper.py's real driver would
+    # write), so the assertion only holds if generated_driver_path exclusion
+    # actually drops them before system-bucket hashing.
     old_h = _write(tmp_path / "old" / "foo.h", "int f(void);\n")
     new_h = _write(tmp_path / "new" / "foo.h", "int f(void);\n")
     driver_old = _write(
-        tmp_path / "old" / "__driver__.cpp", '#include "/abs/old/foo.h"\n'
+        tmp_path / "driver_old" / "__driver__.cpp", '#include "/abs/old/foo.h"\n'
     )
     driver_new = _write(
-        tmp_path / "new" / "__driver__.cpp", '#include "/abs/new/foo.h"\n'
+        tmp_path / "driver_new" / "__driver__.cpp", '#include "/abs/new/foo.h"\n'
     )
     old = compute_extraction_contract(
         declared_headers=[old_h],
@@ -291,6 +302,35 @@ def test_11_generated_driver_tu_excluded_from_bucketing(tmp_path):
         generated_driver_path=driver_new,
     )
     assert old.profile_fingerprint == new.profile_fingerprint
+
+
+def test_11b_without_exclusion_the_driver_tu_would_have_differed(tmp_path):
+    # Companion negative check proving test_11 is load-bearing: the same
+    # driver files, NOT passed as generated_driver_path, land in the system
+    # bucket and their genuinely different content flips profile_fingerprint
+    # -- confirming the match in test_11 comes from the exclusion, not from
+    # some other reason both sides happened to agree.
+    old_h = _write(tmp_path / "old" / "foo.h", "int f(void);\n")
+    new_h = _write(tmp_path / "new" / "foo.h", "int f(void);\n")
+    driver_old = _write(
+        tmp_path / "driver_old" / "__driver__.cpp", '#include "/abs/old/foo.h"\n'
+    )
+    driver_new = _write(
+        tmp_path / "driver_new" / "__driver__.cpp", '#include "/abs/new/foo.h"\n'
+    )
+    old = compute_extraction_contract(
+        declared_headers=[old_h],
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(tmp_path / "old")],
+        depfile_resolved_paths=[driver_old, old_h],
+    )
+    new = compute_extraction_contract(
+        declared_headers=[new_h],
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(tmp_path / "new")],
+        depfile_resolved_paths=[driver_new, new_h],
+    )
+    assert old.profile_fingerprint != new.profile_fingerprint
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +376,38 @@ def test_13_two_project_owned_slots_swapped_order_differs(tmp_path):
             IncludeDir(tmp_path / "include"),
         ],
         depfile_resolved_paths=[foo, bar],
+    )
+    assert order_a.profile_fingerprint != order_b.profile_fingerprint
+
+
+def test_13b_two_project_owned_slots_with_same_basename_swapped_order_differs(
+    tmp_path,
+):
+    # Codex review (PR #624): two project-owned roots each owning a
+    # DIFFERENTLY-LOCATED declared header that happens to share a basename
+    # (include/foo.h vs generated/foo.h) must still tokenize distinctly --
+    # a basename-only token would collapse both to "hdrs:foo.h" and lose the
+    # order-sensitivity test_13 above already covers for distinctly-named
+    # headers.
+    foo_inc = _write(tmp_path / "include" / "foo.h", "int f(void);\n")
+    foo_gen = _write(tmp_path / "generated" / "foo.h", "int g(void);\n")
+    order_a = compute_extraction_contract(
+        declared_headers=[foo_inc, foo_gen],
+        l2_frontend_ran=True,
+        declared_includes=[
+            IncludeDir(tmp_path / "include"),
+            IncludeDir(tmp_path / "generated"),
+        ],
+        depfile_resolved_paths=[foo_inc, foo_gen],
+    )
+    order_b = compute_extraction_contract(
+        declared_headers=[foo_inc, foo_gen],
+        l2_frontend_ran=True,
+        declared_includes=[
+            IncludeDir(tmp_path / "generated"),
+            IncludeDir(tmp_path / "include"),
+        ],
+        depfile_resolved_paths=[foo_inc, foo_gen],
     )
     assert order_a.profile_fingerprint != order_b.profile_fingerprint
 
@@ -439,6 +511,20 @@ def test_symbols_only_public_header_dirs_are_root_relative_not_absolute(tmp_path
         public_header_dirs=[tmp_path / "checkout-new" / "api" / "include"]
     )
     assert old_contract.scope_fingerprint == new_contract.scope_fingerprint
+
+
+def test_declared_headers_and_public_header_paths_share_one_scope_identity(tmp_path):
+    # Codex review (PR #624): the same logical header captured via a full L2
+    # dump's declared_headers on one side and a symbols-only dump's
+    # public_header_paths provenance on the other (an ordinary depth
+    # difference, e.g. comparing `scan --depth binary` against a fuller
+    # stored baseline) must not scope-mismatch just because the two
+    # mechanisms feed different keyword arguments.
+    h_old = _write(tmp_path / "old" / "include" / "foo.h", "int f(void);\n")
+    h_new = _write(tmp_path / "new" / "include" / "foo.h", "int f(void);\n")
+    full_l2 = compute_extraction_contract(declared_headers=[h_old])
+    symbols_only = compute_extraction_contract(public_header_paths=[h_new])
+    assert full_l2.scope_fingerprint == symbols_only.scope_fingerprint
 
 
 # ---------------------------------------------------------------------------

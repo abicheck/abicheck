@@ -86,7 +86,6 @@ PROFILE_FIELD_KEYS = (
 )
 SCOPE_FIELD_KEYS = (
     "headers",
-    "public_header_paths",
     "public_header_dirs",
 )
 
@@ -164,11 +163,36 @@ def _classify_include_dirs(
     return owned
 
 
-def _slot_token_for_ancestor(inc: IncludeDir, declared_headers: Sequence[Path]) -> str:
-    owned_header_names = sorted(
-        h.name for h in declared_headers if _is_ancestor_or_equal(inc.path, h)
+def _header_identities(declared_headers: Sequence[Path]) -> dict[Path, str]:
+    """A stable, side-local identity string per declared header — its path
+    relative to the common ancestor of every declared header's *parent*
+    directory (the same normalization ``scope_fingerprint`` uses for its own
+    header identity). Used only to build ancestor-derived slot tokens below;
+    the basename alone (Codex review, PR #624) is not enough to disambiguate
+    two project-owned roots that each own a different declared header
+    sharing the same basename (e.g. ``include/foo.h`` vs.
+    ``generated/foo.h``) — both would otherwise collapse to token
+    ``hdrs:foo.h``, silently losing the order-sensitivity a swapped
+    ``-I include -I generated`` vs. ``-I generated -I include`` is supposed
+    to preserve."""
+    if not declared_headers:
+        return {}
+    parents = [str(_resolved(h).parent) for h in declared_headers]
+    root = Path(os.path.commonpath(parents))
+    return {h: str(_resolved(h).relative_to(root)) for h in declared_headers}
+
+
+def _slot_token_for_ancestor(
+    inc: IncludeDir,
+    declared_headers: Sequence[Path],
+    header_identities: dict[Path, str],
+) -> str:
+    owned_header_identities = sorted(
+        header_identities[h]
+        for h in declared_headers
+        if _is_ancestor_or_equal(inc.path, h)
     )
-    return "hdrs:" + ",".join(owned_header_names)
+    return "hdrs:" + ",".join(owned_header_identities)
 
 
 def _attribute_file(
@@ -287,6 +311,7 @@ def compute_extraction_contract(
     profile_fields: dict[str, str] = {}
     if l2_frontend_ran:
         ownership = _classify_include_dirs(declared_headers, declared_includes)
+        header_identities = _header_identities(declared_headers)
 
         resolved_paths = [
             p for p in depfile_resolved_paths if p != generated_driver_path
@@ -310,7 +335,9 @@ def compute_extraction_contract(
                 if inc.label is not None:
                     token = f"label:{inc.label}"
                 else:
-                    token = _slot_token_for_ancestor(inc, declared_headers)
+                    token = _slot_token_for_ancestor(
+                        inc, declared_headers, header_identities
+                    )
             else:
                 pairs = sorted(
                     (
@@ -346,23 +373,34 @@ def compute_extraction_contract(
     scope_fingerprint: str | None = None
     scope_fields: dict[str, str] = {}
     if scope_inputs_present:
-        # All three scope-identity inputs normalize against one shared,
-        # side-local root — never raw absolute paths (Codex review, PR
-        # #624): a lone `--public-header`/`--public-header-dir` provenance
-        # input (the symbols-only-with-provenance case, no declared_headers
-        # at all) is exactly as checkout-root-dependent as declared_headers,
-        # and hashing it unnormalized would make an ordinary two-checkout
+        # All scope-identity inputs normalize against one shared, side-local
+        # root — never raw absolute paths (Codex review, PR #624): a lone
+        # `--public-header`/`--public-header-dir` provenance input (the
+        # symbols-only-with-provenance case, no declared_headers at all) is
+        # exactly as checkout-root-dependent as declared_headers, and
+        # hashing it unnormalized would make an ordinary two-checkout
         # compare relying only on public-header provenance spuriously
-        # ScopeMismatchError. declared_headers/public_header_paths are
-        # files (use their parent for the root, preserving the basename,
-        # the same single-entry-preserving trick used everywhere else in
-        # this function); public_header_dirs are
-        # themselves directories, so their *own* parent is the analogous
+        # ScopeMismatchError. declared_headers and public_header_paths are
+        # merged into one combined "headers" identity, not two separate
+        # scope_fields entries (Codex review, PR #624): both name individual
+        # public header *files* — the same declared surface, captured by two
+        # different mechanisms (a full L2 header-AST dump's `-H` vs. a
+        # symbols-only dump's `--public-header` provenance tag). Keeping
+        # them in separate fields made an ordinary depth difference between
+        # two dumps of the *same* header (one via each mechanism) fingerprint
+        # as a scope mismatch, even though nothing about the declared
+        # surface actually differs. public_header_dirs stays its own field —
+        # a directory asserts "everything under here is public," a
+        # categorically different claim from naming individual files, so
+        # merging it into "headers" would conflate the two rather than
+        # recognize genuine equivalence. Files use their parent for the
+        # root (preserving the basename, the same single-entry-preserving
+        # trick used everywhere else in this function); public_header_dirs
+        # are themselves directories, so their *own* parent is the analogous
         # root candidate (preserving the directory's own basename the same
-        # way a lone header's basename survives).
-        # root_candidates is never empty here: scope_inputs_present is true
-        # (checked above) iff at least one of these same three sequences is
-        # non-empty.
+        # way a lone header's basename survives). root_candidates is never
+        # empty here: scope_inputs_present is true (checked above) iff at
+        # least one of these same three sequences is non-empty.
         root_candidates = [
             str(_resolved(p).parent)
             for p in (*declared_headers, *public_header_paths, *public_header_dirs)
@@ -373,8 +411,7 @@ def compute_extraction_contract(
             return sorted(str(_resolved(p).relative_to(root)) for p in paths)
 
         scope_fields = {
-            "headers": "|".join(_normalize(declared_headers)),
-            "public_header_paths": "|".join(_normalize(public_header_paths)),
+            "headers": "|".join(_normalize((*declared_headers, *public_header_paths))),
             "public_header_dirs": "|".join(_normalize(public_header_dirs)),
         }
         scope_fingerprint = _sha256_of(*[scope_fields[k] for k in SCOPE_FIELD_KEYS])

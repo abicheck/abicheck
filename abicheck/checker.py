@@ -41,6 +41,7 @@ from .checker_types import (  # noqa: F401
     DiffResult,
     LibraryMetadata,
 )
+from .comparability import check_contracts_comparable
 from .confidence import _compute_confidence
 from .detector_registry import registry as _detector_registry
 from .diff_elf_layout import (  # noqa: F401 — triggers detector registration
@@ -197,10 +198,14 @@ def _filter_suppressed_changes(
             continue
         visible.append(c)
         if outcome.withheld_rule is not None:
-            diagnostics.append(_build_suppression_overreach_change(c, outcome.withheld_rule))
+            diagnostics.append(
+                _build_suppression_overreach_change(c, outcome.withheld_rule)
+            )
         if outcome.withheld_unknown_rule is not None:
             diagnostics.append(
-                _build_suppression_unknown_reachability_change(c, outcome.withheld_unknown_rule)
+                _build_suppression_unknown_reachability_change(
+                    c, outcome.withheld_unknown_rule
+                )
             )
     visible.extend(diagnostics)
     return visible
@@ -284,10 +289,14 @@ def _filter_pattern_synthetic(
             continue
         retained.append(c)
         if outcome.withheld_rule is not None:
-            diagnostics.append(_build_suppression_overreach_change(c, outcome.withheld_rule))
+            diagnostics.append(
+                _build_suppression_overreach_change(c, outcome.withheld_rule)
+            )
         if outcome.withheld_unknown_rule is not None:
             diagnostics.append(
-                _build_suppression_unknown_reachability_change(c, outcome.withheld_unknown_rule)
+                _build_suppression_unknown_reachability_change(
+                    c, outcome.withheld_unknown_rule
+                )
             )
     retained.extend(diagnostics)
     if suppressed_synthetic:
@@ -337,7 +346,11 @@ def _apply_pattern_verdicts_step(
         )
 
     if pattern_modulations:
-        return kept, _compute_verdict_for(kept + verdict_redundant, policy, policy_file), pattern_modulations
+        return (
+            kept,
+            _compute_verdict_for(kept + verdict_redundant, policy, policy_file),
+            pattern_modulations,
+        )
     return kept, current_verdict, pattern_modulations
 
 
@@ -398,7 +411,15 @@ def _run_post_processing(
     force_public_symbols: set[str] | None,
     collapse_versioned_symbols: bool,
     public_surface_allowlist: set[str] | None = None,
-) -> tuple[list[Change], list[Change], list[Change], list[Change], list[Change], bool, PipelineContext]:
+) -> tuple[
+    list[Change],
+    list[Change],
+    list[Change],
+    list[Change],
+    list[Change],
+    bool,
+    PipelineContext,
+]:
     """Run the post-processing pipeline and unpack results.
 
     Returns ``(kept, redundant, opaque_filtered, suppressed, out_of_surface,
@@ -475,7 +496,8 @@ def _apply_soname_policy(
     )
     if versioned_scheme_soname_relink_required:
         soname_changes = [
-            c for c in soname_changes
+            c
+            for c in soname_changes
             if c.kind is not ChangeKind.SONAME_BUMP_UNNECESSARY
         ]
     soname_changes = _filter_suppressed_changes(soname_changes, suppression, suppressed)
@@ -530,6 +552,7 @@ def compare(
     public_surface_allowlist: set[str] | None = None,
     reconcile_build_context: bool = False,
     env_matrix: EnvironmentMatrix | None = None,
+    diagnostic_comparison: bool = False,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -549,7 +572,35 @@ def compare(
             requirements are classified against the declared floors
             (≤ floor → COMPATIBLE, > floor → BREAKING) instead of the default
             deployment-RISK verdict.
+        diagnostic_comparison: ADR-050 D2's one sanctioned escape hatch. By
+            default, a genuine ``contract`` mismatch between *old* and *new*
+            (ADR-050 D1's profile/scope fingerprints) raises
+            :class:`~abicheck.errors.ProfileMismatchError` or
+            :class:`~abicheck.errors.ScopeMismatchError` before any diff runs
+            — the two snapshots aren't provably comparable, so no verdict is
+            produced. Setting this True downgrades that hard-fail into an
+            ordinary diff whose ``DiffResult.assurance`` is stamped
+            ``"none"``, so the caller can still see *a* result but knows not
+            to trust it the way an ordinary comparable diff is trusted.
+
+    Raises:
+        ProfileMismatchError: *old* and *new* were extracted under
+            different, incompatible compile contexts (ADR-050 D1/D2), and
+            *diagnostic_comparison* was not set.
+        ScopeMismatchError: *old* and *new* do not cover the same declared
+            surface (ADR-050 D1/D2), and *diagnostic_comparison* was not
+            set.
     """
+    mismatch = check_contracts_comparable(old, new, diagnostic=diagnostic_comparison)
+    assurance = "none" if mismatch is not None else None
+    # ADR-050 D2 — set only when exactly one side carries a ``contract`` at
+    # all (both/neither is the ordinary case check_contracts_comparable
+    # already treats leniently): a fresh header-AST dump compared against a
+    # pre-ADR-050 stored baseline, or a symbols-only side against a full L2
+    # side. Report-level metadata, not a Change/ChangeKind finding.
+    contract_coverage = (
+        "partial" if (old.contract is None) != (new.contract is None) else None
+    )
 
     # Discover any diff_* detector modules not already imported above, then run
     # all registered detectors via the self-registering registry. ensure_loaded
@@ -568,12 +619,24 @@ def compare(
     # Run the post-processing pipeline (filtering, dedup, enrichment, suppression).
     # PolicyFile.frozen_namespaces is threaded in so the late-stage
     # EscalateFrozenNamespaceViolations step can tag matching findings.
-    kept, redundant, opaque_filtered, suppressed, out_of_surface, scope_resolved, pp_ctx = (
-        _run_post_processing(
-            changes, old, new, suppression, policy_file, scope_to_public_surface,
-            force_public_symbols, collapse_versioned_symbols,
-            public_surface_allowlist=public_surface_allowlist,
-        )
+    (
+        kept,
+        redundant,
+        opaque_filtered,
+        suppressed,
+        out_of_surface,
+        scope_resolved,
+        pp_ctx,
+    ) = _run_post_processing(
+        changes,
+        old,
+        new,
+        suppression,
+        policy_file,
+        scope_to_public_surface,
+        force_public_symbols,
+        collapse_versioned_symbols,
+        public_surface_allowlist=public_surface_allowlist,
     )
 
     # Verdict computed on unsuppressed semantic changes.
@@ -760,11 +823,15 @@ def compare(
     # label in the reporter is distinct from true display-dedup redundant changes.
     # redundant_count reflects only the display-dedup set; opaque_filtered is additive.
     redundant_for_report = redundant + opaque_filtered
-    true_redundant_count = len(redundant)  # dedup-only (not opaque); used for report label
+    true_redundant_count = len(
+        redundant
+    )  # dedup-only (not opaque); used for report label
 
     # Compute evidence tiers and confidence from detector results.
     evidence_tiers, confidence, coverage_warnings, evidence_tier = _compute_confidence(
-        detector_results, old, new,
+        detector_results,
+        old,
+        new,
     )
 
     # ADR-024 §D5.3: structured confidence in the surface resolution itself.
@@ -789,7 +856,15 @@ def compare(
     # breaking, so they leave the verdict unchanged unless NO_CHANGE flips to COMPATIBLE.
     if surface_metrics:
         kept, verdict = _apply_surface_metrics(
-            old, new, kept, verdict_redundant, suppressed, suppression, policy, policy_file, verdict
+            old,
+            new,
+            kept,
+            verdict_redundant,
+            suppressed,
+            suppression,
+            policy,
+            policy_file,
+            verdict,
         )
 
     # ADR-027 A4: pattern-aware verdict modulation. Runs after post-processing
@@ -800,7 +875,16 @@ def compare(
     pattern_modulations: list[dict[str, object]] = []
     if pattern_verdicts:
         kept, verdict, pattern_modulations = _apply_pattern_verdicts_step(
-            old, new, kept, verdict_redundant, suppressed, suppression, policy, policy_file, evidence_tier, verdict
+            old,
+            new,
+            kept,
+            verdict_redundant,
+            suppressed,
+            suppression,
+            policy,
+            policy_file,
+            evidence_tier,
+            verdict,
         )
 
     return DiffResult(
@@ -831,4 +915,6 @@ def compare(
         surface_scope_notes=scope_notes,
         evidence_tier=evidence_tier,
         pattern_modulations=pattern_modulations,
+        contract_coverage=contract_coverage,
+        assurance=assurance,
     )

@@ -4,11 +4,18 @@ Covers serialisation fields added in PR #63:
   - elf_only_mode
   - constants
 """
+
 from __future__ import annotations
 
 import json
 
-from abicheck.model import AbiSnapshot, EnumMember, EnumType, Function
+from abicheck.model import (
+    AbiSnapshot,
+    EnumMember,
+    EnumType,
+    ExtractionContract,
+    Function,
+)
 from abicheck.serialization import (
     load_snapshot,
     save_snapshot,
@@ -58,7 +65,8 @@ class TestEnumQualifiedNameRoundTrip:
         removal risk TypeMap was built to fix, for every enum that went
         through a save/load cycle."""
         e = EnumType(
-            name="Status", qualified_name="ns::Status",
+            name="Status",
+            qualified_name="ns::Status",
             members=[EnumMember(name="OK", value=0)],
         )
         snap = _make_snap(enums=[e])
@@ -282,7 +290,9 @@ class TestDeletedFromDwarfRoundTrip:
         )
 
     def test_true_survives_roundtrip(self) -> None:
-        snap = _make_snap(functions=[self._func(is_deleted=True, deleted_from_dwarf=True)])
+        snap = _make_snap(
+            functions=[self._func(is_deleted=True, deleted_from_dwarf=True)]
+        )
         j = json.loads(snapshot_to_json(snap))
         assert j["functions"][0]["deleted_from_dwarf"] is True
         restored = snapshot_from_dict(j)
@@ -290,13 +300,17 @@ class TestDeletedFromDwarfRoundTrip:
         assert restored.functions[0].is_deleted is True
 
     def test_false_survives_roundtrip(self) -> None:
-        snap = _make_snap(functions=[self._func(is_deleted=True, deleted_from_dwarf=False)])
+        snap = _make_snap(
+            functions=[self._func(is_deleted=True, deleted_from_dwarf=False)]
+        )
         restored = snapshot_from_dict(json.loads(snapshot_to_json(snap)))
         assert restored.functions[0].deleted_from_dwarf is False
 
     def test_defaults_to_false_when_absent(self) -> None:
         """Legacy snapshots without the key deserialise to False."""
-        d = _minimal_dict(functions=[{"name": "f", "mangled": "f", "return_type": "void"}])
+        d = _minimal_dict(
+            functions=[{"name": "f", "mangled": "f", "return_type": "void"}]
+        )
         assert "deleted_from_dwarf" not in d["functions"][0]
         assert snapshot_from_dict(d).functions[0].deleted_from_dwarf is False
 
@@ -345,10 +359,67 @@ class TestInferredFromHeadersProvenance:
 class TestFileRoundTrip:
     """save_snapshot / load_snapshot must preserve new fields."""
 
-    def test_elf_only_mode_and_constants_survive_file_io(self, tmp_path: object) -> None:
+    def test_elf_only_mode_and_constants_survive_file_io(
+        self, tmp_path: object
+    ) -> None:
         snap = _make_snap(elf_only_mode=True, constants={"FOO": "bar"})
         p = tmp_path / "snap.json"  # type: ignore[operator]
         save_snapshot(snap, p)
         restored = load_snapshot(p)
         assert restored.elf_only_mode is True
         assert restored.constants == {"FOO": "bar"}
+
+
+# ── ExtractionContract round-trip (ADR-050 D1, schema v12) ─────────────────
+
+
+class TestExtractionContractRoundTrip:
+    def test_populated_contract_survives_json_round_trip(self) -> None:
+        contract = ExtractionContract(
+            profile_fingerprint="sha256:abc",
+            scope_fingerprint="sha256:def",
+            profile_fields={"target_triple": "x86_64-linux-gnu"},
+            scope_fields={"headers": "foo.h"},
+        )
+        snap = _make_snap(contract=contract)
+        reloaded = snapshot_from_dict(json.loads(snapshot_to_json(snap)))
+        assert reloaded.contract == contract
+
+    def test_missing_contract_key_loads_as_none(self) -> None:
+        d = _minimal_dict()
+        assert "contract" not in d
+        assert snapshot_from_dict(d).contract is None
+
+    def test_null_contract_loads_as_none(self) -> None:
+        d = _minimal_dict(contract=None)
+        assert snapshot_from_dict(d).contract is None
+
+    def test_malformed_contract_value_loads_as_none(self) -> None:
+        d = _minimal_dict(contract="not-a-dict")
+        assert snapshot_from_dict(d).contract is None
+
+    def test_contract_with_malformed_nested_fields_defaults_gracefully(self) -> None:
+        d = _minimal_dict(
+            contract={
+                "profile_fingerprint": 123,  # not a str
+                "scope_fingerprint": None,
+                "profile_fields": "not-a-dict",
+                "scope_fields": {"headers": "foo.h"},
+            }
+        )
+        restored = snapshot_from_dict(d).contract
+        assert restored is not None
+        assert restored.profile_fingerprint is None
+        assert restored.scope_fingerprint is None
+        assert restored.profile_fields == {}
+        assert restored.scope_fields == {"headers": "foo.h"}
+
+    def test_contract_survives_file_io(self, tmp_path: object) -> None:
+        contract = ExtractionContract(
+            profile_fingerprint="sha256:abc", scope_fingerprint="sha256:def"
+        )
+        snap = _make_snap(contract=contract)
+        p = tmp_path / "snap.json"  # type: ignore[operator]
+        save_snapshot(snap, p)
+        restored = load_snapshot(p)
+        assert restored.contract == contract

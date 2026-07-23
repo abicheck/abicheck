@@ -53,7 +53,17 @@ here, only exercised at the merge layer once Phase B/C exist).
 `scope_drift/old/` and `scope_drift/new/` declare the identical `a.h`/`b.h`
 pair (byte-for-byte); `new/` additionally declares `c.h`, one extra TU with
 no counterpart on the old side — a manifest/CLI-flag drift between two
-extraction runs, not a real API change. Once Phase A's comparability gate
-exists, comparing `old/` against `new/` must hard-fail `not_comparable` by
-default, and fall back to a tentative, `assurance: "none"`-stamped diff only
-under the explicit `--diagnostic-comparison` opt-in.
+extraction runs, not a real API change. `abicheck.comparability.compute_extraction_contract`/
+`check_contracts_comparable` (ADR-050 D1/D2, G32 Phase A) exist and are unit
+tested against exactly this shape of drift in `tests/test_comparability.py`,
+and `checker.compare` itself now calls the gate (Phase A slice 2) —
+comparing `old/` against `new/` through `compute_extraction_contract` +
+`compare()` hard-fails `ScopeMismatchError` (`not_comparable`) by default,
+and `compare(..., diagnostic_comparison=True)` downgrades that to a
+tentative, `assurance: "none"`-stamped diff. **Not yet true at the CLI/
+application level**: no `abicheck compare` flag, exit code, or front-end
+(`service.py`, `mcp_server.py`, `cli_scan.py`, etc.) reaches this gate yet —
+`dumper.py` doesn't call `compute_extraction_contract` on a real dump
+either, so every snapshot a real `dump`/`compare` invocation produces still
+has `contract=None` today. See `abicheck/comparability.py`'s own module
+docstring for the exact remaining scope.
