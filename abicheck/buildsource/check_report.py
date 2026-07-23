@@ -103,6 +103,13 @@ RESOLVE_FAILURE_OUTCOMES = frozenset(
 
 GATE_MODES = ("local", "deferred", "advisory")
 
+#: ``cli_compare_release_helpers._exit_compare_release``'s dedicated
+#: ``--fail-on-removed-library`` exit code -- applied "in preference to the
+#: severity code," so it's the one value the analysis step's real exit code
+#: can carry that the persisted ``severity`` block never independently
+#: reflects.
+_REMOVED_LIBRARY_EXIT_CODE = 8
+
 
 def validate_identifier(field_name: str, value: str) -> None:
     """Reject a ``target``/``profile``/``baseline_channel`` outside the safe
@@ -312,6 +319,40 @@ def augment_report(
     raw_verdict = report.get("verdict")
     real_exit_code = max(_real_exit_code(report), analysis_exit_code or 0)
     out["policy_gate_decision"] = "fail" if real_exit_code != 0 else "pass"
+    if analysis_exit_code == _REMOVED_LIBRARY_EXIT_CODE:
+        # --fail-on-removed-library's exit 8 is the *only* value
+        # cli_compare_release_helpers._exit_compare_release applies "in
+        # preference to the severity code" -- every other severity-aware
+        # exit path there just emits severity_exit_code directly, so 8 is
+        # the sole case where the real outcome can diverge from what's
+        # already in the persisted severity block. Escalating
+        # policy_gate_decision/real_exit_code above isn't enough on its
+        # own: gate-mode: deferred relies on check-project.yml's trailing
+        # aggregate job, and abicheck.aggregate.GateInfo.from_report_data
+        # reads ONLY the persisted severity.exit_code -- it has no way to
+        # see policy_gate_decision or analysis_exit_code at all. Without
+        # also updating severity here, a removed-library gate on a
+        # deferred bundle check would still be silently missed by
+        # aggregate, even though this check's own local exit code is
+        # correct (Codex review, second pass). A whole library
+        # disappearing is unambiguously an ABI break, so it's encoded as
+        # the abi_breaking tier (exit_code 4 -- the ceiling of
+        # aggregate.py's _VALID_GATE_EXIT = {0, 1, 2, 4}; 8 itself isn't a
+        # legal severity.exit_code and would raise _MalformedGate there).
+        # Only escalates -- never downgrades an already-≥4 severity block,
+        # though 4 is already that ceiling so there's nothing to downgrade
+        # from in this scheme.
+        severity = out.get("severity")
+        if isinstance(severity, dict) and severity.get("exit_code", 0) < 4:
+            cats = list(severity.get("blocking_categories") or [])
+            if "abi_breaking" not in cats:
+                cats.append("abi_breaking")
+            out["severity"] = {
+                **severity,
+                "exit_code": 4,
+                "blocking": True,
+                "blocking_categories": cats,
+            }
     if raw_verdict in LEGACY_VERDICT_VALUES:
         out["compatibility_verdict"] = raw_verdict
         out.setdefault("operational_errors", [])

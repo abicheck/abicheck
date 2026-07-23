@@ -397,7 +397,11 @@ class TestFinalizeAugmentMode:
         preference to the severity code" -- the persisted report's own
         severity.exit_code can read 0 even though a library was actually
         removed. run.sh must forward the analysis step's own real exit code
-        (ANALYSIS_EXIT_CODE) so gate-mode: local doesn't silently pass."""
+        (ANALYSIS_EXIT_CODE) so gate-mode: local doesn't silently pass, and
+        the persisted severity block must also be escalated (exit_code 4,
+        abi_breaking) so a later gate-mode: deferred aggregate pass -- which
+        reads only severity.exit_code, never policy_gate_decision -- can't
+        silently miss it either (Codex review, second pass)."""
         report_path = tmp_path / "analysis.json"
         _write_compare_report(report_path, verdict="COMPATIBLE_WITH_RISK", exit_code=0)
         result, outputs = _run_finalize(
@@ -414,9 +418,40 @@ class TestFinalizeAugmentMode:
         assert result.returncode == 8, result.stderr
         report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert report["policy_gate_decision"] == "fail"
-        assert (
-            report["severity"]["exit_code"] == 0
-        )  # untouched -- only the gate folds it
+        assert report["severity"]["exit_code"] == 4
+        assert report["severity"]["blocking"] is True
+        assert "abi_breaking" in report["severity"]["blocking_categories"]
+
+    def test_removed_library_gate_survives_deferred_mode_for_a_real_aggregate_read(
+        self, tmp_path: Path
+    ) -> None:
+        """End-to-end proof this doesn't just look right on paper: feed the
+        persisted report straight into the real
+        abicheck.aggregate.GateInfo.from_report_data and confirm it reads a
+        blocking gate, for gate-mode: deferred specifically (the mode that
+        actually depends on aggregate re-reading the report later)."""
+        from abicheck.aggregate import GateInfo
+
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(report_path, verdict="COMPATIBLE_WITH_RISK", exit_code=0)
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_GATE_MODE": "deferred",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+                "ANALYSIS_EXIT_CODE": "8",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr  # deferred never fails locally
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        gate = GateInfo.from_report_data(report)
+        assert gate is not None
+        assert gate.blocking is True
+        assert gate.exit_code == 4
 
     def test_advisory_gate_mode_neutralizes_severity(self, tmp_path: Path) -> None:
         report_path = tmp_path / "analysis.json"

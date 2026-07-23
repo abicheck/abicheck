@@ -320,10 +320,86 @@ class TestAugmentReport:
             analysis_exit_code=8,
         )
         assert out["policy_gate_decision"] == "fail"
-        # The persisted severity block is untouched -- only the gate
-        # decision folds in the analysis exit code, since gate-mode: local
-        # doesn't neutralize anything.
+
+    def test_removed_library_exit_code_escalates_persisted_severity(self):
+        """Escalating policy_gate_decision alone isn't enough: gate-mode:
+        deferred relies on check-project.yml's trailing aggregate job, and
+        abicheck.aggregate.GateInfo.from_report_data reads ONLY the
+        persisted severity.exit_code -- it has no way to see
+        policy_gate_decision. Without also updating severity here, a
+        removed-library gate on a deferred bundle check would still be
+        silently missed downstream (Codex review, second pass). Escalated
+        to exit_code 4 (abi_breaking) -- 8 itself isn't a legal
+        severity.exit_code (aggregate.py's _VALID_GATE_EXIT is {0,1,2,4})
+        and would raise _MalformedGate there."""
+        report = self._base_compare_report(verdict="COMPATIBLE_WITH_RISK", exit_code=0)
+        out = augment_report(
+            report,
+            name="libpvxs-bundle",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+            analysis_exit_code=8,
+        )
+        assert out["severity"]["exit_code"] == 4
+        assert out["severity"]["blocking"] is True
+        assert "abi_breaking" in out["severity"]["blocking_categories"]
+
+    def test_removed_library_escalation_does_not_downgrade_an_already_worse_severity(
+        self,
+    ):
+        report = self._base_compare_report(verdict="BREAKING", exit_code=4)
+        report["severity"]["blocking_categories"] = ["abi_breaking"]
+        out = augment_report(
+            report,
+            name="libpvxs-bundle",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+            analysis_exit_code=8,
+        )
+        assert out["severity"]["exit_code"] == 4
+        assert out["severity"]["blocking_categories"] == ["abi_breaking"]
+
+    def test_removed_library_escalation_only_triggers_on_exit_code_8(self):
+        """Any other nonzero analysis_exit_code folds into policy_gate_decision
+        (already covered above) but must NOT rewrite the severity block --
+        8 is the one specific, well-known value that bypasses severity."""
+        report = self._base_compare_report(verdict="COMPATIBLE", exit_code=0)
+        out = augment_report(
+            report,
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+            analysis_exit_code=64,
+        )
         assert out["severity"]["exit_code"] == 0
+        assert out["policy_gate_decision"] == "fail"  # still folded via max()
+
+    def test_removed_library_escalation_is_a_no_op_without_a_severity_block(self):
+        """A scan-shaped report has no severity block at all -- the
+        escalation must not crash or invent one (exit 8 only ever comes
+        from the release/bundle compare path, never scan, but stay
+        defensive)."""
+        out = augment_report(
+            {
+                "scan_schema_version": "1.1",
+                "verdict": "COMPATIBLE",
+                "exit_code": 0,
+                "level": {"depth": "headers"},
+            },
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+            analysis_exit_code=8,
+        )
+        assert "severity" not in out
 
     def test_analysis_exit_code_of_zero_does_not_flip_a_clean_report(self):
         out = augment_report(

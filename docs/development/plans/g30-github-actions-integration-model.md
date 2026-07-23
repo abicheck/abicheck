@@ -1031,6 +1031,45 @@ follow-up commit:
   `run.sh` end-to-end against a fake `abicheck` stub to prove the flags
   reach the actual command line.
 
+Codex's second pass on the same PR then pushed back on the removed-library
+fix above being incomplete: escalating `policy_gate_decision`/the local
+exit code isn't enough on its own, because `gate-mode: deferred` relies on
+`check-project.yml`'s trailing `aggregate` job, and
+`abicheck.aggregate.GateInfo.from_report_data` reads **only** the persisted
+`severity.exit_code` — it has no way to see `policy_gate_decision` or the
+analysis step's raw exit code at all (confirmed by reading
+`from_report_data` directly). Without also updating the persisted
+`severity` block, a removed-library gate on a `deferred` bundle check would
+still be silently missed by a later `aggregate` pass, even though the
+check's own composite exit code was already correct. Fixed properly this
+time: when `analysis_exit_code == 8` (the specific, well-known
+`--fail-on-removed-library` sentinel — confirmed by reading
+`_exit_compare_release`'s full body that it's the *only* value that
+diverges from `severity_exit_code` in the severity-aware scheme check-target
+always uses), `augment_report` now also escalates the persisted
+`severity` block itself: `exit_code` → 4, `blocking` → `True`,
+`"abi_breaking"` added to `blocking_categories` (a whole library
+disappearing is unambiguously an ABI break) — landing on 4 specifically
+because it's the ceiling of `aggregate.py`'s own `_VALID_GATE_EXIT = {0, 1,
+2, 4}`; writing the literal `8` there would make `aggregate.py`'s strict,
+fail-closed `from_report_data` raise `_MalformedGate` instead of silently
+missing the gate, which is arguably worse (it would crash the *entire*
+aggregate computation, not just misjudge one target). The escalation only
+ever raises an already-`< 4` severity block, never downgrades one already
+at the ceiling, and is a no-op when no `severity` block exists at all (a
+scan-shaped report — exit 8 only ever comes from the release/bundle
+compare path in the first place, but the check stays defensive). New
+`test_removed_library_exit_code_escalates_persisted_severity`/
+`test_removed_library_escalation_does_not_downgrade_an_already_worse_severity`/
+`test_removed_library_escalation_only_triggers_on_exit_code_8`/
+`test_removed_library_escalation_is_a_no_op_without_a_severity_block` in
+`tests/test_check_report.py`; a real end-to-end proof
+(`test_removed_library_gate_survives_deferred_mode_for_a_real_aggregate_read`
+in `tests/test_action_check_target.py`) feeds the persisted report straight
+into the actual `abicheck.aggregate.GateInfo.from_report_data` for
+`gate-mode: deferred` and asserts it reads a blocking gate — not just that
+the shell/Python logic looks right on paper.
+
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
 Implements ADR-047 §4/§5 (`run-plan.json` generation + matrix + trailing

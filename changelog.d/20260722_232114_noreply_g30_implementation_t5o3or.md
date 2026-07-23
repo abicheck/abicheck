@@ -22,7 +22,10 @@
   exit code that overrides the persisted severity scheme rather than
   feeding into it) is folded into the check's own gate decision too, so
   `gate-mode: local` doesn't silently pass a removed library the caller
-  explicitly asked to gate on. See `docs/reference/check-target.md`.
+  explicitly asked to gate on — and the persisted `severity` block is
+  escalated to the `abi_breaking` tier for it too, so `gate-mode: deferred`'s
+  later `aggregate` read (which only ever looks at `severity.exit_code`)
+  can't miss it either. See `docs/reference/check-target.md`.
 
 <!--
 ### Changed
