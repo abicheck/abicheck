@@ -50,9 +50,13 @@ def _bash_executable() -> str:
     return "bash"
 
 
-def _run_compare(env_extra: dict[str, str], tmp_path: Path) -> str:
+def _run_compare_raw(
+    env_extra: dict[str, str], tmp_path: Path
+) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Run the real run.sh in compare mode against a fake `abicheck` on
-    $PATH that records its own argv; returns the captured command line."""
+    $PATH that records its own argv; returns the raw result plus the path
+    the argv would have been captured to (may not exist if run.sh exited
+    before ever invoking the stub)."""
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
@@ -97,6 +101,13 @@ def _run_compare(env_extra: dict[str, str], tmp_path: Path) -> str:
         cwd=tmp_path,
         check=False,
     )
+    return result, captured
+
+
+def _run_compare(env_extra: dict[str, str], tmp_path: Path) -> str:
+    """Like _run_compare_raw, but asserts success and returns the captured
+    command line."""
+    result, captured = _run_compare_raw(env_extra, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert captured.is_file(), "abicheck stub was never invoked"
     return captured.read_text(encoding="utf-8").strip()
@@ -163,10 +174,8 @@ class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:
             {
                 "INPUT_OLD_LIBRARY": str(old_dir),
                 "INPUT_NEW_LIBRARY": str(new_dir),
-                "INPUT_SOURCES": "/src",
-                "INPUT_BUILD_INFO": "/build",
                 "INPUT_BUILD_CONFIG": "/cfg.yml",
-                "INPUT_DEPTH": "source",
+                "INPUT_DEPTH": "headers",
             },
             tmp_path,
         )
@@ -186,8 +195,70 @@ class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:
             {
                 "INPUT_OLD_LIBRARY": str(old_dir),
                 "INPUT_NEW_LIBRARY": str(new_json),
-                "INPUT_DEPTH": "build",
+                "INPUT_DEPTH": "headers",
             },
             tmp_path,
+        )
+        assert "--depth" not in cmd
+
+
+class TestCompareModeFailsFastOnUnservableDirectoryEvidenceRequest:
+    """A directory/package operand can never actually collect build/source
+    evidence (the CLI's per-library release fan-out rejects it outright),
+    so silently dropping a real evidence request there would let the
+    comparison run without the evidence and still report a clean/normal
+    result -- e.g. missing a source-only break. Must fail loud instead
+    (Codex review, PR #625)."""
+
+    def test_depth_source_against_directory_operand_fails(self, tmp_path: Path) -> None:
+        new_dir = tmp_path / "new-bundle"
+        new_dir.mkdir()
+        result, captured = _run_compare_raw(
+            {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "source"}, tmp_path
+        )
+        assert result.returncode != 0
+        assert not captured.is_file(), "abicheck stub must never be invoked"
+
+    def test_depth_build_against_directory_operand_fails(self, tmp_path: Path) -> None:
+        new_dir = tmp_path / "new-bundle"
+        new_dir.mkdir()
+        result, captured = _run_compare_raw(
+            {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "build"}, tmp_path
+        )
+        assert result.returncode != 0
+        assert not captured.is_file()
+
+    def test_explicit_sources_against_directory_operand_fails_even_without_depth(
+        self, tmp_path: Path
+    ) -> None:
+        new_dir = tmp_path / "new-bundle"
+        new_dir.mkdir()
+        result, captured = _run_compare_raw(
+            {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_SOURCES": "/src"}, tmp_path
+        )
+        assert result.returncode != 0
+        assert not captured.is_file()
+
+    def test_explicit_build_info_against_directory_operand_fails(
+        self, tmp_path: Path
+    ) -> None:
+        new_dir = tmp_path / "new-bundle"
+        new_dir.mkdir()
+        result, captured = _run_compare_raw(
+            {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_BUILD_INFO": "/build"}, tmp_path
+        )
+        assert result.returncode != 0
+        assert not captured.is_file()
+
+    def test_headers_depth_against_directory_operand_still_succeeds(
+        self, tmp_path: Path
+    ) -> None:
+        """binary/headers never needed sources/build-info to begin with --
+        nothing requested is actually unservable, so this must keep working,
+        not regress into the new fail-fast path."""
+        new_dir = tmp_path / "new-bundle"
+        new_dir.mkdir()
+        cmd = _run_compare(
+            {"INPUT_NEW_LIBRARY": str(new_dir), "INPUT_DEPTH": "headers"}, tmp_path
         )
         assert "--depth" not in cmd

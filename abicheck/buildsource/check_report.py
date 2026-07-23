@@ -309,7 +309,17 @@ def augment_report(
         ]
     else:
         out.setdefault("operational_errors", [])
-    out.setdefault("publication", {"state": "published", "channels": ["job_summary"]})
+    # check-target's own nested analysis step always disables add-job-summary/
+    # pr-comment/upload-sarif (action.yml's "Run analysis" step), and the
+    # finalize step itself only writes the report JSON to disk + sets
+    # GITHUB_OUTPUT values -- neither is a "publication" in ADR-047 §7's
+    # sense (surfaced to a human/dashboard via a real channel). Defaulting
+    # to state: "published"/channels: ["job_summary"] here was simply false
+    # for every real check-target run and could make a downstream consumer
+    # believe a report had actually been surfaced when it hadn't (Codex
+    # review). Nothing today computes a real publication state for this
+    # path, so the honest default is "nothing was published."
+    out.setdefault("publication", {"state": "skipped", "channels": []})
 
     if gate_mode == "advisory":
         _neutralize_gate(out)

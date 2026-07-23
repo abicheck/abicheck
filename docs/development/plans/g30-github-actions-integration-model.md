@@ -865,6 +865,50 @@ marker choice is shape-aware now. New
 `test_bundle_release_report_gets_no_schema_version_stamp` cases in
 `tests/test_check_report.py`.
 
+A sixth review round on the same commit caught two more real issues:
+
+- **A `kind: bundle` (or any directory/package `compare`) request for
+  build/source-depth evidence was silently downgraded instead of failing** —
+  the directory/package guard added earlier (fifth round) correctly stopped
+  forwarding `--depth`/`--sources`/`--build-info` to avoid the CLI's hard
+  rejection, but that meant a caller who explicitly asked for
+  `requested-depth: build`/`source` (or supplied `--sources`/`--build-info`/
+  `--compile-db` directly) had that request silently dropped: the
+  comparison would still run and report a normal/clean result, just without
+  ever actually gathering the requested evidence — a source-only break
+  could be missed with no signal anything was wrong (`effective_depth` even
+  falls into `derive_effective_depth`'s "no depth signal in report" branch,
+  which trusts the *request* rather than reporting a real degradation, since
+  the release fan-out's own JSON never carries `old_evidence_depth`/
+  `new_evidence_depth` at all). Fixed in two places: `action/run.sh` now
+  exits with an explicit error when a directory/package operand is combined
+  with `--depth build`/`source` or an explicit `--sources`/`--build-info`/
+  `--compile-db` (covers any direct caller of the root Action, not just
+  check-target) — `--depth binary`/`headers` against a directory/package
+  operand is untouched, since nothing requested there is actually
+  unservable. `actions/check-target/validate-inputs.sh` additionally
+  rejects `kind: bundle` combined with `requested-depth: build`/`source` up
+  front, before `resolve-baseline`/`collect-facts` even run, for a cheaper
+  and clearer failure than waiting for the nested analysis step to fail.
+  New `TestCompareModeFailsFastOnUnservableDirectoryEvidenceRequest` class
+  in `tests/test_action_run_sh_compare_build_source.py` (four failure cases
+  plus one confirming `headers` depth still succeeds) and
+  `test_bundle_kind_rejects_build_depth`/`test_bundle_kind_rejects_source_depth`/
+  `test_bundle_kind_allows_headers_depth` in `tests/test_action_check_target.py`.
+- **`augment_report`'s successful-path `publication` default was simply
+  false** — it defaulted every successful report's `publication` to
+  `{"state": "published", "channels": ["job_summary"]}`, but check-target's
+  own "Run analysis" step always passes `add-job-summary: 'false'`,
+  `pr-comment: 'false'`, `upload-sarif: 'false'` to the nested root Action
+  (confirmed by reading `action.yml`), and the finalize step itself only
+  writes the report JSON to disk plus `GITHUB_OUTPUT` values — nothing is
+  actually published anywhere for a real check-target run. The
+  operational-error/bootstrap sentinel envelopes already got this right
+  (`{"state": "skipped", "channels": []}`); only the common success-path
+  default was wrong. Fixed to match. New
+  `test_publication_defaults_to_skipped_not_a_false_claim` case in
+  `tests/test_check_report.py`.
+
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
 Implements ADR-047 §4/§5 (`run-plan.json` generation + matrix + trailing

@@ -349,8 +349,23 @@ elif [[ "$MODE" == "compare" ]]; then
   # rejected flags and silently dropped a bundle caller's build-config
   # (Codex review, second round).
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  if ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
-     && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+  if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+     || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+    # A caller that explicitly asked for build/source-depth evidence (via
+    # --depth build/source, or by supplying --sources/--build-info/
+    # --compile-db directly) against a directory/package operand would
+    # otherwise have that request silently dropped: the flags above are
+    # skipped rather than forwarded, so the comparison would quietly run
+    # without the requested evidence and could miss a source-only break
+    # while still reporting a clean/normal result -- fail loud instead
+    # (Codex review; --depth binary/headers is fine to drop silently, since
+    # nothing was actually requested that this shape can't provide).
+    if [[ "${INPUT_DEPTH:-}" == "build" || "${INPUT_DEPTH:-}" == "source" \
+       || -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]]; then
+      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support --depth build/source or inline --sources/--build-info/--compile-db evidence -- the CLI's per-library release fan-out never collects it, so the requested evidence would silently never be gathered and a source-only break could be missed. Compare the libraries individually (mode: compare with single-file operands) to use build/source-depth evidence."
+      exit 1
+    fi
+  else
     add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
     add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
     add_single_flag "--depth" "${INPUT_DEPTH:-}"

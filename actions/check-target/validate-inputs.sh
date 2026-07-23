@@ -51,6 +51,17 @@ if [[ "$KIND" == "bundle" ]]; then
   if [[ "$BUNDLE_MEMBERS" == "[]" ]]; then
     _fail "bundle-members must be a non-empty JSON array when kind is 'bundle'."
   fi
+  if [[ "$REQUESTED_DEPTH" == "build" || "$REQUESTED_DEPTH" == "source" ]]; then
+    # kind: bundle always compares directories (the resolved binaries-dir vs.
+    # the candidate bundle directory), which routes through the CLI's
+    # per-library release fan-out -- that fan-out never collects inline
+    # build/source evidence and the root Action's run.sh now fails loud
+    # rather than silently dropping a build/source-depth request for a
+    # directory operand (Codex review). Failing here, before resolve-
+    # baseline/collect-facts even run, gives a clearer and cheaper error
+    # than letting the nested analysis step fail later.
+    _fail "requested-depth '$REQUESTED_DEPTH' is not supported when kind is 'bundle' -- a bundle compares directories, which the CLI's per-library release fan-out never collects inline build/source evidence for. Use requested-depth: binary or headers for a bundle check, or kind: target to compare one library at build/source depth."
+  fi
 fi
 if [[ "$TARGET_KIND" == "app-consumer" && -z "$CONSUMER_BINARY" ]]; then
   _fail "consumer-binary is required when target-kind is 'app-consumer'."

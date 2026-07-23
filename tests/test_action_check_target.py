@@ -214,6 +214,52 @@ class TestValidateInputs:
         )
         assert result.returncode == 64
 
+    def test_bundle_kind_rejects_build_depth(self, tmp_path: Path) -> None:
+        # kind: bundle compares directories, which the CLI's per-library
+        # release fan-out never collects build/source evidence for -- must
+        # fail loud rather than silently running at a shallower depth
+        # (Codex review).
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_REQUESTED_DEPTH": "build",
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_bundle_kind_rejects_source_depth(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_REQUESTED_DEPTH": "source",
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_bundle_kind_allows_headers_depth(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_REQUESTED_DEPTH": "headers",
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+
     def test_bundle_kind_rejects_non_library_target_kind(self, tmp_path: Path) -> None:
         result = _run(
             VALIDATE_SH,

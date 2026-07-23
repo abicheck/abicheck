@@ -92,6 +92,31 @@ it should read in CHANGELOG.md. Delete the other sections.
   required fields. A scan report now only bumps its own
   `scan_schema_version`; a bundle/release report gets neither marker (it has
   never had a schema of its own).
+- **GitHub Action `compare` mode now fails loud instead of silently dropping
+  a build/source-depth evidence request against a directory or package
+  operand** — `--depth build`/`source`, or an explicit `--sources`/
+  `--build-info`/`--compile-db`, against a directory/package operand (e.g.
+  `check-target`'s `kind: bundle`) used to be silently skipped so the
+  comparison would still succeed, but at whatever shallower depth the CLI's
+  per-library release fan-out naturally reaches — a source-only break could
+  be missed while the check still reported a clean/normal result.
+  `action/run.sh` now exits with an error explaining why instead;
+  `actions/check-target`'s `validate-inputs.sh` additionally rejects
+  `kind: bundle` combined with `requested-depth: build`/`source` up front,
+  before `resolve-baseline`/`collect-facts` even run. `--depth binary`/
+  `headers` against a directory/package operand is unaffected (still
+  silently dropped, since nothing requested there is actually unservable).
+- **`actions/check-target`'s successful-report `publication` default no
+  longer falsely claims a job summary was posted** — `augment_report`
+  defaulted every successful report's `publication` to
+  `{"state": "published", "channels": ["job_summary"]}`, but check-target's
+  own nested analysis step always disables `add-job-summary`/`pr-comment`/
+  `upload-sarif`, and the finalize step only writes the report JSON to disk.
+  Nothing is actually published anywhere for a real check-target run, so a
+  downstream consumer reading `publication` could wrongly conclude the
+  report had been surfaced to a human. Defaults to
+  `{"state": "skipped", "channels": []}` now, matching the existing
+  operational-error/bootstrap sentinel envelopes.
 
 <!--
 ### Performance

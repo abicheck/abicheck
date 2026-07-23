@@ -451,6 +451,22 @@ class TestAugmentReport:
         )
         assert out["operational_errors"] == []
 
+    def test_publication_defaults_to_skipped_not_a_false_claim(self):
+        """check-target's own nested analysis step always disables
+        add-job-summary/pr-comment/upload-sarif, and finalize only writes
+        the report JSON to disk -- none of that is a real ADR-047 §7
+        publication channel, so the default must not falsely claim
+        published/job_summary (Codex review)."""
+        out = augment_report(
+            self._base_compare_report(verdict="COMPATIBLE", exit_code=0),
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert out["publication"] == {"state": "skipped", "channels": []}
+
     def test_existing_publication_is_not_overwritten(self):
         report = self._base_compare_report()
         report["publication"] = {"state": "failed", "channels": []}
