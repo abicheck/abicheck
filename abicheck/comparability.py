@@ -84,6 +84,7 @@ PROFILE_FIELD_KEYS = (
     "endianness",
     "macro_ops",
     "include_sequence",
+    "header_sequence",
 )
 SCOPE_FIELD_KEYS = (
     "headers",
@@ -412,6 +413,29 @@ def compute_extraction_contract(
             sys_hashes = sorted(_content_hash(f) for f in system_bucket_files)
             slot_tokens.append("sys:" + _sha256_of(*sys_hashes))
 
+        # Declared-header ORDER is a profile/extraction-context fact, not a
+        # scope one (Codex review, PR #624): the aggregate driver TU
+        # dumper.py generates includes declared headers sequentially in the
+        # caller's given order, so a macro/pragma side effect from one
+        # header can change how a LATER header in the sequence parses --
+        # `-H a.h -H b.h` and `-H b.h -H a.h` can genuinely produce
+        # different ASTs even though the same header SET is declared either
+        # way. scope_fingerprint deliberately stays order-independent (the
+        # declared *surface* -- which headers are public -- doesn't depend
+        # on dump order; see the "headers" field above), but
+        # profile_fingerprint must still catch a reordering that could
+        # change the extracted AST. Order-preserving de-duplication (first
+        # occurrence wins), not a sorted set, mirroring the same
+        # duplicate-collapse rule scope's "headers" field applies -- a
+        # header named twice must not itself change the sequence.
+        seen_header_identities: set[str] = set()
+        header_sequence: list[str] = []
+        for h in declared_headers:
+            identity = header_identities[h]
+            if identity not in seen_header_identities:
+                seen_header_identities.add(identity)
+                header_sequence.append(identity)
+
         profile_fields = {
             "compiler_family": compiler_family or "",
             "compiler_version": compiler_version or "",
@@ -429,6 +453,7 @@ def compute_extraction_contract(
             # content.
             "macro_ops": json.dumps(list(macro_ops)),
             "include_sequence": json.dumps(slot_tokens),
+            "header_sequence": json.dumps(header_sequence),
         }
         profile_fingerprint = _sha256_of(
             *[profile_fields[k] for k in PROFILE_FIELD_KEYS]

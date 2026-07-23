@@ -101,6 +101,71 @@ def test_no_common_anchor_fallback_still_distinguishes_different_headers(
 
 
 # ---------------------------------------------------------------------------
+# profile_fingerprint: declared-header order (Codex review, PR #624)
+# ---------------------------------------------------------------------------
+
+
+def test_declared_header_order_differs_profile_fingerprint_when_l2_ran(tmp_path):
+    # The aggregate driver TU dumper.py generates includes declared headers
+    # sequentially in the caller's given order, so a macro/pragma side
+    # effect from one header can change how a LATER header parses --
+    # `-H a.h -H b.h` and `-H b.h -H a.h` can genuinely produce different
+    # ASTs even though the same header SET is declared either way.
+    # profile_fingerprint must catch that reordering.
+    a = _write(tmp_path / "a.h", "int a(void);\n")
+    b = _write(tmp_path / "b.h", "int b(void);\n")
+    order_ab = compute_extraction_contract(
+        declared_headers=[a, b], l2_frontend_ran=True
+    )
+    order_ba = compute_extraction_contract(
+        declared_headers=[b, a], l2_frontend_ran=True
+    )
+    assert order_ab.profile_fingerprint != order_ba.profile_fingerprint
+
+
+def test_declared_header_order_does_not_affect_scope_fingerprint(tmp_path):
+    # scope_fingerprint stays order-independent -- the declared *surface*
+    # (which headers are public) doesn't depend on dump order, only
+    # profile_fingerprint (the extraction context) does.
+    a = _write(tmp_path / "a.h", "int a(void);\n")
+    b = _write(tmp_path / "b.h", "int b(void);\n")
+    order_ab = compute_extraction_contract(
+        declared_headers=[a, b], l2_frontend_ran=True
+    )
+    order_ba = compute_extraction_contract(
+        declared_headers=[b, a], l2_frontend_ran=True
+    )
+    assert order_ab.scope_fingerprint == order_ba.scope_fingerprint
+
+
+def test_declared_header_order_ignores_a_repeated_header(tmp_path):
+    # A header named twice must not itself change header_sequence --
+    # order-preserving de-duplication (first occurrence wins), mirroring
+    # the same duplicate-collapse rule scope's "headers" field applies.
+    a = _write(tmp_path / "a.h", "int a(void);\n")
+    b = _write(tmp_path / "b.h", "int b(void);\n")
+    once = compute_extraction_contract(declared_headers=[a, b], l2_frontend_ran=True)
+    repeated = compute_extraction_contract(
+        declared_headers=[a, b, a], l2_frontend_ran=True
+    )
+    assert once.profile_fingerprint == repeated.profile_fingerprint
+
+
+def test_declared_header_order_irrelevant_without_l2_frontend(tmp_path):
+    # No L2 frontend ran means no aggregate driver TU was ever generated,
+    # so there is nothing for header order to have affected -- and
+    # profile_fingerprint is None in this case regardless (l2_frontend_ran
+    # gates profile_fingerprint's existence entirely).
+    a = _write(tmp_path / "a.h", "int a(void);\n")
+    b = _write(tmp_path / "b.h", "int b(void);\n")
+    order_ab = compute_extraction_contract(declared_headers=[a, b])
+    order_ba = compute_extraction_contract(declared_headers=[b, a])
+    assert order_ab.profile_fingerprint is None
+    assert order_ba.profile_fingerprint is None
+    assert order_ab.scope_fingerprint == order_ba.scope_fingerprint
+
+
+# ---------------------------------------------------------------------------
 # profile_fingerprint: -I directory content hashing (tests 4, 5, 6)
 # ---------------------------------------------------------------------------
 
