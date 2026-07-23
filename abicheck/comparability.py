@@ -488,38 +488,39 @@ def compute_extraction_contract(
     )
 
 
-def _binary_platform_axis(snap: AbiSnapshot) -> tuple[str, ...] | None:
+def _binary_platform_components(snap: AbiSnapshot) -> dict[str, str] | None:
     """Read the same binary-header platform-identity fields
     ``elf_machine_changed``/``elf_class_changed``/``elf_endianness_changed``
-    (and PE/Mach-O equivalents) already detect directly, so the profile
-    carve-out below can confirm a target-only mismatch corresponds to a
-    genuine architecture difference rather than a misconfigured extraction.
-    Returns None when no binary-derived platform metadata is available.
+    (and PE/Mach-O equivalents) already detect directly, keyed by the
+    :data:`_PLATFORM_IDENTITY_FIELDS` name each one corresponds to — so the
+    carve-out below can confirm each *specific* differing profile field maps
+    to a genuine difference in its own corresponding binary component, not
+    merely that some unspecified component of the platform identity changed
+    (Codex review, PR #624: comparing whole axis tuples let a bogus
+    ``pointer_width`` extraction hide behind an unrelated, genuine
+    ``machine``/architecture change on a different field). Returns ``None``
+    when no binary-derived platform metadata is available at all.
 
-    Includes ELF's ``elf_class`` (32/64-bit) alongside ``machine``/``ei_data``
-    (Codex review, PR #624) — a family that shares ``e_machine`` and
-    endianness across word sizes (e.g. ``EM_RISCV`` RV32 vs. RV64) would
-    otherwise produce an identical axis on both sides despite a genuine
-    class change, making the carve-out below wrongly refuse to defer to
-    ``diff_platform.py``'s more specific ``elf_class_changed``.
+    Only ELF exposes a word-size (``elf_class``) and endianness (``ei_data``)
+    field distinct from ``machine`` — PE/Mach-O metadata has no equivalent,
+    so a PE/Mach-O snapshot's dict only ever contains ``target_triple``.
     """
     if snap.elf is not None:
         elf_machine = getattr(snap.elf, "machine", "")
         if elf_machine:
-            return (
-                "elf",
-                elf_machine,
-                getattr(snap.elf, "ei_data", ""),
-                str(getattr(snap.elf, "elf_class", "")),
-            )
+            return {
+                "target_triple": elf_machine,
+                "endianness": getattr(snap.elf, "ei_data", ""),
+                "pointer_width": str(getattr(snap.elf, "elf_class", "")),
+            }
     if snap.pe is not None:
         pe_machine = getattr(snap.pe, "machine", "")
         if pe_machine:
-            return ("pe", pe_machine, "")
+            return {"target_triple": pe_machine}
     if snap.macho is not None:
         macho_cpu_type = getattr(snap.macho, "cpu_type", "")
         if macho_cpu_type:
-            return ("macho", macho_cpu_type, "")
+            return {"target_triple": macho_cpu_type}
     return None
 
 
@@ -603,10 +604,25 @@ def check_contracts_comparable(
             if old_fields.get(k, "") != new_fields.get(k, "")
         }
         if differing and differing <= _PLATFORM_IDENTITY_FIELDS:
-            old_axis = _binary_platform_axis(old)
-            new_axis = _binary_platform_axis(new)
-            if old_axis is not None and new_axis is not None and old_axis != new_axis:
-                return None  # genuine cross-architecture compare; diff_platform.py handles it
+            old_components = _binary_platform_components(old)
+            new_components = _binary_platform_components(new)
+            # Every field in `differing` must itself map to a binary-derived
+            # component present on BOTH sides AND genuinely differing on
+            # that same field (Codex review, PR #624) -- not just "some"
+            # component of the platform identity differs somewhere. A field
+            # with no corresponding binary component on one side (e.g.
+            # pointer_width/endianness for a PE/Mach-O snapshot, which has
+            # no distinct word-size/endianness field) can never be confirmed
+            # this way, so the carve-out correctly declines to waive it.
+            if old_components is not None and new_components is not None:
+                verified = all(
+                    field in old_components
+                    and field in new_components
+                    and old_components[field] != new_components[field]
+                    for field in differing
+                )
+                if verified:
+                    return None  # genuine cross-architecture compare; diff_platform.py handles it
         reason = (
             "old and new snapshots were extracted under different compile "
             f"contexts (profile_fingerprint mismatch; differing fields: "

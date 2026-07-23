@@ -838,9 +838,10 @@ def test_gate_platform_identity_carve_out_covers_macho():
 
 
 def test_gate_carve_out_does_not_apply_without_any_binary_platform_metadata():
-    # Neither side carries elf/pe/macho metadata at all -- _binary_platform_axis
-    # returns None for both, so the carve-out cannot confirm a genuine
-    # architecture difference and the mismatch still raises.
+    # Neither side carries elf/pe/macho metadata at all --
+    # _binary_platform_components returns None for both, so the carve-out
+    # cannot confirm a genuine architecture difference and the mismatch
+    # still raises.
     old_contract = compute_extraction_contract(
         l2_frontend_ran=True, target_triple="x86_64-linux-gnu"
     )
@@ -849,6 +850,37 @@ def test_gate_carve_out_does_not_apply_without_any_binary_platform_metadata():
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(_snap(old_contract), _snap(new_contract))
+
+
+def test_gate_carve_out_does_not_waive_pointer_width_via_unrelated_machine_change():
+    # Codex review (PR #624): the carve-out must verify the SPECIFIC
+    # differing profile field against its OWN corresponding binary
+    # component, not merely that "some" component of the platform identity
+    # changed somewhere. Here only pointer_width differs in the profile (a
+    # bogus/misconfigured extraction), and the binaries' machine genuinely
+    # differs too (a real but UNRELATED architecture change) -- but
+    # elf_class (pointer_width's corresponding binary field) is IDENTICAL on
+    # both sides, so the pointer_width mismatch is not corroborated and must
+    # still raise instead of being waived by the coincidental machine change.
+    old_contract = compute_extraction_contract(l2_frontend_ran=True, pointer_width=32)
+    new_contract = compute_extraction_contract(l2_frontend_ran=True, pointer_width=64)
+    old = _snap(old_contract, elf=ElfMetadata(machine="EM_X86_64", elf_class=64))
+    new = _snap(new_contract, elf=ElfMetadata(machine="EM_AARCH64", elf_class=64))
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_carve_out_cannot_verify_pointer_width_on_pe_and_still_raises():
+    # PE metadata has no distinct word-size field (unlike ELF's elf_class),
+    # so a pointer_width-only profile mismatch can never be corroborated for
+    # a PE snapshot -- the carve-out must not waive it just because
+    # `machine` also happens to differ.
+    old_contract = compute_extraction_contract(l2_frontend_ran=True, pointer_width=32)
+    new_contract = compute_extraction_contract(l2_frontend_ran=True, pointer_width=64)
+    old = _snap(old_contract, pe=PeMetadata(machine="IMAGE_FILE_MACHINE_I386"))
+    new = _snap(new_contract, pe=PeMetadata(machine="IMAGE_FILE_MACHINE_AMD64"))
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
 
 
 # ---------------------------------------------------------------------------
