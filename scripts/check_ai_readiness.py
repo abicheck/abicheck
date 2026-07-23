@@ -1533,7 +1533,14 @@ def _links_to_another_adr(status: str, adr_dir: Path, own_path: Path) -> bool:
     resolved_adr_dir = adr_dir.resolve()
     resolved_own_path = own_path.resolve()
     for href in _ADR_REPLACEMENT_LINK_RE.findall(status):
-        href_path = href.split("#", 1)[0].strip()
+        href_path = href.strip()
+        if href_path.startswith("<"):
+            # CommonMark's angle-bracket link destination form
+            # ([text](<url>)) -- MkDocs renders it as a normal link, so the
+            # `<`/`>` must not end up as part of the resolved path.
+            end = href_path.find(">")
+            href_path = href_path[1:end] if end != -1 else href_path[1:]
+        href_path = href_path.split("#", 1)[0]
         if (
             not href_path
             or "://" in href_path
