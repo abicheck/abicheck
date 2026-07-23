@@ -8,7 +8,7 @@ fields — and `reachability_state`, the tri-state reachability signal it made
 visible in JSON/SARIF output for the first time.
 
 This is slice 1 of [G29 Phase 3](../development/plans/g29-impact-analysis-layer.md)
-([ADR-050](../development/adr/050-unified-impact-assessment-model.md)). It
+([ADR-051](../development/adr/051-unified-impact-assessment-model.md)). It
 adds a report-level read view; it does not change which findings are
 produced, which are suppressed, or any verdict.
 
@@ -94,7 +94,7 @@ changes route through a separate builder that mirrors the same fields), and
 each entry in `suppression.suppressed_changes[]` — a suppressed finding's
 `decision.state` is always `"suppressed"` there, so its `impact_assessment`
 is always present. SARIF carries the same two fields as `properties.reachabilityState`/
-`properties.impactAssessment`. JUnit does not — see ADR-050 / ADR-048 for
+`properties.impactAssessment`. JUnit does not — see ADR-051 / ADR-048 for
 why.
 
 ## What this does not cover yet
@@ -106,5 +106,5 @@ through the impact layer, and the root-cause correlator (G29 Phase 6),
 none of which exist yet. Adding empty placeholder fields for data no
 producer can populate would misrepresent what abicheck actually knows, so
 they are left out of the schema entirely rather than always-`null`. See
-[ADR-050](../development/adr/050-unified-impact-assessment-model.md) for the
+[ADR-051](../development/adr/051-unified-impact-assessment-model.md) for the
 full list of what this slice deliberately does not implement.

@@ -300,7 +300,7 @@ def _result_for(
         properties["impactProofPath"] = change.impact_proof_path
     if change.impact_is_direct is not None:
         properties["impactIsDirect"] = change.impact_is_direct
-    # G29 Phase 3 slice 1 (ADR-050): same unified read view reporter.py's
+    # G29 Phase 3 slice 1 (ADR-051): same unified read view reporter.py's
     # JSON output gained -- reachabilityState always present (the tri-state
     # signal from PR #607, never surfaced in SARIF before this), and the
     # unified impactAssessment object when it carries more than the defaults.
@@ -421,7 +421,7 @@ def _missing_contract_result(
             "relevantToGate": True,
             "blocksGate": blocks,
             "missingContractMember": label,
-            # G29 Phase 3 slice 1 (ADR-050, Codex review): a missing-contract
+            # G29 Phase 3 slice 1 (ADR-051, Codex review): a missing-contract
             # member has no backing Change for assess_change to read, but
             # reachabilityState is "always present" everywhere else this
             # slice touches (D3/D4) -- a missing symbol/version is a hard

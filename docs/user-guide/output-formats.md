@@ -204,7 +204,7 @@ every change individually — e.g. an internal helper's `func_removed` finding
 and the `internal_symbol_required_by_public_api` overlay finding that names
 it both land in the same group. **JSON output only** (`--format json`); other
 formats render as `full`. This is a first slice reusing the existing
-`Change.caused_by_type` field (see [ADR-050](../development/adr/050-unified-impact-assessment-model.md));
+`Change.caused_by_type` field (see [ADR-051](../development/adr/051-unified-impact-assessment-model.md));
 a future slice (G29 Phase 6) will additionally correlate consumer-overlay
 findings that don't share a `caused_by_type` today.
 

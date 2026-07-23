@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """Build an :class:`~abicheck.impact.model.ImpactAssessment` from an existing
-``Change`` (G29 Phase 3 slice 1, ADR-050).
+``Change`` (G29 Phase 3 slice 1, ADR-051).
 
 ``assess_change`` is a pure read view: it does not mutate *change*, run any
 graph traversal, or change any producer's behavior. It only reads attributes
@@ -74,7 +74,7 @@ def assess_change(change: Any, *, suppressed: bool = False) -> ImpactAssessment:
     *suppressed* is caller-supplied: whether *this* call site is rendering
     ``DiffResult.changes`` or ``DiffResult.suppressed_changes`` is not
     recoverable from *change* alone. ``Change.suppression_rule`` (G29 Phase 3
-    slice 2, ADR-050 follow-up) *is* set directly on the change by whichever
+    slice 2, ADR-051 follow-up) *is* set directly on the change by whichever
     suppression call site moved it into ``suppressed_changes``
     (``checker._filter_suppressed_changes``/``_filter_pattern_synthetic``,
     ``post_processing.ApplySuppression``), so it is read unconditionally

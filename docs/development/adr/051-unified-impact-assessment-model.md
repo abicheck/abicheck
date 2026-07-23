@@ -1,4 +1,4 @@
-# ADR-050: Unified Impact Assessment Model (G29 Phase 3, slices 1-3)
+# ADR-051: Unified Impact Assessment Model (G29 Phase 3, slices 1-3)
 
 **Date:** 2026-07-22
 **Status:** Accepted — slices 1, 2, and 3 implemented.

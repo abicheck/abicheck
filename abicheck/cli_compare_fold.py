@@ -248,7 +248,7 @@ def _fold_scoped_compat_into_text(
                         "severity": "breaking" if blocks else "compatible",
                         "relevant_to_gate": True,
                         "blocks_gate": blocks,
-                        # G29 Phase 3 slice 1 (ADR-050, Codex review): a
+                        # G29 Phase 3 slice 1 (ADR-051, Codex review): a
                         # missing-contract label has no backing Change for
                         # _change_to_dict/assess_change to read (unlike the
                         # scoped_only loop above, which already routes

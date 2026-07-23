@@ -639,7 +639,7 @@ class SuppressionOutcome:
     ``UNKNOWN`` rather than proven-unreachable, distinct from the
     public-reachable-break case ``withheld_rule`` covers.
 
-    ``matched_rule`` (G29 Phase 3 slice 2, ADR-050 follow-up) is the rule
+    ``matched_rule`` (G29 Phase 3 slice 2, ADR-051 follow-up) is the rule
     that actually suppressed the change when ``suppressed`` is True — before
     this, a successful match returned no record of *which* rule fired, so a
     caller moving the change into ``DiffResult.suppressed_changes`` had

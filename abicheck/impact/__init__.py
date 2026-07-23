@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unified impact-assessment model (G29 Phase 3 slice 1, ADR-050).
+"""Unified impact-assessment model (G29 Phase 3 slice 1, ADR-051).
 
 See :mod:`abicheck.impact.model` for the dataclasses and
 :mod:`abicheck.impact.engine` for :func:`assess_change`, the builder.

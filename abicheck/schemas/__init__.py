@@ -144,7 +144,7 @@ from typing import Any
 #:       have a report-level place to record a check's identity. Omitted
 #:       entirely (never emitted as null) when unset.
 #:   2.13: added two additive optional per-change keys (G29 Phase 3 slice 1,
-#:       ADR-050) -- ``reachability_state`` (the tri-state signal from PR
+#:       ADR-051) -- ``reachability_state`` (the tri-state signal from PR
 #:       #607's ``Change.reachability_state``, always present, never
 #:       serialized before this) and ``impact_assessment`` (a unified read
 #:       view over the scattered reachability/impact fields above --
@@ -153,7 +153,7 @@ from typing import Any
 #:       ``correlated_change_kind`` -- present only when it carries
 #:       information beyond the all-defaults case).
 #:   2.14: added two additive optional top-level keys, present only under
-#:       ``--report-mode root-cause`` (G29 Phase 3 slice 3, ADR-050) --
+#:       ``--report-mode root-cause`` (G29 Phase 3 slice 3, ADR-051) --
 #:       ``root_causes`` (groups ``changes`` by ``Change.caused_by_type``,
 #:       falling back to the change's own symbol for an ungrouped finding)
 #:       and ``root_cause_count``. A first, JSON-only slice of the plan's

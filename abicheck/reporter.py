@@ -342,7 +342,7 @@ def _to_json_leaf(
             proof_path = getattr(c, "reachability_proof_path", None)
             if proof_path:
                 entry["reachability_proof_path"] = proof_path
-        # G29 Phase 3 slice 1 (ADR-050, Codex review): _leaf_entry duplicates
+        # G29 Phase 3 slice 1 (ADR-051, Codex review): _leaf_entry duplicates
         # _change_to_dict's reachability fields rather than routing through
         # it (see the ADR-044 block above) -- reachability_state/
         # impact_assessment follow the same precedent so a root TYPE_*
@@ -422,7 +422,7 @@ def _to_json_root_cause(
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
 ) -> str:
-    """``--report-mode root-cause`` JSON output (G29 Phase 3, ADR-050 slice 3).
+    """``--report-mode root-cause`` JSON output (G29 Phase 3, ADR-051 slice 3).
 
     Groups ``result.changes`` (after ``--show-only`` filtering) by
     ``Change.caused_by_type`` when set, else each change is its own
@@ -434,7 +434,7 @@ def _to_json_root_cause(
     will additionally correlate across consumer-overlay findings that don't
     share a `caused_by_type` today; `root_cause_id` here is a stable hash of
     the grouping key, not the eventual correlator's own identifier scheme
-    (ADR-050, "Deliberately not implemented this slice").
+    (ADR-051, "Deliberately not implemented this slice").
     """
     changes = list(result.changes)
     if show_only:
@@ -654,7 +654,7 @@ def _add_show_only_filter(
 def _suppressed_change_entry(c: Change) -> dict[str, object]:
     """Minimal audit-trail entry for one suppressed change, plus the
     impact-assessment decision it was actually suppressed with (G29 Phase 3
-    slice 1, ADR-050 follow-up, Codex review: this is the one call site that
+    slice 1, ADR-051 follow-up, Codex review: this is the one call site that
     passes ``suppressed=True`` -- without it, ``decision.state:
     "suppressed"`` was advertised but never actually reachable from
     production reporting)."""
@@ -1095,7 +1095,7 @@ def _change_to_dict(
     impact_direct = getattr(c, "impact_is_direct", None)
     if impact_direct is not None:
         d["impact_is_direct"] = impact_direct
-    # G29 Phase 3 slice 1 (ADR-050): reachability_state has existed on Change
+    # G29 Phase 3 slice 1 (ADR-051): reachability_state has existed on Change
     # since PR #607 but was never serialized -- without it, a JSON consumer
     # cannot tell a PROVEN_UNREACHABLE finding apart from one the graph walk
     # never examined at all (UNKNOWN), since both leave public_reachable

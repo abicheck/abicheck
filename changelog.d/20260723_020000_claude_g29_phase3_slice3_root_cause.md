@@ -4,7 +4,7 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 
 ### Added
 
-- **`--report-mode root-cause`** (ADR-050, G29 Phase 3 slice 3): groups
+- **`--report-mode root-cause`** (ADR-051, G29 Phase 3 slice 3): groups
   findings sharing a root cause (`Change.caused_by_type`) under one entry
   instead of listing every change individually — e.g. an internal helper's
   `func_removed` finding and the `internal_symbol_required_by_public_api`
@@ -17,7 +17,7 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 ### Fixed
 
 - **`impact_assessment.decision.suppression_rule` missing for late-detector
-  suppressions** (ADR-050 follow-up): a suppression rule that suppressed a
+  suppressions** (ADR-051 follow-up): a suppression rule that suppressed a
   finding built by `DetectCppPatterns`/`DetectTemplatePatterns`/
   `DetectNamespacePatterns` (which run after the main suppression pass and
   route through their own shared helper) did not get

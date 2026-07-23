@@ -129,7 +129,7 @@ def test_suppressed_changes_audit_trail(tmp_path: Path) -> None:
 
 
 def test_suppressed_change_records_matching_rule_label(tmp_path: Path) -> None:
-    """G29 Phase 3 slice 2 (ADR-050 follow-up): Change.suppression_rule
+    """G29 Phase 3 slice 2 (ADR-051 follow-up): Change.suppression_rule
     carries the label of the rule that actually suppressed it, so
     impact_assessment.decision.suppression_rule isn't always None."""
     yaml_path = write_yaml(tmp_path, """

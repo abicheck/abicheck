@@ -5,7 +5,7 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 ### Added
 
 - **Unified `impact_assessment` object and always-present `reachability_state`
-  field in JSON/SARIF reports** (ADR-050, G29 Phase 3 slice 1): every finding
+  field in JSON/SARIF reports** (ADR-051, G29 Phase 3 slice 1): every finding
   now carries `reachability_state` (`reachable`/`unreachable`/`unknown`) — the
   tri-state reachability signal `Change.reachability_state` has carried in
   memory since PR #607, but which was never serialized until now, so a

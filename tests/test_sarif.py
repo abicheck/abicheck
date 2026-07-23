@@ -695,7 +695,7 @@ class TestScopedGate:
         assert results[0]["properties"]["relevantToGate"] is True
         assert results[0]["properties"]["blocksGate"] is True
         assert "_Z6vanishv" in results[0]["message"]["text"]
-        # G29 Phase 3 slice 1 (ADR-050, Codex review): reachabilityState is
+        # G29 Phase 3 slice 1 (ADR-051, Codex review): reachabilityState is
         # "always present" everywhere else this slice touches -- a missing
         # contract member has no backing Change, but it still needs the
         # honest UNKNOWN value rather than silently omitting the field.

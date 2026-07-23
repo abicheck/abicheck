@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the unified impact-assessment model (G29 Phase 3 slice 1, ADR-050)."""
+"""Tests for the unified impact-assessment model (G29 Phase 3 slice 1, ADR-051)."""
 
 from __future__ import annotations
 
@@ -206,7 +206,7 @@ class TestAssessChange:
         assert assessment.has_signal() is False
 
     def test_proven_unreachable_distinguishable_from_unknown(self) -> None:
-        """The gap ADR-050 fixes: two changes both leave public_reachable
+        """The gap ADR-051 fixes: two changes both leave public_reachable
         False, but one was proven unreachable and one was never examined --
         assess_change must keep those apart."""
         unreachable = _change(reachability_state=ReachabilityState.PROVEN_UNREACHABLE)
@@ -296,7 +296,7 @@ class TestAssessChange:
         assert assessment.has_signal() is True
 
     def test_suppression_rule_read_from_change(self) -> None:
-        """G29 Phase 3 slice 2 (ADR-050 follow-up): Change.suppression_rule
+        """G29 Phase 3 slice 2 (ADR-051 follow-up): Change.suppression_rule
         (set by checker.py/post_processing.py at suppression time) flows
         into FindingDecision.suppression_rule -- the piece slice 1 left
         unwired."""
@@ -392,7 +392,7 @@ class TestReporterIntegration:
         assert entry["impact_assessment"]["decision"]["state"] == "suppressed"
 
     def test_suppressed_changes_carry_suppression_rule_label(self) -> None:
-        """G29 Phase 3 slice 2 (ADR-050 follow-up): a suppressed change
+        """G29 Phase 3 slice 2 (ADR-051 follow-up): a suppressed change
         already carrying Change.suppression_rule (set by checker.py/
         post_processing.py at suppression time) surfaces it in
         impact_assessment.decision.suppression_rule end to end."""

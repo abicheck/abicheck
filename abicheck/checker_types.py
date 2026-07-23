@@ -208,13 +208,13 @@ class Change:
     affected_public_roots: list[str] | None = None
     impact_proof_path: list[dict[str, object]] | None = None
     impact_is_direct: bool | None = None
-    # G29 Phase 3 slice 2 (ADR-050 follow-up) — set on a change moved into
+    # G29 Phase 3 slice 2 (ADR-051 follow-up) — set on a change moved into
     # ``DiffResult.suppressed_changes`` (``checker._filter_suppressed_changes``/
     # ``_filter_pattern_synthetic``, ``post_processing.ApplySuppression``) to
     # the matching ``Suppression`` rule's ``label`` (falling back to
     # ``reason`` when the rule has no label — both are free-form and either
     # may be unset, so this can still be ``None``). Feeds
-    # ``impact.model.FindingDecision.suppression_rule`` — the piece ADR-050
+    # ``impact.model.FindingDecision.suppression_rule`` — the piece ADR-051
     # slice 1 deliberately left unwired. Never set for a change that stays
     # visible, nor for the appcompat.py/cli_compare_helpers.py consumer/
     # runtime overlays a suppression rule discards outright (those never
