@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from . import (
     diff_abi_tags,  # noqa: F401 — triggers detector registration
@@ -592,7 +592,16 @@ def compare(
             set.
     """
     mismatch = check_contracts_comparable(old, new, diagnostic=diagnostic_comparison)
-    assurance = "none" if mismatch is not None else None
+    assurance: Literal["none"] | None = "none" if mismatch is not None else None
+    # Propagate *why* a diagnostic-mode comparison is untrustworthy into the
+    # existing human-readable coverage_warnings disclosure (CodeRabbit
+    # review, PR #624): the non-diagnostic (raising) path already surfaces
+    # mismatch.reason via the exception message, but the diagnostic escape
+    # hatch previously reduced it to a bare assurance == "none" with no
+    # explanation of which axis mismatched -- undermining the stated purpose
+    # of the escape hatch ("the caller can still see a result but knows not
+    # to trust it").
+    comparability_warnings = [mismatch.reason] if mismatch is not None else []
     # ADR-050 D2 — set when either fingerprint is mixed (exactly one side
     # has it) between old and new, mirroring check_contracts_comparable's
     # own per-fingerprint-independent gating (Codex review, PR #624: a
@@ -608,7 +617,7 @@ def compare(
     new_profile = new.contract.profile_fingerprint if new.contract else None
     old_scope = old.contract.scope_fingerprint if old.contract else None
     new_scope = new.contract.scope_fingerprint if new.contract else None
-    contract_coverage = (
+    contract_coverage: Literal["partial"] | None = (
         "partial"
         if (old_profile is None) != (new_profile is None)
         or (old_scope is None) != (new_scope is None)
@@ -917,7 +926,7 @@ def compare(
         old_symbol_count=_old_public_symbol_count(old),
         confidence=confidence,
         evidence_tiers=evidence_tiers,
-        coverage_warnings=coverage_warnings,
+        coverage_warnings=coverage_warnings + comparability_warnings,
         out_of_surface_changes=out_of_surface,
         out_of_surface_count=len(out_of_surface),
         reconciled_changes=reconciled,

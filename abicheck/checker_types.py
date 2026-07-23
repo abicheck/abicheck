@@ -23,6 +23,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 from .checker_policy import (
     ChangeKind,
@@ -334,13 +335,13 @@ class DiffResult:
     # a ChangeKind/Change finding, so it is structurally unreachable by any
     # --severity-* promotion. "partial" is currently the only recognized
     # value.
-    contract_coverage: str | None = None
+    contract_coverage: Literal["partial"] | None = None
     # ADR-050 D2 — set to "none" only when --diagnostic-comparison forced a
     # tentative diff through past a genuine contract mismatch that would
     # otherwise have raised ProfileMismatchError/ScopeMismatchError. Applies
     # to the whole DiffResult (the gate failed for the pair as a whole
     # before any diff ran), not per-Change.
-    assurance: str | None = None
+    assurance: Literal["none"] | None = None
 
     def _effective_kind_sets(
         self,

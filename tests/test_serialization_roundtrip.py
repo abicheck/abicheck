@@ -8,6 +8,7 @@ Covers serialisation fields added in PR #63:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from abicheck.model import (
     AbiSnapshot,
@@ -359,11 +360,9 @@ class TestInferredFromHeadersProvenance:
 class TestFileRoundTrip:
     """save_snapshot / load_snapshot must preserve new fields."""
 
-    def test_elf_only_mode_and_constants_survive_file_io(
-        self, tmp_path: object
-    ) -> None:
+    def test_elf_only_mode_and_constants_survive_file_io(self, tmp_path: Path) -> None:
         snap = _make_snap(elf_only_mode=True, constants={"FOO": "bar"})
-        p = tmp_path / "snap.json"  # type: ignore[operator]
+        p = tmp_path / "snap.json"
         save_snapshot(snap, p)
         restored = load_snapshot(p)
         assert restored.elf_only_mode is True
@@ -414,12 +413,12 @@ class TestExtractionContractRoundTrip:
         assert restored.profile_fields == {}
         assert restored.scope_fields == {"headers": "foo.h"}
 
-    def test_contract_survives_file_io(self, tmp_path: object) -> None:
+    def test_contract_survives_file_io(self, tmp_path: Path) -> None:
         contract = ExtractionContract(
             profile_fingerprint="sha256:abc", scope_fingerprint="sha256:def"
         )
         snap = _make_snap(contract=contract)
-        p = tmp_path / "snap.json"  # type: ignore[operator]
+        p = tmp_path / "snap.json"
         save_snapshot(snap, p)
         restored = load_snapshot(p)
         assert restored.contract == contract

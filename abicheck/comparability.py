@@ -119,6 +119,31 @@ def _resolved(path: Path) -> Path:
     return path.resolve()
 
 
+def _common_root(candidates: Sequence[str]) -> Path | None:
+    """``os.path.commonpath``, tolerant of candidates with no shared anchor
+    at all (CodeRabbit review, PR #624): mixed drives on Windows, or a local
+    vs. UNC root, make ``commonpath`` raise ``ValueError`` instead of
+    degrading gracefully — that must not propagate out of fingerprinting as
+    an unhandled crash. Returns ``None`` when there is no common root to
+    strip; callers fall back to :func:`_side_local_identity`'s
+    drive-stripped form in that case."""
+    try:
+        return Path(os.path.commonpath(candidates))
+    except ValueError:
+        return None
+
+
+def _side_local_identity(path: Path, root: Path | None) -> str:
+    """A path's identity relative to ``root``, or — when ``root`` is
+    ``None`` because this side's declared paths share no common anchor at
+    all — the drive-stripped absolute path (still deterministic and
+    drive-letter-independent, just without a common prefix to strip)."""
+    resolved = _resolved(path)
+    if root is not None:
+        return str(resolved.relative_to(root))
+    return os.path.splitdrive(str(resolved))[1]
+
+
 def _is_ancestor_or_equal(root: Path, path: Path) -> bool:
     root = _resolved(root)
     path = _resolved(path)
@@ -179,8 +204,8 @@ def _header_identities(declared_headers: Sequence[Path]) -> dict[Path, str]:
     if not declared_headers:
         return {}
     parents = [str(_resolved(h).parent) for h in declared_headers]
-    root = Path(os.path.commonpath(parents))
-    return {h: str(_resolved(h).relative_to(root)) for h in declared_headers}
+    root = _common_root(parents)
+    return {h: _side_local_identity(h, root) for h in declared_headers}
 
 
 def _slot_token_for_ancestor(
@@ -297,7 +322,11 @@ def compute_extraction_contract(
       roots to the same sequence.
     - Every depfile-listed file attributed to no declared ``-I`` directory
       (and not under a declared header's own parent) feeds one additional,
-      unordered **system/toolchain bucket**, appended last.
+      unordered **system/toolchain bucket**, appended last. Its content is
+      the sorted set of content hashes alone (no path component): unlike an
+      external slot, a system-bucket file has no declared ``-I`` directory
+      to make its path side-local against, so including its raw resolved
+      path would make the fingerprint checkout/cache-root-dependent.
     """
     scope_inputs_present = bool(
         declared_headers or public_header_paths or public_header_dirs
@@ -357,10 +386,18 @@ def compute_extraction_contract(
             slot_tokens.append(f"{idx}:{token}")
 
         if system_bucket_files:
-            sys_pairs = sorted(
-                (str(_resolved(f)), _content_hash(f)) for f in system_bucket_files
-            )
-            slot_tokens.append("sys:" + _sha256_of(*[f"{p}={h}" for p, h in sys_pairs]))
+            # Content hashes only, no path component (Codex review, PR #624):
+            # unlike the "ext:" bucket, a system-bucket file has no declared
+            # IncludeDir to make its path side-local against, and its raw
+            # resolved path is checkout/cache-root-dependent (e.g. an
+            # auto-injected sysroot under /tmp/old-sysroot/... vs.
+            # /tmp/new-sysroot/...). Two toolchains with byte-identical
+            # system headers must fingerprint identically regardless of
+            # where those headers happen to sit on disk -- the bucket is
+            # already unordered/unattributed, so path identity was never
+            # load-bearing here, only content is.
+            sys_hashes = sorted(_content_hash(f) for f in system_bucket_files)
+            slot_tokens.append("sys:" + _sha256_of(*sys_hashes))
 
         profile_fields = {
             "compiler_family": compiler_family or "",
@@ -419,7 +456,7 @@ def compute_extraction_contract(
             str(_resolved(p).parent)
             for p in (*declared_headers, *public_header_paths, *public_header_dirs)
         ]
-        root = Path(os.path.commonpath(root_candidates))
+        root = _common_root(root_candidates)
 
         def _normalize(paths: Sequence[Path]) -> list[str]:
             # sorted(set(...)), not sorted(...) (Codex review, PR #624): the
@@ -430,7 +467,7 @@ def compute_extraction_contract(
             # once wouldn't have -- ["foo.h", "foo.h"] vs. ["foo.h"] would
             # otherwise mismatch on element count alone, despite describing
             # the identical declared surface.
-            return sorted({str(_resolved(p).relative_to(root)) for p in paths})
+            return sorted({_side_local_identity(p, root) for p in paths})
 
         # json.dumps, not a raw "|" join (Codex review, PR #624, same class
         # of bug already fixed for macro_ops/include_sequence above): a

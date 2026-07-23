@@ -14,6 +14,7 @@ comparability.IncludeDir(label=...) directly.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,43 @@ def test_1_identical_header_name_different_checkout_root_matches(tmp_path):
 
 
 def test_2_different_header_name_produces_different_scope_fingerprint(tmp_path):
+    old_h = _write(tmp_path / "v1" / "foo.h", "int add(int, int);\n")
+    new_h = _write(tmp_path / "v2" / "bar.h", "int add(int, int);\n")
+    old = compute_extraction_contract(declared_headers=[old_h])
+    new = compute_extraction_contract(declared_headers=[new_h])
+    assert old.scope_fingerprint != new.scope_fingerprint
+
+
+def test_no_common_anchor_across_declared_paths_does_not_crash(tmp_path, monkeypatch):
+    # CodeRabbit review (PR #624): os.path.commonpath raises ValueError when
+    # its candidates share no common anchor at all (e.g. mixed drives on
+    # Windows, or a local vs. UNC root) -- simulated here on any platform by
+    # monkeypatching commonpath itself, since a real cross-drive fixture
+    # isn't constructible on POSIX. This must degrade to a still-usable,
+    # still-deterministic fingerprint, not propagate as an unhandled crash.
+    real_commonpath = os.path.commonpath
+
+    def _raising_commonpath(paths):
+        raise ValueError("simulated: no common anchor (e.g. mixed drives)")
+
+    monkeypatch.setattr(os.path, "commonpath", _raising_commonpath)
+    h = _write(tmp_path / "v1" / "foo.h", "int add(int, int);\n")
+    contract = compute_extraction_contract(declared_headers=[h])
+    assert contract is not None
+    assert contract.scope_fingerprint is not None
+
+    monkeypatch.setattr(os.path, "commonpath", real_commonpath)
+    contract_normal = compute_extraction_contract(declared_headers=[h])
+    assert contract_normal.scope_fingerprint is not None
+
+
+def test_no_common_anchor_fallback_still_distinguishes_different_headers(
+    tmp_path, monkeypatch
+):
+    def _raising_commonpath(paths):
+        raise ValueError("simulated: no common anchor")
+
+    monkeypatch.setattr(os.path, "commonpath", _raising_commonpath)
     old_h = _write(tmp_path / "v1" / "foo.h", "int add(int, int);\n")
     new_h = _write(tmp_path / "v2" / "bar.h", "int add(int, int);\n")
     old = compute_extraction_contract(declared_headers=[old_h])
@@ -309,6 +347,30 @@ def test_9_10_unattributed_depfile_path_still_hashed_into_system_bucket(tmp_path
         l2_frontend_ran=True, depfile_resolved_paths=[new_sys]
     )
     assert old.profile_fingerprint != new.profile_fingerprint
+
+
+def test_system_bucket_ignores_checkout_root_dependent_absolute_paths(tmp_path):
+    # Codex review (PR #624): a system-bucket file (e.g. an auto-injected
+    # sysroot/-isystem header not under any declared IncludeDir) has no
+    # declared -I directory to make its path side-local against. Two
+    # otherwise-identical toolchains whose system headers happen to be
+    # materialized under different checkout/cache roots
+    # (/tmp/old-sysroot/usr/include/stddef.h vs.
+    # /tmp/new-sysroot/usr/include/stddef.h) must fingerprint identically --
+    # only content, never the raw resolved path, may feed the digest.
+    old_sys = _write(
+        tmp_path / "old-sysroot" / "usr" / "include" / "stddef.h", "// v1\n"
+    )
+    new_sys = _write(
+        tmp_path / "new-sysroot" / "usr" / "include" / "stddef.h", "// v1\n"
+    )
+    old = compute_extraction_contract(
+        l2_frontend_ran=True, depfile_resolved_paths=[old_sys]
+    )
+    new = compute_extraction_contract(
+        l2_frontend_ran=True, depfile_resolved_paths=[new_sys]
+    )
+    assert old.profile_fingerprint == new.profile_fingerprint
 
 
 # ---------------------------------------------------------------------------

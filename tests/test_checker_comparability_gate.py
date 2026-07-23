@@ -94,6 +94,13 @@ def test_compare_diagnostic_comparison_downgrades_mismatch_to_tentative_diff(
     new = _snap("2.0", compute_extraction_contract(declared_headers=[new_h]))
     result = compare(old, new, diagnostic_comparison=True)
     assert result.assurance == "none"
+    # CodeRabbit review (PR #624): the escape hatch's stated purpose is "the
+    # caller can still see a result but knows not to trust it" -- that
+    # requires knowing *why*, not just a bare assurance=="none". The
+    # non-diagnostic (raising) path already surfaces this via the exception
+    # message; the diagnostic path must surface the same reason through the
+    # existing coverage_warnings disclosure instead of discarding it.
+    assert any("scope" in w.lower() for w in result.coverage_warnings)
 
 
 def test_compare_contract_coverage_partial_when_exactly_one_side_has_a_contract(
