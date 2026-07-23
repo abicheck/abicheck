@@ -1723,6 +1723,11 @@ class TestUsedByScoping:
         )
         assert entry["symbol"] == "needed_symbol"
         assert entry["blocks_gate"] is True
+        # G29 Phase 3 slice 1 (ADR-050, Codex review): reachability_state is
+        # "always present" for every changes[] entry -- a missing-contract
+        # label has no backing Change, but it still needs the honest
+        # UNKNOWN value rather than silently omitting the field.
+        assert entry["reachability_state"] == "unknown"
 
     def test_json_uncovered_missing_symbol_not_blocking_under_demoted_severity(
         self, tmp_path, monkeypatch

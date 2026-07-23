@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.checker_policy import (
     EvidenceStatus,
+    ReachabilityState,
     evidence_status_for_change,
     impact_for,
     policy_for,
@@ -420,6 +421,13 @@ def _missing_contract_result(
             "relevantToGate": True,
             "blocksGate": blocks,
             "missingContractMember": label,
+            # G29 Phase 3 slice 1 (ADR-050, Codex review): a missing-contract
+            # member has no backing Change for assess_change to read, but
+            # reachabilityState is "always present" everywhere else this
+            # slice touches (D3/D4) -- a missing symbol/version is a hard
+            # absence, not a reachability question, so UNKNOWN (not proven
+            # either way) is the honest, consistent value here.
+            "reachabilityState": ReachabilityState.UNKNOWN.value,
         },
     }
 

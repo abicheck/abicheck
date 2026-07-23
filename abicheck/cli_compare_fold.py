@@ -210,7 +210,7 @@ def _fold_scoped_compat_into_text(
         changes_list = payload.get("changes")
         full_summary = payload.get("summary")
         if isinstance(changes_list, list):
-            from .checker_policy import EvidenceStatus
+            from .checker_policy import EvidenceStatus, ReachabilityState
             from .reporter import _change_to_dict
 
             eff_sets = result._effective_kind_sets()
@@ -248,6 +248,17 @@ def _fold_scoped_compat_into_text(
                         "severity": "breaking" if blocks else "compatible",
                         "relevant_to_gate": True,
                         "blocks_gate": blocks,
+                        # G29 Phase 3 slice 1 (ADR-050, Codex review): a
+                        # missing-contract label has no backing Change for
+                        # _change_to_dict/assess_change to read (unlike the
+                        # scoped_only loop above, which already routes
+                        # through _change_to_dict and picks up
+                        # reachability_state for free). reachability_state is
+                        # "always present" for every changes[] entry per D3
+                        # -- a missing symbol/version is a hard absence, not
+                        # a reachability question, so UNKNOWN (not proven
+                        # either way) is the honest, consistent value here.
+                        "reachability_state": ReachabilityState.UNKNOWN.value,
                     }
                 )
             # `summary` above was computed from result.changes *before*

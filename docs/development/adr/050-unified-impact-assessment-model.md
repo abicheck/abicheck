@@ -179,7 +179,7 @@ the synced copy under `docs/schemas/v1/`.
 
 ## Follow-up fixes (Codex review)
 
-Six gaps in the initial slice-1 landing, each caught by automated review on
+Seven gaps in the initial slice-1 landing, each caught by automated review on
 the same PR and fixed before merge:
 
 - **`has_signal()` missed three of `ImpactAssessment`'s own non-default
@@ -248,6 +248,25 @@ the same PR and fixed before merge:
   so `has_signal()` always fires), which is the intended outcome, not a
   regression of D3's "only when it carries signal" gate for the main
   `changes[]` list.
+- **Missing-contract synthetic entries had no `reachability_state` at all.**
+  A `--used-by`/`--required-symbol(s)` run whose only gated issue is a
+  required symbol/version absent from the new library has no backing
+  `Change` — `cli_compare_fold._fold_scoped_compat_into_text`'s
+  `missing_labels` loop (JSON) and `sarif._missing_contract_result` (SARIF)
+  each hand-build a synthetic entry instead of routing through
+  `_change_to_dict`/`assess_change`. (The neighboring `scoped_only` loop in
+  the same JSON function already routes real, graph-backed `Change` objects
+  like `PE_ORDINAL_RETARGETED` through `_change_to_dict`, so those already
+  picked up `reachability_state` for free — only the no-backing-`Change`
+  case was missing it.) Since D3/D4 both commit to `reachability_state`
+  being "always present", omitting it here broke that promise for exactly
+  the scoped-gate-failure shape most likely to appear in a failing CI run.
+  Fixed by adding `"reachability_state": ReachabilityState.UNKNOWN.value`
+  (JSON) / `"reachabilityState": ReachabilityState.UNKNOWN.value` (SARIF
+  `properties`) to both synthetic entries — `UNKNOWN` because a missing
+  symbol/version is a hard absence, not a reachability question, so there is
+  no stronger claim to make. No `impact_assessment`/`impactAssessment` is
+  added (there is no signal beyond the default to report).
 
 ## Deliberately not implemented this slice
 
