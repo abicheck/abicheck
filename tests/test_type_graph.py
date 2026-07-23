@@ -1223,6 +1223,29 @@ def test_return_type_edge_with_parameters() -> None:
     ]
 
 
+def test_same_private_type_as_return_and_param_stays_role_distinct() -> None:
+    # Codex review on PR #620: a function that both returns and takes the
+    # same private type used to collapse onto one DECL_HAS_TYPE edge --
+    # _dedupe_edges keyed on (src, dst, kind) alone, dropping whichever role
+    # was emitted second (params, since return is emitted first) before the
+    # edge ever reached augment_graph_with_types/add_edge. Both roles must
+    # now survive as distinct TypeEdges.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "FunctionDecl",
+            "name": "roundtrip",
+            "mangledName": "_Z9roundtripN6detail4ImplE",
+            "type": {"qualType": "detail::Impl (detail::Impl)"},
+            "inner": [_param("x", "detail::Impl")],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    has_type = [e for e in edges if e.kind == "DECL_HAS_TYPE" and e.dst == "detail::Impl"]
+    roles = {e.role for e in has_type}
+    assert roles == {"return", "param"}
+
+
 def test_builtin_return_type_produces_no_edge() -> None:
     ast = _tu(
         {
@@ -1345,6 +1368,35 @@ def test_augment_graph_backfills_provenance_onto_earlier_created_node() -> None:
     project_files = frozenset({"src/detail/impl.h"})
     augment_graph_with_types(graph, edges, project_files)
     node = next(n for n in graph.nodes if n.id == "type://ns::detail::Impl")
+    assert node.attrs.get("defined_in_project") is True
+    assert node.attrs.get("def_file") == "src/detail/impl.h"
+
+
+def test_augment_graph_backfill_survives_serialization_round_trip() -> None:
+    # ADR-046 D2 regression (Codex review on PR #620): the backfill above must
+    # go through register_fact, not a direct existing.attrs[...] mutation --
+    # a direct mutation is invisible to facts/resolved, so
+    # ensure_facts_and_resolve silently drops it on the next
+    # to_dict()/from_dict() round-trip (a persisted pack reload).
+    graph = SourceGraphSummary()
+    edges = [
+        TypeEdge(
+            "ns::detail::Impl", "ns::detail::Base", "TYPE_INHERITS", CONF_HIGH, "base"
+        ),
+        TypeEdge(
+            "ns::Widget",
+            "ns::detail::Impl",
+            "TYPE_HAS_FIELD_TYPE",
+            CONF_HIGH,
+            "field",
+            dst_file="src/detail/impl.h",
+        ),
+    ]
+    project_files = frozenset({"src/detail/impl.h"})
+    augment_graph_with_types(graph, edges, project_files)
+
+    reloaded = SourceGraphSummary.from_dict(graph.to_dict())
+    node = next(n for n in reloaded.nodes if n.id == "type://ns::detail::Impl")
     assert node.attrs.get("defined_in_project") is True
     assert node.attrs.get("def_file") == "src/detail/impl.h"
 

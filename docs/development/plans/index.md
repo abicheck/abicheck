@@ -27,12 +27,14 @@ Initiative plans (cross-cutting, not tied to a single registry gap):
 
 | Plan | ADR | Effort |
 |---|---|---|
+| **Public contract default** | [Implementation and rollout](public-contract-default.md) | [ADR-049](../adr/049-contract-relevance-and-compatibility-configuration.md) · Proposed, not implemented · L/XL (effective config, evidence completeness, L0 reconciliation, report/snapshot migration) |
 | **G19** | [PR-tier source intelligence & cross-source validation](g19-pr-source-intelligence.md) | [ADR-035](../adr/035-pr-tier-source-intelligence-and-crosscheck.md) · XL (phased) |
 | **G24** | [Linux ABI/API detection gap closure](g24-linux-abi-gap-closure.md) | — · L (phased: ELF facts → vtable machinery → clang flag extraction → kABI/ecosystem; macOS/Windows gaps recorded as deferred) |
 | **G28** | [CastXML/Clang L2 parity: hardening & remaining phases](g28-castxml-clang-l2-parity-hardening.md) | [ADR-001](../adr/001-technology-stack.md), [ADR-003](../adr/003-data-source-architecture.md) D8/D9, [ADR-037](../adr/037-cli-interface-contract.md) D8 · Phase 0–4 done; Phase 5 M (overlaps [G4](g4-header-ast-extractor.md)) |
 | **G29** | [Impact-analysis layer: unified graph-driven impact model](g29-impact-analysis-layer.md) | [ADR-044](../adr/044-reachability-aware-suppression.md), [ADR-031](../adr/031-source-implementation-graph-augmentation.md), [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) · XL (phased: Phase 1 done — tri-state reachability, [PR #607](https://github.com/abicheck/abicheck/pull/607); Phase 2 ADR drafted (ADR-046, Proposed), implementation not started; Phases 3–6 open) |
 | **G30** | [GitHub Actions integration model: project lifecycle backlog](g30-github-actions-integration-model.md) | [ADR-047](../adr/047-github-actions-integration-model.md) · XL (phased P0/P1/P2, not started) |
 | **G31** | [Header-graph default-on: follow-up phases B–D](g31-header-graph-default-on-followup.md) — independent of G29 above; drafted as "G29" before that letter was found taken, see its own naming note | [ADR-041](../adr/041-compiler-facts-semantic-impact-graph.md) · Phase A done (header-graph/header-graph-includes flipped default-on); Phases B–D open |
+| **G32** | [Comparability contract: profile/scope fingerprints and the multi-TU manifest](g32-comparability-contract-and-multi-tu-manifest.md) | [ADR-050](../adr/050-comparability-contract-and-multi-tu-manifest.md) · XL (phased: Phase 0–E, none started) |
 
 Completed or decided plans are retained for implementation history:
 

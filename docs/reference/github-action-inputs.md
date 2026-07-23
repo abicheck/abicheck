@@ -4,7 +4,7 @@
 
 Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../user-guide/github-action.md), generated directly from `action.yml` — see that page for setup, mode/input compatibility, and usage recipes; this page is the exhaustive field list only.
 
-## Inputs (68)
+## Inputs (72)
 
 | Input | Required | Default | Description |
 |---|:--:|---|---|
@@ -39,6 +39,10 @@ Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../us
 | `new-root` | no | — | Sysroot for the new (candidate) environment. Required for mode=deps-compare. |
 | `search-path` | no | — | Additional directories to search for shared libraries (space-separated). Used by deps-tree, deps-compare, and follow-deps. |
 | `ld-library-path` | no | — | Simulated LD_LIBRARY_PATH (colon-separated). Used by deps-tree, deps-compare, and follow-deps. |
+| `used-by` | no | — | Application binary/binaries whose actual imports/required symbol versions scope the comparison (space-separated; maps to repeated compare --used-by). The full library comparison still runs; the worst app-scoped result becomes the primary verdict/exit code, with the full verdict kept as informational context. Mutually exclusive with required-symbol/required-symbols (the CLI rejects both being set). compare mode only. |
+| `verify-runtime` | no | false | With used-by: actually run each consumer binary once against the old library and once against the new one (LD_BIND_NOW=1), recording a runtime-load-failure finding when the dynamic linker reports an undefined symbol against the new library after loading cleanly against the old one. Linux-only; a no-op elsewhere. Ignored without used-by. compare mode only. |
+| `required-symbol` | no | — | An exported linker symbol a plugin host resolves via dlopen/dlsym and requires (space-separated; maps to repeated compare --required-symbol). Scopes the comparison to this explicit entrypoint contract instead of the full diff. Mutually exclusive with used-by. compare mode only. |
+| `required-symbols` | no | — | Path to a file of required symbols, one per line (blank lines and '#' comments ignored) -- combined with any required-symbol values. compare mode only. |
 | `against` | no | — | scan mode only. Baseline artifact (a library binary or JSON snapshot) to compare the scanned new-library against. Maps to scan --against; omit for a one-build audit (see the audit input below). Overridden by abi-baseline when set. |
 | `sources` | no | — | Source checkout / tree for source-intelligence analysis. The compile database is auto-discovered within it. Drives L4 source-ABI replay and L5 source-graph collection. Used by scan and dump modes. |
 | `build-info` | no | — | Out-of-tree L3 build context: a build directory, a compile_commands.json, or a previously-collected evidence pack. Use when the build tree lives outside --sources. Used by scan and dump modes. |

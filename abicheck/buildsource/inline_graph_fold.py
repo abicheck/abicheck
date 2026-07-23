@@ -35,6 +35,56 @@ if TYPE_CHECKING:
     from .source_graph import SourceGraphSummary
 
 
+#: ADR-046 D3: the per-(kind, role) coverage matrix. ``type_graph.py``'s
+#: ``_walk_types`` (the pure-AST full walk this module's ``fold_type_graph``
+#: drives) emits exactly these role values, each from its own unconditional
+#: code path — unlike the ADR-038 C.8 clang-plugin producer (a *different*,
+#: filtered walk ingested via ``inputs_pack.py``, out of scope here), this
+#: pass has no known per-role gap, so a confirmed family-level pass may
+#: honestly claim every role below too. Kept here (not in ``type_graph.py``)
+#: since this module is the one call site that turns "family confirmed" into
+#: role-level claims.
+ROLE_COVERAGE_MATRIX: dict[str, tuple[str, ...]] = {
+    "TYPE_INHERITS": ("base",),
+    "TYPE_HAS_FIELD_TYPE": ("field", "alias"),
+    "DECL_HAS_TYPE": ("var", "return", "param"),
+    "DECL_REFERENCES_DECL": ("ref",),
+}
+
+
+def _role_coverage_key(pass_name: str, edge_kind: str, role: str) -> str:
+    """The finer ``extractor_passes``/``narrowed_passes`` key for one
+    (pass, edge kind, role) triple (ADR-046 D3) — e.g.
+    ``"type_graph:DECL_HAS_TYPE:param"``.
+    """
+    return f"{pass_name}:{edge_kind}:{role}"
+
+
+def role_pass_covered(
+    graph: SourceGraphSummary, pass_name: str, edge_kind: str, role: str
+) -> bool:
+    """Whether *graph* confirms ``(pass_name, edge_kind, role)`` was examined
+    (ADR-046 D3), falling back to the coarser family-level
+    ``extractor_passes[pass_name]`` flag when no finer key is recorded (a
+    hand-built or pre-D3 graph) — the family key stays the honest fallback
+    for any role this matrix doesn't (yet) break out.
+    """
+    key = _role_coverage_key(pass_name, edge_kind, role)
+    if key in graph.extractor_passes:
+        return graph.extractor_passes[key]
+    return graph.extractor_passes.get(pass_name, False)
+
+
+def _mark_role_coverage(dest: dict[str, bool], pass_name: str) -> None:
+    """Set every ``ROLE_COVERAGE_MATRIX`` key for *pass_name* in *dest*
+    (``graph.extractor_passes`` or ``graph.narrowed_passes``), alongside the
+    family-level key the caller already set there.
+    """
+    for edge_kind, roles in ROLE_COVERAGE_MATRIX.items():
+        for role in roles:
+            dest[_role_coverage_key(pass_name, edge_kind, role)] = True
+
+
 #: Header / non-compilable changed paths fan the call-graph pass out to all TUs
 #: (mirroring the L4 selector). A *real* header suffix — not merely "not a source
 #: TU" — so a docs/config-only change (README.md, ci.yml) does NOT trigger a
@@ -245,11 +295,16 @@ def fold_type_graph(
     project_files = project_source_files(merged)
     added = augment_graph_with_types(graph, edges, project_files or None)
     # Recorded regardless of `added` — mirrors fold_call_graph's coverage gate.
+    # ADR-046 D3: a confirmed full/narrowed pass also earns the finer
+    # per-(kind, role) keys — see ROLE_COVERAGE_MATRIX's docstring for why
+    # this producer (unlike the clang-plugin one) has no known role gap.
     if extractor_pass_fully_covered(target, extractor, narrowed):
         graph.extractor_passes["type_graph"] = True
+        _mark_role_coverage(graph.extractor_passes, "type_graph")
     elif narrowed and narrowed_pass_confirmed(target, extractor):
         graph.narrowed_passes["type_graph"] = True
         graph.narrowed_scope["type_graph"] = scope_key
+        _mark_role_coverage(graph.narrowed_passes, "type_graph")
     elif extractor.diagnostics:
         graph.degraded_passes["type_graph"] = True
     for diag in extractor.diagnostics:

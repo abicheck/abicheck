@@ -41,20 +41,46 @@
             "visibility": "public_header"
           },
           "confidence": "unknown",
+          "conflicts": [],
+          "facts": [
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "id": "decl://connect",
           "kind": "source_decl",
           "label": "connect",
-          "provenance": ""
+          "provenance": "",
+          "resolved": {
+            "visibility": "public_header"
+          }
         },
         {
           "attrs": {
             "visibility": "private_header"
           },
           "confidence": "unknown",
+          "conflicts": [],
+          "facts": [
+            {
+              "attrs": {
+                "visibility": "private_header"
+              },
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "id": "type://detail::SessionState",
           "kind": "record_type",
           "label": "detail::SessionState",
-          "provenance": ""
+          "provenance": "",
+          "resolved": {
+            "visibility": "private_header"
+          }
         }
       ],
       "schema_version": 1

@@ -84,7 +84,9 @@ against the code as unverified, regardless of how confident it reads.
 | [043](043-cli-pre-1.0-surface-reset.md) | Pre-1.0 CLI Surface Reset — Root Command Collapse, Depth Ladder Narrowing, and Dry-Run Unification | Accepted — implemented |
 | [044](044-reachability-aware-suppression.md) | Reachability-Aware Suppression and the Effective Public ABI | Accepted — P0 slice implemented |
 | [045](045-identity-based-old-new-entity-matching.md) | Identity-Based Old/New Entity Matching | Accepted — implemented for `RecordType` and `EnumType` |
-| [046](046-source-graph-identity-v2-and-evidence-merge.md) | Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge | Proposed |
+| [046](046-source-graph-identity-v2-and-evidence-merge.md) | Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge | Accepted — D1 (`relation_key` half), D2 (evidence-preserving merge), D3 (per-role coverage matrix), D5 (partial, `TraversalPolicy` for the call-graph walk), D6 (partial, two-tier proof-path preference) implemented; D1's `occurrence_id` half open; D4 deliberately deferred (ADR-048 covers its practical value at smaller scope) |
 | [047](047-github-actions-integration-model.md) | GitHub Actions Integration Model — Project Lifecycle Over Aggregate-Centric Design | Proposed — not implemented; see [G30](../plans/g30-github-actions-integration-model.md) |
 | [048](048-canonical-entity-identity-and-graph-reconciliation.md) | Canonical Entity Identity and Graph Reconciliation (G31 Phase B) | Accepted — implemented |
-| [049](049-documentation-operational-model.md) | Documentation Operational Model (Ownership Registry + Docs-Contract Gate) | Accepted — Stage 1 implemented, Stages 2-5 deferred |
+| [049](049-contract-relevance-and-compatibility-configuration.md) | Contract Relevance and Compatibility Configuration | Proposed — not implemented |
+| [050](050-comparability-contract-and-multi-tu-manifest.md) | Comparability Contract — Profile/Scope Fingerprints and the Multi-TU Manifest | Proposed — not implemented; see [G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md) |
+| [051](051-documentation-operational-model.md) | Documentation Operational Model (Ownership Registry + Docs-Contract Gate) | Accepted — partially implemented (Stage 1 done; Stages 2-5 deferred) |

@@ -570,6 +570,67 @@ def test_adr_index_nav_sync_catches_superseded_without_replacement_link(
     assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
 
 
+def test_adr_index_nav_sync_catches_superseded_colon_without_replacement_link(
+    car, tmp_path, monkeypatch
+):
+    """ "Superseded:" (colon, no separating whitespace/dash before the rest
+    of the sentence) must still be recognized as a Superseded status -- the
+    leading-word split previously didn't treat ':' as a delimiter, leaving
+    the token "Superseded:" which never matched the plain "superseded"
+    comparison, silently skipping the replacement-link requirement
+    (regression test for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded: no pointer to what replaced it.\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
+def test_adr_index_nav_sync_catches_bold_superseded_without_replacement_link(
+    car, tmp_path, monkeypatch
+):
+    """ "**Superseded**" (the word itself wrapped in Markdown emphasis) must
+    also be recognized -- the leading token would otherwise be
+    "**Superseded**" with the asterisks still attached, never matching the
+    plain "superseded" comparison (regression test for the gap flagged in
+    PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** **Superseded** by nothing in particular.\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
 def test_adr_index_nav_sync_accepts_superseded_with_replacement_link(
     car, tmp_path, monkeypatch
 ):

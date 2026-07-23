@@ -1,0 +1,137 @@
+name: 'abicheck resolve-baseline'
+description: >-
+  Resolve one check's baseline: channel x target/bundle x profile against an
+  already-staged baseline-set, returning one of ADR-047 Section 6's typed
+  outcomes (resolved, not_found, ambiguous, wrong_profile, stale_schema,
+  incompatible_evidence) -- never a compatibility verdict, and never
+  silently degraded to "no baseline = compatible." Read-only: this Action
+  never fetches, commits, or pushes.
+
+branding:
+  icon: 'target'
+  color: 'blue'
+
+inputs:
+  baseline-path:
+    description: >
+      Path to this channel's baseline-set, already staged by the calling
+      workflow (e.g. via actions/cache, actions/download-artifact, or gh
+      release download -- this Action does not itself know how to fetch
+      from a baseline channel's storage backend, see ADR-047 §10). Either a
+      directory already containing manifest.json (plus per-target
+      snapshots, and binaries/ for a bundle-scoped baseline), or a
+      .tar.zst/.tar.gz/.tgz/.tar archive of the same, which is extracted
+      here. A path that does not exist at all is treated as "no baseline
+      set exists yet" (the not_found outcome), never a usage error.
+    required: true
+  channel:
+    description: >
+      Baseline channel name (release-contract, accepted-main, explicit, or
+      a project-defined custom channel) -- recorded on the outcome/output
+      only. This Action trusts the caller already resolved the right
+      physical baseline-path for this channel; it does not itself choose
+      between channels.
+    required: true
+  kind:
+    description: "'target' (default) or 'bundle' -- which resolution shape to use."
+    required: false
+    default: 'target'
+  target:
+    description: 'Target id to resolve. Required when kind is target.'
+    required: false
+    default: ''
+  bundle:
+    description: 'Bundle id to resolve. Required when kind is bundle.'
+    required: false
+    default: ''
+  bundle-members:
+    description: >
+      JSON array of the bundle's member target ids, e.g.
+      '["libpvxs", "libpvxsIoc"]'. Required when kind is bundle -- every
+      member must have a staged binary in the baseline-set's binaries/
+      directory for the bundle to resolve (ADR-047 §6/§8 S14: bundle
+      analysis reads real ELF binaries, never JSON snapshots).
+    required: false
+    default: '[]'
+  profile:
+    description: >
+      The build profile.id this check expects the baseline to have been
+      built for -- a baseline built for a different profile is always
+      wrong_profile, never silently compared.
+    required: true
+  required:
+    description: >
+      'true' (default) -- no baseline set yet is a hard failure
+      (not_found, required). 'false' -- explicit bootstrap opt-in (e.g. the
+      very first release-contract publish, before any release exists); no
+      baseline set yet resolves as not_found/bootstrap, an advisory,
+      non-fatal outcome.
+    required: false
+    default: 'true'
+  candidate-build-output:
+    description: >
+      Path to the candidate build's build-output.json (ADR-047 §2), read
+      only for its evidence_producer block, used for the
+      incompatible_evidence check (the baseline's recorded evidence
+      producer -- wrapper, clang-plugin, replay -- disagreeing with the
+      candidate's). Omit to skip that check.
+    required: false
+    default: ''
+  python-version:
+    description: 'Python version for setup-python.'
+    required: false
+    default: '3.13'
+
+outputs:
+  outcome:
+    description: 'resolved | not_found | ambiguous | wrong_profile | stale_schema | incompatible_evidence.'
+    value: ${{ steps.resolve.outputs.outcome }}
+  bootstrap:
+    description: "'true' when outcome is not_found and required was 'false' (advisory, non-fatal). 'false' otherwise."
+    value: ${{ steps.resolve.outputs.bootstrap }}
+  channel:
+    description: 'Echoes the channel input, for a caller that only has this step''s outputs in scope.'
+    value: ${{ steps.resolve.outputs.channel }}
+  manifest-path:
+    description: 'Path to the resolved baseline-set''s manifest.json, when one was found.'
+    value: ${{ steps.resolve.outputs.manifest-path }}
+  snapshot-path:
+    description: '(kind: target only) Path to the resolved target''s .abicheck.json snapshot.'
+    value: ${{ steps.resolve.outputs.snapshot-path }}
+  binaries-dir:
+    description: '(kind: bundle only) Path to the directory containing the resolved bundle''s staged member binaries.'
+    value: ${{ steps.resolve.outputs.binaries-dir }}
+  binary-paths:
+    description: '(kind: bundle only) JSON object mapping each member target id to its staged binary path.'
+    value: ${{ steps.resolve.outputs.binary-paths }}
+  message:
+    description: 'Human-readable explanation of the outcome.'
+    value: ${{ steps.resolve.outputs.message }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install abicheck
+      shell: bash
+      run: pip install "${{ github.action_path }}/../.."
+
+    - name: Resolve baseline
+      id: resolve
+      shell: bash
+      env:
+        INPUT_BASELINE_PATH: ${{ inputs.baseline-path }}
+        INPUT_CHANNEL: ${{ inputs.channel }}
+        INPUT_KIND: ${{ inputs.kind }}
+        INPUT_TARGET: ${{ inputs.target }}
+        INPUT_BUNDLE: ${{ inputs.bundle }}
+        INPUT_BUNDLE_MEMBERS: ${{ inputs.bundle-members }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_REQUIRED: ${{ inputs.required }}
+        INPUT_CANDIDATE_BUILD_OUTPUT: ${{ inputs.candidate-build-output }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "${{ github.action_path }}/run.sh"

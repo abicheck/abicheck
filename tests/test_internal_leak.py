@@ -12,6 +12,7 @@ These tests build synthetic ``AbiSnapshot`` objects, so they do not
 need a C/C++ compiler, libabigail, abi-compliance-checker, or castxml.
 They are part of the default fast test suite.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -29,6 +30,7 @@ from abicheck.internal_leak import (
     compute_leak_paths,
     detect_internal_leaks,
     is_internal_type,
+    select_preferred_path,
 )
 from abicheck.model import (
     AbiSnapshot,
@@ -50,11 +52,17 @@ class TestNameSegments:
         assert _strip_template_args("ns::detail::pimpl<X>") == "ns::detail::pimpl"
 
     def test_strips_nested_template_args(self) -> None:
-        assert _strip_template_args("ns::detail::pimpl<Foo<int, char>>") == "ns::detail::pimpl"
+        assert (
+            _strip_template_args("ns::detail::pimpl<Foo<int, char>>")
+            == "ns::detail::pimpl"
+        )
 
     def test_splits_segments(self) -> None:
         assert _name_segments("oneapi::dal::detail::pimpl<X>") == [
-            "oneapi", "dal", "detail", "pimpl",
+            "oneapi",
+            "dal",
+            "detail",
+            "pimpl",
         ]
 
     def test_empty(self) -> None:
@@ -65,10 +73,7 @@ class TestStripSignatureParams:
     def test_strips_params(self) -> None:
         from abicheck.internal_leak import _strip_signature_params
 
-        assert (
-            _strip_signature_params("ns::api::foo(ns::detail::T*)")
-            == "ns::api::foo"
-        )
+        assert _strip_signature_params("ns::api::foo(ns::detail::T*)") == "ns::api::foo"
 
     def test_stops_at_top_level_paren_not_nested_one(self) -> None:
         """A function-pointer parameter type has its own nested parens
@@ -76,9 +81,7 @@ class TestStripSignatureParams:
         own parameter-list opening."""
         from abicheck.internal_leak import _strip_signature_params
 
-        assert (
-            _strip_signature_params("ns::api::bar(void (*)(int))") == "ns::api::bar"
-        )
+        assert _strip_signature_params("ns::api::bar(void (*)(int))") == "ns::api::bar"
 
     def test_no_parens_returned_unchanged(self) -> None:
         from abicheck.internal_leak import _strip_signature_params
@@ -92,24 +95,30 @@ class TestStripSignatureParams:
 
 
 class TestIsInternalType:
-    @pytest.mark.parametrize("name", [
-        "oneapi::dal::detail::pimpl",
-        "oneapi::dal::detail::pimpl<X>",
-        "ns::impl::handle",
-        "ns::internal::core",
-        "std::__detail::node",
-    ])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "oneapi::dal::detail::pimpl",
+            "oneapi::dal::detail::pimpl<X>",
+            "ns::impl::handle",
+            "ns::internal::core",
+            "std::__detail::node",
+        ],
+    )
     def test_internal_names_are_internal(self, name: str) -> None:
         assert is_internal_type(name) is True
 
-    @pytest.mark.parametrize("name", [
-        "MyClass",
-        "ns::Public",
-        "Details",                # substring 'detail' — but not a segment
-        "DetailView",             # name segment that *contains* 'detail'
-        "ns::DetailHelper",       # segment contains 'detail' but isn't exactly 'detail'
-        "ns::Public::impl",       # last segment is 'impl' — IS internal (segment match)
-    ])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "MyClass",
+            "ns::Public",
+            "Details",  # substring 'detail' — but not a segment
+            "DetailView",  # name segment that *contains* 'detail'
+            "ns::DetailHelper",  # segment contains 'detail' but isn't exactly 'detail'
+            "ns::Public::impl",  # last segment is 'impl' — IS internal (segment match)
+        ],
+    )
     def test_non_segment_substring_is_not_internal(self, name: str) -> None:
         # The last case ("ns::Public::impl") *is* internal because the last
         # segment is exactly "impl". Adjust the parametrise list:
@@ -174,7 +183,9 @@ def _snap(
     )
 
 
-def _public_fn(name: str, ret: str = "void", params: list[tuple[str, str]] | None = None) -> Function:
+def _public_fn(
+    name: str, ret: str = "void", params: list[tuple[str, str]] | None = None
+) -> Function:
     return Function(
         name=name,
         mangled=name,
@@ -221,8 +232,11 @@ class TestResolveTypeNameSuffixIndex:
             functions=[_public_fn("make", "Public*", [])],
             types=[
                 RecordType(name="Public", kind="class", bases=["Base"]),
-                RecordType(name="ns::detail::Base", kind="class",
-                           fields=[TypeField(name="f", type="int")]),
+                RecordType(
+                    name="ns::detail::Base",
+                    kind="class",
+                    fields=[TypeField(name="f", type="int")],
+                ),
             ],
         )
         assert "ns::detail::Base" in compute_leak_paths(snap)
@@ -248,11 +262,18 @@ class TestResolveTypeNameSuffixIndex:
         snap = _snap(
             functions=[_public_fn(f"make{i}", f"Public{i}*", []) for i in range(8)],
             types=(
-                [RecordType(name=f"Public{i}", kind="class", bases=[f"Base{i}"])
-                 for i in range(8)]
-                + [RecordType(name=f"ns::detail::Base{i}", kind="class",
-                              fields=[TypeField(name="f", type="int")])
-                   for i in range(8)]
+                [
+                    RecordType(name=f"Public{i}", kind="class", bases=[f"Base{i}"])
+                    for i in range(8)
+                ]
+                + [
+                    RecordType(
+                        name=f"ns::detail::Base{i}",
+                        kind="class",
+                        fields=[TypeField(name="f", type="int")],
+                    )
+                    for i in range(8)
+                ]
             ),
         )
         paths = il.compute_leak_paths(snap)
@@ -268,9 +289,16 @@ class TestResolveTypeNameSuffixIndex:
         n = 3000
         types: list[RecordType] = []
         for i in range(n):
-            types.append(RecordType(name=f"Public{i}", kind="class", bases=[f"Base{i}"]))
-            types.append(RecordType(name=f"ns::detail::Base{i}", kind="class",
-                                    fields=[TypeField(name="f", type="int")]))
+            types.append(
+                RecordType(name=f"Public{i}", kind="class", bases=[f"Base{i}"])
+            )
+            types.append(
+                RecordType(
+                    name=f"ns::detail::Base{i}",
+                    kind="class",
+                    fields=[TypeField(name="f", type="int")],
+                )
+            )
         snap = _snap(
             functions=[_public_fn(f"make{i}", f"Public{i}*", []) for i in range(n)],
             types=types,
@@ -284,8 +312,11 @@ class TestComputeLeakPaths:
         snap = _snap(
             functions=[_public_fn("foo", "Public", [])],
             types=[
-                RecordType(name="Public", kind="class",
-                           fields=[TypeField(name="x", type="int")]),
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    fields=[TypeField(name="x", type="int")],
+                ),
             ],
         )
         paths = compute_leak_paths(snap)
@@ -296,10 +327,12 @@ class TestComputeLeakPaths:
         snap = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class",
-                           bases=["ns::detail::Base"]),
-                RecordType(name="ns::detail::Base", kind="class",
-                           fields=[TypeField(name="f", type="int")]),
+                RecordType(name="Public", kind="class", bases=["ns::detail::Base"]),
+                RecordType(
+                    name="ns::detail::Base",
+                    kind="class",
+                    fields=[TypeField(name="f", type="int")],
+                ),
             ],
         )
         paths = compute_leak_paths(snap)
@@ -312,9 +345,13 @@ class TestComputeLeakPaths:
         snap = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class", fields=[
-                    TypeField(name="impl_", type="ns::detail::Impl"),
-                ]),
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    fields=[
+                        TypeField(name="impl_", type="ns::detail::Impl"),
+                    ],
+                ),
                 RecordType(name="ns::detail::Impl", kind="struct"),
             ],
         )
@@ -325,9 +362,13 @@ class TestComputeLeakPaths:
         snap = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class", fields=[
-                    TypeField(name="impl_", type="ns::detail::Impl*"),
-                ]),
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    fields=[
+                        TypeField(name="impl_", type="ns::detail::Impl*"),
+                    ],
+                ),
                 RecordType(name="ns::detail::Impl", kind="struct"),
             ],
         )
@@ -376,8 +417,11 @@ class TestComputeLeakPaths:
         snap = _snap(
             functions=[_public_fn("foo", "int", [])],
             types=[
-                RecordType(name="ns::detail::A", kind="class",
-                           fields=[TypeField(name="h", type="ns::detail::Hidden")]),
+                RecordType(
+                    name="ns::detail::A",
+                    kind="class",
+                    fields=[TypeField(name="h", type="ns::detail::Hidden")],
+                ),
                 RecordType(name="ns::detail::Hidden", kind="class"),
             ],
         )
@@ -412,11 +456,13 @@ class TestDetectInternalLeaks:
             functions=[_public_fn("foo", "Public*", [])],
             types=[RecordType(name="Public", kind="class", size_bits=64)],
         )
-        changes = [Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED,
-            symbol="Public",
-            description="size changed",
-        )]
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="Public",
+                description="size changed",
+            )
+        ]
         leaks = detect_internal_leaks(changes, old, new)
         assert leaks == []
 
@@ -424,24 +470,24 @@ class TestDetectInternalLeaks:
         old = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class",
-                           bases=["ns::detail::Base"]),
+                RecordType(name="Public", kind="class", bases=["ns::detail::Base"]),
                 RecordType(name="ns::detail::Base", kind="class", size_bits=32),
             ],
         )
         new = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class",
-                           bases=["ns::detail::Base"]),
+                RecordType(name="Public", kind="class", bases=["ns::detail::Base"]),
                 RecordType(name="ns::detail::Base", kind="class", size_bits=64),
             ],
         )
-        changes = [Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED,
-            symbol="ns::detail::Base",
-            description="size changed",
-        )]
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="ns::detail::Base",
+                description="size changed",
+            )
+        ]
         leaks = detect_internal_leaks(changes, old, new)
         assert len(leaks) == 1
         leak = leaks[0]
@@ -462,11 +508,13 @@ class TestDetectInternalLeaks:
             functions=[_public_fn("foo", "int", [])],
             types=[RecordType(name="ns::detail::Hidden", kind="class", size_bits=64)],
         )
-        changes = [Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED,
-            symbol="ns::detail::Hidden",
-            description="size changed",
-        )]
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="ns::detail::Hidden",
+                description="size changed",
+            )
+        ]
         leaks = detect_internal_leaks(changes, old, new)
         assert leaks == []
 
@@ -474,26 +522,36 @@ class TestDetectInternalLeaks:
         old = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class", fields=[
-                    TypeField(name="impl_", type="ns::detail::Impl"),
-                ]),
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    fields=[
+                        TypeField(name="impl_", type="ns::detail::Impl"),
+                    ],
+                ),
                 RecordType(name="ns::detail::Impl", kind="struct", size_bits=32),
             ],
         )
         new = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class", fields=[
-                    TypeField(name="impl_", type="ns::detail::Impl"),
-                ]),
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    fields=[
+                        TypeField(name="impl_", type="ns::detail::Impl"),
+                    ],
+                ),
                 RecordType(name="ns::detail::Impl", kind="struct", size_bits=64),
             ],
         )
-        changes = [Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED,
-            symbol="ns::detail::Impl",
-            description="size changed",
-        )]
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="ns::detail::Impl",
+                description="size changed",
+            )
+        ]
         leaks = detect_internal_leaks(changes, old, new)
         assert len(leaks) == 1
         assert "embedded-by-value or via inheritance" in leaks[0].description
@@ -502,27 +560,38 @@ class TestDetectInternalLeaks:
         old = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class", fields=[
-                    TypeField(name="impl_", type="ns::detail::Impl*"),
-                ]),
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    fields=[
+                        TypeField(name="impl_", type="ns::detail::Impl*"),
+                    ],
+                ),
                 RecordType(name="ns::detail::Impl", kind="struct", size_bits=32),
             ],
         )
         new = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class", fields=[
-                    TypeField(name="impl_", type="ns::detail::Impl*"),
-                ]),
-                RecordType(name="ns::detail::Impl", kind="struct",
-                           vtable=["fn1", "fn2"]),
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    fields=[
+                        TypeField(name="impl_", type="ns::detail::Impl*"),
+                    ],
+                ),
+                RecordType(
+                    name="ns::detail::Impl", kind="struct", vtable=["fn1", "fn2"]
+                ),
             ],
         )
-        changes = [Change(
-            kind=ChangeKind.TYPE_VTABLE_CHANGED,
-            symbol="ns::detail::Impl",
-            description="vtable changed",
-        )]
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_VTABLE_CHANGED,
+                symbol="ns::detail::Impl",
+                description="vtable changed",
+            )
+        ]
         leaks = detect_internal_leaks(changes, old, new)
         assert len(leaks) == 1
         # Pointer-only embedding — not "embedded-by-value"
@@ -535,16 +604,14 @@ class TestDetectInternalLeaks:
         old = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class",
-                           bases=["ns::detail::Base"]),
+                RecordType(name="Public", kind="class", bases=["ns::detail::Base"]),
                 RecordType(name="ns::detail::Base", kind="class", size_bits=32),
             ],
         )
         new = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class",
-                           bases=["ns::detail::Base"]),
+                RecordType(name="Public", kind="class", bases=["ns::detail::Base"]),
                 RecordType(name="ns::detail::Base", kind="class", size_bits=64),
             ],
         )
@@ -553,15 +620,23 @@ class TestDetectInternalLeaks:
         # puts the type name in symbol (the field name lives in
         # `description`). STRUCT_FIELD_* puts "Type::field" in symbol.
         changes = [
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                   symbol="ns::detail::Base", description="size"),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="ns::detail::Base",
+                description="size",
+            ),
             # TYPE_FIELD_ADDED uses symbol=type-name (matches diff_types).
-            Change(kind=ChangeKind.TYPE_FIELD_ADDED,
-                   symbol="ns::detail::Base", description="field added: ns::detail::Base::y"),
+            Change(
+                kind=ChangeKind.TYPE_FIELD_ADDED,
+                symbol="ns::detail::Base",
+                description="field added: ns::detail::Base::y",
+            ),
             # STRUCT_FIELD_OFFSET_CHANGED uses symbol="Type::field" (matches diff_platform).
-            Change(kind=ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
-                   symbol="ns::detail::Base::y",
-                   description="offset changed: ns::detail::Base::y"),
+            Change(
+                kind=ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+                symbol="ns::detail::Base::y",
+                description="offset changed: ns::detail::Base::y",
+            ),
         ]
         leaks = detect_internal_leaks(changes, old, new)
         assert len(leaks) == 1
@@ -586,32 +661,48 @@ class TestDetectInternalLeaks:
         old = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class", fields=[
-                    TypeField(name="impl_", type="ns::detail::Impl"),
-                ]),
-                RecordType(name="ns::detail::Impl", kind="struct",
-                           fields=[TypeField(name="row", type="int",
-                                             offset_bits=0)]),
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    fields=[
+                        TypeField(name="impl_", type="ns::detail::Impl"),
+                    ],
+                ),
+                RecordType(
+                    name="ns::detail::Impl",
+                    kind="struct",
+                    fields=[TypeField(name="row", type="int", offset_bits=0)],
+                ),
             ],
         )
         new = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class", fields=[
-                    TypeField(name="impl_", type="ns::detail::Impl"),
-                ]),
-                RecordType(name="ns::detail::Impl", kind="struct", fields=[
-                    TypeField(name="row", type="int", offset_bits=0),
-                    TypeField(name="col", type="int", offset_bits=32),
-                ]),
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    fields=[
+                        TypeField(name="impl_", type="ns::detail::Impl"),
+                    ],
+                ),
+                RecordType(
+                    name="ns::detail::Impl",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="row", type="int", offset_bits=0),
+                        TypeField(name="col", type="int", offset_bits=32),
+                    ],
+                ),
             ],
         )
         # Mimic diff_types: TYPE_FIELD_ADDED with symbol = containing type.
-        changes = [Change(
-            kind=ChangeKind.TYPE_FIELD_ADDED,
-            symbol="ns::detail::Impl",
-            description="Field added: ns::detail::Impl::col",
-        )]
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_FIELD_ADDED,
+                symbol="ns::detail::Impl",
+                description="Field added: ns::detail::Impl::col",
+            )
+        ]
         leaks = detect_internal_leaks(changes, old, new)
         assert len(leaks) == 1
         assert leaks[0].symbol == "ns::detail::Impl"
@@ -621,29 +712,32 @@ class TestDetectInternalLeaks:
         old = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class",
-                           bases=["ns::priv::Base"]),
+                RecordType(name="Public", kind="class", bases=["ns::priv::Base"]),
                 RecordType(name="ns::priv::Base", kind="class", size_bits=32),
             ],
         )
         new = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class",
-                           bases=["ns::priv::Base"]),
+                RecordType(name="Public", kind="class", bases=["ns::priv::Base"]),
                 RecordType(name="ns::priv::Base", kind="class", size_bits=64),
             ],
         )
-        changes = [Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED,
-            symbol="ns::priv::Base",
-            description="size",
-        )]
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="ns::priv::Base",
+                description="size",
+            )
+        ]
         # Default namespaces: no detection (priv isn't in defaults).
         assert detect_internal_leaks(changes, old, new) == []
         # Custom: detection fires.
         leaks = detect_internal_leaks(
-            changes, old, new, internal_namespaces=("priv",),
+            changes,
+            old,
+            new,
+            internal_namespaces=("priv",),
         )
         assert len(leaks) == 1
 
@@ -660,22 +754,38 @@ class TestComparePipelineIntegration:
         old = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class",
-                           bases=["ns::detail::Base"], size_bits=32),
-                RecordType(name="ns::detail::Base", kind="class", size_bits=32,
-                           fields=[TypeField(name="x", type="int", offset_bits=0)]),
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    bases=["ns::detail::Base"],
+                    size_bits=32,
+                ),
+                RecordType(
+                    name="ns::detail::Base",
+                    kind="class",
+                    size_bits=32,
+                    fields=[TypeField(name="x", type="int", offset_bits=0)],
+                ),
             ],
         )
         new = _snap(
             functions=[_public_fn("make", "Public*", [])],
             types=[
-                RecordType(name="Public", kind="class",
-                           bases=["ns::detail::Base"], size_bits=64),
-                RecordType(name="ns::detail::Base", kind="class", size_bits=64,
-                           fields=[
-                               TypeField(name="x", type="int", offset_bits=0),
-                               TypeField(name="y", type="int", offset_bits=32),
-                           ]),
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    bases=["ns::detail::Base"],
+                    size_bits=64,
+                ),
+                RecordType(
+                    name="ns::detail::Base",
+                    kind="class",
+                    size_bits=64,
+                    fields=[
+                        TypeField(name="x", type="int", offset_bits=0),
+                        TypeField(name="y", type="int", offset_bits=32),
+                    ],
+                ),
             ],
         )
         result = compare(old, new)
@@ -730,52 +840,62 @@ class TestExampleCaseParity:
         # mylib::knn_descriptor : public mylib::detail::descriptor_base
         # detail::descriptor_base gains a field; public derived size shifts.
         old = _snap(
-            functions=[_public_fn(
-                "mylib_make_descriptor", "mylib::knn_descriptor*",
-            )],
+            functions=[
+                _public_fn(
+                    "mylib_make_descriptor",
+                    "mylib::knn_descriptor*",
+                )
+            ],
             types=[
                 RecordType(
-                    name="mylib::detail::descriptor_base", kind="class",
+                    name="mylib::detail::descriptor_base",
+                    kind="class",
                     size_bits=32,
-                    fields=[TypeField(name="class_count_", type="int",
-                                      offset_bits=0)],
+                    fields=[TypeField(name="class_count_", type="int", offset_bits=0)],
                 ),
                 RecordType(
-                    name="mylib::knn_descriptor", kind="class",
+                    name="mylib::knn_descriptor",
+                    kind="class",
                     size_bits=64,
                     bases=["mylib::detail::descriptor_base"],
-                    fields=[TypeField(name="neighbor_count_", type="int",
-                                      offset_bits=32)],
+                    fields=[
+                        TypeField(name="neighbor_count_", type="int", offset_bits=32)
+                    ],
                 ),
             ],
         )
         new = _snap(
-            functions=[_public_fn(
-                "mylib_make_descriptor", "mylib::knn_descriptor*",
-            )],
+            functions=[
+                _public_fn(
+                    "mylib_make_descriptor",
+                    "mylib::knn_descriptor*",
+                )
+            ],
             types=[
                 RecordType(
-                    name="mylib::detail::descriptor_base", kind="class",
+                    name="mylib::detail::descriptor_base",
+                    kind="class",
                     size_bits=64,
                     fields=[
-                        TypeField(name="class_count_", type="int",
-                                  offset_bits=0),
-                        TypeField(name="max_iter_", type="int",
-                                  offset_bits=32),
+                        TypeField(name="class_count_", type="int", offset_bits=0),
+                        TypeField(name="max_iter_", type="int", offset_bits=32),
                     ],
                 ),
                 RecordType(
-                    name="mylib::knn_descriptor", kind="class",
+                    name="mylib::knn_descriptor",
+                    kind="class",
                     size_bits=96,
                     bases=["mylib::detail::descriptor_base"],
-                    fields=[TypeField(name="neighbor_count_", type="int",
-                                      offset_bits=64)],
+                    fields=[
+                        TypeField(name="neighbor_count_", type="int", offset_bits=64)
+                    ],
                 ),
             ],
         )
         result = compare(old, new)
         leaks = [
-            c for c in result.changes
+            c
+            for c in result.changes
             if c.kind == ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API
         ]
         assert leaks, "case74 pattern: leak must be detected"
@@ -787,60 +907,72 @@ class TestExampleCaseParity:
         # mylib::table embeds mylib::detail::table_impl by value.
         # detail::table_impl gains a field; public table size grows.
         old = _snap(
-            functions=[_public_fn(
-                "mylib_make_table", "mylib::table*",
-            )],
+            functions=[
+                _public_fn(
+                    "mylib_make_table",
+                    "mylib::table*",
+                )
+            ],
             types=[
                 RecordType(
-                    name="mylib::detail::table_impl", kind="struct",
+                    name="mylib::detail::table_impl",
+                    kind="struct",
                     size_bits=128,
                     fields=[
-                        TypeField(name="row_count", type="size_t",
-                                  offset_bits=0),
-                        TypeField(name="column_count", type="size_t",
-                                  offset_bits=64),
+                        TypeField(name="row_count", type="size_t", offset_bits=0),
+                        TypeField(name="column_count", type="size_t", offset_bits=64),
                     ],
                 ),
                 RecordType(
-                    name="mylib::table", kind="class", size_bits=128,
+                    name="mylib::table",
+                    kind="class",
+                    size_bits=128,
                     fields=[
-                        TypeField(name="impl_",
-                                  type="mylib::detail::table_impl",
-                                  offset_bits=0),
+                        TypeField(
+                            name="impl_",
+                            type="mylib::detail::table_impl",
+                            offset_bits=0,
+                        ),
                     ],
                 ),
             ],
         )
         new = _snap(
-            functions=[_public_fn(
-                "mylib_make_table", "mylib::table*",
-            )],
+            functions=[
+                _public_fn(
+                    "mylib_make_table",
+                    "mylib::table*",
+                )
+            ],
             types=[
                 RecordType(
-                    name="mylib::detail::table_impl", kind="struct",
+                    name="mylib::detail::table_impl",
+                    kind="struct",
                     size_bits=192,
                     fields=[
-                        TypeField(name="row_count", type="size_t",
-                                  offset_bits=0),
-                        TypeField(name="column_count", type="size_t",
-                                  offset_bits=64),
-                        TypeField(name="layout_kind", type="size_t",
-                                  offset_bits=128),
+                        TypeField(name="row_count", type="size_t", offset_bits=0),
+                        TypeField(name="column_count", type="size_t", offset_bits=64),
+                        TypeField(name="layout_kind", type="size_t", offset_bits=128),
                     ],
                 ),
                 RecordType(
-                    name="mylib::table", kind="class", size_bits=192,
+                    name="mylib::table",
+                    kind="class",
+                    size_bits=192,
                     fields=[
-                        TypeField(name="impl_",
-                                  type="mylib::detail::table_impl",
-                                  offset_bits=0),
+                        TypeField(
+                            name="impl_",
+                            type="mylib::detail::table_impl",
+                            offset_bits=0,
+                        ),
                     ],
                 ),
             ],
         )
         result = compare(old, new)
         leaks = [
-            c for c in result.changes
+            c
+            for c in result.changes
             if c.kind == ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API
         ]
         assert leaks, "case75 pattern: leak must be detected"
@@ -853,17 +985,22 @@ class TestExampleCaseParity:
         # detail::algorithm_iface gets a new virtual method inserted
         # mid-vtable; vtable layout shifts for all consumers.
         old = _snap(
-            functions=[_public_fn(
-                "mylib_make_svm", "mylib::detail::algorithm_iface*",
-            )],
+            functions=[
+                _public_fn(
+                    "mylib_make_svm",
+                    "mylib::detail::algorithm_iface*",
+                )
+            ],
             types=[
                 RecordType(
-                    name="mylib::detail::algorithm_iface", kind="class",
+                    name="mylib::detail::algorithm_iface",
+                    kind="class",
                     size_bits=64,
                     vtable=["~algorithm_iface", "run", "status"],
                 ),
                 RecordType(
-                    name="mylib::svm_algorithm", kind="class",
+                    name="mylib::svm_algorithm",
+                    kind="class",
                     size_bits=96,
                     bases=["mylib::detail::algorithm_iface"],
                     vtable=["~svm_algorithm", "run", "status"],
@@ -871,17 +1008,22 @@ class TestExampleCaseParity:
             ],
         )
         new = _snap(
-            functions=[_public_fn(
-                "mylib_make_svm", "mylib::detail::algorithm_iface*",
-            )],
+            functions=[
+                _public_fn(
+                    "mylib_make_svm",
+                    "mylib::detail::algorithm_iface*",
+                )
+            ],
             types=[
                 RecordType(
-                    name="mylib::detail::algorithm_iface", kind="class",
+                    name="mylib::detail::algorithm_iface",
+                    kind="class",
                     size_bits=64,
                     vtable=["~algorithm_iface", "run", "progress", "status"],
                 ),
                 RecordType(
-                    name="mylib::svm_algorithm", kind="class",
+                    name="mylib::svm_algorithm",
+                    kind="class",
                     size_bits=96,
                     bases=["mylib::detail::algorithm_iface"],
                     vtable=["~svm_algorithm", "run", "progress", "status"],
@@ -890,7 +1032,8 @@ class TestExampleCaseParity:
         )
         result = compare(old, new)
         leaks = [
-            c for c in result.changes
+            c
+            for c in result.changes
             if c.kind == ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API
         ]
         assert leaks, "case76 pattern: leak must be detected"
@@ -975,8 +1118,13 @@ class TestComputeCallGraphLeakPaths:
         snap = _graph_snap(
             [
                 GraphNode(
-                    id="decl://pub", kind="source_decl", label="api",
-                    attrs={"visibility": "public_header", "consumer_compiled_body": False},
+                    id="decl://pub",
+                    kind="source_decl",
+                    label="api",
+                    attrs={
+                        "visibility": "public_header",
+                        "consumer_compiled_body": False,
+                    },
                 ),
                 _decl_node("decl://int", "ns::detail::helper", "source"),
             ],
@@ -994,8 +1142,13 @@ class TestComputeCallGraphLeakPaths:
         snap = _graph_snap(
             [
                 GraphNode(
-                    id="decl://pub", kind="source_decl", label="pubInline",
-                    attrs={"visibility": "public_header", "consumer_compiled_body": True},
+                    id="decl://pub",
+                    kind="source_decl",
+                    label="pubInline",
+                    attrs={
+                        "visibility": "public_header",
+                        "consumer_compiled_body": True,
+                    },
                 ),
                 _decl_node("decl://int", "ns::detail::helper", "source"),
             ],
@@ -1025,18 +1178,30 @@ class TestComputeCallGraphLeakPaths:
         snap = _graph_snap(
             [
                 GraphNode(
-                    id="decl://wrap", kind="source_decl", label="demo::wrap",
-                    attrs={"visibility": "public_header", "consumer_compiled_body": True},
+                    id="decl://wrap",
+                    kind="source_decl",
+                    label="demo::wrap",
+                    attrs={
+                        "visibility": "public_header",
+                        "consumer_compiled_body": True,
+                    },
                 ),
                 GraphNode(
-                    id="decl://api", kind="source_decl", label="demo::api",
-                    attrs={"visibility": "public_header", "consumer_compiled_body": False},
+                    id="decl://api",
+                    kind="source_decl",
+                    label="demo::api",
+                    attrs={
+                        "visibility": "public_header",
+                        "consumer_compiled_body": False,
+                    },
                 ),
                 _decl_node("decl://helper", "demo::detail::helper", "source"),
             ],
             [
                 GraphEdge(src="decl://wrap", dst="decl://api", kind="DECL_CALLS_DECL"),
-                GraphEdge(src="decl://api", dst="decl://helper", kind="DECL_CALLS_DECL"),
+                GraphEdge(
+                    src="decl://api", dst="decl://helper", kind="DECL_CALLS_DECL"
+                ),
             ],
         )
         paths = compute_call_graph_leak_paths(snap)
@@ -1068,18 +1233,30 @@ class TestComputeCallGraphLeakPaths:
         snap = _graph_snap(
             [
                 GraphNode(
-                    id="decl://wrap", kind="source_decl", label="demo::wrap",
-                    attrs={"visibility": "public_header", "consumer_compiled_body": True},
+                    id="decl://wrap",
+                    kind="source_decl",
+                    label="demo::wrap",
+                    attrs={
+                        "visibility": "public_header",
+                        "consumer_compiled_body": True,
+                    },
                 ),
                 GraphNode(
-                    id="decl://helper_a", kind="source_decl", label="demo::helper_a",
-                    provenance="call_graph", attrs={"defined_in_project": True},
+                    id="decl://helper_a",
+                    kind="source_decl",
+                    label="demo::helper_a",
+                    provenance="call_graph",
+                    attrs={"defined_in_project": True},
                 ),
                 _decl_node("decl://helper", "demo::detail::helper", "source"),
             ],
             [
-                GraphEdge(src="decl://wrap", dst="decl://helper_a", kind="DECL_CALLS_DECL"),
-                GraphEdge(src="decl://helper_a", dst="decl://helper", kind="DECL_CALLS_DECL"),
+                GraphEdge(
+                    src="decl://wrap", dst="decl://helper_a", kind="DECL_CALLS_DECL"
+                ),
+                GraphEdge(
+                    src="decl://helper_a", dst="decl://helper", kind="DECL_CALLS_DECL"
+                ),
             ],
         )
         paths = compute_call_graph_leak_paths(snap)
@@ -1087,7 +1264,8 @@ class TestComputeCallGraphLeakPaths:
 
     @pytest.mark.parametrize("backend_provenance", ["kythe", "codeql"])
     def test_walk_stops_at_kythe_codeql_node_with_no_signal(
-        self, backend_provenance: str,
+        self,
+        backend_provenance: str,
     ) -> None:
         """Codex review, fresh evidence: the call_graph.py fallback-node fix
         above only excused that one provenance from the permissive
@@ -1107,18 +1285,30 @@ class TestComputeCallGraphLeakPaths:
         snap = _graph_snap(
             [
                 GraphNode(
-                    id="decl://wrap", kind="source_decl", label="demo::wrap",
-                    attrs={"visibility": "public_header", "consumer_compiled_body": True},
+                    id="decl://wrap",
+                    kind="source_decl",
+                    label="demo::wrap",
+                    attrs={
+                        "visibility": "public_header",
+                        "consumer_compiled_body": True,
+                    },
                 ),
                 GraphNode(
-                    id="decl://helper_a", kind="source_decl", label="demo::helper_a",
-                    provenance=backend_provenance, attrs={"defined_in_project": True},
+                    id="decl://helper_a",
+                    kind="source_decl",
+                    label="demo::helper_a",
+                    provenance=backend_provenance,
+                    attrs={"defined_in_project": True},
                 ),
                 _decl_node("decl://helper", "demo::detail::helper", "source"),
             ],
             [
-                GraphEdge(src="decl://wrap", dst="decl://helper_a", kind="DECL_CALLS_DECL"),
-                GraphEdge(src="decl://helper_a", dst="decl://helper", kind="DECL_CALLS_DECL"),
+                GraphEdge(
+                    src="decl://wrap", dst="decl://helper_a", kind="DECL_CALLS_DECL"
+                ),
+                GraphEdge(
+                    src="decl://helper_a", dst="decl://helper", kind="DECL_CALLS_DECL"
+                ),
             ],
         )
         paths = compute_call_graph_leak_paths(snap)
@@ -1133,7 +1323,11 @@ class TestComputeCallGraphLeakPaths:
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://int", "ns::detail::Const", "source"),
             ],
-            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_REFERENCES_DECL")],
+            [
+                GraphEdge(
+                    src="decl://pub", dst="decl://int", kind="DECL_REFERENCES_DECL"
+                )
+            ],
         )
         paths = compute_call_graph_leak_paths(snap)
         assert "ns::detail::Const" in paths
@@ -1210,9 +1404,10 @@ class TestComputeCallGraphLeakPaths:
         # ... and the mangled key a real diff_symbols.py FUNC_REMOVED
         # Change.symbol actually holds must resolve to the same proof paths.
         assert "_ZN2ns6detail19train_ops_dispatcherEv" in paths
-        assert paths["_ZN2ns6detail19train_ops_dispatcherEv"] == paths[
-            "ns::detail::train_ops_dispatcher"
-        ]
+        assert (
+            paths["_ZN2ns6detail19train_ops_dispatcherEv"]
+            == paths["ns::detail::train_ops_dispatcher"]
+        )
 
     def test_no_symbol_mapping_keys_only_by_label(self) -> None:
         """A call-graph-only target with no exported symbol at all (e.g.
@@ -1257,7 +1452,9 @@ class TestComputeCallGraphLeakPaths:
         assert mangled in paths
         assert "pubFn" in paths[mangled][0]
 
-    def test_mangled_label_not_internal_after_demangling_stays_dropped(self, monkeypatch) -> None:
+    def test_mangled_label_not_internal_after_demangling_stays_dropped(
+        self, monkeypatch
+    ) -> None:
         """A mangled label that demangles to a non-internal qualified name
         must still be excluded -- demangling only changes what's classified
         as internal, not a blanket "keep everything mangled" allowance."""
@@ -1277,7 +1474,8 @@ class TestComputeCallGraphLeakPaths:
         assert compute_call_graph_leak_paths(snap) == {}
 
     def test_public_fn_with_internal_param_type_not_misclassified(
-        self, monkeypatch,
+        self,
+        monkeypatch,
     ) -> None:
         """Codex review, fresh evidence: demangle() returns the *full
         signature* ("ns::api::foo(ns::detail::T*)"), not just the qualified
@@ -1384,7 +1582,9 @@ class TestDetectCallGraphLeaks:
         new = _graph_snap([_decl_node("decl://pub", "pubFn", "public_header")], [])
         # symbol is the mangled name, exactly as diff_symbols.py builds it —
         # NOT "ns::detail::train_ops_dispatcher" (the node's label).
-        triggering = Change(kind=ChangeKind.FUNC_REMOVED, symbol=mangled, description="removed")
+        triggering = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol=mangled, description="removed"
+        )
         extra = detect_call_graph_leaks([triggering], old, new)
         assert len(extra) == 1
         overlay = extra[0]
@@ -1502,3 +1702,186 @@ class TestDetectCallGraphLeaks:
             description="removed",
         )
         assert detect_call_graph_leaks([triggering], _snap(), _snap()) == []
+
+
+class TestBuildLeakChangePreferredPath:
+    """CodeRabbit review on PR #620: the INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API
+    finding's own displayed proof path must also prefer value-propagating
+    evidence over a shorter indirect one -- select_preferred_path (ADR-046
+    D6) was wired into MarkReachability's separate layout walk but not into
+    this, the leak detector's own synthetic Change builder."""
+
+    def test_reachability_proof_path_prefers_value_propagating(self) -> None:
+        from abicheck.internal_leak import _build_leak_change, _format_path
+
+        indirect_short = ["Public", "indirect:ptr", "Internal"]
+        value_longer = ["Public", "field:x", "Mid", "field:y", "Internal"]
+        change = _build_leak_change(
+            "ns::detail::Internal",
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Internal",
+                    description="size changed",
+                )
+            ],
+            [indirect_short, value_longer],
+            _snap(),
+            embedded_by_value=True,
+        )
+        assert change.reachability_proof_path == _format_path(value_longer)
+
+    def test_more_paths_count_still_reflects_the_full_collection(self) -> None:
+        from abicheck.internal_leak import _build_leak_change
+
+        paths = [
+            ["Public", "field:x", "Internal"],
+            ["Public", "field:y", "Internal"],
+            ["Public", "field:z", "Internal"],
+            ["Public", "indirect:ptr", "Internal"],
+        ]
+        change = _build_leak_change(
+            "ns::detail::Internal",
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Internal",
+                    description="size changed",
+                )
+            ],
+            paths,
+            _snap(),
+            embedded_by_value=True,
+        )
+        assert "+1 more paths" in (change.description or "")
+
+
+class TestSelectPreferredPath:
+    """ADR-046 D6 (partial): prefer a value-propagating path over a shorter
+    indirect-only one instead of plain ``min(paths, key=len)``."""
+
+    def test_prefers_value_propagating_over_shorter_indirect(self) -> None:
+        indirect_short = ["Public", "indirect:ptr", "Internal"]
+        value_longer = ["Public", "field:x", "Mid", "field:y", "Internal"]
+        assert select_preferred_path([indirect_short, value_longer]) == value_longer
+
+    def test_shortest_wins_within_the_same_tier(self) -> None:
+        short = ["Public", "field:x", "Internal"]
+        long_ = ["Public", "field:x", "Mid", "field:y", "Internal"]
+        assert select_preferred_path([long_, short]) == short
+
+    def test_pointer_or_signature_beats_pure_indirect(self) -> None:
+        # Neither value-propagating nor indirection-marked (e.g. a bare
+        # signature-seed path) ranks above an indirect-marked one.
+        plain = ["Public", "signature", "Internal"]
+        indirect = ["Public", "indirect:ptr", "Internal"]
+        assert select_preferred_path([indirect, plain]) == plain
+
+    def test_single_path_returned_unchanged(self) -> None:
+        only = ["Public", "field:x", "Internal"]
+        assert select_preferred_path([only]) == only
+
+
+# ---------------------------------------------------------------------------
+# TraversalPolicy (ADR-046 D5, partial)
+# ---------------------------------------------------------------------------
+
+
+class TestTraversalPolicy:
+    """CALL_GRAPH_TRAVERSAL_POLICY reifies compute_call_graph_leak_paths's
+    own edge-kind/stop rules; a caller-supplied policy with a stricter
+    minimum_confidence or a custom stop predicate must actually change the
+    walk, not just be accepted and ignored."""
+
+    def test_call_graph_policy_allows_call_and_reference_edges(self) -> None:
+        from abicheck.internal_leak import CALL_GRAPH_TRAVERSAL_POLICY
+
+        assert CALL_GRAPH_TRAVERSAL_POLICY.allowed_edges == frozenset(
+            {"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"}
+        )
+
+    def test_minimum_confidence_excludes_low_confidence_edges(self) -> None:
+        from abicheck.buildsource.graph_facts import CONF_HIGH, CONF_REDUCED
+        from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
+        from abicheck.internal_leak import (
+            TraversalPolicy,
+            _consumer_compiled_reachability,
+        )
+
+        graph = SourceGraphSummary(
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://mid", "ns::detail::mid", "source"),
+            ],
+            edges=[
+                GraphEdge(
+                    src="decl://pub",
+                    dst="decl://mid",
+                    kind="DECL_CALLS_DECL",
+                    confidence=CONF_REDUCED,
+                )
+            ],
+        )
+        node_by_id = {n.id: n for n in graph.nodes}
+        permissive = TraversalPolicy(
+            allowed_edges=frozenset({"DECL_CALLS_DECL"}),
+            stop_conditions=lambda node_id, node_by_id: False,
+        )
+        strict = TraversalPolicy(
+            allowed_edges=frozenset({"DECL_CALLS_DECL"}),
+            stop_conditions=lambda node_id, node_by_id: False,
+            minimum_confidence=CONF_HIGH,
+        )
+        permissive_reach = _consumer_compiled_reachability(
+            graph, permissive, ["decl://pub"], node_by_id
+        )
+        strict_reach = _consumer_compiled_reachability(
+            graph, strict, ["decl://pub"], node_by_id
+        )
+        assert "decl://mid" in permissive_reach["decl://pub"][0]
+        assert "decl://mid" not in strict_reach["decl://pub"][0]
+
+    def test_stop_conditions_halts_expansion_but_keeps_node_reachable(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
+        from abicheck.internal_leak import (
+            TraversalPolicy,
+            _consumer_compiled_reachability,
+        )
+
+        graph = SourceGraphSummary(
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://mid", "ns::detail::mid", "source"),
+                _decl_node("decl://leaf", "ns::detail::leaf", "source"),
+            ],
+            edges=[
+                GraphEdge(src="decl://pub", dst="decl://mid", kind="DECL_CALLS_DECL"),
+                GraphEdge(src="decl://mid", dst="decl://leaf", kind="DECL_CALLS_DECL"),
+            ],
+        )
+        node_by_id = {n.id: n for n in graph.nodes}
+        stop_at_mid = TraversalPolicy(
+            allowed_edges=frozenset({"DECL_CALLS_DECL"}),
+            stop_conditions=lambda node_id, node_by_id: node_id == "decl://mid",
+        )
+        reachable, _ = _consumer_compiled_reachability(
+            graph, stop_at_mid, ["decl://pub"], node_by_id
+        )["decl://pub"]
+        assert "decl://mid" in reachable
+        assert "decl://leaf" not in reachable
+
+    def test_compute_call_graph_leak_paths_uses_the_shared_policy(self) -> None:
+        """End-to-end: the public entry point still routes through
+        CALL_GRAPH_TRAVERSAL_POLICY, not a re-derived edge set."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_REFERENCES_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert "ns::detail::helper" in paths

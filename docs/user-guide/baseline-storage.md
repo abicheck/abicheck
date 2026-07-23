@@ -155,7 +155,11 @@ No download step needed — the baseline file is in the repo.
 
 ## Recipe C: GitHub Actions Cache
 
-Best for: ephemeral, branch-scoped comparisons (e.g., comparing HEAD~1 vs HEAD).
+Best for: ephemeral, branch-scoped comparisons (e.g., comparing HEAD~1 vs HEAD)
+without a release or a committed file.
+
+**Default-branch workflow** (restores the previous cache entry, then refreshes
+it with the current build):
 
 ```yaml
       - uses: actions/cache@v4
@@ -164,6 +168,37 @@ Best for: ephemeral, branch-scoped comparisons (e.g., comparing HEAD~1 vs HEAD).
           key: abi-baseline-${{ github.event.repository.default_branch }}-${{ github.sha }}
           restore-keys: |
             abi-baseline-${{ github.event.repository.default_branch }}-
+
+      - name: Refresh baseline
+        uses: abicheck/abicheck@v0.5.0
+        with:
+          mode: dump
+          new-library: build/libfoo.so
+          new-header: include/foo.h
+          output-file: abi-baseline.json
+```
+
+The cache key is unique per commit SHA, so every default-branch push is a cache
+miss — once the job finishes, `actions/cache` saves whatever is at
+`abi-baseline.json` (the snapshot the `dump` step just wrote) back under that
+key, ready for the next PR's `restore-keys` fallback to pick up.
+
+**PR workflow** (restores the latest default-branch baseline and compares):
+
+```yaml
+      - uses: actions/cache@v4
+        with:
+          path: abi-baseline.json
+          key: abi-baseline-${{ github.event.repository.default_branch }}-${{ github.sha }}
+          restore-keys: |
+            abi-baseline-${{ github.event.repository.default_branch }}-
+
+      - name: ABI compatibility check
+        uses: abicheck/abicheck@v0.5.0
+        with:
+          old-library: abi-baseline.json
+          new-library: build/libfoo.so
+          new-header: include/foo.h
 ```
 
 ## Recipe D: External Artifact Store (S3, Artifactory, GCS)

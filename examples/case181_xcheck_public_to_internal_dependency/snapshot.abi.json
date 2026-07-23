@@ -27,23 +27,41 @@
         {
           "attrs": {},
           "confidence": "unknown",
+          "conflicts": [],
           "dst": "decl://validate_utf8",
           "edge": "DECL_CALLS_DECL",
+          "facts": [
+            {
+              "attrs": {},
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "provenance": "",
+          "resolved": {},
           "src": "decl://json_parse"
         },
         {
           "attrs": {},
           "confidence": "unknown",
+          "conflicts": [],
           "dst": "decl://validate_utf8",
           "edge": "SOURCE_DECLARES",
+          "facts": [
+            {
+              "attrs": {},
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "provenance": "",
+          "resolved": {},
           "src": "header://src/json_internal.cc"
         }
       ],
       "external_graph_refs": [],
       "extractor_passes": {},
-      "graph_id": "sha256:4b0c873903c7d83eeaec7281f8ee4ec4e144f8ab0d9cb777163ba35bd63a9f3b",
+      "graph_id": "sha256:cf1a119e384c6047cb7a30210b638954c7663dfc7f4d854ef79db00a112275f5",
       "indexes": {
         "by_binary_symbol": {},
         "by_file": {},
@@ -63,26 +81,57 @@
             "visibility": "public_header"
           },
           "confidence": "unknown",
+          "conflicts": [],
+          "facts": [
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "id": "decl://json_parse",
           "kind": "source_decl",
           "label": "json_parse",
-          "provenance": ""
+          "provenance": "",
+          "resolved": {
+            "visibility": "public_header"
+          }
         },
         {
           "attrs": {},
           "confidence": "unknown",
+          "conflicts": [],
+          "facts": [
+            {
+              "attrs": {},
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "id": "decl://validate_utf8",
           "kind": "source_decl",
           "label": "validate_utf8",
-          "provenance": ""
+          "provenance": "",
+          "resolved": {}
         },
         {
           "attrs": {},
           "confidence": "unknown",
+          "conflicts": [],
+          "facts": [
+            {
+              "attrs": {},
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "id": "header://src/json_internal.cc",
           "kind": "source",
           "label": "src/json_internal.cc",
-          "provenance": ""
+          "provenance": "",
+          "resolved": {}
         }
       ],
       "schema_version": 1

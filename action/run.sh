@@ -374,6 +374,17 @@ elif [[ "$MODE" == "compare" ]]; then
     add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
   fi
 
+  # Scoped comparison (ADR-043): --used-by/--required-symbol(s) contracts.
+  # The CLI itself enforces --used-by vs --required-symbol/--required-symbols
+  # mutual exclusivity (a UsageError, surfaced as VERDICT=ERROR below via the
+  # generic CLI-error detection) -- not re-validated here.
+  add_flag "--used-by" "${INPUT_USED_BY:-}"
+  if [[ "${INPUT_VERIFY_RUNTIME:-false}" == "true" ]]; then
+    CMD+=(--verify-runtime)
+  fi
+  add_flag "--required-symbol" "${INPUT_REQUIRED_SYMBOL:-}"
+  add_single_flag "--required-symbols" "${INPUT_REQUIRED_SYMBOLS:-}"
+
   # Note: --gcc-path, --gcc-prefix, --gcc-options, --sysroot, --nostdinc are
   # dump-only flags. In compare mode abicheck performs the dump internally
   # when an input is a binary, but these cross-compilation flags are not

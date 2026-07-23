@@ -5,31 +5,58 @@
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
       "dst": "decl:demo::compute",
       "edge": "SOURCE_DECLARES",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "provenance": "",
+      "resolved": {},
       "src": "hdr:include/demo/api.h"
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
       "dst": "decl:demo::compute",
       "edge": "DECL_REFERENCES_DECL",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "provenance": "",
+      "resolved": {},
       "src": "decl:demo::compute"
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
       "dst": "decl:detail::kInternalLimit",
       "edge": "DECL_REFERENCES_DECL",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "provenance": "",
+      "resolved": {},
       "src": "decl:demo::compute"
     }
   ],
   "external_graph_refs": [],
   "extractor_passes": {},
-  "graph_id": "sha256:d767284742fc4dd40aaaa0d003e4401ce2b571f78570c71b1200a558ae494581",
+  "graph_id": "sha256:2b43ca9ef84f40a50812c51f29fd4fec841153c14d0ecb7e938e63d2e7d73e12",
   "indexes": {
     "by_binary_symbol": {},
     "by_file": {},
@@ -52,28 +79,63 @@
         "visibility": "public_header"
       },
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "visibility": "public_header"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "decl:demo::compute",
       "kind": "source_decl",
       "label": "demo::compute()",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {
+        "visibility": "public_header"
+      }
     },
     {
       "attrs": {
         "visibility": "private_header"
       },
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "visibility": "private_header"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "decl:detail::kInternalLimit",
       "kind": "source_decl",
       "label": "detail::kInternalLimit",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {
+        "visibility": "private_header"
+      }
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "hdr:include/demo/api.h",
       "kind": "header",
       "label": "demo/api.h",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {}
     }
   ],
   "schema_version": 1

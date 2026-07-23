@@ -1836,7 +1836,12 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
                 "metadata line ('**Status:** ...') or heading ('## Status')",
             )
             continue
-        leading_word = re.split(r"[\s—.,;-]", status.strip(), maxsplit=1)[0]
+        # Strip Markdown emphasis (`**Superseded**`) and split on ':' too
+        # (`Superseded: see ADR-002`) -- either phrasing otherwise leaves
+        # the leading token as "**Superseded**" or "Superseded:", neither of
+        # which matches the plain "superseded" comparison below, silently
+        # skipping the replacement-link requirement (PR #619 review).
+        leading_word = re.split(r"[\s—:.,;-]", status.strip(), maxsplit=1)[0].strip("*")
         if leading_word.lower() == "superseded" and not _links_to_another_adr(
             status, adr_dir, md, text
         ):

@@ -662,6 +662,7 @@ class MarkReachability:
             compute_call_graph_leak_paths,
             compute_leak_paths,
             is_internal_type,
+            select_preferred_path,
         )
         from .model import ScopeOrigin
 
@@ -925,12 +926,9 @@ class MarkReachability:
                 )
                 if paths and not (all_indirect and not identity_or_vtable):
                     c.public_reachable = True
-                    c.reachability_kind = (
-                        "value_embedding"
-                        if any(_path_is_value_propagating(p) for p in paths)
-                        else "pointer_or_signature"
-                    )
-                    c.reachability_proof_path = _format_path(min(paths, key=len))
+                    preferred_path = select_preferred_path(paths)
+                    c.reachability_kind = "value_embedding" if _path_is_value_propagating(preferred_path) else "pointer_or_signature"
+                    c.reachability_proof_path = _format_path(preferred_path)
                     c.reachability_state = ReachabilityState.PROVEN_REACHABLE
                     tagged = True
             # ADR-044 P1 items 1/3: independent of (and checked regardless of

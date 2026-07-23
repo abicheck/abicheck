@@ -1,4 +1,4 @@
-# ADR-049: Documentation Operational Model (Ownership Registry + Docs-Contract Gate)
+# ADR-051: Documentation Operational Model (Ownership Registry + Docs-Contract Gate)
 
 **Date:** 2026-07-22
 
@@ -113,8 +113,8 @@ attempted here:
 | 1. Governance | `topics.yaml`, `docs/AGENTS.md`, front matter, warning-only docs-contract | **Done** |
 | 2. Source-of-truth automation | Generated CLI reference, Action inputs/outputs, MCP tools, Python API, config keys, platform/capability matrix | **Partial** — `scripts/gen_action_reference.py` (Action inputs/outputs from `action.yml`) proves the pattern; the rest are not built |
 | 3. High-duplication cluster consolidation | Getting Started/Choose Workflow, evidence/scan/tool-modes, source-facts/build-evidence, verdict/policy/severity/exit-codes, baseline, GitHub Action, specialized contracts | **Partial** — exit-codes/severity/platform-support-matrix dedup, `getting-started.md` and `tool-modes.md` trims, ADR nav relaxation (see below), and `baseline-management.md`'s 3-way split (lifecycle concept / `create-baseline.md` how-to / `baseline-storage.md` recipes) landed; the GitHub Action page cluster and Specialized Checks regrouping did not |
-| 4. Physical restructuring (`start/`/`learn/`/`use/`/`reference/`/`contribute/` + redirects) | **Not attempted** — high blast radius on live, indexed doc URLs; needs its own scoped pass with a redirect map, not a drive-by alongside governance work |
-| 5. Case Library / future providers (Cython, NumPy, wheel) | **Not attempted** — no such providers exist yet to catalog |
+| 4. Physical restructuring (`start/`/`learn/`/`use/`/`reference/`/`contribute/` + redirects) | High blast radius on live, indexed doc URLs; needs its own scoped pass with a redirect map, not a drive-by alongside governance work | **Not attempted** |
+| 5. Case Library / future providers (Cython, NumPy, wheel) | No such providers exist yet to catalog | **Not attempted** |
 
 One additional, un-staged change rides along in this same decision: the
 `adr-index-nav-sync` AI-readiness check originally required every ADR

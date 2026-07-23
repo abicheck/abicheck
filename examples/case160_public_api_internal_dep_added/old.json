@@ -5,31 +5,58 @@
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
       "dst": "sym:_ZN4demo5parseEv",
       "edge": "SOURCE_DECL_MAPS_TO_SYMBOL",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "provenance": "",
+      "resolved": {},
       "src": "decl:demo::parse"
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
       "dst": "decl:demo::parse",
       "edge": "SOURCE_DECLARES",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "provenance": "",
+      "resolved": {},
       "src": "hdr:include/demo/api.h"
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
       "dst": "decl:demo::parse",
       "edge": "DECL_CALLS_DECL",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "provenance": "",
+      "resolved": {},
       "src": "decl:demo::parse"
     }
   ],
   "external_graph_refs": [],
   "extractor_passes": {},
-  "graph_id": "sha256:4e69e5f0640548214614870c0ac12d47ebf649966b7e5aadf8c209767a3e6f12",
+  "graph_id": "sha256:62d6e24a12310573db8587e60321254aa9359dedf180a5eb4db64270eac3c7a9",
   "indexes": {
     "by_binary_symbol": {
       "sym:_ZN4demo5parseEv": [
@@ -52,36 +79,76 @@
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "decl:demo::parse",
       "kind": "source_decl",
       "label": "demo::parse()",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {}
     },
     {
       "attrs": {
         "visibility": "private_header"
       },
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "visibility": "private_header"
+          },
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "decl:detail::validate",
       "kind": "source_decl",
       "label": "detail::validate()",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {
+        "visibility": "private_header"
+      }
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "sym:_ZN4demo5parseEv",
       "kind": "binary_symbol",
       "label": "demo::parse",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {}
     },
     {
       "attrs": {},
       "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": ""
+        }
+      ],
       "id": "hdr:include/demo/api.h",
       "kind": "header",
       "label": "demo/api.h",
-      "provenance": ""
+      "provenance": "",
+      "resolved": {}
     }
   ],
   "schema_version": 1
