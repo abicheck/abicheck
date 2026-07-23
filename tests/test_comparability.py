@@ -324,6 +324,29 @@ def test_ancestor_slot_token_with_comma_in_header_name_does_not_collide(tmp_path
     assert single.profile_fingerprint != split.profile_fingerprint
 
 
+def test_ancestor_slot_token_deduplicates_a_repeated_declared_header(tmp_path):
+    # Codex review (PR #624): declared_headers is not itself deduplicated
+    # before reaching _slot_token_for_ancestor, so the same header supplied
+    # twice in one CLI/manifest invocation (e.g. [a.h, b.h, a.h]) must not
+    # retain a duplicate (identity, relative_path) pair in the owned slot
+    # token -- a compare where only one side repeats the header would
+    # otherwise spuriously raise ProfileMismatchError on a duplicate
+    # declaration that changes nothing about the declared surface.
+    a = _write(tmp_path / "include" / "a.h", "int a(void);\n")
+    b = _write(tmp_path / "include" / "b.h", "int b(void);\n")
+    once = compute_extraction_contract(
+        declared_headers=[a, b],
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(tmp_path / "include")],
+    )
+    repeated = compute_extraction_contract(
+        declared_headers=[a, b, a],
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(tmp_path / "include")],
+    )
+    assert once.profile_fingerprint == repeated.profile_fingerprint
+
+
 # ---------------------------------------------------------------------------
 # The routine real-world shape: same dir is both --header and --include
 # (tests 8, 8b, 8c)
@@ -1049,6 +1072,23 @@ def test_gate_carve_out_cannot_verify_pointer_width_on_pe_and_still_raises():
     new = _snap(new_contract, pe=PeMetadata(machine="IMAGE_FILE_MACHINE_AMD64"))
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
+
+
+def test_gate_carve_out_riscv_word_size_change_verified_via_full_axis():
+    # Codex review (PR #624): EM_RISCV shares e_machine across RV32/RV64, so
+    # a target_triple change that's really just an expression of a genuine
+    # word-size change (riscv32-... vs. riscv64-...) must not fail
+    # verification on its own narrow "machine" component alone when
+    # elf_class already confirms the architecture genuinely differs.
+    old_contract = compute_extraction_contract(
+        l2_frontend_ran=True, target_triple="riscv32-unknown-elf", pointer_width=32
+    )
+    new_contract = compute_extraction_contract(
+        l2_frontend_ran=True, target_triple="riscv64-unknown-elf", pointer_width=64
+    )
+    old = _snap(old_contract, elf=ElfMetadata(machine="EM_RISCV", elf_class=32))
+    new = _snap(new_contract, elf=ElfMetadata(machine="EM_RISCV", elf_class=64))
+    check_contracts_comparable(old, new)  # must not raise
 
 
 # ---------------------------------------------------------------------------

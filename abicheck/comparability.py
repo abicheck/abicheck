@@ -227,10 +227,18 @@ def _slot_token_for_ancestor(
     # preserve. The dir-relative component is always safe to compute here:
     # ownership (checked by the filter below) means `inc.path` is already
     # an ancestor-or-equal of `h`, so `h.relative_to(inc.path)` never raises.
+    # sorted(set(...)), not sorted(...) (Codex review, PR #624): declared_headers
+    # is not itself deduplicated before reaching this function, so the same
+    # header supplied twice in one CLI/manifest invocation must not retain a
+    # duplicate (header_identity, relative_path) pair -- mirroring the same
+    # duplicate-collapse rule scope's "headers" field and header_sequence
+    # both already apply.
     owned = sorted(
-        (header_identities[h], str(_resolved(h).relative_to(_resolved(inc.path))))
-        for h in declared_headers
-        if _is_ancestor_or_equal(inc.path, h)
+        {
+            (header_identities[h], str(_resolved(h).relative_to(_resolved(inc.path))))
+            for h in declared_headers
+            if _is_ancestor_or_equal(inc.path, h)
+        }
     )
     # json.dumps, not a raw "," join (Codex review, PR #624): a header
     # identity string is not guaranteed comma-free, so an unescaped join
@@ -682,14 +690,33 @@ def check_contracts_comparable(
             # pointer_width/endianness for a PE/Mach-O snapshot, which has
             # no distinct word-size/endianness field) can never be confirmed
             # this way, so the carve-out correctly declines to waive it.
+            #
+            # `target_triple` is the one exception, verified against the
+            # FULL axis rather than its own single "machine" component
+            # (Codex review, PR #624): some ELF families share `e_machine`
+            # across word sizes (e.g. EM_RISCV for both RV32 and RV64), so a
+            # target_triple change that's really just an expression of a
+            # genuine word-size change (riscv32-... vs. riscv64-...) would
+            # otherwise fail verification on its own narrow "machine"
+            # component even though `elf_class` already confirms the
+            # architecture genuinely differs. target_triple is a coarse,
+            # composite descriptor -- unlike pointer_width/endianness, which
+            # map to one specific, independently-meaningful field, it can be
+            # corroborated by any genuine difference on this axis.
             if old_components is not None and new_components is not None:
-                verified = all(
-                    field in old_components
-                    and field in new_components
-                    and old_components[field] != new_components[field]
-                    for field in differing
+                common_keys = old_components.keys() & new_components.keys()
+                any_component_differs = any(
+                    old_components[k] != new_components[k] for k in common_keys
                 )
-                if verified:
+
+                def _field_verified(field: str) -> bool:
+                    if field not in old_components or field not in new_components:
+                        return False
+                    if field == "target_triple":
+                        return any_component_differs
+                    return old_components[field] != new_components[field]
+
+                if all(_field_verified(field) for field in differing):
                     return None  # genuine cross-architecture compare; diff_platform.py handles it
         reason = (
             "old and new snapshots were extracted under different compile "
