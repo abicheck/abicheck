@@ -1168,6 +1168,48 @@ def test_cpp20_detector_ignores_commented_out_consteval_type_shadow(tmp_path):
     assert any(r.reason == "consteval-declaration" for r in reqs)
 
 
+def test_cpp20_detector_ignores_inactive_if_zero_consteval_type_shadow(tmp_path):
+    """Regression (Codex review): a compatibility stub disabled via
+    ``#if 0``/``#endif`` must not suppress a genuine ``consteval``
+    declaration elsewhere in the header — mirrors the commented-out-shadow
+    exclusion above, but for a preprocessor-inactive region rather than a
+    ``//`` comment."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nstruct consteval {};\n#endif\nconsteval int f() { return 1; }\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
+def test_cpp20_detector_still_shadows_active_if_zero_consteval_type(tmp_path):
+    """Companion: an *active* (non-``#if 0``) ``struct consteval {};`` must
+    still shadow, confirming the ``#if 0`` stripping doesn't over-strip."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 1\nstruct consteval {};\n#endif\nconsteval const *p;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_nested_if_zero_constinit_type_shadow(tmp_path):
+    """Companion: a nested ``#ifdef`` inside a disabled ``#if 0`` region
+    must not confuse the matching-``#endif`` depth tracking and re-activate
+    the stub early."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\n#ifdef FOO\nstruct constinit {};\n#endif\n#endif\n"
+        "constinit int x = 1;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "constinit-declaration" for r in reqs)
+
+
 def test_cpp20_detector_detects_consteval_split_across_lines(tmp_path):
     """Regression (Codex review, second round): a bare ``consteval``
     trailing at the end of a line, with its declarator on the following

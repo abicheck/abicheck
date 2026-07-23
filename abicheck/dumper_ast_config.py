@@ -869,6 +869,40 @@ def _is_preprocessor_directive(line: bytes) -> bool:
     return re.match(rb"^\s*#", line) is not None
 
 
+_PP_IF_OPEN_PATTERN = re.compile(rb"^[ \t]*#[ \t]*(?:if|ifdef|ifndef)\b")
+_PP_IF_ZERO_PATTERN = re.compile(rb"^[ \t]*#[ \t]*if[ \t]+(?:0+|false)[ \t]*$")
+_PP_ENDIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*endif\b")
+
+
+def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
+    """Blank out ``#if 0``/``#if false`` regions, nested directives included.
+
+    A disabled compatibility stub (``#if 0\\nstruct consteval {};\\n#endif``)
+    must not shadow a genuine ``consteval``/``constinit``/``concept`` keyword
+    used as an identifier elsewhere in the header (Codex review) — the
+    ``*_type_shadowed`` scan otherwise sees the inactive type definition and
+    wrongly treats a real C++20 declaration as ambiguous. Line count is
+    preserved so this can be composed with the rest of the shadow scan.
+    """
+    lines = content.split(b"\n")
+    out: list[bytes] = []
+    depth = 0
+    for line in lines:
+        if depth:
+            if _PP_IF_OPEN_PATTERN.match(line):
+                depth += 1
+            elif _PP_ENDIF_PATTERN.match(line):
+                depth -= 1
+            out.append(b"")
+            continue
+        if _PP_IF_ZERO_PATTERN.match(line):
+            depth = 1
+            out.append(b"")
+            continue
+        out.append(line)
+    return b"\n".join(out)
+
+
 @dataclass(frozen=True)
 class Cpp20Requirement:
     """A single structural C++20 construct found while scanning headers."""
@@ -932,13 +966,18 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
         # "// struct concept {};" comment must never make a *real*
         # concept declaration elsewhere in the header look ambiguous
         # (Codex review, fifth round).
+        # Also strip out #if 0/#if false regions before any of the three
+        # shadow scans below — a disabled compatibility stub must not shadow
+        # a genuine keyword used elsewhere in the header (Codex review).
+        _content_no_line_comments = _strip_inactive_if_zero_blocks(
+            re.sub(rb"//[^\n]*", b"", content)
+        )
         concept_type_shadowed = bool(
-            _CONCEPT_AS_TYPE_NAME_PATTERN.search(re.sub(rb"//[^\n]*", b"", content))
+            _CONCEPT_AS_TYPE_NAME_PATTERN.search(_content_no_line_comments)
         )
         # Same reasoning and "//"-comment-stripped-copy caveat as
         # concept_type_shadowed above, for "consteval"/"constinit" used as
         # an ordinary pre-C++20 type name (Codex review, third round).
-        _content_no_line_comments = re.sub(rb"//[^\n]*", b"", content)
         consteval_type_shadowed = bool(
             _CONSTEVAL_AS_TYPE_NAME_PATTERN.search(_content_no_line_comments)
         )
