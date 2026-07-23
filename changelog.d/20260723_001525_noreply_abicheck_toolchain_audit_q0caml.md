@@ -40,14 +40,18 @@ it should read in CHANGELOG.md. Delete the other sections.
 -->
 ### Fixed
 
-- **`consteval`/`constinit`/`concept` type-shadow detection now ignores
-  `#if 0`/`#if false` disabled regions.** A pre-C++20 compatibility stub
-  kept around but disabled (`#if 0\nstruct consteval {};\n#endif`) was
-  previously still seen by the shadowed-type-name scan, which then treated
-  a genuine active `consteval`/`constinit`/`concept` declaration elsewhere
-  in the same header as ambiguous and skipped C++20 detection entirely.
-  Inactive `#if 0`/`#if false` regions (including nested directives) are
-  now stripped before the shadow scan runs.
+- **C++20 structural detection now ignores `#if 0`/`#if false` disabled
+  regions.** A pre-C++20 compatibility stub kept around but disabled
+  (`#if 0\nstruct consteval {};\n#endif`) was previously still seen by the
+  `consteval`/`constinit`/`concept` shadowed-type-name scan, which then
+  treated a genuine active declaration elsewhere in the same header as
+  ambiguous and skipped C++20 detection entirely. Conversely, a genuine
+  `consteval`/`constinit`/`concept`/`requires` construct written *only*
+  inside a disabled `#if 0` block was still picked up by the requirements
+  scan itself, wrongly marking an otherwise pre-C++20 header as needing
+  C++20. Inactive `#if 0`/`#if false` regions (including nested directives
+  and CRLF line endings) are now stripped once, up front, before both
+  scans run.
 
 -->
 <!--

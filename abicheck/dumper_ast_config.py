@@ -991,7 +991,11 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
         constinit_type_shadowed = bool(
             _CONSTINIT_AS_TYPE_NAME_PATTERN.search(_content_no_line_comments)
         )
-        logical_lines = _iter_logical_lines(content)
+        # Scan the same #if-0-stripped content the shadow checks above use —
+        # a genuine consteval/constinit/concept/requires construct written
+        # only inside a disabled #if 0 block must not itself mark the header
+        # as needing C++20 (Codex review): it's never actually compiled.
+        logical_lines = _iter_logical_lines(_content_no_line_comments)
         n = len(logical_lines)
         # Last non-blank line's own (un-extended) code, tracked across
         # iterations — lets a concept-declaration candidate look backward

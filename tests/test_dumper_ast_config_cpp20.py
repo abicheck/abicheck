@@ -1201,6 +1201,34 @@ def test_cpp20_detector_ignores_inactive_if_zero_consteval_type_shadow_crlf(tmp_
     assert any(r.reason == "consteval-declaration" for r in reqs)
 
 
+def test_cpp20_detector_ignores_consteval_declared_only_in_if_zero_block(tmp_path):
+    """Regression (Codex review): a genuine ``consteval`` *declaration*
+    written only inside a disabled ``#if 0`` block must not itself mark the
+    header as needing C++20 — it's never actually compiled. The active code
+    outside the block uses "consteval" the pre-C++20 way (an ordinary
+    identifier), so the header is really C/pre-C++20 throughout."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nconsteval int f();\n#endif\nint consteval;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_still_detects_consteval_alongside_if_zero_block(tmp_path):
+    """Companion: a genuine *active* ``consteval`` declaration elsewhere in
+    the same header must still be detected even when an unrelated ``#if 0``
+    block is also present, confirming the stripping doesn't over-suppress."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nconsteval int f();\n#endif\nconsteval int g();\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" and r.line == 4 for r in reqs)
+
+
 def test_cpp20_detector_still_shadows_active_if_zero_consteval_type(tmp_path):
     """Companion: an *active* (non-``#if 0``) ``struct consteval {};`` must
     still shadow, confirming the ``#if 0`` stripping doesn't over-strip."""
