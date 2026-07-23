@@ -319,6 +319,28 @@ def test_macro_ops_with_embedded_delimiters_does_not_collide(tmp_path):
     assert one_op.profile_fingerprint != two_ops.profile_fingerprint
 
 
+def test_pass_through_flag_order_differs_profile_fingerprint(tmp_path):
+    # Codex review (PR #624): a repeatable pass-through frontend flag with
+    # ABI-relevant preprocessing order (e.g. -include a.h -include b.h)
+    # forces preprocessing content whose order can change macro/pragma
+    # state -- "-include a.h -include b.h" and "-include b.h -include a.h"
+    # must fingerprint differently, unlike the depfile buckets (which are
+    # deliberately order-independent).
+    order_ab = compute_extraction_contract(
+        l2_frontend_ran=True, pass_through_flags=["-include", "a.h", "-include", "b.h"]
+    )
+    order_ba = compute_extraction_contract(
+        l2_frontend_ran=True, pass_through_flags=["-include", "b.h", "-include", "a.h"]
+    )
+    assert order_ab.profile_fingerprint != order_ba.profile_fingerprint
+
+
+def test_pass_through_flags_absent_on_both_sides_is_unaffected(tmp_path):
+    old = compute_extraction_contract(l2_frontend_ran=True, compiler_family="gcc")
+    new = compute_extraction_contract(l2_frontend_ran=True, compiler_family="gcc")
+    assert old.profile_fingerprint == new.profile_fingerprint
+
+
 def test_ancestor_slot_token_with_comma_in_header_name_does_not_collide(tmp_path):
     # One project-owned slot owning a single header literally named
     # "a.h,b.h" must not fingerprint identically to one project-owned slot

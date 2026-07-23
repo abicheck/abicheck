@@ -83,6 +83,7 @@ PROFILE_FIELD_KEYS = (
     "pointer_width",
     "endianness",
     "macro_ops",
+    "pass_through_flags",
     "include_sequence",
     "header_sequence",
 )
@@ -318,6 +319,7 @@ def compute_extraction_contract(
     pointer_width: int | None = None,
     endianness: str | None = None,
     macro_ops: Sequence[tuple[str, str]] = (),
+    pass_through_flags: Sequence[str] = (),
     declared_headers: Sequence[Path] = (),
     declared_includes: Sequence[IncludeDir] = (),
     depfile_resolved_paths: Sequence[Path] = (),
@@ -346,6 +348,16 @@ def compute_extraction_contract(
     profile keyword arguments were passed — the caller states explicitly
     whether an L2 frontend ran rather than this function guessing from
     which fields happen to be non-empty.
+
+    ``pass_through_flags`` is an ordered, opaque list of repeatable
+    frontend flags with ABI-relevant preprocessing order (e.g.
+    ``-include a.h -include b.h``) hashed *in the given order*, unlike the
+    sorted/unordered depfile buckets below (Codex review, PR #624): such a
+    flag forces preprocessing content whose order can change macro/pragma
+    state even when the resolved dependency *set* the depfile reports is
+    identical between two extraction runs. This function does not parse or
+    validate the flags themselves — the CLI/manifest glue that would
+    collect them from a real invocation is separate, not-yet-built work.
 
     ``-I`` **ownership and tokenization** (the load-bearing part of
     ``profile_fingerprint``):
@@ -504,6 +516,19 @@ def compute_extraction_contract(
             # length-delimits each element unambiguously regardless of its
             # content.
             "macro_ops": json.dumps(list(macro_ops)),
+            # Ordered, not sorted (Codex review, PR #624): repeatable
+            # pass-through frontend flags like `-include a.h -include b.h`
+            # force preprocessing content whose ORDER can change
+            # macro/pragma state before the rest of the TU is parsed --
+            # `-include a.h -include b.h` and `-include b.h -include a.h`
+            # can genuinely produce different ASTs even when the depfile's
+            # resolved dependency SET is identical (which bucketing above
+            # would otherwise report as unchanged, since bucket contents
+            # are order-independent by design). This is deliberately a raw,
+            # caller-supplied ordered flag list, not parsed or validated --
+            # dumper.py's actual `-include`/other repeatable-flag wiring is
+            # separate, not-yet-built work (see this module's docstring).
+            "pass_through_flags": json.dumps(list(pass_through_flags)),
             "include_sequence": json.dumps(slot_tokens),
             "header_sequence": json.dumps(header_sequence),
         }
