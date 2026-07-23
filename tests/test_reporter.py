@@ -594,6 +594,20 @@ class TestRootCauseReporter:
         roots = {group["root"] for group in d["root_causes"]}
         assert roots == {"ns::internal::helper"}
 
+    def test_carries_scope_block_when_public_headers_scoped(self):
+        """Codex review: full/leaf JSON both emit the machine-readable
+        `scope` block (resolved/fell_back/manual_review_required) when
+        --scope-public-headers was requested; root-cause mode dropped it,
+        hiding the fallback/manual-review warning for scoped root-cause
+        runs."""
+        c = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
+        r = _result(Verdict.BREAKING, changes=[c])
+        r.scope_to_public_surface = True
+        r.scope_resolved = False
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert d["scope"]["public_headers_applied"] is True
+        assert d["scope"]["manual_review_required"] is True
+
 
 class TestMarkdownReporter:
     def test_no_change_contains_no_change(self):

@@ -560,6 +560,13 @@ def _to_json_root_cause(
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
+    # Codex review: full/leaf JSON both emit the machine-readable
+    # `scope` block (resolved/fell_back/manual_review_required) when
+    # --scope-public-headers was requested -- root-cause mode dropped it,
+    # hiding the fallback/manual-review warning for scoped root-cause runs.
+    scope = _scope_dict(result)
+    if scope is not None:
+        d["scope"] = scope
     return json.dumps(d, indent=indent)
 
 
