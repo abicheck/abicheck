@@ -1312,6 +1312,61 @@ def test_cpp20_detector_detects_construct_in_elif_after_permanently_false_elif(
     assert any(r.reason == "consteval-declaration" for r in reqs)
 
 
+def test_cpp20_detector_ignores_construct_in_dead_arm_after_elif_true(tmp_path):
+    """Regression (Codex review, third round): once an ``#elif 1``/``#elif
+    true`` arm fires, it is unconditionally reachable in *every* build
+    configuration, which makes every later sibling arm in the same chain
+    unconditionally *unreachable* — masking must resume for them, unlike
+    after a merely-unevaluated ``#elif <macro>`` condition. A construct
+    written only in the dead ``#else`` here must not be detected."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n#elif 1\nint consteval;\n#else\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_construct_in_dead_arm_after_elif_true_word(tmp_path):
+    """Companion: same as above but with the ``true`` spelling."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n#elif true\nint consteval;\n#else\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_detects_construct_in_elif_true_arm_itself(tmp_path):
+    """Companion: the ``#elif 1`` arm's own content is definitely reachable
+    and must still be scanned normally."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n#elif 1\nconsteval int f();\n#else\nint consteval;\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
+def test_cpp20_detector_still_detects_construct_after_unevaluable_elif_then_else(
+    tmp_path,
+):
+    """Companion: a merely-*unevaluable* ``#elif <macro>`` (as opposed to a
+    provably-true ``#elif 1``) must NOT settle the chain — a construct in
+    the ``#else`` that follows it is still possibly reachable (the macro
+    might be false) and must stay detected."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n#elif SOME_MACRO\nint b;\n#else\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
 def test_cpp20_detector_ignores_nested_if_zero_constinit_type_shadow(tmp_path):
     """Companion: a nested ``#ifdef`` inside a disabled ``#if 0`` region
     must not confuse the matching-``#endif`` depth tracking and re-activate

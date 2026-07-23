@@ -55,7 +55,11 @@ it should read in CHANGELOG.md. Delete the other sections.
   left untouched, so a genuine construct written only there is still
   detected. A further `#elif 0`/`#elif false` arm stays masked exactly
   like the `#if 0` guard before it, rather than being treated as reachable
-  the way a genuinely unevaluable `#elif <macro>` condition is.
+  the way a genuinely unevaluable `#elif <macro>` condition is. And once
+  an `#elif 1`/`#elif true` arm fires, every later sibling arm in the same
+  chain is unconditionally unreachable in any build configuration, so
+  masking resumes for them too instead of staying lifted for the rest of
+  the chain.
 
 -->
 <!--

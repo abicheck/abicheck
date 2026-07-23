@@ -874,11 +874,12 @@ _PP_IF_ZERO_PATTERN = re.compile(rb"^[ \t]*#[ \t]*if[ \t]+(?:0+|false)[ \t]*$")
 _PP_ELSE_PATTERN = re.compile(rb"^[ \t]*#[ \t]*else\b")
 _PP_ELIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*elif\b")
 _PP_ELIF_ZERO_PATTERN = re.compile(rb"^[ \t]*#[ \t]*elif[ \t]+(?:0+|false)[ \t]*$")
+_PP_ELIF_TRUE_PATTERN = re.compile(rb"^[ \t]*#[ \t]*elif[ \t]+(?:1|true)[ \t]*$")
 _PP_ENDIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*endif\b")
 
 
 def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
-    """Blank out ``#if 0``/``#if false`` regions, nested directives included.
+    """Blank out unreachable arms of an ``#if 0``/``#if false`` chain.
 
     A disabled compatibility stub (``#if 0\\nstruct consteval {};\\n#endif``)
     must not shadow a genuine ``consteval``/``constinit``/``concept`` keyword
@@ -887,55 +888,70 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
     wrongly treats a real C++20 declaration as ambiguous. Line count is
     preserved so this can be composed with the rest of the shadow scan.
 
-    Only the ``#if 0``/``#if false`` arm itself is masked: an ``#else`` at
-    the same nesting level is unconditionally reachable (the guard is
-    unconditionally false), and an ``#elif`` there whose own condition
-    isn't a recognizable ``0``/``false`` literal has a condition this
-    heuristic can't evaluate — both stop the masking from that line on
-    (Codex review) rather than blanking all the way to the matching
-    ``#endif``, which previously hid a genuine construct written in the
-    active arm of a permanently-false guard. Treating an unevaluated
-    ``#elif`` as possibly-active is the conservative direction here: it can
-    only cause C++20 mode to be requested when not strictly needed, never
-    the reverse (a real C++20 header parsed without it and failing). An
-    ``#elif 0``/``#elif false`` arm is itself permanently unreachable
-    exactly like ``#if 0``, so masking continues through it rather than
-    stopping (Codex review, second round) — otherwise a construct written
-    only in *that* dead arm would wrongly force C++20 mode too.
+    Only *unreachable* arms are masked. ``#if 0``/``#elif 0``/``#elif
+    false`` are permanently unreachable, exactly like their guard says
+    (Codex review, second round). An ``#else``/``#elif`` whose own
+    condition isn't a recognizable ``0``/``1``/``false``/``true`` literal
+    has a condition this heuristic can't evaluate, so it's treated as
+    possibly-reachable (unmasked) — the conservative direction, since it
+    can only request C++20 mode when not strictly needed, never the
+    reverse. But once an ``#elif 1``/``#elif true`` arm is seen, it is
+    *unconditionally* reachable in every build configuration, which makes
+    every later sibling arm in that same chain unconditionally
+    *unreachable* — masking must resume for them too (Codex review, third
+    round), not stay lifted for the rest of the chain the way it correctly
+    does after a merely-unevaluated condition.
     """
     lines = content.split(b"\n")
     out: list[bytes] = []
-    depth = 0
+    in_chain = False  # inside a chain whose first arm was #if 0/#if false
+    nested = 0  # depth of an unrelated #if opened inside the current arm
+    masking = False  # should the current arm's content be blanked
+    settled = False  # a definite #elif 1/true arm already fired this chain
     for raw_line in lines:
         # A CRLF source (or a CRLF-normalizing text-mode write, e.g. the
         # test suite's Path.write_text() on Windows) leaves a trailing "\r"
-        # on every line after splitting on "\n" alone — which
-        # _PP_IF_ZERO_PATTERN's trailing "$" then fails to match, since "\r"
-        # isn't in its "[ \t]*" tail (Windows CI regression). Strip it before
+        # on every line after splitting on "\n" alone — which the trailing
+        # "$" in these patterns then fails to match, since "\r" isn't in
+        # their "[ \t]*" tail (Windows CI regression). Strip it before
         # matching; harmless on genuine LF input.
         line = raw_line[:-1] if raw_line.endswith(b"\r") else raw_line
-        if depth:
+        if in_chain:
+            if nested:
+                if _PP_IF_OPEN_PATTERN.match(line):
+                    nested += 1
+                elif _PP_ENDIF_PATTERN.match(line):
+                    nested -= 1
+                out.append(b"" if masking else line)
+                continue
             if _PP_IF_OPEN_PATTERN.match(line):
-                depth += 1
-                out.append(b"")
+                nested = 1
+                out.append(b"" if masking else line)
                 continue
             if _PP_ENDIF_PATTERN.match(line):
-                depth -= 1
-                out.append(b"")
-                continue
-            if depth == 1 and _PP_ELIF_ZERO_PATTERN.match(line):
-                out.append(b"")
-                continue
-            if depth == 1 and (
-                _PP_ELSE_PATTERN.match(line) or _PP_ELIF_PATTERN.match(line)
-            ):
-                depth = 0
+                in_chain = False
                 out.append(line)
                 continue
-            out.append(b"")
+            if _PP_ELIF_ZERO_PATTERN.match(line):
+                masking = True
+                out.append(b"")
+                continue
+            if _PP_ELIF_TRUE_PATTERN.match(line):
+                masking = settled
+                settled = True
+                out.append(b"" if masking else line)
+                continue
+            if _PP_ELIF_PATTERN.match(line) or _PP_ELSE_PATTERN.match(line):
+                masking = settled
+                out.append(b"" if masking else line)
+                continue
+            out.append(b"" if masking else line)
             continue
         if _PP_IF_ZERO_PATTERN.match(line):
-            depth = 1
+            in_chain = True
+            nested = 0
+            masking = True
+            settled = False
             out.append(b"")
             continue
         out.append(line)
