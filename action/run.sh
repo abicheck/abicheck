@@ -320,6 +320,14 @@ elif [[ "$MODE" == "compare" ]]; then
   add_sided_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
+  # Cross-compiler flags -- documented root-Action inputs, but previously
+  # only wired to dump mode's branch. Without them, a compare against a
+  # cross-target library silently falls back to the host toolchain/includes
+  # for header parsing and can produce false ABI results (Codex review).
+  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
   # Build/source evidence (--depth build/source) — new (candidate) side only.
   # The old side's evidence, if any, already lives in whatever
@@ -556,6 +564,14 @@ elif [[ "$MODE" == "scan" ]]; then
   add_flag "-I" "${INPUT_INCLUDE:-}"
   add_sided_flag "-I" "old" "${INPUT_OLD_INCLUDE:-}"
   add_sided_flag "-I" "new" "${INPUT_NEW_INCLUDE:-}"
+
+  # Cross-compiler flags -- documented root-Action inputs, but previously
+  # only wired to dump mode's branch (Codex review, same gap as compare
+  # mode above).
+  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
   # Build-source evidence inputs (L3/L4/L5)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"

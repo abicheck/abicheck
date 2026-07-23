@@ -29,6 +29,21 @@ RESOLVE_MESSAGE="${RESOLVE_MESSAGE:-}"
 
 ANALYSIS_RAN="${ANALYSIS_RAN:-false}"
 ANALYSIS_REPORT_PATH="${ANALYSIS_REPORT_PATH:-}"
+# The nested root Action's own real process exit code (its `exit-code`
+# output) -- some of its gates (e.g. --fail-on-removed-library on a
+# directory/package compare) take effect as a dedicated exit code that
+# overrides the persisted severity scheme rather than feeding into it, so
+# the report body alone can under-report the real outcome (Codex review).
+# Defensively defaulted to 0 for anything not a clean non-negative integer
+# (an empty output when the nested step never reached its own exit-code
+# step, or any unexpected content) rather than letting a malformed value
+# reach report_envelope.py's --analysis-exit-code (an argparse int).
+ANALYSIS_EXIT_CODE_RAW="${ANALYSIS_EXIT_CODE:-0}"
+if [[ "$ANALYSIS_EXIT_CODE_RAW" =~ ^[0-9]+$ ]]; then
+  ANALYSIS_EXIT_CODE="$ANALYSIS_EXIT_CODE_RAW"
+else
+  ANALYSIS_EXIT_CODE=0
+fi
 
 COLLECT_VERIFY_OUTCOME="${COLLECT_VERIFY_OUTCOME:-}"
 COLLECT_REPLAY_OUTCOME="${COLLECT_REPLAY_OUTCOME:-}"
@@ -96,7 +111,7 @@ ENVELOPE_ARGS=(
   --action-version "$ACTION_VERSION"
 )
 if [[ "$MODE" == "augment" ]]; then
-  ENVELOPE_ARGS+=(--report-in "$ANALYSIS_REPORT_PATH")
+  ENVELOPE_ARGS+=(--report-in "$ANALYSIS_REPORT_PATH" --analysis-exit-code "$ANALYSIS_EXIT_CODE")
 elif [[ "$MODE" == "bootstrap" ]]; then
   ENVELOPE_ARGS+=(--resolve-message "${RESOLVE_MESSAGE:-no baseline set exists yet for this channel.}")
 else

@@ -246,12 +246,26 @@ def augment_report(
     head_sha: str | None = None,
     base_ref: str | None = None,
     action_version: str | None = None,
+    analysis_exit_code: int | None = None,
 ) -> dict[str, Any]:
     """Layer ADR-047 §7's identity/new fields onto a real analysis report.
 
     *report* is the already-parsed JSON dict a ``compare``/``scan`` run
     produced (root ``action.yml``'s ``report-path`` output). Returns a new
     dict -- *report* itself is never mutated.
+
+    *analysis_exit_code*, when given, is the nested root Action's own real
+    process exit code (its ``exit-code`` output) -- folded into the gate
+    decision via ``max()`` alongside whatever ``_real_exit_code`` reads from
+    the report body itself. Needed because at least one root-Action gate,
+    ``--fail-on-removed-library`` (release/bundle compares), takes effect as
+    a dedicated exit code (8) that overrides the persisted severity scheme
+    rather than feeding into it -- ``compare_release_cmd``'s own
+    ``_exit_compare_release`` applies it "in preference to the severity
+    code," so a bundle report's own ``severity.exit_code`` can read 0 even
+    though the real process exited 8. Reading only the report body would
+    silently pass a removed-library gate the caller explicitly asked for
+    (Codex review).
     """
     if gate_mode not in GATE_MODES:
         raise ValueError(f"gate_mode must be one of {GATE_MODES}, got {gate_mode!r}")
@@ -296,7 +310,7 @@ def augment_report(
         out["action_version"] = action_version
 
     raw_verdict = report.get("verdict")
-    real_exit_code = _real_exit_code(report)
+    real_exit_code = max(_real_exit_code(report), analysis_exit_code or 0)
     out["policy_gate_decision"] = "fail" if real_exit_code != 0 else "pass"
     if raw_verdict in LEGACY_VERDICT_VALUES:
         out["compatibility_verdict"] = raw_verdict

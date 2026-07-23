@@ -17,8 +17,12 @@
   that evidence for a directory operand. A `baseline-channel: none` scan run
   that hits a guard (e.g. `--budget` exceeded) is treated as an operational
   error rather than a deferrable compatibility finding, so `gate-mode:
-  deferred`/`advisory` can't turn a guard failure into a quiet pass. See
-  `docs/reference/check-target.md`.
+  deferred`/`advisory` can't turn a guard failure into a quiet pass. A
+  bundle/directory compare's `--fail-on-removed-library` gate (a dedicated
+  exit code that overrides the persisted severity scheme rather than
+  feeding into it) is folded into the check's own gate decision too, so
+  `gate-mode: local` doesn't silently pass a removed library the caller
+  explicitly asked to gate on. See `docs/reference/check-target.md`.
 
 <!--
 ### Changed

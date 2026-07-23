@@ -389,6 +389,35 @@ class TestFinalizeAugmentMode:
         assert report["severity"]["exit_code"] == 4  # aggregate needs the real value
         assert report["policy_gate_decision"] == "fail"
 
+    def test_analysis_exit_code_folds_into_local_gate_even_with_clean_severity(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact Codex-flagged gap: --fail-on-removed-library on a
+        bundle/directory compare makes the CLI process exit 8 "in
+        preference to the severity code" -- the persisted report's own
+        severity.exit_code can read 0 even though a library was actually
+        removed. run.sh must forward the analysis step's own real exit code
+        (ANALYSIS_EXIT_CODE) so gate-mode: local doesn't silently pass."""
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(report_path, verdict="COMPATIBLE_WITH_RISK", exit_code=0)
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+                "ANALYSIS_EXIT_CODE": "8",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 8, result.stderr
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["policy_gate_decision"] == "fail"
+        assert (
+            report["severity"]["exit_code"] == 0
+        )  # untouched -- only the gate folds it
+
     def test_advisory_gate_mode_neutralizes_severity(self, tmp_path: Path) -> None:
         report_path = tmp_path / "analysis.json"
         _write_compare_report(report_path, verdict="BREAKING", exit_code=4)

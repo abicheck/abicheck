@@ -470,6 +470,7 @@ runs:
         ANALYSIS_OUTCOME: ${{ steps.analysis.outcome }}
         ANALYSIS_VERDICT: ${{ steps.analysis.outputs.verdict }}
         ANALYSIS_REPORT_PATH: ${{ steps.analysis.outputs.report-path }}
+        ANALYSIS_EXIT_CODE: ${{ steps.analysis.outputs.exit-code }}
         COLLECT_VERIFY_OUTCOME: ${{ steps.collect_verify.outcome }}
         COLLECT_REPLAY_OUTCOME: ${{ steps.collect_replay.outcome }}
         ACTION_PATH: ${{ github.action_path }}

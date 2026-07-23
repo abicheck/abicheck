@@ -152,6 +152,104 @@ class TestCompareModeForwardsBuildSourceEvidence:
         assert "--depth" not in cmd
 
 
+def _run_scan(env_extra: dict[str, str], tmp_path: Path) -> str:
+    """Like _run_compare, but drives run.sh's scan-mode branch instead."""
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    captured = tmp_path / "captured_argv.txt"
+    abicheck_stub = fake_bin / "abicheck"
+    abicheck_stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f'printf \'%s\\n\' "$*" >> "{captured}"\n'
+        'echo \'{"scan_schema_version":"1.2","verdict":"COMPATIBLE","exit_code":0}\'\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    abicheck_stub.chmod(0o755)
+
+    artifact = tmp_path / "new.json"
+    artifact.write_text("{}", encoding="utf-8")
+
+    github_output = tmp_path / "github_output"
+    github_output.write_text("")
+    github_step_summary = tmp_path / "github_step_summary"
+    github_step_summary.write_text("")
+
+    base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+    env = {
+        **base_env,
+        "PATH": f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}",
+        "INPUT_MODE": "scan",
+        "INPUT_NEW_LIBRARY": str(artifact),
+        "INPUT_ADD_JOB_SUMMARY": "false",
+        "GITHUB_OUTPUT": str(github_output),
+        "GITHUB_STEP_SUMMARY": str(github_step_summary),
+        **env_extra,
+    }
+    result = subprocess.run(
+        [_bash_executable(), str(RUN_SH)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert captured.is_file(), "abicheck stub was never invoked"
+    return captured.read_text(encoding="utf-8").strip()
+
+
+class TestScanModeForwardsCrossCompilerFlags:
+    """Same gap as compare mode above, in scan mode's branch (Codex
+    review, PR #625)."""
+
+    def test_all_four_reach_the_cli(self, tmp_path: Path) -> None:
+        cmd = _run_scan(
+            {
+                "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
+                "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
+                "INPUT_GCC_OPTIONS": "-D__ARM_NEON",
+                "INPUT_SYSROOT": "/opt/sysroots/aarch64",
+            },
+            tmp_path,
+        )
+        assert "--gcc-path /opt/cross/bin/aarch64-linux-gnu-g++" in cmd
+        assert "--gcc-prefix aarch64-linux-gnu-" in cmd
+        assert "--gcc-options -D__ARM_NEON" in cmd
+        assert "--sysroot /opt/sysroots/aarch64" in cmd
+
+
+class TestCompareModeForwardsCrossCompilerFlags:
+    """--gcc-path/--gcc-prefix/--gcc-options/--sysroot are documented root-
+    Action inputs and both dump AND compare/scan support them at the CLI
+    level, but were previously only wired into dump mode's branch --
+    a cross-target compare/scan silently fell back to the host toolchain
+    for header parsing and could produce false ABI results (Codex review,
+    PR #625)."""
+
+    def test_all_four_reach_the_cli(self, tmp_path: Path) -> None:
+        cmd = _run_compare(
+            {
+                "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
+                "INPUT_GCC_PREFIX": "aarch64-linux-gnu-",
+                "INPUT_GCC_OPTIONS": "-D__ARM_NEON",
+                "INPUT_SYSROOT": "/opt/sysroots/aarch64",
+            },
+            tmp_path,
+        )
+        assert "--gcc-path /opt/cross/bin/aarch64-linux-gnu-g++" in cmd
+        assert "--gcc-prefix aarch64-linux-gnu-" in cmd
+        assert "--gcc-options -D__ARM_NEON" in cmd
+        assert "--sysroot /opt/sysroots/aarch64" in cmd
+
+    def test_none_set_adds_no_flags(self, tmp_path: Path) -> None:
+        cmd = _run_compare({}, tmp_path)
+        assert "--gcc-path" not in cmd
+        assert "--gcc-prefix" not in cmd
+        assert "--gcc-options" not in cmd
+        assert "--sysroot" not in cmd
+
+
 class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:
     """The CLI's per-library release fan-out (directory/package operands --
     e.g. check-target's kind: bundle) rejects --sources/--build-info/

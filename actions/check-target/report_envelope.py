@@ -110,6 +110,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base-ref", default="")
     parser.add_argument("--tool-version", default="")
     parser.add_argument("--action-version", default="")
+    parser.add_argument(
+        "--analysis-exit-code",
+        type=int,
+        default=0,
+        help=(
+            "The nested root Action's own real process exit code (mode: "
+            "augment only). Some root-Action gates (e.g. "
+            "--fail-on-removed-library on a directory/package compare) take "
+            "effect as a dedicated exit code that overrides the persisted "
+            "severity scheme rather than feeding into it, so the report "
+            "body alone can under-report the real outcome."
+        ),
+    )
     args = parser.parse_args(argv)
 
     project = args.project or None
@@ -189,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
             head_sha=head_sha,
             base_ref=base_ref,
             action_version=action_version,
+            analysis_exit_code=args.analysis_exit_code,
         )
         # augment_report already classifies any non-compatibility verdict
         # (the literal "ERROR", or a scan guard sentinel like
@@ -206,6 +220,10 @@ def main(argv: list[str] | None = None) -> int:
             real_exit_code = severity["exit_code"]
         elif isinstance(report.get("exit_code"), int):
             real_exit_code = report["exit_code"]  # type: ignore[assignment]
+        # Same fold augment_report already applied for policy_gate_decision
+        # -- keep this local real_exit_code (used for final_exit_code below)
+        # consistent with it, not just the persisted report field.
+        real_exit_code = max(real_exit_code, args.analysis_exit_code)
 
     args.report_out.parent.mkdir(parents=True, exist_ok=True)
     args.report_out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

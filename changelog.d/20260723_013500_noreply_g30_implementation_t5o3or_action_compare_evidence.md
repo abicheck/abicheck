@@ -14,3 +14,10 @@
   shallower comparison and reporting a clean result while a source-only
   break could have been missed; `--config` is unaffected and always
   forwarded, since the release fan-out does consume it.
+- **GitHub Action `compare`/`scan` modes now forward cross-compiler flags**
+  — `gcc-path`, `gcc-prefix`, `gcc-options`, and `sysroot` were already
+  documented root-Action inputs but were previously only wired to `dump`
+  mode in `action/run.sh`; a `compare`/`scan` run against a cross-target
+  library silently fell back to the host toolchain/includes for header
+  parsing, which can produce false ABI results. Now forwarded in both
+  modes.

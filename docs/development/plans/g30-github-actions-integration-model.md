@@ -966,6 +966,71 @@ operational-error classification missed scan guard sentinels.
   (parametrized over all three `gate-mode` values) in
   `tests/test_action_check_target.py`.
 
+A seventh round of Codex review caught two more issues, both fixed in one
+follow-up commit:
+
+- **A removed-library gate on a bundle/directory compare could silently
+  pass `gate-mode: local`** — `abicheck compare`'s per-library release
+  engine gives `--fail-on-removed-library` its own dedicated exit code (8),
+  applied "in preference to the severity code"
+  (`cli_compare_release_helpers._exit_compare_release`'s own docstring) —
+  meaning the persisted JSON report's `severity.exit_code` can read `0`
+  (e.g. `verdict: COMPATIBLE_WITH_RISK`, the removal only shows up in
+  `unmatched_old`) even though the real CLI process exited 8. Since
+  `augment_report`'s `real_exit_code` was computed purely from the report
+  body, and `report_envelope.py`'s own `real_exit_code` variable did the
+  same, `gate-mode: local` would read `real_exit_code: 0` and both the
+  composite job exit code and the persisted `policy_gate_decision` would
+  read as a clean pass — silently allowing a removed library the caller
+  explicitly asked to gate on. Confirmed by reading
+  `_exit_compare_release`'s docstring and code directly. Fixed: the nested
+  root Action's own real `exit-code` output is now captured
+  (`actions/check-target/action.yml`'s finalize step gains
+  `ANALYSIS_EXIT_CODE: ${{ steps.analysis.outputs.exit-code }}`), forwarded
+  through `run.sh` (defensively defaulted to 0 for anything not a clean
+  non-negative integer) and `report_envelope.py`'s new
+  `--analysis-exit-code` flag, and folded into `augment_report`'s
+  `real_exit_code` via `max()` alongside whatever the report body itself
+  says — the same precedence pattern `_exit_compare_release` already uses
+  internally. `report_envelope.py`'s own `real_exit_code` (used for
+  `final_exit_code()`) applies the identical fold, so the persisted
+  `policy_gate_decision` field and the actual composite exit code agree.
+  Scoped deliberately to `gate-mode: local`'s correctness, the most severe
+  form of the bug (the job silently passed outright); `gate-mode: deferred`
+  still defers to `check-project.yml`'s trailing `aggregate` job, and
+  `abicheck/aggregate.py`'s own `GateInfo.from_report_data` reads only the
+  persisted `severity.exit_code` (unaffected by this fix, since that field
+  is deliberately left untouched — only the gate *decision* folds in the
+  analysis exit code, not the persisted severity block itself) — so a
+  removed-library gate on a `deferred` bundle check can still be missed by
+  a later `aggregate` pass; that gap is in `aggregate.py` itself, predates
+  this task, and applies to any consumer of `compare`'s bundle JSON output
+  relying on `severity.exit_code` alone, not something check-target
+  introduced or is positioned to fix on its own. New
+  `test_analysis_exit_code_overrides_a_clean_severity_block`/
+  `test_analysis_exit_code_of_zero_does_not_flip_a_clean_report` in
+  `tests/test_check_report.py`, and
+  `test_analysis_exit_code_folds_into_local_gate_even_with_clean_severity`
+  (full `run.sh` + `report_envelope.py` integration) in
+  `tests/test_action_check_target.py`.
+- **`compare`/`scan` modes never forwarded cross-compiler flags** —
+  `--gcc-path`/`--gcc-prefix`/`--gcc-options`/`--sysroot` are documented
+  root-Action inputs and `abicheck compare --help-all`/`abicheck scan
+  --help` both expose the equivalent CLI flags, but `action/run.sh` only
+  ever wired them into `dump` mode's branch — confirmed by grepping the
+  file. A `check-target` compare/scan needing a cross compiler or sysroot
+  to parse headers correctly would silently fall back to the host
+  toolchain/includes and could produce false ABI results for cross-target
+  libraries. Fixed by adding the same four `add_single_flag` calls to both
+  the `compare` and `scan` branches (check-target's own `action.yml`
+  already forwarded these inputs to the nested root Action's `with:` block
+  — the gap was entirely inside `action/run.sh`). New
+  `TestCompareModeForwardsCrossCompilerFlags`/
+  `TestScanModeForwardsCrossCompilerFlags` classes in
+  `tests/test_action_run_sh_compare_build_source.py`, each running the real
+  `run.sh` end-to-end against a fake `abicheck` stub to prove the flags
+  reach the actual command line.
+
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
 Implements ADR-047 §4/§5 (`run-plan.json` generation + matrix + trailing

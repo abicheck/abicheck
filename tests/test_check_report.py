@@ -300,6 +300,43 @@ class TestAugmentReport:
         )
         assert clean["policy_gate_decision"] == "pass"
 
+    def test_analysis_exit_code_overrides_a_clean_severity_block(self):
+        """The exact Codex-flagged gap: --fail-on-removed-library on a
+        directory/package compare makes the CLI process exit 8 "in
+        preference to the severity code" (cli_compare_release_helpers.py's
+        _exit_compare_release), so a bundle report's own severity.exit_code
+        can read 0/COMPATIBLE_WITH_RISK even though the real process exited
+        nonzero. analysis_exit_code must win via max() so the gate doesn't
+        silently pass a removed-library check the caller explicitly asked
+        for."""
+        report = self._base_compare_report(verdict="COMPATIBLE_WITH_RISK", exit_code=0)
+        out = augment_report(
+            report,
+            name="libpvxs-bundle",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+            analysis_exit_code=8,
+        )
+        assert out["policy_gate_decision"] == "fail"
+        # The persisted severity block is untouched -- only the gate
+        # decision folds in the analysis exit code, since gate-mode: local
+        # doesn't neutralize anything.
+        assert out["severity"]["exit_code"] == 0
+
+    def test_analysis_exit_code_of_zero_does_not_flip_a_clean_report(self):
+        out = augment_report(
+            self._base_compare_report(verdict="COMPATIBLE", exit_code=0),
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+            analysis_exit_code=0,
+        )
+        assert out["policy_gate_decision"] == "pass"
+
     def test_local_and_deferred_never_neutralize_severity(self):
         for gate_mode in ("local", "deferred"):
             out = augment_report(
