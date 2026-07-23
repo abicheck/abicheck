@@ -186,7 +186,7 @@ key, ready for the next PR's `restore-keys` fallback to pick up.
 **PR workflow** (restores the latest default-branch baseline and compares):
 
 ```yaml
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: abi-baseline.json
           key: abi-baseline-${{ github.event.repository.default_branch }}-${{ github.sha }}
@@ -200,6 +200,15 @@ key, ready for the next PR's `restore-keys` fallback to pick up.
           new-library: build/libfoo.so
           new-header: include/foo.h
 ```
+
+The PR side uses `actions/cache/restore` (restore-only), not the combined
+`actions/cache` action from the default-branch workflow above. A PR run never
+produces a fresh baseline to save, and the primary key here is scoped to the
+PR's own commit SHA — with the combined action, a successful job would still
+save whatever `abi-baseline.json` holds back under that PR-specific key, so a
+*rerun* of the same commit would then hit that stale self-cached entry
+instead of falling through `restore-keys` to the latest default-branch
+baseline. Restore-only avoids that gap entirely.
 
 ## Recipe D: External Artifact Store (S3, Artifactory, GCS)
 
