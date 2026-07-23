@@ -62,6 +62,7 @@ docstring for the full algorithm.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -192,7 +193,11 @@ def _slot_token_for_ancestor(
         for h in declared_headers
         if _is_ancestor_or_equal(inc.path, h)
     )
-    return "hdrs:" + ",".join(owned_header_identities)
+    # json.dumps, not a raw "," join (Codex review, PR #624): a header
+    # identity string is not guaranteed comma-free, so an unescaped join
+    # could let two structurally different owned-header sets collapse to
+    # the same token — the identical class of bug reported for macro_ops.
+    return "hdrs:" + json.dumps(owned_header_identities)
 
 
 def _attribute_file(
@@ -363,8 +368,15 @@ def compute_extraction_contract(
             "target_triple": target_triple or "",
             "pointer_width": str(pointer_width) if pointer_width is not None else "",
             "endianness": endianness or "",
-            "macro_ops": "|".join(f"{op}:{val}" for op, val in macro_ops),
-            "include_sequence": "|".join(slot_tokens),
+            # json.dumps, not a raw "|"/":" join (Codex review, PR #624): a
+            # macro value or slot token is not guaranteed pipe/colon-free —
+            # macro_ops=[("D", "A|U:B")] and [("D", "A"), ("U", "B")] would
+            # otherwise both serialize to the identical string "D:A|U:B",
+            # letting the gate miss a real profile drift. json.dumps
+            # length-delimits each element unambiguously regardless of its
+            # content.
+            "macro_ops": json.dumps(list(macro_ops)),
+            "include_sequence": json.dumps(slot_tokens),
         }
         profile_fingerprint = _sha256_of(
             *[profile_fields[k] for k in PROFILE_FIELD_KEYS]
@@ -410,9 +422,14 @@ def compute_extraction_contract(
         def _normalize(paths: Sequence[Path]) -> list[str]:
             return sorted(str(_resolved(p).relative_to(root)) for p in paths)
 
+        # json.dumps, not a raw "|" join (Codex review, PR #624, same class
+        # of bug already fixed for macro_ops/include_sequence above): a
+        # normalized path is not guaranteed pipe-free.
         scope_fields = {
-            "headers": "|".join(_normalize((*declared_headers, *public_header_paths))),
-            "public_header_dirs": "|".join(_normalize(public_header_dirs)),
+            "headers": json.dumps(
+                _normalize((*declared_headers, *public_header_paths))
+            ),
+            "public_header_dirs": json.dumps(_normalize(public_header_dirs)),
         }
         scope_fingerprint = _sha256_of(*[scope_fields[k] for k in SCOPE_FIELD_KEYS])
 

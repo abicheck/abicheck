@@ -173,6 +173,55 @@ def test_7_macro_only_header_never_owning_a_declaration_still_counted(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# unambiguous encoding of joined fields (Codex review, PR #624): a raw
+# "|"/":"/"," join across user-controlled strings can let two structurally
+# different inputs collapse to the identical joined string, silently
+# defeating the whole fingerprint.
+# ---------------------------------------------------------------------------
+
+
+def test_macro_ops_with_embedded_delimiters_does_not_collide(tmp_path):
+    # macro_ops=[("D", "A|U:B")] (one -D flag whose value happens to contain
+    # "|" and ":") must NOT fingerprint identically to
+    # [("D", "A"), ("U", "B")] (two separate macro operations) -- a naive
+    # "|".join(f"{op}:{val}") would collapse both to the literal string
+    # "D:A|U:B".
+    one_op = compute_extraction_contract(
+        l2_frontend_ran=True, macro_ops=[("D", "A|U:B")]
+    )
+    two_ops = compute_extraction_contract(
+        l2_frontend_ran=True, macro_ops=[("D", "A"), ("U", "B")]
+    )
+    assert one_op.profile_fingerprint != two_ops.profile_fingerprint
+
+
+def test_ancestor_slot_token_with_comma_in_header_name_does_not_collide(tmp_path):
+    # One project-owned slot owning a single header literally named
+    # "a.h,b.h" must not fingerprint identically to one project-owned slot
+    # owning two separate headers "a.h" and "b.h" -- a naive
+    # ",".join(sorted(identities)) collapses both to the literal string
+    # "a.h,b.h" (verified: ",".join(["a.h,b.h"]) == ",".join(["a.h","b.h"])
+    # == "a.h,b.h"), the same class of bug as macro_ops above, one level
+    # deeper in the ancestor-derived slot token.
+    one_header = _write(tmp_path / "inc1" / "a.h,b.h", "int f(void);\n")
+    two_headers = [
+        _write(tmp_path / "inc2" / "a.h", "int f(void);\n"),
+        _write(tmp_path / "inc2" / "b.h", "int g(void);\n"),
+    ]
+    single = compute_extraction_contract(
+        declared_headers=[one_header],
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(tmp_path / "inc1")],
+    )
+    split = compute_extraction_contract(
+        declared_headers=two_headers,
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(tmp_path / "inc2")],
+    )
+    assert single.profile_fingerprint != split.profile_fingerprint
+
+
+# ---------------------------------------------------------------------------
 # The routine real-world shape: same dir is both --header and --include
 # (tests 8, 8b, 8c)
 # ---------------------------------------------------------------------------
