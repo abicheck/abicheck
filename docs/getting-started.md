@@ -221,9 +221,10 @@ abicheck compare baseline.json ./build/libfoo.so \
 
 `compare` auto-detects each input: `.so` files are dumped on-the-fly, `.json`
 snapshots are loaded directly (and can be compared to each other with no
-headers/castxml/network needed) — mix them freely. See [Baseline
-Management](user-guide/baseline-management.md) for where to store baselines
-and how to compare across releases, and [Evidence, Build-Context & Debug
+headers/castxml/network needed) — mix them freely. See [Storing
+Baselines](user-guide/baseline-storage.md) for where to store baselines
+and [Creating and Comparing a Baseline](user-guide/create-baseline.md) for
+how to compare across releases, and [Evidence, Build-Context & Debug
 Flags](user-guide/dump-compare-flags.md) for `--lang c`, cross-compilation
 (`--gcc-prefix`, `--sysroot`), and verbose output.
 

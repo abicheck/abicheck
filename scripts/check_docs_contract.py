@@ -383,6 +383,7 @@ _MD_LINK_TARGET_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 _BACKTICK_RUN_RE = re.compile(r"`+")
 _MD_REF_LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\[([^\]]*)\]")
 _MD_REF_DEF_RE = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
 def _strip_inline_code(text: str) -> str:
@@ -444,13 +445,16 @@ def _page_links_to(path: Path, target_rel_to_docs: str) -> bool:
     path). The whole point of `summarizes` is "link back to the canonical
     page instead of restating it" — being a permitted summarizer (registered
     in topics.yaml) isn't the same as actually doing that, so this enforces
-    the link exists. Fenced code blocks and inline code spans are stripped
-    first: a link shown inside a ``` fence or as inline code (e.g.
-    `` `[owner](owner.md)` ``, showing the link syntax itself rather than a
-    real link) is example text, not a navigable link -- MkDocs renders both
-    as code, not as a backlink."""
+    the link exists. Fenced code blocks, inline code spans, and HTML
+    comments are stripped first: a link shown inside a ``` fence or as
+    inline code (e.g. `` `[owner](owner.md)` ``, showing the link syntax
+    itself rather than a real link) is example text, and a link hidden
+    inside `<!-- ... -->` is invisible in the rendered page -- neither is a
+    navigable backlink, even though the raw regex would otherwise match
+    both."""
     text = _strip_fenced_code(_strip_front_matter(path.read_text(encoding="utf-8")))
     text = _strip_inline_code(text)
+    text = _HTML_COMMENT_RE.sub("", text)
     for m in _MD_LINK_TARGET_RE.finditer(text):
         if _resolve_href(path, m.group(1)) == target_rel_to_docs:
             return True

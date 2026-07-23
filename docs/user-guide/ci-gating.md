@@ -106,7 +106,7 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
 - **Baselines → everything.** All of the above only gates what changed
   *relative to the baseline you chose*. Compare against the last release (not
   the previous commit) to catch cumulative drift; see
-  [Baseline Management](baseline-management.md) for storage workflows.
+  [Storing Baselines](baseline-storage.md) for storage workflows.
 
 ## Recipes
 

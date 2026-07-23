@@ -1513,14 +1513,29 @@ _ADR_STATUS_HEADING_RE = re.compile(r"^## Status\s*\n+(.+)$", re.MULTILINE)
 _ADR_REPLACEMENT_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
 
-def _links_to_another_adr(status: str) -> bool:
-    """True if `status` contains a Markdown link whose target looks like
-    another ADR file (matches _ADR_FILE_RE), not just any link at all -- a
-    "Superseded" status could otherwise link to unrelated context (e.g. a
-    plan doc explaining why) and still satisfy a bare "has a link" check."""
+def _links_to_another_adr(status: str, adr_dir: Path) -> bool:
+    """True if `status` contains a Markdown link that resolves to another
+    real ADR file inside `adr_dir` -- checking only the link target's
+    basename against _ADR_FILE_RE isn't enough, since a link like
+    `[plan](../notes/002-plan.md)` has a basename that matches the ADR
+    filename pattern while actually pointing outside the ADR directory
+    entirely. And it must be more than "any link at all" -- a "Superseded"
+    status could otherwise link to unrelated context (e.g. a plan doc
+    explaining why) and still satisfy a bare "has a link" check."""
+    resolved_adr_dir = adr_dir.resolve()
     for href in _ADR_REPLACEMENT_LINK_RE.findall(status):
-        basename = href.split("#", 1)[0].split("/")[-1]
-        if _ADR_FILE_RE.match(basename):
+        href_path = href.split("#", 1)[0].strip()
+        if (
+            not href_path
+            or "://" in href_path
+            or href_path.startswith(("mailto:", "/"))
+        ):
+            continue
+        basename = href_path.split("/")[-1]
+        if not _ADR_FILE_RE.match(basename):
+            continue
+        resolved = (adr_dir / href_path).resolve()
+        if resolved.parent == resolved_adr_dir and resolved.is_file():
             return True
     return False
 
@@ -1590,7 +1605,9 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
             )
             continue
         leading_word = re.split(r"[\s—.,;-]", status.strip(), maxsplit=1)[0]
-        if leading_word.lower() == "superseded" and not _links_to_another_adr(status):
+        if leading_word.lower() == "superseded" and not _links_to_another_adr(
+            status, adr_dir
+        ):
             f.err(
                 "adr-index-nav-sync",
                 f"docs/development/adr/{md.name}: status is 'Superseded' "

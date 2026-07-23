@@ -66,6 +66,9 @@ topics:
     fact_sources:
       - abicheck/model.py
       - abicheck/serialization.py
+    task_pages:
+      - user-guide/create-baseline.md
+      - user-guide/baseline-storage.md
     allowed_summaries:
       - getting-started.md
 

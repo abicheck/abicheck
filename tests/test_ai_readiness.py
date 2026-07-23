@@ -230,11 +230,14 @@ def test_adr_index_nav_sync_accepts_superseded_with_replacement_link(
     adr_dir = fake_docs / "development" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
-        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+        "| [001](001-example.md) | Example | |\n"
+        "| [002](002-example.md) | Example 2 | |\n",
+        encoding="utf-8",
     )
     (adr_dir / "001-example.md").write_text(
         "# ADR-001\n\n**Status:** Superseded by [ADR-002](002-example.md).\n"
     )
+    (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
     (fake_root / "mkdocs.yml").write_text(
         "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
     )
@@ -264,6 +267,40 @@ def test_adr_index_nav_sync_rejects_unrelated_link_as_replacement(
     (adr_dir / "001-example.md").write_text(
         "# ADR-001\n\n**Status:** Superseded, see "
         "[the plan doc](../plans/some-plan.md) for context.\n"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors)
+
+
+def test_adr_index_nav_sync_rejects_adr_shaped_link_outside_adr_dir(
+    car, tmp_path, monkeypatch
+):
+    """A link whose *basename* matches the ADR filename pattern but whose
+    target resolves outside docs/development/adr/ (e.g. a coincidentally
+    numbered file in a notes/ directory) must not satisfy the
+    replacement-link requirement -- basename-only matching previously
+    accepted it (regression test for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    notes_dir = fake_docs / "notes"
+    notes_dir.mkdir(parents=True)
+    (notes_dir / "002-plan.md").write_text("# Plan\n", encoding="utf-8")
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | |\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded, see "
+        "[the plan](../../notes/002-plan.md) for context.\n"
     )
     (fake_root / "mkdocs.yml").write_text(
         "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"

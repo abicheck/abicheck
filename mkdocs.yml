@@ -47,6 +47,8 @@ nav:
       - Producing Source Facts: user-guide/producing-source-facts.md
       - Output Formats: user-guide/output-formats.md
       - Baseline Management: user-guide/baseline-management.md
+      - Creating and Comparing a Baseline: user-guide/create-baseline.md
+      - Storing Baselines: user-guide/baseline-storage.md
     - CI & Gating:
       - CI Gating Pipeline: user-guide/ci-gating.md
       - GitHub Action: user-guide/github-action.md

@@ -626,6 +626,24 @@ def test_page_links_to_still_finds_real_link_alongside_image(
     assert dc._page_links_to(page, "owner.md") is True
 
 
+def test_page_links_to_ignores_links_inside_html_comments(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A link hidden inside `<!-- ... -->` is invisible in the rendered
+    page -- MkDocs (like any Markdown renderer) drops HTML comments
+    entirely, so it can't be the required backlink even though the raw
+    regex would otherwise match it (regression test for the gap flagged in
+    PR #619 review)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(
+        "<!-- TODO: link to [owner](owner.md) once written -->\n",
+        encoding="utf-8",
+    )
+    assert dc._page_links_to(page, "owner.md") is False
+
+
 def test_page_links_to_ignores_links_inside_fenced_code_blocks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
