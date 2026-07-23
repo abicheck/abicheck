@@ -356,6 +356,17 @@ root-cause grouping, deliberately scoped to JSON only:
   (`_root_cause_key_and_display` in `reporter.py`): `caused_by_type`, else
   non-empty `symbol`, else a unique per-finding key — so uncorrelated
   anonymous findings stay singleton.
+- The `symbol` tier above then over-corrected the other way: two
+  *independent* findings sharing a non-empty symbol with no
+  `caused_by_type` at all (e.g. a `func_return_changed` and a
+  `func_params_changed` finding both on `foo`) grouped together purely
+  because the key matched, contradicting the same "only `caused_by_type`
+  correlates" contract. Fixed by computing `referenced_causes` — the set
+  of `caused_by_type` values actually present across the batch — first;
+  a bare symbol is only used as a *grouping* key when some other
+  finding's `caused_by_type` names it, otherwise it keys uniquely (via
+  finding id) while still showing the symbol as its own singleton
+  group's display root.
 - The `--used-by`/`--required-symbol` scoped-gate fold-in
   (`cli_compare_fold._fold_scoped_compat_into_text`) appends its
   synthetic scoped-only/missing-contract entries to the flat `changes[]`

@@ -522,6 +522,23 @@ class TestRootCauseReporter:
         assert d["root_cause_count"] == 1
         assert d["root_causes"][0]["root"] == "ns::pub_new"
 
+    def test_independent_findings_sharing_a_symbol_stay_separate(self):
+        """Codex review: two independent findings on the same symbol with no
+        caused_by_type correlation (e.g. a return-type change and a parameter
+        change, both on "foo") must NOT collapse into one root cause just
+        because they share a symbol -- only caused_by_type correlates
+        findings in this slice's contract."""
+        a = Change(ChangeKind.FUNC_RETURN_CHANGED, "foo", "return type changed")
+        b = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "parameter changed")
+        r = _result(Verdict.BREAKING, changes=[a, b])
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert d["root_cause_count"] == 2
+        for group in d["root_causes"]:
+            assert group["root"] == "foo"
+            assert group["finding_count"] == 1
+        ids = {group["root_cause_id"] for group in d["root_causes"]}
+        assert len(ids) == 2
+
     def test_anonymous_findings_with_no_symbol_stay_separate(self):
         """Codex review: SOURCE_FACT_COVERAGE_INCOMPLETE/
         SOURCE_BINARY_PROVENANCE_MISMATCH (source_diff.py) are both

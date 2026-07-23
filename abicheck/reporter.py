@@ -420,18 +420,27 @@ def _root_cause_key_and_display(
     symbol: str | None,
     kind_value: str,
     finding_id: str,
+    *,
+    referenced_causes: frozenset[str] = frozenset(),
 ) -> tuple[str, str]:
     """Grouping key + display root for one root-cause finding: ``caused_by_type``
-    when set, else a non-empty ``symbol``, else a unique per-finding key (an
-    empty-symbol/no-caused_by_type fallback would wrongly collapse unrelated
-    aggregate findings onto one shared ``""`` group). Shared by
+    when set, else its own ``symbol`` -- but only as a *grouping* key when
+    some other finding's ``caused_by_type`` actually names that symbol
+    (Codex review: two independent findings that merely share a symbol with
+    no producer-set correlation, e.g. ``func_return_changed`` and
+    ``func_params_changed`` both on ``foo``, must stay singleton -- the
+    first-slice contract is that only ``caused_by_type`` correlates
+    findings). Otherwise a unique per-finding key, with the symbol (or, if
+    empty, the kind) still used as the *display* root. Shared by
     :func:`_to_json_root_cause` and the scoped-gate fold-in in
     ``cli_compare_fold.py``, which appends synthetic findings afterwards.
     """
     if caused_by_type:
         return caused_by_type, caused_by_type
     if symbol:
-        return symbol, symbol
+        if symbol in referenced_causes:
+            return symbol, symbol
+        return f"finding:{finding_id}", symbol
     return f"finding:{finding_id}", kind_value
 
 
@@ -513,12 +522,22 @@ def _to_json_root_cause(
         )
         for c in changes
     ]
+    # A symbol only earns the "grouping" reading of the caused_by_type/symbol
+    # fallback when some *other* finding's caused_by_type actually names it --
+    # otherwise two independent findings that merely share a symbol (e.g.
+    # func_return_changed and func_params_changed both on "foo") would wrongly
+    # collapse into one root cause (Codex review).
+    referenced_causes = frozenset(c.caused_by_type for c in changes if c.caused_by_type)
     groups: dict[str, list[dict[str, object]]] = {}
     roots: dict[str, str] = {}
     order: list[str] = []
     for c, entry in zip(changes, entries):
         key, root_display = _root_cause_key_and_display(
-            c.caused_by_type, c.symbol, c.kind.value, str(entry["finding_id"])
+            c.caused_by_type,
+            c.symbol,
+            c.kind.value,
+            str(entry["finding_id"]),
+            referenced_causes=referenced_causes,
         )
         if key not in groups:
             groups[key] = []

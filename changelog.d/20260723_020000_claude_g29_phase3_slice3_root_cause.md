@@ -37,4 +37,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   synthetic scoped-only change or missing-contract label (folded into
   `changes[]` after `root_causes` is built) is now folded into
   `root_causes`/`root_cause_count` too, instead of only the flat
-  `changes[]`.
+  `changes[]`. Separately, two *independent* findings that merely share a
+  non-empty symbol with no `caused_by_type` correlation (e.g. a
+  `func_return_changed` and a `func_params_changed` finding both on `foo`)
+  no longer wrongly collapse into one root cause either — a symbol is
+  only used as a grouping key when some other finding's `caused_by_type`
+  actually names it; otherwise each finding keys uniquely, with the
+  symbol still shown as its own singleton group's display root.

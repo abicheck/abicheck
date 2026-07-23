@@ -229,6 +229,14 @@ def _fold_scoped_compat_into_text(
             # whose only gated issue is one of these would report a nonempty
             # `changes` array next to `root_cause_count: 0`, losing the only
             # gate failure for a root-cause consumer.
+            # Mirrors _to_json_root_cause's own referenced_causes computation
+            # (Codex review): a symbol only groups when some caused_by_type
+            # actually names it, not merely because it's shared.
+            referenced_causes: frozenset[str] = frozenset(
+                str(entry.get("caused_by_type"))
+                for entry in changes_list
+                if isinstance(entry, dict) and entry.get("caused_by_type")
+            ) | frozenset(c.caused_by_type for c in scoped_only if c.caused_by_type)
             root_cause_entries: list[tuple[str, str, dict[str, object]]] = []
             for c in scoped_only:
                 entry = _change_to_dict(
@@ -247,7 +255,11 @@ def _fold_scoped_compat_into_text(
                 )
                 changes_list.append(entry)
                 key, root_display = _root_cause_key_and_display(
-                    c.caused_by_type, c.symbol, c.kind.value, _finding_id(c)
+                    c.caused_by_type,
+                    c.symbol,
+                    c.kind.value,
+                    _finding_id(c),
+                    referenced_causes=referenced_causes,
                 )
                 root_cause_entries.append((key, root_display, entry))
             for label in missing_labels:
@@ -276,12 +288,19 @@ def _fold_scoped_compat_into_text(
                     "reachability_state": ReachabilityState.UNKNOWN.value,
                 }
                 changes_list.append(entry)
-                # A missing-contract label has no caused_by_type and its
-                # `symbol` is the label itself, which is always non-empty --
-                # so this always keys on the label, never the finding_id
-                # fallback (mirrors the non-empty-symbol branch above).
+                # A missing-contract label has no caused_by_type; its
+                # `symbol` (the label) only becomes a *grouping* key if some
+                # other finding's caused_by_type names it, same as any other
+                # symbol-only fallback (see referenced_causes above). There is
+                # no real Change/finding_id to disambiguate an unreferenced
+                # label by, so the label itself (always unique per label)
+                # fills that role instead.
                 key, root_display = _root_cause_key_and_display(
-                    None, label, missing_kind, ""
+                    None,
+                    label,
+                    missing_kind,
+                    label,
+                    referenced_causes=referenced_causes,
                 )
                 root_cause_entries.append((key, root_display, entry))
             _add_entries_to_root_causes(payload, root_cause_entries)
