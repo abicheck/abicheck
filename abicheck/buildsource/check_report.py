@@ -60,7 +60,7 @@ import re
 from typing import Any
 
 from ..checker_types import validate_check_id, validate_evidence_depth
-from ..schemas import REPORT_SCHEMA_VERSION
+from ..schemas import REPORT_SCHEMA_VERSION, SCAN_SCHEMA_VERSION
 
 #: Safe identifier charset shared by every ``check_id`` component (ADR-047
 #: §7's delimiter-unambiguity fix) -- target/bundle names, profile ids, and
@@ -258,7 +258,27 @@ def augment_report(
     out = dict(report)
     check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
     effective_depth, coverage = derive_effective_depth(report, requested_depth)
-    out["report_schema_version"] = REPORT_SCHEMA_VERSION
+    if "scan_schema_version" in report:
+        # A scan report (baseline-channel: none) has its own schema marker
+        # and shape (level/risk/coverage/... -- no library/old_file/summary/
+        # changes/...) -- bump it to the latest version for this envelope's
+        # new additive fields instead of also stamping report_schema_version
+        # (the *compare*-report schema's marker), which would make a
+        # downstream validator select compare_report.schema.json for a
+        # report that structurally can never satisfy it (Codex review).
+        out["scan_schema_version"] = SCAN_SCHEMA_VERSION
+    elif "libraries" in report and "old_dir" in report:
+        # A kind: bundle / directory-package compare report (the per-library
+        # release fan-out's own summary shape: verdict/old_dir/new_dir/
+        # libraries/... -- no singular library/old_file/new_file/summary/
+        # changes/... either) has never had a schema of its own; leave it
+        # unversioned here too rather than falsely claiming the single-pair
+        # compare schema (same rationale as the scan case above, Codex
+        # review). ADR-047 §7's identity/policy-gate fields below still
+        # apply regardless of report shape.
+        pass
+    else:
+        out["report_schema_version"] = REPORT_SCHEMA_VERSION
     out["check_id"] = check_id
     out["target_id"] = check_id
     out["profile_id"] = profile_id

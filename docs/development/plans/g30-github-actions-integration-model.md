@@ -840,6 +840,31 @@ one follow-up commit:
   shape) now validate. `docs/schemas/v1/compare_report.schema.json`
   re-synced via `scripts/publish_schemas.py`.
 
+The same review round separately caught that the schema fix above didn't
+cover every report shape `augment_report` can receive: a successful
+`baseline-channel: none` scan report (its own `scan_schema_version` shape --
+`level`/`risk`/`coverage`/... , no `library`/`old_file`/`summary`/`changes`)
+or a `kind: bundle` directory-compare report (the per-library release
+fan-out's own summary shape -- `verdict`/`old_dir`/`new_dir`/`libraries`,
+also no singular `library`/`old_file`/`summary`/`changes`) still got
+`report_schema_version` stamped onto them unconditionally, same as a normal
+single-pair compare report. Confirmed by reading `scan_engine.py`'s report
+dict and `cli_compare_release_helpers.py`'s `_format_release_json` by hand
+— neither shape has ever had a schema, let alone this one. A downstream
+validator selecting a schema by `report_schema_version`'s presence would
+pick `compare_report.schema.json` for either shape and reject it against
+that schema's real-verdict branch. Fixed in `augment_report`: a report
+carrying `scan_schema_version` gets that field bumped to the current
+`SCAN_SCHEMA_VERSION` instead of also gaining `report_schema_version`; a
+report shaped like the release fan-out's summary (`libraries` + `old_dir`
+present) gets neither schema marker, since that shape has never had one to
+claim. ADR-047 §7's identity/policy-gate-decision fields (`check_id`,
+`policy_gate_decision`, etc.) are unaffected either way — only the schema
+marker choice is shape-aware now. New
+`test_scan_report_gets_scan_schema_version_not_report_schema_version` /
+`test_bundle_release_report_gets_no_schema_version_stamp` cases in
+`tests/test_check_report.py`.
+
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
 Implements ADR-047 §4/§5 (`run-plan.json` generation + matrix + trailing

@@ -81,6 +81,17 @@ it should read in CHANGELOG.md. Delete the other sections.
   `verdict`'s enum now also allows `ERROR`/`NO_BASELINE`, and the
   compare-specific fields are only required (via an `allOf`/`if`/`then`)
   when `verdict` is one of the five real values.
+- **`actions/check-target` no longer falsely claims the compare-report schema
+  for scan or `kind: bundle` reports** — `augment_report` unconditionally
+  stamped `report_schema_version` (the *compare*-report schema's marker) onto
+  every report regardless of its actual shape, so a successful
+  `baseline-channel: none` scan report (its own `scan_schema_version`
+  shape) or a `kind: bundle` directory-compare report (the release
+  fan-out's `verdict`/`old_dir`/`new_dir`/`libraries` shape) would validate
+  as broken against `compare_report.schema.json`'s single-pair-compare
+  required fields. A scan report now only bumps its own
+  `scan_schema_version`; a bundle/release report gets neither marker (it has
+  never had a schema of its own).
 
 <!--
 ### Performance

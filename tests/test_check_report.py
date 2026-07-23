@@ -194,6 +194,63 @@ class TestAugmentReport:
         assert out["check_evidence_coverage"] == {"state": "complete", "reasons": []}
         assert out["report_schema_version"] != "2.12"  # bumped to the current version
 
+    def test_scan_report_gets_scan_schema_version_not_report_schema_version(self):
+        """A scan report (baseline-channel: none) has its own schema marker
+        and shape -- no library/old_file/summary/changes/... -- so it must
+        never be stamped with report_schema_version (the *compare*-report
+        schema's marker): a downstream validator selecting a schema by that
+        key's presence would pick compare_report.schema.json for a report
+        that structurally can never satisfy it (Codex review)."""
+        scan_report = {
+            "scan_schema_version": "1.1",
+            "verdict": "COMPATIBLE",
+            "exit_code": 0,
+            "level": {"depth": "headers"},
+        }
+        out = augment_report(
+            scan_report,
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert "report_schema_version" not in out
+        assert out["scan_schema_version"] != "1.1"  # bumped to the current version
+
+    def test_bundle_release_report_gets_no_schema_version_stamp(self):
+        """A kind: bundle / directory-package compare report (the per-library
+        release fan-out's own verdict/old_dir/new_dir/libraries shape) has
+        never had a schema of its own -- must not be falsely stamped with
+        the single-pair compare schema's report_schema_version either
+        (Codex review)."""
+        bundle_report = {
+            "verdict": "BREAKING",
+            "old_dir": "/old",
+            "new_dir": "/new",
+            "libraries": [{"library": "libpvxs", "verdict": "BREAKING"}],
+            "severity": {
+                "config": {},
+                "categories": {},
+                "exit_code": 4,
+                "blocking": True,
+                "blocking_categories": ["abi_breaking"],
+            },
+        }
+        out = augment_report(
+            bundle_report,
+            name="pvxs-bundle",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+        )
+        assert "report_schema_version" not in out
+        assert "scan_schema_version" not in out
+        # ADR-047 identity/policy-gate fields still apply regardless of shape.
+        assert out["check_id"] == "pvxs-bundle@p#c@headers"
+        assert out["policy_gate_decision"] == "fail"
+
     def test_degrades_effective_depth_from_real_report_signal(self):
         """The Codex-flagged bug: a producer-less build/source check (direct
         --build-info/--sources, no collect-facts composition) must not be
