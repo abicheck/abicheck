@@ -1587,6 +1587,24 @@ def _strip_adr_inline_code(text: str) -> str:
     return "".join(out)
 
 
+#: HTML comments are invisible when MkDocs renders the page -- a link
+#: hidden inside one (`<!-- [ADR-050](050-new.md) -->`) must not satisfy a
+#: "links to X" check any more than one buried in code would (PR #619
+#: review).
+_ADR_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def _strip_adr_link_noise(text: str) -> str:
+    """Strip fenced code, inline code, and HTML comments before scanning
+    `text` for Markdown links -- all three render as non-navigable or
+    invisible content in MkDocs, so a link-shaped string inside any of them
+    must not count as a real link."""
+    text = _strip_adr_fenced_code(text)
+    text = _strip_adr_inline_code(text)
+    text = _ADR_HTML_COMMENT_RE.sub("", text)
+    return text
+
+
 def _resolve_adr_href_target(
     href: str, adr_dir: Path, resolved_adr_dir: Path
 ) -> Path | None:
@@ -1757,12 +1775,10 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
     adr_dir = DOCS / "development" / "adr"
     if not adr_dir.is_dir():
         return
-    # Stripped before link scanning (_index_links_to_adr) so a fenced or
-    # inline-code example demonstrating link syntax can't be misread as a
-    # real, navigable link to the index page (PR #619 review).
-    index_text = _strip_adr_inline_code(
-        _strip_adr_fenced_code(_read(adr_dir / "index.md"))
-    )
+    # Stripped before link scanning (_index_links_to_adr) so a fenced/inline
+    # code example or an HTML comment can't be misread as a real, navigable
+    # link to the index page (PR #619 review).
+    index_text = _strip_adr_link_noise(_read(adr_dir / "index.md"))
     resolved_adr_dir = adr_dir.resolve()
     nav_refs = _collect_mkdocs_nav_refs()
     index_nav_target = "development/adr/index.md"
@@ -1782,7 +1798,10 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
                 f"docs/development/adr/{md.name}: not linked from "
                 f"docs/development/adr/index.md",
             )
-        text = _read(md)
+        # Same stripping as index_text above -- a Superseded status hiding
+        # its replacement link in inline code or an HTML comment must not
+        # satisfy _links_to_another_adr() below (PR #619 review).
+        text = _strip_adr_link_noise(_read(md))
         status = _adr_status_text(text)
         if status is None:
             f.err(

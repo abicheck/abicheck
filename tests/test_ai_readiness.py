@@ -125,6 +125,113 @@ def test_adr_index_and_nav_sync_catches_missing_index_nav_entry(
     )
 
 
+def test_adr_index_nav_sync_ignores_link_hidden_in_html_comment(
+    car, tmp_path, monkeypatch
+):
+    """A link hidden inside an HTML comment (`<!-- [001](001-example.md)
+    -->`) is invisible when MkDocs renders index.md -- it must not satisfy
+    the "linked from index.md" requirement any more than a code sample
+    would (regression test for the gap flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "<!-- [001](001-example.md) -->\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("not linked from" in msg for _, msg in f.errors), (
+        f"expected a not-linked-from-index error, got: {f.errors}"
+    )
+
+
+def test_adr_index_nav_sync_rejects_replacement_link_hidden_in_inline_code(
+    car, tmp_path, monkeypatch
+):
+    """A Superseded ADR whose replacement pointer is wrapped in inline code
+    (`Superseded by \\`[ADR-002](002-example.md)\\``) renders as literal
+    code in MkDocs, not a navigable link -- it must not satisfy the
+    replacement-link requirement (regression test for the gap flagged in
+    PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | Superseded |\n"
+        "| [002](002-example.md) | Replacement | Accepted |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded by `[ADR-002](002-example.md)`\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "002-example.md").write_text(
+        "# ADR-002\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors), (
+        f"expected a missing-replacement-link error, got: {f.errors}"
+    )
+
+
+def test_adr_index_nav_sync_rejects_replacement_link_hidden_in_comment(
+    car, tmp_path, monkeypatch
+):
+    """Same as above, but the replacement link is hidden in an HTML comment
+    instead of inline code."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "| [001](001-example.md) | Example | Superseded |\n"
+        "| [002](002-example.md) | Replacement | Accepted |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Superseded. <!-- [ADR-002](002-example.md) -->\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "002-example.md").write_text(
+        "# ADR-002\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("doesn't link to its replacement" in msg for _, msg in f.errors), (
+        f"expected a missing-replacement-link error, got: {f.errors}"
+    )
+
+
 def test_adr_index_nav_sync_rejects_bare_filename_mention_as_link(
     car, tmp_path, monkeypatch
 ):
