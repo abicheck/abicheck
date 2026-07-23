@@ -1409,6 +1409,43 @@ class TestHiddenFriendSurface:
         )
         assert classify_change_surface(c, s, s) == (True, None)
 
+    def test_ambiguous_bare_name_without_qualified_data_falls_through(self):
+        """Regression (Codex review, sixth round): when *neither* colliding
+        type carries a ``qualified_name`` (a producer that never populates
+        it — the realistic "legacy" case, unlike the two tests above which
+        rely on the qualified-key index to disambiguate), the bare-name
+        ``origin_by_key`` collision must not be trusted either.  An
+        unrelated *public* ``Foo`` sharing the bare tail with the
+        confidently-private actual owner must not silently keep this
+        finding via a false PUBLIC_HEADER signal from the merged bare-name
+        origin — it must fall through to the friend function's own
+        recorded origin (private-header) instead."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "priv::operator==",
+                    mangled="_ZN4priv3FooeqERKS0_S1_",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+            ],
+            types=[
+                _rec("Foo", origin=ScopeOrigin.PUBLIC_HEADER),
+                _rec("Foo", origin=ScopeOrigin.PRIVATE_HEADER),
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert "Foo" in s.ambiguous_type_names
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN4priv3FooeqERKS0_S1_",
+            caused_by_type="priv::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
+
     def test_owner_added_together_with_unknown_origin_stays_retained(self):
         """The one-sided-presence relaxation must still be conservative: an
         owner added together with the friend but recorded with an UNKNOWN

@@ -351,6 +351,15 @@ class PublicSurface:
     # ``befriending`` class) resolve it exactly instead of falling into that
     # collision (Codex review).
     origin_by_qualified_key: dict[str, ScopeOrigin] = field(default_factory=dict)
+    # Names (bare or full) that resolve to *more than one* record/enum in
+    # this snapshot — the same collision ``origin_by_qualified_key`` exists
+    # to route around, but that only helps when a qualified name was
+    # actually recorded. When it wasn't (a producer that doesn't populate
+    # ``qualified_name`` at all), a caller must know the plain ``origin_by_key``
+    # lookup for such a name is unreliable (merged across unrelated types,
+    # public wins conservatively) rather than trust it outright — see
+    # :func:`_hidden_friend_owner_effective_origin` (Codex review).
+    ambiguous_type_names: set[str] = field(default_factory=set)
     # True when *any* declaration carried a non-UNKNOWN origin — i.e. the
     # snapshot was dumped with a public-header set so provenance is available.
     # Lets the classifier distinguish a confident reachability demotion from one
@@ -443,6 +452,10 @@ def _index_surface_types(
             )
     for alias in snap.typedefs:
         surface.all_types.add(alias)
+    for name_map in (record_by_name, enum_by_name):
+        surface.ambiguous_type_names.update(
+            name for name, entries in name_map.items() if len(entries) > 1
+        )
     return record_by_name, enum_by_name
 
 
@@ -872,13 +885,28 @@ def _hidden_friend_owner_effective_origin(
     ``name`` (never the bare tail extracted from it), so a legacy side
     whose ``name`` *is* the qualified string was otherwise treated as
     absent even though its origin is recorded under that exact key too
-    (Codex review, third round)."""
+    (Codex review, third round).
+
+    Neither the ``owner`` nor the ``bare`` key is trusted when
+    ``ambiguous_type_names`` says it names more than one record/enum on
+    this side (Codex review, sixth round): an unrelated *public* type
+    sharing that bare tail (``pub::Foo`` alongside the actually-private
+    ``priv::Foo``) would otherwise merge into ``origin_by_key`` as
+    PUBLIC_HEADER (conservative "any side public" merge — safe for
+    reachability, but wrong here, since it would hide a genuinely private
+    owner's demotion). Reported as ``UNKNOWN`` rather than ``None`` in that
+    case — the type genuinely exists on this side, we just can't tell
+    which one, which is a real disagreement signal, not absence."""
     exact = surf.origin_by_qualified_key.get(owner)
     if exact is not None:
         return exact
     if owner in surf.all_types:
+        if owner in surf.ambiguous_type_names:
+            return ScopeOrigin.UNKNOWN
         return surf.origin_by_key.get(owner, ScopeOrigin.UNKNOWN)
     if bare in surf.all_types:
+        if bare in surf.ambiguous_type_names:
+            return ScopeOrigin.UNKNOWN
         return surf.origin_by_key.get(bare, ScopeOrigin.UNKNOWN)
     return None
 
