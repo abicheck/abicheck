@@ -25,7 +25,10 @@
   explicitly asked to gate on — and the persisted `severity` block is
   escalated to the `abi_breaking` tier for it too, so `gate-mode: deferred`'s
   later `aggregate` read (which only ever looks at `severity.exit_code`)
-  can't miss it either. See `docs/reference/check-target.md`.
+  can't miss it either. `profile` is validated as required up front (GitHub
+  Actions doesn't actually enforce `required: true` for composite-action
+  inputs), instead of only failing deep inside a later step with no report
+  produced. See `docs/reference/check-target.md`.
 
 <!--
 ### Changed

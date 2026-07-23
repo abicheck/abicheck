@@ -12,6 +12,7 @@ _fail() {
 KIND="${INPUT_KIND:-target}"
 TARGET_KIND="${INPUT_TARGET_KIND:-library}"
 NAME="${INPUT_NAME:-}"
+PROFILE="${INPUT_PROFILE:-}"
 BUNDLE_MEMBERS="${INPUT_BUNDLE_MEMBERS:-[]}"
 BASELINE_CHANNEL="${INPUT_BASELINE_CHANNEL:?baseline-channel input is required}"
 BASELINE_PATH="${INPUT_BASELINE_PATH:-}"
@@ -43,6 +44,19 @@ case "$EVIDENCE_PRODUCER" in
 esac
 if [[ -z "$NAME" ]]; then
   _fail "name input is required."
+fi
+if [[ -z "$PROFILE" ]]; then
+  # action.yml declares profile: required: true, but GitHub Actions does
+  # NOT actually enforce `required: true` for composite-action inputs --
+  # it's documentation only; an omitted input simply arrives as an empty
+  # string (github.com/orgs/community/discussions/26777). Without this
+  # check, a workflow that forgot `profile:` would sail past this step and
+  # only fail deep inside run.sh's `PROFILE="${INPUT_PROFILE:?}"` bash
+  # parameter expansion -- which aborts the finalize step immediately,
+  # before report_envelope.py ever runs, so the check produces no
+  # check-target-report*.json/outputs at all despite ADR-047 §7's "the
+  # report-envelope step always executes" contract (Codex review).
+  _fail "profile input is required."
 fi
 if [[ "$KIND" == "bundle" ]]; then
   if [[ "$TARGET_KIND" != "library" ]]; then

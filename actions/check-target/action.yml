@@ -265,6 +265,7 @@ runs:
         INPUT_KIND: ${{ inputs.kind }}
         INPUT_TARGET_KIND: ${{ inputs.target-kind }}
         INPUT_NAME: ${{ inputs.name }}
+        INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_BUNDLE_MEMBERS: ${{ inputs.bundle-members }}
         INPUT_BASELINE_CHANNEL: ${{ inputs.baseline-channel }}
         INPUT_BASELINE_PATH: ${{ inputs.baseline-path }}

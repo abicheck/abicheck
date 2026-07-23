@@ -157,6 +157,26 @@ class TestValidateInputs:
         result = _run(VALIDATE_SH, {**_BASE_IDENTITY}, tmp_path)
         assert result.returncode == 64
 
+    def test_missing_profile_fails_here_not_deep_in_run_sh(
+        self, tmp_path: Path
+    ) -> None:
+        """action.yml declares profile: required: true, but GitHub Actions
+        does not actually enforce `required: true` for composite-action
+        inputs -- an omitted input just arrives as an empty string. Without
+        this check, a workflow that forgot `profile:` would sail past this
+        step and only fail deep inside run.sh's bash parameter expansion,
+        producing no report/outputs at all (Codex review)."""
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_PROFILE": "",
+                "INPUT_BASELINE_PATH": "./baseline",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
     def test_unknown_kind_fails(self, tmp_path: Path) -> None:
         result = _run(
             VALIDATE_SH,

@@ -1070,6 +1070,27 @@ into the actual `abicheck.aggregate.GateInfo.from_report_data` for
 `gate-mode: deferred` and asserts it reads a blocking gate — not just that
 the shell/Python logic looks right on paper.
 
+An eighth round of Codex review then caught that `profile` — declared
+`required: true` in `action.yml` — was never actually validated anywhere:
+`validate-inputs.sh` checks `name` but never read `INPUT_PROFILE` at all,
+and the "Validate check-target inputs" step's own env block didn't even
+forward it. This matters because **GitHub Actions does not actually
+enforce `required: true` for composite-action inputs** — confirmed via
+`github.com/orgs/community/discussions/26777` and GitHub's own metadata-
+syntax docs: an omitted required input simply arrives as an empty string,
+with no automatic failure. Without an explicit check, a workflow that
+forgot `profile:` would sail past validation and only fail deep inside
+`run.sh`'s `PROFILE="${INPUT_PROFILE:?}"` bash parameter expansion, which
+aborts the finalize step immediately — before `report_envelope.py` ever
+runs — so the check would produce no `check-target-report*.json` and no
+outputs at all, despite ADR-047 §7's "the report-envelope step always
+executes" contract. Fixed: `INPUT_PROFILE: ${{ inputs.profile }}` added to
+the validate step's env block, and `validate-inputs.sh` now fails loud
+(exit 64, matching every other required-input check there) when `profile`
+is empty, the same way it already does for `name`. New
+`test_missing_profile_fails_here_not_deep_in_run_sh` in
+`tests/test_action_check_target.py`.
+
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
 Implements ADR-047 §4/§5 (`run-plan.json` generation + matrix + trailing
