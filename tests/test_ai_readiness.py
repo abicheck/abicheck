@@ -189,6 +189,72 @@ def test_adr_index_nav_sync_accepts_reference_style_index_link(
     assert f.errors == []
 
 
+def test_adr_index_nav_sync_ignores_link_syntax_inside_fenced_code(
+    car, tmp_path, monkeypatch
+):
+    """A fenced code sample demonstrating Markdown link syntax (e.g. showing
+    an author how to add an index row) must not count as a real link to the
+    ADR it mentions -- MkDocs renders a code block verbatim, not as a
+    navigable link, so an ADR only "linked" from inside one is still
+    unreachable from the published index page (regression test for the gap
+    flagged in PR #619 review)."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "Add a new row like this:\n\n"
+        "```\n| [001](001-example.md) | Example | Accepted |\n```\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("not linked from" in msg for _, msg in f.errors), (
+        f"expected a not-linked-from-index error, got: {f.errors}"
+    )
+
+
+def test_adr_index_nav_sync_ignores_link_syntax_inside_inline_code(
+    car, tmp_path, monkeypatch
+):
+    """Same as the fenced-code case above, but for a single-backtick inline
+    code span instead of a ``` block."""
+    fake_root = tmp_path
+    fake_docs = fake_root / "docs"
+    adr_dir = fake_docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        "Example row: `[001](001-example.md)`\n", encoding="utf-8"
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
+    )
+    (fake_root / "mkdocs.yml").write_text(
+        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(car, "ROOT", fake_root)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+
+    f = car.Findings()
+    car.check_adr_index_and_nav_sync(f)
+    assert any("not linked from" in msg for _, msg in f.errors), (
+        f"expected a not-linked-from-index error, got: {f.errors}"
+    )
+
+
 def test_adr_index_nav_sync_does_not_require_individual_adr_in_nav(
     car, tmp_path, monkeypatch
 ):

@@ -1522,6 +1522,70 @@ _ADR_REPLACEMENT_LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 _ADR_REF_LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\[([^\]]*)\]")
 _ADR_REF_DEF_RE = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 
+#: A fenced-code opening delimiter (``` or ~~~, 3+ repeats, optional leading
+#: indent up to 3 spaces per CommonMark, optional trailing info string).
+_ADR_FENCE_OPEN_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})[^\n]*$")
+_ADR_BACKTICK_RUN_RE = re.compile(r"`+")
+
+
+def _strip_adr_fenced_code(text: str) -> str:
+    """Remove fenced code blocks before scanning `text` for links -- a code
+    sample demonstrating Markdown link syntax (e.g. `[001](001-example.md)`
+    inside a ``` block explaining the convention) would otherwise be
+    misread as a real, navigable link (PR #619 review). Mirrors
+    check_docs_contract.py's _strip_fenced_code: a closing fence must be
+    alone on its own line, using the same delimiter character as the opener
+    with at least as many repeats."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        m = _ADR_FENCE_OPEN_RE.match(lines[i])
+        if m is None:
+            out.append(lines[i])
+            i += 1
+            continue
+        fence = m.group(1)
+        i += 1
+        closer = re.compile(rf"^[ \t]{{0,3}}{fence[0]}{{{len(fence)},}}[ \t]*$")
+        while i < n and closer.match(lines[i]) is None:
+            i += 1
+        i += 1  # skip the closing fence line itself (or EOF, harmlessly)
+    return "\n".join(out)
+
+
+def _strip_adr_inline_code(text: str) -> str:
+    """Remove CommonMark inline code spans (a backtick run, matched by
+    length, not just a single backtick) before scanning for links -- same
+    rationale as _strip_adr_fenced_code, for a link-shaped example wrapped
+    in `single or ``double`` backticks instead of a fenced block."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        m = _ADR_BACKTICK_RUN_RE.match(text, i)
+        if m is None:
+            out.append(text[i])
+            i += 1
+            continue
+        run_len = m.end() - i
+        j = m.end()
+        closer = None
+        while j < n:
+            m2 = _ADR_BACKTICK_RUN_RE.match(text, j)
+            if m2 is None:
+                j += 1
+                continue
+            if m2.end() - j == run_len:
+                closer = m2
+                break
+            j = m2.end()
+        if closer is None:
+            out.append(text[i : m.end()])
+            i = m.end()
+        else:
+            i = closer.end()
+    return "".join(out)
+
 
 def _resolve_adr_href_target(
     href: str, adr_dir: Path, resolved_adr_dir: Path
@@ -1693,7 +1757,12 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
     adr_dir = DOCS / "development" / "adr"
     if not adr_dir.is_dir():
         return
-    index_text = _read(adr_dir / "index.md")
+    # Stripped before link scanning (_index_links_to_adr) so a fenced or
+    # inline-code example demonstrating link syntax can't be misread as a
+    # real, navigable link to the index page (PR #619 review).
+    index_text = _strip_adr_inline_code(
+        _strip_adr_fenced_code(_read(adr_dir / "index.md"))
+    )
     resolved_adr_dir = adr_dir.resolve()
     nav_refs = _collect_mkdocs_nav_refs()
     index_nav_target = "development/adr/index.md"
