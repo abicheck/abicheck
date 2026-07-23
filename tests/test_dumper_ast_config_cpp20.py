@@ -1445,6 +1445,43 @@ def test_cpp20_detector_detects_abbreviated_unconstrained_function_template(tmp_
     assert any(r.reason == "abbreviated-function-template-parameter" for r in reqs)
 
 
+def test_cpp20_detector_detects_custom_concept_constrained_auto_param(tmp_path):
+    """Regression (Codex review): an abbreviated function parameter
+    constrained by a *project-defined* concept (``void f(MyConcept auto
+    x);``) has no ``std::``-qualified concept name, so the finite
+    ``_CPP20_CONSTRAINED_PARAM_CONCEPT_PATTERN`` list never matched it,
+    and the unconstrained-``auto`` check requires ``auto`` to be the
+    parameter's very first token (excluding it too). Unlike a bare
+    identifier inside ``template<...>`` (routinely a valid pre-C++20
+    non-type template parameter's type), an identifier directly followed
+    by ``auto`` has no valid pre-C++20 reading at all regardless of which
+    identifier it is."""
+    headers = _write(
+        tmp_path, "a.h", '#include "concepts.hpp"\nvoid f(MyConcept auto x);\n'
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "custom-constrained-auto-parameter" for r in reqs)
+
+
+def test_cpp20_detector_detects_qualified_custom_concept_auto_param(tmp_path):
+    """Companion: a namespace-qualified project-defined concept."""
+    headers = _write(tmp_path, "a.h", "void f(myproj::Sortable auto x);\n")
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "custom-constrained-auto-parameter" for r in reqs)
+
+
+def test_cpp20_detector_ignores_type_name_before_auto_variable(tmp_path):
+    """Companion: an identifier followed by ``auto`` must be at a
+    parameter's start position (directly after ``(``/``,``) to count — an
+    unrelated identifier earlier in an ordinary declaration, with a
+    *different* ``auto`` appearing elsewhere on its own, must not be
+    conflated with the constrained-auto-parameter shape."""
+    headers = _write(tmp_path, "a.h", "int Foo;\nauto bar() { return 1; }\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_detects_abbreviated_param_with_cv_qualifier(tmp_path):
     """Companion: a cv-qualifier between the enclosing ``(``/``,`` and the
     bare ``auto`` (``void f(const auto& x);``) must not block detection —

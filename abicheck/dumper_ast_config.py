@@ -437,6 +437,55 @@ def _has_abbreviated_unconstrained_auto_param(lookahead: bytes) -> bool:
     return False
 
 
+_QUALIFIED_IDENTIFIER_TAIL_PATTERN = re.compile(rb"(?:[A-Za-z_]\w*::)*[A-Za-z_]\w*\Z")
+
+
+def _has_custom_constrained_auto_param(lookahead: bytes) -> bool:
+    """True if *lookahead* contains an abbreviated function parameter
+    constrained by a project-defined (non-``std::``) concept
+    (``void f(MyConcept auto x);``) — Codex review. Unlike a bare
+    identifier directly inside a ``template<...>`` parameter list
+    (routinely a valid pre-C++20 non-type template parameter's type, e.g.
+    ``template<MyEnum E>`` — see :func:`_has_constrained_param_syntax`'s
+    docstring for why that shape stays scoped to the finite ``std::``
+    list), an identifier immediately followed by the keyword ``auto`` in a
+    parameter's decl-specifier position has no valid pre-C++20 reading at
+    all: a decl-specifier-seq can carry at most one type-determining
+    specifier, and ``auto`` — always a keyword, never usable as an
+    ordinary identifier the way ``concept``/``requires``/``consteval``/
+    ``constinit`` are pre-C++20 — is itself one, so juxtaposing it with an
+    unrelated type name is exclusively the C++20 constrained-placeholder
+    syntax regardless of which concept is named. Reuses the same
+    unambiguous-boundary check as :func:`_has_abbreviated_unconstrained_auto_param`
+    (nothing but the identifier separates ``auto`` from its enclosing
+    ``(``/``,``); a leading cv-qualifier before the identifier
+    (``const MyConcept auto& x``) is a known, deliberately narrow gap —
+    not attempted here, matching this file's incremental-per-reported-case
+    scope rather than a full parameter-declaration parser."""
+    for m in re.finditer(rb"\bauto\b", lookahead):
+        prefix = _strip_trailing_declarator_specifiers(lookahead[: m.start()])
+        prefix = _strip_trailing_attributes(prefix)
+        ident_match = _QUALIFIED_IDENTIFIER_TAIL_PATTERN.search(prefix)
+        if not ident_match:
+            continue
+        before_ident = prefix[: ident_match.start()].rstrip()
+        last = before_ident[-1:]
+        open_pos: int | None
+        if last == b"(":
+            open_pos = len(before_ident) - 1
+        elif last == b",":
+            open_pos = _find_enclosing_open_paren(lookahead, len(before_ident))
+            if open_pos is None:
+                continue
+        else:
+            continue
+        if not _is_lambda_param_list_open_paren(
+            lookahead, open_pos
+        ) and not _is_decltype_open_paren(lookahead, open_pos):
+            return True
+    return False
+
+
 # "requires" only became a reserved keyword in C++20 — any earlier standard
 # allows it as an ordinary identifier, e.g. ``bool requires(int x) { ... }``
 # (a declaration) or ``requires(1);`` (a call), both real uses of a
@@ -992,6 +1041,7 @@ class Cpp20Requirement:
         "requires-expression",
         "requires-clause",
         "constrained-template-parameter",
+        "custom-constrained-auto-parameter",
         "abbreviated-function-template-parameter",
         "consteval-declaration",
         "constinit-declaration",
@@ -1137,6 +1187,12 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
             elif _has_constrained_param_syntax(lookahead):
                 found.append(
                     Cpp20Requirement("constrained-template-parameter", str(p), start_no)
+                )
+            elif _has_custom_constrained_auto_param(lookahead):
+                found.append(
+                    Cpp20Requirement(
+                        "custom-constrained-auto-parameter", str(p), start_no
+                    )
                 )
             elif _has_abbreviated_unconstrained_auto_param(lookahead):
                 found.append(
