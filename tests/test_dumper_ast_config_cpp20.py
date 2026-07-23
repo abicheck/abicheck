@@ -1147,6 +1147,26 @@ def test_cpp20_detector_ignores_constinit_as_shadowed_type_name(tmp_path):
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_concept_shadowed_via_union(tmp_path):
+    """Regression (Codex review, sixth round): the shadowed-type-name
+    patterns only recognized ``struct``/``class`` class-keys, so a
+    pre-C++20 header declaring "concept" as a ``union`` (or ``enum``) —
+    just as legal pre-C++20 as the class-key form — was invisible to the
+    shadow check."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "union concept { int x; };\ntemplate<class T> concept C = {0};\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_consteval_shadowed_via_enum(tmp_path):
+    """Companion: ``consteval`` shadowed via ``enum`` instead of ``union``."""
+    headers = _write(tmp_path, "a.h", "enum consteval { A, B };\nconsteval const *p;\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_ignores_requires_as_shadowed_type_name(tmp_path):
     """Regression (Codex review, sixth round): "requires" only became a
     reserved keyword in C++20 — a pre-C++20 header can legally declare a
@@ -1472,6 +1492,78 @@ def test_cpp20_detector_still_detects_genuine_concept_across_header_set(tmp_path
     api.write_bytes(b"template<class T> concept D = true;\n")
     assert _detect_cpp20_headers([other, api]) is True
     reqs = _find_cpp20_requirements([other, api])
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
+def test_cpp20_detector_ignores_construct_guarded_by_cplusplus_version_check(
+    tmp_path,
+):
+    """Regression (Codex review, sixth round): content behind a
+    ``#if __cplusplus >= 202002L`` guard must not itself drive the
+    -std= decision this heuristic makes — the guard's own condition is
+    what makes that content reachable, and that condition is decided by
+    the very -std= this heuristic would otherwise be choosing. Forcing
+    C++20 mode here would also turn the *unguarded*, active
+    ``int consteval;`` elsewhere in the header into a reserved-word
+    parse error."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if __cplusplus >= 202002L\n"
+        "template<class T> concept C = true;\n"
+        "#endif\n"
+        "int consteval;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_construct_guarded_by_feature_test_macro(tmp_path):
+    """Companion: the same reasoning applies to a standard feature-test
+    macro guard (``__cpp_concepts``), not just a raw ``__cplusplus``
+    comparison."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if __cpp_concepts >= 201907L\n"
+        "template<class T> concept C = true;\n"
+        "#endif\n"
+        "int consteval;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_scans_else_fallback_of_cplusplus_guard_normally(tmp_path):
+    """Companion: the ``#else`` fallback of a ``__cplusplus`` guard is the
+    code path actually compiled whenever this heuristic doesn't force
+    C++20, so it must be scanned like ordinary reachable code — this test
+    only pins that the guarded arm itself doesn't leak a false positive
+    (the fallback here has no C++20 syntax of its own)."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if __cplusplus >= 202002L\n"
+        "template<class T> concept C = true;\n"
+        "#else\n"
+        "int legacy;\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_still_detects_unguarded_construct_alongside_cplusplus_guard(
+    tmp_path,
+):
+    """Companion: a genuine, unguarded C++20 construct elsewhere in the
+    same header must still force detection even when an unrelated
+    ``__cplusplus``-guarded block is also present."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if __cplusplus >= 202002L\nint legacy;\n#endif\n"
+        "template<class T> concept D = true;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
     assert any(r.reason == "concept-declaration" for r in reqs)
 
 

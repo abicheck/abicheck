@@ -142,9 +142,12 @@ _CPP20_CONCEPT_PATTERN = re.compile(rb"\bconcept\s+\w+\s*=")  # concept Addable 
 # concept(int); }; template<class T> concept C = 1;``). No per-initializer
 # check can ever be complete, so this instead detects the one thing that
 # makes every one of those variants possible: a definition of "concept" as
-# an ordinary type name anywhere in the header.
+# an ordinary type name anywhere in the header. Covers ``union``/``enum``
+# as well as ``struct``/``class`` (Codex review, sixth round) — a
+# ``union concept { ... };`` or ``enum concept { ... };`` shadow is just as
+# legal pre-C++20 as the class-key form and was previously invisible here.
 _CONCEPT_AS_TYPE_NAME_PATTERN = re.compile(
-    rb"\b(?:struct|class)\s+concept\b|\busing\s+concept\s*=|\btypedef\b[^;]*\bconcept\s*;"
+    rb"\b(?:struct|class|union|enum)\s+concept\b|\busing\s+concept\s*=|\btypedef\b[^;]*\bconcept\s*;"
 )
 # "requires" only became a reserved keyword in C++20 too — a pre-C++20 header
 # can legally declare a type literally named "requires" and reference it in a
@@ -154,7 +157,7 @@ _CONCEPT_AS_TYPE_NAME_PATTERN = re.compile(
 # review). Mirrors ``_CONCEPT_AS_TYPE_NAME_PATTERN``/``concept_type_shadowed``
 # exactly.
 _REQUIRES_AS_TYPE_NAME_PATTERN = re.compile(
-    rb"\b(?:struct|class)\s+requires\b|\busing\s+requires\s*=|\btypedef\b[^;]*\brequires\s*;"
+    rb"\b(?:struct|class|union|enum)\s+requires\b|\busing\s+requires\s*=|\btypedef\b[^;]*\brequires\s*;"
 )
 _CPP20_REQUIRES_EXPR_PATTERN = re.compile(
     rb"\brequires\s*[(\{]"
@@ -200,10 +203,10 @@ _CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
 _CPP20_CONSTEVAL_PATTERN = re.compile(rb"\bconsteval\b(?=\s+[A-Za-z_])")
 _CPP20_CONSTINIT_PATTERN = re.compile(rb"\bconstinit\b(?=\s+[A-Za-z_])")
 _CONSTEVAL_AS_TYPE_NAME_PATTERN = re.compile(
-    rb"\b(?:struct|class)\s+consteval\b|\busing\s+consteval\s*=|\btypedef\b[^;]*\bconsteval\s*;"
+    rb"\b(?:struct|class|union|enum)\s+consteval\b|\busing\s+consteval\s*=|\btypedef\b[^;]*\bconsteval\s*;"
 )
 _CONSTINIT_AS_TYPE_NAME_PATTERN = re.compile(
-    rb"\b(?:struct|class)\s+constinit\b|\busing\s+constinit\s*=|\btypedef\b[^;]*\bconstinit\s*;"
+    rb"\b(?:struct|class|union|enum)\s+constinit\b|\busing\s+constinit\s*=|\btypedef\b[^;]*\bconstinit\s*;"
 )
 
 # Constrained template parameters using a *standard-library* concept name in
@@ -950,6 +953,19 @@ _PP_ELIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*elif\b")
 _PP_ELIF_ZERO_PATTERN = re.compile(rb"^[ \t]*#[ \t]*elif[ \t]+(?:0+|false)[ \t]*$")
 _PP_ELIF_TRUE_PATTERN = re.compile(rb"^[ \t]*#[ \t]*elif[ \t]+(?:1|true)[ \t]*$")
 _PP_ENDIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*endif\b")
+# A guard on __cplusplus (or a standard feature-test macro, __cpp_*) is
+# self-consistent under *any* -std= this heuristic ends up choosing — the
+# guard's own condition is what makes its content reachable or not, driven
+# by that same choice, so the content behind it must never be allowed to
+# drive the choice itself (Codex review). Masking it exactly like #if 0
+# breaks that circularity: whichever std gets picked, the guard evaluates
+# consistently and the header parses either way.
+_PP_IF_CPLUSPLUS_GUARD_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*if[ \t]+.*\b(?:__cplusplus|__cpp_\w+)\b"
+)
+_PP_ELIF_CPLUSPLUS_GUARD_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*elif[ \t]+.*\b(?:__cplusplus|__cpp_\w+)\b"
+)
 
 
 def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
@@ -975,6 +991,19 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
     *unreachable* — masking must resume for them too (Codex review, third
     round), not stay lifted for the rest of the chain the way it correctly
     does after a merely-unevaluated condition.
+
+    An ``#if``/``#elif`` guarded on ``__cplusplus`` or a standard
+    feature-test macro (``__cpp_concepts``, ``__cpp_consteval``, ...) is
+    masked the same way as ``#if 0`` (Codex review, sixth round) — not
+    because it's provably false, but because it's circular: whichever
+    ``-std=`` this heuristic ends up choosing is exactly what decides
+    whether the guard is reachable, so its content must never be allowed
+    to drive that same choice. Forcing C++20 mode purely because a
+    ``#if __cplusplus >= 202002L`` block contains C++20 syntax doesn't
+    just needlessly activate that block — passing ``-std=gnu++20`` turns
+    every *unguarded* pre-C++20 use of ``consteval``/``constinit``/
+    ``concept``/``requires`` as an ordinary identifier elsewhere in the
+    same header into a reserved-word parse error too.
     """
     lines = content.split(b"\n")
     out: list[bytes] = []
@@ -1006,7 +1035,9 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 in_chain = False
                 out.append(line)
                 continue
-            if _PP_ELIF_ZERO_PATTERN.match(line):
+            if _PP_ELIF_ZERO_PATTERN.match(
+                line
+            ) or _PP_ELIF_CPLUSPLUS_GUARD_PATTERN.match(line):
                 masking = True
                 out.append(b"")
                 continue
@@ -1021,7 +1052,9 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 continue
             out.append(b"" if masking else line)
             continue
-        if _PP_IF_ZERO_PATTERN.match(line):
+        if _PP_IF_ZERO_PATTERN.match(line) or _PP_IF_CPLUSPLUS_GUARD_PATTERN.match(
+            line
+        ):
             in_chain = True
             nested = 0
             masking = True
