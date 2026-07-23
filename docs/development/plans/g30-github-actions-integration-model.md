@@ -1091,6 +1091,43 @@ is empty, the same way it already does for `name`. New
 `test_missing_profile_fails_here_not_deep_in_run_sh` in
 `tests/test_action_check_target.py`.
 
+A ninth round of Codex review then found that the per-check report-filename
+fix (above) only scoped the *final envelope* — the internal analysis-step
+output, `check-target-analysis.json`, is still a single fixed workspace-
+relative path shared by every `check-target` invocation in a job. If a job
+runs check-target twice and the *second* invocation's nested root Action
+crashes before ever writing its own report (e.g. a CLI usage/config error),
+`action/run.sh`'s "only emit report-path when a real report file was
+produced" check (confirmed by reading it: `if [[ -n "${OUTPUT_FILE:-}" &&
+-f "${OUTPUT_FILE}" ]]`) tests file *existence*, not freshness — so it would
+find the *first* invocation's still-present file and report it as this
+run's own `report-path`. The finalize step would then augment the
+*previous* check's JSON as if it were the current check's real result, and
+with `gate-mode: deferred`/`advisory` that silently turns a genuine
+operational failure into a false pass, since `operational_errors` would be
+read from the stale (successful) report instead. Considered giving the
+analysis output a per-check filename too, the same way the final envelope
+already is, but rejected it: the final envelope's filename is built from a
+`_slug()`-sanitized `name`/`profile`/`baseline-channel`/`requested-depth`,
+and no such sanitization runs before the analysis step — interpolating
+those raw input values into a second filename here would trade a staleness
+bug for a path-injection one. Fixed instead by adding an unconditional
+"Clean stale analysis output" step (`rm -f check-target-analysis.json`)
+immediately before "Run analysis" in `action.yml`, deliberately *not*
+gated behind "Run analysis"'s own `if:` — a same-job resolve/collect
+failure that skips analysis this run must still clear out whatever a prior
+invocation left behind, or the next invocation in the same job would find
+it. Since `action.yml`'s own step orchestration needs a real GitHub Actions
+runner to exercise end-to-end (no way to unit-test the composite steps
+directly, per this section's existing testing approach), verified via a
+structural assertion over the parsed YAML instead — mirroring
+`test_action_validate_inputs.py`'s `TestUnsetFormatUsesEachModesOwnDefault`
+precedent for the same kind of `action.yml`-only fix. New
+`TestStaleAnalysisOutputIsCleanedBeforeEachRun::test_cleanup_step_runs_unconditionally_immediately_before_analysis`
+in `tests/test_action_check_target.py` asserts the cleanup step exists,
+is unconditional (no `if:`), sits immediately before "Run analysis", and
+targets the same filename the analysis step's `output-file` writes.
+
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
 Implements ADR-047 §4/§5 (`run-plan.json` generation + matrix + trailing

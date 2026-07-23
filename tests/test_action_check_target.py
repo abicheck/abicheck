@@ -813,3 +813,67 @@ class TestFinalizeScanGuardSentinel:
                 "message": "the analysis reported a non-compatibility verdict: 'BUDGET_OVERFLOW'",
             }
         ]
+
+
+@pytest.mark.skipif(
+    not (ACTION_DIR / "action.yml").is_file(),
+    reason="actions/check-target/action.yml not found",
+)
+class TestStaleAnalysisOutputIsCleanedBeforeEachRun:
+    """Regression (Codex review): the nested analysis step always writes to
+    the same fixed workspace-relative path (``check-target-analysis.json``),
+    unlike the final envelope, which is already scoped per check-id. If a
+    job runs check-target more than once and a LATER invocation's nested
+    root Action crashes before ever writing its own report (e.g. a CLI
+    usage/config error), run.sh's "only emit report-path when a real report
+    file was produced" check only tests file *existence*, not freshness --
+    so it would find an EARLIER invocation's stale file and hand it to the
+    finalize step as if it were the current run's real result. With
+    gate-mode: deferred/advisory that silently turns a genuine operational
+    failure into a false pass, since operational_errors would be read from
+    the stale (successful) report instead. action.yml must unconditionally
+    delete that file immediately before the analysis step runs, every time,
+    regardless of whether the analysis step itself ends up running (its
+    own `if:` gates skip it for a prior resolve/collect failure).
+
+    action.yml's own step orchestration needs a real GitHub Actions runner
+    to exercise end-to-end (see this module's docstring), so this is a
+    structural assertion over the parsed YAML rather than a behavioral one
+    -- mirroring test_action_validate_inputs.py's
+    TestUnsetFormatUsesEachModesOwnDefault precedent for the same
+    action.yml-only-fix problem.
+    """
+
+    def test_cleanup_step_runs_unconditionally_immediately_before_analysis(
+        self,
+    ) -> None:
+        import yaml
+
+        action_yml = ACTION_DIR / "action.yml"
+        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        steps = data["runs"]["steps"]
+        names = [s.get("name") for s in steps]
+        assert "Clean stale analysis output" in names, (
+            "action.yml must have a step that removes the stale "
+            "check-target-analysis.json before the analysis step runs"
+        )
+        assert "Run analysis" in names
+        cleanup_index = names.index("Clean stale analysis output")
+        analysis_index = names.index("Run analysis")
+        assert cleanup_index == analysis_index - 1, (
+            "the cleanup step must run immediately before the analysis "
+            "step, so no other step can write check-target-analysis.json "
+            "in between"
+        )
+        cleanup_step = steps[cleanup_index]
+        assert "if" not in cleanup_step, (
+            "the cleanup step must be unconditional -- it has to run even "
+            "when the analysis step's own `if:` will skip it (e.g. a "
+            "prior resolve/collect failure), or a stale file from an "
+            "earlier invocation in the same job would survive"
+        )
+        assert "check-target-analysis.json" in cleanup_step.get("run", "")
+        analysis_step = steps[analysis_index]
+        assert analysis_step["with"]["output-file"] == "check-target-analysis.json", (
+            "the cleanup step must target the same filename the analysis step writes"
+        )

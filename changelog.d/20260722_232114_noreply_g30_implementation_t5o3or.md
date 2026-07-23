@@ -28,7 +28,11 @@
   can't miss it either. `profile` is validated as required up front (GitHub
   Actions doesn't actually enforce `required: true` for composite-action
   inputs), instead of only failing deep inside a later step with no report
-  produced. See `docs/reference/check-target.md`.
+  produced. The internal per-invocation analysis output is now cleared
+  before every analysis attempt, so a job that runs `check-target` more
+  than once can't have a later invocation's crashed analysis silently pick
+  up an earlier invocation's stale report file. See
+  `docs/reference/check-target.md`.
 
 <!--
 ### Changed
