@@ -135,8 +135,13 @@ caller-provided directory of the candidate build's own member binaries.
 
 ## Report envelope (ADR-047 §7)
 
-Every run writes a single JSON report at `check-target-report.json`,
-starting from whatever the underlying `compare`/`scan` run already produced
+Every run writes a single JSON report at
+`check-target-report-<name>-<profile>-<baseline_channel>-<requested_depth>.json`
+(the exact path is always available via the `report-path` output — don't
+hard-code the filename, since running `check-target` more than once in the
+same job, e.g. the same target against two baseline channels, would
+otherwise overwrite an earlier run's report), starting from whatever the
+underlying `compare`/`scan` run already produced
 (`abicheck/reporter.py`'s existing shape — `report_schema_version: "2.13"`)
 and layering on:
 

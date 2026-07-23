@@ -34,7 +34,21 @@ COLLECT_VERIFY_OUTCOME="${COLLECT_VERIFY_OUTCOME:-}"
 COLLECT_REPLAY_OUTCOME="${COLLECT_REPLAY_OUTCOME:-}"
 
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-REPORT_OUT="check-target-report.json"
+
+# A fixed "check-target-report.json" collides across multiple check-target
+# invocations in the same job (e.g. the same target checked against two
+# baseline channels, or several targets in one job without per-step output
+# dirs) -- each call would overwrite the previous one's report file, so an
+# earlier step's own `report-path` output would end up pointing at a LATER
+# check's envelope by the time anything reads it (Codex review). Scope the
+# filename to this check's own identity components instead; `tr -c` maps
+# any character outside the safe identifier charset to `_` so an
+# unsanitized NAME/PROFILE/BASELINE_CHANNEL can never escape the workspace
+# directory or collide with an unrelated file.
+_slug() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'
+}
+REPORT_OUT="check-target-report-$(_slug "$NAME")-$(_slug "$PROFILE")-$(_slug "$BASELINE_CHANNEL")-$(_slug "$REQUESTED_DEPTH").json"
 
 # ── Decide which report_envelope.py mode this check needs ──────────────────
 MODE=""

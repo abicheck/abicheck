@@ -364,7 +364,7 @@ class TestFinalizeAugmentMode:
         assert outputs["outcome"] == "resolved"
         assert outputs["verdict"] == "BREAKING"
         assert outputs["compatibility-verdict"] == "BREAKING"
-        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert report["check_id"] == f"libpvxs@{PROFILE}#accepted-main@headers"
         assert report["severity"]["exit_code"] == 4
 
@@ -373,7 +373,7 @@ class TestFinalizeAugmentMode:
     ) -> None:
         report_path = tmp_path / "analysis.json"
         _write_compare_report(report_path, verdict="BREAKING", exit_code=4)
-        result, _ = _run_finalize(
+        result, outputs = _run_finalize(
             {
                 **_BASE_IDENTITY,
                 "INPUT_GATE_MODE": "deferred",
@@ -385,14 +385,14 @@ class TestFinalizeAugmentMode:
             tmp_path,
         )
         assert result.returncode == 0, result.stderr
-        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert report["severity"]["exit_code"] == 4  # aggregate needs the real value
         assert report["policy_gate_decision"] == "fail"
 
     def test_advisory_gate_mode_neutralizes_severity(self, tmp_path: Path) -> None:
         report_path = tmp_path / "analysis.json"
         _write_compare_report(report_path, verdict="BREAKING", exit_code=4)
-        result, _ = _run_finalize(
+        result, outputs = _run_finalize(
             {
                 **_BASE_IDENTITY,
                 "INPUT_GATE_MODE": "advisory",
@@ -404,7 +404,7 @@ class TestFinalizeAugmentMode:
             tmp_path,
         )
         assert result.returncode == 0, result.stderr
-        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert report["severity"]["exit_code"] == 0
         assert report["severity"]["blocking"] is False
         assert report["compatibility_verdict"] == "BREAKING"
@@ -427,6 +427,52 @@ class TestFinalizeAugmentMode:
         )
         assert result.returncode == 0, result.stderr
         assert outputs["outcome"] == "skipped"
+
+    def test_two_invocations_in_the_same_job_do_not_overwrite_each_others_report(
+        self, tmp_path: Path
+    ) -> None:
+        """A fixed "check-target-report.json" filename would collide across
+        two check-target calls in the same job (e.g. the same target against
+        two baseline channels) -- an earlier step's own report-path output
+        would end up pointing at the LATER check's envelope by the time
+        anything reads it (Codex review). The filename must be scoped to
+        each check's own identity."""
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(report_path, verdict="BREAKING", exit_code=4)
+        first_result, first_outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "accepted-main",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+            },
+            tmp_path,
+        )
+        assert first_result.returncode == 4, first_result.stderr
+        second_report_path = tmp_path / "analysis2.json"
+        _write_compare_report(second_report_path, verdict="COMPATIBLE", exit_code=0)
+        second_result, second_outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "release-contract",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(second_report_path),
+            },
+            tmp_path,
+        )
+        assert second_result.returncode == 0, second_result.stderr
+        assert first_outputs["report-path"] != second_outputs["report-path"]
+        # The first report is still on disk, unmodified by the second call.
+        first_report = json.loads((tmp_path / first_outputs["report-path"]).read_text())
+        assert first_report["severity"]["exit_code"] == 4
+        second_report = json.loads(
+            (tmp_path / second_outputs["report-path"]).read_text()
+        )
+        assert second_report["severity"]["exit_code"] == 0
 
 
 @pytest.mark.skipif(
@@ -451,7 +497,7 @@ class TestFinalizeOperationalError:
         assert result.returncode == 1, result.stderr
         assert outputs["outcome"] == "wrong_profile"
         assert outputs["verdict"] == "ERROR"
-        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert report["operational_errors"] == [
             {
                 "kind": "wrong_profile",
@@ -463,7 +509,7 @@ class TestFinalizeOperationalError:
     def test_analysis_never_producing_a_report_is_an_operational_error(
         self, tmp_path: Path
     ) -> None:
-        result, _ = _run_finalize(
+        result, outputs = _run_finalize(
             {
                 **_BASE_IDENTITY,
                 "RESOLVE_RAN": "true",
@@ -473,7 +519,7 @@ class TestFinalizeOperationalError:
             tmp_path,
         )
         assert result.returncode == 1, result.stderr
-        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert report["operational_errors"][0]["kind"] == "ambiguous"
 
     def test_collect_verify_failure_is_a_distinct_operational_error(
@@ -494,7 +540,7 @@ class TestFinalizeOperationalError:
         )
         assert result.returncode == 1, result.stderr
         assert outputs["verdict"] == "ERROR"
-        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert "verify failed" in report["operational_errors"][0]["message"]
 
     def test_collect_replay_failure_is_a_distinct_operational_error(
@@ -512,7 +558,7 @@ class TestFinalizeOperationalError:
         )
         assert result.returncode == 1, result.stderr
         assert outputs["verdict"] == "ERROR"
-        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert "replay" in report["operational_errors"][0]["message"]
 
 
@@ -536,7 +582,7 @@ class TestFinalizeBootstrap:
         assert result.returncode == 0, result.stderr
         assert outputs["outcome"] == "not_found"
         assert outputs["verdict"] == "NO_BASELINE"
-        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert report["baseline_bootstrap"] is True
         assert report["operational_errors"] == []
 
@@ -563,7 +609,7 @@ class TestFinalizeEvidenceDegradation:
             old_depth="headers",
             new_depth="headers",
         )
-        result, _ = _run_finalize(
+        result, outputs = _run_finalize(
             {
                 **_BASE_IDENTITY,
                 "INPUT_REQUESTED_DEPTH": "source",
@@ -575,7 +621,7 @@ class TestFinalizeEvidenceDegradation:
             tmp_path,
         )
         assert result.returncode == 0, result.stderr
-        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert report["requested_depth"] == "source"
         assert report["effective_depth"] == "headers"
         assert report["check_evidence_coverage"]["state"] == "degraded"
@@ -591,7 +637,7 @@ class TestFinalizeEvidenceDegradation:
             old_depth="source",
             new_depth="source",
         )
-        result, _ = _run_finalize(
+        result, outputs = _run_finalize(
             {
                 **_BASE_IDENTITY,
                 "INPUT_REQUESTED_DEPTH": "source",
@@ -603,7 +649,7 @@ class TestFinalizeEvidenceDegradation:
             tmp_path,
         )
         assert result.returncode == 0, result.stderr
-        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert report["effective_depth"] == "source"
         assert report["check_evidence_coverage"]["state"] == "complete"
 
@@ -621,7 +667,7 @@ class TestFinalizeEvidenceDegradation:
             old_depth="source",
             new_depth="source",
         )
-        result, _ = _run_finalize(
+        result, outputs = _run_finalize(
             {
                 **_BASE_IDENTITY,
                 "INPUT_REQUESTED_DEPTH": "source",
@@ -633,6 +679,6 @@ class TestFinalizeEvidenceDegradation:
             tmp_path,
         )
         assert result.returncode == 0, result.stderr
-        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert report["effective_depth"] == "source"
         assert report["check_evidence_coverage"]["state"] == "complete"
