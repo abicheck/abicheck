@@ -1515,52 +1515,83 @@ _ADR_STATUS_CONTINUATION_STOP_RE = re.compile(
     r"^\s*\*\*[^*\n]+:\*\*|^\s*#|^\s*-{3,}\s*$"
 )
 
-_ADR_REPLACEMENT_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+#: (?<!!) excludes image syntax (`![alt](src)` / `![alt][label]`) -- an
+#: image embed is not a navigable link, even though its bracket/paren shape
+#: otherwise matches the same pattern as a real link.
+_ADR_REPLACEMENT_LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
+_ADR_REF_LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\[([^\]]*)\]")
+_ADR_REF_DEF_RE = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 
 
-def _links_to_another_adr(status: str, adr_dir: Path, own_path: Path) -> bool:
-    """True if `status` contains a Markdown link that resolves to another
-    real ADR file inside `adr_dir` -- *other than* `own_path` itself.
-    Checking only the link target's basename against _ADR_FILE_RE isn't
-    enough, since a link like `[plan](../notes/002-plan.md)` has a basename
-    that matches the ADR filename pattern while actually pointing outside
-    the ADR directory entirely. It must also be more than "any link at
-    all" -- a "Superseded" status could otherwise link to unrelated context
-    (e.g. a plan doc explaining why) and still satisfy a bare "has a link"
-    check, or even link to itself ("Superseded by [this ADR](001-x.md)"
-    inside 001-x.md) and still satisfy a bare "resolves to a real ADR file"
-    check."""
+def _adr_href_resolves_elsewhere(
+    href: str, adr_dir: Path, resolved_adr_dir: Path, resolved_own_path: Path
+) -> bool:
+    """True if `href` resolves to another real ADR file inside `adr_dir` --
+    *other than* the ADR making the claim. Checking only the link target's
+    basename against _ADR_FILE_RE isn't enough, since a link like
+    `[plan](../notes/002-plan.md)` has a basename that matches the ADR
+    filename pattern while actually pointing outside the ADR directory
+    entirely."""
+    href_path = href.strip()
+    if href_path.startswith("<"):
+        # CommonMark's angle-bracket link destination form ([text](<url>))
+        # -- MkDocs renders it as a normal link, so the `<`/`>` must not end
+        # up as part of the resolved path.
+        end = href_path.find(">")
+        href_path = href_path[1:end] if end != -1 else href_path[1:]
+    else:
+        # Non-bracketed destinations may carry an optional title after a
+        # space ([text](url "title")) -- without splitting it off, the
+        # trailing `"title"` text stays glued to the basename and never
+        # matches _ADR_FILE_RE.
+        href_path = href_path.split(" ", 1)[0]
+    href_path = href_path.split("#", 1)[0]
+    if not href_path or "://" in href_path or href_path.startswith(("mailto:", "/")):
+        return False
+    basename = href_path.split("/")[-1]
+    if not _ADR_FILE_RE.match(basename):
+        return False
+    resolved = (adr_dir / href_path).resolve()
+    return (
+        resolved.parent == resolved_adr_dir
+        and resolved.is_file()
+        and resolved != resolved_own_path
+    )
+
+
+def _links_to_another_adr(
+    status: str, adr_dir: Path, own_path: Path, full_text: str
+) -> bool:
+    """True if `status` contains a Markdown link (inline `[text](url)` or
+    reference-style `[text][label]` with a `[label]: url` definition
+    elsewhere in the file) that resolves to another real ADR file inside
+    `adr_dir` -- *other than* `own_path` itself. Must be more than "any
+    link at all" -- a "Superseded" status could otherwise link to unrelated
+    context (e.g. a plan doc explaining why) and still satisfy a bare "has
+    a link" check, or even link to itself ("Superseded by [this
+    ADR](001-x.md)" inside 001-x.md) and still satisfy a bare "resolves to
+    a real ADR file" check."""
     resolved_adr_dir = adr_dir.resolve()
     resolved_own_path = own_path.resolve()
     for href in _ADR_REPLACEMENT_LINK_RE.findall(status):
-        href_path = href.strip()
-        if href_path.startswith("<"):
-            # CommonMark's angle-bracket link destination form
-            # ([text](<url>)) -- MkDocs renders it as a normal link, so the
-            # `<`/`>` must not end up as part of the resolved path.
-            end = href_path.find(">")
-            href_path = href_path[1:end] if end != -1 else href_path[1:]
-        else:
-            # Non-bracketed destinations may carry an optional title after
-            # a space ([text](url "title")) -- without splitting it off,
-            # the trailing `"title"` text stays glued to the basename and
-            # never matches _ADR_FILE_RE.
-            href_path = href_path.split(" ", 1)[0]
-        href_path = href_path.split("#", 1)[0]
-        if (
-            not href_path
-            or "://" in href_path
-            or href_path.startswith(("mailto:", "/"))
+        if _adr_href_resolves_elsewhere(
+            href, adr_dir, resolved_adr_dir, resolved_own_path
         ):
-            continue
-        basename = href_path.split("/")[-1]
-        if not _ADR_FILE_RE.match(basename):
-            continue
-        resolved = (adr_dir / href_path).resolve()
-        if (
-            resolved.parent == resolved_adr_dir
-            and resolved.is_file()
-            and resolved != resolved_own_path
+            return True
+    # Reference-style links: [text][label] / [text][] -- resolve `label`
+    # (or `text` for the collapsed form) against a `[label]: url` definition
+    # anywhere in the file (reference definitions are conventionally placed
+    # at the bottom of the document, not necessarily near the status
+    # paragraph itself).
+    definitions = {
+        label.strip().casefold(): url
+        for label, url in _ADR_REF_DEF_RE.findall(full_text)
+    }
+    for link_text, label in _ADR_REF_LINK_RE.findall(status):
+        key = (label or link_text).strip().casefold()
+        url = definitions.get(key)
+        if url and _adr_href_resolves_elsewhere(
+            url, adr_dir, resolved_adr_dir, resolved_own_path
         ):
             return True
     return False
@@ -1662,7 +1693,7 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
             continue
         leading_word = re.split(r"[\s—.,;-]", status.strip(), maxsplit=1)[0]
         if leading_word.lower() == "superseded" and not _links_to_another_adr(
-            status, adr_dir, md
+            status, adr_dir, md, text
         ):
             f.err(
                 "adr-index-nav-sync",
