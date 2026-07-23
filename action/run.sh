@@ -321,6 +321,21 @@ elif [[ "$MODE" == "compare" ]]; then
   add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
 
+  # Build/source evidence (--depth build/source) — new (candidate) side only.
+  # The old side's evidence, if any, already lives in whatever
+  # old-library/abi-baseline snapshot was resolved (e.g. a baseline archive
+  # built with its own embedded build_source) — this Action has no live old-
+  # side source tree to point --sources/--build-info at in compare mode, so
+  # these inputs scope to `new=` unconditionally rather than exposing a
+  # second old-sources/old-build-info input pair. Previously silently
+  # dropped in compare mode (only dump/scan forwarded them) — a real gap
+  # flagged by review: a --depth build/source compare request had no way to
+  # actually reach the CLI's evidence flags at all.
+  add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
+  add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
+  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  add_single_flag "--depth" "${INPUT_DEPTH:-}"
+
   # Format — for SARIF, always write to a file so upload-sarif can find it.
   # sarif/html are rejected by the CLI itself (a clear UsageError, exit 64)
   # when the operands are directories/packages — surfaced as VERDICT=ERROR

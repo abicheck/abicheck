@@ -17,6 +17,7 @@ BASELINE_CHANNEL="${INPUT_BASELINE_CHANNEL:?baseline-channel input is required}"
 BASELINE_PATH="${INPUT_BASELINE_PATH:-}"
 GATE_MODE="${INPUT_GATE_MODE:-local}"
 REQUESTED_DEPTH="${INPUT_REQUESTED_DEPTH:?requested-depth input is required}"
+EVIDENCE_PRODUCER="${INPUT_EVIDENCE_PRODUCER:-}"
 CONSUMER_BINARY="${INPUT_CONSUMER_BINARY:-}"
 CONTRACT_FILE="${INPUT_CONTRACT_FILE:-}"
 
@@ -35,6 +36,10 @@ esac
 case "$REQUESTED_DEPTH" in
   binary | headers | build | source) ;;
   *) _fail "requested-depth '$REQUESTED_DEPTH' is not recognized. Use 'binary', 'headers', 'build', or 'source'." ;;
+esac
+case "$EVIDENCE_PRODUCER" in
+  "" | wrapper | clang-plugin | replay) ;;
+  *) _fail "evidence-producer '$EVIDENCE_PRODUCER' is not recognized. Use '' (none), 'wrapper', 'clang-plugin', or 'replay' -- a misspelled value silently skips fact collection instead of failing loud." ;;
 esac
 if [[ -z "$NAME" ]]; then
   _fail "name input is required."

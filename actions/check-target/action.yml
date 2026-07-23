@@ -270,6 +270,7 @@ runs:
         INPUT_BASELINE_PATH: ${{ inputs.baseline-path }}
         INPUT_GATE_MODE: ${{ inputs.gate-mode }}
         INPUT_REQUESTED_DEPTH: ${{ inputs.requested-depth }}
+        INPUT_EVIDENCE_PRODUCER: ${{ inputs.evidence-producer }}
         INPUT_CONSUMER_BINARY: ${{ inputs.consumer-binary }}
         INPUT_CONTRACT_FILE: ${{ inputs.contract-file }}
       run: bash "${{ github.action_path }}/validate-inputs.sh"
@@ -392,10 +393,18 @@ runs:
     # ── Analysis: compare against the resolved baseline, or (baseline: ─────
     # none) a scan audit with no --against -- continue-on-error so the ─────
     # report-envelope step below always runs, per ADR-047 §7's required ─────
-    # "internal analysis step must run with continue-on-error: true" rule ───
+    # "internal analysis step must run with continue-on-error: true" rule. ──
+    # Also skipped when a required collect-facts step failed: without this,
+    # a broken/empty wrapper or clang-plugin pack (collect_verify failure)
+    # would still be handed to compare as --build-info, silently running the
+    # comparison against invalid evidence instead of surfacing the
+    # collection failure as the operational error it is (review). ──────────
     - name: Run analysis
       id: analysis
-      if: inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved'
+      if: |
+        (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved') &&
+        steps.collect_verify.outcome != 'failure' &&
+        steps.collect_replay.outcome != 'failure'
       continue-on-error: true
       uses: ./.abicheck-check-target-src
       with:
@@ -461,5 +470,7 @@ runs:
         ANALYSIS_OUTCOME: ${{ steps.analysis.outcome }}
         ANALYSIS_VERDICT: ${{ steps.analysis.outputs.verdict }}
         ANALYSIS_REPORT_PATH: ${{ steps.analysis.outputs.report-path }}
+        COLLECT_VERIFY_OUTCOME: ${{ steps.collect_verify.outcome }}
+        COLLECT_REPLAY_OUTCOME: ${{ steps.collect_replay.outcome }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

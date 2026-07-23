@@ -44,14 +44,15 @@ it should read in CHANGELOG.md. Delete the other sections.
   `--policy-file`.
 
 -->
-<!--
 ### Fixed
 
-- **Short bold summary** — the rest of the sentence: what changed, for
-  whom, and why it matters. Backtick identifiers like `ChangeKind` or
-  `--policy-file`.
+- **GitHub Action `compare` mode now forwards build/source evidence** — `sources`,
+  `build-info`, `compile-db`, `build-config`, and `depth` were previously only
+  wired to `dump`/`scan` mode in `action/run.sh`, so a `compare`-mode Action run
+  requesting `--depth build`/`source` evidence had no way to actually reach the
+  CLI's evidence flags. Now forwarded (scoped to the new/candidate side for
+  `sources`/`build-info`, matching `compare`'s own `new=`-prefixed syntax).
 
--->
 <!--
 ### Performance
 

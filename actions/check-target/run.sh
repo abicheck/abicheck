@@ -30,6 +30,9 @@ RESOLVE_MESSAGE="${RESOLVE_MESSAGE:-}"
 ANALYSIS_RAN="${ANALYSIS_RAN:-false}"
 ANALYSIS_REPORT_PATH="${ANALYSIS_REPORT_PATH:-}"
 
+COLLECT_VERIFY_OUTCOME="${COLLECT_VERIFY_OUTCOME:-}"
+COLLECT_REPLAY_OUTCOME="${COLLECT_REPLAY_OUTCOME:-}"
+
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 REPORT_OUT="check-target-report.json"
 
@@ -43,6 +46,16 @@ elif [[ "$RESOLVE_RAN" == "true" && "$RESOLVE_OUTCOME" != "resolved" ]]; then
   OUTCOME="${RESOLVE_OUTCOME:-ambiguous}"
   MESSAGE="${RESOLVE_MESSAGE:-resolve-baseline did not produce an outcome.}"
   RESOLVE_ARGS+=(--resolve-outcome "$OUTCOME" --resolve-message "$MESSAGE")
+elif [[ "$COLLECT_VERIFY_OUTCOME" == "failure" ]]; then
+  # A wrapper/clang-plugin pack that failed phase: verify (e.g. missing or
+  # empty) never reaches the analysis step at all (action.yml gates on this)
+  # -- surfaced as its own typed operational error, not silently run against
+  # an invalid pack or lost as an unexplained "no report" ambiguous below.
+  MODE="operational-error"
+  RESOLVE_ARGS+=(--resolve-outcome "ambiguous" --resolve-message "collect-facts phase: verify failed -- the wrapper/clang-plugin evidence pack is missing or invalid.")
+elif [[ "$COLLECT_REPLAY_OUTCOME" == "failure" ]]; then
+  MODE="operational-error"
+  RESOLVE_ARGS+=(--resolve-outcome "ambiguous" --resolve-message "collect-facts phase: auto (replay) failed to resolve source evidence.")
 elif [[ "$ANALYSIS_RAN" != "true" || -z "$ANALYSIS_REPORT_PATH" || ! -f "$ANALYSIS_REPORT_PATH" ]]; then
   # Baseline resolution succeeded (or was skipped for baseline-channel:
   # none), but the analysis step never produced a report -- a genuine

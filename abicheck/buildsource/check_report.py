@@ -327,7 +327,11 @@ def build_operational_error_report(
         "baseline_channel": baseline_channel,
         "requested_depth": requested_depth,
         "check_evidence_coverage": {"state": "unknown", "reasons": [resolve_outcome]},
-        "compatibility_verdict": None,
+        # compatibility_verdict is omitted, not written as null: the schema
+        # declares it a plain string enum with no null alternative -- an
+        # operational failure has no compatibility result to report at all
+        # (§7: "ERROR" is the deliberate exception living in the legacy
+        # `verdict` field instead, never in this new one).
         "policy_gate_decision": "fail",
         "operational_errors": [{"kind": resolve_outcome, "message": resolve_message}],
         "publication": {"state": "skipped", "channels": []},
@@ -374,7 +378,9 @@ def build_bootstrap_report(
             "reasons": ["no_baseline_published_yet"],
         },
         "baseline_bootstrap": True,
-        "compatibility_verdict": None,
+        # compatibility_verdict omitted, not null -- same reasoning as
+        # build_operational_error_report above: a bootstrap pass never
+        # produced a compatibility result either.
         "policy_gate_decision": "pass",
         "operational_errors": [],
         "publication": {"state": "skipped", "channels": []},

@@ -388,6 +388,45 @@ class TestFinalizeOperationalError:
         report = json.loads((tmp_path / "check-target-report.json").read_text())
         assert report["operational_errors"][0]["kind"] == "ambiguous"
 
+    def test_collect_verify_failure_is_a_distinct_operational_error(
+        self, tmp_path: Path
+    ) -> None:
+        """action.yml gates the analysis step on collect_verify not having
+        failed -- a broken/empty wrapper or clang-plugin pack must never be
+        silently handed to compare as --build-info (review)."""
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "false",
+                "COLLECT_VERIFY_OUTCOME": "failure",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1, result.stderr
+        assert outputs["verdict"] == "ERROR"
+        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        assert "verify failed" in report["operational_errors"][0]["message"]
+
+    def test_collect_replay_failure_is_a_distinct_operational_error(
+        self, tmp_path: Path
+    ) -> None:
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "false",
+                "COLLECT_REPLAY_OUTCOME": "failure",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1, result.stderr
+        assert outputs["verdict"] == "ERROR"
+        report = json.loads((tmp_path / "check-target-report.json").read_text())
+        assert "replay" in report["operational_errors"][0]["message"]
+
 
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/check-target/run.sh not found"

@@ -481,7 +481,9 @@ class TestBuildOperationalErrorReport:
         )
         assert report["verdict"] == OPERATIONAL_ERROR_VERDICT
         assert "severity" not in report
-        assert report["compatibility_verdict"] is None
+        # Omitted, not null -- the schema declares compatibility_verdict a
+        # plain string enum with no null alternative.
+        assert "compatibility_verdict" not in report
         assert report["policy_gate_decision"] == "fail"
         assert report["operational_errors"] == [
             {
@@ -537,6 +539,7 @@ class TestBuildBootstrapReport:
             "ERROR",
         }
         assert report["baseline_bootstrap"] is True
+        assert "compatibility_verdict" not in report
         assert report["operational_errors"] == []
         assert report["policy_gate_decision"] == "pass"
         assert report["message"] == "no baseline set exists yet."

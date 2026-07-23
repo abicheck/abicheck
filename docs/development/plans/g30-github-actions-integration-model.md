@@ -693,6 +693,77 @@ never affected by this specific bug) gained the same `||` fallback for
 consistency, so a local same-repo test run reports a real identity instead
 of an empty `"@"`.
 
+**A fourth, fifth, and sixth real bug, all caught by a second Codex review
+round, all fixed:**
+
+- **The root `action.yml`'s `compare` mode branch never forwarded
+  `sources`/`build-info`/`compile-db`/`build-config`/`depth` at all** —
+  confirmed by grepping `action/run.sh`: those five inputs were only wired
+  in the `dump`/`scan` branches (`action.yml`'s own input descriptions said
+  "Used by scan and dump modes," which was accurate but incomplete —
+  `compare` genuinely supports `--sources`/`--build-info`/`--depth`/
+  `--config` directly, confirmed via `abicheck compare --help`). This meant
+  a `check-target` build/source-depth check against a real baseline (the
+  normal, non-audit `compare`-mode path) had no way to actually reach the
+  CLI's evidence flags — `requested-depth: source` would silently only ever
+  achieve `headers`, regardless of what `sources`/`build-info` were set to.
+  Fixed by adding the missing forwarding to `action/run.sh`'s `compare`
+  branch, scoped to the **new (candidate) side only**
+  (`--sources new=...`/`--build-info new=...`, falling back to `compile-db`
+  when `build-info` is unset, matching `dump` mode's own fallback) — the old
+  side's evidence, if any, is expected to already be embedded in whatever
+  baseline snapshot was resolved; this Action has no live old-side source
+  tree to point at in `compare` mode. `action.yml`'s five input descriptions
+  updated to document the new `compare`-mode support. This is a general fix
+  to the root Action, benefiting any direct `compare`-mode caller wanting
+  build/source-depth evidence, not `check-target`-specific.
+- **A collect-facts verify/replay failure was never checked before running
+  analysis** — `collect_verify`/`collect_replay` run with
+  `continue-on-error: true` (correctly, so the finalize step always runs),
+  but the `Run analysis` step's own `if:` only checked
+  `resolve.outcome == 'resolved'`, never `collect_verify`/`collect_replay`'s
+  outcome — so a broken/empty wrapper or clang-plugin pack (a real
+  `collect-facts phase: verify` failure) would still be handed to `compare`
+  as `--build-info`, silently running the comparison against invalid
+  evidence and reporting a plain degraded-or-normal result instead of the
+  operational error it actually is. Fixed by adding
+  `steps.collect_verify.outcome != 'failure' && steps.collect_replay.outcome
+  != 'failure'` to the analysis step's `if:`, and giving `run.sh`'s finalize
+  logic two new, specific `operational-error` branches (ahead of the
+  generic "analysis produced no report" catch-all) so the resulting report
+  names collection failure specifically, not an ambiguous unexplained gap.
+- **`validate-inputs.sh` never validated `evidence-producer`** — every other
+  enum-like input (`kind`/`target-kind`/`gate-mode`/`requested-depth`) is
+  checked up front, but a misspelled `evidence-producer` value would just
+  silently fall through the `case` statement composing `collect-facts`
+  (neither `wrapper`/`clang-plugin`/`replay` branch matches), skipping fact
+  collection entirely with no error — a build/source-depth check would then
+  silently run at whatever depth the analysis naturally reached, never
+  telling the caller their typo was ignored. Fixed by adding the same
+  `case` validation for `evidence-producer`
+  (`''`/`wrapper`/`clang-plugin`/`replay`) as every other enum input already
+  has.
+
+Also, separately: the two synthesized envelope builders
+(`build_operational_error_report`/`build_bootstrap_report`) wrote
+`compatibility_verdict: null` — schema-invalid, since the schema declares
+that field a plain string enum with no null alternative (Codex review,
+third round). Fixed by omitting the key entirely for those two cases
+instead (matching how `augment_report` already only sets it when there's a
+real value) — the broader "these two envelope shapes don't satisfy compare's
+full `required` field list either" question Codex also raised is real but
+out of scope here, matching the same precedent ADR-047 §7 already
+established for the pre-existing `verdict: "ERROR"` enum gap (a known,
+accepted limitation of the sentinel-envelope pattern, not something this
+task resolves).
+
+`tests/test_action_run_sh_compare_build_source.py` (new) runs the real
+`action/run.sh` end-to-end against a fake `abicheck` stub on `$PATH` to
+prove the evidence-forwarding fix reaches the actual command line, not just
+that the shell logic looks right on paper; `tests/test_action_check_target.py`
+gained cases for both new collect-facts-failure branches and the
+`evidence-producer` validation.
+
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
 Implements ADR-047 §4/§5 (`run-plan.json` generation + matrix + trailing
