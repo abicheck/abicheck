@@ -346,6 +346,21 @@ class TestAugmentReport:
         assert out["severity"]["blocking"] is True
         assert "abi_breaking" in out["severity"]["blocking_categories"]
 
+    def test_removed_library_escalation_does_not_duplicate_an_existing_category(self):
+        report = self._base_compare_report(verdict="COMPATIBLE_WITH_RISK", exit_code=2)
+        report["severity"]["blocking_categories"] = ["abi_breaking"]
+        out = augment_report(
+            report,
+            name="libpvxs-bundle",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="local",
+            analysis_exit_code=8,
+        )
+        assert out["severity"]["exit_code"] == 4
+        assert out["severity"]["blocking_categories"] == ["abi_breaking"]
+
     def test_removed_library_escalation_does_not_downgrade_an_already_worse_severity(
         self,
     ):
