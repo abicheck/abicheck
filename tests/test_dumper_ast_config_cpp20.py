@@ -1184,6 +1184,23 @@ def test_cpp20_detector_ignores_inactive_if_zero_consteval_type_shadow(tmp_path)
     assert any(r.reason == "consteval-declaration" for r in reqs)
 
 
+def test_cpp20_detector_ignores_inactive_if_zero_consteval_type_shadow_crlf(tmp_path):
+    """Regression (Windows CI): the same disabled ``#if 0`` stub, but with
+    CRLF line endings (as produced by a CRLF source file, or by a
+    text-mode write on Windows). The stripped-region matching must not
+    depend on a bare "\\n" terminator — a trailing "\\r" left over from
+    splitting on "\\n" alone previously defeated ``_PP_IF_ZERO_PATTERN``'s
+    end-anchor, so the stub was never recognized as inactive."""
+    p = tmp_path / "a.h"
+    p.write_bytes(
+        b"#if 0\r\nstruct consteval {};\r\n#endif\r\nconsteval int f() { return 1; }\r\n"
+    )
+    headers = [p]
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
 def test_cpp20_detector_still_shadows_active_if_zero_consteval_type(tmp_path):
     """Companion: an *active* (non-``#if 0``) ``struct consteval {};`` must
     still shadow, confirming the ``#if 0`` stripping doesn't over-strip."""

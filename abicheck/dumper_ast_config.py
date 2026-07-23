@@ -887,7 +887,14 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
     lines = content.split(b"\n")
     out: list[bytes] = []
     depth = 0
-    for line in lines:
+    for raw_line in lines:
+        # A CRLF source (or a CRLF-normalizing text-mode write, e.g. the
+        # test suite's Path.write_text() on Windows) leaves a trailing "\r"
+        # on every line after splitting on "\n" alone — which
+        # _PP_IF_ZERO_PATTERN's trailing "$" then fails to match, since "\r"
+        # isn't in its "[ \t]*" tail (Windows CI regression). Strip it before
+        # matching; harmless on genuine LF input.
+        line = raw_line[:-1] if raw_line.endswith(b"\r") else raw_line
         if depth:
             if _PP_IF_OPEN_PATTERN.match(line):
                 depth += 1
