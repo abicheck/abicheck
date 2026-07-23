@@ -1572,7 +1572,11 @@ def _adr_status_text(text: str) -> str | None:
             j = i + 1
             while j < len(lines) and not lines[j].strip():
                 j += 1
-            if j < len(lines):
+            # An empty "## Status" section immediately followed by the next
+            # heading/field (no actual status content) must not treat that
+            # structural line as the status text -- leave start unset so
+            # this reports as a missing Status, not a bogus one.
+            if j < len(lines) and not _ADR_STATUS_CONTINUATION_STOP_RE.match(lines[j]):
                 start, first_content = j, lines[j]
             break
     if start is None:

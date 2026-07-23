@@ -399,6 +399,15 @@ def test_adr_status_text_stops_at_heading(car):
     assert car._adr_status_text(text) == "Accepted."
 
 
+def test_adr_status_text_rejects_empty_heading_style_status(car):
+    """An empty `## Status` section immediately followed by the next
+    heading (no actual status content) must be treated as a missing
+    status, not silently accept that heading's own text as the status
+    (regression test for the gap flagged in PR #619 review)."""
+    text = "# ADR-001\n\n## Status\n\n## Context\n\nBody.\n"
+    assert car._adr_status_text(text) is None
+
+
 def test_no_hard_file_size_violations(car):
     """Files over ERROR_LINES must be in LARGE_FILE_ALLOWLIST."""
     f = car.Findings()
