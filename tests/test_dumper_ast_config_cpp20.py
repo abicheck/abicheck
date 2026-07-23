@@ -1567,6 +1567,60 @@ def test_cpp20_detector_still_detects_unguarded_construct_alongside_cplusplus_gu
     assert any(r.reason == "concept-declaration" for r in reqs)
 
 
+def test_cpp20_detector_ignores_construct_behind_ifdef_feature_test_macro(tmp_path):
+    """Regression (Codex review, seventh round): the common shorthand
+    ``#ifdef __cpp_consteval`` is exactly as circular as an explicit
+    ``#if defined(__cpp_consteval)`` comparison — the macro is only
+    defined once C++20 (or that specific feature) is already enabled, so
+    content behind it must not itself force that same enablement. Forcing
+    C++20 mode here would also turn the *unguarded*, active
+    ``int consteval;`` into a reserved-word parse error."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#ifdef __cpp_consteval\nconsteval int f();\n#endif\nint consteval;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_construct_behind_ifndef_feature_test_macro(tmp_path):
+    """Companion: the negated ``#ifndef __cpp_concepts`` form (the
+    "feature not yet available" fallback guard) is equally circular and
+    must also be masked."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#ifndef __cpp_concepts\ntemplate<class T> concept C = true;\n#endif\nint x;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_construct_behind_ifndef_cplusplus(tmp_path):
+    """Companion: ``#ifndef __cplusplus`` guards a pure-C fallback that
+    castxml/clang never reach (they always parse in a C++-ish mode), so
+    it must be masked exactly like ``#if 0``."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#ifndef __cplusplus\ntemplate<class T> concept C = true;\n#endif\nint x;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_still_detects_construct_behind_ifdef_cplusplus(tmp_path):
+    """Companion: ``#ifdef __cplusplus`` — unlike a version/feature-test
+    comparison — is unconditionally true for every ``-std=`` this
+    heuristic could pick (castxml always defines it for these scans), so
+    its content is a genuine, unconditional signal and must be scanned
+    normally rather than masked away."""
+    headers = _write(
+        tmp_path, "a.h", "#ifdef __cplusplus\nconsteval int f();\n#endif\n"
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
 def test_cpp20_detector_detects_custom_concept_constrained_auto_param(tmp_path):
     """Regression (Codex review): an abbreviated function parameter
     constrained by a *project-defined* concept (``void f(MyConcept auto

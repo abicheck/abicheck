@@ -966,6 +966,24 @@ _PP_IF_CPLUSPLUS_GUARD_PATTERN = re.compile(
 _PP_ELIF_CPLUSPLUS_GUARD_PATTERN = re.compile(
     rb"^[ \t]*#[ \t]*elif[ \t]+.*\b(?:__cplusplus|__cpp_\w+)\b"
 )
+# The common shorthand spellings of a feature-test guard (Codex review,
+# seventh round): ``#ifdef __cpp_concepts`` / ``#ifndef __cpp_concepts``
+# is exactly as circular as ``#if defined(__cpp_concepts)`` — masked for
+# the same reason. ``#ifndef __cplusplus`` is different but still
+# mask-worthy: castxml/clang always parse these headers in a C++-ish mode
+# (see ``_CPP_PATTERNS`` above), so that branch is never reachable
+# regardless of which ``-std=`` gets picked, exactly like ``#if 0``.
+# ``#ifdef __cplusplus`` is deliberately *not* included here — unlike a
+# version/feature-test comparison, it is unconditionally true for every
+# ``-std=`` this heuristic could pick (castxml always defines it), so its
+# content is a genuine, unconditional signal and must be scanned normally
+# rather than masked away.
+_PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*ifdef[ \t]+__cpp_\w+\b"
+)
+_PP_IFNDEF_CPLUSPLUS_GUARD_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*ifndef[ \t]+(?:__cplusplus|__cpp_\w+)\b"
+)
 
 
 def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
@@ -1052,8 +1070,11 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 continue
             out.append(b"" if masking else line)
             continue
-        if _PP_IF_ZERO_PATTERN.match(line) or _PP_IF_CPLUSPLUS_GUARD_PATTERN.match(
-            line
+        if (
+            _PP_IF_ZERO_PATTERN.match(line)
+            or _PP_IF_CPLUSPLUS_GUARD_PATTERN.match(line)
+            or _PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN.match(line)
+            or _PP_IFNDEF_CPLUSPLUS_GUARD_PATTERN.match(line)
         ):
             in_chain = True
             nested = 0
