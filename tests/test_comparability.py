@@ -397,6 +397,38 @@ def test_8c_no_include_flag_at_all_still_excludes_same_dir_support_header(tmp_pa
     assert old.profile_fingerprint == new.profile_fingerprint
 
 
+def test_8d_implicit_parent_ownership_wins_over_a_nested_non_owned_include(tmp_path):
+    # Codex review (PR #624): a file under a declared header's own parent
+    # that ALSO falls under a nested, non-owned --include (e.g. --header
+    # old/include/foo.h plus --include old/include/sub, with foo.h quote-
+    # including sub/detail.h) must still be treated as implicitly
+    # project-owned -- not attributed to the nested external slot and
+    # content-hashed, which would make an ordinary internal support-header
+    # edit spuriously raise ProfileMismatchError.
+    old_h = _write(tmp_path / "old" / "include" / "foo.h", "int add(int a, int b);\n")
+    new_h = _write(tmp_path / "new" / "include" / "foo.h", "int add(int a, int b);\n")
+    old_detail = _write(
+        tmp_path / "old" / "include" / "sub" / "detail.h", "int helper(void);\n"
+    )
+    new_detail = _write(
+        tmp_path / "new" / "include" / "sub" / "detail.h",
+        "int helper(void); /* internal-only edit */\n",
+    )
+    old = compute_extraction_contract(
+        declared_headers=[old_h],
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(tmp_path / "old" / "include" / "sub")],
+        depfile_resolved_paths=[old_h, old_detail],
+    )
+    new = compute_extraction_contract(
+        declared_headers=[new_h],
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(tmp_path / "new" / "include" / "sub")],
+        depfile_resolved_paths=[new_h, new_detail],
+    )
+    assert old.profile_fingerprint == new.profile_fingerprint
+
+
 # ---------------------------------------------------------------------------
 # system/toolchain bucket (tests 9, 10)
 # ---------------------------------------------------------------------------

@@ -250,6 +250,23 @@ def _attribute_file(
     contain it), or ``None`` if it falls under no declared ``-I`` directory
     at all (the system/toolchain bucket) or under a declared header's own
     (implicitly project-owned) parent directory."""
+    # A declared header's own parent directory is implicitly project-owned
+    # even with no matching --include at all (quote-include same-directory
+    # resolution) -- checked BEFORE the declared_includes longest-prefix
+    # match, not after (Codex review, PR #624): a file under a declared
+    # header's own parent that ALSO happens to fall under a nested, non-
+    # owned --include (e.g. --header old/include/foo.h plus --include
+    # old/include/sub, with foo.h quote-including sub/detail.h) would
+    # otherwise get attributed to that external slot and content-hashed,
+    # even though it is structurally part of the same project directory
+    # tree the implicit-parent rule exists to exclude -- an ordinary
+    # internal support-header edit could then spuriously raise
+    # ProfileMismatchError. Attribute such a file to a synthetic
+    # "owned, excluded" bucket by returning -1, distinct from "no declared
+    # -I dir at all".
+    for h in declared_headers:
+        if _is_ancestor_or_equal(h.parent, file_path):
+            return -1
     best_idx: int | None = None
     best_len = -1
     for idx, inc in enumerate(declared_includes):
@@ -260,13 +277,6 @@ def _attribute_file(
                 best_idx = idx
     if best_idx is not None:
         return best_idx
-    # A declared header's own parent directory is implicitly project-owned
-    # even with no matching --include at all (quote-include same-directory
-    # resolution) — attribute such a file to a synthetic "owned, excluded"
-    # bucket by returning -1, distinct from "no declared -I dir at all".
-    for h in declared_headers:
-        if _is_ancestor_or_equal(h.parent, file_path):
-            return -1
     return None
 
 
