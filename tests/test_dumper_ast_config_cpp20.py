@@ -1701,6 +1701,74 @@ def test_cpp20_detector_settles_on_elif_defined_cplusplus(tmp_path):
     assert not any(r.reason == "consteval-declaration" for r in reqs)
 
 
+def test_cpp20_detector_ignores_parenthesized_if_zero(tmp_path):
+    """Regression (Codex review, ninth round): ``#if (0)`` is the same
+    permanently-false guard as bare ``#if 0`` — valid C/C++ preprocessor
+    syntax, just with redundant grouping parens around the whole
+    condition. The parenthesized spelling wasn't recognized, so its
+    (inactive) content leaked into the requirements scan."""
+    headers = _write(
+        tmp_path, "a.h", "#if (0)\nconsteval int f();\n#endif\nint consteval;\n"
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_parenthesized_elif_zero_with_spaces(tmp_path):
+    """Companion: ``#elif ( 0 )`` (with internal spacing) must stay
+    masked exactly like bare ``#elif 0``."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n#elif ( 0 )\nconsteval int f();\n#endif\nint consteval;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_settles_on_parenthesized_elif_true(tmp_path):
+    """Companion: ``#elif (1)`` must settle the chain the same way bare
+    ``#elif 1`` does, marking a later sibling arm dead."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n#elif (1)\nint consteval;\n#else\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_still_detects_construct_behind_if_defined_space_cplusplus(
+    tmp_path,
+):
+    """Regression (Codex review, ninth round): ``#if defined __cplusplus``
+    (the no-parens spelling of the ``defined`` operator — equally valid
+    C/C++ preprocessor syntax) is semantically identical to
+    ``#if defined(__cplusplus)``/``#ifdef __cplusplus`` and must stay
+    unmasked the same way."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if defined __cplusplus\ntemplate<class T> concept C = true;\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
+def test_cpp20_detector_settles_on_elif_defined_space_cplusplus(tmp_path):
+    """Companion: the no-parens ``#elif defined __cplusplus`` form must
+    also settle the chain like ``#elif defined(__cplusplus)`` does."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n#elif defined __cplusplus\n"
+        "template<class T> concept C = true;\n"
+        "#else\nconsteval int dead();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+    assert not any(r.reason == "consteval-declaration" for r in reqs)
+
+
 def test_cpp20_detector_detects_custom_concept_constrained_auto_param(tmp_path):
     """Regression (Codex review): an abbreviated function parameter
     constrained by a *project-defined* concept (``void f(MyConcept auto

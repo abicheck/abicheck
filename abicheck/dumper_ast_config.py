@@ -947,11 +947,25 @@ def _is_preprocessor_directive(line: bytes) -> bool:
 
 
 _PP_IF_OPEN_PATTERN = re.compile(rb"^[ \t]*#[ \t]*(?:if|ifdef|ifndef)\b")
-_PP_IF_ZERO_PATTERN = re.compile(rb"^[ \t]*#[ \t]*if[ \t]+(?:0+|false)[ \t]*$")
+# A parenthesized literal (``#if (0)``, ``#elif (1)``) is the same
+# permanently-false/-true guard as the bare spelling — valid C/C++
+# preprocessor syntax, just with redundant grouping parens around the
+# whole condition (Codex review, ninth round). Both parenthesized and bare
+# forms are accepted; a stray unbalanced paren is invalid C anyway, so
+# matching only the balanced pair here is sufficient.
+_PP_LITERAL_ZERO = rb"(?:\([ \t]*(?:0+|false)[ \t]*\)|(?:0+|false))"
+_PP_LITERAL_TRUE = rb"(?:\([ \t]*(?:1|true)[ \t]*\)|(?:1|true))"
+_PP_IF_ZERO_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*if[ \t]+" + _PP_LITERAL_ZERO + rb"[ \t]*$"
+)
 _PP_ELSE_PATTERN = re.compile(rb"^[ \t]*#[ \t]*else\b")
 _PP_ELIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*elif\b")
-_PP_ELIF_ZERO_PATTERN = re.compile(rb"^[ \t]*#[ \t]*elif[ \t]+(?:0+|false)[ \t]*$")
-_PP_ELIF_TRUE_PATTERN = re.compile(rb"^[ \t]*#[ \t]*elif[ \t]+(?:1|true)[ \t]*$")
+_PP_ELIF_ZERO_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*elif[ \t]+" + _PP_LITERAL_ZERO + rb"[ \t]*$"
+)
+_PP_ELIF_TRUE_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*elif[ \t]+" + _PP_LITERAL_TRUE + rb"[ \t]*$"
+)
 _PP_ENDIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*endif\b")
 # A guard on __cplusplus (or a standard feature-test macro, __cpp_*) is
 # self-consistent under *any* -std= this heuristic ends up choosing — the
@@ -966,19 +980,25 @@ _PP_IF_CPLUSPLUS_GUARD_PATTERN = re.compile(
 _PP_ELIF_CPLUSPLUS_GUARD_PATTERN = re.compile(
     rb"^[ \t]*#[ \t]*elif[ \t]+.*\b(?:__cplusplus|__cpp_\w+)\b"
 )
-# ``#if defined(__cplusplus)``/``#if __cplusplus`` (bare, no comparison) is
-# semantically identical to ``#ifdef __cplusplus`` — unconditionally true
-# for every ``-std=`` this heuristic could pick — so it must be excluded
-# from the general guard pattern above the same way ``#ifdef __cplusplus``
-# already is, not masked as if it were circular (Codex review, eighth
-# round). Anchored ``$`` so it only matches when this is the *entire*
-# condition: ``#if defined(__cplusplus) && __cplusplus >= 202002L`` still
-# has a genuine version comparison attached and stays mask-worthy.
+# ``#if defined(__cplusplus)``/``#if defined __cplusplus`` (the
+# parenthesized *and* the equally-valid no-parens ``defined`` operator
+# spelling — Codex review, ninth round)/``#if __cplusplus`` (bare, no
+# comparison) are all semantically identical to ``#ifdef __cplusplus`` —
+# unconditionally true for every ``-std=`` this heuristic could pick — so
+# they must be excluded from the general guard pattern above the same way
+# ``#ifdef __cplusplus`` already is, not masked as if circular (Codex
+# review, eighth round). Anchored ``$`` so it only matches when this is
+# the *entire* condition: ``#if defined(__cplusplus) && __cplusplus >=
+# 202002L`` still has a genuine version comparison attached and stays
+# mask-worthy.
+_PP_DEFINED_CPLUSPLUS = (
+    rb"defined[ \t]*(?:\([ \t]*__cplusplus[ \t]*\)|[ \t]+__cplusplus)"
+)
 _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN = re.compile(
-    rb"^[ \t]*#[ \t]*if[ \t]+(?:defined[ \t]*\([ \t]*__cplusplus[ \t]*\)|__cplusplus)[ \t]*$"
+    rb"^[ \t]*#[ \t]*if[ \t]+(?:" + _PP_DEFINED_CPLUSPLUS + rb"|__cplusplus)[ \t]*$"
 )
 _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN = re.compile(
-    rb"^[ \t]*#[ \t]*elif[ \t]+(?:defined[ \t]*\([ \t]*__cplusplus[ \t]*\)|__cplusplus)[ \t]*$"
+    rb"^[ \t]*#[ \t]*elif[ \t]+(?:" + _PP_DEFINED_CPLUSPLUS + rb"|__cplusplus)[ \t]*$"
 )
 # The common shorthand spellings of a feature-test guard (Codex review,
 # seventh round): ``#ifdef __cpp_concepts`` / ``#ifndef __cpp_concepts``
