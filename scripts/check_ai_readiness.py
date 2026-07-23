@@ -1540,6 +1540,12 @@ def _links_to_another_adr(status: str, adr_dir: Path, own_path: Path) -> bool:
             # `<`/`>` must not end up as part of the resolved path.
             end = href_path.find(">")
             href_path = href_path[1:end] if end != -1 else href_path[1:]
+        else:
+            # Non-bracketed destinations may carry an optional title after
+            # a space ([text](url "title")) -- without splitting it off,
+            # the trailing `"title"` text stays glued to the basename and
+            # never matches _ADR_FILE_RE.
+            href_path = href_path.split(" ", 1)[0]
         href_path = href_path.split("#", 1)[0]
         if (
             not href_path
