@@ -966,6 +966,20 @@ _PP_IF_CPLUSPLUS_GUARD_PATTERN = re.compile(
 _PP_ELIF_CPLUSPLUS_GUARD_PATTERN = re.compile(
     rb"^[ \t]*#[ \t]*elif[ \t]+.*\b(?:__cplusplus|__cpp_\w+)\b"
 )
+# ``#if defined(__cplusplus)``/``#if __cplusplus`` (bare, no comparison) is
+# semantically identical to ``#ifdef __cplusplus`` — unconditionally true
+# for every ``-std=`` this heuristic could pick — so it must be excluded
+# from the general guard pattern above the same way ``#ifdef __cplusplus``
+# already is, not masked as if it were circular (Codex review, eighth
+# round). Anchored ``$`` so it only matches when this is the *entire*
+# condition: ``#if defined(__cplusplus) && __cplusplus >= 202002L`` still
+# has a genuine version comparison attached and stays mask-worthy.
+_PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*if[ \t]+(?:defined[ \t]*\([ \t]*__cplusplus[ \t]*\)|__cplusplus)[ \t]*$"
+)
+_PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*elif[ \t]+(?:defined[ \t]*\([ \t]*__cplusplus[ \t]*\)|__cplusplus)[ \t]*$"
+)
 # The common shorthand spellings of a feature-test guard (Codex review,
 # seventh round): ``#ifdef __cpp_concepts`` / ``#ifndef __cpp_concepts``
 # is exactly as circular as ``#if defined(__cpp_concepts)`` — masked for
@@ -1053,13 +1067,16 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 in_chain = False
                 out.append(line)
                 continue
-            if _PP_ELIF_ZERO_PATTERN.match(
-                line
-            ) or _PP_ELIF_CPLUSPLUS_GUARD_PATTERN.match(line):
+            if _PP_ELIF_ZERO_PATTERN.match(line) or (
+                _PP_ELIF_CPLUSPLUS_GUARD_PATTERN.match(line)
+                and not _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+            ):
                 masking = True
                 out.append(b"")
                 continue
-            if _PP_ELIF_TRUE_PATTERN.match(line):
+            if _PP_ELIF_TRUE_PATTERN.match(
+                line
+            ) or _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line):
                 masking = settled
                 settled = True
                 out.append(b"" if masking else line)
@@ -1072,9 +1089,12 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
             continue
         if (
             _PP_IF_ZERO_PATTERN.match(line)
-            or _PP_IF_CPLUSPLUS_GUARD_PATTERN.match(line)
             or _PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN.match(line)
             or _PP_IFNDEF_CPLUSPLUS_GUARD_PATTERN.match(line)
+            or (
+                _PP_IF_CPLUSPLUS_GUARD_PATTERN.match(line)
+                and not _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+            )
         ):
             in_chain = True
             nested = 0

@@ -1621,6 +1621,86 @@ def test_cpp20_detector_still_detects_construct_behind_ifdef_cplusplus(tmp_path)
     assert any(r.reason == "consteval-declaration" for r in reqs)
 
 
+def test_cpp20_detector_still_detects_construct_behind_if_defined_cplusplus(
+    tmp_path,
+):
+    """Regression (Codex review, eighth round): ``#if defined(__cplusplus)``
+    is semantically identical to ``#ifdef __cplusplus`` — unconditionally
+    true for every ``-std=`` this heuristic could pick — but the general
+    __cplusplus-guard pattern doesn't distinguish it from a genuine
+    version/feature-test comparison and previously masked it too, hiding
+    the only C++20 signal in the header."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if defined(__cplusplus)\ntemplate<class T> concept C = true;\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
+def test_cpp20_detector_still_detects_construct_behind_bare_if_cplusplus(tmp_path):
+    """Companion: the bare ``#if __cplusplus`` (no ``defined()`` wrapper,
+    no comparison) truthiness-check form is equally always-true."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if __cplusplus\ntemplate<class T> concept C = true;\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
+def test_cpp20_detector_still_masks_combined_cplusplus_defined_and_version_check(
+    tmp_path,
+):
+    """Companion: ``#if defined(__cplusplus) && __cplusplus >= 202002L`` is
+    NOT the same as a bare ``defined(__cplusplus)`` — the attached version
+    comparison makes it genuinely circular, so it must stay masked exactly
+    like a plain version check would."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if defined(__cplusplus) && __cplusplus >= 202002L\n"
+        "template<class T> concept C = true;\n"
+        "#endif\n"
+        "int consteval;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_masks_negated_defined_cplusplus(tmp_path):
+    """Companion: ``#if !defined(__cplusplus)`` is the ``#if`` spelling of
+    ``#ifndef __cplusplus`` and must be masked the same way — never
+    reached in these C++-mode scans."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if !defined(__cplusplus)\ntemplate<class T> concept C = true;\n#endif\nint x;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_settles_on_elif_defined_cplusplus(tmp_path):
+    """Companion: an ``#elif defined(__cplusplus)`` arm, once reached, is
+    just as definitely-true as ``#elif 1`` — it must settle the chain
+    (marking any later sibling arm dead) the same way, not merely stay
+    unmasked without settling."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n#elif defined(__cplusplus)\n"
+        "template<class T> concept C = true;\n"
+        "#else\nconsteval int dead();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+    assert not any(r.reason == "consteval-declaration" for r in reqs)
+
+
 def test_cpp20_detector_detects_custom_concept_constrained_auto_param(tmp_path):
     """Regression (Codex review): an abbreviated function parameter
     constrained by a *project-defined* concept (``void f(MyConcept auto
