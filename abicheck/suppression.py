@@ -651,6 +651,18 @@ class SuppressionOutcome:
     withheld_unknown_rule: Suppression | None = None
     matched_rule: Suppression | None = None
 
+    def rule_label(self) -> str | None:
+        """Display label for :attr:`matched_rule`: its ``label``, falling
+        back to ``reason`` (both are optional/free-form on a ``Suppression``
+        rule, so this can still be ``None``). ``None`` when nothing matched.
+        Used by every call site that stamps ``Change.suppression_rule`` on a
+        change moved into ``DiffResult.suppressed_changes``, so the
+        label-vs-reason fallback logic lives in one place.
+        """
+        if self.matched_rule is None:
+            return None
+        return self.matched_rule.label or self.matched_rule.reason
+
 
 class SuppressionList:
     def __init__(self, suppressions: list[Suppression]) -> None:

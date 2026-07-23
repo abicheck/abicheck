@@ -1,7 +1,7 @@
-# ADR-050: Unified Impact Assessment Model (G29 Phase 3, slices 1-2)
+# ADR-050: Unified Impact Assessment Model (G29 Phase 3, slices 1-3)
 
 **Date:** 2026-07-22
-**Status:** Accepted — slices 1 and 2 implemented.
+**Status:** Accepted — slices 1, 2, and 3 implemented.
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 3's own
 "needs its own ADR" gate — [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s
@@ -301,9 +301,51 @@ existing one:
   `suppressed_changes[]`.
 
 `post_processing.py` was already at the AI-readiness 2000-line hard cap
-(same constraint D6's implementation in ADR-046 hit) — the `ApplySuppression`
-change is a single-line assignment specifically to stay at the cap rather
-than push it over.
+(same constraint D6's implementation in ADR-046 hit). A Codex-review
+follow-up caught that the initial landing missed `_merge_findings_respecting_suppression`
+— the shared helper `DetectCppPatterns`/`DetectTemplatePatterns`/
+`DetectNamespacePatterns` route through for their own late-built findings,
+a second real call site beyond `ApplySuppression.run` where a change moves
+into `ctx.suppressed` — so a late-detector finding a rule actually
+suppressed (not just withheld) still had no `suppression_rule` stamped.
+Fixing both call sites while staying at the 2000-line cap needed one more
+round: the label-or-reason selection moved into a new
+`SuppressionOutcome.rule_label()` method (`suppression.py`, not
+line-constrained), so each of the two `post_processing.py` call sites
+(plus `checker.py`'s two, for the same reason) shrank to a single
+`c.suppression_rule = outcome.rule_label()` line instead of duplicating the
+fallback logic inline three or five times over.
+
+## Slice 3 — `--report-mode root-cause`
+
+Landed in a follow-up commit on the same PR — the first slice of the plan's
+root-cause grouping, deliberately scoped to JSON only:
+
+- **`reporter._to_json_root_cause`** groups `result.changes` (after
+  `--show-only` filtering) by `Change.caused_by_type`, falling back to the
+  change's own `symbol` for an ungrouped, singleton finding — reusing the
+  field `diff_filtering.py`'s redundancy collapse and
+  `internal_leak.py`'s call-graph-leak overlay (`_build_call_graph_leak_change`)
+  already set, rather than requiring new producer wiring. Each group gets a
+  `root_cause_id` (a stable hash of the grouping key — **not** the eventual
+  `RootCauseCorrelator`'s own identifier scheme), a `root`, a
+  `finding_count`, and `findings` (the same `_change_to_dict()` dicts also
+  present in the flat `changes` array, which root-cause mode still emits in
+  full — every other report mode provides `changes` for backward
+  compatibility, `--report-mode leaf` included, so root-cause mode does
+  too rather than breaking that contract).
+- **`--report-mode root-cause`** added to the CLI's `click.Choice`.
+  Deliberately **JSON-only**: `reporter_markdown.to_markdown` and
+  `sarif.py`/`junit_report.py` do not gain a matching branch, so
+  `--format text`/`markdown`/`sarif`/`junit` silently render as `full` —
+  the exact same precedent `--report-mode leaf` already set for
+  SARIF/JUnit (neither module's rendering function even accepts a
+  `report_mode` parameter today). Building the markdown/text rendering
+  too would roughly double this slice's size for a human-facing view
+  the JSON-consuming CI/tooling use case (the primary motivation) doesn't
+  need yet; left for a follow-up slice if real usage asks for it.
+- `REPORT_SCHEMA_VERSION` 2.13 → 2.14 (two new additive, root-cause-mode-only
+  top-level keys: `root_causes`, `root_cause_count`).
 
 ## Deliberately not implemented this slice
 
@@ -336,8 +378,11 @@ remaining four tiers):
   CLAUDE.md "M1-3") exists to prevent — a real regression here would be to
   suppression correctness, not just to this reporting layer. Left for a
   dedicated slice.
-- **`--report-mode root-cause`** — needs Phase 6's `RootCauseCorrelator` to
-  group by; there is nothing to group by yet.
+- **`--report-mode root-cause`'s markdown/text rendering, and the full
+  `RootCauseCorrelator` correlation across consumer-overlay findings that
+  don't share a `caused_by_type` today** — Slice 3 above ships the JSON-only,
+  `caused_by_type`-based first cut; Phase 6's `RootCauseCorrelator` is the
+  fuller job.
 - **Stable `finding_id`/`occurrence_id`/`root_cause_id`/`impact_group_id`
   identifiers independent of `description` text** — `reporter._finding_id`
   already exists (schema 2.3) and is stable across repeated runs, but (unlike
@@ -394,14 +439,15 @@ by and do not depend on anything in this slice being done differently.
 ## References
 
 - `abicheck/impact/model.py`, `abicheck/impact/engine.py`
-- `abicheck/reporter.py` — `_change_to_dict`, `_leaf_entry`, `_suppressed_change_entry`
+- `abicheck/reporter.py` — `_change_to_dict`, `_leaf_entry`, `_suppressed_change_entry`, `_to_json_root_cause`
 - `abicheck/sarif.py` — `_result_for`, `_missing_contract_result`
 - `abicheck/cli_compare_fold.py` — `_fold_scoped_compat_into_text`
-- `abicheck/suppression.py` — `SuppressionOutcome.matched_rule`
-- `abicheck/checker.py`, `abicheck/post_processing.py` — `Change.suppression_rule` set at suppression time
+- `abicheck/cli.py` — `--report-mode` `click.Choice`
+- `abicheck/suppression.py` — `SuppressionOutcome.matched_rule`/`rule_label`
+- `abicheck/checker.py`, `abicheck/post_processing.py` — `Change.suppression_rule` set at suppression time (`_filter_suppressed_changes`, `_filter_pattern_synthetic`, `ApplySuppression.run`, `_merge_findings_respecting_suppression`)
 - `abicheck/schemas/compare_report.schema.json`, `abicheck/schemas/__init__.py`
-- `tests/test_impact_model.py`, `tests/test_suppression.py`, `tests/test_sarif.py`, `tests/test_cov95_cli.py`
-- `docs/concepts/impact-analysis.md`
+- `tests/test_impact_model.py`, `tests/test_suppression.py`, `tests/test_sarif.py`, `tests/test_cov95_cli.py`, `tests/test_reporter.py`, `tests/test_reachability_aware_suppression.py`
+- `docs/concepts/impact-analysis.md`, `docs/user-guide/output-formats.md`
 - [G29](../plans/g29-impact-analysis-layer.md) — Phase 3
 - [ADR-044](044-reachability-aware-suppression.md),
   [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md),

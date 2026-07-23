@@ -241,7 +241,7 @@ partial implemented, D4 deliberately deferred); this paragraph originally
 described the pre-implementation "needs a recorded decision" gate
 (ADR-044's own bar) before the ADR existed.
 
-### Phase 3 — Reporting & root causes — **slices 1-2 implemented (ADR-050)**
+### Phase 3 — Reporting & root causes — **slices 1-3 implemented (ADR-050)**
 
 [ADR-050](../adr/050-unified-impact-assessment-model.md) records the slice 1
 decisions: `abicheck/impact/model.py`'s `ImpactAssessment`/`GraphProofPath`/
@@ -265,13 +265,19 @@ beyond the all-defaults case). `REPORT_SCHEMA_VERSION` 2.12 → 2.13. Slice 2
 closed `FindingDecision.suppression_rule`: `suppression.SuppressionOutcome`
 gained `matched_rule`, and the three call sites that move a change into
 `DiffResult.suppressed_changes` (`checker._filter_suppressed_changes`/
-`_filter_pattern_synthetic`, `post_processing.ApplySuppression`) now stamp
-`Change.suppression_rule` from it.
+`_filter_pattern_synthetic`, `post_processing.ApplySuppression`,
+`_merge_findings_respecting_suppression`) now stamp `Change.suppression_rule`
+from it. Slice 3 added `--report-mode root-cause`: JSON-only (markdown/text/
+SARIF/JUnit render as `full`, mirroring `leaf` mode's own SARIF/JUnit gap),
+grouping findings by the existing `Change.caused_by_type` field rather than
+waiting on Phase 6's `RootCauseCorrelator`. `REPORT_SCHEMA_VERSION` reached
+2.14.
 **Still open under this same ADR**: the D2 direction flip (deliberately not
 attempted — touches five producer modules' core control flow at once,
 several of them performance-sensitive graph walks under active
 suppression-safety guarantees; see ADR-050's "Deliberately not implemented"
-section), `--report-mode root-cause`, stable
+section), `--report-mode root-cause`'s markdown/text rendering and its full
+`RootCauseCorrelator`-based correlation (Phase 6), stable
 `occurrence_id`/`root_cause_id`/`impact_group_id`, and the reference docs
 below — the original Phase 3 scope this section describes:
 

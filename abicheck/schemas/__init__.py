@@ -152,7 +152,15 @@ from typing import Any
 #:       the proof path/decision state/``evidence_category``/
 #:       ``correlated_change_kind`` -- present only when it carries
 #:       information beyond the all-defaults case).
-REPORT_SCHEMA_VERSION = "2.13"
+#:   2.14: added two additive optional top-level keys, present only under
+#:       ``--report-mode root-cause`` (G29 Phase 3 slice 3, ADR-050) --
+#:       ``root_causes`` (groups ``changes`` by ``Change.caused_by_type``,
+#:       falling back to the change's own symbol for an ungrouped finding)
+#:       and ``root_cause_count``. A first, JSON-only slice of the plan's
+#:       root-cause grouping -- ``root_cause_id`` is a stable hash of the
+#:       grouping key, not the eventual G29 Phase 6 ``RootCauseCorrelator``'s
+#:       own identifier scheme.
+REPORT_SCHEMA_VERSION = "2.14"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

@@ -92,6 +92,32 @@
       "items": { "$ref": "#/$defs/change" }
     },
     "redundant_count": { "type": "integer", "minimum": 0 },
+    "root_causes": {
+      "type": "array",
+      "description": "G29 Phase 3 (ADR-050 slice 3, schema 2.14): present only under `--report-mode root-cause`. Groups `changes` (also present, flat, for backward compatibility) by Change.caused_by_type (falling back to the change's own symbol for an ungrouped, singleton finding) -- a first, JSON-only slice of the plan's root-cause grouping; the full RootCauseCorrelator (G29 Phase 6) will additionally correlate consumer-overlay findings that don't share a caused_by_type today.",
+      "items": {
+        "type": "object",
+        "required": ["root_cause_id", "root", "finding_count", "findings"],
+        "additionalProperties": true,
+        "properties": {
+          "root_cause_id": {
+            "type": "string",
+            "description": "Stable hash of the grouping key -- not the eventual RootCauseCorrelator's own identifier scheme."
+          },
+          "root": { "type": "string" },
+          "finding_count": { "type": "integer", "minimum": 1 },
+          "findings": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/change" }
+          }
+        }
+      }
+    },
+    "root_cause_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "G29 Phase 3 (ADR-050 slice 3, schema 2.14): present only under `--report-mode root-cause`. Length of `root_causes`."
+    },
     "suppression": {
       "type": "object",
       "required": ["file_provided", "suppressed_count", "suppressed_changes"],

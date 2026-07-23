@@ -1675,12 +1675,15 @@ def _embed_inline_source_side(
               help="One-line summary output for CI gates. "
                    "With --format json, emits only the summary object.")
 @click.option("--report-mode", "report_mode",
-              type=click.Choice(["full", "leaf", "impact"], case_sensitive=True),
+              type=click.Choice(["full", "leaf", "impact", "root-cause"], case_sensitive=True),
               default="full", show_default=True,
               help="Report mode: 'full' lists all changes individually (default), "
                    "'leaf' groups by root type changes with impact lists, "
                    "'impact' behaves as 'full' with the impact summary table enabled "
-                   "(equivalent to --report-mode full --show-impact).")
+                   "(equivalent to --report-mode full --show-impact), "
+                   "'root-cause' groups findings sharing a root cause "
+                   "(Change.caused_by_type) under one entry -- JSON output only "
+                   "(--format json); other formats render as 'full'.")
 @click.option("--show-impact", is_flag=True, default=False,
               help="Append an impact summary table showing root changes and affected interfaces.")
 @click.option("--recommend", is_flag=True, default=False,

@@ -491,6 +491,84 @@ class TestEvidenceStatusInJson:
         assert "severity" not in d
 
 
+class TestRootCauseReporter:
+    """G29 Phase 3 slice 3 (ADR-050): --report-mode root-cause groups
+    findings sharing a Change.caused_by_type under one entry -- a first,
+    JSON-only slice reusing the existing caused_by_type field rather than
+    requiring the full G29 Phase 6 RootCauseCorrelator."""
+
+    def test_groups_findings_sharing_caused_by_type(self):
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        overlay = Change(
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
+            "required", caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root, overlay])
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert d["root_cause_count"] == 1
+        group = d["root_causes"][0]
+        assert group["root"] == "ns::internal::helper"
+        assert group["finding_count"] == 2
+        assert {f["symbol"] for f in group["findings"]} == {
+            "ns::internal::helper", "pub_entry",
+        }
+
+    def test_ungrouped_finding_is_its_own_singleton(self):
+        c = Change(ChangeKind.FUNC_ADDED, "ns::pub_new", "added")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert d["root_cause_count"] == 1
+        assert d["root_causes"][0]["root"] == "ns::pub_new"
+        assert d["root_causes"][0]["finding_count"] == 1
+
+    def test_root_cause_id_is_stable_for_the_same_root(self):
+        c1 = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
+        c2 = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
+        d1 = json.loads(
+            to_json(_result(Verdict.BREAKING, changes=[c1]), report_mode="root-cause")
+        )
+        d2 = json.loads(
+            to_json(_result(Verdict.BREAKING, changes=[c2]), report_mode="root-cause")
+        )
+        assert (
+            d1["root_causes"][0]["root_cause_id"]
+            == d2["root_causes"][0]["root_cause_id"]
+        )
+
+    def test_changes_still_present_for_backward_compat(self):
+        """Every other report mode always provides a flat `changes` array
+        (leaf mode included, via its own backward-compat union) -- root-cause
+        mode must too, or a consumer relying on that contract breaks."""
+        c = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
+        r = _result(Verdict.BREAKING, changes=[c])
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert len(d["changes"]) == 1
+        assert d["changes"][0]["symbol"] == "ns::internal::helper"
+
+    def test_carries_severity_block(self):
+        from abicheck.severity import PRESET_DEFAULT
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(
+            to_json(r, report_mode="root-cause", severity_config=PRESET_DEFAULT)
+        )
+        assert "severity" in d
+        assert d["severity"]["categories"]["addition"]["count"] == 1
+
+    def test_show_only_filters_root_cause_groups(self):
+        breaking = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
+        addition = Change(ChangeKind.FUNC_ADDED, "ns::pub_new", "added")
+        r = _result(Verdict.BREAKING, changes=[breaking, addition])
+        d = json.loads(
+            to_json(r, report_mode="root-cause", show_only="breaking")
+        )
+        roots = {group["root"] for group in d["root_causes"]}
+        assert roots == {"ns::internal::helper"}
+
+
 class TestMarkdownReporter:
     def test_no_change_contains_no_change(self):
         md = to_markdown(_result(Verdict.NO_CHANGE))

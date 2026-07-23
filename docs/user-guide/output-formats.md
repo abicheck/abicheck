@@ -197,6 +197,36 @@ listing every change individually. Available in Markdown and JSON formats.
 abicheck compare old.json new.json --report-mode leaf
 ```
 
+## `--report-mode root-cause`
+
+Groups findings that share a root cause under one entry, instead of listing
+every change individually — e.g. an internal helper's `func_removed` finding
+and the `internal_symbol_required_by_public_api` overlay finding that names
+it both land in the same group. **JSON output only** (`--format json`); other
+formats render as `full`. This is a first slice reusing the existing
+`Change.caused_by_type` field (see [ADR-050](../development/adr/050-unified-impact-assessment-model.md));
+a future slice (G29 Phase 6) will additionally correlate consumer-overlay
+findings that don't share a `caused_by_type` today.
+
+```bash
+abicheck compare old.json new.json --report-mode root-cause --format json
+```
+
+```json
+{
+  "root_causes": [
+    {
+      "root_cause_id": "ad544909f783ad0d",
+      "root": "ns::internal::helper",
+      "finding_count": 2,
+      "findings": ["... the two grouped Change entries ..."]
+    }
+  ],
+  "root_cause_count": 1,
+  "changes": ["... the same findings, flat, for backward compatibility ..."]
+}
+```
+
 ## `--show-impact`
 
 Appends an impact summary table to the report, showing root changes and how many

@@ -1073,8 +1073,7 @@ class ApplySuppression:
         for c in changes:
             outcome = ctx.suppression.evaluate(c)
             if outcome.suppressed:
-                if outcome.matched_rule is not None:
-                    c.suppression_rule = outcome.matched_rule.label or outcome.matched_rule.reason
+                c.suppression_rule = outcome.rule_label()
                 ctx.suppressed.append(c)
                 continue
             filtered.append(c)
@@ -1199,6 +1198,7 @@ def _merge_findings_respecting_suppression(
         if ctx.suppression is not None:
             outcome = ctx.suppression.evaluate(c)
             if outcome.suppressed:
+                c.suppression_rule = outcome.rule_label()
                 ctx.suppressed.append(c)
                 continue
             if outcome.withheld_rule is not None:

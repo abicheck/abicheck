@@ -1442,6 +1442,37 @@ class TestLateDetectorSuppressionDiagnostic:
             "descriptor_base" in (d.symbol or "") for d in diag
         )
 
+    def test_late_detector_finding_records_suppression_rule(self) -> None:
+        """G29 Phase 3 slice 2 follow-up (Codex review): a late-pattern-
+        detector finding (DetectCppPatterns/DetectTemplatePatterns/
+        DetectNamespacePatterns) that a rule actually suppresses -- not just
+        withholds -- must also get Change.suppression_rule stamped, the
+        same as ApplySuppression's own direct suppressions. This exercises
+        _merge_findings_respecting_suppression (the shared helper all three
+        late detectors route through) directly with a narrow, non-broad
+        rule that suppresses outright rather than being gated."""
+        from abicheck.post_processing import (
+            PipelineContext,
+            _merge_findings_respecting_suppression,
+        )
+
+        old, new = _snap(), _snap()
+        suppression = SuppressionList(
+            [Suppression(symbol="late::finding", label="late-workaround")]
+        )
+        ctx = PipelineContext(old=old, new=new, suppression=suppression)
+        changes: list[Change] = []
+        new_finding = Change(
+            kind=ChangeKind.CPO_KIND_CHANGED,
+            symbol="late::finding",
+            description="late synthetic finding",
+        )
+        _merge_findings_respecting_suppression(changes, [new_finding], ctx)
+
+        assert changes == []
+        assert ctx.suppressed == [new_finding]
+        assert new_finding.suppression_rule == "late-workaround"
+
 
 class TestCheckerLevelSuppressionDiagnostic:
     """ADR-044 P1 item 6: checker.py's own _filter_suppressed_changes (SONAME/

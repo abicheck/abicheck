@@ -415,6 +415,95 @@ def _to_json_leaf(
     return json.dumps(d, indent=indent)
 
 
+def _to_json_root_cause(
+    result: DiffResult,
+    indent: int = 2,
+    *,
+    show_only: str | None = None,
+    severity_config: SeverityConfig | None = None,
+) -> str:
+    """``--report-mode root-cause`` JSON output (G29 Phase 3, ADR-050 slice 3).
+
+    Groups ``result.changes`` (after ``--show-only`` filtering) by
+    ``Change.caused_by_type`` when set, else each change is its own
+    singleton group keyed by its own ``symbol`` -- reusing the existing
+    ``caused_by_type`` field ``diff_filtering.py``'s redundancy collapse and
+    ``internal_leak.py``'s call-graph-leak overlay already set, rather than
+    requiring new producer wiring. This is a first, JSON-only slice of the
+    plan's root-cause grouping: the full `RootCauseCorrelator` (G29 Phase 6)
+    will additionally correlate across consumer-overlay findings that don't
+    share a `caused_by_type` today; `root_cause_id` here is a stable hash of
+    the grouping key, not the eventual correlator's own identifier scheme
+    (ADR-050, "Deliberately not implemented this slice").
+    """
+    changes = list(result.changes)
+    if show_only:
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+    effective_policy = result.policy or "strict_abi"
+    eff_sets = result._effective_kind_sets()
+
+    # Build each finding's dict exactly once; group the same dict objects by
+    # key so `changes` (flat, backward-compatible -- every existing report
+    # mode provides it, `_to_json_leaf` included) and `root_causes[].findings`
+    # never drift from each other.
+    entries = [
+        _change_to_dict(
+            c, policy=effective_policy, kind_sets=eff_sets, policy_file=result.policy_file
+        )
+        for c in changes
+    ]
+    groups: dict[str, list[dict[str, object]]] = {}
+    order: list[str] = []
+    for c, entry in zip(changes, entries):
+        key = c.caused_by_type or c.symbol
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(entry)
+
+    root_causes = [
+        {
+            "root_cause_id": hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
+            "root": key,
+            "finding_count": len(groups[key]),
+            "findings": groups[key],
+        }
+        for key in order
+    ]
+
+    d = _build_json_base(result)
+    _add_abi_surface_breakdown(d, result)
+    _add_evidence_fields(d, result)
+    d["policy"] = effective_policy
+    if show_only:
+        _add_show_only_filter(d, result, changes, show_only)
+    if severity_config is not None:
+        d["severity"] = _build_severity_json(
+            changes,
+            severity_config,
+            all_changes=list(result.changes),
+            policy=result.policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+        )
+    d["changes"] = entries
+    d["root_causes"] = root_causes
+    d["root_cause_count"] = len(root_causes)
+    _add_suppression(d, result)
+    _add_surface_scope(d, result)
+    _add_reconciled(d, result)
+    _add_detectors(d, result)
+    _add_confidence_evidence(d, result)
+    _add_policy_overrides(d, result)
+    return json.dumps(d, indent=indent)
+
+
 def _metadata_dict(meta: object | None) -> dict[str, object] | None:
     if meta is None:
         return None
@@ -680,6 +769,14 @@ def to_json(
 
     if report_mode == "leaf":
         return _to_json_leaf(
+            result,
+            indent=indent,
+            show_only=show_only,
+            severity_config=severity_config,
+        )
+
+    if report_mode == "root-cause":
+        return _to_json_root_cause(
             result,
             indent=indent,
             show_only=show_only,
