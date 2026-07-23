@@ -429,6 +429,43 @@ def test_8d_implicit_parent_ownership_wins_over_a_nested_non_owned_include(tmp_p
     assert old.profile_fingerprint == new.profile_fingerprint
 
 
+def test_8e_owned_ancestor_wins_over_a_nested_non_owned_include(tmp_path):
+    # Codex review (PR #624): a file under a project-owned ANCESTOR -I
+    # directory (e.g. --include old, owned because it's an ancestor of a
+    # declared header) that ALSO falls under a nested, non-owned --include
+    # (e.g. --include old/generated) must still be treated as project-owned
+    # -- the owned ancestor's "every file under it, named or not" exclusion
+    # wins over the nested dir's longer/deeper longest-prefix match. Unlike
+    # test_8d, ownership here comes from an explicit --include ancestor, not
+    # the implicit declared-header-parent rule.
+    old_h = _write(tmp_path / "old" / "include" / "foo.h", "int add(int a, int b);\n")
+    new_h = _write(tmp_path / "new" / "include" / "foo.h", "int add(int a, int b);\n")
+    old_gen = _write(tmp_path / "old" / "generated" / "config.h", "int helper(void);\n")
+    new_gen = _write(
+        tmp_path / "new" / "generated" / "config.h",
+        "int helper(void); /* internal-only edit */\n",
+    )
+    old = compute_extraction_contract(
+        declared_headers=[old_h],
+        l2_frontend_ran=True,
+        declared_includes=[
+            IncludeDir(tmp_path / "old"),
+            IncludeDir(tmp_path / "old" / "generated"),
+        ],
+        depfile_resolved_paths=[old_h, old_gen],
+    )
+    new = compute_extraction_contract(
+        declared_headers=[new_h],
+        l2_frontend_ran=True,
+        declared_includes=[
+            IncludeDir(tmp_path / "new"),
+            IncludeDir(tmp_path / "new" / "generated"),
+        ],
+        depfile_resolved_paths=[new_h, new_gen],
+    )
+    assert old.profile_fingerprint == new.profile_fingerprint
+
+
 # ---------------------------------------------------------------------------
 # system/toolchain bucket (tests 9, 10)
 # ---------------------------------------------------------------------------

@@ -267,16 +267,36 @@ def _attribute_file(
     for h in declared_headers:
         if _is_ancestor_or_equal(h.parent, file_path):
             return -1
-    best_idx: int | None = None
-    best_len = -1
+    # An owned ancestor -I directory's exclusion ("every file under it,
+    # named or not") wins over a deeper, non-owned nested -I directory
+    # (Codex review, PR #624): with `--header old/include/foo.h --include
+    # old --include old/generated`, `old` is project-owned (an ancestor of
+    # the declared header) and `old/generated` is not (it isn't itself an
+    # ancestor of any declared header) -- a plain longest-prefix match would
+    # pick the deeper, non-owned `old/generated` slot for a file under it,
+    # content-hashing it even though the broader owned `old` root already
+    # claims everything beneath it. Owned matches are therefore preferred
+    # outright over non-owned ones, with longest-prefix only breaking ties
+    # within the same ownership class (which owned index wins is otherwise
+    # immaterial: an owned slot's token never depends on per_slot_files).
+    best_owned_idx: int | None = None
+    best_owned_len = -1
+    best_external_idx: int | None = None
+    best_external_len = -1
     for idx, inc in enumerate(declared_includes):
         if _is_ancestor_or_equal(inc.path, file_path):
             depth = len(_resolved(inc.path).parts)
-            if depth > best_len:
-                best_len = depth
-                best_idx = idx
-    if best_idx is not None:
-        return best_idx
+            if ownership[idx]:
+                if depth > best_owned_len:
+                    best_owned_len = depth
+                    best_owned_idx = idx
+            elif depth > best_external_len:
+                best_external_len = depth
+                best_external_idx = idx
+    if best_owned_idx is not None:
+        return best_owned_idx
+    if best_external_idx is not None:
+        return best_external_idx
     return None
 
 
