@@ -1257,10 +1257,9 @@ def test_cpp20_detector_detects_construct_in_active_else_arm_of_if_zero(tmp_path
 
 
 def test_cpp20_detector_detects_construct_in_else_after_elif(tmp_path):
-    """Companion: the same reachable-``#else`` reasoning holds when an
-    ``#elif`` (whose condition this heuristic can't evaluate) sits between
-    the ``#if 0`` and the ``#else`` — the construct in ``#else`` must still
-    be found."""
+    """Companion: the same reachable-``#else`` reasoning holds when a
+    permanently-false ``#elif 0`` sits between the ``#if 0`` and the
+    ``#else`` — the construct in ``#else`` must still be found."""
     headers = _write(
         tmp_path,
         "a.h",
@@ -1280,6 +1279,37 @@ def test_cpp20_detector_still_ignores_truly_inactive_if_zero_without_else(tmp_pa
         "#if 0\ntemplate<class T> concept C = true;\n#endif\nint x;\n",
     )
     assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_construct_in_permanently_false_elif(tmp_path):
+    """Regression (Codex review, second round): a ``#elif 0``/``#elif
+    false`` arm is itself permanently unreachable, exactly like the
+    ``#if 0`` guard before it — a construct written only there must stay
+    masked, not treated as reachable the way a genuinely unevaluable
+    ``#elif <macro>`` condition is. Only the trailing pre-C++20 ``int
+    consteval;`` outside the conditional is active."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n#elif 0\nconsteval int f();\n#endif\nint consteval;\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_detects_construct_in_elif_after_permanently_false_elif(
+    tmp_path,
+):
+    """Companion: a genuinely unevaluable ``#elif`` after a permanently-false
+    ``#elif 0`` must still stop masking and be scanned — the "keep masking
+    for elif-0" rule must not swallow a later, truly unknown arm."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n#elif 0\nint b;\n#elif SOME_MACRO\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
 
 
 def test_cpp20_detector_ignores_nested_if_zero_constinit_type_shadow(tmp_path):

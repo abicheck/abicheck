@@ -53,7 +53,9 @@ it should read in CHANGELOG.md. Delete the other sections.
   and CRLF line endings) are now stripped once, up front, before both
   scans run — while a reachable `#else`/`#elif` arm of the same guard is
   left untouched, so a genuine construct written only there is still
-  detected.
+  detected. A further `#elif 0`/`#elif false` arm stays masked exactly
+  like the `#if 0` guard before it, rather than being treated as reachable
+  the way a genuinely unevaluable `#elif <macro>` condition is.
 
 -->
 <!--

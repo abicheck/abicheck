@@ -871,7 +871,9 @@ def _is_preprocessor_directive(line: bytes) -> bool:
 
 _PP_IF_OPEN_PATTERN = re.compile(rb"^[ \t]*#[ \t]*(?:if|ifdef|ifndef)\b")
 _PP_IF_ZERO_PATTERN = re.compile(rb"^[ \t]*#[ \t]*if[ \t]+(?:0+|false)[ \t]*$")
-_PP_ELSE_OR_ELIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*(?:else|elif)\b")
+_PP_ELSE_PATTERN = re.compile(rb"^[ \t]*#[ \t]*else\b")
+_PP_ELIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*elif\b")
+_PP_ELIF_ZERO_PATTERN = re.compile(rb"^[ \t]*#[ \t]*elif[ \t]+(?:0+|false)[ \t]*$")
 _PP_ENDIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*endif\b")
 
 
@@ -887,14 +889,19 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
 
     Only the ``#if 0``/``#if false`` arm itself is masked: an ``#else`` at
     the same nesting level is unconditionally reachable (the guard is
-    unconditionally false), and an ``#elif`` there has a condition this
+    unconditionally false), and an ``#elif`` there whose own condition
+    isn't a recognizable ``0``/``false`` literal has a condition this
     heuristic can't evaluate — both stop the masking from that line on
     (Codex review) rather than blanking all the way to the matching
     ``#endif``, which previously hid a genuine construct written in the
     active arm of a permanently-false guard. Treating an unevaluated
     ``#elif`` as possibly-active is the conservative direction here: it can
     only cause C++20 mode to be requested when not strictly needed, never
-    the reverse (a real C++20 header parsed without it and failing).
+    the reverse (a real C++20 header parsed without it and failing). An
+    ``#elif 0``/``#elif false`` arm is itself permanently unreachable
+    exactly like ``#if 0``, so masking continues through it rather than
+    stopping (Codex review, second round) — otherwise a construct written
+    only in *that* dead arm would wrongly force C++20 mode too.
     """
     lines = content.split(b"\n")
     out: list[bytes] = []
@@ -916,7 +923,12 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 depth -= 1
                 out.append(b"")
                 continue
-            if depth == 1 and _PP_ELSE_OR_ELIF_PATTERN.match(line):
+            if depth == 1 and _PP_ELIF_ZERO_PATTERN.match(line):
+                out.append(b"")
+                continue
+            if depth == 1 and (
+                _PP_ELSE_PATTERN.match(line) or _PP_ELIF_PATTERN.match(line)
+            ):
                 depth = 0
                 out.append(line)
                 continue
