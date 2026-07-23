@@ -340,9 +340,9 @@ elif [[ "$MODE" == "compare" ]]; then
   # check-target's kind: bundle) comparison into a hard usage error instead
   # of the intended comparison (Codex review).
   #
-  # --config is NOT one of the flags that rejection covers
-  # (_EVIDENCE_SET_INPUT_FLAGS in cli_resolve.py lists only depth/sources/
-  # build_info) — the release fan-out still consumes the project
+  # --config is NOT one of the flags that rejection covers (cli_resolve.py's
+  # set-input evidence-flags allowlist lists only depth/sources/build_info)
+  # — the release fan-out still consumes the project
   # .abicheck.yml for severity/scope/suppression/exit-code settings
   # (_resolve_compare_config runs before the directory/package dispatch), so
   # it stays unconditional; an earlier fix lumped it in with the three
