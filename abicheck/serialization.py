@@ -102,13 +102,17 @@ from .model import (
 #     ordinary verdict (Codex review, PR #624) — no in-band schema-version
 #     change can close that gap for code that already shipped without it.
 #     `checker.compare`'s ``contract_coverage="partial"`` disclosure (ADR-050
-#     D2) is the mitigation available for exactly this case: a pair where one
-#     side's contract was dropped (by an old reader, or because it was never
-#     populated) is reported as partially covered rather than silently full,
-#     even though it isn't hard-blocked. As of this PR no real producer
-#     populates ``contract`` yet (``dumper.py`` wiring is separate, later
-#     work), so there is no snapshot in the wild today for an old reader to
-#     mis-handle.
+#     D2) is the mitigation available for exactly this case -- but it comes
+#     from whichever *v12-aware* `compare()` later evaluates the resulting
+#     pair, never from the pre-v12 reader that did the dropping (that reader
+#     predates the coverage logic too, and stays just as unaware of the drop
+#     as it was of ``contract`` itself; Codex review, PR #624). A pair where
+#     one side's contract is missing -- whether dropped by an old re-save or
+#     never populated -- is reported as partially covered rather than
+#     silently full, once a current reader does the comparing. As of this
+#     PR no real producer populates ``contract`` yet (``dumper.py`` wiring
+#     is separate, later work), so there is no snapshot in the wild today
+#     for an old reader to mis-handle.
 SCHEMA_VERSION: int = 12
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).

@@ -14,6 +14,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   warn-and-continue path and silently drops the unrecognized `contract`
   field, exactly the failure mode the comment claimed was closed. No in-band
   schema-version change can retroactively patch already-shipped code; the
-  comments now say so explicitly and point at `contract_coverage="partial"`
-  as the actual mitigation for a contract dropped this way. No behavior
-  change — `contract` isn't populated by any real producer yet.
+  comments now say so explicitly. `contract_coverage="partial"` is *not* a
+  mitigation a pre-v12 reader can provide — that code predates the coverage
+  logic too and stays fully unaware of the drop. It only helps once a
+  *v12-aware* `compare()` later evaluates a pair where one side's contract
+  is missing (whether dropped by an old re-save, or never populated): that
+  comparison correctly discloses partial coverage instead of reporting a
+  false full match. No behavior change — `contract` isn't populated by any
+  real producer yet.
