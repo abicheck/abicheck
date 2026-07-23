@@ -252,6 +252,48 @@ class TestValidateInputs:
         )
         assert result.returncode == 64
 
+    def test_app_consumer_rejects_baseline_channel_none(self, tmp_path: Path) -> None:
+        # baseline-channel: none routes to `scan`, which has no --used-by
+        # equivalent -- an app-consumer check would silently run unscoped
+        # (Codex review).
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "none",
+                "INPUT_TARGET_KIND": "app-consumer",
+                "INPUT_CONSUMER_BINARY": "./consumer.so",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_plugin_contract_rejects_baseline_channel_none(
+        self, tmp_path: Path
+    ) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "none",
+                "INPUT_TARGET_KIND": "plugin-contract",
+                "INPUT_CONTRACT_FILE": "./contract.syms",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_library_target_allows_baseline_channel_none(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "none",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0
+
 
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/check-target/run.sh not found"

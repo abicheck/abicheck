@@ -53,12 +53,34 @@ it should read in CHANGELOG.md. Delete the other sections.
   CLI's evidence flags. Now forwarded (scoped to the new/candidate side for
   `sources`/`build-info`, matching `compare`'s own `new=`-prefixed syntax).
 - **GitHub Action `compare` mode no longer forwards `--depth`/`--sources`/
-  `--build-info`/`--config` for directory or package operands** — the CLI's
-  per-library release fan-out rejects those flags outright for that shape, so
+  `--build-info` for directory or package operands** — the CLI's per-library
+  release fan-out rejects those three flags outright for that shape, so
   every `check-target` `kind: bundle` check (or any other directory/package
   `compare` invocation) with a baseline resolved would fail as a usage error
-  before comparing anything. `action/run.sh` now skips that flag block when
-  either operand is a directory/package.
+  before comparing anything. `action/run.sh` now skips those three when
+  either operand is a directory/package. `--config` is not one of the
+  rejected flags and keeps being forwarded unconditionally (an intermediate
+  fix had incorrectly grouped it with the other three, silently dropping a
+  bundle caller's `build-config`).
+- **`actions/check-target` now rejects `target-kind: app-consumer`/
+  `plugin-contract` combined with `baseline-channel: none`** — that
+  combination routes the analysis step to `scan` (a single-build audit),
+  but `scan` has no `--used-by`/`--required-symbols` equivalent to scope the
+  contract check against, so the check previously ran as a plain unscoped
+  scan under the contract target's name and could pass without ever
+  checking the consumer/plugin contract it claimed to. `validate-inputs.sh`
+  now fails loud on this combination instead.
+- **`compare_report.schema.json` now accepts the operational-error/bootstrap
+  report envelopes it's supposed to always be able to produce** — the schema
+  required compare-specific fields (`library`, `old_file`, `summary`,
+  `changes`, ...) and restricted `verdict` to the five real `Verdict` values
+  unconditionally, so `actions/check-target`'s synthesized
+  `verdict: "ERROR"`/`"NO_BASELINE"` envelopes (and the pre-existing
+  per-library release fan-out's own `verdict: "ERROR"` shape) never actually
+  validated against the schema they declare via `report_schema_version`.
+  `verdict`'s enum now also allows `ERROR`/`NO_BASELINE`, and the
+  compare-specific fields are only required (via an `allOf`/`if`/`then`)
+  when `verdict` is one of the five real values.
 
 <!--
 ### Performance

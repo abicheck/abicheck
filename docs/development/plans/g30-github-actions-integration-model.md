@@ -790,6 +790,56 @@ same directory/package shape) — checked against both `old-library` and
 flags are omitted when either operand is a directory, even when the
 corresponding evidence inputs are set.
 
+A fifth round of Codex review then caught three more issues, all fixed in
+one follow-up commit:
+
+- **The directory/package guard above over-suppressed `--config` too** —
+  `--config` is not one of the flags `_reject_evidence_flags_for_set_inputs`
+  actually rejects (`_EVIDENCE_SET_INPUT_FLAGS` lists only `depth`/`sources`/
+  `build_info`); the release fan-out still consumes the project
+  `.abicheck.yml` for severity/scope/suppression/exit-code settings
+  (`_resolve_compare_config` runs before the directory/package dispatch), so
+  a bundle caller's `build-config` was being silently dropped. Fixed by
+  pulling `--config` out of the release-style-operand guard entirely — it
+  now always reaches the CLI, matching every other compare mode.
+- **`target-kind: app-consumer`/`plugin-contract` combined with
+  `baseline-channel: none` silently ran an unscoped audit** —
+  `baseline-channel: none` routes the analysis step to `scan`, but `scan`
+  has no `--used-by`/`--required-symbols` equivalent at all (confirmed via
+  `abicheck scan --help`); those flags only exist in the `compare` branch of
+  `action/run.sh`. A contract check with no baseline therefore ran as a
+  plain unscoped scan under the contract target's name and could pass
+  without ever checking the consumer/plugin contract it claimed to. Fixed
+  by rejecting the combination up front in `validate-inputs.sh` — there is
+  no way to honor a contract scope without a two-sided comparison, so
+  failing loud (rather than trying to thread `--used-by`/`--required-symbols`
+  through a mode that structurally can't use them) is the correct fix.
+- **The operational-error/bootstrap sentinel envelopes still didn't validate
+  against `compare_report.schema.json`** — the earlier `compatibility_verdict:
+  null` fix (third review round, above) only addressed one field; the schema
+  unconditionally required compare-specific fields (`library`, `old_file`,
+  `summary`, `changes`, `policy`, `suppression`, `detectors`, `confidence`,
+  `evidence_tier`, `evidence_tiers`, ...) and restricted `verdict` to the
+  five real `Verdict` values, so `build_operational_error_report`/
+  `build_bootstrap_report`'s `verdict: "ERROR"`/`"NO_BASELINE"` envelopes —
+  and the pre-existing per-library release fan-out's own `verdict: "ERROR"`
+  shape in `cli_compare_release.py` (not new to this task) — never actually
+  validated, confirmed by running `jsonschema.validate` against both shapes
+  by hand. The "out of scope, mirrors an accepted ADR-047 §7 gap" reply
+  given in the third round was too quick to wave this away as unfixable;
+  Codex's fourth pass on it correctly pushed back with concrete schema
+  evidence. Fixed properly this time: `compare_report.schema.json`'s
+  top-level `required` now only demands `report_schema_version`/`verdict`,
+  an `allOf`/`if`/`then` requires the full compare-specific field list only
+  when `verdict` is one of the five real values, and `verdict`'s enum grew
+  `ERROR`/`NO_BASELINE` (additive, consistent with the existing
+  `report_schema_version` MINOR-bump convention for new enum members).
+  Verified against all four shapes by hand: a full compare report validates
+  and still rejects a truncated one, and both sentinel envelopes (plus the
+  minimal pre-existing release-fan-out `{library, verdict: "ERROR", error}`
+  shape) now validate. `docs/schemas/v1/compare_report.schema.json`
+  re-synced via `scripts/publish_schemas.py`.
+
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
 Implements ADR-047 §4/§5 (`run-plan.json` generation + matrix + trailing

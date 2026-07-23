@@ -144,11 +144,17 @@ class TestCompareModeForwardsBuildSourceEvidence:
 class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:
     """The CLI's per-library release fan-out (directory/package operands --
     e.g. check-target's kind: bundle) rejects --sources/--build-info/
-    --config/--depth outright (_reject_evidence_flags_for_set_inputs) --
-    forwarding them here would turn every bundle comparison into a hard
-    usage error instead of running it (Codex review, PR #625)."""
+    --depth outright (_reject_evidence_flags_for_set_inputs) -- forwarding
+    them here would turn every bundle comparison into a hard usage error
+    instead of running it (Codex review, PR #625). --config is NOT one of
+    the rejected flags (_EVIDENCE_SET_INPUT_FLAGS lists only depth/sources/
+    build_info) -- the release fan-out still consumes the project
+    .abicheck.yml, so it must keep reaching the CLI even for a directory
+    operand (Codex review, second round)."""
 
-    def test_directory_new_library_gets_no_evidence_flags(self, tmp_path: Path) -> None:
+    def test_directory_new_library_gets_no_evidence_flags_but_keeps_config(
+        self, tmp_path: Path
+    ) -> None:
         old_dir = tmp_path / "old-bundle"
         new_dir = tmp_path / "new-bundle"
         old_dir.mkdir()
@@ -166,8 +172,8 @@ class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:
         )
         assert "--sources" not in cmd
         assert "--build-info" not in cmd
-        assert "--config" not in cmd
         assert "--depth" not in cmd
+        assert "--config /cfg.yml" in cmd
 
     def test_directory_old_library_alone_also_skips_evidence_flags(
         self, tmp_path: Path

@@ -6,22 +6,39 @@
   "type": "object",
   "required": [
     "report_schema_version",
-    "library",
-    "old_version",
-    "new_version",
-    "verdict",
-    "old_file",
-    "new_file",
-    "summary",
-    "policy",
-    "changes",
-    "suppression",
-    "detectors",
-    "confidence",
-    "evidence_tier",
-    "evidence_tiers"
+    "verdict"
   ],
   "additionalProperties": true,
+  "allOf": [
+    {
+      "description": "A real compatibility comparison (the five Verdict enum values) carries the full compare-report shape.",
+      "if": {
+        "properties": {
+          "verdict": {
+            "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+          }
+        },
+        "required": ["verdict"]
+      },
+      "then": {
+        "required": [
+          "library",
+          "old_version",
+          "new_version",
+          "old_file",
+          "new_file",
+          "summary",
+          "policy",
+          "changes",
+          "suppression",
+          "detectors",
+          "confidence",
+          "evidence_tier",
+          "evidence_tiers"
+        ]
+      }
+    }
+  ],
   "properties": {
     "report_schema_version": {
       "type": "string",
@@ -33,7 +50,8 @@
     "new_version": { "type": "string" },
     "verdict": {
       "type": "string",
-      "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+      "description": "The five real Verdict enum values for a computed compatibility comparison, plus two sentinel values for a report that never got that far: \"ERROR\" (an operational/infrastructure failure -- e.g. a library that failed to dump/extract/compare in the per-library release fan-out, or a resolve-baseline failure in actions/check-target; pre-dates check-target, see aggregate.py's _OPERATIONAL_ERROR_VERDICT) and \"NO_BASELINE\" (actions/check-target's bootstrap \"no baseline published yet\" advisory pass, ADR-047 §6 -- never a compatibility verdict). Only the five real values require the full compare-report shape below (see allOf); ERROR/NO_BASELINE reports carry whatever operational_errors/check_evidence_coverage context is available instead.",
+      "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", "ERROR", "NO_BASELINE"]
     },
     "full_verdict": {
       "type": "string",

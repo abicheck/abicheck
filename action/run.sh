@@ -332,18 +332,27 @@ elif [[ "$MODE" == "compare" ]]; then
   # flagged by review: a --depth build/source compare request had no way to
   # actually reach the CLI's evidence flags at all.
   #
-  # Skipped entirely when either operand is a directory/package: the CLI's
-  # per-library release fan-out (ADR-037 D7) doesn't collect inline
-  # build/source evidence and rejects --sources/--build-info/--config/--depth
-  # outright for that shape (_reject_evidence_flags_for_set_inputs) — passing
-  # them here would turn every directory/package (e.g. check-target's
-  # kind: bundle) comparison into a hard usage error instead of the intended
-  # comparison (Codex review).
+  # --sources/--build-info/--depth are skipped entirely when either operand
+  # is a directory/package: the CLI's per-library release fan-out (ADR-037
+  # D7) doesn't collect inline build/source evidence and rejects those three
+  # outright for that shape (_reject_evidence_flags_for_set_inputs) —
+  # passing them here would turn every directory/package (e.g.
+  # check-target's kind: bundle) comparison into a hard usage error instead
+  # of the intended comparison (Codex review).
+  #
+  # --config is NOT one of the flags that rejection covers
+  # (_EVIDENCE_SET_INPUT_FLAGS in cli_resolve.py lists only depth/sources/
+  # build_info) — the release fan-out still consumes the project
+  # .abicheck.yml for severity/scope/suppression/exit-code settings
+  # (_resolve_compare_config runs before the directory/package dispatch), so
+  # it stays unconditional; an earlier fix lumped it in with the three
+  # rejected flags and silently dropped a bundle caller's build-config
+  # (Codex review, second round).
+  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
   if ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
     add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
     add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
-    add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
     add_single_flag "--depth" "${INPUT_DEPTH:-}"
   fi
 

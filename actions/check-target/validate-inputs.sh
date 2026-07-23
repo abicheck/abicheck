@@ -58,6 +58,16 @@ fi
 if [[ "$TARGET_KIND" == "plugin-contract" && -z "$CONTRACT_FILE" ]]; then
   _fail "contract-file is required when target-kind is 'plugin-contract'."
 fi
+if [[ "$BASELINE_CHANNEL" == "none" && "$TARGET_KIND" != "library" ]]; then
+  # baseline-channel: none routes the analysis step to `scan` (a one-build
+  # audit), but the root Action's --used-by/--required-symbols contract
+  # scoping only exists in its `compare` branch -- `scan` has no equivalent
+  # flag at all. Without this check, an app-consumer/plugin-contract check
+  # with no baseline would silently run as a plain unscoped scan under the
+  # contract target's name and could pass without ever checking the
+  # consumer/plugin contract it claims to (Codex review).
+  _fail "target-kind '$TARGET_KIND' is not supported with baseline-channel: none -- a single-build audit (scan) has no --used-by/--required-symbols equivalent to scope the contract check against. Use target-kind: library for a baseline-channel: none audit, or set a real baseline-channel to run the scoped compare."
+fi
 if [[ "$BASELINE_CHANNEL" != "none" && -z "$BASELINE_PATH" ]]; then
   _fail "baseline-path is required when baseline-channel is not 'none'."
 fi
