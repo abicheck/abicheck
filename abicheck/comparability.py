@@ -401,9 +401,23 @@ def compute_extraction_contract(
         ownership = _classify_include_dirs(declared_headers, declared_includes)
         header_identities = _header_identities(declared_headers)
 
-        resolved_paths = [
-            p for p in depfile_resolved_paths if p != generated_driver_path
-        ]
+        # Deduplicated by resolved identity, not just filtered (Codex
+        # review, PR #624): depfile_resolved_paths can realistically list
+        # the same resolved file more than once (e.g. concatenated per-TU
+        # depfiles, or an un-deduplicated depfile parse). Left un-deduped,
+        # a repeated entry is bucketed and hashed twice, so an otherwise
+        # identical extraction fingerprints differently purely because one
+        # side happens to repeat the same dependency entry.
+        seen_resolved: set[Path] = set()
+        resolved_paths: list[Path] = []
+        for p in depfile_resolved_paths:
+            if p == generated_driver_path:
+                continue
+            key = _resolved(p)
+            if key in seen_resolved:
+                continue
+            seen_resolved.add(key)
+            resolved_paths.append(p)
         per_slot_files: list[list[Path]] = [[] for _ in declared_includes]
         system_bucket_files: list[Path] = []
         for file_path in resolved_paths:

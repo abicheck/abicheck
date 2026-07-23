@@ -211,6 +211,27 @@ def test_4_routine_two_checkout_dependency_matches_profile(tmp_path):
     assert old.profile_fingerprint == new.profile_fingerprint
 
 
+def test_depfile_paths_are_deduplicated_before_external_slot_bucketing(tmp_path):
+    # Codex review (PR #624): depfile_resolved_paths can realistically list
+    # the same resolved file more than once (e.g. concatenated per-TU
+    # depfiles, or an un-deduplicated depfile parse) -- an otherwise
+    # identical extraction must not fingerprint differently just because
+    # one side happens to repeat the same dependency entry.
+    dep_old = _write(tmp_path / "old" / "include" / "dep.h", "struct Dep { int x; };\n")
+    dep_new = _write(tmp_path / "new" / "include" / "dep.h", "struct Dep { int x; };\n")
+    once = compute_extraction_contract(
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(tmp_path / "old" / "include")],
+        depfile_resolved_paths=[dep_old],
+    )
+    repeated = compute_extraction_contract(
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(tmp_path / "new" / "include")],
+        depfile_resolved_paths=[dep_new, dep_new],
+    )
+    assert once.profile_fingerprint == repeated.profile_fingerprint
+
+
 def test_5_genuinely_different_dependency_content_differs_profile(tmp_path):
     dep_old = _write(
         tmp_path / "dep-v1" / "include" / "dep.h", "struct Dep { int x; };\n"
@@ -504,6 +525,20 @@ def test_9_10_unattributed_depfile_path_still_hashed_into_system_bucket(tmp_path
         l2_frontend_ran=True, depfile_resolved_paths=[new_sys]
     )
     assert old.profile_fingerprint != new.profile_fingerprint
+
+
+def test_depfile_paths_are_deduplicated_before_system_bucket_hashing(tmp_path):
+    # Codex review (PR #624): the same dedup rule applies to the
+    # unattributed system/toolchain bucket -- a repeated depfile entry must
+    # not double-count its content hash.
+    sysfile = _write(tmp_path / "sysroot" / "stddef.h", "// content\n")
+    once = compute_extraction_contract(
+        l2_frontend_ran=True, depfile_resolved_paths=[sysfile]
+    )
+    repeated = compute_extraction_contract(
+        l2_frontend_ran=True, depfile_resolved_paths=[sysfile, sysfile]
+    )
+    assert once.profile_fingerprint == repeated.profile_fingerprint
 
 
 def test_system_bucket_ignores_checkout_root_dependent_absolute_paths(tmp_path):
