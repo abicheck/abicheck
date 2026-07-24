@@ -45,29 +45,49 @@ if not _mcp_extra_installed():
 _TAINTED_MODULE_NAMES = ("mcp", "mcp.server", "mcp.server.fastmcp", "abicheck.mcp_server")
 
 
+def _mcp_server_is_tainted() -> bool:
+    # Two distinct ways a prior test module can leave this poisoned:
+    #  (1) sys.modules["mcp"] is *currently* a MagicMock (test_mcp_server_unit.py/
+    #      test_mcp_server_coverage.py leave this behind permanently) -- any
+    #      fresh import right now would pick up the mock.
+    #  (2) sys.modules["mcp"] has since been restored to the real package (or
+    #      removed), but "abicheck.mcp_server" is already cached from when it
+    #      *was* mocked (test_mcp_server_coverage_gaps.py restores sys.modules
+    #      for the mcp.* chain but never touches the cached abicheck.mcp_server
+    #      module or the abicheck package's `mcp_server` attribute) -- reusing
+    #      that cache would silently check a mocked FastMCP instance even
+    #      though the real mcp package is otherwise available.
+    if isinstance(sys.modules.get("mcp"), MagicMock):
+        return True
+    cached = sys.modules.get("abicheck.mcp_server")
+    return cached is not None and isinstance(getattr(cached, "mcp", None), MagicMock)
+
+
 @pytest.fixture(autouse=True)
 def _real_abicheck_mcp_server():
     """tests/test_mcp_server_unit.py and tests/test_mcp_server_coverage.py
     install a MagicMock under sys.modules["mcp"] via setdefault and never
-    restore it (unlike test_mcp_server_coverage_gaps.py/test_cov95_misc.py,
-    which carefully save/restore sys.modules around the same trick). If
-    either module already ran in this pytest process, `abicheck.mcp_server`
-    is cached with a mocked FastMCP instance whose tool registry is empty --
-    silently breaking this file's assumption that it exercises the real,
-    live MCP server (reproduced with `pytest tests/test_mcp_server_unit.py
-    tests/test_mcp_reference.py`).
+    restore it; tests/test_mcp_server_coverage_gaps.py/test_cov95_misc.py do
+    restore sys.modules for the mcp.* chain, but neither clears the
+    `abicheck.mcp_server` module (or the `abicheck` package's `mcp_server`
+    attribute) that was cached while mcp was mocked. Either way,
+    `abicheck.mcp_server` ends up cached with a mocked FastMCP instance whose
+    tool registry is empty -- silently breaking this file's assumption that
+    it exercises the real, live MCP server (reproduced with `pytest
+    tests/test_mcp_server_unit.py tests/test_mcp_reference.py` and with
+    `pytest tests/test_mcp_server_coverage_gaps.py tests/test_mcp_reference.py`).
 
     This must run at test-execution time, not import/collection time: pytest
     collects every file before running any test, so a module-level purge
     here would fire during our own collection -- before test_mcp_server_unit.py's
     tests actually run -- and rip the mock out from under them instead.
     """
-    mocked = isinstance(sys.modules.get("mcp"), MagicMock)
+    tainted = _mcp_server_is_tainted()
     saved = {name: sys.modules.get(name) for name in _TAINTED_MODULE_NAMES}
     abicheck_pkg = sys.modules.get("abicheck")
     had_attr = abicheck_pkg is not None and hasattr(abicheck_pkg, "mcp_server")
     saved_attr = getattr(abicheck_pkg, "mcp_server", None)
-    if mocked:
+    if tainted:
         for name in _TAINTED_MODULE_NAMES:
             sys.modules.pop(name, None)
         # Popping "abicheck.mcp_server" from sys.modules isn't enough on its
@@ -82,7 +102,7 @@ def _real_abicheck_mcp_server():
     try:
         yield
     finally:
-        if mocked:
+        if tainted:
             for name, mod in saved.items():
                 if mod is not None:
                     sys.modules[name] = mod
