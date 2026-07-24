@@ -143,8 +143,22 @@ from typing import Any
 #:       primitives G30 P1 will add (``resolve-baseline``, ``check-target``)
 #:       have a report-level place to record a check's identity. Omitted
 #:       entirely (never emitted as null) when unset.
-#:   2.13: added two additive optional per-change keys (G29 Phase 3 slice 1,
-#:       ADR-051) -- ``reachability_state`` (the tri-state signal from PR
+#:   2.13: added the remaining ADR-047 §7 report-envelope keys --
+#:       ``compatibility_verdict`` (``Verdict``-cased mirror of the legacy
+#:       ``verdict`` field), ``policy_gate_decision`` (``"pass"``/``"fail"``),
+#:       ``check_evidence_coverage`` (``{state, reasons}``, not
+#:       ``layer_coverage`` -- deliberately a different name/shape than that
+#:       existing per-layer array, see §7's field-naming corrections),
+#:       ``operational_errors`` (list of ``{kind, message}``), ``publication``
+#:       (``{state, channels}``), ``project``, ``head_sha``, ``base_ref``,
+#:       ``action_version``, and ``tool_version``. Populated by
+#:       ``actions/check-target`` (G30 P1.3, ``abicheck.buildsource.
+#:       check_report``), which reads/rewrites a report file after the CLI
+#:       has already produced it -- nothing in the CLI/service layer sets
+#:       these directly either, same as 2.12's five keys. All additive/
+#:       optional; omitted entirely (never emitted as null) when unset.
+#:   2.14: added two additive optional per-change keys (G29 Phase 3 slice 1,
+#:       ADR-052) -- ``reachability_state`` (the tri-state signal from PR
 #:       #607's ``Change.reachability_state``, always present, never
 #:       serialized before this) and ``impact_assessment`` (a unified read
 #:       view over the scattered reachability/impact fields above --
@@ -152,16 +166,18 @@ from typing import Any
 #:       the proof path/decision state/``evidence_category``/
 #:       ``correlated_change_kind`` -- present only when it carries
 #:       information beyond the all-defaults case).
-#:   2.14: added two additive optional top-level keys, present only under
-#:       ``--report-mode root-cause`` (G29 Phase 3 slices 3-4, ADR-051) --
+#:   2.15: added two additive optional top-level keys, present only under
+#:       ``--report-mode root-cause`` (G29 Phase 3 slices 3-4, ADR-052) --
 #:       ``root_causes`` (groups ``changes`` by ``Change.caused_by_type``,
 #:       falling back to the change's own symbol for an ungrouped finding)
 #:       and ``root_cause_count``. This schema field is JSON-specific by
 #:       nature, but the same grouping also renders for ``--format
-#:       markdown``/text (slice 4) -- ``root_cause_id`` is a stable hash of
-#:       the grouping key, not the eventual G29 Phase 6
-#:       ``RootCauseCorrelator``'s own identifier scheme.
-REPORT_SCHEMA_VERSION = "2.14"
+#:       markdown``/text (slice 4) and as additive SARIF ``properties``
+#:       (slice 5, SARIF has no ``report_schema_version`` of its own) --
+#:       ``root_cause_id`` is a stable hash of the grouping key, not the
+#:       eventual G29 Phase 6 ``RootCauseCorrelator``'s own identifier
+#:       scheme.
+REPORT_SCHEMA_VERSION = "2.15"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -178,7 +194,14 @@ REPORT_SCHEMA_VERSION = "2.14"
 #:       ``baseline_channel`` — mirroring compare's 2.12 report-identity
 #:       envelope (ADR-047 §7, G30 P0.3). Reserved for G30 P1; not yet
 #:       populated. Omitted entirely (never emitted as null) when unset.
-SCAN_SCHEMA_VERSION = "1.1"
+#: 1.2 — mirrors compare's 2.13 bump: the remaining ADR-047 §7 keys
+#:       (``compatibility_verdict``, ``policy_gate_decision``,
+#:       ``check_evidence_coverage``, ``operational_errors``,
+#:       ``publication``, ``project``, ``head_sha``, ``base_ref``,
+#:       ``action_version``, ``tool_version``), populated the same way by
+#:       ``actions/check-target`` (G30 P1.3) for a ``scan``-mode audit
+#:       check (ADR-047 S5).
+SCAN_SCHEMA_VERSION = "1.2"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

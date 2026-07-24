@@ -4,7 +4,7 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 
 ### Added
 
-- **`--report-mode root-cause` markdown/text rendering** (ADR-051, G29
+- **`--report-mode root-cause` markdown/text rendering** (ADR-052, G29
   Phase 3 slice 4): the root-cause grouping `--report-mode root-cause`
   added to JSON output now also renders for `--format markdown` and the
   default text output — one `### root (N findings)` heading per root

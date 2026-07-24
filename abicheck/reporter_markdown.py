@@ -737,7 +737,7 @@ def _to_markdown_root_cause(
     *,
     severity_config: SeverityConfig | None = None,
 ) -> str:
-    """``--report-mode root-cause`` markdown rendering (G29 Phase 3 slice 4, ADR-051).
+    """``--report-mode root-cause`` markdown rendering (G29 Phase 3 slice 4, ADR-052).
 
     Groups findings under one heading per root cause instead of full mode's
     severity-bucketed sections -- root-cause mode's point is "what's the

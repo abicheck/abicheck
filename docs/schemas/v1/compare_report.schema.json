@@ -6,22 +6,39 @@
   "type": "object",
   "required": [
     "report_schema_version",
-    "library",
-    "old_version",
-    "new_version",
-    "verdict",
-    "old_file",
-    "new_file",
-    "summary",
-    "policy",
-    "changes",
-    "suppression",
-    "detectors",
-    "confidence",
-    "evidence_tier",
-    "evidence_tiers"
+    "verdict"
   ],
   "additionalProperties": true,
+  "allOf": [
+    {
+      "description": "A real compatibility comparison (the five Verdict enum values) carries the full compare-report shape.",
+      "if": {
+        "properties": {
+          "verdict": {
+            "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+          }
+        },
+        "required": ["verdict"]
+      },
+      "then": {
+        "required": [
+          "library",
+          "old_version",
+          "new_version",
+          "old_file",
+          "new_file",
+          "summary",
+          "policy",
+          "changes",
+          "suppression",
+          "detectors",
+          "confidence",
+          "evidence_tier",
+          "evidence_tiers"
+        ]
+      }
+    }
+  ],
   "properties": {
     "report_schema_version": {
       "type": "string",
@@ -33,7 +50,8 @@
     "new_version": { "type": "string" },
     "verdict": {
       "type": "string",
-      "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+      "description": "The five real Verdict enum values for a computed compatibility comparison, plus two sentinel values for a report that never got that far: \"ERROR\" (an operational/infrastructure failure -- e.g. a library that failed to dump/extract/compare in the per-library release fan-out, or a resolve-baseline failure in actions/check-target; pre-dates check-target, see aggregate.py's _OPERATIONAL_ERROR_VERDICT) and \"NO_BASELINE\" (actions/check-target's bootstrap \"no baseline published yet\" advisory pass, ADR-047 §6 -- never a compatibility verdict). Only the five real values require the full compare-report shape below (see allOf); ERROR/NO_BASELINE reports carry whatever operational_errors/check_evidence_coverage context is available instead.",
+      "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", "ERROR", "NO_BASELINE"]
     },
     "full_verdict": {
       "type": "string",
@@ -62,6 +80,77 @@
     "baseline_channel": {
       "type": "string",
       "description": "Schema 2.12 (ADR-047 §7). Which baseline channel (e.g. \"accepted-main\", a release tag) old_file/old_version was resolved from. Reserved for G30 P1; not yet populated."
+    },
+    "compatibility_verdict": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). Mirrors verdict's exact casing/enum -- a separate field name so aggregate.py's existing verdict/severity parsing stays untouched while richer consumers (PR comment, SARIF, humans) read this one. Populated by actions/check-target; omitted when the underlying report has no verdict in Verdict's five-value enum (e.g. an operational-failure or bootstrap report, which stay verdict: \"ERROR\"/\"NO_BASELINE\" instead).",
+      "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+    },
+    "policy_gate_decision": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). \"pass\" or \"fail\" -- this check's own real gate decision, computed from the report's real severity/exit_code before any gate-mode: advisory neutralization of the legacy severity block. New vocabulary, not a Verdict mirror.",
+      "enum": ["pass", "fail"]
+    },
+    "check_evidence_coverage": {
+      "type": "object",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). Not layer_coverage (a different, existing per-L0-L5-layer array) -- this is check-target's own state/reasons summary of whether requested_depth was actually achieved.",
+      "additionalProperties": true,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["complete", "degraded", "bootstrap", "unknown"]
+        },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "operational_errors": {
+      "type": "array",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). Non-empty exactly when this check hit an infrastructure/config problem (e.g. a resolve-baseline failure) rather than -- or in addition to -- a compatibility finding. Empty means clean.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["kind", "message"],
+        "properties": {
+          "kind": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      }
+    },
+    "publication": {
+      "type": "object",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). Whether/where this report was actually published -- distinct from whether it was computed, so a downstream consumer can tell \"no publication happened\" apart from \"no report was produced at all.\"",
+      "additionalProperties": true,
+      "properties": {
+        "state": { "type": "string", "enum": ["published", "skipped", "failed"] },
+        "channels": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "baseline_bootstrap": {
+      "type": "boolean",
+      "description": "Schema 2.13 (ADR-047 §6/§7, G30 P1.3). True only on a bootstrap \"no baseline published yet\" advisory pass (required: false with no baseline set yet) -- the explicit report field ADR-047 §6 requires for that case."
+    },
+    "project": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). The project identifier (e.g. \"owner/repo\") this check ran for."
+    },
+    "head_sha": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). The candidate commit SHA this check analyzed."
+    },
+    "base_ref": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). The base ref this check's candidate was compared against, when known (e.g. a PR's target branch)."
+    },
+    "tool_version": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). The abicheck version that produced this report."
+    },
+    "action_version": {
+      "type": "string",
+      "description": "Schema 2.13 (ADR-047 §7, G30 P1.3). The abicheck/abicheck Action ref (e.g. \"abicheck/abicheck@v1\") that ran this check."
     },
     "old_file": { "$ref": "#/$defs/fileMetadata" },
     "new_file": { "$ref": "#/$defs/fileMetadata" },
@@ -94,7 +183,7 @@
     "redundant_count": { "type": "integer", "minimum": 0 },
     "root_causes": {
       "type": "array",
-      "description": "G29 Phase 3 (ADR-051 slices 3-4, schema 2.14): present only under `--report-mode root-cause`. Groups `changes` (also present, flat, for backward compatibility) by Change.caused_by_type (falling back to the change's own symbol for an ungrouped, singleton finding); the same grouping also renders for --format markdown/text (slice 4) -- the full RootCauseCorrelator (G29 Phase 6) will additionally correlate consumer-overlay findings that don't share a caused_by_type today.",
+      "description": "G29 Phase 3 (ADR-052 slices 3-4, schema 2.15): present only under `--report-mode root-cause`. Groups `changes` (also present, flat, for backward compatibility) by Change.caused_by_type (falling back to the change's own symbol for an ungrouped, singleton finding); the same grouping also renders for --format markdown/text (slice 4) -- the full RootCauseCorrelator (G29 Phase 6) will additionally correlate consumer-overlay findings that don't share a caused_by_type today.",
       "items": {
         "type": "object",
         "required": ["root_cause_id", "root", "finding_count", "findings"],
@@ -116,7 +205,7 @@
     "root_cause_count": {
       "type": "integer",
       "minimum": 0,
-      "description": "G29 Phase 3 (ADR-051 slice 3, schema 2.14): present only under `--report-mode root-cause`. Length of `root_causes`."
+      "description": "G29 Phase 3 (ADR-052 slice 3, schema 2.15): present only under `--report-mode root-cause`. Length of `root_causes`."
     },
     "suppression": {
       "type": "object",
@@ -138,7 +227,7 @@
               "reachability_state": {
                 "type": "string",
                 "enum": ["reachable", "unreachable", "unknown"],
-                "description": "G29 Phase 3 slice 1 (ADR-051, schema 2.13): always present. This is the one call site that passes suppressed=True to assess_change, so decision.state below is always \"suppressed\"."
+                "description": "G29 Phase 3 slice 1 (ADR-052, schema 2.14): always present. This is the one call site that passes suppressed=True to assess_change, so decision.state below is always \"suppressed\"."
               },
               "impact_assessment": {
                 "$ref": "#/$defs/change/properties/impact_assessment"
@@ -408,12 +497,12 @@
         },
         "reachability_state": {
           "type": "string",
-          "description": "G29 Phase 3 slice 1 (ADR-051, schema 2.13): the tri-state refinement of public_reachable (Change.reachability_state, in memory since PR #607 but never serialized before this). 'reachable' when public_reachable is true. 'unreachable' when the walk positively found this change not part of the effective public ABI. 'unknown' when no walk reached a verdict, or the only available evidence (the optional L5 call/type graph) is itself flagged narrowed/degraded — distinct from 'unreachable', since 'unknown' is not proof of absence. Always present (the enum's own default is 'unknown', an honest answer, not an absent key).",
+          "description": "G29 Phase 3 slice 1 (ADR-052, schema 2.14): the tri-state refinement of public_reachable (Change.reachability_state, in memory since PR #607 but never serialized before this). 'reachable' when public_reachable is true. 'unreachable' when the walk positively found this change not part of the effective public ABI. 'unknown' when no walk reached a verdict, or the only available evidence (the optional L5 call/type graph) is itself flagged narrowed/degraded — distinct from 'unreachable', since 'unknown' is not proof of absence. Always present (the enum's own default is 'unknown', an honest answer, not an absent key).",
           "enum": ["reachable", "unreachable", "unknown"]
         },
         "impact_assessment": {
           "type": "object",
-          "description": "G29 Phase 3 slice 1 (ADR-051, schema 2.13): a unified read view over this finding's reachability/impact fields above (reachability_state, public_reachable, reachability_kind, the proof path, decision state, evidence_category, correlated_change_kind) -- a single object a consumer can query instead of stitching several independently-nullable keys together. Intentionally duplicates data already published at the top level (see the fields above); present only when it carries information beyond the all-defaults case (a proof path exists, reachability_state is not 'unknown', public_reachable is true, confidence is not 'high', the decision state is not 'kept', a modulation/verdict-override fired, or correlated_change_kind/evidence_category is set).",
+          "description": "G29 Phase 3 slice 1 (ADR-052, schema 2.14): a unified read view over this finding's reachability/impact fields above (reachability_state, public_reachable, reachability_kind, the proof path, decision state, evidence_category, correlated_change_kind) -- a single object a consumer can query instead of stitching several independently-nullable keys together. Intentionally duplicates data already published at the top level (see the fields above); present only when it carries information beyond the all-defaults case (a proof path exists, reachability_state is not 'unknown', public_reachable is true, confidence is not 'high', the decision state is not 'kept', a modulation/verdict-override fired, or correlated_change_kind/evidence_category is set).",
           "properties": {
             "reachability_state": {
               "type": "string",
@@ -441,7 +530,7 @@
             },
             "decision": {
               "type": "object",
-              "description": "Whether this finding was kept or suppressed, and why. suppression_rule (G29 Phase 3 slice 2, ADR-051 follow-up) is the label (falling back to reason) of the Suppression rule that actually suppressed the change -- present only for a suppressed entry whose matching rule set either field. verdict_override carries Change.effective_verdict's value verbatim when set -- an override can raise a finding's category (e.g. STDLIB_IMPLEMENTATION_CHANGED promoted to BREAKING) as well as lower it, so this is not always a downgrade despite the name of the underlying mechanism.",
+              "description": "Whether this finding was kept or suppressed, and why. suppression_rule (G29 Phase 3 slice 2, ADR-052 follow-up) is the label (falling back to reason) of the Suppression rule that actually suppressed the change -- present only for a suppressed entry whose matching rule set either field. verdict_override carries Change.effective_verdict's value verbatim when set -- an override can raise a finding's category (e.g. STDLIB_IMPLEMENTATION_CHANGED promoted to BREAKING) as well as lower it, so this is not always a downgrade despite the name of the underlying mechanism.",
               "properties": {
                 "state": { "type": "string", "enum": ["kept", "suppressed"] },
                 "reason_code": { "type": "string" },

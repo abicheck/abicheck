@@ -4,7 +4,7 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 
 ### Added
 
-- **`--report-mode root-cause` SARIF properties** (ADR-051, G29 Phase 3
+- **`--report-mode root-cause` SARIF properties** (ADR-052, G29 Phase 3
   slice 5): `--format sarif` keeps its normal one-result-per-finding shape
   (so every existing SARIF/code-scanning consumer keeps working unchanged)
   but each result now gets `properties.rootCauseId`/`properties.rootCause`

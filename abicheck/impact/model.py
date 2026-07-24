@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unified impact-assessment dataclasses (G29 Phase 3 slice 1, ADR-051).
+"""Unified impact-assessment dataclasses (G29 Phase 3 slice 1, ADR-052).
 
 ``ImpactAssessment``/``GraphProofPath``/``FindingDecision`` are a shared,
 queryable shape over reachability/impact fields that
 ``source_graph_findings.py``, ``internal_leak.py``, ``post_processing.py``,
 ``suppression.py``, and ``appcompat.py`` each independently set on
 ``Change`` today. This module only defines the shape; :mod:`.engine` builds
-one from an existing ``Change`` object. See ADR-051 for the full decision
+one from an existing ``Change`` object. See ADR-052 for the full decision
 record, including which plan-described fields (``changed_entities``,
 ``affected_consumers``, ``affected_use_cases``, ``coverage``,
 ``root_cause_id``) are deliberately absent from this slice.
@@ -119,7 +119,7 @@ class GraphProofPath:
 class FindingDecision:
     """Whether a finding was kept or suppressed, and why.
 
-    ``suppression_rule`` (G29 Phase 3 slice 2, ADR-051 follow-up) is the
+    ``suppression_rule`` (G29 Phase 3 slice 2, ADR-052 follow-up) is the
     label (falling back to ``reason``) of the ``Suppression`` rule that
     actually suppressed the change, read from ``Change.suppression_rule`` —
     set directly on the change by whichever suppression call site moved it
@@ -159,7 +159,7 @@ class ImpactAssessment:
     Every field is read from a ``Change`` attribute that already exists and
     is already independently populated by one of the producer modules named
     in this module's docstring — this dataclass adds no new signal, only a
-    shared shape to query it through (ADR-051 D1).
+    shared shape to query it through (ADR-052 D1).
     """
 
     reachability_state: ReachabilityState = ReachabilityState.UNKNOWN
@@ -175,7 +175,7 @@ class ImpactAssessment:
         """True when this assessment carries information beyond the
         all-defaults case — the gate ``reporter.py``/``sarif.py`` use to
         decide whether emitting the full object is worth the report-size
-        cost (ADR-051 D3)."""
+        cost (ADR-052 D3)."""
         return (
             self.proof_path is not None
             or self.reachability_state != ReachabilityState.UNKNOWN

@@ -1,68 +1,18 @@
 # CLAUDE.md — `docs/`
 
-User-facing documentation, published via `mkdocs` (config in
-`/mkdocs.yml`). CI runs `mkdocs build --strict`, so dangling
-internal links fail the build.
+Canonical, vendor-neutral documentation-authoring instructions live in
+**`AGENTS.md`** in this directory — imported below so Claude Code loads the
+full contract automatically as part of this file, mirroring the repo-root
+`CLAUDE.md`/`AGENTS.md` split ("M1-1"). If you're changing a documentation
+rule, edit `docs/AGENTS.md`, not this file.
 
-## Layout
+@AGENTS.md
 
-Note: file locations and `mkdocs.yml` nav grouping are independent. Several
-files live at the docs root or under `concepts/`/`reference/` but are grouped
-elsewhere in the nav — keep links pointing at the real file path.
+## Claude Code-specific notes
 
-- `index.md` — home / landing page.
-- `getting-started.md` — top-level file, but navigated as the **first page of
-  the User Guide**.
-- `troubleshooting.md` — top-level file, but navigated under **Development**.
-- `user-guide/` — end-user docs (getting started, GitHub Action, CLI flags,
-  policy files, suppression, output formats). Nav is grouped basics-first:
-  Start Here → Everyday Use → CI & Gating → Specialised Checks →
-  Integrations & Migration.
-- `concepts/` — conceptual docs (verdicts, evidence model, architecture, and
-  `abi-api-handling.md` — the consolidated ABI/API handling guide).
-  `abi-cheat-sheet.md`, `abi-api-handling.md`, and the deep-dive pages
-  (`abi-surface.md`, `class-layout-abi.md`, `dependency-floors.md`) are
-  navigated under the educational **ABI/API Handling & Recommendations** tab
-  (the deep-dives under its **Deep Dives** group), not Concepts.
-  The evidence model is deliberately a three-page trio with one role each —
-  model (`concepts/evidence-and-detectability.md`, which also owns the
-  `--depth` dial and the deprecated-axes appendix), worked example
-  (`concepts/what-each-level-sees.md`), and flag reference
-  (`user-guide/scan-levels.md`) — don't add a fourth page to that topic.
-  Verdict semantics live on one page (`concepts/verdicts.md`, including the
-  verdict→exit-code chain); `reference/exit-codes.md` stays the exhaustive
-  per-command authority.
-- `reference/` — curated reference (change kinds, exit codes, platforms, tool
-  comparison, ABICC format compliance). Navigated as its own **Reference** tab.
-- `examples/` — per-case Markdown docs that match the binary fixtures
-  in `/examples/`. Generated via `scripts/gen_examples_docs.py` —
-  regenerate after adding a new example. Navigated as its own **Examples**
-  tab (index + by-verdict + by-category; per-case pages are linked, not
-  in nav).
-- `development/` — contributor-facing docs (architecture, parity status,
-  goals, ADRs in `development/adr/`).
-
-## Conventions
-
-- Every page must be reachable from `mkdocs.yml` nav (mkdocs --strict
-  enforces this). Exceptions: per-case `examples/*.md` pages are linked from
-  the encyclopedia indexes instead of the nav, and this `CLAUDE.md` is
-  excluded from the published site via `exclude_docs`.
-- The docs tell a two-track story: an **educational track** (ABI/API Handling
-  tab — understanding the problem) and a **tool track** (User Guide → Concepts
-  → Reference — using and understanding abicheck). Within each track, order
-  pages simple → advanced.
-- Use relative links (`../user-guide/x.md`), not absolute URLs.
-- Prefer pulling from `--help` output rather than hand-rolling CLI
-  tables — use the same wording the user sees.
-- `ChangeKind` references: use the enum value (e.g. `symbol_removed`)
-  or the enum NAME (`SYMBOL_REMOVED`); the AI-readiness check accepts
-  either form.
-
-## Regenerating examples docs
-
-```bash
-python scripts/gen_examples_docs.py
-```
-
-Then commit the resulting `docs/examples/*.md`.
+- Regenerate generated docs after the relevant source changes, then commit
+  the results — see `docs/AGENTS.md`'s "Regenerating generated docs" section
+  for the exact commands (`gen_examples_docs.py`, `gen_detector_spec.py`).
+- Before adding a new page, check `docs/_meta/topics.yaml` for an existing
+  canonical owner of the topic — `docs/AGENTS.md`'s "When does a new fact
+  need a new page?" section has the decision rule.

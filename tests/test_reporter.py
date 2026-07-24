@@ -492,7 +492,7 @@ class TestEvidenceStatusInJson:
 
 
 class TestRootCauseReporter:
-    """G29 Phase 3 slice 3 (ADR-051): --report-mode root-cause groups
+    """G29 Phase 3 slice 3 (ADR-052): --report-mode root-cause groups
     findings sharing a Change.caused_by_type under one entry -- a first,
     JSON-only slice reusing the existing caused_by_type field rather than
     requiring the full G29 Phase 6 RootCauseCorrelator."""
@@ -627,7 +627,7 @@ class TestRootCauseReporter:
 
 
 class TestRootCauseMarkdown:
-    """G29 Phase 3 slice 4 (ADR-051): --report-mode root-cause markdown/text
+    """G29 Phase 3 slice 4 (ADR-052): --report-mode root-cause markdown/text
     rendering, sharing reporter._group_changes_by_root_cause with the JSON
     renderer so the two formats can never disagree about grouping."""
 

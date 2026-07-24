@@ -89,4 +89,5 @@ against the code as unverified, regardless of how confident it reads.
 | [048](048-canonical-entity-identity-and-graph-reconciliation.md) | Canonical Entity Identity and Graph Reconciliation (G31 Phase B) | Accepted — implemented |
 | [049](049-contract-relevance-and-compatibility-configuration.md) | Contract Relevance and Compatibility Configuration | Proposed — not implemented |
 | [050](050-comparability-contract-and-multi-tu-manifest.md) | Comparability Contract — Profile/Scope Fingerprints and the Multi-TU Manifest | Proposed — not implemented; see [G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md) |
-| [051](051-unified-impact-assessment-model.md) | Unified Impact Assessment Model (G29 Phase 3, slices 1-3) | Accepted — slices 1-3 implemented |
+| [051](051-documentation-operational-model.md) | Documentation Operational Model (Ownership Registry + Docs-Contract Gate) | Accepted — partially implemented (Stage 1 done; Stages 2-5 deferred) |
+| [052](052-unified-impact-assessment-model.md) | Unified Impact Assessment Model (G29 Phase 3, slices 1-5) | Accepted — slices 1-5 implemented |

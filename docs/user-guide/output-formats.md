@@ -207,7 +207,7 @@ it both land in the same group. Supported for `--format json`/`markdown`/
 renders as `full` (no testsuite grouping equivalent yet — JUnit's
 `<testcase>` model already groups by symbol, not by finding). This is a
 first slice reusing the existing `Change.caused_by_type` field (see
-[ADR-051](../development/adr/051-unified-impact-assessment-model.md));
+[ADR-052](../development/adr/052-unified-impact-assessment-model.md));
 a future slice (G29 Phase 6) will additionally correlate consumer-overlay
 findings that don't share a `caused_by_type` today.
 

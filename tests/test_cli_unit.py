@@ -113,7 +113,7 @@ class TestCompareSarif:
         assert content.get("$schema") or "runs" in content
 
     def test_sarif_root_cause_mode_adds_properties(self, tmp_path):
-        # G29 Phase 3 slice 5 (ADR-051): --report-mode root-cause must reach
+        # G29 Phase 3 slice 5 (ADR-052): --report-mode root-cause must reach
         # SARIF through the full CLI -> service_render.render_output ->
         # sarif.to_sarif_str chain, not just the unit-level to_sarif() call.
         old_p, new_p = _breaking_snapshots(tmp_path)

@@ -1,7 +1,7 @@
-# ADR-051: Unified Impact Assessment Model (G29 Phase 3, slices 1-3)
+# ADR-052: Unified Impact Assessment Model (G29 Phase 3, slices 1-5)
 
 **Date:** 2026-07-22
-**Status:** Accepted — slices 1, 2, and 3 implemented.
+**Status:** Accepted — slices 1-5 implemented.
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 3's own
 "needs its own ADR" gate — [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s
@@ -170,7 +170,7 @@ one from.
 
 ### D5. Schema version bump
 
-`REPORT_SCHEMA_VERSION` 2.12 → 2.13 (additive: two new optional keys, no
+`REPORT_SCHEMA_VERSION` 2.13 → 2.14 (additive: two new optional keys, no
 existing key removed or reshaped). `abicheck/schemas/compare_report.schema.json`
 gains `reachability_state` (enum, matching `ReachabilityState`'s three
 values) and `impact_assessment` (object, matching `ImpactAssessment.to_dict()`'s
@@ -340,7 +340,7 @@ root-cause grouping, deliberately scoped to JSON only:
   `junit` render as `full` — the same precedent `--report-mode leaf` already
   set for those two formats (neither module's rendering function even
   accepts a `report_mode` parameter today).
-- `REPORT_SCHEMA_VERSION` 2.13 → 2.14 (two new additive, root-cause-mode-only
+- `REPORT_SCHEMA_VERSION` 2.14 → 2.15 (two new additive, root-cause-mode-only
   top-level keys: `root_causes`, `root_cause_count`).
 
 **Follow-up fixes (Codex review), same PR:**

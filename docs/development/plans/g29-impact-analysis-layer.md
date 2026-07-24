@@ -75,7 +75,7 @@ model:
   `UNKNOWN` unless `allow_unknown_reachability: true` is set explicitly. See
   [PR #607](https://github.com/abicheck/abicheck/pull/607) and
   `docs/concepts/graph-coverage.md`.
-- **G29.2** (Phase 3, **slices 1-5 done, ADR-051**) — A single
+- **G29.2** (Phase 3, **slices 1-5 done, ADR-052**) — A single
   `abicheck/impact/` package with `ImpactAssessment`, `GraphProofPath`, and
   `FindingDecision` dataclasses. **Slices 1-5 implement the read-view
   direction only**: the dataclasses exist and `reporter.py`/`sarif.py`
@@ -84,7 +84,7 @@ model:
   properties, slices 3-5), but `source_graph_findings.py`/`internal_leak.py`/
   `suppression.py`/`appcompat.py` do not yet populate `ImpactAssessment`
   directly — they still independently set the overlapping `Change` fields
-  it derives from (see ADR-051 D2). The originally-stated direction (those
+  it derives from (see ADR-052 D2). The originally-stated direction (those
   four modules populate `ImpactAssessment`, and the flat `Change` fields
   become derived views over it) remains open follow-up work under the same
   ADR.
@@ -243,9 +243,9 @@ partial implemented, D4 deliberately deferred); this paragraph originally
 described the pre-implementation "needs a recorded decision" gate
 (ADR-044's own bar) before the ADR existed.
 
-### Phase 3 — Reporting & root causes — **slices 1-5 implemented (ADR-051)**
+### Phase 3 — Reporting & root causes — **slices 1-5 implemented (ADR-052)**
 
-[ADR-051](../adr/051-unified-impact-assessment-model.md) records the slice 1
+[ADR-052](../adr/052-unified-impact-assessment-model.md) records the slice 1
 decisions: `abicheck/impact/model.py`'s `ImpactAssessment`/`GraphProofPath`/
 `FindingDecision` dataclasses (a narrower field set than originally planned
 below — `changed_entities`/`affected_consumers`/`affected_use_cases`/
@@ -254,7 +254,7 @@ absent rather than added as permanently-`None` placeholders) and
 `abicheck/impact/engine.py`'s `assess_change`, a **pure read view** built
 from the `Change` fields `source_graph_findings.py`/`internal_leak.py`/
 `post_processing.py`/`suppression.py`/`appcompat.py` already independently
-set — none of those producers changed in slice 1 (see ADR-051 D2: the
+set — none of those producers changed in slice 1 (see ADR-052 D2: the
 plan's originally-stated "existing fields become derived views over
 `ImpactAssessment`" direction is *not* implemented yet; this slice derives
 the other way, `ImpactAssessment` read from `Change`). `reporter.py`/
@@ -263,7 +263,7 @@ signal has existed since PR #607 but was never serialized before this,
 closing a real gap: `PROVEN_UNREACHABLE` and `UNKNOWN` were previously
 indistinguishable in JSON/SARIF, both showing as an absent `public_reachable`
 key) and `impact_assessment` (emitted only when it carries information
-beyond the all-defaults case). `REPORT_SCHEMA_VERSION` 2.12 → 2.13. Slice 2
+beyond the all-defaults case). `REPORT_SCHEMA_VERSION` 2.13 → 2.14. Slice 2
 closed `FindingDecision.suppression_rule`: `suppression.SuppressionOutcome`
 gained `matched_rule`, and the three call sites that move a change into
 `DiffResult.suppressed_changes` (`checker._filter_suppressed_changes`/
@@ -272,7 +272,7 @@ gained `matched_rule`, and the three call sites that move a change into
 from it. Slice 3 added `--report-mode root-cause`: initially JSON-only,
 grouping findings by the existing `Change.caused_by_type` field rather than
 waiting on Phase 6's `RootCauseCorrelator`. `REPORT_SCHEMA_VERSION` reached
-2.14. Slice 4 added the matching markdown/text rendering
+2.15. Slice 4 added the matching markdown/text rendering
 (`reporter_markdown._to_markdown_root_cause`) reusing the same grouping
 function slice 3's JSON path now also calls (`_group_changes_by_root_cause`).
 Slice 5 extended `--report-mode root-cause` to `--format sarif`: rather than
@@ -287,7 +287,7 @@ cause.
 **Still open under this same ADR**: the D2 direction flip (deliberately not
 attempted — touches five producer modules' core control flow at once,
 several of them performance-sensitive graph walks under active
-suppression-safety guarantees; see ADR-051's "Deliberately not implemented"
+suppression-safety guarantees; see ADR-052's "Deliberately not implemented"
 section), the full `RootCauseCorrelator`-based correlation across
 consumer-overlay findings with no `caused_by_type` link (Phase 6), JUnit
 `root-cause` rendering, stable `occurrence_id`/`root_cause_id`/
@@ -429,8 +429,8 @@ New:
 ```text
 abicheck/buildsource/graph_facts.py  # GraphFact/FactConflict/merge (Phase 2 D2, DONE)
 abicheck/impact/
-    model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slice 1, DONE — ADR-051)
-    engine.py           # assess_change(...) (Phase 3 slice 1, DONE — ADR-051)
+    model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slice 1, DONE — ADR-052)
+    engine.py           # assess_change(...) (Phase 3 slice 1, DONE — ADR-052)
     traversal.py        # TraversalPolicy + stop conditions (Phase 2)
     correlation.py       # RootCauseCorrelator (Phase 6)
     root_causes.py

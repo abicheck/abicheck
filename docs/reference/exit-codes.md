@@ -1,3 +1,13 @@
+---
+doc_type: reference
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+lifecycle: active
+generated: false
+---
+
 # Exit Codes
 
 `abicheck` uses different exit codes for each command family.

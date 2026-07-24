@@ -222,7 +222,7 @@ def _fold_scoped_compat_into_text(
             scoped_only, missing_labels, blocks, missing_kind = (
                 _resolve_scoped_gate_findings(result, severity_config, show_only)
             )
-            # G29 Phase 3 slice 3 (ADR-051, Codex review): these synthetic
+            # G29 Phase 3 slice 3 (ADR-052, Codex review): these synthetic
             # entries are appended to `changes` after `_to_json_root_cause`
             # already grouped `result.changes` into `root_causes` -- without
             # tracking their own grouping key/root here too, a scoped run
@@ -275,7 +275,7 @@ def _fold_scoped_compat_into_text(
                     "severity": "breaking" if blocks else "compatible",
                     "relevant_to_gate": True,
                     "blocks_gate": blocks,
-                    # G29 Phase 3 slice 1 (ADR-051, Codex review): a
+                    # G29 Phase 3 slice 1 (ADR-052, Codex review): a
                     # missing-contract label has no backing Change for
                     # _change_to_dict/assess_change to read (unlike the
                     # scoped_only loop above, which already routes

@@ -222,7 +222,7 @@ def _result_for(
     """Produce a SARIF result object for a Change.
 
     *root_cause*, when given (``--report-mode root-cause``, G29 Phase 3
-    slice 5, ADR-051), is this finding's ``(root_cause_id, root_display)``
+    slice 5, ADR-052), is this finding's ``(root_cause_id, root_display)``
     pair -- added as ``properties.rootCauseId``/``properties.rootCause`` so
     a SARIF consumer can group results the same way JSON/markdown root-cause
     mode does, without restructuring SARIF's one-result-per-finding shape.
@@ -308,7 +308,7 @@ def _result_for(
         properties["impactProofPath"] = change.impact_proof_path
     if change.impact_is_direct is not None:
         properties["impactIsDirect"] = change.impact_is_direct
-    # G29 Phase 3 slice 1 (ADR-051): same unified read view reporter.py's
+    # G29 Phase 3 slice 1 (ADR-052): same unified read view reporter.py's
     # JSON output gained -- reachabilityState always present (the tri-state
     # signal from PR #607, never surfaced in SARIF before this), and the
     # unified impactAssessment object when it carries more than the defaults.
@@ -426,7 +426,7 @@ def _missing_contract_result(
         "relevantToGate": True,
         "blocksGate": blocks,
         "missingContractMember": label,
-        # G29 Phase 3 slice 1 (ADR-051, Codex review): a missing-contract
+        # G29 Phase 3 slice 1 (ADR-052, Codex review): a missing-contract
         # member has no backing Change for assess_change to read, but
         # reachabilityState is "always present" everywhere else this
         # slice touches (D3/D4) -- a missing symbol/version is a hard
@@ -532,7 +532,7 @@ def to_sarif(
     ``exitCode``, ``exitCodeDescription``, result ``level``\\ s, and
     ``properties.severityGate``.
 
-    *report_mode* ``"root-cause"`` (G29 Phase 3 slice 5, ADR-051) adds
+    *report_mode* ``"root-cause"`` (G29 Phase 3 slice 5, ADR-052) adds
     ``properties.rootCauseId``/``properties.rootCause`` to every result
     instead of changing SARIF's one-result-per-finding structure -- unlike
     JSON/markdown's dedicated grouped rendering, this keeps every existing
@@ -557,7 +557,7 @@ def to_sarif(
     rules_seen: dict[str, dict[str, Any]] = {}
     sarif_results: list[dict[str, Any]] = []
 
-    # G29 Phase 3 slice 5 (ADR-051): --report-mode root-cause adds
+    # G29 Phase 3 slice 5 (ADR-052): --report-mode root-cause adds
     # properties.rootCauseId/rootCause to every result rather than
     # restructuring SARIF's flat one-result-per-finding shape. referenced_causes
     # spans `changes` and `scoped_only_changes` (computed once, up front) so a

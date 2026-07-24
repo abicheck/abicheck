@@ -5,7 +5,7 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 ### Added
 
 - **Unified `impact_assessment` object and always-present `reachability_state`
-  field in JSON/SARIF reports** (ADR-051, G29 Phase 3 slice 1): every finding
+  field in JSON/SARIF reports** (ADR-052, G29 Phase 3 slice 1): every finding
   now carries `reachability_state` (`reachable`/`unreachable`/`unknown`) — the
   tri-state reachability signal `Change.reachability_state` has carried in
   memory since PR #607, but which was never serialized until now, so a
@@ -17,5 +17,5 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `evidence_category`/`correlated_change_kind`) instead of several
   separately-named keys. New `abicheck/impact/` package
   (`ImpactAssessment`/`GraphProofPath`/`FindingDecision`/`assess_change`).
-  `report_schema_version` 2.12 → 2.13; every existing field is unchanged.
+  `report_schema_version` 2.13 → 2.14; every existing field is unchanged.
   See `docs/concepts/impact-analysis.md`.

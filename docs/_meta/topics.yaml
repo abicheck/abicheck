@@ -1,0 +1,92 @@
+# Topic-ownership registry — the machine-checked map of "who owns this fact".
+#
+# NOT published as a site page (mkdocs only builds *.md under docs/); it is
+# read by scripts/check_docs_contract.py and is the source of truth
+# docs/AGENTS.md's ownership model points at. See docs/AGENTS.md ("Topic
+# ownership registry") for the full contract this file implements.
+#
+# Schema (each key under `topics` is a topic id, kebab-case):
+#   canonical_page:    REQUIRED. Path relative to docs/ of the ONE page that
+#                       fully explains this topic to a human. Exactly one
+#                       topic may claim a given canonical_page.
+#   fact_sources:       Optional list of repo-relative paths to the code/data
+#                       that hold the exact, machine-checked values for this
+#                       topic (registries, schemas, policy modules). Sanity-
+#                       checked to exist; not parsed for content.
+#   worked_example:     Optional path relative to docs/ — a page that shows
+#                       the same topic through one concrete end-to-end
+#                       example rather than the general model.
+#   reference_page:     Optional path relative to docs/ — an exhaustive,
+#                       generated (or curated-exhaustive) reference for this
+#                       topic, distinct from the narrative canonical_page.
+#   task_pages:         Optional list of paths relative to docs/ — pages that
+#                       describe one practical workflow built on this topic.
+#   allowed_summaries:  Optional list of paths relative to docs/ — pages that
+#                       may restate a short (a paragraph or a few rows)
+#                       summary of this topic with a link back to
+#                       canonical_page. Anything longer belongs on
+#                       canonical_page itself.
+#
+# This is a *pilot* covering the handful of topics that already had an
+# explicit ownership split documented in docs/CLAUDE.md before this file
+# existed (the evidence-model trio, the verdict/exit-code split, the
+# curated-vs-generated change-kinds split). Extending it to the rest of
+# docs/ is deliberately incremental — see docs/AGENTS.md's rollout note.
+
+schema_version: 1
+
+topics:
+  evidence-model:
+    canonical_page: concepts/evidence-and-detectability.md
+    fact_sources:
+      - scripts/evidence_tiers.py
+      - abicheck/buildsource/model.py
+    worked_example: concepts/what-each-level-sees.md
+    task_pages:
+      - user-guide/scan-levels.md
+    allowed_summaries:
+      - getting-started.md
+      - user-guide/choose-your-workflow.md
+      - user-guide/tool-modes.md
+
+  verdicts:
+    canonical_page: concepts/verdicts.md
+    fact_sources:
+      - abicheck/change_registry.py
+      - abicheck/checker_policy.py
+    reference_page: reference/exit-codes.md
+    task_pages:
+      - user-guide/ci-gating.md
+      - user-guide/severity.md
+    allowed_summaries:
+      - getting-started.md
+
+  baseline-lifecycle:
+    canonical_page: user-guide/baseline-management.md
+    fact_sources:
+      - abicheck/model.py
+      - abicheck/serialization.py
+    task_pages:
+      - user-guide/create-baseline.md
+      - user-guide/baseline-storage.md
+    allowed_summaries:
+      - getting-started.md
+
+  public-surface:
+    canonical_page: concepts/abi-surface.md
+    fact_sources:
+      - abicheck/surface.py
+    task_pages:
+      - user-guide/api-surface-intelligence.md
+
+  change-kinds:
+    canonical_page: reference/change-kinds.md
+    fact_sources:
+      - abicheck/change_registry.py
+      - abicheck/checker_policy.py
+    reference_page: reference/detector-spec.md
+
+  platform-support-matrix:
+    canonical_page: concepts/limitations.md
+    allowed_summaries:
+      - concepts/architecture.md

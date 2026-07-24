@@ -217,25 +217,31 @@ inputs:
     description: >
       Source checkout / tree for source-intelligence analysis. The compile
       database is auto-discovered within it. Drives L4 source-ABI replay and
-      L5 source-graph collection. Used by scan and dump modes.
+      L5 source-graph collection. Used by scan and dump modes, and by compare
+      mode for the new (candidate) side only — mapped to compare's
+      --sources new=... (the old side's evidence, if any, is expected to
+      already be embedded in whatever old-library snapshot was resolved).
     required: false
   build-info:
     description: >
       Out-of-tree L3 build context: a build directory, a compile_commands.json,
       or a previously-collected evidence pack. Use when the build tree lives
-      outside --sources. Used by scan and dump modes.
+      outside --sources. Used by scan and dump modes, and by compare mode for
+      the new (candidate) side only — mapped to compare's
+      --build-info new=... (same old-side caveat as sources above).
     required: false
   compile-db:
     description: >
-      Explicit path to a compile_commands.json (scan mode). For dump mode this
-      is folded into build-info. Use when the compile DB is not under sources.
+      Explicit path to a compile_commands.json (scan mode; also compare
+      mode's new side when build-info is unset). For dump mode this is
+      folded into build-info. Use when the compile DB is not under sources.
     required: false
   build-config:
     description: >
       Path to a trusted .abicheck.yml. Supplying this alone (not
       allow-build-query) is what permits its build.query (compile-DB
       generation) command to run — see allow-build-query below. Used by scan
-      and dump modes.
+      and dump modes, and by compare mode (--config).
     required: false
   allow-build-query:
     description: >
@@ -250,11 +256,12 @@ inputs:
     default: 'false'
   depth:
     description: >
-      Evidence-depth selector (scan and dump modes): binary, headers, build,
-      or source. In scan mode, omit it for 'auto' (risk-driven); --depth source
-      analyses the whole current library target unless since/changed-path
-      seeds a narrower changed scope. Maps to --depth. (The deprecated
-      scan-mode/source-method inputs have been removed; use depth.)
+      Evidence-depth selector: binary, headers, build, or source. Used by
+      scan and dump modes, and by compare mode (--depth). In scan mode, omit
+      it for 'auto' (risk-driven); --depth source analyses the whole current
+      library target unless since/changed-path seeds a narrower changed
+      scope. Maps to --depth. (The deprecated scan-mode/source-method inputs
+      have been removed; use depth.)
     required: false
   since:
     description: >
