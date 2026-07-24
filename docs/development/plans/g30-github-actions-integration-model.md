@@ -1678,6 +1678,65 @@ env var *names* and fallback-substring presence, not which context
 expression populates them — only the `TestCheckSingleSelfCheckout` class
 docstring needed correcting to match.
 
+**A fifth round (CodeRabbit, against `557996f`/`ee3f5ce`) found two more real
+issues, one fixed and one deferred with a documented rationale:**
+
+- **The initial caller-repo `actions/checkout@v6` step in every job (all
+  four: `plan`/`check`/`aggregate` in `check-project.yml`, `check` in
+  `check-single.yml`) used the default `persist-credentials: true`,
+  leaving the caller's `GITHUB_TOKEN` in `.git/config` even though none of
+  these jobs push and the paired self-checkout steps a few lines later
+  already set `persist-credentials: false` (zizmor's `artipacked` rule).
+  Fixed by adding the same `persist-credentials: false` to all four.
+- **`check-project.yml`'s "Download every check report" step
+  (`merge-multiple: true`) can silently drop a report to a filename
+  collision.** Two distinct check identities can slug to the same string
+  under `actions/check-target/run.sh`'s own lossy `tr -c 'A-Za-z0-9._-' '_'`
+  report filename (e.g. name `a`/profile `b-c` and name `a-b`/profile `c`
+  on the same channel/depth both produce
+  `check-target-report-a-b-c-<channel>-<depth>.json`) — harmless for a
+  single `check-target` invocation writing its own report, but
+  `check-project.yml`'s artifact *names* are already injective (the round-3
+  sanitizer fix above), so both cells' reports land under different
+  artifacts and then get merged into ONE flat directory
+  (`abicheck/aggregate.py`'s `collect_reports` globs `*.json`
+  non-recursively — a per-artifact subdirectory isn't an option here), where
+  `actions/download-artifact`'s documented same-named-file resolution is
+  last-writer-wins. One report silently overwrites the other before
+  `aggregate` ever sees it. **Fixed at the source**, not in
+  `check-project.yml`: `actions/check-target/run.sh`'s `REPORT_OUT` now
+  appends a 12-hex-char SHA-256 prefix of the original, unsanitized
+  `name`/`profile`/`baseline_channel`/`requested_depth` tuple — the same
+  injective-suffix technique the round-3 artifact-name sanitizer already
+  uses — so two identities that collapse to the same slug still produce
+  distinct filenames. This touches a shared component from the already-merged
+  P1.3 PR (#625; `check-single.yml` also depends on it), but was chosen over
+  a `check-project.yml`-side workaround because `collect_reports`' flat,
+  non-recursive glob leaves no viable fix on the download side — the
+  collision is genuinely a property of the report *filename*, not of how it
+  gets downloaded.
+- **A separate P2 finding — candidate-resolution failures (missing
+  candidate, an escaping/ambiguous glob, a missing bundle member) never
+  produce a per-cell report** — is real but deliberately deferred, not
+  fixed in this round. The "Resolve candidate binary/binaries" step runs
+  *before* `Run check-target` and `sys.exit(1)`s directly on any of these
+  failures, so `check-target`'s own report-envelope finalizer (which is
+  what actually writes `steps.run.outputs.report-path`) never runs — for a
+  `required: false` bootstrap cell, `aggregate` then can't distinguish
+  "legitimately no report because the check is optional" from "the
+  resolver crashed on a misconfigured pattern," and passes either way.
+  Properly closing this needs a real design decision this round didn't
+  have the scope for: either duplicate enough of
+  `actions/check-target/report_envelope.py`'s operational-error mode
+  directly in the resolver step (works, but reimplements logic that
+  belongs to `check-target` and that this codebase otherwise keeps behind
+  one boundary), or restructure candidate resolution to still invoke
+  `check-target` on a resolution failure so its own existing
+  operational-error path writes the report (cleaner, but changes what
+  inputs `check-target` needs to accept a "resolution already failed,
+  write the envelope anyway" case). Tracked as a known gap rather than
+  rushed into either shape without picking one deliberately.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —

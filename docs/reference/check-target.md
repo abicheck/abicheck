@@ -142,11 +142,16 @@ caller-provided directory of the candidate build's own member binaries.
 ## Report envelope (ADR-047 §7)
 
 Every run writes a single JSON report at
-`check-target-report-<name>-<profile>-<baseline_channel>-<requested_depth>.json`
+`check-target-report-<name>-<profile>-<baseline_channel>-<requested_depth>-<digest>.json`
 (the exact path is always available via the `report-path` output — don't
 hard-code the filename, since running `check-target` more than once in the
 same job, e.g. the same target against two baseline channels, would
-otherwise overwrite an earlier run's report), starting from whatever the
+otherwise overwrite an earlier run's report; the trailing `<digest>` is a
+12-hex-char SHA-256 prefix of the original, unsanitized identity tuple, so
+two identities that collapse to the same slug under the filename's lossy
+character substitution still produce distinct files — needed because
+`check-project.yml` downloads every matrix cell's report into one shared
+flat directory), starting from whatever the
 underlying `compare`/`scan` run already produced and layering on the
 fields below. For a normal single-library `compare` (the common case),
 that starting shape is `abicheck/reporter.py`'s existing compare-report
