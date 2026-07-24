@@ -178,9 +178,10 @@ Suppression **hygiene policy** (a project rule, distinct from the suppression
 > longer exist) drive the collection depth per run.
 
 See [Scan levels](../user-guide/scan-levels.md) and the
-[`--depth` dial](../concepts/evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect). (A `graph`
-sub-key is accepted here for forward-compat but not consumed; the effective L5
-detail is `sources.graph`.)
+[`--depth` dial](../concepts/evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect).
+(`graph` is not a valid `source:` sub-key — a config with `source: {graph:
+...}` now fails with an unknown-key error. The L5 graph-detail knob is
+`sources.graph`, in the plural [`sources:`](#sources) block above.)
 
 ---
 
