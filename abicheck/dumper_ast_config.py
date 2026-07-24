@@ -1444,7 +1444,29 @@ def _strip_inactive_if_zero_blocks(
                 stack.append([True, True, False])
                 out.append(b"")
                 continue
-            if _PP_IF_TRUE_PATTERN.match(line):
+            if _PP_IF_TRUE_PATTERN.match(line) or (
+                not mask_cplusplus_defined_guards
+                and (
+                    _PP_IFDEF_CPLUSPLUS_PATTERN.match(line)
+                    or _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+                )
+            ):
+                # ``#if defined(__cplusplus)``/``#ifdef __cplusplus``/bare
+                # ``#if __cplusplus`` (Codex review, twenty-second round):
+                # tracked as *settled*-true here, the same way ``#if 1``/
+                # ``#if true`` already is, not left as an unrecognized
+                # chain (whose #else/#elif arms then get scanned right
+                # along with this one, unmasked). Without this, a dual
+                # C/C++ header's ``#else`` (C-only) fallback -- e.g. a
+                # ``struct concept {};`` compatibility shim -- stayed
+                # visible to the shadow-name scan alongside a genuine
+                # C++20 declaration in the *active* ``#if`` arm, wrongly
+                # shadowing it. Elif-level already settles the equivalent
+                # ``#elif`` spelling this same way; this closes the gap
+                # for it as the chain's *opening* condition. Skipped when
+                # mask_cplusplus_defined_guards is True (the caller
+                # already masked this guard's own content in the general
+                # branch above instead, and never reaches this line).
                 stack.append([True, False, True])
                 out.append(b"")
                 continue

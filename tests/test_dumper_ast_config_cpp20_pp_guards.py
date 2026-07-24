@@ -1052,6 +1052,66 @@ def test_cpp20_detector_still_masks_construct_behind_cplusplus_and_version_check
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_fallback_shim_behind_dead_else_of_defined_cplusplus(
+    tmp_path,
+):
+    """Regression (Codex review, twenty-second round): ``#if
+    defined(__cplusplus)`` was never tracked as *settled*-true opening a
+    chain, unlike ``#if 1``/``#if true`` -- it fell through to
+    "unrecognized", leaving its ``#else`` scanned right along with the
+    active arm. A dual C/C++ header's ``#else`` (C-only) fallback --
+    e.g. a ``struct concept {};`` compatibility shim -- then stayed
+    visible to the shadow-name scan and wrongly shadowed a genuine
+    concept declaration in the *active* ``#if`` arm, forcing the header
+    to be parsed without ``-std=gnu++20``."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if defined(__cplusplus)\n"
+        "template<class T> concept C = true;\n"
+        "#else\n"
+        "struct concept {};\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
+def test_cpp20_detector_ignores_fallback_shim_behind_dead_else_of_ifdef_cplusplus(
+    tmp_path,
+):
+    """Companion: the ``#ifdef __cplusplus`` spelling needs the same
+    settled-true treatment as ``#if defined(__cplusplus)``."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#ifdef __cplusplus\n"
+        "template<class T> concept C = true;\n"
+        "#else\n"
+        "struct concept {};\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_ignores_fallback_shim_behind_dead_else_of_bare_cplusplus(
+    tmp_path,
+):
+    """Companion: the bare ``#if __cplusplus`` spelling needs the same
+    settled-true treatment."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if __cplusplus\n"
+        "template<class T> concept C = true;\n"
+        "#else\n"
+        "struct concept {};\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
 def test_cpp20_detector_ignores_dead_else_of_if_true(tmp_path):
     """Regression (Codex review, tenth round): ``#if 1``/``#if true`` was
     never recognized as opening a trackable chain at all, so a dead
