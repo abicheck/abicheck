@@ -1793,9 +1793,7 @@ class TestUsedByScoping:
         old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
         new_p = tmp_path / "new.so"
         new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
-        monkeypatch.setattr(
-            dumper_mod, "dump", MagicMock(side_effect=[old, new])
-        )
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[old, new]))
         scoped_only = Change(
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
             symbol="pub_entry",
@@ -1817,6 +1815,77 @@ class TestUsedByScoping:
         assert {f["kind"] for f in group["findings"]} == {
             "func_removed", "pe_ordinal_retargeted",
         }
+
+    def test_markdown_root_cause_mode_merges_scoped_only_into_existing_group(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Codex review: markdown/text root-cause mode must merge a
+        # scoped-only finding into an existing group when its caused_by_type
+        # matches a real change's symbol, not just list it separately in
+        # "## Additional scoped-gate findings" -- mirrors the JSON fix above.
+        from abicheck import dumper as dumper_mod
+
+        old, new = _breaking_pair()  # real diff: "bar"/_Z3barv removed
+        app_path = tmp_path / "app"
+        app_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_p = tmp_path / "old.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new_p = tmp_path / "new.so"
+        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[old, new]))
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="pub_entry",
+            description="ordinal retargeted",
+            caused_by_type="_Z3barv",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--used-by",
+            str(app_path),
+            "--report-mode",
+            "root-cause",
+        )
+        assert result.exit_code == 4
+        assert "## Root Causes (1)" in result.output
+        # Markdown demangles by default -- the group's display root is the
+        # demangled `bar()`, not the raw mangled `_Z3barv`.
+        assert "### `bar()` (2 finding" in result.output
+        assert "ordinal retargeted" in result.output
+        # Not duplicated in the flat appendix.
+        assert "## Additional scoped-gate findings" not in result.output
+
+    def test_markdown_root_cause_mode_still_lists_uncorrelated_scoped_only(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # An uncorrelated scoped-only finding must still show up as its own
+        # singleton group, not silently disappear now that the flat
+        # appendix is suppressed for root-cause mode.
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "--report-mode",
+            "root-cause",
+        )
+        assert result.exit_code == 4
+        assert "### `ordinal:5` (1 finding)" in result.output
+        assert "ordinal 5 retargeted" in result.output
+        assert "## Additional scoped-gate findings" not in result.output
 
     def test_json_uncovered_missing_symbol_not_blocking_under_demoted_severity(
         self, tmp_path, monkeypatch

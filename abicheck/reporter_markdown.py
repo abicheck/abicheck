@@ -744,6 +744,70 @@ def _group_changes_by_root_cause(
     return [(key, roots[key], groups[key]) for key in order]
 
 
+def _resolve_scoped_gate_findings(
+    result: DiffResult,
+    severity_config: SeverityConfig | None,
+    show_only: str | None,
+) -> tuple[list[Change], list[str], bool, str]:
+    """Resolve the scoped-only ``Change``s and missing-contract labels relevant
+    to the ``--used-by``/``--required-symbol`` gate, deduped against
+    ``result.changes`` and filtered by ``--show-only``.
+
+    Factored out of ``cli_compare_fold.py``'s JSON branch so markdown/text/
+    review output can render the identical actionable findings instead of
+    only a bare count (Codex review: a scoped run whose only gated issue was
+    a missing contract member or a scoped-only change like
+    ``PE_ORDINAL_RETARGETED`` didn't name either one in the default text
+    report, unlike JSON/SARIF/JUnit). Lives here (not ``cli_compare_fold.py``)
+    so ``_to_markdown_root_cause`` below can also call it directly to merge
+    these into its own root-cause groups, without ``cli_compare_fold``
+    importing back into this leaf module -- ``cli_compare_fold.py`` imports
+    it from ``reporter``'s re-export, same as every other name in this
+    module.
+
+    Returns ``(scoped_only_changes, missing_labels, blocks, missing_kind)``.
+    """
+    from .severity import missing_contract_exit_code
+
+    existing_ids = {_finding_id(c) for c in result.changes}
+    eff_sets = result._effective_kind_sets()
+    scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
+    if show_only and scoped_only:
+        scoped_only = apply_show_only(
+            scoped_only,
+            show_only,
+            policy=result.policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+        )
+    scoped_only = [c for c in scoped_only if _finding_id(c) not in existing_ids]
+
+    gate_scope = getattr(result, "gate_scope", None)
+    missing_kind = (
+        "used_by_missing_symbol"
+        if gate_scope == "used_by"
+        else "required_symbol_missing"
+    )
+    blocks = severity_config is None or missing_contract_exit_code(severity_config) != 0
+    # A missing-contract label has no backing Change/ChangeKind, so it can't
+    # run through apply_show_only -- but --show-only's severity dimension
+    # still applies: without this, a --show-only run that excludes breaking
+    # findings would still include a blocking missing-contract entry the
+    # filter was meant to exclude (Codex review, mirrors the identical
+    # sarif.to_sarif fix). Element/action tokens don't cleanly apply to "a
+    # symbol is simply absent", so only the severity dimension is checked.
+    missing_severity_label = "breaking" if blocks else "compatible"
+    show_only_severities = (
+        ShowOnlyFilter.parse(show_only).severities if show_only else frozenset()
+    )
+    missing_labels = list(
+        getattr(result, "scoped_missing_labels", ()) or ()
+        if not show_only_severities or missing_severity_label in show_only_severities
+        else ()
+    )
+    return scoped_only, missing_labels, blocks, missing_kind
+
+
 def _to_markdown_root_cause(
     result: DiffResult,
     show_only: str | None = None,
@@ -801,15 +865,63 @@ def _to_markdown_root_cause(
             policy_file=result.policy_file,
         )
 
-    groups = _group_changes_by_root_cause(changes)
-    if groups:
-        lines += [f"## Root Causes ({len(groups)})", ""]
-        for _key, root_display, group_changes in groups:
-            plural = "" if len(group_changes) == 1 else "s"
-            lines.append(f"### `{root_display}` ({len(group_changes)} finding{plural})")
+    # G29 Phase 3 slice 3 follow-up (Codex review): a --used-by/
+    # --required-symbol scoped-only change or missing-contract label whose
+    # caused_by_type/symbol correlates with a change above must join that
+    # same root-cause group here, not only appear separately in
+    # cli_compare_fold.py's "## Additional scoped-gate findings" appendix --
+    # otherwise the grouped section under-reports finding_count and hides
+    # the correlation, unlike the JSON/SARIF paths (which fold these in).
+    # Real Change objects (scoped_only) can simply be grouped alongside
+    # `changes` in one pass; missing_labels have no Change to group with, so
+    # they're keyed and merged in separately below.
+    scoped_only, missing_labels, blocks, missing_kind = _resolve_scoped_gate_findings(
+        result,
+        severity_config,
+        show_only,
+    )
+    groups = _group_changes_by_root_cause(changes + scoped_only)
+    if groups or missing_labels:
+        order: list[str] = []
+        root_by_key: dict[str, str] = {}
+        finding_lines_by_key: dict[str, list[str]] = {}
+        count_by_key: dict[str, int] = {}
+        for key, root_display, group_changes in groups:
+            order.append(key)
+            root_by_key[key] = root_display
+            finding_lines_by_key[key] = [_format_change_md(c) for c in group_changes]
+            count_by_key[key] = len(group_changes)
+
+        if missing_labels:
+            referenced_causes = frozenset(
+                c.caused_by_type for c in changes + scoped_only if c.caused_by_type
+            )
+            severity_tag = "breaking" if blocks else "compatible"
+            for label in missing_labels:
+                key, root_display = _root_cause_key_and_display(
+                    None, label, missing_kind, label,
+                    referenced_causes=referenced_causes,
+                )
+                line = (
+                    f"- `{label}` is required but missing from the new "
+                    f"library ({severity_tag})"
+                )
+                if key in finding_lines_by_key:
+                    finding_lines_by_key[key].append(line)
+                    count_by_key[key] += 1
+                else:
+                    order.append(key)
+                    root_by_key[key] = root_display
+                    finding_lines_by_key[key] = [line]
+                    count_by_key[key] = 1
+
+        lines += [f"## Root Causes ({len(order)})", ""]
+        for key in order:
+            n = count_by_key[key]
+            plural = "" if n == 1 else "s"
+            lines.append(f"### `{root_by_key[key]}` ({n} finding{plural})")
             lines.append("")
-            for c in group_changes:
-                lines.append(_format_change_md(c))
+            lines.extend(finding_lines_by_key[key])
             lines.append("")
 
     if not changes:

@@ -73,6 +73,7 @@ from .reporter_markdown import (
     _format_change_md as _format_change_md,
     _format_leaf_type_change as _format_leaf_type_change,
     _group_changes_by_root_cause as _group_changes_by_root_cause,
+    _resolve_scoped_gate_findings as _resolve_scoped_gate_findings,
     _root_cause_key_and_display as _root_cause_key_and_display,
     _section_severity_label as _section_severity_label,
     _to_markdown_leaf as _to_markdown_leaf,

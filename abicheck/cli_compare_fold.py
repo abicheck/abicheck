@@ -32,67 +32,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
-def _resolve_scoped_gate_findings(
-    result: Any, severity_config: Any, show_only: str | None,
-) -> tuple[list[Any], list[str], bool, str]:
-    """Resolve the scoped-only ``Change``s and missing-contract labels relevant
-    to the ``--used-by``/``--required-symbol`` gate, deduped against
-    ``result.changes`` and filtered by ``--show-only``.
-
-    Factored out of the JSON branch below so markdown/text/review output can
-    render the identical actionable findings instead of only a bare count
-    (Codex review: a scoped run whose only gated issue was a missing contract
-    member or a scoped-only change like ``PE_ORDINAL_RETARGETED`` didn't name
-    either one in the default text report, unlike JSON/SARIF/JUnit).
-
-    Returns ``(scoped_only_changes, missing_labels, blocks, missing_kind)``.
-    """
-    from .reporter import _finding_id, apply_show_only
-    from .reporter_markdown import ShowOnlyFilter
-    from .severity import missing_contract_exit_code
-
-    existing_ids = {_finding_id(c) for c in result.changes}
-    eff_sets = result._effective_kind_sets()
-    scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
-    if show_only and scoped_only:
-        scoped_only = apply_show_only(
-            scoped_only,
-            show_only,
-            policy=result.policy,
-            kind_sets=eff_sets,
-            policy_file=result.policy_file,
-        )
-    scoped_only = [c for c in scoped_only if _finding_id(c) not in existing_ids]
-
-    gate_scope = getattr(result, "gate_scope", None)
-    missing_kind = (
-        "used_by_missing_symbol" if gate_scope == "used_by"
-        else "required_symbol_missing"
-    )
-    blocks = (
-        severity_config is None
-        or missing_contract_exit_code(severity_config) != 0
-    )
-    # A missing-contract label has no backing Change/ChangeKind, so it can't
-    # run through apply_show_only -- but --show-only's severity dimension
-    # still applies: without this, a --show-only run that excludes breaking
-    # findings would still include a blocking missing-contract entry the
-    # filter was meant to exclude (Codex review, mirrors the identical
-    # sarif.to_sarif fix). Element/action tokens don't cleanly apply to "a
-    # symbol is simply absent", so only the severity dimension is checked.
-    missing_severity_label = "breaking" if blocks else "compatible"
-    show_only_severities = (
-        ShowOnlyFilter.parse(show_only).severities if show_only else frozenset()
-    )
-    missing_labels = list(
-        getattr(result, "scoped_missing_labels", ()) or ()
-        if not show_only_severities or missing_severity_label in show_only_severities
-        else ()
-    )
-    return scoped_only, missing_labels, blocks, missing_kind
-
-
 # Maps a rendered change's "severity" label (report_model.VERDICT_PRESENTATION,
 # and the "breaking"/"compatible" literals _resolve_scoped_gate_findings' missing-
 # contract entries use) to the summary-block key it contributes to -- shared by
@@ -107,7 +46,7 @@ _SEVERITY_TO_SUMMARY_BUCKET = {
 
 def _fold_scoped_compat_into_text(
     text: str, fmt: str, result: Any, severity_config: Any = None,
-    show_only: str | None = None,
+    show_only: str | None = None, report_mode: str = "full",
 ) -> str:
     """Fold ``--used-by``/``--required-symbol(s)`` summaries into the rendered text.
 
@@ -129,6 +68,16 @@ def _fold_scoped_compat_into_text(
     ``sarif.to_sarif`` fix). Pass ``None`` (the default) for a render that is
     deliberately always-unfiltered, e.g. the ``--secondary-format`` render,
     which ignores the primary format's own ``--show-only``.
+
+    *report_mode* ``"root-cause"`` skips the markdown/text
+    "## Additional scoped-gate findings" append (Codex review):
+    ``reporter_markdown._to_markdown_root_cause`` already merges
+    ``scoped_only``/``missing_labels`` into its own root-cause groups in that
+    mode, so appending them again here would duplicate every scoped finding
+    that also shows up grouped under its matching ``### root`` heading.
+    ``review`` format ignores ``report_mode`` entirely (no root-cause
+    rendering exists for it), so it always gets the appended section
+    regardless of this parameter's value.
     """
     used_by = getattr(result, "used_by", None)
     required_symbols = getattr(result, "required_symbols", None)
@@ -215,6 +164,7 @@ def _fold_scoped_compat_into_text(
                 _add_entries_to_root_causes,
                 _change_to_dict,
                 _finding_id,
+                _resolve_scoped_gate_findings,
                 _root_cause_key_and_display,
             )
 
@@ -352,7 +302,7 @@ def _fold_scoped_compat_into_text(
             # contract synthetic finding's own contribution on top of the
             # already-correct full-library counts.
             from .checker_policy import EvidenceStatus
-            from .reporter import _change_to_dict
+            from .reporter import _change_to_dict, _resolve_scoped_gate_findings
 
             scoped_only, missing_labels, blocks, _missing_kind = (
                 _resolve_scoped_gate_findings(result, severity_config, show_only)
@@ -460,19 +410,26 @@ def _fold_scoped_compat_into_text(
         # land in `result.changes` -- name them here too, mirroring the
         # JSON/SARIF/JUnit fold-in, so a text/markdown/review reader sees the
         # same actionable findings a JSON consumer would (Codex review).
-        scoped_only, missing_labels, blocks, _missing_kind = (
-            _resolve_scoped_gate_findings(result, severity_config, show_only)
-        )
-        if scoped_only or missing_labels:
-            lines.append("## Additional scoped-gate findings")
-            severity_tag = "breaking" if blocks else "compatible"
-            for label in missing_labels:
-                lines.append(
-                    f"- `{label}` is required but missing from the new "
-                    f"library ({severity_tag})"
-                )
-            for c in scoped_only:
-                lines.append(f"- {c.kind.value}: {c.description}")
+        # Skipped for markdown/text root-cause mode: _to_markdown_root_cause
+        # already merged these into its own root-cause groups, so appending
+        # them again here would duplicate every scoped finding that
+        # correlates with an existing group (Codex review follow-up).
+        if not (report_mode == "root-cause" and fmt in ("markdown", "text")):
+            from .reporter import _resolve_scoped_gate_findings
+
+            scoped_only, missing_labels, blocks, _missing_kind = (
+                _resolve_scoped_gate_findings(result, severity_config, show_only)
+            )
+            if scoped_only or missing_labels:
+                lines.append("## Additional scoped-gate findings")
+                severity_tag = "breaking" if blocks else "compatible"
+                for label in missing_labels:
+                    lines.append(
+                        f"- `{label}` is required but missing from the new "
+                        f"library ({severity_tag})"
+                    )
+                for c in scoped_only:
+                    lines.append(f"- {c.kind.value}: {c.description}")
         return "\n".join(lines)
 
     return text

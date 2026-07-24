@@ -419,6 +419,27 @@ Summary table that full/leaf markdown both append. Fixed by threading
 `show_impact` through to `_build_impact_table`, matching the other two
 markdown modes.
 
+**Follow-up fix (Codex review), later commit:** `_to_markdown_root_cause`
+grouped only `result.changes` -- a `--used-by`/`--required-symbol`
+scoped-only finding or missing-contract label was still only listed
+separately, in `cli_compare_fold.py`'s flat "## Additional scoped-gate
+findings" appendix, even when its `caused_by_type`/symbol correlated with
+an existing group, under-reporting that group's `finding_count` and
+hiding the correlation (unlike the JSON/SARIF paths, which already fold
+these in). Fixed by moving `_resolve_scoped_gate_findings` from
+`cli_compare_fold.py` to `reporter_markdown.py` (a leaf module both sides
+can import from, mirroring `_finding_id`/`_group_changes_by_root_cause`'s
+own earlier move for the identical reason) so `_to_markdown_root_cause`
+can call it directly: it now groups `changes + scoped_only_changes`
+together in one pass (real `Change` objects merge naturally), and keys
+each missing-contract label with the same `_root_cause_key_and_display`
+logic, joining an existing group when referenced or forming its own
+singleton otherwise. `cli_compare_fold._fold_scoped_compat_into_text`
+gained a `report_mode` parameter and now skips its own appendix for
+markdown/text root-cause mode specifically, to avoid double-listing the
+same findings; `review` format ignores `report_mode` (no root-cause
+rendering exists for it) and always keeps the appendix.
+
 ## Slice 5 — `--report-mode root-cause` SARIF properties
 
 Landed in a follow-up commit on the same PR. Unlike JSON/markdown, SARIF's
