@@ -1004,6 +1004,30 @@ _PP_IF_CPLUSPLUS_GUARD_PATTERN = re.compile(
 _PP_ELIF_CPLUSPLUS_GUARD_PATTERN = re.compile(
     rb"^[ \t]*#[ \t]*elif[ \t]+.*\b(?:__cplusplus|__cpp_\w+)\b"
 )
+# ``#if __cplusplus < N`` (or ``<=``) is the same "not yet at this
+# dialect" polarity as ``#ifndef __cpp_x`` (Codex review, fifteenth
+# round), not the ``__cplusplus >= N`` polarity the general guard pattern
+# above assumes: the general pattern masks the *guarded* arm and trusts
+# the ``#else`` uniformly, which is only correct when the guarded arm is
+# the feature-*present* content (``>=``/``>``). For a less-than
+# comparison the guarded arm is the pre-C++20-safe fallback and the
+# ``#else`` is the circular, feature-present content instead — reusing
+# the general pattern's treatment here masked the safe pre-C++20 arm and
+# trusted the circular ``#else``, so a header written "if older than
+# C++20, do X; else do Y" forced ``-std=gnu++20`` purely because Y was
+# there, which could then break an unrelated, genuinely pre-C++20 use of
+# the same word as an ordinary identifier in the masked-away X arm.
+# Deliberately narrow (a fixed ``<``/``<=`` against a bare numeric
+# literal, matching this file's incremental-per-reported-case scope, not
+# a full expression parser): reversed operand order
+# (``202002L > __cplusplus``), a combined condition
+# (``__cplusplus < N && defined(FOO)``), and other comparison operators
+# (``==``, ``!=``) are not attempted here and keep falling through to the
+# general (mask-guarded/trust-else) pattern above, the same conservative
+# default an entirely unrecognized condition gets.
+_PP_IF_CPLUSPLUS_LESS_THAN_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*if[ \t]+__cplusplus[ \t]*<=?[ \t]*\d+L?[ \t]*$"
+)
 # ``#if defined(__cplusplus)``/``#if defined __cplusplus`` (the
 # parenthesized *and* the equally-valid no-parens ``defined`` operator
 # spelling — Codex review, ninth round)/``#if __cplusplus`` (bare, no
@@ -1159,6 +1183,16 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 # condition is irrelevant either way; track it only to
                 # find its matching #endif.
                 stack.append([False, True, True])
+                out.append(b"")
+                continue
+            if _PP_IF_CPLUSPLUS_LESS_THAN_PATTERN.match(line):
+                # Opposite polarity from the general __cplusplus-guard
+                # branch below: a less-than comparison's guarded arm is
+                # the pre-C++20-safe fallback, so it's scanned live and
+                # immediately settled so any #else (feature present,
+                # circular) stays masked -- checked ahead of the general
+                # branch since it would otherwise also match.
+                stack.append([True, False, True])
                 out.append(b"")
                 continue
             if (

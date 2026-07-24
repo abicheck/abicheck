@@ -675,6 +675,50 @@ def test_cpp20_detector_masks_negated_defined_cplusplus(tmp_path):
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_construct_behind_less_than_cplusplus_else(tmp_path):
+    """Regression (Codex review, fifteenth round): ``#if __cplusplus < N``
+    is the same "not yet at this dialect" polarity as ``#ifndef __cpp_x``,
+    not the ``__cplusplus >= N`` polarity the general guard assumes. The
+    guarded (less-than) arm is the pre-C++20-safe fallback and should be
+    trusted as live; the ``#else`` (feature-present, circular) should be
+    masked instead. Reusing the general treatment masked the safe
+    fallback and trusted the circular ``#else``, so a header written "if
+    older than C++20, do X; else do Y" forced ``-std=gnu++20`` purely
+    because Y was there -- which could then break an unrelated, genuinely
+    pre-C++20 use of the same word in the wrongly-masked-away X arm."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if __cplusplus < 202002L\nint consteval;\n#else\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_detects_construct_behind_less_than_cplusplus_guard(tmp_path):
+    """Companion: a genuine C++20 construct written directly in the
+    less-than-guarded (pre-C++20-safe) arm itself must still be
+    detected -- only its circular ``#else`` sibling is masked."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if __cplusplus < 202002L\nconsteval int f();\n#else\nint old_style;\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
+def test_cpp20_detector_ignores_construct_behind_less_equal_cplusplus_else(tmp_path):
+    """Companion: the ``<=`` spelling (``#if __cplusplus <= 201703L``,
+    e.g. "at most C++17") gets the same inverted treatment as ``<``."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if __cplusplus <= 201703L\nint consteval;\n#else\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_settles_on_elif_defined_cplusplus(tmp_path):
     """Companion: an ``#elif defined(__cplusplus)`` arm, once reached, is
     just as definitely-true as ``#elif 1`` — it must settle the chain
