@@ -552,7 +552,18 @@ jobs:
 
           if cell['kind'] == 'bundle':
               staging = 'bundle-staging'
-              os.makedirs(staging, exist_ok=True)
+              # exist_ok=True alone would silently reuse a pre-existing
+              # bundle-staging/ directory -- the earlier checkout populates
+              # the whole workspace from the caller's own repository first,
+              # so a checked-in bundle-staging/ tree would leave its own
+              # files sitting alongside the members copied below. compare
+              # fans out a directory operand by collecting every supported
+              # file under it, so a stale leftover file would silently join
+              # the comparison even though it was never part of this run's
+              # candidate upload (Codex review). Clear it first so staging
+              # always starts from nothing.
+              shutil.rmtree(staging, ignore_errors=True)
+              os.makedirs(staging)
               missing = []
               # Two distinct members can resolve to files that share a
               # basename (e.g. build/linux/libfoo.so vs. build/plugins/

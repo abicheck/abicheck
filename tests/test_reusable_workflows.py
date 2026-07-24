@@ -247,6 +247,52 @@ class TestCheckSingleOptionalArtifactStaging:
         step = next(s for s in steps if s.get("name") == "Download baseline artifact")
         assert step["with"]["path"] == "${{ inputs.baseline-path }}"
 
+    @pytest.mark.parametrize(
+        ("clear_name", "download_name"),
+        [
+            ("Clear candidate staging before download", "Download candidate artifact"),
+            ("Clear baseline staging before download", "Download baseline artifact"),
+            (
+                "Clear build-output staging before download",
+                "Download build-output artifact",
+            ),
+        ],
+    )
+    def test_each_download_is_preceded_by_a_clear_step_with_the_same_condition(
+        self, clear_name: str, download_name: str
+    ) -> None:
+        """The earlier `actions/checkout` step already populates the whole
+        workspace from the caller's own repository -- a stale checked-in
+        file at `candidate`/the resolved `baseline-path`/`build-output`
+        would otherwise survive an artifact download that doesn't happen to
+        overwrite it (a missing file, or a differently-laid-out artifact),
+        and `new-library`/`baseline-path` are fixed caller-supplied paths
+        here (unlike check-project.yml's glob-based candidate resolver), so
+        a stale file is scanned/compared as if it were the real upload
+        (Codex review). The clear must share its download's own `if:` --
+        clearing unconditionally would destroy a deliberately checked-in
+        fixture path when the caller leaves the artifact-name input empty."""
+        data = _load(CHECK_SINGLE)
+        steps = _steps(data["jobs"]["check"])
+        names = _step_names(data["jobs"]["check"])
+        clear_step = next(s for s in steps if s.get("name") == clear_name)
+        download_step = next(s for s in steps if s.get("name") == download_name)
+        assert clear_step.get("if") == download_step.get("if")
+        assert names.index(clear_name) < names.index(download_name)
+
+    def test_baseline_clear_step_targets_the_resolved_baseline_path(self) -> None:
+        data = _load(CHECK_SINGLE)
+        steps = _steps(data["jobs"]["check"])
+        clear_step = next(
+            s
+            for s in steps
+            if s.get("name") == "Clear baseline staging before download"
+        )
+        assert (
+            clear_step["env"]["BASELINE_STAGING_PATH"] == "${{ inputs.baseline-path }}"
+        )
+        assert "$BASELINE_STAGING_PATH" in clear_step["run"]
+
 
 class TestCheckProjectAlwaysOnRequirements:
     """ADR-047 §4's two required sub-tasks for check-project.yml: the
@@ -1077,6 +1123,45 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
         )
         assert result.returncode == 0, result.stderr
         assert "new-library=bundle-staging" in result.stdout
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "The actual reusable workflow only ever runs on runs-on: "
+            "ubuntu-latest -- this test exercises that real Linux bash "
+            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "resolves to the System32 WSL launcher (not Git Bash) and fails "
+            "before running anything if no WSL distro is installed, which "
+            "isn't a bug in the workflow script itself."
+        ),
+    )
+    def test_stale_preexisting_bundle_staging_dir_is_cleared_first(
+        self, tmp_path: Path
+    ) -> None:
+        # The earlier `actions/checkout` step already populates the whole
+        # workspace from the caller's own repository -- a checked-in
+        # bundle-staging/ tree there must not survive into the comparison,
+        # since `compare` fans out a directory operand by collecting every
+        # supported file under it (Codex review).
+        candidate = tmp_path / "candidate"
+        candidate.mkdir()
+        (candidate / "libpvxs.so").write_bytes(b"core")
+
+        stale = tmp_path / "bundle-staging"
+        stale.mkdir()
+        (stale / "leftover.so").write_bytes(b"stale repo content")
+
+        result = self._run_bash(
+            tmp_path,
+            {
+                "kind": "bundle",
+                "name": "pvxs",
+                "member_binary_patterns": {"libpvxs": "libpvxs.so"},
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert not (stale / "leftover.so").exists()
+        assert (stale / "libpvxs.so").exists()
 
 
 class TestCheckTargetIdentityPassthrough:

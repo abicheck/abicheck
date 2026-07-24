@@ -369,6 +369,29 @@ jobs:
       # are needed at all -- this job runs on a fresh, isolated runner, so a
       # candidate/baseline/build-output path from the caller's own build job
       # doesn't exist here unless explicitly transferred as an artifact.
+      #
+      # Each download is preceded by its own clear step, gated on the exact
+      # same `if:` as the download it precedes -- the earlier `actions/
+      # checkout` step already populated the whole workspace from the
+      # caller's own repository, so if that repository happens to contain a
+      # checked-in file/directory at `candidate`, the resolved
+      # `inputs.baseline-path`, or `build-output`, download-artifact
+      # extracting into that same path does not guarantee those stale files
+      # are gone first (e.g. the artifact is missing a file the checked-in
+      # tree already has at that path). `new-library`/`baseline-path` are
+      # then still fixed caller-supplied paths, not resolved via glob like
+      # check-project.yml's own candidate resolver, so a stale file there
+      # would be scanned/compared as if it were the genuine upload (Codex
+      # review). Gating the clear on the same condition as its download
+      # (rather than clearing unconditionally) matters just as much: when a
+      # caller deliberately leaves an artifact-name input empty to point
+      # `new-library`/etc. at a checked-in fixture path instead, that path
+      # must NOT be wiped.
+      - name: Clear candidate staging before download
+        if: inputs.candidate-artifact-name != ''
+        shell: bash
+        run: rm -rf candidate
+
       - name: Download candidate artifact
         if: inputs.candidate-artifact-name != ''
         uses: actions/download-artifact@v8
@@ -376,12 +399,24 @@ jobs:
           name: ${{ inputs.candidate-artifact-name }}
           path: candidate
 
+      - name: Clear baseline staging before download
+        if: inputs.baseline-artifact-name != ''
+        shell: bash
+        env:
+          BASELINE_STAGING_PATH: ${{ inputs.baseline-path }}
+        run: rm -rf "$BASELINE_STAGING_PATH"
+
       - name: Download baseline artifact
         if: inputs.baseline-artifact-name != ''
         uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.baseline-artifact-name }}
           path: ${{ inputs.baseline-path }}
+
+      - name: Clear build-output staging before download
+        if: inputs.build-output-artifact-name != ''
+        shell: bash
+        run: rm -rf build-output
 
       - name: Download build-output artifact
         if: inputs.build-output-artifact-name != ''

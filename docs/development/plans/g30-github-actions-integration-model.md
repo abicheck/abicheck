@@ -1960,6 +1960,39 @@ populate. Covered by new
 `TestCheckProjectClearsStagingDirsBeforeTolerantDownloads` tests in
 `tests/test_reusable_workflows.py` (72 cases in that file now).
 
+**Another round (Codex, against `78e40f6`) caught two more instances of the
+same stale-content class of bug, both fixed:**
+
+- **`check-single.yml`'s own three optional artifact downloads
+  (candidate/baseline/build-output) had the identical gap the previous
+  round fixed in `check-project.yml`.** Downloading into `candidate`, the
+  caller-resolved `baseline-path`, or `build-output` does not clear
+  whatever the earlier `actions/checkout` step already put there from the
+  caller's own repository -- and unlike `check-project.yml`'s glob-based
+  candidate resolver, `new-library`/`baseline-path` here are fixed
+  caller-supplied paths, so a stale checked-in file at either path is
+  scanned/compared as if it were the real upload. Fixed: each of the three
+  downloads is now preceded by its own "Clear ... staging before download"
+  step, sharing that download's exact `if:` condition (never clearing
+  unconditionally -- a caller who deliberately leaves an artifact-name
+  input empty to point at a genuinely checked-in fixture path must not have
+  it wiped). Covered by a new parametrized test asserting all three clear
+  steps exist, share their download's condition, and run before it, plus a
+  test on the baseline clear step's path targeting.
+- **`check-project.yml`'s bundle-staging directory used
+  `os.makedirs(staging, exist_ok=True)`, silently reusing a pre-existing
+  directory instead of starting clean.** The same earlier-checkout gap: a
+  checked-in `bundle-staging/` tree in the caller's repository would leave
+  its own files sitting alongside the members copied into it, and
+  `compare` fans out a directory operand by collecting every supported
+  file under it -- a stale leftover file would silently join the
+  comparison despite never being part of the candidate upload. Fixed:
+  `shutil.rmtree(staging, ignore_errors=True)` before `os.makedirs`, so
+  staging always starts from nothing. Covered by
+  `test_stale_preexisting_bundle_staging_dir_is_cleared_first` (pre-seeds
+  `bundle-staging/leftover.so`, confirms it's gone and only the real
+  member remains after resolution).
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —
