@@ -1533,7 +1533,9 @@ _QUOTED_INCLUDE_PATTERN = re.compile(
 )
 
 
-def _expand_with_quoted_includes(header_paths: list[Path]) -> list[Path]:
+def _expand_with_quoted_includes(
+    header_paths: list[Path], *, for_language_mode_decision: bool = False
+) -> list[Path]:
     """Expand *header_paths* with files reachable via a quoted ``#include
     "..."``, resolved relative to the including file's own directory
     (Codex review): a caller often designates just one umbrella entry
@@ -1553,6 +1555,20 @@ def _expand_with_quoted_includes(header_paths: list[Path]) -> list[Path]:
     resolved absolute path) and silently skips an unreadable file or an
     include that doesn't resolve to a real file on disk — the same
     conservative, best-effort spirit as the rest of this scan.
+
+    The ``#include`` line itself is only followed if it is *reachable*
+    under the same preprocessor-guard reasoning the rest of this file
+    already applies (Codex review, twenty-seventh round): a naive raw-text
+    scan for the directive would follow it even when it sits inside an
+    inactive or (for ``for_language_mode_decision``) C++-only guard --
+    e.g. an otherwise-C header wrapping ``#include "cxx20.hpp"`` in
+    ``#ifdef __cplusplus`` -- wrongly pulling the included file's C++20
+    syntax into scope for a decision where that guard is actually false.
+    ``for_language_mode_decision`` is forwarded unchanged to
+    ``_strip_inactive_if_zero_blocks`` (matching the polarity the caller
+    uses for its own reachability scan) before searching for the
+    directive, so an include line blanked as unreachable there is never
+    followed here either.
     """
     seen: set[Path] = set()
     expanded: list[Path] = []
@@ -1571,7 +1587,21 @@ def _expand_with_quoted_includes(header_paths: list[Path]) -> list[Path]:
             content = p.read_bytes()
         except OSError:
             continue
-        for m in _QUOTED_INCLUDE_PATTERN.finditer(content):
+        # Comments only -- NOT string/raw-string literals, unlike the main
+        # scan's preprocessing pipeline: the quoted argument of a genuine
+        # ``#include "..."`` is exactly the text this loop needs to read
+        # next, so it must survive intact.
+        content = re.sub(
+            rb"/\*.*?\*/",
+            lambda m: b"\n" * m.group(0).count(b"\n"),
+            content,
+            flags=re.DOTALL,
+        )
+        content = re.sub(rb"//[^\n]*", b"", content)
+        reachable_content = _strip_inactive_if_zero_blocks(
+            content, mask_cplusplus_defined_guards=for_language_mode_decision
+        )
+        for m in _QUOTED_INCLUDE_PATTERN.finditer(reachable_content):
             name = m.group(1).decode("utf-8", "surrogateescape")
             included = p.parent / name
             if included.is_file():
@@ -1617,9 +1647,15 @@ def _find_cpp20_requirements(
     parse a transitively-included header as part of the same
     translation unit regardless of whether the caller named it directly,
     so a C++20 signal that lives only in an included file (a common
-    umbrella-header shape) must count too.
+    umbrella-header shape) must count too. The expansion is given the
+    same ``for_language_mode_decision`` polarity (Codex review,
+    twenty-seventh round) so an ``#include`` confined to a guard that is
+    unreachable under *this* decision's reasoning (e.g. ``#ifdef
+    __cplusplus`` in a C-mode-decision scan) is not followed either.
     """
-    header_paths = _expand_with_quoted_includes(header_paths)
+    header_paths = _expand_with_quoted_includes(
+        header_paths, for_language_mode_decision=for_language_mode_decision
+    )
     per_file: list[tuple[Path, bytes]] = []
     concept_type_shadowed = False
     requires_type_shadowed = False

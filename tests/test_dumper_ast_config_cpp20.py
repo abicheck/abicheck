@@ -1480,3 +1480,44 @@ def test_cpp20_detector_handles_cyclic_quoted_includes(tmp_path):
     )
     headers = _write(tmp_path, "cyc_a.hpp", '#include "cyc_b.hpp"\nint a();\n')
     assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_honors_reachability_before_following_include(tmp_path):
+    """Regression (Codex review): a quoted include confined to an
+    unreachable guard must not be followed -- an otherwise-C header
+    wrapping ``#include "cxx20.hpp"`` in ``#ifdef __cplusplus`` must not
+    have the concept in ``cxx20.hpp`` counted for the language-mode
+    decision, where ``__cplusplus`` is genuinely undefined (C mode), so
+    the include line itself is unreachable there. A naive raw-text scan
+    for ``#include`` directives would follow it unconditionally and
+    wrongly force C++20 mode, then parse the active ``int consteval;``
+    declaration (an ordinary C identifier) under the wrong language."""
+    (tmp_path / "cxx20.hpp").write_text("template<class T> concept C = true;\n")
+    headers = _write(
+        tmp_path,
+        "api.h",
+        '#ifdef __cplusplus\n#include "cxx20.hpp"\n#endif\nint consteval;\n',
+    )
+    reqs_language_mode = _find_cpp20_requirements(
+        headers, for_language_mode_decision=True
+    )
+    assert reqs_language_mode == []
+    assert _detect_cpp20_headers(headers, for_language_mode_decision=True) is False
+
+
+def test_cpp20_detector_still_follows_reachable_include_for_dialect_decision(
+    tmp_path,
+):
+    """Companion: the same guard is genuinely always-true once already
+    parsing as C++ (the dialect decision, not the language-mode
+    decision), so the include stays reachable and the concept must still
+    be detected there."""
+    (tmp_path / "cxx20.hpp").write_text("template<class T> concept C = true;\n")
+    headers = _write(
+        tmp_path,
+        "api.h",
+        '#ifdef __cplusplus\n#include "cxx20.hpp"\n#endif\nint x;\n',
+    )
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+    assert _detect_cpp20_headers(headers) is True
