@@ -1717,9 +1717,7 @@ class DetectVersionedSymbolScheme:
                 "version, so dependents must relink against the new library even though "
                 "the symbol churn is a version-rename."
             )
-        # Codex review: route through the shared helper (evaluate() + stamp
-        # suppression_rule) instead of the bare is_suppressed this replaced,
-        # which left a labelled rule's match unattributed.
+        # Codex review: shared helper attributes a matched suppression rule.
         _merge_findings_respecting_suppression(changes, [advisory], ctx)
         if ctx.collapse_versioned_symbols and matched:
             # G15: report the collapse count in the summary. caused_count is the
