@@ -319,15 +319,45 @@ elif [[ "$MODE" == "compare" ]]; then
   add_sided_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
   add_sided_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
-  add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-  # Cross-compiler flags -- documented root-Action inputs, but previously
-  # only wired to dump mode's branch. Without them, a compare against a
-  # cross-target library silently falls back to the host toolchain/includes
-  # for header parsing and can produce false ABI results (Codex review).
-  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
-  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
-  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
-  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
+
+  # The L2 compile-context flags (--ast-frontend/--gcc-*/--sysroot/
+  # --nostdinc) are rejected outright by the CLI (a UsageError, exit 64)
+  # for directory/package operands — the per-library release fan-out
+  # doesn't thread a CompileContext to each pair's header dump. Gate them
+  # to the single-pair path, same as the release-only flags below are
+  # gated the other way. Fail loud (::error:: + exit 1) rather than warn
+  # and continue, matching the evidence-flags guard just below (Codex
+  # review): a warning alone lets the comparison run to a green verdict
+  # with headers parsed under the wrong macros/sysroot/frontend, which is
+  # exactly the silent-wrong-result failure mode the evidence-flags guard
+  # was already fixed to avoid for the analogous --depth build/source
+  # case — an explicitly-configured compile-context input deserves the
+  # same treatment as an explicitly-configured evidence input.
+  if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+     || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+    # "auto" is the documented no-op spelling of ast-frontend (resolves to
+    # the same default castxml selection as leaving the input unset, per
+    # its description above) -- a workflow that spells it out explicitly
+    # requests nothing the release fan-out could actually drop, so it must
+    # not trip this guard (Codex review, second round).
+    if [[ (-n "${INPUT_AST_FRONTEND:-}" && "${INPUT_AST_FRONTEND:-}" != "auto") \
+          || -n "${INPUT_GCC_PATH:-}" || -n "${INPUT_GCC_PREFIX:-}" \
+          || -n "${INPUT_GCC_OPTIONS:-}" || -n "${INPUT_SYSROOT:-}" \
+          || "${INPUT_NOSTDINC:-false}" == "true" ]]; then
+      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
+      exit 1
+    fi
+  else
+    add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
+    add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
+    add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+    add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+    add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
+
+    if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
+      CMD+=(--nostdinc)
+    fi
+  fi
 
   # Build/source evidence (--depth build/source) — new (candidate) side only.
   # The old side's evidence, if any, already lives in whatever
@@ -442,11 +472,6 @@ elif [[ "$MODE" == "compare" ]]; then
   fi
   add_flag "--required-symbol" "${INPUT_REQUIRED_SYMBOL:-}"
   add_single_flag "--required-symbols" "${INPUT_REQUIRED_SYMBOLS:-}"
-
-  # Note: --gcc-path, --gcc-prefix, --gcc-options, --sysroot, --nostdinc are
-  # dump-only flags. In compare mode abicheck performs the dump internally
-  # when an input is a binary, but these cross-compilation flags are not
-  # exposed on the compare CLI. They are only passed in dump mode.
 
   # Package-specific options — only meaningful (and only forwarded) when
   # old-library/new-library are directories or packages; gated here rather
@@ -589,6 +614,15 @@ elif [[ "$MODE" == "scan" ]]; then
     add_single_flag "--against" "${INPUT_AGAINST:-}"
   fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
+  add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
+  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
+
+  if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
+    CMD+=(--nostdinc)
+  fi
 
   # Level selection — the modern --depth dial (omit for 'auto'). The deprecated
   # --mode/--source-method passthrough was removed; use depth.

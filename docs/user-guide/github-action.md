@@ -126,12 +126,19 @@ carry binary evidence (a `dump` of a real library, not headers-only).
 | Input | Default | Description |
 |-------|---------|-------------|
 | `lang` | `c++` | Language mode for the header backend: `c++` or `c` |
-| `ast-frontend` | `auto` (resolves to castxml when present) | L2 header-AST frontend (compare/dump modes): `auto`, `castxml`, `clang` (`clang -ast-dump=json`, for clang-only hosts), or `hybrid` (runs both and merges them — needs both tools on the runner, never auto-selected). `auto` falls back to clang on a castxml toolchain error. Same as `ABICHECK_AST_FRONTEND`. |
-| `gcc-path` | — | Path to cross-compiler binary (dump mode only) |
-| `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump mode only) |
-| `gcc-options` | — | Extra flags for castxml (dump mode only) |
-| `sysroot` | — | Alternative system root (dump and deps-tree modes) |
-| `nostdinc` | `false` | Skip standard include paths (dump mode only) |
+| `ast-frontend` | `auto` (resolves to castxml when present) | L2 header-AST frontend (dump/scan modes, and compare mode with a single-pair operand — shared `compile_context_options`, ADR-037 D3): `auto`, `castxml`, `clang` (`clang -ast-dump=json`, for clang-only hosts), or `hybrid` (runs both and merges them — needs both tools on the runner, never auto-selected). `auto` falls back to clang on a castxml toolchain error. Same as `ABICHECK_AST_FRONTEND`. |
+| `gcc-path` | — | Path to cross-compiler binary (dump/scan modes, and compare mode with a single-pair operand) |
+| `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump/scan modes, and compare mode with a single-pair operand) |
+| `gcc-options` | — | Extra flags for the header frontend (dump/scan modes, and compare mode with a single-pair operand) |
+| `sysroot` | — | Alternative system root (dump/scan/deps-tree modes, and compare mode with a single-pair operand) |
+| `nostdinc` | `false` | Skip standard include paths (dump/scan modes, and compare mode with a single-pair operand) |
+
+A directory/package (release/bundle) `compare` operand does not support
+these six inputs — the per-library fan-out never threads this L2 compile
+context to each pair's header dump, and the Action fails fast if any of
+them is set for that shape. Compare libraries individually to use them;
+see the [GitHub Action Inputs/Outputs
+Reference](../reference/github-action-inputs.md) for the exact wording.
 
 ### Full-stack dependency validation (Linux ELF)
 

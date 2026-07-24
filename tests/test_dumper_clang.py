@@ -1287,6 +1287,77 @@ def test_header_ast_parser_castxml_branch(monkeypatch: pytest.MonkeyPatch) -> No
     assert parser._abicheck_ast_toolchain["producer"] == "castxml"
 
 
+def test_header_ast_parser_stamps_castxml_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sentinel = object()
+    parser_cls = dumper._CastxmlParser
+    parser_sentinel = parser_cls.__new__(parser_cls)
+    monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: sentinel)
+    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
+    monkeypatch.setattr(
+        dumper,
+        "_tool_identity_metadata",
+        lambda _executable: {
+            "selected": "/mock/castxml",
+            "version": "castxml version 0.7.0\nclang version 18.1.8",
+        },
+    )
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="castxml",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+    assert parser._abicheck_ast_supported is True
+    assert parser._abicheck_ast_unsupported_reasons == []
+
+
+def test_header_ast_parser_stamps_castxml_unsupported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parser_cls = dumper._CastxmlParser
+    parser_sentinel = parser_cls.__new__(parser_cls)
+    monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: object())
+    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
+    monkeypatch.setattr(
+        dumper,
+        "_tool_identity_metadata",
+        lambda _executable: {
+            "selected": "/mock/castxml",
+            "version": "castxml version 0.4.5\nclang version 8.0.0",
+        },
+    )
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="castxml",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+    assert parser._abicheck_ast_supported is False
+    assert "castxml_version_below_minimum" in parser._abicheck_ast_unsupported_reasons
+
+
 def test_clang_header_dump_success_and_cache(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

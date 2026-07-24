@@ -1250,6 +1250,7 @@ def _append_recommendation_section(lines: list[str], result: DiffResult) -> None
         "|---|---|",
         f"| Version bump | {emoji} **{rec.bump.value.upper()}** |",
         f"| SONAME action | `{rec.soname.value}` |",
+        f"| Recommendation state | `{rec.state.value}` |",
         "",
         f"{rec.rationale}",
         "",

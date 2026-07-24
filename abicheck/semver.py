@@ -77,6 +77,54 @@ class SonameAction(str, Enum):
     BUMP_MISSING = "bump_missing"
     #: Binary remained compatible — no soname change is required.
     NO_BUMP_NEEDED = "no_bump_needed"
+    #: A BREAKING verdict was reached with no binary-level evidence at all
+    #: (the comparison's evidence tiers carry only "header" — e.g. a Python
+    #: API caller compared hand-built/loaded snapshots that were never
+    #: extracted from a real binary). SONAME is a binary-file concept; abicheck
+    #: has no artifact to say whether it moved or should, so it does not
+    #: pretend otherwise.
+    NOT_DETERMINED = "not_determined"
+
+
+class ReleaseRecommendationState(str, Enum):
+    """How much weight the recommendation itself can bear.
+
+    Distinct from ``SonameAction``/``SemverBump`` (*what* to do): this is
+    *how confidently* abicheck can say so, given the evidence the comparison
+    actually had.
+    """
+
+    #: The verdict and its evidence are unambiguous — act on the recommendation.
+    ACTIONABLE = "actionable"
+    #: A source/API-level break was found; a MAJOR release is likely right,
+    #: but no binary-level evidence exists to confirm a SONAME action either
+    #: way — a human should look, not automation.
+    REVIEW = "review"
+    #: The evidence backing a BREAKING verdict is insufficient to recommend a
+    #: concrete binary action (no ELF/PE/Mach-O/DWARF evidence at all).
+    UNAVAILABLE = "unavailable"
+
+
+#: Evidence tiers (``DiffResult.evidence_tiers``) that constitute real
+#: binary-level evidence, as opposed to a pure header/declaration surface
+#: with no artifact ever examined. Mirrors ``confidence._detect_evidence_tiers``.
+_BINARY_EVIDENCE_TIERS = frozenset({"elf", "dwarf", "dwarf_advanced", "pe", "macho"})
+
+
+def _has_binary_evidence(evidence_tiers: list[str]) -> bool:
+    """Whether *evidence_tiers* includes at least one binary-level source.
+
+    An **empty** list means the field was never populated — typically a
+    ``DiffResult`` built directly rather than via ``checker.compare()`` (many
+    unit tests do this). That is "unknown", not "absent": treated as having
+    binary evidence so existing callers that don't populate this field keep
+    their prior (unconditionally actionable) behaviour. Only a *non-empty*
+    tier list containing nothing but ``"header"`` is a genuine, positive
+    signal that no binary was ever examined.
+    """
+    if not evidence_tiers:
+        return True
+    return bool(set(evidence_tiers) & _BINARY_EVIDENCE_TIERS)
 
 
 @dataclass(frozen=True)
@@ -86,6 +134,7 @@ class ReleaseRecommendation:
     bump: SemverBump
     soname: SonameAction
     rationale: str
+    state: ReleaseRecommendationState = ReleaseRecommendationState.ACTIONABLE
 
     def to_dict(self) -> dict[str, str]:
         """Serialise for JSON reports (additive ``release_recommendation`` key)."""
@@ -93,10 +142,13 @@ class ReleaseRecommendation:
             "version_bump": self.bump.value,
             "soname_action": self.soname.value,
             "rationale": self.rationale,
+            "state": self.state.value,
         }
 
     def headline(self) -> str:
         """One-line summary suitable for ``--stat`` output or a CI log."""
+        if self.state == ReleaseRecommendationState.UNAVAILABLE:
+            return "Recommended release: UNAVAILABLE (insufficient binary evidence)"
         if self.soname in (SonameAction.BUMP_REQUIRED, SonameAction.BUMP_MISSING):
             return f"Recommended release: {self.bump.value.upper()} + SONAME bump"
         return f"Recommended release: {self.bump.value.upper()}"
@@ -143,6 +195,17 @@ def recommend_release(result: DiffResult) -> ReleaseRecommendation:
         )
 
     if verdict == Verdict.BREAKING:
+        if not _has_binary_evidence(result.evidence_tiers):
+            return ReleaseRecommendation(
+                SemverBump.MAJOR,
+                SonameAction.NOT_DETERMINED,
+                "Binary ABI break detected, but no ELF/PE/Mach-O/DWARF evidence "
+                "backs this comparison (header/declaration surface only) — a "
+                "MAJOR release is still warranted, but abicheck cannot confirm "
+                "a SONAME action without ever having examined a real binary "
+                "artifact.",
+                state=ReleaseRecommendationState.UNAVAILABLE,
+            )
         soname, extra = _soname_action_for_break(kinds)
         return ReleaseRecommendation(
             SemverBump.MAJOR,
@@ -157,6 +220,7 @@ def recommend_release(result: DiffResult) -> ReleaseRecommendation:
             "Source-level API break (recompilation required) with no binary-layout "
             "change — release a new MAJOR version. The SONAME need not change "
             "because already-linked binaries remain loadable.",
+            state=ReleaseRecommendationState.REVIEW,
         )
 
     if verdict == Verdict.COMPATIBLE_WITH_RISK:

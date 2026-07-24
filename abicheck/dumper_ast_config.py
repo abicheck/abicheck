@@ -32,6 +32,7 @@ def _cache_key(
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_identity: str = "",
     compiler_identity: str = "",
+    force_cpp20: bool = False,
 ) -> str:
     h = hashlib.sha256()
     h.update(f"backend={backend}".encode())
@@ -73,6 +74,16 @@ def _cache_key(
     # Auto-probed system include dirs (castxml↔clang parity): a host-toolchain
     # change must invalidate a cached clang dump (the resolved libstdc++ moved).
     h.update(f"system_includes={chr(0).join(system_includes)}".encode())
+    # The *resolved* C++20 dialect decision (-std=gnu++20 or not), not just the
+    # explicit --lang the caller passed (Codex review): _detect_cpp20_headers is
+    # a heuristic that can itself change across an abicheck upgrade (a bug fix
+    # to the detector, like a false-positive/negative correction) without any
+    # header content or toolchain identity changing. Without this, upgrading
+    # abicheck to fix such a detector bug would silently keep reusing a stale
+    # AST parsed under the *old*, wrong dialect decision until the on-disk
+    # cache was manually cleared — the cache key must depend on everything
+    # that changes the frontend command, and this heuristic decision does.
+    h.update(f"force_cpp20={force_cpp20}".encode())
     return h.hexdigest()
 
 
@@ -118,41 +129,6 @@ _CPP_ONLY_PATTERNS = [
 # failure hint: here ``extern "C"`` *does* count, because castxml always parses in
 # a C++-ish mode, so an aggregate including an extern "C" header is built as .hpp.
 _CPP_PATTERNS = [_EXTERN_C_PATTERN, *_CPP_ONLY_PATTERNS]
-
-
-# Structural C++20 patterns — concepts and requires-expressions. When any
-# of these appears in a header, castxml must be invoked with a C++20-aware
-# `-std=` flag or it will fail to parse the file. The patterns target the
-# definition site (`concept X = ...`, `requires(...) {`, `template <Foo T>`-
-# style constrained template parameters) rather than uses, so we don't
-# over-trigger.
-_CPP20_PATTERNS = [
-    re.compile(rb"^\s*concept\s+\w+\s*="),  # concept Addable = ...
-    re.compile(rb"\brequires\s*\("),  # requires(T a, T b) { ... }
-    re.compile(rb"\brequires\s+\w"),  # template<T> requires Foo<T>
-]
-
-
-def _detect_cpp20_headers(header_paths: list[Path]) -> bool:
-    """Return True if any header contains C++20-only syntax (concept/requires).
-
-    Used to decide whether to pass ``-std=gnu++20`` to castxml. castxml's
-    default standard is whatever the underlying compiler defaults to
-    (usually C++17 on modern gcc), which does not accept ``concept``
-    declarations. This detection is conservative: only definition-site
-    syntax counts, not the keyword in arbitrary text.
-    """
-    for p in header_paths:
-        try:
-            content = p.read_bytes()
-        except OSError:
-            continue
-        content = re.sub(rb"/\*.*?\*/", b"", content, flags=re.DOTALL)
-        for line in content.split(b"\n"):
-            stripped = line.split(b"//")[0]
-            if any(pat.search(stripped) for pat in _CPP20_PATTERNS):
-                return True
-    return False
 
 
 def _detect_cpp_headers(
