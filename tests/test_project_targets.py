@@ -521,10 +521,13 @@ def test_bundle_check_depth_binary_and_headers_are_accepted() -> None:
                 "release": {
                     "targets": ["libfoo"],
                     "checks": [
-                        {"channel": "none", "depth": "binary"},
-                        {"channel": "none", "depth": "headers"},
+                        {"channel": "accepted", "depth": "binary"},
+                        {"channel": "accepted", "depth": "headers"},
                     ],
                 }
+            },
+            "baseline": {
+                "channels": {"accepted": {"source": "git"}},
             },
         }
     )
@@ -1049,17 +1052,26 @@ def test_bundle_checks_round_trip_and_validate() -> None:
             "bundles": {
                 "rel": {
                     "targets": ["a", "b"],
-                    "checks": [{"channel": "none", "depth": "headers"}],
+                    "checks": [
+                        {
+                            "channel": "release",
+                            "depth": "headers",
+                            "gate_mode": "advisory",
+                        }
+                    ],
                 }
+            },
+            "baseline": {
+                "channels": {"release": {"source": "git"}},
             },
         }
     )
     assert config.bundles["rel"].checks == [
-        CheckSpec(channel="none", depth="headers", gate_mode="advisory")
+        CheckSpec(channel="release", depth="headers", gate_mode="advisory")
     ]
     assert config.bundles["rel"].to_dict()["checks"] == [
         {
-            "channel": "none",
+            "channel": "release",
             "depth": "headers",
             "required": True,
             "gate_mode": "advisory",
@@ -1069,6 +1081,32 @@ def test_bundle_checks_round_trip_and_validate() -> None:
     assert round_tripped == config
     report = validate_project_targets(config)
     assert report.ok, report.errors
+
+
+def test_bundle_check_with_channel_none_is_rejected() -> None:
+    """A bundle's candidate is always a staged directory of member
+    binaries -- channel: none routes check-target to scan mode, which
+    rejects a directory/package new-library outright (Codex review)."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "a": {"kind": "library", "binary_pattern": "a.so", "bundle": "rel"},
+                "b": {"kind": "library", "binary_pattern": "b.so", "bundle": "rel"},
+            },
+            "bundles": {
+                "rel": {
+                    "targets": ["a", "b"],
+                    "checks": [{"channel": "none", "depth": "headers"}],
+                }
+            },
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any(
+        "channel: 'none' is not supported for a bundle check" in e
+        for e in report.errors
+    )
 
 
 def test_bundle_checks_not_a_list_raises() -> None:

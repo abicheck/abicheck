@@ -113,7 +113,7 @@ target actually runs.
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
-| `channel` | string | — (required) | A `baseline.channels` id, or the literal `"none"` for a no-baseline audit check (ADR-047 §6 S5 — `check-target` must skip `resolve-baseline` entirely for this sentinel, never look it up as a declared channel). |
+| `channel` | string | — (required) | A `baseline.channels` id, or the literal `"none"` for a no-baseline audit check (ADR-047 §6 S5 — `check-target` must skip `resolve-baseline` entirely for this sentinel, never look it up as a declared channel). `channel: "none"` is only supported for a `kind: library` target — rejected at validation time for `app-consumer`/`plugin-contract` (no `--used-by`/`--required-symbols` equivalent for a one-build audit) and for any [`bundles:` check](#bundles) (a bundle's candidate is always a staged directory of member binaries, which the root Action's `scan` mode rejects outright). |
 | `depth` | string | — (required) | One of `binary`, `headers`, `build`, `source` — the same four rungs `--depth`/the report envelope's `requested_depth` accept. |
 | `required` | boolean | `true` | Whether this check gates `aggregate`'s coverage requirement. |
 | `gate_mode` | string | `local` (`advisory` when `channel: "none"`) | One of `local`, `deferred`, `advisory` (ADR-047 §4/§7). A `channel: "none"` no-baseline audit check defaults to `advisory`, not `local` — it has no baseline-drift verdict to gate CI on, so a minimal `{channel: none, depth: ...}` entry must not unexpectedly block CI (ADR-047 §8's S5 row: "Advisory by default"). Set `gate_mode` explicitly to override either default. |
@@ -153,6 +153,13 @@ ADR-047 §5 run-plan emits a `kind: "bundle"` check entry alongside
 per-target ones (S14 bundle-scoped analysis, e.g. soname/provider-set
 checks across the whole release), and that cell needs its own
 baseline-channel/depth/gate policy independent of its member targets'.
+**Two restrictions that don't apply to a target check:** `depth` must be
+`binary` or `headers` (never `build`/`source` — a bundle check always
+compares directories, which the CLI's per-library release fan-out never
+collects inline build/source evidence for), and `channel` may not be
+`"none"` (a bundle's candidate is always a staged directory of member
+binaries, which the root Action's `scan` mode — the no-baseline routing —
+rejects outright). Both are rejected at validation time.
 
 ## `profiles:`
 

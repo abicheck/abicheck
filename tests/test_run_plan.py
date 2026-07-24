@@ -299,6 +299,66 @@ class TestBundleChecks:
         assert any("linux" in w for w in report.warnings)
 
 
+class TestDuplicateCheckIdIsRejected:
+    """check_id (target@profile#baseline_channel@depth) is the id
+    to_aggregate_manifest() projects into aggregate --manifest's targets[]
+    -- ExpectedTargets.from_manifest_data() rejects a duplicate id there.
+    Two checks[] entries differing only in fields check_id doesn't carry
+    (required:/gate_mode:) but resolving to the same (profile, channel,
+    depth) must be rejected at generation time, not left to surface as a
+    late aggregate-projection failure after every matrix cell already ran
+    (Codex review)."""
+
+    def test_two_checks_entries_with_the_same_channel_and_depth_is_an_error(
+        self,
+    ) -> None:
+        raw = {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "build/libfoo*.so",
+                    "checks": [
+                        {
+                            "channel": "release",
+                            "depth": "headers",
+                            "required": True,
+                            "profiles": ["linux"],
+                        },
+                        {
+                            "channel": "release",
+                            "depth": "headers",
+                            "required": False,
+                            "profiles": ["linux"],
+                        },
+                    ],
+                },
+            },
+            "profiles": {"linux": {"contract": True}},
+            "baseline": {
+                "channels": {
+                    "release": {
+                        "source": "github-release",
+                        "asset_pattern": "libfoo-*",
+                    },
+                },
+            },
+        }
+        config = _parsed(raw)
+        plan, report = generate_run_plan(config, {"linux": _bo("libfoo")})
+        assert not report.ok
+        assert any("libfoo@linux#release@headers" in e for e in report.errors)
+        # Still generated (never raises) -- report.ok is the hard-failure
+        # signal, matching this module's own "report errors, don't raise"
+        # contract; the two duplicate cells are both present in plan.checks.
+        assert len(plan.checks) == 2
+
+    def test_distinct_depths_on_the_same_channel_are_not_duplicates(self) -> None:
+        config = _parsed(_LIBRARY_ONLY_RAW)
+        plan, report = generate_run_plan(config, {"linux": _bo("libfoo")})
+        assert report.ok
+        assert len(plan.checks) == 1
+
+
 class TestBundleOnlyTargetsHaveNoStandaloneChecks:
     def test_bundle_only_target_never_emits_its_own_check(self) -> None:
         raw = {
