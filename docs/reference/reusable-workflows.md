@@ -196,7 +196,11 @@ composite *Action* about to run) is `job.workflow_ref`/`job.workflow_sha`
 (part of the `job` context, populated specifically so a reusable workflow
 can identify itself independent of the calling workflow's own `github.*`
 context) — always the fully-qualified `owner/repo/.github/workflows/
-check-single.yml@ref` form. Both workflows fall back to
-`github.repository`/`github.sha` if `workflow_ref` is ever empty, matching
-`check-target`'s own defense-in-depth pattern for the equivalent local-
-same-repository case.
+check-single.yml@ref` form. **Not** `github.workflow_ref`/
+`github.workflow_sha`: GitHub's docs are explicit that "when a reusable
+workflow is triggered by a caller workflow, the `github` context is always
+associated with the caller workflow," so those fields resolve to the
+*calling* repository/ref for any external consumer — the opposite of what
+a self-checkout needs. Both workflows fall back to `github.repository`/
+`github.sha` if `workflow_ref` is ever empty, matching `check-target`'s own
+defense-in-depth pattern for the equivalent local-same-repository case.

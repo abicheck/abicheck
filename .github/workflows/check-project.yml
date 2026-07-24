@@ -223,19 +223,31 @@ jobs:
       # composition below, and to check-target's own established pattern)
       # and install from there instead (Codex review).
       #
-      # Uses `github.workflow_ref`/`github.workflow_sha` (added to the
-      # `github` context specifically so a reusable workflow can identify
-      # itself) -- NOT `job.workflow_ref`/`job.workflow_sha`: the `job`
-      # context only exposes `container`/`services`/`status`, so that
-      # property access silently resolves to empty at runtime (not a syntax
-      # error) rather than failing loud. See check-single.yml's identical
-      # step for the fuller writeup.
+      # Uses `job.workflow_ref`/`job.workflow_sha` -- NOT
+      # `github.workflow_ref`/`github.workflow_sha`. GitHub's own docs are
+      # explicit that "when a reusable workflow is triggered by a caller
+      # workflow, the `github` context is always associated with the caller
+      # workflow" (reusing-workflow-configurations#github-context), so
+      # `github.workflow_ref` here would resolve to the CALLING repository/
+      # ref for any external consumer, not this repository -- exactly wrong
+      # for a self-checkout meant to install abicheck's own CLI.
+      # `job.workflow_ref`/`job.workflow_sha` are the documented-correct
+      # fields instead (contexts-reference#job-context: "For jobs defined in
+      # a [reusable workflow], this refers to the reusable workflow file").
+      # A prior revision of this comment had the caller/callee association
+      # backwards; caught by a fresh Codex review and confirmed against
+      # GitHub's current docs directly before reverting. `actionlint` still
+      # flags `job.workflow_ref`/`job.workflow_sha` as "not defined in
+      # object type" -- a known false negative, since its hardcoded `job`
+      # context type table hasn't caught up with these (real, documented)
+      # properties. See check-single.yml's identical step for the fuller
+      # writeup.
       - name: Capture this reusable workflow's identity
         id: identity
         shell: bash
         env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
           FALLBACK_REPOSITORY: ${{ github.repository }}
           FALLBACK_REF: ${{ github.sha }}
         run: |
@@ -334,16 +346,18 @@ jobs:
       - uses: actions/checkout@v6
 
       # See the `plan` job's identical steps for the "install abicheck, not
-      # the caller's own repo" rationale -- this job needs the same fix, and
-      # additionally needs this same checked-out copy for its own nested
+      # the caller's own repo" rationale (and for the `job.workflow_ref`/
+      # `job.workflow_sha` vs. `github.workflow_ref`/`github.workflow_sha`
+      # writeup) -- this job needs the same fix, and additionally needs this
+      # same checked-out copy for its own nested
       # `uses: ./.check-project-src/actions/check-target` step below, so one
       # self-checkout now serves both purposes.
       - name: Capture this reusable workflow's identity
         id: identity
         shell: bash
         env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
           FALLBACK_REPOSITORY: ${{ github.repository }}
           FALLBACK_REF: ${{ github.sha }}
         run: |
@@ -633,13 +647,15 @@ jobs:
       - uses: actions/checkout@v6
 
       # See the `plan` job's identical steps for the "install abicheck, not
-      # the caller's own repo" rationale.
+      # the caller's own repo" rationale (and for the `job.workflow_ref`/
+      # `job.workflow_sha` vs. `github.workflow_ref`/`github.workflow_sha`
+      # writeup).
       - name: Capture this reusable workflow's identity
         id: identity
         shell: bash
         env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
           FALLBACK_REPOSITORY: ${{ github.repository }}
           FALLBACK_REF: ${{ github.sha }}
         run: |
