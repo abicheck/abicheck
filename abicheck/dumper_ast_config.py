@@ -1047,16 +1047,32 @@ _PP_ELIF_CPLUSPLUS_GUARD_PATTERN = re.compile(
 # C++20, do X; else do Y" forced ``-std=gnu++20`` purely because Y was
 # there, which could then break an unrelated, genuinely pre-C++20 use of
 # the same word as an ordinary identifier in the masked-away X arm.
-# Deliberately narrow (a fixed ``<``/``<=`` against a bare numeric
-# literal, matching this file's incremental-per-reported-case scope, not
-# a full expression parser): reversed operand order
-# (``202002L > __cplusplus``), a combined condition
-# (``__cplusplus < N && defined(FOO)``), and other comparison operators
-# (``==``, ``!=``) are not attempted here and keep falling through to the
-# general (mask-guarded/trust-else) pattern above, the same conservative
+#
+# Restricted to the exact C++20-boundary literals (Codex review,
+# seventeenth round): the inverted polarity only holds when the
+# threshold *is* C++20 (``202002L``/``201703L``, the two ISO values that
+# both mean "not yet C++20" depending on which operator's used). A
+# less-than check against an *older* standard's threshold
+# (``__cplusplus < 201103L``, "before C++11") is not about the C++20
+# decision at all — there the guarded arm is the ancient-dialect
+# fallback that's realistically never reached (castxml/clang always
+# default to well past C++11), and the ``#else`` is the one that's
+# practically always active, so the *general* (mask-guarded/trust-else)
+# treatment is already correct for it. Blanket-inverting every
+# less-than comparison regardless of threshold masked that always-active
+# ``#else`` too, hiding a genuine, unconditional C++20 construct there.
+# Deliberately narrow otherwise (matching this file's
+# incremental-per-reported-case scope, not a full expression parser):
+# reversed operand order (``202002L > __cplusplus``), a combined
+# condition (``__cplusplus < 202002L && defined(FOO)``), and other
+# comparison operators (``==``, ``!=``) are not attempted here and keep
+# falling through to the general pattern above, the same conservative
 # default an entirely unrecognized condition gets.
+_PP_CPLUSPLUS_LESS_THAN_CPP20_TAIL = (
+    rb"__cplusplus[ \t]*(?:<[ \t]*202002L?|<=[ \t]*201703L?)"
+)
 _PP_IF_CPLUSPLUS_LESS_THAN_PATTERN = re.compile(
-    rb"^[ \t]*#[ \t]*if[ \t]+__cplusplus[ \t]*<=?[ \t]*\d+L?[ \t]*$"
+    rb"^[ \t]*#[ \t]*if[ \t]+" + _PP_CPLUSPLUS_LESS_THAN_CPP20_TAIL + rb"[ \t]*$"
 )
 # Same fix, ``#elif`` spelling (Codex review, sixteenth round): a
 # less-than fallback can just as well be written as a later arm in a
@@ -1065,9 +1081,10 @@ _PP_IF_CPLUSPLUS_LESS_THAN_PATTERN = re.compile(
 # exactly like ``#elif 1``/``#elif true`` for masking purposes: it's the
 # trustworthy arm once reached, so it settles the chain the same way —
 # masked if an earlier arm already settled it, otherwise live with every
-# later sibling masked from here on.
+# later sibling masked from here on. Same C++20-boundary-literal
+# restriction as the ``#if`` form above.
 _PP_ELIF_CPLUSPLUS_LESS_THAN_PATTERN = re.compile(
-    rb"^[ \t]*#[ \t]*elif[ \t]+__cplusplus[ \t]*<=?[ \t]*\d+L?[ \t]*$"
+    rb"^[ \t]*#[ \t]*elif[ \t]+" + _PP_CPLUSPLUS_LESS_THAN_CPP20_TAIL + rb"[ \t]*$"
 )
 # ``#if defined(__cplusplus)``/``#if defined __cplusplus`` (the
 # parenthesized *and* the equally-valid no-parens ``defined`` operator

@@ -768,6 +768,47 @@ def test_cpp20_detector_settles_on_elif_less_than_cplusplus(tmp_path):
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_detects_construct_behind_less_than_older_standard_else(
+    tmp_path,
+):
+    """Regression (Codex review, seventeenth round): the inverted
+    less-than polarity only holds when the threshold *is* the C++20
+    boundary (``202002L``/``201703L``) — a less-than check against an
+    *older* standard's threshold (``__cplusplus < 201103L``, "before
+    C++11") isn't about the C++20 decision at all. There the guarded arm
+    is the ancient-dialect fallback that's realistically never reached,
+    and the ``#else`` is the one that's practically always active — the
+    general (mask-guarded/trust-else) treatment is already correct for
+    it, and blanket-inverting every less-than comparison regardless of
+    threshold wrongly masked this always-active ``#else``, hiding a
+    genuine, unconditional C++20 construct there."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if __cplusplus < 201103L\nint ancient_fallback;\n#else\n"
+        "template<class T> concept C = true;\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
+def test_cpp20_detector_detects_construct_behind_elif_less_than_older_standard_else(
+    tmp_path,
+):
+    """Companion: the same older-standard-threshold exclusion applies to
+    the ``#elif`` spelling."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint disabled;\n#elif __cplusplus < 201402L\nint old;\n#else\n"
+        "consteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
 def test_cpp20_detector_settles_on_elif_defined_cplusplus(tmp_path):
     """Companion: an ``#elif defined(__cplusplus)`` arm, once reached, is
     just as definitely-true as ``#elif 1`` — it must settle the chain
