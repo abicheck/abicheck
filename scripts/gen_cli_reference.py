@@ -64,7 +64,11 @@ def _first_paragraph(text: str | None) -> str:
 
 
 def _escape(text: str) -> str:
-    return text.replace("|", "\\|")
+    # Escaping "_" too (not just "|") matters here specifically: several
+    # ABICC-compat option descriptions mention raw mangled-name patterns like
+    # "_ZS*, _ZNS*, _ZNKS*" -- unescaped, a Markdown renderer can pair up
+    # underscores across the sentence into unintended emphasis spans.
+    return text.replace("|", "\\|").replace("_", "\\_")
 
 
 def _help_with_choices(param: Any) -> str:

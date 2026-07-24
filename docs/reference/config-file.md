@@ -18,8 +18,10 @@ the *stable, reviewed-in-a-PR* properties of a project's ABI contract — build
 system, header compile context, severity policy, public-surface scoping, and
 suppression hygiene — as opposed to per-run invocation flags. See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
-generated list of every recognized key and its exact required type; this page
-covers effective defaults, precedence, and a worked example.
+generated list of every key/sub-key `BuildConfig` itself validates, and its
+exact required type (other recognized top-level keys, parsed by a sibling
+module, are also listed there but without a type); this page covers
+effective defaults, precedence, and a worked example.
 
 Every field is optional; an absent, empty, or non-mapping file yields the
 all-defaults configuration. **CLI flags always override the config**, which in

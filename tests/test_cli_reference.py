@@ -95,8 +95,8 @@ def test_option_row_includes_secondary_opts_for_a_boolean_flag_pair():
     gen = _load_gen()
 
     class _FakeParam:
-        opts = ["--demangle"]
-        secondary_opts = ["--no-demangle"]
+        opts = ("--demangle",)
+        secondary_opts = ("--no-demangle",)
         default = None
         required = False
         help = "Demangle names."
@@ -126,8 +126,8 @@ def test_option_row_shows_a_real_false_default_not_a_blank():
     gen = _load_gen()
 
     class _FakeParam:
-        opts = ["--show-impact"]
-        secondary_opts = []
+        opts = ("--show-impact",)
+        secondary_opts = ()
         default = False
         required = False
         help = "Show impact analysis."
@@ -146,7 +146,7 @@ def test_option_row_hides_click_internal_unset_sentinel():
     _FakeSentinel.__name__ = "Sentinel"
 
     class _FakeParam:
-        opts = ["--expect"]
+        opts = ("--expect",)
         default = _FakeSentinel()
         required = False
         help = "Some help text."
