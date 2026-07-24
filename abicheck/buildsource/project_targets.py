@@ -857,6 +857,23 @@ def _bundle_issues(config: ProjectTargetsConfig, bundle: BundleSpec) -> list[str
                 "validate-inputs.sh rejects build/source for kind: bundle, "
                 "which always compares directories)."
             )
+        if check.channel == NO_BASELINE_CHANNEL:
+            # channel: none routes check-target to the root Action's scan
+            # mode (no baseline to compare against) -- but a bundle check's
+            # candidate is always a staged directory of member binaries
+            # (check-project.yml's own bundle-staging step), and scan mode
+            # rejects a directory/package new-library outright (Codex
+            # review). There is no real bundle audit path today.
+            issues.append(
+                f"bundle {bundle.id!r}.checks[{i}]: channel: "
+                f"{NO_BASELINE_CHANNEL!r} is not supported for a bundle "
+                "check -- a bundle's candidate is always a staged directory "
+                "of member binaries, and action/validate-inputs.sh rejects "
+                "a directory/package new-library for scan mode (the "
+                "no-baseline routing). Set a real baseline channel for a "
+                "bundle check, or scope each member individually with a "
+                "channel: 'none' library-kind target check instead."
+            )
         issues.extend(_check_issues(config, f"bundle {bundle.id!r}.checks[{i}]", check))
     return issues
 
