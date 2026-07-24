@@ -42,7 +42,11 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline
-from ._compiler_options import has_explicit_cpp_std, has_explicit_std
+from ._compiler_options import (
+    explicit_language_standard,
+    has_explicit_cpp_std,
+    has_explicit_std,
+)
 from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
     _build_castxml_command as _build_castxml_command,
@@ -1314,6 +1318,7 @@ def dump(
             or None
         ),
         abi_dialect=snapshot.ast_toolchain.get("abi_dialect"),
+        language_standard=explicit_language_standard(gcc_options, gcc_option_tokens),
         macro_ops=ordered_macro_ops(_flag_tokens),
         pass_through_flags=pass_through_flags_from_tokens(_flag_tokens),
         # Gate declared_headers/declared_includes on from_headers, NOT on

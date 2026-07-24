@@ -156,6 +156,29 @@ def test_dwarf_only_with_headers_supplied_leaves_contract_none(tmp_path: Path) -
     assert snap.contract is None
 
 
+def test_explicit_language_standard_flows_into_profile_fingerprint(
+    built_lib: tuple[Path, Path],
+) -> None:
+    """Codex review, PR #624 follow-up: two dumps differing only by an
+    explicit -std= must not share a profile_fingerprint — the extraction
+    context genuinely differs (e.g. __cplusplus-gated declarations)."""
+    so, header = built_lib
+    snap_17 = dump(
+        so, [header], compiler="cc", header_backend="clang", gcc_options="-std=gnu11"
+    )
+    snap_99 = dump(
+        so, [header], compiler="cc", header_backend="clang", gcc_options="-std=gnu99"
+    )
+
+    assert snap_17.contract is not None
+    assert snap_99.contract is not None
+    assert snap_17.contract.profile_fields["language_standard"] == "gnu11"
+    assert snap_99.contract.profile_fields["language_standard"] == "gnu99"
+    assert snap_17.contract.profile_fingerprint != snap_99.contract.profile_fingerprint
+    # Scope is untouched by a profile-only difference.
+    assert snap_17.contract.scope_fingerprint == snap_99.contract.scope_fingerprint
+
+
 def test_contract_is_deterministic_and_gate_does_not_spuriously_raise(
     built_lib: tuple[Path, Path],
 ) -> None:
