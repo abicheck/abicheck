@@ -31,10 +31,10 @@
   no runtime floor on the CastXML version at all — only a best-effort
   advisory note appended to a *parse failure* message, and only for the
   bundled Clang major, never CastXML's own version. New `castxml_policy.py`
-  defines the supported range (`>=0.7.0,<0.8.0`, bundled/linked Clang `>=18`,
-  tracking the current conda-forge feedstock line) and is now enforced in
-  `dumper._castxml_dump` before the cache lookup or any subprocess
-  invocation; an out-of-range build (notably the legacy PyPI `castxml`
+  defines the supported range (`>=0.6.11,<0.8.0`, bundled/linked Clang
+  `>=18`, tracking the CastXML Superbuild's release-line numbering) and is
+  now enforced in `dumper._castxml_dump` before the cache lookup or any
+  subprocess invocation; an out-of-range build (notably the legacy PyPI `castxml`
   distribution) raises `UnsupportedCastxmlVersionError` with a clear
   remediation message. Exploratory reproduction of a legacy build remains
   possible via the explicit `ABICHECK_ALLOW_UNSUPPORTED_CASTXML=1` opt-in,
