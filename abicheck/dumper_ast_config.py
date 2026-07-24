@@ -1141,11 +1141,39 @@ _PP_ELIF_CPLUSPLUS_LESS_THAN_PATTERN = re.compile(
 _PP_DEFINED_CPLUSPLUS = (
     rb"defined[ \t]*(?:\([ \t]*__cplusplus[ \t]*\)|[ \t]+__cplusplus)"
 )
+# ``#if defined(__cplusplus) && !defined(SWIG)`` (Codex review, twentieth
+# round) — a common real-world idiom wrapping a header's C++-only section
+# so a non-C++ consumer (SWIG, Doxygen, ...) doesn't see it, not a genuine
+# dialect/feature-test guard at all: the second conjunct doesn't reference
+# __cplusplus/__cpp_* so its truth value has nothing to do with the -std=
+# this heuristic picks, and this heuristic never *is* one of those non-C++
+# consumers, so the whole condition is unconditionally true here just like
+# the bare ``defined(__cplusplus)`` form above. The identifier is
+# excluded from matching __cplusplus/__cpp_* itself (a negative lookahead)
+# so a genuinely dialect-related second conjunct (``defined(__cplusplus)
+# && !defined(__cpp_concepts)``) is not swept in here and stays
+# mask-worthy, same as any other feature-test guard. Deliberately narrow
+# (single ``&&``, one negated macro) rather than a full expression parser,
+# matching this file's incremental-per-reported-case scope.
+_PP_NOT_DEFINED_UNRELATED_MACRO = (
+    rb"!defined[ \t]*(?:\([ \t]*(?!__cplusplus\b|__cpp_)\w+[ \t]*\)"
+    rb"|[ \t]+(?!__cplusplus\b|__cpp_)\w+)"
+)
+_PP_CPLUSPLUS_ALWAYS_TRUE_TAIL = (
+    rb"(?:"
+    + _PP_DEFINED_CPLUSPLUS
+    + rb"|__cplusplus"
+    + rb"|(?:"
+    + _PP_DEFINED_CPLUSPLUS
+    + rb")[ \t]*&&[ \t]*"
+    + _PP_NOT_DEFINED_UNRELATED_MACRO
+    + rb")"
+)
 _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN = re.compile(
-    rb"^[ \t]*#[ \t]*if[ \t]+(?:" + _PP_DEFINED_CPLUSPLUS + rb"|__cplusplus)[ \t]*$"
+    rb"^[ \t]*#[ \t]*if[ \t]+" + _PP_CPLUSPLUS_ALWAYS_TRUE_TAIL + rb"[ \t]*$"
 )
 _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN = re.compile(
-    rb"^[ \t]*#[ \t]*elif[ \t]+(?:" + _PP_DEFINED_CPLUSPLUS + rb"|__cplusplus)[ \t]*$"
+    rb"^[ \t]*#[ \t]*elif[ \t]+" + _PP_CPLUSPLUS_ALWAYS_TRUE_TAIL + rb"[ \t]*$"
 )
 # The common shorthand spellings of a feature-test guard (Codex review,
 # seventh round): ``#ifdef __cpp_concepts`` is exactly as circular as

@@ -964,6 +964,94 @@ def test_cpp20_detector_settles_on_elif_defined_space_cplusplus(tmp_path):
     assert not any(r.reason == "consteval-declaration" for r in reqs)
 
 
+def test_cpp20_detector_still_detects_construct_behind_cplusplus_and_not_swig(
+    tmp_path,
+):
+    """Regression (Codex review, twentieth round): ``#if defined(__cplusplus)
+    && !defined(SWIG)`` is a common real-world idiom wrapping a header's
+    C++-only section from a non-C++ consumer (SWIG, Doxygen, ...) -- not a
+    genuine dialect/feature-test guard at all, since the second conjunct
+    doesn't reference __cplusplus/__cpp_* and this heuristic never *is*
+    one of those non-C++ consumers. Before this fix the general
+    __cplusplus-guard branch masked it as if circular, the same way a
+    genuine ``#if __cplusplus >= 202002L`` guard is, wrongly suppressing a
+    valid C++20 declaration inside."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if defined(__cplusplus) && !defined(SWIG)\n"
+        "template<class T> concept C = true;\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
+def test_cpp20_detector_still_detects_construct_behind_cplusplus_space_and_not_swig(
+    tmp_path,
+):
+    """Companion: the no-parens ``defined __cplusplus``/``!defined SWIG``
+    spellings need the same treatment as the parenthesized form."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if defined __cplusplus && !defined SWIG\n"
+        "template<class T> concept C = true;\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_settles_on_elif_cplusplus_and_not_swig(tmp_path):
+    """Companion: the ``#elif`` spelling, reached as a later arm in a
+    chain that opens on something else, must settle the chain the same
+    way as the ``#if``-opening case."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n"
+        "#elif defined(__cplusplus) && !defined(SWIG)\n"
+        "template<class T> concept C = true;\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_still_masks_construct_behind_cplusplus_and_feature_test(
+    tmp_path,
+):
+    """Companion: a *dialect-related* second conjunct (``defined(__cplusplus)
+    && !defined(__cpp_concepts)``) must not be swept into the always-true
+    exemption above -- it is exactly as circular as any other feature-test
+    guard and must stay masked."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if defined(__cplusplus) && !defined(__cpp_concepts)\n"
+        "consteval int f();\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_still_masks_construct_behind_cplusplus_and_version_check(
+    tmp_path,
+):
+    """Companion: a combined condition with a genuine version comparison
+    (``defined(__cplusplus) && __cplusplus >= 202002L``) is not the
+    ``!defined(...)`` shape this exemption matches and must stay masked,
+    same as the bare version-comparison form."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if defined(__cplusplus) && __cplusplus >= 202002L\n"
+        "template<class T> concept C = true;\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_ignores_dead_else_of_if_true(tmp_path):
     """Regression (Codex review, tenth round): ``#if 1``/``#if true`` was
     never recognized as opening a trackable chain at all, so a dead
