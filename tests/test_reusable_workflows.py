@@ -178,11 +178,21 @@ class TestCheckSingleReportUpload:
         assert upload_step["with"]["path"] == "${{ steps.run.outputs.report-path }}"
 
     def test_report_artifact_name_output_matches_the_uploaded_name(self) -> None:
+        # A bare, unconditional concatenation would leave this output as just
+        # the bare prefix (naming a never-uploaded artifact) whenever
+        # report-path is empty, since the "Sanitize check-id for artifact
+        # name" step -- and therefore steps.sanitized.outputs.id -- only runs
+        # when report-path is non-empty (CodeRabbit review). The output must
+        # itself be conditioned on report-path, not just concatenate blindly.
         data = _load(CHECK_SINGLE)
         job_outputs = data["jobs"]["check"]["outputs"]
-        assert job_outputs["report-artifact-name"] == (
-            "${{ inputs.report-artifact-prefix }}${{ steps.sanitized.outputs.id }}"
+        value = job_outputs["report-artifact-name"]
+        assert "steps.run.outputs.report-path != ''" in value
+        assert (
+            "format('{0}{1}', inputs.report-artifact-prefix, steps.sanitized.outputs.id)"
+            in value
         )
+        assert value.rstrip().endswith("|| '' }}")
 
 
 class TestCheckSingleOptionalArtifactStaging:
