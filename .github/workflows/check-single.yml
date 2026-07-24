@@ -53,6 +53,42 @@ on:
         description: 'Path to the candidate build''s build-output.json, for resolve-baseline''s incompatible_evidence check.'
         type: string
         default: ''
+
+      # ── Optional artifact staging ───────────────────────────────────────
+      # Unlike actions/check-target itself (a composite Action a caller can
+      # nest as one step inside their OWN existing job, sharing that job's
+      # filesystem), this reusable workflow's `check` job always runs in a
+      # fresh, isolated job of its own -- nothing the caller's own build job
+      # wrote to ITS runner's filesystem carries over here automatically
+      # (Codex review: the documented `new-library: build/lib/libfoo.so`
+      # usage example silently assumed otherwise). These three inputs are
+      # opt-in: leave them empty (the default) for a new-library/
+      # baseline-path/candidate-build-output that already exists after this
+      # job's own checkout (e.g. a checked-in fixture), matching every
+      # caller's behavior before these inputs existed.
+      candidate-artifact-name:
+        description: >-
+          Optional: an artifact name to download into ./candidate before
+          running check-target. new-library/consumer-binary must then be
+          paths relative to ./candidate (e.g. new-library:
+          candidate/libfoo.so).
+        type: string
+        default: ''
+      baseline-artifact-name:
+        description: >-
+          Optional: an artifact name to download into the directory named
+          by baseline-path before running check-target.
+        type: string
+        default: ''
+      build-output-artifact-name:
+        description: >-
+          Optional: an artifact name to download into ./build-output before
+          running check-target. candidate-build-output must then be a path
+          relative to ./build-output (e.g. candidate-build-output:
+          build-output/build-output.json).
+        type: string
+        default: ''
+
       requested-depth:
         description: 'Evidence-depth this check asks for: binary, headers, build, or source -- required.'
         type: string
@@ -287,6 +323,31 @@ jobs:
           ref: ${{ steps.identity.outputs.ref }}
           path: .check-single-src
           persist-credentials: false
+
+      # See the "Optional artifact staging" input group above for why these
+      # are needed at all -- this job runs on a fresh, isolated runner, so a
+      # candidate/baseline/build-output path from the caller's own build job
+      # doesn't exist here unless explicitly transferred as an artifact.
+      - name: Download candidate artifact
+        if: inputs.candidate-artifact-name != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.candidate-artifact-name }}
+          path: candidate
+
+      - name: Download baseline artifact
+        if: inputs.baseline-artifact-name != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.baseline-artifact-name }}
+          path: ${{ inputs.baseline-path }}
+
+      - name: Download build-output artifact
+        if: inputs.build-output-artifact-name != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.build-output-artifact-name }}
+          path: build-output
 
       - name: Run check-target
         id: run
