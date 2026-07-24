@@ -37,6 +37,13 @@ invocation both consume.
   doesn't list the referenced target/library is silently skipped -- no
   error, since the whole point of the implicit sweep is "run this check on
   every profile where it makes sense," not "every profile, or fail."
+- Either way, a **declared contract profile with no `build-output.json` at
+  all** (as opposed to one whose `build-output.json` was provided but
+  doesn't build this particular target) is always a hard error, explicit or
+  implicit sweep alike -- it almost always means that profile's build/
+  upload failed or was misnamed, and letting the implicit sweep silently
+  drop it would let ``aggregate`` pass over an under-covered matrix without
+  anyone noticing (Codex review).
 
 **The ``app-consumer``/``plugin-contract`` library redirect (ADR-047 §3):**
 both kinds resolve their build-output existence check, and the candidate
@@ -305,11 +312,20 @@ def _generate_target_checks(
         for profile_id in profile_ids:
             bo = build_outputs.get(profile_id)
             if bo is None:
-                msg = (
+                # Distinct from "this profile's build-output.json doesn't
+                # build the target" below -- that's the implicit sweep's
+                # legitimate "run this check on every profile where it makes
+                # sense" skip. A DECLARED contract profile with no
+                # build-output.json at all almost always means the caller's
+                # build/upload for that profile failed or was misnamed, so a
+                # partial plan would silently under-cover it; a hard error
+                # either way (explicit or implicit) surfaces that at
+                # generation time instead of aggregate quietly passing with
+                # an incomplete matrix (Codex review).
+                report.errors.append(
                     f"target {target.id!r}: profile {profile_id!r} has no "
                     "build-output.json provided"
                 )
-                (report.errors if explicit else report.warnings).append(msg)
                 continue
             bo_target = next((t for t in bo.targets if t.id == lookup_id), None)
             if bo_target is None:
@@ -363,11 +379,14 @@ def _generate_bundle_checks(
         for profile_id in profile_ids:
             bo = build_outputs.get(profile_id)
             if bo is None:
-                msg = (
+                # See the identical branch in _generate_target_checks: a
+                # DECLARED contract profile with no build-output.json at all
+                # is always a hard error, distinct from the "doesn't build
+                # this bundle's members" skip below (Codex review).
+                report.errors.append(
                     f"bundle {bundle.id!r}: profile {profile_id!r} has no "
                     "build-output.json provided"
                 )
-                (report.errors if explicit else report.warnings).append(msg)
                 continue
             bo_target_ids = {t.id for t in bo.targets}
             missing = [m for m in bundle.targets if m not in bo_target_ids]
