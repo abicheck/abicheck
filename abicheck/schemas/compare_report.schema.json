@@ -183,7 +183,7 @@
     "redundant_count": { "type": "integer", "minimum": 0 },
     "root_causes": {
       "type": "array",
-      "description": "G29 Phase 3 (ADR-052 slices 3-4, schema 2.15): present only under `--report-mode root-cause`. Groups `changes` (also present, flat, for backward compatibility) by Change.caused_by_type (falling back to the change's own symbol for an ungrouped, singleton finding); the same grouping also renders for --format markdown (the default rendered text output; slice 4) -- the full RootCauseCorrelator (G29 Phase 6) will additionally correlate consumer-overlay findings that don't share a caused_by_type today.",
+      "description": "G29 Phase 3 (ADR-052 slices 3-4, schema 2.16): present only under `--report-mode root-cause`. Groups `changes` (also present, flat, for backward compatibility) by Change.caused_by_type (falling back to the change's own symbol for an ungrouped, singleton finding); the same grouping also renders for --format markdown (the default rendered text output; slice 4) -- the full RootCauseCorrelator (G29 Phase 6) will additionally correlate consumer-overlay findings that don't share a caused_by_type today.",
       "items": {
         "type": "object",
         "required": ["root_cause_id", "root", "finding_count", "findings"],
@@ -205,7 +205,7 @@
     "root_cause_count": {
       "type": "integer",
       "minimum": 0,
-      "description": "G29 Phase 3 (ADR-052 slice 3, schema 2.15): present only under `--report-mode root-cause`. Length of `root_causes`."
+      "description": "G29 Phase 3 (ADR-052 slice 3, schema 2.16): present only under `--report-mode root-cause`. Length of `root_causes`."
     },
     "suppression": {
       "type": "object",
@@ -227,7 +227,7 @@
               "reachability_state": {
                 "type": "string",
                 "enum": ["reachable", "unreachable", "unknown"],
-                "description": "G29 Phase 3 slice 1 (ADR-052, schema 2.14): always present. This is the one call site that passes suppressed=True to assess_change, so decision.state below is always \"suppressed\"."
+                "description": "G29 Phase 3 slice 1 (ADR-052, schema 2.15): always present. This is the one call site that passes suppressed=True to assess_change, so decision.state below is always \"suppressed\"."
               },
               "impact_assessment": {
                 "$ref": "#/$defs/change/properties/impact_assessment"
@@ -244,8 +244,9 @@
       "additionalProperties": true,
       "properties": {
         "version_bump": { "type": "string", "enum": ["major", "minor", "patch", "none"] },
-        "soname_action": { "type": "string", "enum": ["bump_required", "bump_performed", "bump_missing", "no_bump_needed"] },
-        "rationale": { "type": "string" }
+        "soname_action": { "type": "string", "enum": ["bump_required", "bump_performed", "bump_missing", "no_bump_needed", "not_determined"], "description": "'not_determined' added in schema 2.14: a BREAKING verdict whose comparison carried no ELF/PE/Mach-O/DWARF evidence at all." },
+        "rationale": { "type": "string" },
+        "state": { "type": "string", "enum": ["actionable", "review", "unavailable"], "description": "Schema 2.14. How much weight the recommendation itself can bear, independent of what it recommends: 'actionable' (act on it), 'review' (a source/API break was found but no binary evidence confirms a SONAME action either way), or 'unavailable' (a BREAKING verdict with no ELF/PE/Mach-O/DWARF evidence at all — abicheck cannot confirm a binary action)." }
       }
     },
     "layer_coverage": {
@@ -497,12 +498,12 @@
         },
         "reachability_state": {
           "type": "string",
-          "description": "G29 Phase 3 slice 1 (ADR-052, schema 2.14): the tri-state refinement of public_reachable (Change.reachability_state, in memory since PR #607 but never serialized before this). 'reachable' when public_reachable is true. 'unreachable' when the walk positively found this change not part of the effective public ABI. 'unknown' when no walk reached a verdict, or the only available evidence (the optional L5 call/type graph) is itself flagged narrowed/degraded — distinct from 'unreachable', since 'unknown' is not proof of absence. Always present (the enum's own default is 'unknown', an honest answer, not an absent key).",
+          "description": "G29 Phase 3 slice 1 (ADR-052, schema 2.15): the tri-state refinement of public_reachable (Change.reachability_state, in memory since PR #607 but never serialized before this). 'reachable' when public_reachable is true. 'unreachable' when the walk positively found this change not part of the effective public ABI. 'unknown' when no walk reached a verdict, or the only available evidence (the optional L5 call/type graph) is itself flagged narrowed/degraded — distinct from 'unreachable', since 'unknown' is not proof of absence. Always present (the enum's own default is 'unknown', an honest answer, not an absent key).",
           "enum": ["reachable", "unreachable", "unknown"]
         },
         "impact_assessment": {
           "type": "object",
-          "description": "G29 Phase 3 slice 1 (ADR-052, schema 2.14): a unified read view over this finding's reachability/impact fields above (reachability_state, public_reachable, reachability_kind, the proof path, decision state, evidence_category, correlated_change_kind) -- a single object a consumer can query instead of stitching several independently-nullable keys together. Intentionally duplicates data already published at the top level (see the fields above); present only when it carries information beyond the all-defaults case (a proof path exists, reachability_state is not 'unknown', public_reachable is true, confidence is not 'high', the decision state is not 'kept', a modulation/verdict-override fired, or correlated_change_kind/evidence_category is set).",
+          "description": "G29 Phase 3 slice 1 (ADR-052, schema 2.15): a unified read view over this finding's reachability/impact fields above (reachability_state, public_reachable, reachability_kind, the proof path, decision state, evidence_category, correlated_change_kind) -- a single object a consumer can query instead of stitching several independently-nullable keys together. Intentionally duplicates data already published at the top level (see the fields above); present only when it carries information beyond the all-defaults case (a proof path exists, reachability_state is not 'unknown', public_reachable is true, confidence is not 'high', the decision state is not 'kept', a modulation/verdict-override fired, or correlated_change_kind/evidence_category is set).",
           "properties": {
             "reachability_state": {
               "type": "string",

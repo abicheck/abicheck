@@ -770,27 +770,48 @@ class _CastxmlParser:
         fname = file_el.get("name", "")
         return fname in ("<builtin>", "<built-in>", "<command-line>")
 
-    def _build_hidden_friend_ids(self) -> set[str]:
-        """Collect function ids referenced by class `befriending` attributes.
+    def _build_hidden_friend_ids(self) -> dict[str, str]:
+        """Map function ids to the qualified name of their befriending class.
 
         castxml emits an in-class ``friend`` declaration as a separate
         ``Function`` / ``Method`` / ``OperatorFunction`` element at namespace
         scope, and records the link from the class via a ``befriending``
         attribute on the ``Class`` / ``Struct`` element — a whitespace-
         separated list of ids. We resolve those ids so we can mark the
-        corresponding ``Function`` objects as hidden friends downstream.
+        corresponding ``Function`` objects as hidden friends downstream, and
+        also record *which class* befriended each one (``hidden_friend_owner``)
+        so surface classification can key demotion off the owner's header
+        origin instead of unconditionally retaining every hidden-friend finding
+        regardless of whether the owner lives in a system/private header.
+
+        The same free function can legitimately be befriended by more than
+        one class (e.g. one comparison operator declared as a friend inside
+        two distinct types). ``Function.hidden_friend_owner`` holds only a
+        single owner, so when ids collide, a public owner always wins and,
+        once recorded, is never displaced by a later private/system one —
+        never let a public ADL function look privately-owned only because a
+        different, non-public befriending class happened to be visited last
+        (Codex review).
         """
-        ids: set[str] = set()
+        owner_by_id: dict[str, str] = {}
+        owner_is_public_by_id: dict[str, bool] = {}
         for el in self._record_els:
-            if el.tag not in ("Class", "Struct"):
+            if el.tag not in ("Class", "Struct", "Union"):
                 continue
             befriending = el.get("befriending", "")
             if not befriending:
                 continue
+            owner_name = self._qualified_name(el)
+            is_public = self._decl_is_public(el)
             for fid in befriending.split():
-                if fid:
-                    ids.add(fid)
-        return ids
+                if not fid:
+                    continue
+                if fid not in owner_by_id or (
+                    is_public and not owner_is_public_by_id[fid]
+                ):
+                    owner_by_id[fid] = owner_name
+                    owner_is_public_by_id[fid] = is_public
+        return owner_by_id
 
     # castxml emits non-member operator overloads as <OperatorFunction>
     # (e.g. `bool operator==(const Foo&, const Foo&)` at namespace scope,
@@ -807,9 +828,9 @@ class _CastxmlParser:
 
     def parse_functions(self) -> list[Function]:
         funcs: list[Function] = []
-        hidden_friend_ids = self._build_hidden_friend_ids()
+        hidden_friend_owner_by_id = self._build_hidden_friend_ids()
         for el in self._function_els:
-            func = self._parse_function_element(el, hidden_friend_ids)
+            func = self._parse_function_element(el, hidden_friend_owner_by_id)
             if func is not None:
                 funcs.append(func)
         return funcs
@@ -1054,7 +1075,7 @@ class _CastxmlParser:
         return f"throw({thrown})"
 
     def _parse_function_element(
-        self, el: Element, hidden_friend_ids: set[str]
+        self, el: Element, hidden_friend_owner_by_id: dict[str, str]
     ) -> Function | None:
         """Build a Function from a castxml function-like element, or None if filtered."""
         name = self._function_display_name(el)
@@ -1162,7 +1183,8 @@ class _CastxmlParser:
             # Hidden-friend marker: castxml records the link via the
             # ``befriending`` attribute on the class element. We resolved
             # the referenced ids upfront and check membership here.
-            is_hidden_friend=el.get("id", "") in hidden_friend_ids,
+            is_hidden_friend=el.get("id", "") in hidden_friend_owner_by_id,
+            hidden_friend_owner=hidden_friend_owner_by_id.get(el.get("id", "")),
             is_variadic=is_variadic,
             # Semantic contract / calling-convention attributes, filtered from
             # the compound ``attributes`` string (same channel as noexcept).

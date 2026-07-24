@@ -217,9 +217,18 @@ jobs:
         run: brew install castxml cmake
       - name: Install system deps (Windows)
         if: runner.os == 'Windows'
+        # The PyPI `castxml` wheel is a stale 0.4.5 legacy build that the
+        # castxml_policy version gate correctly rejects (see
+        # action/install-castxml.sh's docstring: "Use Homebrew/conda-forge on
+        # this platform" for non-Linux). Use the GitHub-hosted Windows
+        # runner's preinstalled Miniconda (`$env:CONDA`) to pull the
+        # actively-maintained conda-forge build instead — no new third-party
+        # Action needed, and conda verifies its own package integrity.
         run: |
           choco install cmake --no-progress --yes
-          pip install castxml
+          & "$env:CONDA\condabin\conda.bat" install --yes -c conda-forge castxml
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:CONDA\Library\bin"
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:CONDA\Scripts"
       - name: Set up MSVC developer environment (cl.exe on PATH)
         # Some example cases build via CMake (CMakeLists.txt special flags),
         # which invokes CMake's own compiler sanity check

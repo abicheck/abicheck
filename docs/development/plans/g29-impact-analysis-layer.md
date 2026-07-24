@@ -263,7 +263,7 @@ signal has existed since PR #607 but was never serialized before this,
 closing a real gap: `PROVEN_UNREACHABLE` and `UNKNOWN` were previously
 indistinguishable in JSON/SARIF, both showing as an absent `public_reachable`
 key) and `impact_assessment` (emitted only when it carries information
-beyond the all-defaults case). `REPORT_SCHEMA_VERSION` 2.13 → 2.14. Slice 2
+beyond the all-defaults case). `REPORT_SCHEMA_VERSION` 2.14 → 2.15. Slice 2
 closed `FindingDecision.suppression_rule`: `suppression.SuppressionOutcome`
 gained `matched_rule`, and the three call sites that move a change into
 `DiffResult.suppressed_changes` (`checker._filter_suppressed_changes`/

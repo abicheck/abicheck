@@ -11,7 +11,7 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   overlay finding that names it now land in the same group. JSON output
   only (`--format json`); other formats render as `full`. Adds two
   additive top-level keys, `root_causes` and `root_cause_count`
-  (`report_schema_version` 2.14 → 2.15); `changes` is still emitted in
+  (`report_schema_version` 2.15 → 2.16); `changes` is still emitted in
   full for backward compatibility. See `docs/user-guide/output-formats.md`.
 
 ### Fixed

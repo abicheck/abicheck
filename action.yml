@@ -121,23 +121,44 @@ inputs:
       toolchain-version failure still falls back to clang, G16), "castxml"
       (default), "clang" (clang -ast-dump=json; explicit opt-in for
       clang-only hosts), or "hybrid" (runs both and merges them; needs both
-      tools installed on the runner, never auto-selected). Applies to
-      compare and dump modes. Same as the ABICHECK_AST_FRONTEND env var.
+      tools installed on the runner, never auto-selected). Applies to dump,
+      scan, and compare mode with a single-pair (non-directory, non-package)
+      operand — the per-library fan-out a directory/package compare uses
+      never threads this L2 context to each pair's header dump, so a value
+      other than "auto" (the no-op default) is a hard error there (shared
+      `compile_context_options`, ADR-037 D3). Same as the
+      ABICHECK_AST_FRONTEND env var.
     required: false
   gcc-path:
-    description: 'Path to GCC/G++ cross-compiler binary (dump mode only).'
+    description: >
+      Path to GCC/G++ (or clang) cross-compiler binary. Applies to dump,
+      scan, and compare mode with a single-pair (non-directory, non-package)
+      operand — a directory/package compare rejects it with an error (same
+      restriction as ast-frontend above).
     required: false
   gcc-prefix:
-    description: 'Cross-toolchain prefix, e.g. aarch64-linux-gnu- (dump mode only).'
+    description: >
+      Cross-toolchain prefix, e.g. aarch64-linux-gnu-. Applies to dump,
+      scan, and compare mode with a single-pair (non-directory, non-package)
+      operand — a directory/package compare rejects it with an error (same
+      restriction as ast-frontend above).
     required: false
   gcc-options:
-    description: 'Extra compiler flags passed through to castxml (dump mode only).'
+    description: >
+      Extra compiler flags passed through to the header frontend. Applies to
+      dump, scan, and compare mode with a single-pair (non-directory,
+      non-package) operand — a directory/package compare rejects it with an
+      error (same restriction as ast-frontend above).
     required: false
   sysroot:
-    description: 'Alternative system root directory for cross-compilation (dump and deps-tree modes).'
+    description: 'Alternative system root directory for cross-compilation. Applies to dump, scan, deps-tree, and compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error (same restriction as ast-frontend above).'
     required: false
   nostdinc:
-    description: 'Do not search standard system include paths (dump mode only).'
+    description: >
+      Do not search standard system include paths. Applies to dump, scan,
+      and compare mode with a single-pair (non-directory, non-package)
+      operand — a directory/package compare rejects it with an error (same
+      restriction as ast-frontend above).
     required: false
     default: 'false'
 

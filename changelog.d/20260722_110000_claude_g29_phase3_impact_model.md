@@ -17,5 +17,5 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `evidence_category`/`correlated_change_kind`) instead of several
   separately-named keys. New `abicheck/impact/` package
   (`ImpactAssessment`/`GraphProofPath`/`FindingDecision`/`assess_change`).
-  `report_schema_version` 2.13 → 2.14; every existing field is unchanged.
+  `report_schema_version` 2.14 → 2.15; every existing field is unchanged.
   See `docs/concepts/impact-analysis.md`.

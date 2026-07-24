@@ -157,7 +157,15 @@ from typing import Any
 #:       has already produced it -- nothing in the CLI/service layer sets
 #:       these directly either, same as 2.12's five keys. All additive/
 #:       optional; omitted entirely (never emitted as null) when unset.
-#:   2.14: added two additive optional per-change keys (G29 Phase 3 slice 1,
+#:   2.14: ``release_recommendation`` gained a new optional ``state`` key
+#:       (one of "actionable"/"review"/"unavailable" -- how much weight the
+#:       recommendation itself can bear, independent of what it recommends)
+#:       and ``soname_action`` gained a new enum member, ``"not_determined"``
+#:       -- set on a BREAKING verdict whose comparison carried no
+#:       ELF/PE/Mach-O/DWARF evidence at all, so abicheck no longer asserts a
+#:       confident SONAME action it cannot back with a real binary artifact
+#:       (Codex review). Both additive.
+#:   2.15: added two additive optional per-change keys (G29 Phase 3 slice 1,
 #:       ADR-052) -- ``reachability_state`` (the tri-state signal from PR
 #:       #607's ``Change.reachability_state``, always present, never
 #:       serialized before this) and ``impact_assessment`` (a unified read
@@ -166,7 +174,7 @@ from typing import Any
 #:       the proof path/decision state/``evidence_category``/
 #:       ``correlated_change_kind`` -- present only when it carries
 #:       information beyond the all-defaults case).
-#:   2.15: added two additive optional top-level keys, present only under
+#:   2.16: added two additive optional top-level keys, present only under
 #:       ``--report-mode root-cause`` (G29 Phase 3 slices 3-4, ADR-052) --
 #:       ``root_causes`` (groups ``changes`` by ``Change.caused_by_type``,
 #:       falling back to the change's own symbol for an ungrouped finding)
@@ -177,7 +185,7 @@ from typing import Any
 #:       ``root_cause_id`` is a stable hash of the grouping key, not the
 #:       eventual G29 Phase 6 ``RootCauseCorrelator``'s own identifier
 #:       scheme.
-REPORT_SCHEMA_VERSION = "2.15"
+REPORT_SCHEMA_VERSION = "2.16"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

@@ -41,13 +41,18 @@ def _fn(name: str) -> Function:
 
 
 def _lib(
-    version: str, symbols: list[str], *, enums: list[EnumType] | None = None
+    version: str,
+    symbols: list[str],
+    *,
+    enums: list[EnumType] | None = None,
+    elf_only_mode: bool = False,
 ) -> AbiSnapshot:
     return AbiSnapshot(
         library="libplugin.so",
         version=version,
         functions=[_fn(s) for s in symbols],
         enums=enums or [],
+        elf_only_mode=elf_only_mode,
     )
 
 
@@ -63,9 +68,17 @@ def _removed_symbols(result_changes: list) -> set[str]:
 
 
 def test_drop_in_upgrade_with_removed_symbol_is_major_and_soname_bump() -> None:
-    """A library that drops a public symbol must be a MAJOR + SONAME bump."""
-    old = _lib("1.0", ["api_open", "api_close"])
-    new = _lib("2.0", ["api_open"])  # api_close removed
+    """A library that drops a public symbol must be a MAJOR + SONAME bump.
+
+    ``elf_only_mode=True`` marks this as a real (binary-derived) comparison —
+    the release recommendation's SONAME-actionability gate (semver.py) does
+    not confidently recommend a SONAME bump for a comparison with no
+    binary-level evidence at all (see test_semver_recommendation.py's
+    TestBinaryEvidenceGating); a drop-in upgrade check is exactly the
+    scenario that must stay actionable.
+    """
+    old = _lib("1.0", ["api_open", "api_close"], elf_only_mode=True)
+    new = _lib("2.0", ["api_open"], elf_only_mode=True)  # api_close removed
 
     result = compare(old, new)
     assert result.verdict is Verdict.BREAKING
