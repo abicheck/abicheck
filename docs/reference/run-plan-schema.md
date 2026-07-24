@@ -52,10 +52,12 @@ per `checks[]` entry:
   error, since the whole point of the sweep is "run this on every profile
   where it makes sense."
 
-A profile with no `--build-output` supplied at all is a **warning** for an
-implicit sweep (nothing to check it against, but the caller never asked for
-that exact profile) and an **error** for an explicit one (the caller
-explicitly named a profile the generator can't verify).
+A profile with no `--build-output` supplied at all is a hard **error**,
+explicit selector or implicit sweep alike — there is nothing to check the
+target against, which is different from an implicit sweep's ordinary "this
+profile doesn't build the target" skip above (that skip needs an *existing*
+`build-output.json` that simply omits the target from its `targets[]` list;
+a profile with no build-output artifact at all never got that far).
 
 ## The `app-consumer`/`plugin-contract` library redirect
 
