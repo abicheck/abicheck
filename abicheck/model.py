@@ -431,6 +431,31 @@ class DependencyInfo:
 
 
 @dataclass
+class ExtractionContract:
+    """ADR-050 D1 — profile/scope fingerprints proving two snapshots were
+    extracted under a comparable contract, plus the resolved per-field
+    inputs each fingerprint was computed from (so a mismatch report can show
+    *what* differs, not just that the hashes don't match).
+
+    Built by ``abicheck.comparability.compute_extraction_contract`` — never
+    constructed by hand outside tests. Both fingerprints are independently
+    optional: a symbols-only dump with no header-AST inputs but a real
+    ``--public-header``/``--public-header-dir`` still attaches a
+    ``scope_fingerprint`` with ``profile_fingerprint=None`` (see that
+    module's docstring for the full rationale).
+    """
+
+    profile_fingerprint: str | None = None
+    scope_fingerprint: str | None = None
+    # Named resolved sub-inputs, one string per component, keyed the same way
+    # on both sides of a compare so a mismatch can be attributed to a specific
+    # field instead of an opaque hash. See ``comparability.PROFILE_FIELD_KEYS``
+    # / ``comparability.SCOPE_FIELD_KEYS`` for the recognized keys.
+    profile_fields: dict[str, str] = field(default_factory=dict)
+    scope_fields: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class AbiSnapshot:
     """Complete ABI snapshot of one version of a library."""
 
@@ -667,6 +692,15 @@ class AbiSnapshot:
     conditional_fields: dict[str, dict[str, dict[str, object]]] = field(
         default_factory=dict, kw_only=True
     )
+
+    # ADR-050 D1 (schema v12) — profile/scope fingerprints proving this
+    # snapshot's extraction contract, checked by
+    # ``comparability.check_contracts_comparable`` before a compare is
+    # allowed to produce a verdict. None on every snapshot predating this
+    # field and on a symbols-only dump with no header-AST/public-header
+    # inputs at all (see ``ExtractionContract``'s own docstring). Keyword-only
+    # for the same reason as the other optional metadata fields above.
+    contract: ExtractionContract | None = field(default=None, kw_only=True)
 
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy

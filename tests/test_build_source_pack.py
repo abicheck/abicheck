@@ -209,7 +209,7 @@ def test_snapshot_v7_evidence_ref_roundtrip():
         build_source_pack=BuildSourceRef(content_hash="sha256:abc", path_hint="e/"),
     )
     d = snapshot_to_dict(snap)
-    assert d["schema_version"] == 11
+    assert d["schema_version"] == 12
     assert d["build_source_pack"]["content_hash"] == "sha256:abc"
     back = snapshot_from_dict(d)
     assert back.build_source_pack is not None

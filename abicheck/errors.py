@@ -20,6 +20,7 @@ the built-in Exception class for easy catch-all error handling.
 SuppressionError inherits both AbicheckError and ValueError so that
 existing code catching ValueError continues to work without changes.
 """
+
 from __future__ import annotations
 
 
@@ -54,6 +55,48 @@ class HeaderToolchainError(SnapshotError):
     :func:`abicheck.dumper._castxml_failure_hint` recognised) can do so,
     instead of treating every castxml failure as equally opaque. The
     remediation text is already folded into the exception message.
+    """
+
+
+class IncompatibleSnapshotSchemaError(SnapshotError):
+    """Raised when a persisted snapshot's ``schema_version`` is both newer
+    than this reader's ``serialization.SCHEMA_VERSION`` and at or above
+    ``serialization._MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION`` (ADR-050
+    D1).
+
+    A subclass of :class:`SnapshotError` — existing ``except SnapshotError``
+    handling still catches it unchanged, the same precedent
+    :class:`HeaderToolchainError` already documents — rather than a bare
+    sibling of :class:`AbicheckError` that would fall through
+    ``cli_resolve.py``'s existing ``except ValidationError, SnapshotError``
+    translation and surface as an unhandled internal failure instead of a
+    clean usage error.
+
+    Below that threshold, ``snapshot_from_dict`` keeps today's lenient
+    warn-and-continue behavior for an ordinary additive schema bump — this
+    error exists only for the specific class of field (starting with
+    ``ExtractionContract``) where silently reading past an unrecognized,
+    verdict-blocking field would let an old reader compare two
+    possibly-incomparable snapshots and produce an ordinary, wrong verdict.
+    """
+
+
+class ProfileMismatchError(AbicheckError):
+    """Raised by :func:`abicheck.comparability.check_contracts_comparable`
+    when both sides of a compare carry a ``profile_fingerprint`` and it
+    differs (ADR-050 D2) — the two snapshots' resolved compile context
+    (compiler/macros/include-search inputs) is not comparable, so ``compare``
+    must report ``not_comparable`` instead of producing any verdict.
+    """
+
+
+class ScopeMismatchError(AbicheckError):
+    """Raised by :func:`abicheck.comparability.check_contracts_comparable`
+    when both sides of a compare carry a ``scope_fingerprint`` and it
+    differs (ADR-050 D2) — the two snapshots do not cover the same declared
+    surface (a manifest/CLI-flag drift between two extraction runs), so
+    ``compare`` must report ``not_comparable`` instead of producing any
+    verdict.
     """
 
 

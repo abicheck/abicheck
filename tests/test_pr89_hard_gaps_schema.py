@@ -8,11 +8,14 @@ Covers:
 3. Schema baseline: schema_version field in snapshot serialization output;
    backward-compatible loading of snapshots without schema_version.
 """
+
 from __future__ import annotations
 
 import json
 import tempfile
 from pathlib import Path
+
+import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.checker_policy import API_BREAK_KINDS, BREAKING_KINDS
@@ -46,7 +49,9 @@ def _func(name: str, mangled: str, **kwargs: object) -> Function:
 def _elf_with_syms(*names: str) -> ElfMetadata:
     """Build a minimal ElfMetadata with the given symbol names exported."""
     syms = [
-        ElfSymbol(name=n, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC, size=0)
+        ElfSymbol(
+            name=n, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC, size=0
+        )
         for n in names
     ]
     return ElfMetadata(symbols=syms)
@@ -84,7 +89,7 @@ class TestFuncDeletedElfFallbackDetection:
         )
         new = _snap(
             functions=[_func("process", mangled)],  # still in header model
-            elf=_elf_with_syms(),                   # but NOT in new ELF
+            elf=_elf_with_syms(),  # but NOT in new ELF
         )
         result = compare(old, new)
         assert ChangeKind.FUNC_DELETED_ELF_FALLBACK in _kinds(result)
@@ -171,7 +176,7 @@ class TestFuncDeletedElfFallbackDetection:
             elf=_elf_with_syms(mangled),
         )
         new = _snap(
-            functions=[],      # completely gone from header model too
+            functions=[],  # completely gone from header model too
             elf=_elf_with_syms(),
         )
         result = compare(old, new)
@@ -192,7 +197,9 @@ class TestFuncDeletedElfFallbackDetection:
             elf=_elf_with_syms(m1),  # foo2 disappeared
         )
         result = compare(old, new)
-        fb_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_DELETED_ELF_FALLBACK]
+        fb_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_DELETED_ELF_FALLBACK
+        ]
         assert len(fb_changes) == 1
         assert fb_changes[0].symbol == m2
 
@@ -225,60 +232,70 @@ class TestExtractTemplateArgs:
 
     def test_simple_vector_int(self) -> None:
         from abicheck.checker import _extract_template_args
+
         assert _extract_template_args("std::vector<int>") == ["int"]
 
     def test_simple_vector_double(self) -> None:
         from abicheck.checker import _extract_template_args
+
         assert _extract_template_args("std::vector<double>") == ["double"]
 
     def test_map_two_args(self) -> None:
         from abicheck.checker import _extract_template_args
+
         result = _extract_template_args("std::map<int, double>")
         assert result == ["int", "double"]
 
     def test_nested_template(self) -> None:
         from abicheck.checker import _extract_template_args
+
         result = _extract_template_args("Foo<Bar<int>, double>")
         assert result == ["Bar<int>", "double"]
 
     def test_non_template_returns_none(self) -> None:
         from abicheck.checker import _extract_template_args
+
         assert _extract_template_args("int") is None
         assert _extract_template_args("std::string") is None
 
     def test_empty_template_args(self) -> None:
         from abicheck.checker import _extract_template_args
+
         result = _extract_template_args("Empty<>")
         assert result == []
 
     def test_pointer_template(self) -> None:
         from abicheck.checker import _extract_template_args
+
         result = _extract_template_args("std::unique_ptr<Foo>")
         assert result == ["Foo"]
-
-
 
     def test_function_type_with_comma_in_parens(self) -> None:
         """std::function<void(int, double)> must NOT be split on the comma inside ()."""
         from abicheck.checker import _extract_template_args
+
         result = _extract_template_args("std::function<void(int, double)>")
         assert result == ["void(int, double)"], (
             f"Expected single arg 'void(int, double)', got: {result}"
         )
+
 
 class TestTemplateOuterName:
     """Unit tests for the _template_outer helper."""
 
     def test_vector(self) -> None:
         from abicheck.checker import _template_outer
+
         assert _template_outer("std::vector<int>") == "std::vector"
 
     def test_map(self) -> None:
         from abicheck.checker import _template_outer
+
         assert _template_outer("std::map<int, double>") == "std::map"
 
     def test_non_template(self) -> None:
         from abicheck.checker import _template_outer
+
         assert _template_outer("int") == "int"
 
 
@@ -292,8 +309,14 @@ class TestTemplatePolicyKinds:
         assert ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED in BREAKING_KINDS
 
     def test_enum_values(self) -> None:
-        assert ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED.value == "template_param_type_changed"
-        assert ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED.value == "template_return_type_changed"
+        assert (
+            ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED.value
+            == "template_param_type_changed"
+        )
+        assert (
+            ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED.value
+            == "template_return_type_changed"
+        )
 
 
 class TestTemplateParamTypeChanged:
@@ -317,15 +340,21 @@ class TestTemplateParamTypeChanged:
             name=name,
             mangled=mangled,
             return_type="void",
-            params=[Param(name="v", type=f"std::vector<{inner_type}>", kind=ParamKind.VALUE)],
+            params=[
+                Param(name="v", type=f"std::vector<{inner_type}>", kind=ParamKind.VALUE)
+            ],
             visibility=Visibility.PUBLIC,
         )
 
     def test_vector_int_to_double_param_change(self) -> None:
         """std::vector<int> param → std::vector<double>: TEMPLATE_PARAM_TYPE_CHANGED."""
         mangled = "_Z7processNSt6vectorIiEE"
-        old = _snap(functions=[self._make_func_with_vec_param("process", mangled, "int")])
-        new = _snap(functions=[self._make_func_with_vec_param("process", mangled, "double")])
+        old = _snap(
+            functions=[self._make_func_with_vec_param("process", mangled, "int")]
+        )
+        new = _snap(
+            functions=[self._make_func_with_vec_param("process", mangled, "double")]
+        )
         result = compare(old, new)
         assert ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED in _kinds(result)
         assert result.verdict == Verdict.BREAKING
@@ -333,8 +362,12 @@ class TestTemplateParamTypeChanged:
     def test_same_template_inner_type_no_change(self) -> None:
         """Same inner type → no TEMPLATE_PARAM_TYPE_CHANGED."""
         mangled = "_Z7processNSt6vectorIiEE"
-        old = _snap(functions=[self._make_func_with_vec_param("process", mangled, "int")])
-        new = _snap(functions=[self._make_func_with_vec_param("process", mangled, "int")])
+        old = _snap(
+            functions=[self._make_func_with_vec_param("process", mangled, "int")]
+        )
+        new = _snap(
+            functions=[self._make_func_with_vec_param("process", mangled, "int")]
+        )
         result = compare(old, new)
         assert ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED not in _kinds(result)
 
@@ -342,16 +375,28 @@ class TestTemplateParamTypeChanged:
         """vector<int> → list<int>: outer name changed → should NOT fire TEMPLATE_PARAM_TYPE_CHANGED
         (FUNC_PARAMS_CHANGED covers it instead)."""
         mangled = "_Z7processv"
-        old = _snap(functions=[Function(
-            name="process", mangled=mangled, return_type="void",
-            params=[Param(name="v", type="std::vector<int>")],
-            visibility=Visibility.PUBLIC,
-        )])
-        new = _snap(functions=[Function(
-            name="process", mangled=mangled, return_type="void",
-            params=[Param(name="v", type="std::list<int>")],
-            visibility=Visibility.PUBLIC,
-        )])
+        old = _snap(
+            functions=[
+                Function(
+                    name="process",
+                    mangled=mangled,
+                    return_type="void",
+                    params=[Param(name="v", type="std::vector<int>")],
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                Function(
+                    name="process",
+                    mangled=mangled,
+                    return_type="void",
+                    params=[Param(name="v", type="std::list<int>")],
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
         result = compare(old, new)
         # The full type changed → FUNC_PARAMS_CHANGED, not TEMPLATE_PARAM_TYPE_CHANGED
         assert ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED not in _kinds(result)
@@ -359,16 +404,28 @@ class TestTemplateParamTypeChanged:
     def test_map_key_type_changes(self) -> None:
         """std::map<int, string> → std::map<double, string>: first arg changed."""
         mangled = "_Z7processv"
-        old = _snap(functions=[Function(
-            name="process", mangled=mangled, return_type="void",
-            params=[Param(name="m", type="std::map<int, std::string>")],
-            visibility=Visibility.PUBLIC,
-        )])
-        new = _snap(functions=[Function(
-            name="process", mangled=mangled, return_type="void",
-            params=[Param(name="m", type="std::map<double, std::string>")],
-            visibility=Visibility.PUBLIC,
-        )])
+        old = _snap(
+            functions=[
+                Function(
+                    name="process",
+                    mangled=mangled,
+                    return_type="void",
+                    params=[Param(name="m", type="std::map<int, std::string>")],
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                Function(
+                    name="process",
+                    mangled=mangled,
+                    return_type="void",
+                    params=[Param(name="m", type="std::map<double, std::string>")],
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED in _kinds(result)
         assert result.verdict == Verdict.BREAKING
@@ -376,16 +433,28 @@ class TestTemplateParamTypeChanged:
     def test_non_template_param_no_template_change(self) -> None:
         """Plain int → double: no TEMPLATE_PARAM_TYPE_CHANGED."""
         mangled = "_Z7processv"
-        old = _snap(functions=[Function(
-            name="process", mangled=mangled, return_type="void",
-            params=[Param(name="x", type="int")],
-            visibility=Visibility.PUBLIC,
-        )])
-        new = _snap(functions=[Function(
-            name="process", mangled=mangled, return_type="void",
-            params=[Param(name="x", type="double")],
-            visibility=Visibility.PUBLIC,
-        )])
+        old = _snap(
+            functions=[
+                Function(
+                    name="process",
+                    mangled=mangled,
+                    return_type="void",
+                    params=[Param(name="x", type="int")],
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                Function(
+                    name="process",
+                    mangled=mangled,
+                    return_type="void",
+                    params=[Param(name="x", type="double")],
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED not in _kinds(result)
 
@@ -396,16 +465,26 @@ class TestTemplateReturnTypeChanged:
     def test_vector_int_to_double_return(self) -> None:
         """Return type std::vector<int> → std::vector<double>: TEMPLATE_RETURN_TYPE_CHANGED."""
         mangled = "_Z7getVecv"
-        old = _snap(functions=[Function(
-            name="getVec", mangled=mangled,
-            return_type="std::vector<int>",
-            visibility=Visibility.PUBLIC,
-        )])
-        new = _snap(functions=[Function(
-            name="getVec", mangled=mangled,
-            return_type="std::vector<double>",
-            visibility=Visibility.PUBLIC,
-        )])
+        old = _snap(
+            functions=[
+                Function(
+                    name="getVec",
+                    mangled=mangled,
+                    return_type="std::vector<int>",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                Function(
+                    name="getVec",
+                    mangled=mangled,
+                    return_type="std::vector<double>",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED in _kinds(result)
         assert result.verdict == Verdict.BREAKING
@@ -413,44 +492,78 @@ class TestTemplateReturnTypeChanged:
     def test_same_return_template_no_change(self) -> None:
         """Same return template inner type → no TEMPLATE_RETURN_TYPE_CHANGED."""
         mangled = "_Z7getVecv"
-        old = _snap(functions=[Function(
-            name="getVec", mangled=mangled,
-            return_type="std::vector<int>",
-            visibility=Visibility.PUBLIC,
-        )])
-        new = _snap(functions=[Function(
-            name="getVec", mangled=mangled,
-            return_type="std::vector<int>",
-            visibility=Visibility.PUBLIC,
-        )])
+        old = _snap(
+            functions=[
+                Function(
+                    name="getVec",
+                    mangled=mangled,
+                    return_type="std::vector<int>",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                Function(
+                    name="getVec",
+                    mangled=mangled,
+                    return_type="std::vector<int>",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED not in _kinds(result)
 
     def test_non_template_return_no_template_change(self) -> None:
         """Plain int return type → no template change."""
         mangled = "_Z7getValv"
-        old = _snap(functions=[Function(
-            name="getVal", mangled=mangled, return_type="int", visibility=Visibility.PUBLIC
-        )])
-        new = _snap(functions=[Function(
-            name="getVal", mangled=mangled, return_type="double", visibility=Visibility.PUBLIC
-        )])
+        old = _snap(
+            functions=[
+                Function(
+                    name="getVal",
+                    mangled=mangled,
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                Function(
+                    name="getVal",
+                    mangled=mangled,
+                    return_type="double",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED not in _kinds(result)
 
     def test_unique_ptr_inner_type_change(self) -> None:
         """Return std::unique_ptr<Foo> → std::unique_ptr<Bar>: TEMPLATE_RETURN_TYPE_CHANGED."""
         mangled = "_Z5makeFv"
-        old = _snap(functions=[Function(
-            name="makeF", mangled=mangled,
-            return_type="std::unique_ptr<Foo>",
-            visibility=Visibility.PUBLIC,
-        )])
-        new = _snap(functions=[Function(
-            name="makeF", mangled=mangled,
-            return_type="std::unique_ptr<Bar>",
-            visibility=Visibility.PUBLIC,
-        )])
+        old = _snap(
+            functions=[
+                Function(
+                    name="makeF",
+                    mangled=mangled,
+                    return_type="std::unique_ptr<Foo>",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                Function(
+                    name="makeF",
+                    mangled=mangled,
+                    return_type="std::unique_ptr<Bar>",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED in _kinds(result)
         assert result.verdict == Verdict.BREAKING
@@ -463,11 +576,17 @@ class TestTemplateAnalysisNegative:
         """New function with template param → FUNC_ADDED, not template change."""
         mangled = "_Z7processNSt6vectorIiEE"
         old = _snap(functions=[])
-        new = _snap(functions=[Function(
-            name="process", mangled=mangled, return_type="void",
-            params=[Param(name="v", type="std::vector<int>")],
-            visibility=Visibility.PUBLIC,
-        )])
+        new = _snap(
+            functions=[
+                Function(
+                    name="process",
+                    mangled=mangled,
+                    return_type="void",
+                    params=[Param(name="v", type="std::vector<int>")],
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED not in _kinds(result)
         assert ChangeKind.FUNC_ADDED in _kinds(result)
@@ -475,16 +594,28 @@ class TestTemplateAnalysisNegative:
     def test_hidden_function_not_checked(self) -> None:
         """Hidden functions are not part of public ABI — no template change."""
         mangled = "_Z7processNSt6vectorIiEE"
-        old = _snap(functions=[Function(
-            name="process", mangled=mangled, return_type="void",
-            params=[Param(name="v", type="std::vector<int>")],
-            visibility=Visibility.HIDDEN,
-        )])
-        new = _snap(functions=[Function(
-            name="process", mangled=mangled, return_type="void",
-            params=[Param(name="v", type="std::vector<double>")],
-            visibility=Visibility.HIDDEN,
-        )])
+        old = _snap(
+            functions=[
+                Function(
+                    name="process",
+                    mangled=mangled,
+                    return_type="void",
+                    params=[Param(name="v", type="std::vector<int>")],
+                    visibility=Visibility.HIDDEN,
+                )
+            ]
+        )
+        new = _snap(
+            functions=[
+                Function(
+                    name="process",
+                    mangled=mangled,
+                    return_type="void",
+                    params=[Param(name="v", type="std::vector<double>")],
+                    visibility=Visibility.HIDDEN,
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED not in _kinds(result)
 
@@ -518,12 +649,14 @@ class TestSchemaVersionBaseline:
     def test_schema_version_survives_json_roundtrip(self) -> None:
         """schema_version must survive JSON serialization and deserialization."""
         snap = _snap(
-            functions=[Function(
-                name="init",
-                mangled="_Z4initv",
-                return_type="void",
-                visibility=Visibility.PUBLIC,
-            )]
+            functions=[
+                Function(
+                    name="init",
+                    mangled="_Z4initv",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
         )
         d = snapshot_to_dict(snap)
         raw_json = json.dumps(d)
@@ -560,12 +693,14 @@ class TestSchemaVersionBaseline:
     def test_save_and_load_preserves_schema_version(self) -> None:
         """save_snapshot + load_snapshot: schema_version appears in JSON file."""
         snap = _snap(
-            functions=[Function(
-                name="compute",
-                mangled="_Z7computev",
-                return_type="int",
-                visibility=Visibility.PUBLIC,
-            )]
+            functions=[
+                Function(
+                    name="compute",
+                    mangled="_Z7computev",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
         )
         with tempfile.NamedTemporaryFile(suffix=".abi.json", delete=False) as f:
             tmp = Path(f.name)
@@ -587,10 +722,14 @@ class TestSchemaVersionBaseline:
         """Schema version survives snapshot_to_dict → snapshot_from_dict with ELF data."""
         elf = _elf_with_syms("_Z4initv")
         snap = _snap(
-            functions=[Function(
-                name="init", mangled="_Z4initv",
-                return_type="void", visibility=Visibility.PUBLIC,
-            )],
+            functions=[
+                Function(
+                    name="init",
+                    mangled="_Z4initv",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
             elf=elf,
         )
         d = snapshot_to_dict(snap)
@@ -599,22 +738,20 @@ class TestSchemaVersionBaseline:
         assert snap2.elf is not None
         assert len(snap2.elf.symbols) == 1
 
+    def test_future_schema_version_hard_rejects(self) -> None:
+        """Loading a snapshot with schema_version >=
+        _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION must raise
+        IncompatibleSnapshotSchemaError (ADR-050 D1), not merely warn — a
+        verdict-blocking field (AbiSnapshot.contract) was introduced at that
+        threshold, and warn-and-continue would let this reader silently
+        compare two possibly-incomparable snapshots."""
+        from abicheck.errors import IncompatibleSnapshotSchemaError
 
-    def test_future_schema_version_warns(self) -> None:
-        """Loading a snapshot with schema_version > SCHEMA_VERSION must emit UserWarning."""
         snap = _snap()
         d = snapshot_to_dict(snap)
         d["schema_version"] = 999
-        import warnings
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            result = snapshot_from_dict(d)
-        assert any("schema_version 999" in str(warning.message) for warning in w), (
-            f"Expected UserWarning about schema_version 999, got: {[str(ww.message) for ww in w]}"
-        )
-        # Data should still load (best-effort)
-        assert result.library == snap.library
-
+        with pytest.raises(IncompatibleSnapshotSchemaError, match="999"):
+            snapshot_from_dict(d)
 
     def test_not_in_api_break_kinds(self) -> None:
         """FUNC_DELETED_ELF_FALLBACK must NOT be in API_BREAK_KINDS (it is a binary break)."""

@@ -8,7 +8,6 @@ identical logical content. Tests verify:
 - Reserialization always writes current schema version
 """
 import json
-import warnings
 from pathlib import Path
 
 import pytest
@@ -231,14 +230,15 @@ class TestReserialization:
         assert snap.build_mode is not None
         assert snap.build_mode.libcpp_abi_version is None
 
-    def test_future_version_warning(self):
-        """Loading a snapshot with schema_version > current emits a warning."""
+    def test_future_version_hard_rejects(self):
+        """Loading a snapshot with schema_version >=
+        _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION raises
+        IncompatibleSnapshotSchemaError rather than merely warning
+        (ADR-050 D1) — a verdict-blocking field was introduced at that
+        threshold, so an old reader must not silently continue past it."""
+        from abicheck.errors import IncompatibleSnapshotSchemaError
+
         d = _load_fixture("v4.json")
         d["schema_version"] = 999
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            snap = snapshot_from_dict(d)
-            assert len(w) == 1
-            assert "newer than this abicheck" in str(w[0].message)
-        # But still loads successfully
-        assert snap.library == "libcompat.so.1"
+        with pytest.raises(IncompatibleSnapshotSchemaError):
+            snapshot_from_dict(d)
