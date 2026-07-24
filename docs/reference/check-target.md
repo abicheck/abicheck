@@ -115,7 +115,7 @@ caller-provided directory of the candidate build's own member binaries.
 | `baseline-path` | when channel ≠ `none` | `''` | Forwarded to `resolve-baseline`. |
 | `baseline-required` | no | `true` | Forwarded to `resolve-baseline`'s `required`. |
 | `candidate-build-output` | no | `''` | Forwarded to `resolve-baseline`'s `incompatible_evidence` check. |
-| `requested-depth` | yes | — | `binary` \| `headers` \| `build` \| `source`. |
+| `requested-depth` | yes | — | `binary` \| `headers` \| `build` \| `source` — for `kind: bundle`, only `binary` is supported (`headers`/`build`/`source` are all rejected: a bundle's baseline is always raw binaries with no historical header/build/source evidence staged per member). |
 | `gate-mode` | no | `local` | `local` \| `deferred` \| `advisory`. |
 | `project` | no | `${{ github.repository }}` | Recorded in the report envelope. |
 | `head-sha` | no | `${{ github.sha }}` | Recorded in the report envelope. |

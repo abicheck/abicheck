@@ -507,7 +507,7 @@ def test_bundle_check_depth_build_is_rejected() -> None:
     )
 
 
-def test_bundle_check_depth_binary_and_headers_are_accepted() -> None:
+def test_bundle_check_depth_binary_is_accepted() -> None:
     config = ProjectTargetsConfig.from_dict(
         {
             "targets": {
@@ -522,10 +522,141 @@ def test_bundle_check_depth_binary_and_headers_are_accepted() -> None:
                     "targets": ["libfoo"],
                     "checks": [
                         {"channel": "accepted", "depth": "binary"},
-                        {"channel": "accepted", "depth": "headers"},
                     ],
                 }
             },
+            "baseline": {
+                "channels": {"accepted": {"source": "git"}},
+            },
+        }
+    )
+    report = validate_project_targets(config)
+    assert report.ok, report.errors
+
+
+def test_bundle_check_depth_headers_is_rejected() -> None:
+    """A bundle's old-library operand is always raw binaries (never a
+    pre-dumped .abi.json snapshot with historical header data baked in),
+    so a headers-depth bundle compare would parse both sides against the
+    SAME current checkout's headers -- silently missing any header-only
+    change between baseline and candidate (Codex review)."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.so",
+                    "bundle": "release",
+                },
+            },
+            "bundles": {
+                "release": {
+                    "targets": ["libfoo"],
+                    "checks": [{"channel": "accepted", "depth": "headers"}],
+                }
+            },
+            "baseline": {
+                "channels": {"accepted": {"source": "git"}},
+            },
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any(
+        "depth 'headers' is not supported for a bundle check" in e
+        for e in report.errors
+    )
+
+
+def test_bundle_check_explicitly_scoped_to_a_non_elf_profile_is_rejected() -> None:
+    """abicheck/bundle.py's build_bundle_snapshot() skips non-ELF inputs
+    outright, so a bundle check explicitly scoped to a declared Windows
+    profile can never resolve -- it always produces an operationally
+    failing matrix leg rather than a usable check (Codex review)."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.so",
+                    "bundle": "release",
+                },
+            },
+            "bundles": {
+                "release": {
+                    "targets": ["libfoo"],
+                    "checks": [
+                        {
+                            "channel": "accepted",
+                            "depth": "binary",
+                            "profiles": ["windows-x86_64"],
+                        }
+                    ],
+                }
+            },
+            "profiles": {"windows-x86_64": {"contract": True, "os": "windows"}},
+            "baseline": {
+                "channels": {"accepted": {"source": "git"}},
+            },
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any("has os: 'windows'" in e for e in report.errors)
+
+
+def test_bundle_check_explicitly_scoped_to_an_elf_profile_is_accepted() -> None:
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.so",
+                    "bundle": "release",
+                },
+            },
+            "bundles": {
+                "release": {
+                    "targets": ["libfoo"],
+                    "checks": [
+                        {
+                            "channel": "accepted",
+                            "depth": "binary",
+                            "profiles": ["linux-x86_64"],
+                        }
+                    ],
+                }
+            },
+            "profiles": {"linux-x86_64": {"contract": True, "os": "linux"}},
+            "baseline": {
+                "channels": {"accepted": {"source": "git"}},
+            },
+        }
+    )
+    report = validate_project_targets(config)
+    assert report.ok, report.errors
+
+
+def test_target_check_explicitly_scoped_to_a_non_elf_profile_is_unaffected() -> None:
+    """The ELF-only restriction is bundle-specific -- a single-library
+    target check on a non-ELF profile is a completely normal, supported
+    scenario (PE/Mach-O compare)."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.dll",
+                    "checks": [
+                        {
+                            "channel": "accepted",
+                            "depth": "binary",
+                            "profiles": ["windows-x86_64"],
+                        }
+                    ],
+                },
+            },
+            "profiles": {"windows-x86_64": {"contract": True, "os": "windows"}},
             "baseline": {
                 "channels": {"accepted": {"source": "git"}},
             },
@@ -1074,7 +1205,7 @@ def test_bundle_checks_round_trip_and_validate() -> None:
                     "checks": [
                         {
                             "channel": "release",
-                            "depth": "headers",
+                            "depth": "binary",
                             "gate_mode": "advisory",
                         }
                     ],
@@ -1086,12 +1217,12 @@ def test_bundle_checks_round_trip_and_validate() -> None:
         }
     )
     assert config.bundles["rel"].checks == [
-        CheckSpec(channel="release", depth="headers", gate_mode="advisory")
+        CheckSpec(channel="release", depth="binary", gate_mode="advisory")
     ]
     assert config.bundles["rel"].to_dict()["checks"] == [
         {
             "channel": "release",
-            "depth": "headers",
+            "depth": "binary",
             "required": True,
             "gate_mode": "advisory",
         }

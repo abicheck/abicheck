@@ -124,15 +124,25 @@ BASELINE_SOURCES = frozenset({"github-release", "actions-cache", "git"})
 #: in the report schema (ADR-047 §7).
 CHECK_DEPTHS = frozenset(d.value for d in USER_DEPTHS)
 
-#: A ``bundle`` check's ``depth`` is further restricted to these two rungs --
+#: A ``bundle`` check's ``depth`` is further restricted to this single rung --
 #: ``kind: bundle`` always compares directories (the resolved binaries-dir vs.
 #: the candidate bundle directory) in ``actions/check-target``, which routes
 #: through the CLI's per-library release fan-out and never collects inline
 #: build/source evidence for that path (``actions/check-target/
 #: validate-inputs.sh`` rejects ``build``/``source`` for ``kind: bundle``).
-BUNDLE_CHECK_DEPTHS = frozenset(
-    {EvidenceDepth.BINARY.value, EvidenceDepth.HEADERS.value}
-)
+#: ``headers`` is *also* rejected here (not just build/source): a bundle
+#: baseline's old-library operand is always a directory of raw binaries
+#: (``actions/baseline``'s bundle staging, unlike its single-target mode,
+#: never produces pre-dumped ``.abi.json`` snapshots with historical header
+#: data already baked in), so at ``depth: headers`` both the old and new
+#: sides would be freshly header-parsed at compare time using the SAME
+#: current checkout's headers (``check-project.yml`` has only one
+#: project-wide ``header:`` input) -- a header-only change between baseline
+#: and candidate (e.g. an inline function or template removed) would be
+#: silently invisible, since only one version of the headers is ever parsed
+#: (Codex review). Until per-bundle-member baseline header staging exists,
+#: only binary-level (L0/L1) evidence is safe for a bundle check.
+BUNDLE_CHECK_DEPTHS = frozenset({EvidenceDepth.BINARY.value})
 
 #: Sentinel ``channel`` value for a ``baseline: none`` check (ADR-047 §6 S5
 #: correction) — ``check-target`` (P1.3) must skip ``resolve-baseline``
@@ -799,7 +809,11 @@ def _library_reference_issues(
 
 
 def _check_issues(
-    config: ProjectTargetsConfig, where: str, check: CheckSpec
+    config: ProjectTargetsConfig,
+    where: str,
+    check: CheckSpec,
+    *,
+    is_bundle: bool = False,
 ) -> list[str]:
     issues: list[str] = []
     if (
@@ -825,7 +839,8 @@ def _check_issues(
             issues.append(
                 f"{where}: profiles entry {profile_id!r} is not declared under profiles:."
             )
-        elif not profile.contract and check.channel != NO_BASELINE_CHANNEL:
+            continue
+        if not profile.contract and check.channel != NO_BASELINE_CHANNEL:
             # contract: false profiles are documented as test-only lanes that
             # never get a baseline (S17) -- a real-channel check scoped only
             # to one can never be satisfied. A channel: "none" audit check has
@@ -837,6 +852,27 @@ def _check_issues(
                 f"declares a real channel ({check.channel!r}) — only a "
                 f"{NO_BASELINE_CHANNEL!r}-channel audit check may scope to a "
                 "non-contract profile."
+            )
+        # abicheck/bundle.py's build_bundle_snapshot() skips non-ELF inputs
+        # outright (baseline_set.py's _not_elf_issue), so a bundle check
+        # explicitly scoped to a declared Windows/macOS profile can never
+        # resolve -- it always produces an operationally-failing matrix
+        # leg rather than a usable check (Codex review). An UNSET os
+        # (profile.os == "") is left unrejected -- most projects never
+        # bother declaring it, and treating "unspecified" as an error
+        # would punish that common case for a field that's still purely
+        # informational everywhere else in this module. Implicit (not
+        # explicitly profile-scoped) bundle checks are handled separately
+        # at run-plan generation time, where they're silently skipped
+        # rather than erroring, the same way a profile that simply
+        # doesn't build a given target is skipped.
+        if is_bundle and profile.os and profile.os != "linux":
+            issues.append(
+                f"{where}: profiles entry {profile_id!r} has os: {profile.os!r}, "
+                "but a bundle check's backend (abicheck/bundle.py) is ELF-only "
+                "and skips every non-ELF member -- explicitly scope this bundle "
+                "check to a linux profile, or drop it from profiles: and let "
+                "the implicit sweep skip non-ELF profiles automatically."
             )
     return issues
 
@@ -889,7 +925,11 @@ def _bundle_issues(config: ProjectTargetsConfig, bundle: BundleSpec) -> list[str
                 "bundle check, or scope each member individually with a "
                 "channel: 'none' library-kind target check instead."
             )
-        issues.extend(_check_issues(config, f"bundle {bundle.id!r}.checks[{i}]", check))
+        issues.extend(
+            _check_issues(
+                config, f"bundle {bundle.id!r}.checks[{i}]", check, is_bundle=True
+            )
+        )
     return issues
 
 

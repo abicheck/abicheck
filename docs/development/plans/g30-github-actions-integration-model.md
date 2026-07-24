@@ -2050,6 +2050,71 @@ mechanism (manually running the workflow, or reasoning through the YAML
 directly) before merging changes that touch it. Covered by a new
 `test_failure_path_workflow_does_not_trigger_on_pull_request`.
 
+**Two more rounds (Codex, against `0c85916`) caught real bundle-correctness
+gaps, both fixed:**
+
+- **`headers`-depth bundle checks silently missed header-only changes.**
+  `BUNDLE_CHECK_DEPTHS` allowed `binary`/`headers` for a bundle check, but a
+  bundle's old-library operand is always a directory of raw binaries
+  (`actions/baseline`'s bundle staging never produces pre-dumped
+  `.abi.json` snapshots with historical header data baked in, unlike its
+  single-target mode) -- at `depth: headers`, both the old and new sides
+  would be freshly header-parsed at compare time against the SAME current
+  checkout's headers (`check-project.yml` has only one project-wide
+  `header:` input, no per-baseline-version staging), so a header-only
+  change between baseline and candidate (an inline function or template
+  removed, say) would be completely invisible. Fixed: `BUNDLE_CHECK_DEPTHS`
+  is now `{binary}` only, and `actions/check-target/validate-inputs.sh`
+  rejects `requested-depth: headers` for `kind: bundle` alongside its
+  existing `build`/`source` rejection. Covered by
+  `test_bundle_check_depth_headers_is_rejected` (project-targets) and
+  `test_bundle_kind_rejects_headers_depth` (validate-inputs.sh); the
+  pre-existing `test_bundle_checks_round_trip_and_validate` fixture (which
+  happened to use `depth: headers`) switched to `binary`.
+- **A bundle check could resolve against a declared Windows/macOS profile
+  it can never actually run on.** `abicheck/bundle.py`'s
+  `build_bundle_snapshot()` is ELF-only and skips every non-ELF input
+  outright (`baseline_set.py`'s `_not_elf_issue`), but neither
+  `project_targets.py`'s validator nor `run_plan.py`'s generator checked a
+  profile's declared `os` before emitting/accepting a bundle cell against
+  it -- a structurally valid multi-OS project would get an operationally
+  failing matrix leg instead of a usable check. Fixed at both layers: an
+  EXPLICIT `checks[].profiles:` entry naming a non-`linux`-`os` profile is
+  now a config-validation error (`_check_issues` gained an `is_bundle`
+  parameter) and a `run_plan.py` generation-time defensive backstop for a
+  caller that invokes `generate_run_plan()` directly without validating
+  first; the IMPLICIT sweep case (no `profiles:` selector) is silently
+  skipped instead, the same way a profile that simply doesn't build a
+  bundle's members already was -- not every profile is expected to support
+  a bundle check, so that's not a misconfiguration to error on. An unset
+  `os` (`""`, the common case -- most projects never bother declaring it)
+  is left unrejected, since it's still purely informational metadata
+  everywhere else in this module. A single-library `kind: target` check on
+  a non-ELF profile is completely unaffected (PE/Mach-O compare is a
+  normal, supported case) -- this restriction is bundle-specific. Covered
+  by four new tests across `test_project_targets.py` (explicit
+  reject/accept, target-check-unaffected control) and `test_run_plan.py`
+  (implicit-sweep skip, explicit-scope error).
+
+**A further round (Codex, against `7303a74`) caught that the per-check
+report filename could exceed a filesystem's `NAME_MAX`, fixed:**
+`_IDENTIFIER_RE` (`project_targets.py`) only constrains a target/bundle
+id's charset, not its length -- `actions/check-target/run.sh`'s
+`REPORT_OUT` filename (`check-target-report-<slug>-<12-hex-digest>.json`)
+had no cap on the readable `<slug>` portion, so a long but otherwise valid
+id (Codex's example: a 210-char name with one-char profile/channel ids)
+could push the final filename past 255 bytes, making
+`report_envelope.py` unable to create the file at all -- turning a
+legitimate long id into an orchestration failure instead of a report.
+Fixed: the slug portion is now truncated to 150 characters before the
+digest suffix is appended (`check-target-report-` prefix 20 + slug ≤150 +
+`-`+digest 13 + `.json` 5 = ≤188 bytes, comfortably under 255); the digest
+itself is still computed over the ORIGINAL, untruncated identity tuple, so
+two long ids sharing a truncated prefix stay distinguishable. Covered by
+`test_report_filename_stays_under_name_max_for_a_long_target_id`
+(210-char `INPUT_NAME`, asserts the resulting filename is ≤255 bytes and
+the file was actually created).
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —

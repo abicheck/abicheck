@@ -297,13 +297,33 @@ class TestValidateInputs:
         )
         assert result.returncode == 64
 
-    def test_bundle_kind_allows_headers_depth(self, tmp_path: Path) -> None:
+    def test_bundle_kind_rejects_headers_depth(self, tmp_path: Path) -> None:
+        # A bundle's old-library operand is always raw binaries, never a
+        # pre-dumped .abi.json snapshot with historical header data baked
+        # in -- at depth: headers, both sides would be freshly parsed
+        # against the SAME current checkout's headers (this Action has no
+        # per-baseline-version header staging), silently missing any
+        # header-only change between baseline and candidate (Codex review).
         result = _run(
             VALIDATE_SH,
             {
                 **_BASE_IDENTITY,
                 "INPUT_KIND": "bundle",
                 "INPUT_REQUESTED_DEPTH": "headers",
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_bundle_kind_allows_binary_depth(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_REQUESTED_DEPTH": "binary",
                 "INPUT_BASELINE_PATH": "./b",
                 "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
             },
@@ -440,6 +460,35 @@ class TestFinalizeAugmentMode:
         report = json.loads((tmp_path / outputs["report-path"]).read_text())
         assert report["check_id"] == f"libpvxs@{PROFILE}#accepted-main@headers"
         assert report["severity"]["exit_code"] == 4
+
+    def test_report_filename_stays_under_name_max_for_a_long_target_id(
+        self, tmp_path: Path
+    ) -> None:
+        # _IDENTIFIER_RE (project_targets.py) only constrains the charset a
+        # target/bundle id may use, not its length -- a long but otherwise
+        # valid id previously pushed the readable slug portion of the report
+        # filename past a typical filesystem's 255-byte NAME_MAX once the
+        # fixed "check-target-report-"/"-<digest>.json" scaffolding was added
+        # on top, so report_envelope.py couldn't create the file at all
+        # (Codex review).
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(report_path, verdict="BREAKING", exit_code=4)
+        long_name = "x" * 210
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_NAME": long_name,
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 4, result.stderr
+        report_filename = outputs["report-path"]
+        assert len(report_filename.encode("utf-8")) <= 255, report_filename
+        assert (tmp_path / report_filename).is_file()
 
     def test_deferred_gate_mode_never_fails_job_but_keeps_real_severity(
         self, tmp_path: Path

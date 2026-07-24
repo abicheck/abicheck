@@ -377,6 +377,28 @@ def _generate_bundle_checks(
     for check in bundle.checks:
         profile_ids, explicit = _resolve_profile_ids(check, config)
         for profile_id in profile_ids:
+            # abicheck/bundle.py's build_bundle_snapshot() skips non-ELF
+            # inputs outright, so a bundle check against a declared
+            # Windows/macOS profile can never resolve (Codex review). An
+            # EXPLICIT profiles: entry naming a non-ELF profile is already
+            # rejected as a config-validation error by
+            # project_targets.validate_project_targets -- this is a
+            # defensive backstop for a caller that invokes
+            # generate_run_plan() directly without validating first. The
+            # IMPLICIT sweep case (no profiles: list -- "every contract
+            # profile") is not a misconfiguration to error on, though: not
+            # every profile is expected to support bundle checks, the same
+            # way a profile that simply doesn't build a given target is
+            # silently skipped below rather than flagged.
+            profile = config.profiles.get(profile_id)
+            if profile is not None and profile.os and profile.os != "linux":
+                if explicit:
+                    report.errors.append(
+                        f"bundle {bundle.id!r}: profile {profile_id!r} has "
+                        f"os: {profile.os!r}, but a bundle check's backend is "
+                        "ELF-only (named explicitly in this check's profiles:)"
+                    )
+                continue
             bo = build_outputs.get(profile_id)
             if bo is None:
                 # See the identical branch in _generate_target_checks: a

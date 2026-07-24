@@ -85,7 +85,20 @@ _IDENTITY_DIGEST="$(
   printf '%s\x1f%s\x1f%s\x1f%s' "$NAME" "$PROFILE" "$BASELINE_CHANNEL" "$REQUESTED_DEPTH" \
     | python3 -c 'import hashlib, sys; sys.stdout.write(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:12])'
 )"
-REPORT_OUT="check-target-report-$(_slug "$NAME")-$(_slug "$PROFILE")-$(_slug "$BASELINE_CHANNEL")-$(_slug "$REQUESTED_DEPTH")-${_IDENTITY_DIGEST}.json"
+# A valid but long identity component (e.g. a long target/bundle id --
+# _IDENTIFIER_RE in project_targets.py only constrains the charset, not the
+# length) can push the readable slug portion past a filesystem's 255-byte
+# NAME_MAX once the fixed "check-target-report-"/"-<digest>.json" scaffolding
+# is added on top -- report_envelope.py then can't create the file at all,
+# turning a legitimate long id into an orchestration failure (Codex review).
+# Cap the readable slug so the final filename stays comfortably under 255
+# bytes regardless of how long any single identity component is; the digest
+# suffix (already collision-resistant over the ORIGINAL, untruncated
+# identity tuple, per the comment above) still keeps two long ids that
+# happen to share this truncated prefix distinguishable.
+_REPORT_SLUG="$(_slug "$NAME")-$(_slug "$PROFILE")-$(_slug "$BASELINE_CHANNEL")-$(_slug "$REQUESTED_DEPTH")"
+_REPORT_SLUG="${_REPORT_SLUG:0:150}"
+REPORT_OUT="check-target-report-${_REPORT_SLUG}-${_IDENTITY_DIGEST}.json"
 
 # ── Decide which report_envelope.py mode this check needs ──────────────────
 MODE=""

@@ -154,12 +154,16 @@ per-target ones (S14 bundle-scoped analysis, e.g. soname/provider-set
 checks across the whole release), and that cell needs its own
 baseline-channel/depth/gate policy independent of its member targets'.
 **Two restrictions that don't apply to a target check:** `depth` must be
-`binary` or `headers` (never `build`/`source` — a bundle check always
+`binary` (never `headers`/`build`/`source` — a bundle check always
 compares directories, which the CLI's per-library release fan-out never
-collects inline build/source evidence for), and `channel` may not be
-`"none"` (a bundle's candidate is always a staged directory of member
-binaries, which the root Action's `scan` mode — the no-baseline routing —
-rejects outright). Both are rejected at validation time.
+collects inline build/source evidence for; `headers` is additionally
+unsafe because a bundle's baseline is always raw binaries with no
+historical header snapshot, so both sides would be parsed against the
+same current checkout's headers, silently missing a header-only change),
+and `channel` may not be `"none"` (a bundle's candidate is always a staged
+directory of member binaries, which the root Action's `scan` mode — the
+no-baseline routing — rejects outright). Both are rejected at validation
+time.
 
 ## `profiles:`
 

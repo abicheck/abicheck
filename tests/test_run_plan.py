@@ -335,6 +335,42 @@ class TestBundleChecks:
         assert not plan.checks
         assert any("linux" in e for e in report.errors)
 
+    def test_bundle_check_silently_skips_a_non_elf_profile_implicit_sweep(
+        self,
+    ) -> None:
+        """abicheck/bundle.py's build_bundle_snapshot() skips non-ELF
+        inputs outright -- an implicit sweep across every contract profile
+        must silently skip a declared Windows/macOS profile the same way
+        it already skips a profile that simply doesn't build a bundle's
+        members, not treat it as a coverage-gap error (Codex review)."""
+        raw = json.loads(json.dumps(self._RAW))
+        raw["profiles"]["windows"] = {"contract": True, "os": "windows"}
+        config = _parsed(raw)
+        plan, report = generate_run_plan(
+            config,
+            {
+                "linux": _bo("libpvxs", "libpvxsIoc"),
+                "windows": _bo("libpvxs", "libpvxsIoc"),
+            },
+        )
+        assert report.ok, report.errors
+        [check] = plan.checks
+        assert check.profile_id == "linux"
+
+    def test_bundle_check_explicitly_scoped_to_a_non_elf_profile_is_an_error(
+        self,
+    ) -> None:
+        raw = json.loads(json.dumps(self._RAW))
+        raw["profiles"]["windows"] = {"contract": True, "os": "windows"}
+        raw["bundles"]["pvxs-release"]["checks"][0]["profiles"] = ["windows"]
+        config = _parsed(raw)
+        plan, report = generate_run_plan(
+            config, {"windows": _bo("libpvxs", "libpvxsIoc")}
+        )
+        assert not report.ok
+        assert not plan.checks
+        assert any("os: 'windows'" in e for e in report.errors)
+
 
 class TestDuplicateCheckIdIsRejected:
     """check_id (target@profile#baseline_channel@depth) is the id
