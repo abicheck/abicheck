@@ -923,3 +923,79 @@ def test_cpp20_detector_still_detects_construct_in_live_if_true_arm(tmp_path):
     assert _detect_cpp20_headers(headers) is True
     reqs = _find_cpp20_requirements(headers)
     assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
+def test_cpp20_detector_ignores_negated_defined_cpp_feature_guard_else(tmp_path):
+    """Regression (Codex review, eighteenth round): ``#if
+    !defined(__cpp_x)`` is the ``defined``-operator spelling of
+    ``#ifndef __cpp_x`` and needs the same inverted polarity -- the
+    guarded arm (feature absent) is the pre-C++20-safe fallback and must
+    be trusted as live, while the ``#else`` (feature present) is circular
+    and must be masked. Without a dedicated check, this spelling still
+    matched the general ``__cplusplus``/``__cpp_*`` guard pattern (it
+    contains ``__cpp_x`` too) and got the *positive*-form polarity
+    instead -- masking the safe fallback and trusting the circular
+    ``#else`` -- forcing ``-std=gnu++20`` purely because the ``#else``
+    content was there, which could then break the live arm's own use of
+    the same word as an ordinary identifier under the wrongly-forced
+    dialect."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if !defined(__cpp_consteval)\n"
+        "int consteval;\n"
+        "#else\n"
+        "consteval int f();\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_detects_construct_behind_negated_defined_cpp_feature_guard(
+    tmp_path,
+):
+    """Companion: a genuine C++20 construct in the *live*
+    ``#if !defined(__cpp_x)`` arm itself (no ``#else`` at all) must still
+    be detected."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if !defined(__cpp_consteval)\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
+def test_cpp20_detector_ignores_negated_defined_space_cpp_feature_guard_else(
+    tmp_path,
+):
+    """Companion: the no-parens ``#if !defined __cpp_x`` spelling (the
+    ``defined`` operator doesn't require parens) needs the same inverted
+    polarity as the parenthesized form."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if !defined __cpp_consteval\n"
+        "int consteval;\n"
+        "#else\n"
+        "consteval int f();\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_settles_on_elif_negated_defined_cpp_feature_guard(tmp_path):
+    """Companion: the ``#elif !defined(__cpp_x)`` spelling, reached as a
+    later arm in a chain that opens on something else, must settle the
+    chain the same way -- masking the ``#else`` -- rather than falling
+    into the general elif-guard branch's positive-form polarity."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint a;\n"
+        "#elif !defined(__cpp_consteval)\n"
+        "int consteval;\n"
+        "#else\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False

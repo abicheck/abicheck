@@ -1173,6 +1173,34 @@ _PP_IFNDEF_CPLUSPLUS_PATTERN = re.compile(rb"^[ \t]*#[ \t]*ifndef[ \t]+__cpluspl
 _PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN = re.compile(
     rb"^[ \t]*#[ \t]*ifndef[ \t]+__cpp_\w+\b"
 )
+# ``#if !defined(__cpp_x)``/``#if !defined __cpp_x`` (Codex review,
+# eighteenth round) is just the ``defined``-operator spelling of
+# ``#ifndef __cpp_x`` — same negated-mirror polarity, same reasoning as
+# the comment above. Without this, the general ``__cplusplus``/``__cpp_*``
+# guard pattern still matches it (it contains ``__cpp_x`` too) and applies
+# the *positive*-form polarity instead: masking the guarded arm (the
+# feature-absent, portable fallback) and trusting the ``#else`` (the
+# circular feature-present content) -- backwards, exactly the same bug the
+# ``#ifndef`` spelling above was fixed for. Anchored ``$`` so only a bare
+# negated feature-test counts as the whole condition, matching how the
+# other single-purpose guards here are deliberately narrow rather than a
+# full expression parser. Checked ahead of the general branch below, the
+# same way the ``#ifndef`` spelling doesn't need to be (it can never match
+# the general branch's ``#if``-only pattern), since this spelling starts
+# with ``#if`` and would otherwise be caught by it first.
+_PP_NOT_DEFINED_CPP_FEATURE_TAIL = (
+    rb"![ \t]*defined[ \t]*(?:\([ \t]*__cpp_\w+[ \t]*\)|[ \t]+__cpp_\w+)"
+)
+_PP_IF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*if[ \t]+" + _PP_NOT_DEFINED_CPP_FEATURE_TAIL + rb"[ \t]*$"
+)
+# Same ``#elif`` companion pattern this file already adds for every other
+# inverted-polarity ``#if`` spelling (the less-than-C++20 guard above),
+# for a chain that opens on something else and reaches the negated
+# feature-test guard as a later arm.
+_PP_ELIF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*elif[ \t]+" + _PP_NOT_DEFINED_CPP_FEATURE_TAIL + rb"[ \t]*$"
+)
 
 
 def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
@@ -1283,6 +1311,14 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 stack.append([True, False, True])
                 out.append(b"")
                 continue
+            if _PP_IF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN.match(line):
+                # Same inverted polarity as #ifndef __cpp_x below --
+                # checked ahead of the general branch since this spelling
+                # (unlike #ifndef) starts with "#if" and would otherwise
+                # be caught there first.
+                stack.append([True, False, True])
+                out.append(b"")
+                continue
             if (
                 _PP_IF_ZERO_PATTERN.match(line)
                 or _PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN.match(line)
@@ -1334,6 +1370,14 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
             if _PP_ELIF_CPLUSPLUS_LESS_THAN_PATTERN.match(line):
                 # Same inverted polarity as the #if-opening case, checked
                 # ahead of the general branch below since it would
+                # otherwise also match.
+                frame[1] = frame[2]
+                frame[2] = True
+                out.append(b"" if frame[1] else line)
+                continue
+            if _PP_ELIF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN.match(line):
+                # Same inverted polarity as #if !defined(__cpp_x) above,
+                # checked ahead of the general branch since it would
                 # otherwise also match.
                 frame[1] = frame[2]
                 frame[2] = True
