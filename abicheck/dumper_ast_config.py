@@ -464,7 +464,18 @@ def _has_custom_constrained_auto_param(lookahead: bytes) -> bool:
     ``(``/``,``); a leading cv-qualifier before the identifier
     (``const MyConcept auto& x``) is a known, deliberately narrow gap —
     not attempted here, matching this file's incremental-per-reported-case
-    scope rather than a full parameter-declaration parser."""
+    scope rather than a full parameter-declaration parser.
+
+    Unlike :func:`_has_abbreviated_unconstrained_auto_param`, a lambda's
+    parameter list is deliberately *not* excluded here (Codex review):
+    a *bare* ``auto`` lambda parameter (``[](auto x) {}``) has been valid
+    since C++14, but a lambda parameter *constrained* by a concept
+    (``[](MyConcept auto x) {}``) is exactly as C++20-only as the
+    equivalent ordinary-function form — lambdas' call operators gained
+    the same abbreviated-function-template treatment in C++20. Excluding
+    lambda parameter lists here would silently miss the only C++20 signal
+    in a header whose lone use of the feature is a constrained generic
+    lambda."""
     for m in re.finditer(rb"\bauto\b", lookahead):
         prefix = _strip_trailing_declarator_specifiers(lookahead[: m.start()])
         prefix = _strip_trailing_attributes(prefix)
@@ -482,9 +493,7 @@ def _has_custom_constrained_auto_param(lookahead: bytes) -> bool:
                 continue
         else:
             continue
-        if not _is_lambda_param_list_open_paren(
-            lookahead, open_pos
-        ) and not _is_decltype_open_paren(lookahead, open_pos):
+        if not _is_decltype_open_paren(lookahead, open_pos):
             return True
     return False
 

@@ -1152,6 +1152,33 @@ def test_cpp20_detector_detects_qualified_custom_concept_auto_param(tmp_path):
     assert any(r.reason == "custom-constrained-auto-parameter" for r in reqs)
 
 
+def test_cpp20_detector_detects_custom_concept_constrained_lambda_param(tmp_path):
+    """Regression (Codex review, twelfth round): a lambda parameter
+    constrained by a project-defined concept (``[](MyConcept auto x)
+    {}``) was wrongly excluded the same way a *bare* ``auto`` lambda
+    parameter is -- but only the bare form has been valid since C++14; a
+    *constrained* lambda parameter is exactly as C++20-only as the
+    equivalent ordinary-function form. A header whose only C++20 signal
+    is a constrained generic lambda (the concept itself declared in an
+    included header) must still be detected."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        '#include "concepts.hpp"\n'
+        "inline void f() { auto l = [](MyConcept auto x) {}; }\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "custom-constrained-auto-parameter" for r in reqs)
+
+
+def test_cpp20_detector_ignores_bare_auto_lambda_param(tmp_path):
+    """Companion: a *bare* (unconstrained) ``auto`` lambda parameter --
+    valid since C++14 -- must still not be treated as a C++20 signal."""
+    headers = _write(tmp_path, "a.h", "inline void f() { auto l = [](auto x) {}; }\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_ignores_type_name_before_auto_variable(tmp_path):
     """Companion: an identifier followed by ``auto`` must be at a
     parameter's start position (directly after ``(``/``,``) to count — an
