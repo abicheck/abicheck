@@ -958,6 +958,21 @@ _PP_LITERAL_TRUE = rb"(?:\([ \t]*(?:1|true)[ \t]*\)|(?:1|true))"
 _PP_IF_ZERO_PATTERN = re.compile(
     rb"^[ \t]*#[ \t]*if[ \t]+" + _PP_LITERAL_ZERO + rb"[ \t]*$"
 )
+# ``#if 1``/``#if true`` (Codex review, tenth round): an unconditionally
+# *true* opening arm was never recognized as starting a trackable chain at
+# all (only ``#if 0``/feature-guard openings were), so a dead ``#else``/
+# ``#elif`` sibling of a genuinely-true ``#if 1`` fell through to plain
+# pass-through scanning right along with the live arm -- a real C++20
+# construct sitting only in that dead sibling would then force
+# ``-std=gnu++20`` onto a header whose *active* code never needed it, and
+# could break that active code outright if it uses a soon-to-be-reserved
+# word (``consteval``, ``concept``, ...) as an ordinary identifier. Track
+# it like ``#elif 1``/``#elif true``: the opening arm itself stays
+# unmasked (it's live), but the chain is immediately ``settled`` so every
+# later sibling arm is masked as unreachable.
+_PP_IF_TRUE_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*if[ \t]+" + _PP_LITERAL_TRUE + rb"[ \t]*$"
+)
 _PP_ELSE_PATTERN = re.compile(rb"^[ \t]*#[ \t]*else\b")
 _PP_ELIF_PATTERN = re.compile(rb"^[ \t]*#[ \t]*elif\b")
 _PP_ELIF_ZERO_PATTERN = re.compile(
@@ -1042,7 +1057,15 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
     every later sibling arm in that same chain unconditionally
     *unreachable* — masking must resume for them too (Codex review, third
     round), not stay lifted for the rest of the chain the way it correctly
-    does after a merely-unevaluated condition.
+    does after a merely-unevaluated condition. The same applies when the
+    chain *opens* on an unconditionally-true literal (``#if 1``/``#if
+    true``, Codex review, tenth round): that arm is scanned normally like
+    any other unmasked arm, but the chain is entered and immediately
+    settled so a dead ``#else``/``#elif`` sibling doesn't fall through to
+    plain pass-through scanning — a real C++20 construct sitting only in
+    that dead sibling would otherwise force ``-std=gnu++20`` onto a header
+    whose live code never needed it, breaking any active use of a
+    soon-to-be-reserved word as an ordinary identifier.
 
     An ``#if``/``#elif`` guarded on ``__cplusplus`` or a standard
     feature-test macro (``__cpp_concepts``, ``__cpp_consteval``, ...) is
@@ -1120,6 +1143,13 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
             nested = 0
             masking = True
             settled = False
+            out.append(b"")
+            continue
+        if _PP_IF_TRUE_PATTERN.match(line):
+            in_chain = True
+            nested = 0
+            masking = False
+            settled = True
             out.append(b"")
             continue
         out.append(line)

@@ -1769,6 +1769,36 @@ def test_cpp20_detector_settles_on_elif_defined_space_cplusplus(tmp_path):
     assert not any(r.reason == "consteval-declaration" for r in reqs)
 
 
+def test_cpp20_detector_ignores_dead_else_of_if_true(tmp_path):
+    """Regression (Codex review, tenth round): ``#if 1``/``#if true`` was
+    never recognized as opening a trackable chain at all, so a dead
+    ``#else``/``#elif`` sibling fell through to plain pass-through
+    scanning right along with the live arm. A genuine C++20 construct
+    sitting only in that dead sibling must not force ``-std=gnu++20``
+    onto a header whose live code never needed it -- especially when the
+    live arm itself uses the same word as an ordinary identifier, which
+    would then hard-fail to parse under the wrongly-forced dialect."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 1\nint consteval_var;\n#else\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_still_detects_construct_in_live_if_true_arm(tmp_path):
+    """Companion: a genuine C++20 construct in the *live* ``#if 1`` arm
+    itself must still be detected -- only dead sibling arms are masked."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 1\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
 def test_cpp20_detector_detects_custom_concept_constrained_auto_param(tmp_path):
     """Regression (Codex review): an abbreviated function parameter
     constrained by a *project-defined* concept (``void f(MyConcept auto
