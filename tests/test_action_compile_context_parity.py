@@ -157,6 +157,34 @@ def _run_region(
     return out.stdout.splitlines(), out.stderr
 
 
+def _run_region_raw(
+    mode_marker: str,
+    env_extra: dict[str, str],
+    start_marker: str = _COMPILE_CONTEXT_START,
+) -> subprocess.CompletedProcess[str]:
+    """Like :func:`_run_region`, but ``check=False`` and returns the raw
+    result -- for a region that's now expected to ``exit 1``, where
+    ``check=True`` would raise before the caller could inspect anything."""
+    harness = (
+        'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+        + _is_release_style_operand_source()
+        + "\nCMD=()\n"
+    )
+    script = (
+        harness
+        + _compile_context_region(mode_marker, start_marker)
+        + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
+    )
+    env = {**os.environ, **env_extra}
+    return subprocess.run(
+        [_bash_executable(), "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+
 class TestCompileContextForwardingParity:
     """dump/compare/scan must forward the identical flag set."""
 
@@ -217,35 +245,35 @@ class TestCompileContextForwardingParity:
         assert "--sysroot" not in cmd
         assert "--nostdinc" not in cmd
 
-    def test_compare_skips_compile_context_for_release_style_operand(
+    def test_compare_fails_loud_for_compile_context_against_release_style_operand(
         self,
     ) -> None:
         """Regression (Codex review): the CLI hard-rejects these flags for
         directory/package operands (a UsageError, exit 64) since the
         per-library release fan-out never threads a CompileContext to each
-        pair's header dump — forwarding them unconditionally turned a
-        working release comparison into a hard failure the moment any of
-        these Action inputs were configured. A directory operand must skip
-        forwarding and warn instead."""
+        pair's header dump. A prior fix gated them to the single-pair path
+        but only warned and continued for a directory operand — silently
+        running the comparison with headers parsed under the wrong
+        macros/sysroot/frontend instead of the intended cross-compile
+        context. Must fail loud instead (a second Codex round), matching
+        the evidence-flags guard's already-established treatment of the
+        same "explicitly-configured input the fan-out can't honor" shape."""
         env = {
             **_FULL_ENV,
             "INPUT_OLD_LIBRARY": str(RUN_SH.parent),  # any real directory
             "INPUT_NEW_LIBRARY": "new.so",
         }
-        cmd, stderr = _run_region(
+        result = _run_region_raw(
             _COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START
         )
-        assert "--ast-frontend" not in cmd
-        assert "--gcc-path" not in cmd
-        assert "--sysroot" not in cmd
-        assert "--nostdinc" not in cmd
-        assert "not applied to directory/package" in stderr
+        assert result.returncode != 0
+        assert "not support" in result.stdout
 
-    def test_compare_release_style_no_warning_when_context_unset(self) -> None:
+    def test_compare_release_style_succeeds_when_context_unset(self) -> None:
         """Companion: a plain directory/package compare with no compile-
-        context inputs configured must not emit the warning at all (only
-        when a flag was actually going to be dropped)."""
-        _, stderr = _run_region(
+        context inputs configured must still succeed (only fails when a
+        flag was actually configured and would be dropped)."""
+        cmd, stderr = _run_region(
             _COMPARE_MODE_MARKER,
             {
                 "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
@@ -253,4 +281,4 @@ class TestCompileContextForwardingParity:
             },
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        assert "not applied to directory/package" not in stderr
+        assert "not support" not in stderr

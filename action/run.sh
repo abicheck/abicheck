@@ -323,18 +323,23 @@ elif [[ "$MODE" == "compare" ]]; then
   # The L2 compile-context flags (--ast-frontend/--gcc-*/--sysroot/
   # --nostdinc) are rejected outright by the CLI (a UsageError, exit 64)
   # for directory/package operands — the per-library release fan-out
-  # doesn't thread a CompileContext to each pair's header dump (Codex
-  # review: forwarding them unconditionally here turned a working release
-  # comparison into a hard failure the moment any of these Action inputs
-  # were configured). Gate them to the single-pair path, same as the
-  # release-only flags below are gated the other way, and warn instead of
-  # silently dropping a configured context.
+  # doesn't thread a CompileContext to each pair's header dump. Gate them
+  # to the single-pair path, same as the release-only flags below are
+  # gated the other way. Fail loud (::error:: + exit 1) rather than warn
+  # and continue, matching the evidence-flags guard just below (Codex
+  # review): a warning alone lets the comparison run to a green verdict
+  # with headers parsed under the wrong macros/sysroot/frontend, which is
+  # exactly the silent-wrong-result failure mode the evidence-flags guard
+  # was already fixed to avoid for the analogous --depth build/source
+  # case — an explicitly-configured compile-context input deserves the
+  # same treatment as an explicitly-configured evidence input.
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
     if [[ -n "${INPUT_AST_FRONTEND:-}" || -n "${INPUT_GCC_PATH:-}" \
           || -n "${INPUT_GCC_PREFIX:-}" || -n "${INPUT_GCC_OPTIONS:-}" \
           || -n "${INPUT_SYSROOT:-}" || "${INPUT_NOSTDINC:-false}" == "true" ]]; then
-      echo "::warning::ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc are not applied to directory/package (release) comparisons — the per-library fan-out does not thread the L2 compile context to each pair's header dump. Compare the libraries individually to use them." >&2
+      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
+      exit 1
     fi
   else
     add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
