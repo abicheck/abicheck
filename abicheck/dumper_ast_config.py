@@ -1079,13 +1079,43 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
     every *unguarded* pre-C++20 use of ``consteval``/``constinit``/
     ``concept``/``requires`` as an ordinary identifier elsewhere in the
     same header into a reserved-word parse error too.
+
+    A nested ``#if`` inside a *reachable* arm gets the exact same
+    treatment, recursively, via an explicit per-depth stack rather than a
+    flat "opaque nested" counter (Codex review, eleventh round). A flat
+    counter that just tracks depth to find the matching ``#endif`` cannot
+    tell a nested ``#if 0`` compatibility stub from nested live code, so a
+    dead nested construct inside an otherwise-live arm previously leaked
+    into the shadow/requirements scan (or, symmetrically, a live nested
+    construct inside a dead-sibling ancestor was wrongly treated as
+    reachable). Each stack frame independently recognizes zero/true/
+    feature-guard conditions the same way the top level does; a frame
+    whose own condition isn't recognizable stays fully unmasked (pass
+    through, the same conservative default the top level already applies
+    to an unrecognized ``#if``), but any frame with an unreachable
+    *ancestor* is unconditionally unreachable regardless of its own
+    condition.
     """
     lines = content.split(b"\n")
     out: list[bytes] = []
-    in_chain = False  # inside a chain whose first arm was #if 0/#if false
-    nested = 0  # depth of an unrelated #if opened inside the current arm
-    masking = False  # should the current arm's content be blanked
-    settled = False  # a definite #elif 1/true arm already fired this chain
+    # One entry per currently-open #if, innermost last. Each entry is
+    # [recognized, masking, settled]:
+    #   recognized: this level's own condition matched one of the
+    #     zero/true/feature-guard patterns, so its later #elif/#else arms
+    #     are interpreted the same way the top level interprets them.
+    #   masking: the arm *currently open at this level* should be
+    #     blanked, judged purely by this level's own condition (ignoring
+    #     ancestors).
+    #   settled: an unconditionally-true arm already fired at this level,
+    #     so every later sibling arm here is unconditionally unreachable.
+    stack: list[list[bool]] = []
+
+    def unreachable() -> bool:
+        # Unreachable if this level or any ancestor is masking — a dead
+        # ancestor arm makes everything nested inside it dead too,
+        # regardless of the nested content's own condition.
+        return any(frame[1] for frame in stack)
+
     for raw_line in lines:
         # A CRLF source (or a CRLF-normalizing text-mode write, e.g. the
         # test suite's Path.write_text() on Windows) leaves a trailing "\r"
@@ -1094,64 +1124,76 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
         # their "[ \t]*" tail (Windows CI regression). Strip it before
         # matching; harmless on genuine LF input.
         line = raw_line[:-1] if raw_line.endswith(b"\r") else raw_line
-        if in_chain:
-            if nested:
-                if _PP_IF_OPEN_PATTERN.match(line):
-                    nested += 1
-                elif _PP_ENDIF_PATTERN.match(line):
-                    nested -= 1
-                out.append(b"" if masking else line)
+
+        if _PP_IF_OPEN_PATTERN.match(line):
+            if unreachable():
+                # Already inside dead code — this nested chain's own
+                # condition is irrelevant either way; track it only to
+                # find its matching #endif.
+                stack.append([False, True, True])
+                out.append(b"")
                 continue
-            if _PP_IF_OPEN_PATTERN.match(line):
-                nested = 1
-                out.append(b"" if masking else line)
+            if (
+                _PP_IF_ZERO_PATTERN.match(line)
+                or _PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN.match(line)
+                or _PP_IFNDEF_CPLUSPLUS_GUARD_PATTERN.match(line)
+                or (
+                    _PP_IF_CPLUSPLUS_GUARD_PATTERN.match(line)
+                    and not _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+                )
+            ):
+                stack.append([True, True, False])
+                out.append(b"")
                 continue
-            if _PP_ENDIF_PATTERN.match(line):
-                in_chain = False
+            if _PP_IF_TRUE_PATTERN.match(line):
+                stack.append([True, False, True])
+                out.append(b"")
+                continue
+            # Unrecognized condition — same conservative pass-through the
+            # top level always applied to an #if it can't evaluate.
+            stack.append([False, False, False])
+            out.append(line)
+            continue
+
+        if stack and _PP_ENDIF_PATTERN.match(line):
+            stack.pop()
+            out.append(b"" if unreachable() else line)
+            continue
+
+        if stack:
+            frame = stack[-1]
+            ancestors_unreachable = any(f[1] for f in stack[:-1])
+            if ancestors_unreachable:
+                out.append(b"")
+                continue
+            if not frame[0]:
+                # This level's own #if condition was unrecognized — its
+                # #elif/#else arms are never specially interpreted,
+                # exactly like the top level's unrecognized-chain
+                # pass-through.
                 out.append(line)
                 continue
             if _PP_ELIF_ZERO_PATTERN.match(line) or (
                 _PP_ELIF_CPLUSPLUS_GUARD_PATTERN.match(line)
                 and not _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
             ):
-                masking = True
+                frame[1] = True
                 out.append(b"")
                 continue
             if _PP_ELIF_TRUE_PATTERN.match(
                 line
             ) or _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line):
-                masking = settled
-                settled = True
-                out.append(b"" if masking else line)
+                frame[1] = frame[2]
+                frame[2] = True
+                out.append(b"" if frame[1] else line)
                 continue
             if _PP_ELIF_PATTERN.match(line) or _PP_ELSE_PATTERN.match(line):
-                masking = settled
-                out.append(b"" if masking else line)
+                frame[1] = frame[2]
+                out.append(b"" if frame[1] else line)
                 continue
-            out.append(b"" if masking else line)
+            out.append(b"" if frame[1] else line)
             continue
-        if (
-            _PP_IF_ZERO_PATTERN.match(line)
-            or _PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN.match(line)
-            or _PP_IFNDEF_CPLUSPLUS_GUARD_PATTERN.match(line)
-            or (
-                _PP_IF_CPLUSPLUS_GUARD_PATTERN.match(line)
-                and not _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
-            )
-        ):
-            in_chain = True
-            nested = 0
-            masking = True
-            settled = False
-            out.append(b"")
-            continue
-        if _PP_IF_TRUE_PATTERN.match(line):
-            in_chain = True
-            nested = 0
-            masking = False
-            settled = True
-            out.append(b"")
-            continue
+
         out.append(line)
     return b"\n".join(out)
 
