@@ -615,6 +615,33 @@ class TestRunPlanGenerateCli:
         )
         assert result.exit_code == 64
 
+    def test_generate_exits_64_on_duplicate_build_output_profile(
+        self, tmp_path: Path
+    ) -> None:
+        """Two --build-output specs naming the same profile id used to
+        silently overwrite the first with the second (dict assignment); a
+        repeated profile is almost certainly a caller mistake, so it's now
+        a hard usage error instead (Codex review)."""
+        config = _write_config(tmp_path, _LIBRARY_ONLY_RAW)
+        build_dir_1 = _write_build_output(tmp_path, "linux", ["libfoo"])
+        build_dir_2 = tmp_path / "linux-again"
+        build_dir_2.mkdir()
+        result = CliRunner().invoke(
+            main,
+            [
+                "run-plan",
+                "generate",
+                str(config),
+                "--build-output",
+                f"linux={build_dir_1}",
+                "--build-output",
+                f"linux={build_dir_2}",
+            ],
+        )
+        assert result.exit_code == 64
+        assert "linux" in result.output
+        assert "more than once" in result.output
+
     def test_generate_text_format_lists_checks(self, tmp_path: Path) -> None:
         config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
         build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])

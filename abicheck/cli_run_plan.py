@@ -65,6 +65,10 @@ def _parse_build_output_specs(
         profile_id, sep, dir_str = spec.partition("=")
         if not sep or not profile_id or not dir_str:
             raise click.UsageError(f"--build-output must be PROFILE=DIR, got {spec!r}")
+        if profile_id in build_outputs:
+            raise click.UsageError(
+                f"--build-output: profile {profile_id!r} was specified more than once"
+            )
         try:
             build_outputs[profile_id] = load_build_output(dir_str)
         except (FileNotFoundError, ValueError) as exc:

@@ -276,6 +276,21 @@ class CheckSpec:
             # defaulting it to a blocking gate would surprise a minimal
             # `{channel: none, depth: ...}` entry into failing CI.
             gate_mode = "advisory" if channel == NO_BASELINE_CHANNEL else "local"
+        if d.get("profiles") == []:
+            # `_require_str_list` can't distinguish an omitted `profiles:`
+            # key from an explicit `profiles: []` -- both parse to `[]` --
+            # but this field's own semantics (see the dataclass docstring)
+            # treat an empty selector as "every contract profile," so a
+            # config author who wrote `profiles: []` expecting "select
+            # nothing" would silently get the opposite (Codex review).
+            # Reject the explicit-empty spelling outright instead of
+            # reinterpreting it: omit the key for "every profile," or name
+            # at least one profile id.
+            raise ValueError(
+                f"{where}.profiles must not be an explicit empty list -- "
+                "omit the key entirely to run on every contract profile, "
+                "or list at least one profile id"
+            )
         profiles = _require_str_list(d, "profiles", where=where)
         return cls(
             channel=channel,

@@ -922,6 +922,25 @@ def test_check_spec_explicit_gate_mode_overrides_none_channel_default() -> None:
     assert check.gate_mode == "local"
 
 
+def test_check_spec_explicit_empty_profiles_list_raises() -> None:
+    """`profiles: []` is rejected outright rather than silently treated the
+    same as an omitted key -- both parse to `[]` via `_require_str_list`,
+    but an omitted key means "every contract profile" while a config author
+    writing `profiles: []` almost certainly meant "select nothing" (Codex
+    review)."""
+    with pytest.raises(ValueError, match="must not be an explicit empty list"):
+        CheckSpec.from_dict(
+            {"channel": "none", "depth": "headers", "profiles": []}, where="x"
+        )
+
+
+def test_check_spec_omitted_profiles_still_defaults_to_empty_list() -> None:
+    """Control case: omitting the key entirely is still valid and means
+    "every contract profile" (the sweep, resolved downstream in run_plan.py)."""
+    check = CheckSpec.from_dict({"channel": "none", "depth": "headers"}, where="x")
+    assert check.profiles == []
+
+
 def test_check_spec_to_dict_includes_profiles_when_set() -> None:
     check = CheckSpec(
         channel="accepted-main", depth="headers", profiles=["linux-x86_64"]
