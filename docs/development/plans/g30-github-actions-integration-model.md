@@ -1756,6 +1756,24 @@ the pack. Fixed by broadening the condition to
 Covered by a new
 `test_build_output_download_also_runs_for_no_baseline_wrapper_or_clang_plugin_evidence`.
 
+**A seventh round (Codex, against `9982fb3`) caught a `$GITHUB_OUTPUT`
+injection risk in the candidate resolver:** every resolved path (`new-library`,
+`consumer-binary`, a bundle member's staged copy) was written as a bare
+`key=value` line straight to `$GITHUB_OUTPUT`, which GitHub documents as
+line-oriented. A candidate artifact filename containing an embedded newline
+or carriage return could therefore inject or override a later output line
+(e.g. a spoofed `consumer-binary=`) before `check-target` ever runs,
+bypassing every confinement/ambiguity check the resolver already performs.
+Fixed by rejecting any `resolve()` match containing `\n`/`\r` outright
+(`::error::` + exit 1, matching this same function's existing "fail loud
+instead of guessing" posture for escaping/ambiguous matches) rather than
+switching to the safer multiline delimiter output form — simpler, and a
+legitimate build artifact has no reason to contain one. Verified by hand
+(a synthetic `libfoo\nconsumer-binary=evil.so` candidate file, confirmed
+rejected before anything reaches `$GITHUB_OUTPUT`) and covered by two new
+tests, `test_newline_bearing_match_is_rejected_end_to_end` and
+`test_carriage_return_bearing_match_is_also_rejected`.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —

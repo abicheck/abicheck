@@ -469,6 +469,18 @@ jobs:
               if escaped:
                   print(f'::error::{label}: pattern {pattern!r} matched {escaped} outside {root}/ -- absolute or ../-escaping patterns are not allowed', file=sys.stderr)
                   sys.exit(1)
+              # A resolved path is about to be written as a bare key=value
+              # line to \$GITHUB_OUTPUT, which GitHub documents as
+              # line-oriented -- an embedded newline/carriage-return in a
+              # candidate artifact's filename could inject or override a
+              # later output line (e.g. a spoofed consumer-binary=), bypassing
+              # every check above (Codex review). Reject outright rather than
+              # switching to the multiline delimiter form, since a legitimate
+              # build artifact has no reason to contain one.
+              newlines = [m for m in matches if '\\n' in m or '\\r' in m]
+              if newlines:
+                  print(f'::error::{label}: pattern {pattern!r} matched a path containing a newline character -- rejected to avoid corrupting \$GITHUB_OUTPUT', file=sys.stderr)
+                  sys.exit(1)
               if len(matches) > 1:
                   # A pattern like '*.so*' commonly matches both a linker
                   # symlink and the real versioned DSO -- silently picking
