@@ -353,7 +353,6 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `header_backend` | `str` | `'auto'` |
 | `compile` | `CompileContext \| None` | `None` |
 | `notify` | `Callable[[str], None] \| None` | `None` |
-| `_skip_header_graph_attach` | `bool` | `False` |
 
 **Returns:** `AbiSnapshot`
 

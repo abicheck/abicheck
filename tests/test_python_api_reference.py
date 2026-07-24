@@ -78,6 +78,17 @@ def test_keyword_only_parameters_are_marked_in_generated_reference():
     assert "`old`" not in after
 
 
+def test_private_underscore_parameters_are_excluded():
+    # run_dump's `_skip_header_graph_attach` is documented in its own
+    # docstring as a private, internal-only knob (not public API, not
+    # CLI-reachable) used solely by run_dump's own hybrid-backend recursion
+    # -- publishing it on the advertised public-API reference would invite
+    # callers to depend on an implementation detail.
+    gen = _load_gen()
+    content = gen.OUT_PATH.read_text(encoding="utf-8")
+    assert "_skip_header_graph_attach" not in content
+
+
 def test_generated_reference_has_marker_comment():
     gen = _load_gen()
     text = gen.OUT_PATH.read_text(encoding="utf-8")

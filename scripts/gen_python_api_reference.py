@@ -90,6 +90,14 @@ def _function_section(name: str, fn: object) -> list[str]:
             inspect.Parameter.VAR_KEYWORD,
         ):
             continue
+        # A leading underscore (e.g. run_dump's `_skip_header_graph_attach`)
+        # is this codebase's convention for "private, internal-only knob,
+        # not public API" (see that parameter's own docstring) -- publishing
+        # it on the advertised public-API reference invites callers to
+        # depend on an implementation detail we'd otherwise be free to
+        # change or remove.
+        if param_name.startswith("_"):
+            continue
         # Mirror Python's own `*` separator: everything below can only be
         # passed by keyword, so a caller who follows the table's row order
         # as positional args (e.g. compare_snapshots(old, new, suppression,

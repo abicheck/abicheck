@@ -20,14 +20,76 @@ guard the generator itself needs."""
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
+import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 
-pytest.importorskip("mcp")
+
+def _mcp_extra_installed() -> bool:
+    try:
+        importlib.metadata.version("mcp")
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    return True
+
+
+if not _mcp_extra_installed():
+    pytest.skip("mcp extra not installed", allow_module_level=True)
+
+_TAINTED_MODULE_NAMES = ("mcp", "mcp.server", "mcp.server.fastmcp", "abicheck.mcp_server")
+
+
+@pytest.fixture(autouse=True)
+def _real_abicheck_mcp_server():
+    """tests/test_mcp_server_unit.py and tests/test_mcp_server_coverage.py
+    install a MagicMock under sys.modules["mcp"] via setdefault and never
+    restore it (unlike test_mcp_server_coverage_gaps.py/test_cov95_misc.py,
+    which carefully save/restore sys.modules around the same trick). If
+    either module already ran in this pytest process, `abicheck.mcp_server`
+    is cached with a mocked FastMCP instance whose tool registry is empty --
+    silently breaking this file's assumption that it exercises the real,
+    live MCP server (reproduced with `pytest tests/test_mcp_server_unit.py
+    tests/test_mcp_reference.py`).
+
+    This must run at test-execution time, not import/collection time: pytest
+    collects every file before running any test, so a module-level purge
+    here would fire during our own collection -- before test_mcp_server_unit.py's
+    tests actually run -- and rip the mock out from under them instead.
+    """
+    mocked = isinstance(sys.modules.get("mcp"), MagicMock)
+    saved = {name: sys.modules.get(name) for name in _TAINTED_MODULE_NAMES}
+    abicheck_pkg = sys.modules.get("abicheck")
+    had_attr = abicheck_pkg is not None and hasattr(abicheck_pkg, "mcp_server")
+    saved_attr = getattr(abicheck_pkg, "mcp_server", None)
+    if mocked:
+        for name in _TAINTED_MODULE_NAMES:
+            sys.modules.pop(name, None)
+        # Popping "abicheck.mcp_server" from sys.modules isn't enough on its
+        # own: Python's `from abicheck import mcp_server` first tries
+        # `getattr(abicheck, "mcp_server")`, and the earlier (mocked) import
+        # already left that attribute set on the cached `abicheck` package
+        # object -- so without this, `from abicheck import mcp_server` below
+        # (including inside gen_mcp_reference.py's own render()) would keep
+        # resolving to the stale mocked module instead of a fresh real one.
+        if had_attr:
+            delattr(abicheck_pkg, "mcp_server")
+    try:
+        yield
+    finally:
+        if mocked:
+            for name, mod in saved.items():
+                if mod is not None:
+                    sys.modules[name] = mod
+                else:
+                    sys.modules.pop(name, None)
+            if had_attr:
+                abicheck_pkg.mcp_server = saved_attr
 
 
 def _load_gen():
