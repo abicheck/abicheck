@@ -290,7 +290,15 @@ jobs:
       compatibility-verdict: ${{ steps.run.outputs.compatibility-verdict }}
       policy-gate-decision: ${{ steps.run.outputs.policy-gate-decision }}
       report-path: ${{ steps.run.outputs.report-path }}
-      report-artifact-name: '${{ inputs.report-artifact-prefix }}${{ steps.sanitized.outputs.id }}'
+      # The "Sanitize check-id for artifact name" step only runs when
+      # report-path is non-empty (nothing to upload otherwise), so
+      # steps.sanitized.outputs.id is empty in that case too -- a bare
+      # unconditional concatenation would then leave this output as just
+      # the prefix, naming an artifact that was never uploaded (CodeRabbit
+      # review). Empty out the whole output instead when there's no report.
+      report-artifact-name: >-
+        ${{ steps.run.outputs.report-path != '' &&
+            format('{0}{1}', inputs.report-artifact-prefix, steps.sanitized.outputs.id) || '' }}
     steps:
       - uses: actions/checkout@v6
         with:
