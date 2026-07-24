@@ -382,13 +382,32 @@ jobs:
           path: 'baseline-sets/${{ matrix.baseline_channel }}'
         continue-on-error: true
 
+      # Forwarded to check-target's own candidate-build-output input, which
+      # forwards it to resolve-baseline's incompatible_evidence check --
+      # without it, a baseline produced by a different evidence-producer/
+      # tool-version than this run's candidate can be treated as resolved
+      # and compared anyway (Codex review). continue-on-error here matches
+      # the two downloads above: the "Resolve candidate binary/binaries"
+      # step below checks the file actually landed before referencing it,
+      # the same way it already resolves new-library from candidate/.
+      - name: Download build-output artifact
+        if: matrix.baseline_channel != 'none'
+        uses: actions/download-artifact@v8
+        with:
+          name: '${{ inputs.build-output-artifact-prefix }}${{ matrix.profile_id }}'
+          path: build-output
+        continue-on-error: true
+
       # Resolves this cell's `new-library` from the downloaded `candidate/`
       # tree: a single glob match for kind: target (the redirected library's
       # own binary_pattern for app-consumer/plugin-contract), or a staged
       # directory of member binaries for kind: bundle. Uses Python's `glob`
       # rather than bash globbing so `binary_pattern`/`member_binary_patterns`
       # can use `**` recursive patterns without depending on `shopt -s
-      # globstar` semantics matching across shells/runners.
+      # globstar` semantics matching across shells/runners. Also emits
+      # `build-output=` (the downloaded build-output.json path, or empty if
+      # the download above didn't land one) for the candidate-build-output
+      # forward.
       - name: Resolve candidate binary/binaries
         id: candidate
         shell: bash
@@ -469,6 +488,9 @@ jobs:
                   print(f'consumer-binary={consumer_match}')
               else:
                   print('consumer-binary=')
+
+          build_output_path = 'build-output/build-output.json'
+          print(f'build-output={build_output_path}' if os.path.isfile(build_output_path) else 'build-output=')
           " >> "$GITHUB_OUTPUT"
 
       # Deliberately no continue-on-error here: check-target's own finalize
@@ -494,6 +516,8 @@ jobs:
           profile: ${{ matrix.profile_id }}
           baseline-channel: ${{ matrix.baseline_channel }}
           baseline-path: 'baseline-sets/${{ matrix.baseline_channel }}'
+          baseline-required: ${{ matrix.required }}
+          candidate-build-output: ${{ steps.candidate.outputs.build-output }}
           requested-depth: ${{ matrix.requested_depth }}
           gate-mode: ${{ matrix.gate_mode }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}

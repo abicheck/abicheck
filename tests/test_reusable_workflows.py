@@ -352,6 +352,103 @@ class TestCheckProjectArtifactNaming:
         )
 
 
+class TestBaselineRequiredAndCandidateBuildOutputForwarded:
+    """check-single.yml already forwards baseline-required/
+    candidate-build-output to check-target -- check-project.yml's own
+    Run check-target step didn't (Codex review). Without baseline-required,
+    a bootstrap check (required: false) reports a hard not_found
+    operational error instead of the intended advisory bootstrap pass.
+    Without candidate-build-output, resolve-baseline's
+    incompatible_evidence check never runs, so a baseline produced by a
+    different evidence-producer/tool-version can be silently compared
+    against."""
+
+    def test_run_check_target_forwards_baseline_required_from_matrix(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["with"]["baseline-required"] == "${{ matrix.required }}"
+
+    def test_run_check_target_forwards_candidate_build_output(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["with"]["candidate-build-output"] == (
+            "${{ steps.candidate.outputs.build-output }}"
+        )
+
+    def test_build_output_artifact_is_downloaded_before_it_is_resolved(self) -> None:
+        data = _load(CHECK_PROJECT)
+        names = _step_names(data["jobs"]["check"])
+        assert names.index("Download build-output artifact") < names.index(
+            "Resolve candidate binary/binaries"
+        )
+
+    def test_build_output_download_uses_profile_scoped_artifact_name(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        dl = next(s for s in steps if s.get("name") == "Download build-output artifact")
+        assert dl["with"]["name"] == (
+            "${{ inputs.build-output-artifact-prefix }}${{ matrix.profile_id }}"
+        )
+
+    def test_resolver_emits_empty_build_output_when_download_did_not_land_a_file(
+        self,
+    ) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        resolver = next(
+            s for s in steps if s.get("name") == "Resolve candidate binary/binaries"
+        )
+        run = resolver["run"]
+        assert "os.path.isfile(build_output_path)" in run
+
+    def test_resolver_reports_build_output_end_to_end(self, tmp_path: Path) -> None:
+        """Extract the real resolver script and run it via bash -c (exactly
+        as the runner does) against both a present and an absent
+        build-output.json, confirming the emitted output matches."""
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        resolver = next(
+            s for s in steps if s.get("name") == "Resolve candidate binary/binaries"
+        )
+        script = resolver["run"]
+
+        def build_output_output(*, stage_file: bool) -> str:
+            root = tmp_path / ("with-file" if stage_file else "without-file")
+            (root / "candidate").mkdir(parents=True)
+            (root / "candidate" / "libexample.so").write_text("real")
+            if stage_file:
+                (root / "build-output").mkdir()
+                (root / "build-output" / "build-output.json").write_text("{}")
+            github_output = root / "github_output"
+            github_output.write_text("")
+            env = {
+                **os.environ,
+                "MATRIX_JSON": json.dumps(
+                    {"kind": "target", "name": "libexample", "binary_pattern": "*.so"}
+                ),
+                "GITHUB_OUTPUT": str(github_output),
+            }
+            result = subprocess.run(
+                ["bash", "-c", script],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, result.stderr
+            line = next(
+                line
+                for line in github_output.read_text().splitlines()
+                if line.startswith("build-output=")
+            )
+            return line[len("build-output=") :]
+
+        assert build_output_output(stage_file=True) == "build-output/build-output.json"
+        assert build_output_output(stage_file=False) == ""
+
+
 class TestNoArrayLiteralsInExpressions:
     """GitHub Actions expression syntax has no array-literal form -- only
     boolean/null/number/string literals plus values from contexts or
