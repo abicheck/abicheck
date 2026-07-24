@@ -26,12 +26,38 @@ PE/Mach-O header-scoped dump route) keeps working unchanged.
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 from pathlib import Path
 
 from ._compiler_options import language_standard_field
 from .model import AbiSnapshot
+
+
+def _profile_compiler_version(ast_toolchain: dict[str, str]) -> str | None:
+    """Combine the AST frontend's own identity (``producer`` + its resolved
+    ``version``) with the host compiler's ``compiler_version`` into one
+    profile-fingerprint input (Codex review, PR #624 follow-up).
+
+    Reading only ``compiler_version`` (falling back to bare ``version``)
+    silently discards the frontend's own identity whenever a host
+    ``compiler_version`` is also present — for a castxml-produced snapshot
+    that is *always* the case, so two dumps made with different castxml
+    binaries (or castxml vs. clang, when both happen to wrap the same host
+    compiler/version) could share a ``profile_fingerprint`` despite castxml
+    and clang's ``-ast-dump=json`` having materially different parsing
+    capabilities (see ``dumper_clang.py``'s own docs on what it can't see).
+    ``json.dumps``, not a raw string join (the same class of bug already
+    fixed for ``macro_ops``/slot tokens elsewhere in this module): none of
+    these three components is guaranteed separator-free.
+    """
+    producer = ast_toolchain.get("producer") or ""
+    frontend_version = ast_toolchain.get("version") or ""
+    host_version = ast_toolchain.get("compiler_version") or ""
+    if not (producer or frontend_version or host_version):
+        return None
+    return json.dumps([producer, frontend_version, host_version])
 
 
 def _attach_extraction_contract(
@@ -82,11 +108,7 @@ def _attach_extraction_contract(
 
     snapshot.contract = compute_extraction_contract(
         compiler_family=_compiler_family_from_toolchain(snapshot.ast_toolchain),
-        compiler_version=(
-            snapshot.ast_toolchain.get("compiler_version")
-            or snapshot.ast_toolchain.get("version")
-            or None
-        ),
+        compiler_version=_profile_compiler_version(snapshot.ast_toolchain),
         abi_dialect=snapshot.ast_toolchain.get("abi_dialect"),
         language_standard=language_standard_field(lang, gcc_options, gcc_option_tokens),
         macro_ops=ordered_macro_ops(_flag_tokens),

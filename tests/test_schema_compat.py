@@ -7,9 +7,9 @@ identical logical content. Tests verify:
 - Cross-version comparison produces NO_CHANGE
 - Reserialization always writes current schema version
 """
+
 import json
 import re
-import warnings
 from pathlib import Path
 
 import pytest
@@ -40,6 +40,7 @@ def _load_fixture(name: str) -> dict:
 # ---------------------------------------------------------------------------
 # 3b. Parameterized load tests
 # ---------------------------------------------------------------------------
+
 
 class TestLoadAllVersions:
     @pytest.mark.parametrize("fixture", SCHEMA_VERSIONS)
@@ -84,6 +85,7 @@ class TestLoadAllVersions:
 # ---------------------------------------------------------------------------
 # 3c. Cross-version comparison tests
 # ---------------------------------------------------------------------------
+
 
 class TestCrossVersionCompare:
     def test_v1_vs_v3_no_change(self):
@@ -130,6 +132,7 @@ class TestCrossVersionCompare:
 # ---------------------------------------------------------------------------
 # 3d. Reserialization stability tests
 # ---------------------------------------------------------------------------
+
 
 class TestReserialization:
     @pytest.mark.parametrize("fixture", SCHEMA_VERSIONS)

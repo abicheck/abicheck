@@ -665,6 +665,8 @@ def run_dump(
             pdb_path=pdb_path,
             header_backend=eff_backend,
             compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
         )
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
@@ -697,6 +699,8 @@ def run_dump(
             header_backend=eff_backend,
             lang=lang,
             compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
         )
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
@@ -1194,6 +1198,8 @@ def _try_header_scoped_dump(
     lang: str,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> tuple[AbiSnapshot | None, str | None]:
     """Attempt a header-scoped dump for a PE/Mach-O binary.
 
@@ -1298,9 +1304,12 @@ def _try_header_scoped_dump(
     # -- without this call, every PE/Mach-O header-scoped dump would leave
     # snap.contract=None regardless of whether headers were genuinely used,
     # unlike the ELF service path (_dump_elf above), which already routes
-    # through dumper.dump() and gets this for free. No public_headers/
-    # public_header_dirs equivalent exists on this path today (a separate,
-    # pre-existing gap, not introduced here).
+    # through dumper.dump() and gets this for free. public_headers/
+    # public_header_dirs are the same outer provenance inputs run_dump
+    # applies via _apply_native_provenance after this call returns (Codex
+    # review, PR #624 follow-up) -- without threading them in here too, two
+    # saved snapshots differing only in declared public-header provenance
+    # could share the same scope_fingerprint.
     from .dumper import _attach_extraction_contract
 
     _attach_extraction_contract(
@@ -1310,8 +1319,8 @@ def _try_header_scoped_dump(
         gcc_options=cc.gcc_options,
         gcc_option_tokens=eff_tokens,
         lang=lang_arg,
-        public_headers=None,
-        public_header_dirs=None,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
     )
 
     if not _has_matched_public_surface(snap):
@@ -1361,6 +1370,8 @@ def _dump_pe(
     pdb_path: Path | None = None,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Dump a PE binary (Windows DLL) to an ABI snapshot.
 
@@ -1402,6 +1413,8 @@ def _dump_pe(
             lang,
             header_backend=header_backend,
             compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
         )
         if scoped is not None:
             # Preserve any PDB debug info alongside the header-scoped surface.
@@ -1457,6 +1470,8 @@ def _dump_macho(
     lang: str = "c++",
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Dump a Mach-O binary (macOS dylib) to an ABI snapshot.
 
@@ -1491,6 +1506,8 @@ def _dump_macho(
             lang,
             header_backend=header_backend,
             compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
         )
         if scoped is not None:
             return scoped

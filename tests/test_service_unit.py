@@ -1092,6 +1092,53 @@ class TestHeaderScopedInferredRoots:
         assert snap.contract is not None
         assert snap.contract.profile_fingerprint is not None
 
+    def test_pe_header_scoped_dump_threads_public_headers_into_contract(self, tmp_path):
+        """Codex review, PR #624 follow-up: run_dump applies public_headers/
+        public_header_dirs to a PE/Mach-O snapshot separately via
+        _apply_native_provenance *after* this call returns, but that same
+        provenance input must also reach the scope_fingerprint here -- else
+        two saved snapshots differing only in declared public-header
+        provenance could share a scope_fingerprint."""
+        from abicheck.service import _try_header_scoped_dump
+
+        root, umb = self._umbrella(tmp_path)
+
+        def fake_pe(path, headers, extra_includes, version, compiler, **k):
+            return AbiSnapshot(
+                library="x",
+                version="1.0",
+                from_headers=True,
+                functions=[
+                    Function(
+                        name="f",
+                        mangled="f",
+                        return_type="int",
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
+            )
+
+        with patch("abicheck.dumper._dump_pe", fake_pe):
+            snap_no_public, _ = _try_header_scoped_dump(
+                "pe", tmp_path / "x.dll", [umb], [], "1.0", "c++"
+            )
+            snap_with_public, _ = _try_header_scoped_dump(
+                "pe",
+                tmp_path / "x.dll",
+                [umb],
+                [],
+                "1.0",
+                "c++",
+                public_header_dirs=[root],
+            )
+
+        assert snap_no_public.contract is not None
+        assert snap_with_public.contract is not None
+        assert (
+            snap_no_public.contract.scope_fingerprint
+            != snap_with_public.contract.scope_fingerprint
+        )
+
     def test_deadline_exceeded_propagates_not_swallowed_as_fallback(self, tmp_path):
         # Codex review on the P0 fix: the broad `except Exception` below (which
         # exists to fall back to export-table mode when a header backend is
