@@ -41,3 +41,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `changes`, producing a report that listed a real root cause immediately
   followed by "No ABI changes detected." The empty-state note now also
   checks whether any root-cause entries were actually rendered.
+
+- **MCP `abi_compare`'s embedded markdown/text report duplicated
+  scoped-gate findings under `--report-mode root-cause`** (ADR-052
+  follow-up, Codex review): the CLI's primary render path threads
+  `report_mode` into `_fold_scoped_compat_into_text` so it skips its own
+  "Additional scoped-gate findings" appendix once `_to_markdown_root_cause`
+  has already placed the same findings under `## Root Causes` — but
+  `mcp_server.abi_compare`'s identical fold-in call was missed and kept the
+  default `"full"`, so an MCP client's `response["report"]` showed the same
+  scoped-only/missing-contract finding twice. Fixed by passing the caller's
+  `report_mode` through that call too.

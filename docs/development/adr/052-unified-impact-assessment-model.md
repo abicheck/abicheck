@@ -472,6 +472,17 @@ contradictory "no changes" note. Fixed by tracking
 empty-state note on `not changes and not has_root_cause_entries` instead of
 `not changes` alone.
 
+**Follow-up fix (Codex review), later commit:** the `report_mode` parameter
+that lets `cli_compare_fold._fold_scoped_compat_into_text` skip its own
+appendix in root-cause mode (two fixes above) was threaded through the CLI's
+primary render call site, but `mcp_server.abi_compare`'s identical fold-in
+call was missed and kept the default `"full"` — an MCP client combining
+`used_by`/`required_symbols` with `report_mode="root-cause"` still got the
+same scoped-only/missing-contract finding duplicated in the embedded
+`response["report"]` text, even though the top-level JSON fields were
+already correct. Fixed by passing `report_mode=report_mode` through that
+call too.
+
 ## Slice 5 — `--report-mode root-cause` SARIF properties
 
 Landed in a follow-up commit on the same PR. Unlike JSON/markdown, SARIF's
