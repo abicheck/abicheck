@@ -997,7 +997,34 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
             },
         )
         assert result.returncode != 0
-        assert "outside candidate/" in result.stderr
+        assert "'..' path component" in result.stderr
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "The actual reusable workflow only ever runs on runs-on: "
+            "ubuntu-latest -- this test exercises that real Linux bash "
+            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "resolves to the System32 WSL launcher (not Git Bash) and fails "
+            "before running anything if no WSL distro is installed, which "
+            "isn't a bug in the workflow script itself."
+        ),
+    )
+    def test_absolute_pattern_is_rejected_without_globbing(self, tmp_path: Path) -> None:
+        # An absolute recursive pattern like '/**/*' would otherwise expand
+        # glob.glob against the whole runner filesystem BEFORE the
+        # commonpath confinement check ever ran -- a needlessly slow/heavy
+        # pre-check failure instead of an immediate, contained validation
+        # error (Codex review). Reject upfront on the pattern string alone,
+        # before glob.glob is ever called.
+        (tmp_path / "candidate").mkdir()
+
+        result = self._run_bash(
+            tmp_path,
+            {"kind": "target", "name": "libexample", "binary_pattern": "/etc/passwd"},
+        )
+        assert result.returncode != 0
+        assert "is absolute or contains a '..' path component" in result.stderr
 
     @pytest.mark.skipif(
         sys.platform == "win32",

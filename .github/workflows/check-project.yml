@@ -511,7 +511,6 @@ jobs:
           def resolve(pattern, *, label):
               if not pattern:
                   return None
-              matches = sorted(glob.glob(os.path.join(root, pattern), recursive=True))
               # binary_pattern/consumer_binary_pattern/member_binary_patterns
               # come from the project's own .abicheck.yml -- os.path.join
               # discards 'root' entirely for an absolute pattern, and a
@@ -519,8 +518,25 @@ jobs:
               # escaping pattern can otherwise glob against the runner's
               # checkout (this side checkout or the caller's own) instead of
               # the downloaded candidate/ artifact, comparing/scoping
-              # against arbitrary files (Codex review). Confine every match
-              # to actually live under candidate/ before accepting it.
+              # against arbitrary files (Codex review). Reject the pattern
+              # itself before ever calling glob.glob: a recursive absolute
+              # or escaping pattern (e.g. '/**/*', '../**/*') would otherwise
+              # walk and allocate paths from outside candidate/ FIRST, only
+              # to be rejected after the fact by the commonpath confinement
+              # check below -- a needlessly slow/heavy pre-check failure
+              # instead of a contained, immediate validation error (a second
+              # Codex review, catching that the confinement check alone only
+              # rejects escaping matches after the expensive glob already
+              # ran).
+              if os.path.isabs(pattern) or any(part == '..' for part in pattern.split('/')):
+                  print(f'::error::{label}: pattern {pattern!r} is absolute or contains a \'..\' path component -- absolute or ../-escaping patterns are not allowed', file=sys.stderr)
+                  sys.exit(1)
+              matches = sorted(glob.glob(os.path.join(root, pattern), recursive=True))
+              # Confine every match to actually live under candidate/ before
+              # accepting it -- belt-and-suspenders alongside the upfront
+              # pattern rejection above (e.g. a symlink inside candidate/
+              # pointing back out could still produce an escaping match even
+              # from a pattern that looked confined).
               escaped = [
                   m for m in matches if os.path.commonpath([root_abs, os.path.realpath(m)]) != root_abs
               ]

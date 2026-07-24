@@ -2010,6 +2010,25 @@ input a caller could leave empty to intentionally point at a checked-in
 path, so there is no "don't wipe a deliberate fixture" case to gate on
 here. Covered by `TestCheckProjectClearsReportsDirBeforeAggregateDownload`.
 
+**A further round (Codex, against `96bc92b`) caught that the candidate
+resolver's confinement check ran too late, fixed:** `resolve()`'s
+`commonpath` confinement check (added in an earlier round to reject an
+absolute/`../`-escaping `binary_pattern`) only rejects an escaping match
+*after* `glob.glob()` has already expanded it -- for a recursive absolute
+or escaping pattern (`/**/*`, `../**/*`), that means the glob walks and
+allocates paths from outside `candidate/` first, only to be thrown away by
+the confinement check afterward: a needlessly slow/heavy pre-check failure
+(potentially the whole runner filesystem) instead of an immediate,
+contained validation error. Fixed: `resolve()` now rejects the pattern
+*string* outright (`os.path.isabs(pattern)` or any `..` path component)
+before ever calling `glob.glob`, with the `commonpath` confinement check
+kept as belt-and-suspenders afterward (e.g. a symlink inside `candidate/`
+pointing back out could still produce an escaping match from a
+pattern that looked confined). Covered by a new
+`test_absolute_pattern_is_rejected_without_globbing`; the pre-existing
+`test_escaping_pattern_is_rejected_end_to_end` updated to assert the new
+upfront-rejection message.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —
