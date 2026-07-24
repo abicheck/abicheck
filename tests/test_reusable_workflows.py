@@ -458,6 +458,17 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         run = resolver["run"]
         assert "os.path.isfile(build_output_path)" in run
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "The actual reusable workflow only ever runs on runs-on: "
+            "ubuntu-latest -- this test exercises that real Linux bash "
+            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "resolves to the System32 WSL launcher (not Git Bash) and fails "
+            "before running anything if no WSL distro is installed, which "
+            "isn't a bug in the workflow script itself."
+        ),
+    )
     def test_resolver_reports_build_output_end_to_end(self, tmp_path: Path) -> None:
         """Extract the real resolver script and run it via bash -c (exactly
         as the runner does) against both a present and an absent
@@ -725,6 +736,17 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
         result.stdout = github_output.read_text() + result.stdout
         return result
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "The actual reusable workflow only ever runs on runs-on: "
+            "ubuntu-latest -- this test exercises that real Linux bash "
+            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "resolves to the System32 WSL launcher (not Git Bash) and fails "
+            "before running anything if no WSL distro is installed, which "
+            "isn't a bug in the workflow script itself."
+        ),
+    )
     def test_escaping_pattern_is_rejected_end_to_end(self, tmp_path: Path) -> None:
         (tmp_path / "candidate").mkdir()
         (tmp_path / "candidate" / "libexample.so").write_text("real")
@@ -743,6 +765,17 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
         assert result.returncode != 0
         assert "outside candidate/" in result.stderr
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "The actual reusable workflow only ever runs on runs-on: "
+            "ubuntu-latest -- this test exercises that real Linux bash "
+            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "resolves to the System32 WSL launcher (not Git Bash) and fails "
+            "before running anything if no WSL distro is installed, which "
+            "isn't a bug in the workflow script itself."
+        ),
+    )
     def test_in_root_pattern_still_resolves(self, tmp_path: Path) -> None:
         (tmp_path / "candidate").mkdir()
         (tmp_path / "candidate" / "libexample.so").write_text("real")
