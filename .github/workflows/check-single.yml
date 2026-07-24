@@ -284,31 +284,36 @@ jobs:
       # The composite-Action fix used `github.action_repository`/
       # `github.action_ref` (which describe the *Action* about to run).
       # Reusable workflows have their own equivalent for the *workflow*
-      # about to run: `github.workflow_ref`/`github.workflow_sha` (part of
-      # the `github` context, added specifically so a reusable workflow can
-      # identify itself -- NOT `job.workflow_ref`/`job.workflow_sha`: the
-      # `job` context only exposes `container`/`services`/`status`, and an
-      # earlier version of this workflow used `job.*` here, which is an
-      # undefined-property access that resolves to empty at runtime rather
-      # than a syntax error, so it silently fell through to the fallback on
-      # every run (caught via `actionlint`, not by a failed CI run turning
-      # red -- the workflow parsed fine either way). `github.workflow_ref`
-      # is always the fully qualified
-      # `owner/repo/.github/workflows/check-single.yml@ref` form, even for
-      # a same-repository `uses: ./.github/workflows/check-single.yml`
-      # caller -- unlike `github.action_repository`/`github.action_ref`,
-      # which go empty for a local composite-Action reference. This
-      # workflow still falls back to `github.repository`/`github.sha` if
-      # `workflow_ref` is ever empty, matching check-target's own
-      # defense-in-depth pattern, since this exact behavior could not be
-      # verified against a real external-consumer run in this session (no
-      # second repository available to test cross-repo consumption from).
+      # about to run: `job.workflow_ref`/`job.workflow_sha` -- NOT
+      # `github.workflow_ref`/`github.workflow_sha`. GitHub's own docs are
+      # explicit that "when a reusable workflow is triggered by a caller
+      # workflow, the `github` context is always associated with the caller
+      # workflow" (reusing-workflow-configurations#github-context), so
+      # reading `github.workflow_ref` here would resolve to the CALLING
+      # repository/ref for any external consumer, not this repository --
+      # exactly the wrong thing for a self-checkout. `job.workflow_ref`/
+      # `job.workflow_sha` are the documented-correct fields instead
+      # (contexts-reference#job-context: "For jobs defined in a [reusable
+      # workflow], this refers to the reusable workflow file"). A prior
+      # revision of this comment had that backwards -- it was based on an
+      # under-verified web search and got the caller/callee association
+      # inverted; caught by a fresh Codex review on check-project.yml and
+      # confirmed against GitHub's current docs directly before reverting.
+      # `actionlint` still flags `job.workflow_ref`/`job.workflow_sha` as
+      # "not defined in object type" -- that's a known false negative: its
+      # hardcoded `job` context type table hasn't caught up with these
+      # properties, which are real and documented. This workflow still
+      # falls back to `github.repository`/`github.sha` if `workflow_ref` is
+      # ever empty, matching check-target's own defense-in-depth pattern,
+      # since this exact behavior could not be verified against a real
+      # external-consumer run in this session (no second repository
+      # available to test cross-repo consumption from).
       - name: Capture this reusable workflow's identity
         id: identity
         shell: bash
         env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
           FALLBACK_REPOSITORY: ${{ github.repository }}
           FALLBACK_REF: ${{ github.sha }}
         run: |

@@ -75,14 +75,16 @@ class TestBothFilesParseAsValidWorkflowYaml:
 class TestCheckSingleSelfCheckout:
     """Mirrors check-target/action.yml's own "Capture this Action's
     identity" -> "Checkout abicheck" -> nested `uses:` pattern, but keyed
-    off `github.workflow_ref`/`github.workflow_sha` (the reusable-workflow
+    off `job.workflow_ref`/`job.workflow_sha` (the reusable-workflow
     equivalent of `github.action_repository`/`github.action_ref` -- NOT
-    `job.workflow_ref`/`job.workflow_sha`, an earlier version of this
-    workflow's own mistake; the `job` context has no such properties) since
-    a relative `uses: ./x` step inside THIS reusable workflow's own steps
-    resolves against the caller's checkout, not this repository, exactly
-    like the composite-Action case check-target itself already had to fix
-    (confirmed via GitHub Community Discussion #107558)."""
+    `github.workflow_ref`/`github.workflow_sha`, which GitHub's own docs
+    document as caller-associated inside a called reusable workflow, so it
+    would resolve to an external consumer's own repository/ref rather than
+    this one) since a relative `uses: ./x` step inside THIS reusable
+    workflow's own steps resolves against the caller's checkout, not this
+    repository, exactly like the composite-Action case check-target itself
+    already had to fix (confirmed via GitHub Community Discussion
+    #107558)."""
 
     def test_identity_captured_before_the_nested_checkout(self) -> None:
         data = _load(CHECK_SINGLE)

@@ -1374,39 +1374,36 @@ have worked, exactly the blind spot that let the original `check-target` bug
 ship unnoticed. **Fixed the same way**, adapted to the reusable-workflow
 context: `check-target`'s fix reads `github.action_repository`/
 `github.action_ref` (which describe the composite *Action* about to run);
-the reusable-workflow equivalent is `github.workflow_ref`/
-`github.workflow_sha` (part of the `github` context, added specifically so
-a reusable workflow can identify itself — always the fully-qualified
-`owner/repo/.github/workflows/name.yml@ref` form). **This page originally
-claimed the equivalent was `job.workflow_ref`/`job.workflow_sha` (the `job`
-context); that was wrong, corrected below in the round-3 addendum** — the
-`job` context only exposes `container`/`services`/`status`, so the original
-code silently read as empty at runtime and fell through to the fallback
-branch on every single run, never actually exercising the primary
-`workflow_ref` path it was written for. Both workflows capture this
-identity in a first `run:` step (mirroring `check-target`'s own "capture
-before any nested `uses:` step overwrites it" ordering, though
-`workflow_ref`/`workflow_sha` describe the whole job rather than "whichever
-action is about to run," so they are not actually subject to check-target's
-specific third-bug per-step-flip issue — captured early anyway for defense
-in depth and pattern consistency), then checks out that repository/ref into
-a side directory before any nested `uses:` step, falling back to
-`github.repository`/`github.sha` if `workflow_ref` is ever empty (matching
-`check-target`'s own defense-in-depth pattern for the local-same-repository
-case). **Honesty note, since this is exactly the kind of design decision
-this plan's own history shows is easy to get subtly wrong: this specific
-mechanism could not be verified against a real external-consumer run in
-this session** — no second repository was available to test cross-repo
-reusable-workflow consumption end to end, only same-repository invocation
-(`test-action.yml`'s own `uses: ./.github/workflows/check-project.yml`,
-where `github.workflow_ref`/`github.workflow_sha` resolve to this same
-repository regardless of whether the fallback branch is ever exercised —
-so this run cannot distinguish "the primary branch worked" from "the
-fallback saved it" the way check-target's own three-round bug history
-needed a real cross-repo run to surface). Treat this as
-reviewed-but-unverified until a real external-consumer run confirms it, the
-same caveat this plan already gives S14 bundle-scoped resolution and other
-"defines the contract, no producer yet" gaps.
+the reusable-workflow equivalent is `job.workflow_ref`/`job.workflow_sha`
+(part of the `job` context, populated specifically so a reusable workflow
+can identify itself independent of the calling workflow's own `github.*`
+context — always the fully-qualified `owner/repo/.github/workflows/
+name.yml@ref` form). **This is the final, verified conclusion after two
+self-inflicted reversals documented in the round-3 and round-4 addenda
+below — read those for the full story of how this got flipped twice.**
+Both workflows capture this identity in a first `run:` step (mirroring
+`check-target`'s own "capture before any nested `uses:` step overwrites
+it" ordering, though `workflow_ref`/`workflow_sha` describe the whole job
+rather than "whichever action is about to run," so they are not actually
+subject to check-target's specific third-bug per-step-flip issue —
+captured early anyway for defense in depth and pattern consistency), then
+checks out that repository/ref into a side directory before any nested
+`uses:` step, falling back to `github.repository`/`github.sha` if
+`workflow_ref` is ever empty (matching `check-target`'s own
+defense-in-depth pattern for the local-same-repository case). **Honesty
+note, since this is exactly the kind of design decision this plan's own
+history shows is easy to get subtly wrong: this specific mechanism could
+not be verified against a real external-consumer run in this session** —
+no second repository was available to test cross-repo reusable-workflow
+consumption end to end, only same-repository invocation (`test-action.yml`'s
+own `uses: ./.github/workflows/check-project.yml`, where `job.workflow_ref`/
+`job.workflow_sha` resolve to this same repository regardless of whether
+the fallback branch is ever exercised — so this run cannot distinguish "the
+primary branch worked" from "the fallback saved it" the way check-target's
+own three-round bug history needed a real cross-repo run to surface). Treat
+this as reviewed-but-unverified until a real external-consumer run confirms
+it, the same caveat this plan already gives S14 bundle-scoped resolution
+and other "defines the contract, no producer yet" gaps.
 
 **Required fixture-workflow test — implemented as specified, not skipped.**
 This plan's own text requires a fixture "that deliberately fails one matrix
@@ -1633,6 +1630,53 @@ the corrected shape instead: `test-check-project` carries no
 against every file under `.github/workflows/` after these fixes — clean,
 zero findings — the verification step the first two rounds lacked and
 should have used from the start.
+
+**A fourth round, from external review again (Codex, against `d93cc9d`),
+caught that the round-3 `job.*` → `github.*` "fix" above was itself wrong
+— flipping the same bug back the other way.** The round-3 fix treated
+`actionlint`'s "not defined in object type" flag on `job.workflow_ref`/
+`job.workflow_sha` as proof the properties don't exist, and switched to
+`github.workflow_ref`/`github.workflow_sha` instead. That flag was a false
+negative, not a real error: `actionlint`'s hardcoded `job` context type
+table is stale and doesn't know about `workflow_ref`/`workflow_sha`/
+`workflow_repository`/`workflow_file_path`, all four of which are real,
+current, documented `job` context properties
+(`contexts-reference#job-context`: *"The full ref of the workflow file
+that defines the current job... For jobs defined in a [reusable
+workflow], this refers to the reusable workflow file"*). Meanwhile
+`github.workflow_ref`/`github.workflow_sha` — the fields the round-3 fix
+switched to — are explicitly documented as **caller-associated** inside a
+called reusable workflow (`reusing-workflow-configurations#github-context`:
+*"When a reusable workflow is triggered by a caller workflow, the `github`
+context is always associated with the caller workflow"*). So the round-3
+"fix" made every external consumer's self-checkout resolve to the
+*caller's* own repository/ref instead of abicheck's — silently breaking
+`pip install ./.check-project-src` and the nested
+`uses: ./.check-project-src/actions/check-target` step for exactly the
+external-consumer scenario this whole self-checkout mechanism exists to
+support, while leaving `test-action.yml`'s own same-repository CI run
+green throughout (both fields happen to resolve identically when caller
+and callee are the same repository, so nothing in this PR's own CI could
+have caught either direction of this mistake — the same blind spot noted
+above for the original bug).
+
+Verified this time via **primary-source GitHub documentation directly**
+(four separate fetches against `docs.github.com`, not a web-search
+summary — the round-3 mistake originated from an "insufficiently-verified
+web search," a lesson applied here deliberately) before reverting: all
+four occurrences (`check-single.yml`'s one identity step,
+`check-project.yml`'s `plan`/`check`/`aggregate` jobs' three) switched
+back to `job.workflow_ref`/`job.workflow_sha`, with corrected comments in
+both YAML files explaining the true caller/callee association and flagging
+the `actionlint` false negative so a future reader doesn't repeat the same
+mistake a third time. `actionlint` still flags these two properties as
+"not defined" after this revert — expected and understood as a tooling gap,
+not a signal to change course again. No test assertions needed to change:
+`tests/test_reusable_workflows.py`'s `test_identity_step_falls_back_to_
+github_repository_and_sha` only asserts the `WORKFLOW_REF`/`WORKFLOW_SHA`
+env var *names* and fallback-substring presence, not which context
+expression populates them — only the `TestCheckSingleSelfCheckout` class
+docstring needed correcting to match.
 
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
