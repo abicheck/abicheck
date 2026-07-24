@@ -8,11 +8,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   findings sharing a root cause (`Change.caused_by_type`) under one entry
   instead of listing every change individually — e.g. an internal helper's
   `func_removed` finding and the `internal_symbol_required_by_public_api`
-  overlay finding that names it now land in the same group. JSON output
-  only (`--format json`); other formats render as `full`. Adds two
-  additive top-level keys, `root_causes` and `root_cause_count`
-  (`report_schema_version` 2.15 → 2.16); `changes` is still emitted in
-  full for backward compatibility. See `docs/user-guide/output-formats.md`.
+  overlay finding that names it now land in the same group. Initially
+  JSON-only (`--format json`); the same grouping was extended to
+  `--format markdown`/text in slice 4 below, and to `sarif` (as additive
+  `properties`) in slice 5 — `junit` still renders `root-cause` mode as
+  `full`. Adds two additive top-level JSON keys, `root_causes` and
+  `root_cause_count` (`report_schema_version` 2.15 → 2.16); `changes` is
+  still emitted in full for backward compatibility. See
+  `docs/user-guide/output-formats.md`.
 
 ### Fixed
 
