@@ -34,6 +34,7 @@ def _cache_key(
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_identity: str = "",
     compiler_identity: str = "",
+    force_cpp20: bool = False,
 ) -> str:
     h = hashlib.sha256()
     h.update(f"backend={backend}".encode())
@@ -75,6 +76,16 @@ def _cache_key(
     # Auto-probed system include dirs (castxml↔clang parity): a host-toolchain
     # change must invalidate a cached clang dump (the resolved libstdc++ moved).
     h.update(f"system_includes={chr(0).join(system_includes)}".encode())
+    # The *resolved* C++20 dialect decision (-std=gnu++20 or not), not just the
+    # explicit --lang the caller passed (Codex review): _detect_cpp20_headers is
+    # a heuristic that can itself change across an abicheck upgrade (a bug fix
+    # to the detector, like a false-positive/negative correction) without any
+    # header content or toolchain identity changing. Without this, upgrading
+    # abicheck to fix such a detector bug would silently keep reusing a stale
+    # AST parsed under the *old*, wrong dialect decision until the on-disk
+    # cache was manually cleared — the cache key must depend on everything
+    # that changes the frontend command, and this heuristic decision does.
+    h.update(f"force_cpp20={force_cpp20}".encode())
     return h.hexdigest()
 
 

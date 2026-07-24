@@ -752,6 +752,21 @@ class TestCacheKeyToolchain:
         k_base = _cache_key([h], [], "c++")
         assert len({k_base, k1, k2, k3, k4, k5, k6}) == 7
 
+    def test_resolved_force_cpp20_changes_key(self, tmp_path):
+        """Regression (Codex review): the *resolved* C++20 dialect decision
+        must be part of the key, not just the explicit ``lang`` the caller
+        passed in. ``_detect_cpp20_headers`` is a heuristic that can itself
+        change across an abicheck upgrade (a detector bug fix) with no
+        header content or toolchain identity change at all — without this,
+        such an upgrade would silently keep reusing a stale AST parsed
+        under the old, wrong dialect decision until the on-disk cache was
+        manually cleared."""
+        h = tmp_path / "h.h"
+        h.write_text("int f();", encoding="utf-8")
+        k_false = _cache_key([h], [], "c++", lang=None, force_cpp20=False)
+        k_true = _cache_key([h], [], "c++", lang=None, force_cpp20=True)
+        assert k_false != k_true
+
 
 class TestCastxmlParserAccessLevel:
     def test_protected_access(self):

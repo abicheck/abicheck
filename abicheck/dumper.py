@@ -369,6 +369,7 @@ def _clang_header_dump(
         extra_hash_dirs=extra_hash_dirs,
         frontend_identity=frontend_identity,
         compiler_identity=compiler_identity,
+        force_cpp20=force_cpp20,
     )
     cached = _cache_path(key, backend="clang")
     if cached.exists():
@@ -790,6 +791,11 @@ def _castxml_dump(
     # gcc/cc, not g++, and both cache identity and execution must describe the
     # same driver.
     force_cpp = _resolve_force_cpp(lang, headers, gcc_options, gcc_option_tokens)
+    # Same expression _run_castxml_attempt uses for its (non-retry) call below —
+    # folded into the cache key ahead of time so the resolved dialect decision,
+    # not just the explicit --lang, invalidates a stale cache entry (Codex
+    # review).
+    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
     resolved_compiler = compiler
     if not force_cpp and not gcc_path and not gcc_prefix:
         resolved_compiler = {
@@ -819,6 +825,7 @@ def _castxml_dump(
         extra_hash_dirs=extra_hash_dirs,
         frontend_identity=frontend_identity,
         compiler_identity=compiler_identity,
+        force_cpp20=force_cpp20,
     )
     cached = _cache_path(key)
     if cached.exists():
