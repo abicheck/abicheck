@@ -57,7 +57,6 @@ Every recognized `.abicheck.yml` top-level key and block sub-key, with its exact
 
 | Sub-key | Type |
 |---|---|
-| `graph` | unspecified |
 | `method` | str |
 
 ### `sources:`

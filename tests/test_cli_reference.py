@@ -108,6 +108,16 @@ def test_option_row_includes_secondary_opts_for_a_boolean_flag_pair():
     assert row.startswith("| `--demangle`, `--no-demangle` |")
 
 
+def test_hidden_options_are_excluded_from_generated_reference():
+    # --header-graph/--no-header-graph are deprecated, hidden, inert no-op
+    # shims (abicheck/cli_options.py) -- Click itself omits them from
+    # --help, so a reference that claims to mirror --help must omit them
+    # too rather than publishing dead flags no user can discover.
+    gen = _load_gen()
+    content = gen.OUT_PATH.read_text(encoding="utf-8")
+    assert "--header-graph" not in content
+
+
 def test_option_row_hides_click_internal_unset_sentinel():
     gen = _load_gen()
 

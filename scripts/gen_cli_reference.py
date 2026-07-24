@@ -126,8 +126,17 @@ def _render_command(name: str, cmd: Any, heading_level: int) -> list[str]:
     if summary:
         lines += [summary, ""]
 
-    arguments = [p for p in cmd.params if isinstance(p, click.Argument)]
-    options = [p for p in cmd.params if isinstance(p, click.Option)]
+    # Click's own --help omits hidden params (deprecated no-op shims like
+    # --header-graph, ABICC compatibility stubs) -- rendering them anyway
+    # would publish flags this reference claims to mirror but that users
+    # can't even discover via --help. click.Argument has no `hidden`
+    # attribute at all (only click.Option does), hence getattr(..., False).
+    arguments = [
+        p for p in cmd.params if isinstance(p, click.Argument) and not getattr(p, "hidden", False)
+    ]
+    options = [
+        p for p in cmd.params if isinstance(p, click.Option) and not getattr(p, "hidden", False)
+    ]
 
     if arguments:
         lines += ["**Arguments**", "", "| Name | Required | Description |", "|---|:--:|---|"]
@@ -167,7 +176,9 @@ def render() -> str:
         "exhaustive field list only.",
         "",
     ]
-    root_options = [p for p in main.params if isinstance(p, click.Option)]
+    root_options = [
+        p for p in main.params if isinstance(p, click.Option) and not getattr(p, "hidden", False)
+    ]
     if root_options:
         lines += [
             "## Root options",
