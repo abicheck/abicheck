@@ -1993,6 +1993,23 @@ same stale-content class of bug, both fixed:**
   `bundle-staging/leftover.so`, confirms it's gone and only the real
   member remains after resolution).
 
+**A further round (Codex, against `021cbcf`) caught a fourth instance of
+the same stale-content class of bug, fixed:** the `aggregate` job's
+"Download every check report" step downloads with `merge-multiple: true`
+into `reports/` -- but that job's own earlier `actions/checkout` step
+already populated the whole workspace from the caller's own repository
+first, so a checked-in `reports/*.json` directory there would sit
+alongside the real downloaded reports rather than being replaced by them.
+`abicheck aggregate` loads every `*.json` under `reports/` and rejects
+duplicate target IDs, so a stale checked-in report for the same check
+could fail the job even though the matrix produced the correct report.
+Fixed: a "Clear reports staging before download" step (`rm -rf reports`)
+now runs immediately before the download, unconditionally -- unlike the
+`check`/`check-single.yml` fixes above, this download has no artifact-name
+input a caller could leave empty to intentionally point at a checked-in
+path, so there is no "don't wipe a deliberate fixture" case to gate on
+here. Covered by `TestCheckProjectClearsReportsDirBeforeAggregateDownload`.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —

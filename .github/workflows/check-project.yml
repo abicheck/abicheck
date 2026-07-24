@@ -795,6 +795,19 @@ jobs:
         with:
           name: ${{ inputs.run-plan-artifact-name }}
 
+      # The earlier `actions/checkout` step already populated the whole
+      # workspace from the caller's own repository -- if that repository
+      # happens to contain a checked-in reports/*.json directory,
+      # merge-multiple: true below extracts every downloaded report into
+      # that same directory without first removing what's already there.
+      # `abicheck aggregate` loads every *.json under reports/ and rejects
+      # duplicate target IDs, so a stale checked-in report can fail this
+      # job even though the matrix produced the correct report (Codex
+      # review). Clear it first so only the real downloads land there.
+      - name: Clear reports staging before download
+        shell: bash
+        run: rm -rf reports
+
       - name: Download every check report
         uses: actions/download-artifact@v8
         with:

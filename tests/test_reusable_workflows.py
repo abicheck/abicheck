@@ -605,6 +605,28 @@ class TestCheckProjectClearsStagingDirsBeforeTolerantDownloads:
             assert clear_idx < names.index(download_name), download_name
 
 
+class TestCheckProjectClearsReportsDirBeforeAggregateDownload:
+    """The `aggregate` job's own earlier `actions/checkout` step populates
+    the whole workspace from the caller's own repository first -- if that
+    repository happens to contain a checked-in reports/*.json directory,
+    the `merge-multiple: true` download below would extract every
+    downloaded report into that same directory without removing what's
+    already there, and `abicheck aggregate` rejects duplicate target IDs
+    across every *.json it finds under reports/ (Codex review)."""
+
+    def test_clear_step_exists_and_precedes_the_download(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["aggregate"])
+        names = _step_names(data["jobs"]["aggregate"])
+        clear = next(
+            s for s in steps if s.get("name") == "Clear reports staging before download"
+        )
+        assert clear["run"].strip() == "rm -rf reports"
+        assert names.index("Clear reports staging before download") < names.index(
+            "Download every check report"
+        )
+
+
 class TestBaselineRequiredAndCandidateBuildOutputForwarded:
     """check-single.yml already forwards baseline-required/
     candidate-build-output to check-target -- check-project.yml's own
