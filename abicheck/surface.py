@@ -358,7 +358,11 @@ class PublicSurface:
     # ``qualified_name`` at all), a caller must know the plain ``origin_by_key``
     # lookup for such a name is unreliable (merged across unrelated types,
     # public wins conservatively) rather than trust it outright — see
-    # :func:`_hidden_friend_owner_effective_origin` (Codex review).
+    # :func:`_hidden_friend_owner_effective_origin` (Codex review). Computed
+    # across records *and* enums combined, not per-kind: a private record
+    # and an unrelated public enum sharing a bare name each look unique
+    # within their own kind, but still collide in the single ``origin_by_key``
+    # both kinds share (Codex review, thirteenth round).
     ambiguous_type_names: set[str] = field(default_factory=set)
     # True when *any* declaration carried a non-UNKNOWN origin — i.e. the
     # snapshot was dumped with a public-header set so provenance is available.
@@ -452,10 +456,18 @@ def _index_surface_types(
             )
     for alias in snap.typedefs:
         surface.all_types.add(alias)
+    # Combine both kinds before counting: a bare name ambiguous *across*
+    # records and enums (one record entry, one enum entry -- neither list
+    # individually looks ambiguous) collides in ``origin_by_key`` exactly
+    # the same way a within-kind collision does, since that dict is shared
+    # by both kinds (Codex review, thirteenth round).
+    combined_counts: dict[str, int] = {}
     for name_map in (record_by_name, enum_by_name):
-        surface.ambiguous_type_names.update(
-            name for name, entries in name_map.items() if len(entries) > 1
-        )
+        for name, entries in name_map.items():
+            combined_counts[name] = combined_counts.get(name, 0) + len(entries)
+    surface.ambiguous_type_names.update(
+        name for name, count in combined_counts.items() if count > 1
+    )
     return record_by_name, enum_by_name
 
 

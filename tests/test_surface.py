@@ -1446,6 +1446,48 @@ class TestHiddenFriendSurface:
         )
         assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
 
+    def test_ambiguous_bare_name_across_record_and_enum_kinds(self):
+        """Regression (Codex review, thirteenth round): ``ambiguous_type_names``
+        was computed separately for records and enums, so a private
+        hidden-friend owner *record* ``Foo`` and an unrelated public *enum*
+        ``Foo`` (neither carrying a ``qualified_name``) each looked unique
+        within their own kind's name map and were never flagged ambiguous
+        — even though both land under the same bare ``origin_by_key["Foo"]``
+        entry, which the public enum then merges to PUBLIC_HEADER
+        (conservative "any side public" winner). That silently confirmed a
+        record owner that is actually private, keeping a hidden friend that
+        should instead fall through to (and be demoted by) the friend
+        function's own private-header origin."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "operator==",
+                    mangled="_ZN3FooeqERKS0_S1_",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+            ],
+            types=[_rec("Foo", origin=ScopeOrigin.PRIVATE_HEADER)],
+            enums=[
+                EnumType(
+                    name="Foo",
+                    members=[EnumMember(name="A", value=0)],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert "Foo" in s.ambiguous_type_names
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN3FooeqERKS0_S1_",
+            caused_by_type="Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
+
     def test_owner_added_together_with_unknown_origin_stays_retained(self):
         """The one-sided-presence relaxation must still be conservative: an
         owner added together with the friend but recorded with an UNKNOWN
