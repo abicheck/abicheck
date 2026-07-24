@@ -266,24 +266,44 @@ jobs:
           pattern: '${{ inputs.build-output-artifact-prefix }}*'
           merge-multiple: false
 
+      # actions/download-artifact only nests a downloaded artifact under
+      # `path/<artifact-name>/` when its `pattern` matches TWO OR MORE
+      # artifacts -- when it matches exactly one (the common single-contract-
+      # profile case, and this is what test-check-project-failure-path.yml's
+      # own fixture hit), the content is extracted FLAT into `path` instead,
+      # with no subdirectory at all. Deriving `--build-output`'s PROFILE from
+      # the artifact/directory NAME is therefore ambiguous by construction --
+      # this silently produced zero --build-output args (and a spuriously
+      # empty run-plan) the first time this workflow's plan job ever actually
+      # ran end to end (it could never schedule any jobs before this PR's own
+      # continue-on-error/zero-jobs fix). Sidestep the directory-naming
+      # question entirely: `find` every build-output.json regardless of
+      # nesting depth and read its OWN `profile.id` field -- already the
+      # source of truth per ADR-047 §2 ("one build-output.json = one build
+      # profile, always") -- instead of reconstructing it from a path.
       - name: Generate run-plan.json
         id: plan
         shell: bash
         env:
           CONFIG_PATH: ${{ inputs.config-path }}
-          BUILD_OUTPUT_PREFIX: ${{ inputs.build-output-artifact-prefix }}
           PROJECT: ${{ inputs.project != '' && inputs.project || github.repository }}
           HEAD_SHA: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
         run: |
           set -euo pipefail
           args=()
           if [[ -d build-outputs ]]; then
-            for dir in build-outputs/*/; do
-              [[ -d "$dir" ]] || continue
-              artifact_name="$(basename "$dir")"
-              profile_id="${artifact_name#"$BUILD_OUTPUT_PREFIX"}"
-              args+=(--build-output "${profile_id}=${dir%/}")
-            done
+            while IFS= read -r -d '' bo_file; do
+              bo_dir="$(dirname "$bo_file")"
+              profile_id="$(python3 -c "
+          import json, sys
+          print(json.load(open(sys.argv[1])).get('profile', {}).get('id', ''))
+          " "$bo_file")"
+              if [[ -z "$profile_id" ]]; then
+                echo "::error::$bo_file has no profile.id set -- cannot determine which contract profile it belongs to" >&2
+                exit 1
+              fi
+              args+=(--build-output "${profile_id}=${bo_dir}")
+            done < <(find build-outputs -name build-output.json -print0)
           fi
           abicheck run-plan generate "$CONFIG_PATH" \
             --project "$PROJECT" --head-sha "$HEAD_SHA" \
@@ -381,11 +401,27 @@ jobs:
 
           cell = json.loads(os.environ['MATRIX_JSON'])
           root = 'candidate'
+          root_abs = os.path.realpath(root)
 
           def resolve(pattern, *, label):
               if not pattern:
                   return None
               matches = sorted(glob.glob(os.path.join(root, pattern), recursive=True))
+              # binary_pattern/consumer_binary_pattern/member_binary_patterns
+              # come from the project's own .abicheck.yml -- os.path.join
+              # discards 'root' entirely for an absolute pattern, and a
+              # '../' pattern walks back out of it, so an absolute or
+              # escaping pattern can otherwise glob against the runner's
+              # checkout (this side checkout or the caller's own) instead of
+              # the downloaded candidate/ artifact, comparing/scoping
+              # against arbitrary files (Codex review). Confine every match
+              # to actually live under candidate/ before accepting it.
+              escaped = [
+                  m for m in matches if os.path.commonpath([root_abs, os.path.realpath(m)]) != root_abs
+              ]
+              if escaped:
+                  print(f'::error::{label}: pattern {pattern!r} matched {escaped} outside {root}/ -- absolute or ../-escaping patterns are not allowed', file=sys.stderr)
+                  sys.exit(1)
               if len(matches) > 1:
                   # A pattern like '*.so*' commonly matches both a linker
                   # symlink and the real versioned DSO -- silently picking
@@ -494,6 +530,16 @@ jobs:
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}
           action-version: ${{ format('{0}@{1}', steps.identity.outputs.repository, steps.identity.outputs.ref) }}
+          # This job's own already-resolved identity (captured in "Capture
+          # this reusable workflow's identity" above) -- check-target's own
+          # github.action_repository/github.action_ref auto-detection can't
+          # tell a nested `uses: ./.check-project-src/...` local reference
+          # apart from a genuine same-repository invocation, which would
+          # silently misresolve for an external consumer (Codex review; see
+          # check-target/action.yml's abicheck-repository/abicheck-ref
+          # input docs for the full explanation).
+          abicheck-repository: ${{ steps.identity.outputs.repository }}
+          abicheck-ref: ${{ steps.identity.outputs.ref }}
 
       # `check-id` is `target@profile#baseline_channel@depth` (ADR-047 §7) --
       # artifact names disallow `"`/`:`/`<`/`>`/`|`/`*`/`?`/`\`/`/` outright,

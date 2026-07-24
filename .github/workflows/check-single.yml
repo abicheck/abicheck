@@ -338,3 +338,13 @@ jobs:
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}
           action-version: ${{ format('{0}@{1}', steps.identity.outputs.repository, steps.identity.outputs.ref) }}
+          # This job's own already-resolved identity (captured in "Capture
+          # this reusable workflow's identity" above) -- check-target's own
+          # github.action_repository/github.action_ref auto-detection can't
+          # tell a nested `uses: ./.check-single-src/...` local reference
+          # apart from a genuine same-repository invocation, which would
+          # silently misresolve for an external consumer (Codex review; see
+          # check-target/action.yml's abicheck-repository/abicheck-ref
+          # input docs for the full explanation).
+          abicheck-repository: ${{ steps.identity.outputs.repository }}
+          abicheck-ref: ${{ steps.identity.outputs.ref }}
