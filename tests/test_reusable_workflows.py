@@ -447,6 +447,20 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
             "${{ inputs.build-output-artifact-prefix }}${{ matrix.profile_id }}"
         )
 
+    def test_build_output_download_also_runs_for_no_baseline_wrapper_or_clang_plugin_evidence(
+        self,
+    ) -> None:
+        # channel: none with evidence-producer: wrapper/clang-plugin still
+        # needs this artifact if evidence-pack-path points inside it -- the
+        # download must not be gated on baseline_channel alone (Codex review).
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        dl = next(s for s in steps if s.get("name") == "Download build-output artifact")
+        condition = dl["if"]
+        assert "matrix.baseline_channel != 'none'" in condition
+        assert "inputs.evidence-producer == 'wrapper'" in condition
+        assert "inputs.evidence-producer == 'clang-plugin'" in condition
+
     def test_resolver_emits_empty_build_output_when_download_did_not_land_a_file(
         self,
     ) -> None:

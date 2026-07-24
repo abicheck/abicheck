@@ -1737,6 +1737,25 @@ issues, one fixed and one deferred with a documented rationale:**
   write the envelope anyway" case). Tracked as a known gap rather than
   rushed into either shape without picking one deliberately.
 
+**A sixth round (Codex, against `06e1fcb`) caught one more real issue,
+fixed in the same commit style as the rest of this section:** the "Download
+build-output artifact" step's `if: matrix.baseline_channel != 'none'`
+condition assumed the artifact is only ever needed for baseline comparison
+(`candidate-build-output`'s `incompatible_evidence` check). But
+`evidence-pack-path` (`docs/reference/check-target.md`: "must match an
+earlier `collect-facts phase: prepare` step's own output path") can
+legitimately live inside this same build-output artifact — it's exactly
+the kind of thing this workflow's own artifact-staging contract already
+allows for ("`abicheck-build-<profile>/` directory (build-output.json + whatever
+it references)"). A `channel: none` audit-only cell with
+`evidence-producer: wrapper`/`clang-plugin` and an `evidence-pack-path`
+pointing inside the build-output download would therefore silently skip the
+download it needed, and `collect-facts phase: verify` would fail to find
+the pack. Fixed by broadening the condition to
+`matrix.baseline_channel != 'none' || inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin'`.
+Covered by a new
+`test_build_output_download_also_runs_for_no_baseline_wrapper_or_clang_plugin_evidence`.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —
