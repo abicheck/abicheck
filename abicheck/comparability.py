@@ -507,6 +507,15 @@ def compute_extraction_contract(
                 seen_header_identities.add(identity)
                 header_sequence.append(identity)
 
+        # A single declared header's own name is not load-bearing here
+        # either (Codex review, PR #624 follow-up — same reasoning as the
+        # scope "headers" field above): with only one header, there is no
+        # order to disambiguate, so a rename (v1.h -> v2.h) must not
+        # collide with the ORDER-sensitivity this field exists to catch
+        # for 2+ headers.
+        if len(header_sequence) == 1:
+            header_sequence = ["<single-header>"]
+
         # Path-valued pass-through operands are content-hashed, never
         # hashed as their raw string form (Codex review, PR #624): a
         # forced-include flag like `-include /checkout-old/force.h` names
@@ -610,13 +619,29 @@ def compute_extraction_contract(
             # the identical declared surface.
             return sorted({_side_local_identity(p, root) for p in paths})
 
+        # A single declared header's own filename is NOT load-bearing scope
+        # identity (Codex review, PR #624 follow-up — CI went red at scale
+        # once real dumps started populating contract): renaming a
+        # project's one main header between versions (v1.h -> v2.h, or any
+        # other rename) is a common, legitimate practice, not the
+        # "manifest/CLI-flag drift" mistake this fingerprint exists to
+        # catch -- and with only one header declared there is nothing to
+        # disambiguate a name against anyway. The multi-header case below
+        # still needs real per-file identity: two co-located headers must
+        # not collapse to the same token (["a.h","b.h"] vs ["a.h","c.h"]
+        # is a genuine declared-surface difference). The header's actual
+        # API surface is still verified by the ordinary diff engine; this
+        # only concerns whether the extraction inputs count as "the same
+        # declared surface" for the comparability gate.
+        _scope_header_identities = _normalize((*declared_headers, *public_header_paths))
+        if len(_scope_header_identities) == 1:
+            _scope_header_identities = ["<single-header>"]
+
         # json.dumps, not a raw "|" join (Codex review, PR #624, same class
         # of bug already fixed for macro_ops/include_sequence above): a
         # normalized path is not guaranteed pipe-free.
         scope_fields = {
-            "headers": json.dumps(
-                _normalize((*declared_headers, *public_header_paths))
-            ),
+            "headers": json.dumps(_scope_header_identities),
             "public_header_dirs": json.dumps(_normalize(public_header_dirs)),
         }
         scope_fingerprint = _sha256_of(*[scope_fields[k] for k in SCOPE_FIELD_KEYS])

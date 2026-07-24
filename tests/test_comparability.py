@@ -55,11 +55,30 @@ def test_1_identical_header_name_different_checkout_root_matches(tmp_path):
     assert old.scope_fingerprint == new.scope_fingerprint
 
 
-def test_2_different_header_name_produces_different_scope_fingerprint(tmp_path):
+def test_2_single_declared_header_rename_does_not_flip_scope_fingerprint(tmp_path):
+    # Inverted by design (Codex review, PR #624 follow-up — the CI-red
+    # incident once the gate went live on real dumps at scale): with only
+    # one declared header per side, there is nothing to disambiguate a
+    # name against, and renaming a project's single main header (v1.h ->
+    # v2.h, or any other rename) is common, legitimate practice, not a
+    # manifest/CLI-flag mistake. See test_2b below for the case that must
+    # still mismatch: 2+ declared headers, where names are load-bearing.
     old_h = _write(tmp_path / "v1" / "foo.h", "int add(int, int);\n")
     new_h = _write(tmp_path / "v2" / "bar.h", "int add(int, int);\n")
     old = compute_extraction_contract(declared_headers=[old_h])
     new = compute_extraction_contract(declared_headers=[new_h])
+    assert old.scope_fingerprint == new.scope_fingerprint
+
+
+def test_2b_multi_header_set_still_distinguishes_different_names(tmp_path):
+    # The multi-header case is untouched: two co-located declared headers
+    # still need real per-file identity to disambiguate a genuine
+    # declared-surface difference.
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b_old = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    b_new = _write(tmp_path / "v1" / "c.h", "int g(void);\n")
+    old = compute_extraction_contract(declared_headers=[a, b_old])
+    new = compute_extraction_contract(declared_headers=[a, b_new])
     assert old.scope_fingerprint != new.scope_fingerprint
 
 
@@ -89,14 +108,20 @@ def test_no_common_anchor_across_declared_paths_does_not_crash(tmp_path, monkeyp
 def test_no_common_anchor_fallback_still_distinguishes_different_headers(
     tmp_path, monkeypatch
 ):
+    # Uses a 2-header declared set (not a single header -- see test_2b):
+    # a single declared header's name is no longer load-bearing scope
+    # identity (Codex review, PR #624 follow-up), so this fallback-path
+    # robustness check needs the multi-header case to still exercise real
+    # disambiguation.
     def _raising_commonpath(paths):
         raise ValueError("simulated: no common anchor")
 
     monkeypatch.setattr(os.path, "commonpath", _raising_commonpath)
-    old_h = _write(tmp_path / "v1" / "foo.h", "int add(int, int);\n")
-    new_h = _write(tmp_path / "v2" / "bar.h", "int add(int, int);\n")
-    old = compute_extraction_contract(declared_headers=[old_h])
-    new = compute_extraction_contract(declared_headers=[new_h])
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    old_b = _write(tmp_path / "v1" / "foo.h", "int add(int, int);\n")
+    new_b = _write(tmp_path / "v1" / "bar.h", "int add(int, int);\n")
+    old = compute_extraction_contract(declared_headers=[a, old_b])
+    new = compute_extraction_contract(declared_headers=[a, new_b])
     assert old.scope_fingerprint != new.scope_fingerprint
 
 
@@ -988,10 +1013,14 @@ def test_unreadable_header_content_raises_snapshot_error(tmp_path):
 
 
 def test_gate_raises_scope_mismatch_error_on_scope_drift(tmp_path):
+    # A single declared header's own name is no longer load-bearing scope
+    # identity (Codex review, PR #624 follow-up), so this needs a genuine
+    # multi-header declared-surface difference to still trigger the gate.
+    a = _write(tmp_path / "v1" / "a.h", "int g(void);\n")
     old_h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
     new_h = _write(tmp_path / "v2" / "bar.h", "int f(void);\n")
-    old = _snap(compute_extraction_contract(declared_headers=[old_h]))
-    new = _snap(compute_extraction_contract(declared_headers=[new_h]))
+    old = _snap(compute_extraction_contract(declared_headers=[a, old_h]))
+    new = _snap(compute_extraction_contract(declared_headers=[a, new_h]))
     with pytest.raises(ScopeMismatchError):
         check_contracts_comparable(old, new)
 
@@ -1035,12 +1064,15 @@ def test_gate_is_lenient_on_mixed_pair_for_a_given_fingerprint(tmp_path):
 
 def test_gate_still_checks_scope_when_profile_is_mixed(tmp_path):
     # A symbols-only side (scope_fingerprint only) compared against a full
-    # L2 side (both fingerprints) must still get its scope checked.
+    # L2 side (both fingerprints) must still get its scope checked. Uses a
+    # 2-header declared set (a single header's own name is no longer
+    # load-bearing scope identity — Codex review, PR #624 follow-up).
+    a = _write(tmp_path / "v1" / "a.h", "int g(void);\n")
     old_h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
     new_h = _write(tmp_path / "v2" / "bar.h", "int f(void);\n")
-    symbols_only = compute_extraction_contract(public_header_paths=[old_h])
+    symbols_only = compute_extraction_contract(public_header_paths=[a, old_h])
     full_l2 = compute_extraction_contract(
-        declared_headers=[new_h], l2_frontend_ran=True
+        declared_headers=[a, new_h], l2_frontend_ran=True
     )
     with pytest.raises(ScopeMismatchError):
         check_contracts_comparable(_snap(symbols_only), _snap(full_l2))
@@ -1199,10 +1231,13 @@ def test_gate_carve_out_riscv_word_size_change_verified_via_full_axis():
 
 
 def test_gate_diagnostic_mode_returns_descriptor_instead_of_raising_on_scope(tmp_path):
+    # 2-header declared set: a single header's own name is no longer
+    # load-bearing scope identity (Codex review, PR #624 follow-up).
+    a = _write(tmp_path / "v1" / "a.h", "int g(void);\n")
     old_h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
     new_h = _write(tmp_path / "v2" / "bar.h", "int f(void);\n")
-    old = _snap(compute_extraction_contract(declared_headers=[old_h]))
-    new = _snap(compute_extraction_contract(declared_headers=[new_h]))
+    old = _snap(compute_extraction_contract(declared_headers=[a, old_h]))
+    new = _snap(compute_extraction_contract(declared_headers=[a, new_h]))
     result = check_contracts_comparable(old, new, diagnostic=True)
     assert isinstance(result, ComparabilityMismatch)
     assert result.kind == "scope"

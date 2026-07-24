@@ -1583,14 +1583,23 @@ class TestDiagnosticComparisonThreading:
     point."""
 
     def _mismatched_pair(self, tmp_path):
+        # 2-header declared set: a single header's own name is no longer
+        # load-bearing scope identity (Codex review, PR #624 follow-up —
+        # the CI-red incident once the gate went live on real dumps at
+        # scale), so this needs a genuine multi-header declared-surface
+        # difference to still trigger the gate.
+        a_old = tmp_path / "old" / "a.h"
+        a_new = tmp_path / "new" / "a.h"
         old_h = tmp_path / "old" / "foo.h"
         new_h = tmp_path / "new" / "bar.h"
         old_h.parent.mkdir(parents=True)
         new_h.parent.mkdir(parents=True)
+        a_old.write_text("int g(void);\n")
+        a_new.write_text("int g(void);\n")
         old_h.write_text("int f(void);\n")
         new_h.write_text("int f(void);\n")
 
-        def _snap(version, header):
+        def _snap(version, headers):
             return AbiSnapshot(
                 library="libtest.so",
                 version=version,
@@ -1603,13 +1612,13 @@ class TestDiagnosticComparisonThreading:
                         is_extern_c=True,
                     )
                 ],
-                contract=compute_extraction_contract(declared_headers=[header]),
+                contract=compute_extraction_contract(declared_headers=headers),
             )
 
         old_p = tmp_path / "old.json"
         new_p = tmp_path / "new.json"
-        save_snapshot(_snap("1.0", old_h), old_p)
-        save_snapshot(_snap("2.0", new_h), new_p)
+        save_snapshot(_snap("1.0", [a_old, old_h]), old_p)
+        save_snapshot(_snap("2.0", [a_new, new_h]), new_p)
         return old_p, new_p
 
     def test_compare_snapshots_raises_by_default(self, tmp_path):

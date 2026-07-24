@@ -100,8 +100,15 @@ def test_header_dump_populates_contract(built_lib: tuple[Path, Path]) -> None:
     assert snap.contract.scope_fingerprint.startswith("sha256:")
     assert snap.contract.profile_fields["compiler_family"] == "clang"
     assert snap.contract.profile_fields["abi_dialect"] in ("gnu", "msvc")
-    assert "api.h" in snap.contract.profile_fields["header_sequence"]
-    assert "api.h" in snap.contract.scope_fields["headers"]
+    # A single declared header's own filename is not load-bearing profile
+    # identity either (Codex review, PR #624 follow-up) -- see
+    # test_comparability.py's declared_header_order tests for the
+    # multi-header case that still tracks real ordering.
+    assert snap.contract.profile_fields["header_sequence"] == '["<single-header>"]'
+    # A single declared header's own filename is not load-bearing scope
+    # identity (Codex review, PR #624 follow-up) -- see
+    # test_comparability.py's test_2b for the multi-header case that is.
+    assert snap.contract.scope_fields["headers"] == '["<single-header>"]'
 
 
 def test_symbols_only_dump_leaves_contract_none(built_lib: tuple[Path, Path]) -> None:
@@ -291,3 +298,60 @@ def test_contract_is_deterministic_and_gate_does_not_spuriously_raise(
 
     result = compare(snap_a, snap_b)
     assert result.verdict == Verdict.NO_CHANGE
+
+
+def test_renamed_single_header_does_not_spuriously_block_compare(
+    tmp_path: Path,
+) -> None:
+    """Regression pin for the CI-red incident this wiring caused once live
+    on real dumps at scale (Codex review, PR #624 follow-up): a project
+    with exactly one declared header per side that gets renamed between
+    versions (v1.h -> v2.h, or any other rename -- a common, legitimate
+    practice, e.g. examples/case31_enum_rename's own fixture layout) must
+    not raise ScopeMismatchError/ProfileMismatchError -- the comparability
+    gate has nothing to disambiguate a lone header's name against, and the
+    real API surface is still verified by the ordinary diff engine below."""
+    if not (_have("clang") and _have("gcc")):
+        pytest.skip(
+            "clang and gcc are required for the contract-wiring integration test"
+        )
+    old_header = tmp_path / "v1.h"
+    old_header.write_text(
+        "typedef enum { LOG_ERR = 1 } log_level_t;\n"
+        "void set_log_level(log_level_t level);\n"
+    )
+    new_header = tmp_path / "v2.h"
+    new_header.write_text(
+        "typedef enum { LOG_ERROR = 1 } log_level_t;\n"
+        "void set_log_level(log_level_t level);\n"
+    )
+    old_src = tmp_path / "v1.c"
+    old_src.write_text('#include "v1.h"\nvoid set_log_level(log_level_t level) {}\n')
+    new_src = tmp_path / "v2.c"
+    new_src.write_text('#include "v2.h"\nvoid set_log_level(log_level_t level) {}\n')
+    old_so = tmp_path / "libv1.so"
+    new_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-o", str(old_so), str(old_src), f"-I{tmp_path}"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-o", str(new_so), str(new_src), f"-I{tmp_path}"],
+        check=True,
+        capture_output=True,
+    )
+
+    snap_old = dump(old_so, [old_header], version="v1", header_backend="clang")
+    snap_new = dump(new_so, [new_header], version="v2", header_backend="clang")
+
+    assert snap_old.contract is not None
+    assert snap_new.contract is not None
+    assert snap_old.contract.scope_fingerprint == snap_new.contract.scope_fingerprint
+    assert (
+        snap_old.contract.profile_fingerprint == snap_new.contract.profile_fingerprint
+    )
+
+    result = compare(snap_old, snap_new)
+    names = {c.kind.value for c in result.changes}
+    assert "enum_member_renamed" in names
