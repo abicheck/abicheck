@@ -1070,6 +1070,16 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # direction. No init deadlock.
                 "cli_project_targets",
                 "cli_resolve",
+                # `cli_run_plan` (G30 P1.4) joins this SCC exactly like
+                # `cli_project_targets`/`cli_build_output`/`cli_aggregate`:
+                # its `run-plan generate`/`to-aggregate-manifest` commands
+                # reuse the shared `-o/--format` pair via
+                # `cli_options.output_options` (module-load import), and
+                # `cli_options` is already a member — so `cli ->
+                # cli_run_plan -> cli_options -> ... -> cli` closes through
+                # already-member modules, not a new dependency direction.
+                # No init deadlock.
+                "cli_run_plan",
                 "cli_scan",
                 "cli_scan_baseline",
                 "cli_stack",

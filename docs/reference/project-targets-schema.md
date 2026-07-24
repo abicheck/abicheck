@@ -10,11 +10,12 @@ checks run against each target (G30/ADR-047 §3).
 > **Status.** This page documents the schema and the
 > `abicheck project-targets validate` command shipped in G30 P1.5. The
 > run-plan generator that reads a validated block to fan out CI checks
-> (`check-single.yml`/`check-project.yml`) is G30 P1.4, not built yet — see
-> the [G30 plan](../development/plans/g30-github-actions-integration-model.md).
-> A project not using G30's CI-integration primitives sees no behavior
-> change at all from adding (or omitting) this block: nothing in `dump`/
-> `compare`/`scan` reads it today.
+> (`abicheck run-plan generate`, `check-single.yml`/`check-project.yml`) is
+> G30 P1.4 — see the [run-plan schema](run-plan-schema.md) and the
+> [reusable workflows reference](reusable-workflows.md). A project not using
+> G30's CI-integration primitives sees no behavior change at all from adding
+> (or omitting) this block: nothing in `dump`/`compare`/`scan` reads it
+> today.
 
 ## Example
 

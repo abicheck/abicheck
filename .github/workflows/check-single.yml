@@ -1,0 +1,334 @@
+name: 'abicheck check-single'
+
+# G30 P1.4 (ADR-047 §4/§5): a reusable workflow wrapping actions/check-target
+# for a caller that wants exactly ONE check without generating a run-plan.json
+# (check-project.yml, below, is the multi-check matrix + aggregate flow that
+# generates one). Every input here mirrors actions/check-target/action.yml's
+# own input surface 1:1 -- see that file for the full rationale behind each
+# one; this workflow only adds the reusable-workflow-level self-checkout
+# needed to reference check-target as a nested Action from an external
+# caller (see the "Capture this reusable workflow's identity" step below).
+
+on:
+  workflow_call:
+    inputs:
+      # ── Identity (ADR-047 §5/§7) ──────────────────────────────────────
+      kind:
+        description: "'target' (default) or 'bundle' -- which resolution/compare shape this check uses."
+        type: string
+        default: 'target'
+      target-kind:
+        description: "'library' (default), 'app-consumer', or 'plugin-contract' -- only meaningful when kind: target."
+        type: string
+        default: 'library'
+      name:
+        description: 'The target id (kind: target) or bundle id (kind: bundle) -- required.'
+        type: string
+        required: true
+      baseline-target:
+        description: 'Which target''s baseline actually gets resolved -- defaults to name (see check-target''s own doc for the app-consumer/plugin-contract redirect).'
+        type: string
+        default: ''
+      bundle-members:
+        description: 'JSON array of the bundle''s member target ids. Required when kind is bundle.'
+        type: string
+        default: '[]'
+      profile:
+        description: 'The build profile.id this check runs under -- required.'
+        type: string
+        required: true
+      baseline-channel:
+        description: 'Baseline channel name, or the literal ''none'' for a no-baseline audit -- required.'
+        type: string
+        required: true
+      baseline-path:
+        description: 'Path to baseline-channel''s already-staged baseline-set. Required unless baseline-channel is ''none''.'
+        type: string
+        default: ''
+      baseline-required:
+        description: 'true (default) -- no baseline set yet is a hard failure. false -- explicit bootstrap opt-in.'
+        type: boolean
+        default: true
+      candidate-build-output:
+        description: 'Path to the candidate build''s build-output.json, for resolve-baseline''s incompatible_evidence check.'
+        type: string
+        default: ''
+      requested-depth:
+        description: 'Evidence-depth this check asks for: binary, headers, build, or source -- required.'
+        type: string
+        required: true
+      gate-mode:
+        description: "'local' (default), 'deferred', or 'advisory'."
+        type: string
+        default: 'local'
+      project:
+        description: 'Project identifier recorded in the report envelope. Defaults to this repository.'
+        type: string
+        default: ''
+      head-sha:
+        description: 'Candidate commit SHA recorded in the report envelope. Defaults to this workflow''s own SHA.'
+        type: string
+        default: ''
+      base-ref:
+        description: 'Base ref recorded in the report envelope, when known.'
+        type: string
+        default: ''
+
+      # ── Evidence collection composition ───────────────────────────────
+      evidence-producer:
+        description: "'' (default), 'replay', 'wrapper', or 'clang-plugin'."
+        type: string
+        default: ''
+      evidence-pack-path:
+        description: 'Path to the wrapper/clang-plugin abicheck_inputs/ pack an earlier collect-facts phase: prepare step wrote.'
+        type: string
+        default: 'abicheck_inputs'
+
+      # ── Candidate/new-side inputs ──────────────────────────────────────
+      new-library:
+        description: 'Candidate binary (kind: target) or directory of candidate member binaries (kind: bundle) -- required.'
+        type: string
+        required: true
+      header:
+        description: 'Public header file(s) applied to both sides (space-separated).'
+        type: string
+        default: ''
+      old-header:
+        description: 'Public header(s) for the baseline side only.'
+        type: string
+        default: ''
+      new-header:
+        description: 'Public header(s) for the candidate side only.'
+        type: string
+        default: ''
+      include:
+        description: 'Extra include directories, applied to both sides.'
+        type: string
+        default: ''
+      old-include:
+        description: 'Include directories for the baseline side only.'
+        type: string
+        default: ''
+      new-include:
+        description: 'Include directories for the candidate side only.'
+        type: string
+        default: ''
+      lang:
+        description: 'Language mode for header AST parsing: "c++" or "c".'
+        type: string
+        default: 'c++'
+      ast-frontend:
+        description: 'L2 header-AST frontend: auto, castxml, clang, or hybrid.'
+        type: string
+        default: ''
+      gcc-path:
+        description: 'Path to GCC/G++ cross-compiler binary.'
+        type: string
+        default: ''
+      gcc-prefix:
+        description: 'Cross-toolchain prefix, e.g. aarch64-linux-gnu-.'
+        type: string
+        default: ''
+      gcc-options:
+        description: 'Extra compiler flags passed through to castxml.'
+        type: string
+        default: ''
+      sysroot:
+        description: 'Alternative system root directory for cross-compilation.'
+        type: string
+        default: ''
+      sources:
+        description: 'Source checkout for L3/L4/L5 evidence.'
+        type: string
+        default: ''
+      build-info:
+        description: 'Out-of-tree L3 build context (producer-less build/source-depth checks only).'
+        type: string
+        default: ''
+      compile-db:
+        description: 'Explicit path to a compile_commands.json.'
+        type: string
+        default: ''
+      build-config:
+        description: 'Path to a trusted .abicheck.yml.'
+        type: string
+        default: ''
+      consumer-binary:
+        description: 'target-kind: app-consumer only. Consumer binary/binaries whose imports scope the comparison.'
+        type: string
+        default: ''
+      verify-runtime:
+        description: 'target-kind: app-consumer only.'
+        type: boolean
+        default: false
+      contract-file:
+        description: 'target-kind: plugin-contract only. A .syms file (one required linker symbol per line).'
+        type: string
+        default: ''
+      policy:
+        description: 'Built-in policy profile: strict_abi (default), sdk_vendor, plugin_abi.'
+        type: string
+        default: 'strict_abi'
+      policy-file:
+        description: 'Path to a YAML policy file with per-kind verdict overrides.'
+        type: string
+        default: ''
+      suppress:
+        description: 'Path to a YAML suppression file to filter known/intentional changes.'
+        type: string
+        default: ''
+      severity-preset:
+        description: 'Forwarded to the internal compare step. Defaults to ''default'' so the report always carries a severity block.'
+        type: string
+        default: 'default'
+      severity-addition:
+        description: 'Severity for new public API additions: error, warning, or info.'
+        type: string
+        default: ''
+      extra-args:
+        description: 'Additional CLI arguments passed directly to the internal abicheck invocation.'
+        type: string
+        default: ''
+      python-version:
+        description: 'Python version for setup-python.'
+        type: string
+        default: '3.13'
+      install-deps:
+        description: 'Install system dependencies (castxml, gcc). Set to false if pre-installed.'
+        type: boolean
+        default: true
+
+    outputs:
+      outcome:
+        description: 'resolve-baseline outcome, or "skipped" when baseline-channel is none.'
+        value: ${{ jobs.check.outputs.outcome }}
+      check-id:
+        description: "This check's full identity: target@profile#baseline_channel@requested_depth."
+        value: ${{ jobs.check.outputs.check-id }}
+      verdict:
+        description: 'The legacy verdict field.'
+        value: ${{ jobs.check.outputs.verdict }}
+      compatibility-verdict:
+        description: "ADR-047 §7's new compatibility_verdict field (empty when unavailable)."
+        value: ${{ jobs.check.outputs.compatibility-verdict }}
+      policy-gate-decision:
+        description: '"pass" or "fail" -- before any advisory neutralization.'
+        value: ${{ jobs.check.outputs.policy-gate-decision }}
+      report-path:
+        description: 'Path to the final, enriched report JSON, inside this job''s own workspace.'
+        value: ${{ jobs.check.outputs.report-path }}
+
+jobs:
+  check:
+    name: ${{ inputs.name }}
+    runs-on: ubuntu-latest
+    outputs:
+      outcome: ${{ steps.run.outputs.outcome }}
+      check-id: ${{ steps.run.outputs.check-id }}
+      verdict: ${{ steps.run.outputs.verdict }}
+      compatibility-verdict: ${{ steps.run.outputs.compatibility-verdict }}
+      policy-gate-decision: ${{ steps.run.outputs.policy-gate-decision }}
+      report-path: ${{ steps.run.outputs.report-path }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # ── Self-checkout for the nested check-target Action ────────────────
+      # A relative `uses: ./x` step in THIS reusable workflow's own steps
+      # always resolves against the CALLER's checkout, never against the
+      # repository that defines this reusable workflow -- reusable workflows
+      # have the identical limitation actions/check-target/action.yml's own
+      # "Checkout abicheck (for nested Action composition)" step documents
+      # for composite Actions (confirmed: GitHub Community Discussion
+      # #107558, "How can callable workflows in a dedicated repo use its
+      # local actions with relative paths?" -- the answer is the same "the
+      # runner resolves `./x` against the caller's checkout" rule). `uses:`
+      # accepts no expressions, so this workflow cannot reference itself
+      # dynamically either -- it needs the same runtime self-checkout.
+      #
+      # The composite-Action fix used `github.action_repository`/
+      # `github.action_ref` (which describe the *Action* about to run).
+      # Reusable workflows have their own equivalent for the *workflow*
+      # about to run: `job.workflow_ref`/`job.workflow_sha` (part of the
+      # `job` context, populated specifically so a reusable workflow can
+      # identify itself independent of the calling workflow's own
+      # `github.*` context). `job.workflow_ref` is always the fully
+      # qualified `owner/repo/.github/workflows/check-single.yml@ref` form,
+      # even for a same-repository `uses: ./.github/workflows/check-single.yml`
+      # caller -- unlike `github.action_repository`/`github.action_ref`,
+      # which go empty for a local composite-Action reference. This
+      # workflow still falls back to `github.repository`/`github.sha` if
+      # `workflow_ref` is ever empty, matching check-target's own
+      # defense-in-depth pattern, since this exact behavior could not be
+      # verified against a real external-consumer run in this session (no
+      # second repository available to test cross-repo consumption from).
+      - name: Capture this reusable workflow's identity
+        id: identity
+        shell: bash
+        env:
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          FALLBACK_REPOSITORY: ${{ github.repository }}
+          FALLBACK_REF: ${{ github.sha }}
+        run: |
+          repository="${WORKFLOW_REF%%/.github/workflows/*}"
+          echo "repository=${repository:-$FALLBACK_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "ref=${WORKFLOW_SHA:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout abicheck (for nested Action composition)
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.identity.outputs.repository }}
+          ref: ${{ steps.identity.outputs.ref }}
+          path: .check-single-src
+          persist-credentials: false
+
+      - name: Run check-target
+        id: run
+        uses: ./.check-single-src/actions/check-target
+        with:
+          kind: ${{ inputs.kind }}
+          target-kind: ${{ inputs.target-kind }}
+          name: ${{ inputs.name }}
+          baseline-target: ${{ inputs.baseline-target }}
+          bundle-members: ${{ inputs.bundle-members }}
+          profile: ${{ inputs.profile }}
+          baseline-channel: ${{ inputs.baseline-channel }}
+          baseline-path: ${{ inputs.baseline-path }}
+          baseline-required: ${{ inputs.baseline-required }}
+          candidate-build-output: ${{ inputs.candidate-build-output }}
+          requested-depth: ${{ inputs.requested-depth }}
+          gate-mode: ${{ inputs.gate-mode }}
+          project: ${{ inputs.project != '' && inputs.project || github.repository }}
+          head-sha: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
+          base-ref: ${{ inputs.base-ref }}
+          evidence-producer: ${{ inputs.evidence-producer }}
+          evidence-pack-path: ${{ inputs.evidence-pack-path }}
+          new-library: ${{ inputs.new-library }}
+          header: ${{ inputs.header }}
+          old-header: ${{ inputs.old-header }}
+          new-header: ${{ inputs.new-header }}
+          include: ${{ inputs.include }}
+          old-include: ${{ inputs.old-include }}
+          new-include: ${{ inputs.new-include }}
+          lang: ${{ inputs.lang }}
+          ast-frontend: ${{ inputs.ast-frontend }}
+          gcc-path: ${{ inputs.gcc-path }}
+          gcc-prefix: ${{ inputs.gcc-prefix }}
+          gcc-options: ${{ inputs.gcc-options }}
+          sysroot: ${{ inputs.sysroot }}
+          sources: ${{ inputs.sources }}
+          build-info: ${{ inputs.build-info }}
+          compile-db: ${{ inputs.compile-db }}
+          build-config: ${{ inputs.build-config }}
+          consumer-binary: ${{ inputs.consumer-binary }}
+          verify-runtime: ${{ inputs.verify-runtime }}
+          contract-file: ${{ inputs.contract-file }}
+          policy: ${{ inputs.policy }}
+          policy-file: ${{ inputs.policy-file }}
+          suppress: ${{ inputs.suppress }}
+          severity-preset: ${{ inputs.severity-preset }}
+          severity-addition: ${{ inputs.severity-addition }}
+          extra-args: ${{ inputs.extra-args }}
+          python-version: ${{ inputs.python-version }}
+          install-deps: ${{ inputs.install-deps }}
+          action-version: ${{ format('{0}@{1}', steps.identity.outputs.repository, steps.identity.outputs.ref) }}

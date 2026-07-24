@@ -1,0 +1,535 @@
+name: 'abicheck check-project'
+
+# G30 P1.4 (ADR-047 §4/§5): the multi-target CI run-plan + matrix + trailing
+# aggregate gate. Three jobs:
+#
+#   plan      Generate run-plan.json from .abicheck.yml's targets:/bundles:/
+#             profiles: block (G30 P1.5) plus each contract profile's
+#             build-output.json (G30 P1.1, downloaded as an artifact this
+#             workflow expects the caller's own build job(s) to have
+#             uploaded earlier in the same workflow run -- this workflow
+#             never runs a build itself, "build once, scan many").
+#   check     One actions/check-target invocation per run-plan.json cell
+#             (matrix, fail-fast: false). Downloads that cell's candidate
+#             binaries + (unless baseline-channel: none) that channel's
+#             baseline-set, both as artifacts this workflow expects to
+#             already exist -- it never fetches from a baseline channel's
+#             storage backend itself, the same "this Action never fetches"
+#             boundary actions/resolve-baseline and actions/baseline already
+#             draw (ADR-047 §10). Always uploads its report, even on an
+#             operational error (if: always()) -- a required sub-task ADR-047
+#             §4 flags: under gate-mode: deferred, check-target's own exit
+#             can fail this matrix job even though it already wrote a report,
+#             and a later step in a failed job is skipped by default unless
+#             it too carries an always-on condition.
+#   aggregate Projects run-plan.json to `aggregate --manifest`'s wire shape
+#             (using each check's own check_id, ADR-047 §5's required
+#             sub-task) and runs `abicheck aggregate` over every downloaded
+#             report. Runs with if: always() (never a bare needs: with no
+#             if:) -- plain needs: semantics skip a dependent job when any
+#             matrix leg fails, and a skipped job reports success, which
+#             would silently green a branch-protection-required status past
+#             a real gate-mode: deferred operational failure -- exactly the
+#             failure mode ADR-047 exists to close (second required
+#             sub-task).
+#
+# **Artifact-naming convention this workflow establishes (not yet exercised
+# against a real external-consumer run in this session -- no second
+# repository was available to validate cross-repo artifact staging end to
+# end; see docs/reference/reusable-workflows.md for the full contract):**
+# the calling workflow's own job(s) must, before or in parallel with calling
+# this reusable workflow non-blockingly via `needs:`, upload:
+#   - one `<build-output-artifact-prefix><profile-id>` artifact per contract
+#     profile, containing that profile's `abicheck-build-<profile>/` directory
+#     (build-output.json + whatever it references) -- G30 P1.1.
+#   - one `<candidate-artifact-prefix><profile-id>` artifact per contract
+#     profile, containing the tree each target's `binary_pattern`/
+#     `consumer_binary_pattern` globs against for THIS run's candidate side.
+#   - one `<baseline-artifact-prefix><channel>` artifact per baseline channel
+#     referenced by any check (unless every check on that channel uses
+#     `baseline-channel: none`), containing that channel's staged
+#     baseline-set (`manifest.json` + snapshots, `actions/baseline`'s own
+#     output shape) -- this workflow never fetches from a channel's storage
+#     backend itself (ADR-047 §10), matching resolve-baseline's own
+#     documented boundary.
+
+on:
+  workflow_call:
+    inputs:
+      config-path:
+        description: 'Path to the project''s .abicheck.yml, relative to the repository root.'
+        type: string
+        default: '.abicheck.yml'
+      build-output-artifact-prefix:
+        description: 'Each contract profile''s build-output.json is downloaded from an artifact named <this><profile-id>.'
+        type: string
+        default: 'abicheck-build-'
+      candidate-artifact-prefix:
+        description: 'Each contract profile''s candidate binaries are downloaded from an artifact named <this><profile-id>.'
+        type: string
+        default: 'abicheck-candidate-'
+      baseline-artifact-prefix:
+        description: 'Each baseline channel''s staged baseline-set is downloaded from an artifact named <this><channel>.'
+        type: string
+        default: 'abicheck-baseline-'
+      run-plan-artifact-name:
+        description: 'Artifact name the generated run-plan.json is uploaded under.'
+        type: string
+        default: 'run-plan'
+      report-artifact-prefix:
+        description: 'Each check''s report is uploaded under an artifact named <this><sanitized-check-id>.'
+        type: string
+        default: 'abicheck-check-report-'
+      aggregate-artifact-name:
+        description: 'Artifact name the final aggregate result (JSON + text) is uploaded under.'
+        type: string
+        default: 'abicheck-aggregate-result'
+      project:
+        description: 'Project identifier recorded in every report envelope. Defaults to this repository.'
+        type: string
+        default: ''
+      head-sha:
+        description: 'Candidate commit SHA recorded in every report envelope and the run-plan. Defaults to this workflow''s own SHA.'
+        type: string
+        default: ''
+      base-ref:
+        description: 'Base ref recorded in every report envelope, when known.'
+        type: string
+        default: ''
+      python-version:
+        description: 'Python version for setup-python, every job.'
+        type: string
+        default: '3.13'
+      on-missing-required:
+        description: "Forwarded to `abicheck aggregate --on-missing-required`: 'fail' (default) or 'warn'."
+        type: string
+        default: 'fail'
+      on-unexpected-target:
+        description: "Forwarded to `abicheck aggregate --on-unexpected-target`: 'include' (default), 'warn', 'fail', or 'ignore'."
+        type: string
+        default: 'include'
+
+      # ── Shared analysis options, forwarded to every check-target cell ────
+      # (a per-cell override of any of these is out of scope for this first
+      # version -- see docs/reference/reusable-workflows.md).
+      header:
+        type: string
+        default: ''
+      old-header:
+        type: string
+        default: ''
+      new-header:
+        type: string
+        default: ''
+      include:
+        type: string
+        default: ''
+      old-include:
+        type: string
+        default: ''
+      new-include:
+        type: string
+        default: ''
+      lang:
+        type: string
+        default: 'c++'
+      ast-frontend:
+        type: string
+        default: ''
+      gcc-path:
+        type: string
+        default: ''
+      gcc-prefix:
+        type: string
+        default: ''
+      gcc-options:
+        type: string
+        default: ''
+      sysroot:
+        type: string
+        default: ''
+      evidence-producer:
+        type: string
+        default: ''
+      evidence-pack-path:
+        type: string
+        default: 'abicheck_inputs'
+      sources:
+        type: string
+        default: ''
+      build-info:
+        type: string
+        default: ''
+      compile-db:
+        type: string
+        default: ''
+      build-config:
+        type: string
+        default: ''
+      verify-runtime:
+        type: boolean
+        default: false
+      policy:
+        type: string
+        default: 'strict_abi'
+      policy-file:
+        type: string
+        default: ''
+      suppress:
+        type: string
+        default: ''
+      severity-preset:
+        type: string
+        default: 'default'
+      severity-addition:
+        type: string
+        default: ''
+      extra-args:
+        type: string
+        default: ''
+      install-deps:
+        type: boolean
+        default: true
+
+    outputs:
+      gate-exit-code:
+        description: "abicheck aggregate's own exit code (0 pass / 1 coverage or policy gap / 2 API break / 4 ABI break)."
+        value: ${{ jobs.aggregate.outputs.exit-code }}
+      run-plan-artifact-name:
+        description: 'The artifact name run-plan.json was uploaded under (== inputs.run-plan-artifact-name, echoed for convenience).'
+        value: ${{ jobs.plan.outputs.run-plan-artifact-name }}
+
+jobs:
+  # ── Job 1: generate run-plan.json ───────────────────────────────────────
+  plan:
+    name: 'Generate run-plan'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has-checks: ${{ steps.plan.outputs.has-checks }}
+      run-plan-artifact-name: ${{ inputs.run-plan-artifact-name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install abicheck
+        shell: bash
+        run: pip install .
+
+      - name: Download build-output artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: build-outputs
+          pattern: '${{ inputs.build-output-artifact-prefix }}*'
+          merge-multiple: false
+
+      - name: Generate run-plan.json
+        id: plan
+        shell: bash
+        env:
+          CONFIG_PATH: ${{ inputs.config-path }}
+          BUILD_OUTPUT_PREFIX: ${{ inputs.build-output-artifact-prefix }}
+          PROJECT: ${{ inputs.project != '' && inputs.project || github.repository }}
+          HEAD_SHA: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -d build-outputs ]]; then
+            for dir in build-outputs/*/; do
+              [[ -d "$dir" ]] || continue
+              artifact_name="$(basename "$dir")"
+              profile_id="${artifact_name#"$BUILD_OUTPUT_PREFIX"}"
+              args+=(--build-output "${profile_id}=${dir%/}")
+            done
+          fi
+          abicheck run-plan generate "$CONFIG_PATH" \
+            --project "$PROJECT" --head-sha "$HEAD_SHA" \
+            "${args[@]}" -o run-plan.json
+          python3 -c "
+          import json
+          plan = json.load(open('run-plan.json'))
+          checks = plan.get('checks', [])
+          print('matrix=' + json.dumps({'include': checks}))
+          print('has-checks=' + ('true' if checks else 'false'))
+          " >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.run-plan-artifact-name }}
+          path: run-plan.json
+
+  # ── Job 2: one check-target invocation per run-plan.json cell ──────────
+  check:
+    name: ${{ matrix.check_id }}
+    needs: plan
+    if: needs.plan.outputs.has-checks == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install abicheck
+        shell: bash
+        run: pip install .
+
+      # See check-single.yml's "Capture this reusable workflow's identity"
+      # step for the full rationale -- identical technique, needed here for
+      # the same reason (this job's own nested `uses: ./actions/check-target`
+      # step below).
+      - name: Capture this reusable workflow's identity
+        id: identity
+        shell: bash
+        env:
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          FALLBACK_REPOSITORY: ${{ github.repository }}
+          FALLBACK_REF: ${{ github.sha }}
+        run: |
+          repository="${WORKFLOW_REF%%/.github/workflows/*}"
+          echo "repository=${repository:-$FALLBACK_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "ref=${WORKFLOW_SHA:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout abicheck (for nested Action composition)
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.identity.outputs.repository }}
+          ref: ${{ steps.identity.outputs.ref }}
+          path: .check-project-src
+          persist-credentials: false
+
+      - name: Download candidate artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: '${{ inputs.candidate-artifact-prefix }}${{ matrix.profile_id }}'
+          path: candidate
+        continue-on-error: true
+
+      - name: Download baseline-set artifact
+        if: matrix.baseline_channel != 'none'
+        uses: actions/download-artifact@v8
+        with:
+          name: '${{ inputs.baseline-artifact-prefix }}${{ matrix.baseline_channel }}'
+          path: 'baseline-sets/${{ matrix.baseline_channel }}'
+        continue-on-error: true
+
+      # Resolves this cell's `new-library` from the downloaded `candidate/`
+      # tree: a single glob match for kind: target (the redirected library's
+      # own binary_pattern for app-consumer/plugin-contract), or a staged
+      # directory of member binaries for kind: bundle. Uses Python's `glob`
+      # rather than bash globbing so `binary_pattern`/`member_binary_patterns`
+      # can use `**` recursive patterns without depending on `shopt -s
+      # globstar` semantics matching across shells/runners.
+      - name: Resolve candidate binary/binaries
+        id: candidate
+        shell: bash
+        env:
+          MATRIX_JSON: ${{ toJSON(matrix) }}
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import glob, json, os, shutil, sys
+
+          cell = json.loads(os.environ['MATRIX_JSON'])
+          root = 'candidate'
+
+          def resolve(pattern):
+              if not pattern:
+                  return None
+              matches = sorted(glob.glob(os.path.join(root, pattern), recursive=True))
+              return matches[0] if matches else None
+
+          if cell['kind'] == 'bundle':
+              staging = 'bundle-staging'
+              os.makedirs(staging, exist_ok=True)
+              missing = []
+              for member, pattern in cell.get('member_binary_patterns', {}).items():
+                  match = resolve(pattern)
+                  if match is None:
+                      missing.append(member)
+                      continue
+                  shutil.copy2(match, os.path.join(staging, os.path.basename(match)))
+              if missing:
+                  print(f'::error::bundle {cell[\"name\"]!r}: no candidate binary matched for member(s) {missing}', file=sys.stderr)
+                  sys.exit(1)
+              print(f'new-library={staging}')
+          else:
+              match = resolve(cell.get('binary_pattern', ''))
+              if match is None:
+                  print(f'::error::target {cell[\"name\"]!r}: no candidate binary matched binary_pattern {cell.get(\"binary_pattern\")!r} under {root}/', file=sys.stderr)
+                  sys.exit(1)
+              print(f'new-library={match}')
+          " >> "$GITHUB_OUTPUT"
+
+      # Deliberately no continue-on-error here: check-target's own finalize
+      # step (ADR-047 §7) already computes its correct composite exit code
+      # per gate-mode before this step's outer conclusion is decided, and
+      # `steps.run.outputs.*` are captured at the point its internal
+      # finalize step wrote them -- before that exit code is returned --
+      # so they stay available to the always()-conditioned steps below even
+      # when this step's own conclusion is "failure". Letting this step's
+      # natural failure propagate (instead of swallowing it) is what makes
+      # this whole matrix job correctly report failure for a real
+      # gate-mode: local break or an operational error, which
+      # branch-protection-required status checks depend on.
+      - name: Run check-target
+        id: run
+        uses: ./.check-project-src/actions/check-target
+        with:
+          kind: ${{ matrix.kind }}
+          target-kind: ${{ matrix.target_kind || 'library' }}
+          name: ${{ matrix.name }}
+          baseline-target: ${{ matrix.baseline_target || '' }}
+          bundle-members: ${{ toJSON(matrix.bundle_members || []) }}
+          profile: ${{ matrix.profile_id }}
+          baseline-channel: ${{ matrix.baseline_channel }}
+          baseline-path: 'baseline-sets/${{ matrix.baseline_channel }}'
+          requested-depth: ${{ matrix.requested_depth }}
+          gate-mode: ${{ matrix.gate_mode }}
+          project: ${{ inputs.project != '' && inputs.project || github.repository }}
+          head-sha: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
+          base-ref: ${{ inputs.base-ref }}
+          evidence-producer: ${{ inputs.evidence-producer }}
+          evidence-pack-path: ${{ inputs.evidence-pack-path }}
+          new-library: ${{ steps.candidate.outputs.new-library }}
+          consumer-binary: ${{ matrix.target_kind == 'app-consumer' && steps.candidate.outputs.new-library || '' }}
+          contract-file: ${{ matrix.target_kind == 'plugin-contract' && matrix.contract_file || '' }}
+          header: ${{ inputs.header }}
+          old-header: ${{ inputs.old-header }}
+          new-header: ${{ inputs.new-header }}
+          include: ${{ inputs.include }}
+          old-include: ${{ inputs.old-include }}
+          new-include: ${{ inputs.new-include }}
+          lang: ${{ inputs.lang }}
+          ast-frontend: ${{ inputs.ast-frontend }}
+          gcc-path: ${{ inputs.gcc-path }}
+          gcc-prefix: ${{ inputs.gcc-prefix }}
+          gcc-options: ${{ inputs.gcc-options }}
+          sysroot: ${{ inputs.sysroot }}
+          sources: ${{ inputs.sources }}
+          build-info: ${{ inputs.build-info }}
+          compile-db: ${{ inputs.compile-db }}
+          build-config: ${{ inputs.build-config }}
+          verify-runtime: ${{ inputs.verify-runtime }}
+          policy: ${{ inputs.policy }}
+          policy-file: ${{ inputs.policy-file }}
+          suppress: ${{ inputs.suppress }}
+          severity-preset: ${{ inputs.severity-preset }}
+          severity-addition: ${{ inputs.severity-addition }}
+          extra-args: ${{ inputs.extra-args }}
+          python-version: ${{ inputs.python-version }}
+          install-deps: ${{ inputs.install-deps }}
+          action-version: ${{ format('{0}@{1}', steps.identity.outputs.repository, steps.identity.outputs.ref) }}
+
+      # `check-id` is `target@profile#baseline_channel@depth` (ADR-047 §7) --
+      # artifact names disallow `"`/`:`/`<`/`>`/`|`/`*`/`?`/`\`/`/` outright,
+      # and `#` in particular is a *documented, reproducible bug*
+      # (actions/upload-artifact#473: a `#` in the name triggers an
+      # Authorization error against the underlying Actions API, even though
+      # it isn't in the officially-disallowed list), not just a style
+      # preference. Sanitize before using it in an artifact name, mirroring
+      # `actions/check-target/run.sh`'s own `tr -c 'A-Za-z0-9._-' '_'`
+      # precedent for its per-check report filename (P1.3's identical
+      # cross-invocation-collision fix, reused here for the identical
+      # underlying reason: a raw identity string is not a safe filesystem/
+      # artifact-name component).
+      - name: Sanitize check-id for artifact name
+        id: sanitized
+        if: always() && steps.run.outputs.report-path != ''
+        shell: bash
+        env:
+          CHECK_ID: ${{ steps.run.outputs.check-id }}
+        run: |
+          echo "id=$(printf '%s' "$CHECK_ID" | tr -c 'A-Za-z0-9._-' '_')" >> "$GITHUB_OUTPUT"
+
+      # Required sub-task (ADR-047 §4): this upload step must carry its own
+      # always-on condition, not just the trailing aggregate job -- under
+      # gate-mode: local a real ABI break, or under any gate-mode a genuine
+      # operational failure, fails the "Run check-target" step above (see
+      # its own comment for why that's deliberately not swallowed), and a
+      # subsequent step in a job whose earlier step failed is skipped by
+      # default unless it too is always()-conditioned. Without this, the
+      # report artifact for exactly the failing cells `aggregate` most
+      # needs to see would never upload. `steps.run.outputs.report-path`
+      # stays populated even for a failed step, per the comment above.
+      - name: Upload report
+        if: always() && steps.run.outputs.report-path != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: '${{ inputs.report-artifact-prefix }}${{ steps.sanitized.outputs.id }}'
+          path: ${{ steps.run.outputs.report-path }}
+
+  # ── Job 3: fan-in gate ───────────────────────────────────────────────────
+  aggregate:
+    name: 'Aggregate'
+    needs: [plan, check]
+    # Required sub-task (ADR-047 §4): always(), never a bare `needs:` -- plain
+    # needs: semantics skip this job when any matrix leg fails, and a skipped
+    # job reports success, silently greening a branch-protection-required
+    # status past a real gate-mode: deferred operational failure.
+    if: always() && needs.plan.outputs.has-checks == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      exit-code: ${{ steps.aggregate.outputs.exit-code }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install abicheck
+        shell: bash
+        run: pip install .
+
+      - name: Download run-plan.json
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.run-plan-artifact-name }}
+
+      - name: Download every check report
+        uses: actions/download-artifact@v8
+        with:
+          path: reports
+          pattern: '${{ inputs.report-artifact-prefix }}*'
+          merge-multiple: true
+
+      - name: Project run-plan.json to an aggregate manifest
+        shell: bash
+        run: |
+          abicheck run-plan to-aggregate-manifest run-plan.json -o aggregate-manifest.json
+
+      - name: Run aggregate
+        id: aggregate
+        shell: bash
+        env:
+          ON_MISSING_REQUIRED: ${{ inputs.on-missing-required }}
+          ON_UNEXPECTED_TARGET: ${{ inputs.on-unexpected-target }}
+        run: |
+          set +e
+          abicheck aggregate reports --manifest aggregate-manifest.json \
+            --on-missing-required "$ON_MISSING_REQUIRED" \
+            --on-unexpected-target "$ON_UNEXPECTED_TARGET" \
+            --format json -o aggregate-result.json
+          code=$?
+          abicheck aggregate reports --manifest aggregate-manifest.json \
+            --on-missing-required "$ON_MISSING_REQUIRED" \
+            --on-unexpected-target "$ON_UNEXPECTED_TARGET" \
+            --format text
+          echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Upload aggregate result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.aggregate-artifact-name }}
+          path: aggregate-result.json

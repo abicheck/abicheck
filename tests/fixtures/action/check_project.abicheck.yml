@@ -1,0 +1,27 @@
+# Fixture .abicheck.yml for .github/workflows/test-action.yml's
+# `test-check-project` job (G30 P1.4). Deliberately declares gate_mode:
+# deferred with `required: true` (the default) and no baseline-set artifact
+# staged for the `accepted-main` channel -- this forces resolve-baseline's
+# `not_found` outcome, which is an operational error regardless of
+# gate-mode, so the matrix job is expected to fail. The test then asserts
+# the trailing `aggregate` job still runs (if: always()) and reports the
+# failure, per this plan's own required-sub-task instruction: "Cover this
+# with a fixture-workflow test that deliberately fails one matrix cell and
+# asserts the aggregate job still runs and reports the failure."
+targets:
+  libexample:
+    kind: library
+    binary_pattern: "action_test_v2.json"
+    checks:
+      - channel: accepted-main
+        depth: headers
+        required: true
+        gate_mode: deferred
+profiles:
+  linux-x86_64-gcc-test:
+    contract: true
+baseline:
+  channels:
+    accepted-main:
+      source: actions-cache
+      key_prefix: abicheck-baseline
