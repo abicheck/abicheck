@@ -29,6 +29,16 @@ own input surface 1:1 (same names, same defaults) — see that page for the
 full rationale behind each one. Outputs are `check-target`'s own six
 outputs, forwarded unchanged.
 
+**This job always runs in its own fresh, isolated runner** — unlike
+`check-target` itself (a composite Action a caller can nest as one step
+inside their own existing job, sharing that job's filesystem), a
+`workflow_call` reusable workflow's job never shares a filesystem with the
+caller's own build job. A `new-library`/`baseline-path`/`candidate-build-output`
+path only exists here if it's checked into git (present after this job's
+own checkout) or explicitly staged as a `download-artifact` step — which is
+exactly what the three optional `*-artifact-name` inputs below do, mirroring
+`check-project.yml`'s own artifact-staging convention:
+
 ```yaml
 jobs:
   check-libfoo:
@@ -38,9 +48,16 @@ jobs:
       profile: linux-x86_64-gcc13
       baseline-channel: accepted-main
       baseline-path: ./restored-baseline
+      baseline-artifact-name: abicheck-baseline-accepted-main
       requested-depth: headers
-      new-library: build/lib/libfoo.so
+      candidate-artifact-name: my-build-output
+      new-library: candidate/lib/libfoo.so
 ```
+
+`candidate-artifact-name`/`baseline-artifact-name`/`build-output-artifact-name`
+are all optional (default empty, meaning "no download, use the path as
+given") — a caller whose `new-library`/`baseline-path`/`candidate-build-output`
+already point at a checked-in fixture doesn't need any of them.
 
 ## `check-project.yml`
 

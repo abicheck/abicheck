@@ -128,6 +128,59 @@ class TestCheckSingleSelfCheckout:
         assert wf_outputs == job_outputs
 
 
+class TestCheckSingleOptionalArtifactStaging:
+    """check-single.yml's own `check` job always runs in a fresh, isolated
+    runner -- unlike check-target itself (a composite Action a caller can
+    nest as one step inside their OWN job, sharing that job's filesystem).
+    A new-library/baseline-path/candidate-build-output path from the
+    caller's own build job doesn't exist here unless explicitly staged as
+    an artifact download; the documented usage example silently assumed
+    otherwise (Codex review)."""
+
+    def test_three_artifact_name_inputs_default_to_empty(self) -> None:
+        data = _load(CHECK_SINGLE)
+        inputs = data[True]["workflow_call"]["inputs"]
+        for name in (
+            "candidate-artifact-name",
+            "baseline-artifact-name",
+            "build-output-artifact-name",
+        ):
+            assert inputs[name]["type"] == "string"
+            assert inputs[name]["default"] == ""
+
+    def test_download_steps_are_conditioned_on_their_own_artifact_name_input(
+        self,
+    ) -> None:
+        data = _load(CHECK_SINGLE)
+        steps = _steps(data["jobs"]["check"])
+        by_name = {
+            "Download candidate artifact": "inputs.candidate-artifact-name != ''",
+            "Download baseline artifact": "inputs.baseline-artifact-name != ''",
+            "Download build-output artifact": "inputs.build-output-artifact-name != ''",
+        }
+        for step_name, expected_if in by_name.items():
+            step = next(s for s in steps if s.get("name") == step_name)
+            assert step.get("if") == expected_if
+            assert step["uses"].startswith("actions/download-artifact@")
+
+    def test_download_steps_run_before_run_check_target(self) -> None:
+        data = _load(CHECK_SINGLE)
+        names = _step_names(data["jobs"]["check"])
+        run_idx = names.index("Run check-target")
+        for step_name in (
+            "Download candidate artifact",
+            "Download baseline artifact",
+            "Download build-output artifact",
+        ):
+            assert names.index(step_name) < run_idx
+
+    def test_baseline_artifact_downloads_into_baseline_path(self) -> None:
+        data = _load(CHECK_SINGLE)
+        steps = _steps(data["jobs"]["check"])
+        step = next(s for s in steps if s.get("name") == "Download baseline artifact")
+        assert step["with"]["path"] == "${{ inputs.baseline-path }}"
+
+
 class TestCheckProjectAlwaysOnRequirements:
     """ADR-047 §4's two required sub-tasks for check-project.yml: the
     trailing aggregate job must run with `if: always()` (never a bare
