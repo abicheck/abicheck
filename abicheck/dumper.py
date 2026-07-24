@@ -82,6 +82,16 @@ from .dumper_debug import (
     _is_kernel_binary as _is_kernel_binary,
     _resolve_debug_metadata as _resolve_debug_metadata,
 )
+from .dumper_elf_symbols import (
+    # ELF visibility/symbol-classification helpers live in the sibling module
+    # (dumper.py is at the file-size cap); re-exported here so
+    # ``dumper._elf_classify_symbols``/``dumper._populate_elf_visibility``
+    # remain valid bare-name calls in ``_dump_elf``/``_try_dwarf_snapshot``/
+    # ``_build_symbol_only_snapshot`` and existing test patch targets.
+    _ELF_VIS_MAP as _ELF_VIS_MAP,
+    _elf_classify_symbols as _elf_classify_symbols,
+    _populate_elf_visibility as _populate_elf_visibility,
+)
 from .dumper_layout_backfill import backfill_dwarf_layout, dwarf_layout_types_or_empty
 from .dumper_sysinc import (
     _auto_system_includes_enabled as _auto_system_includes_enabled,
@@ -106,12 +116,10 @@ from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .errors import HeaderToolchainError, SnapshotError, ValidationError
 from .model import (
     AbiSnapshot,
-    ElfVisibility,
     Function,
     RecordType,
     Variable,
     Visibility,
-    is_cxx_runtime_library,
 )
 
 log = logging.getLogger(__name__)
@@ -488,18 +496,33 @@ def _header_ast_parser(
         fallback_reason: str | None = None,
     ) -> _CastxmlParser | _ClangAstParser:
         metadata = {"producer": producer, **_tool_identity_metadata(executable)}
+        dialect: str | None
         if producer == "clang":
             compiler_meta = _tool_identity_metadata(executable)
+            # clang is both frontend and compiler here (mirrors
+            # _resolve_clang_langmode's own cc_id derivation for the same
+            # binary); same dialect test used there.
+            dialect = (
+                "msvc" if Path(executable).name.lower() in ("cl", "cl.exe") else "gnu"
+            )
         else:
             try:
-                host_cc, _ = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
+                host_cc, dialect = _resolve_compiler_binary(
+                    compiler, gcc_path, gcc_prefix
+                )
                 compiler_meta = _tool_identity_metadata(host_cc)
             except SnapshotError as exc:
                 metadata["compiler_error"] = str(exc)
                 compiler_meta = {}
+                dialect = None
         metadata.update(
             {f"compiler_{key}": value for key, value in compiler_meta.items()}
         )
+        # ADR-050 D1: surface the ABI dialect (gnu/msvc) instead of
+        # discarding it -- compute_extraction_contract's abi_dialect field
+        # reads this key (Codex review, PR #624 follow-up).
+        if dialect is not None:
+            metadata["abi_dialect"] = dialect
         setattr(parser, "_abicheck_ast_toolchain", metadata)
         setattr(parser, "_abicheck_ast_fallback_reason", fallback_reason)
         return parser
@@ -1264,99 +1287,58 @@ def dump(
     # service._try_header_scoped_dump), bypassing this function — records it
     # correctly. DWARF-only and symbols-only builds leave it False.
 
+    # ADR-050 D1 — attach this dump's extraction contract (profile/scope
+    # fingerprints) so a later compare() can prove the two snapshots were
+    # extracted comparably (comparability.check_contracts_comparable, wired
+    # into checker.compare since PR #624 but inert until every snapshot's
+    # contract was None). compute_extraction_contract itself returns None
+    # when there is nothing to fingerprint at all (see its docstring).
+    from .comparability import IncludeDir, compute_extraction_contract
+    from .dumper_toolchain import _compiler_family_from_toolchain
+    from .header_conditionals import ordered_macro_ops, pass_through_flags_from_tokens
+
+    _flag_tokens = list(gcc_option_tokens)
+    if gcc_options:
+        try:
+            _flag_tokens = (
+                shlex.split(gcc_options, posix=os.name != "nt") + _flag_tokens
+            )
+        except ValueError:
+            pass  # malformed --gcc-options must not abort the dump
+
+    snapshot.contract = compute_extraction_contract(
+        compiler_family=_compiler_family_from_toolchain(snapshot.ast_toolchain),
+        compiler_version=(
+            snapshot.ast_toolchain.get("compiler_version")
+            or snapshot.ast_toolchain.get("version")
+            or None
+        ),
+        abi_dialect=snapshot.ast_toolchain.get("abi_dialect"),
+        macro_ops=ordered_macro_ops(_flag_tokens),
+        pass_through_flags=pass_through_flags_from_tokens(_flag_tokens),
+        # Gate declared_headers/declared_includes on from_headers, NOT on
+        # `headers` being non-empty: headers can be supplied yet fully
+        # ignored (dwarf_only=True / symbols_only=True force a DWARF/
+        # symbols path even with headers given — see _dump_elf). Feeding an
+        # ignored `headers` list in would falsely assert a header-parsed
+        # scope for a DWARF-derived surface.
+        declared_headers=list(headers) if snapshot.from_headers else [],
+        declared_includes=(
+            [IncludeDir(path=p) for p in extra_includes]
+            if snapshot.from_headers and extra_includes
+            else []
+        ),
+        l2_frontend_ran=snapshot.from_headers,
+        public_header_paths=list(public_headers or []),
+        public_header_dirs=list(public_header_dirs or []),
+    )
+
     # Tag declaration provenance (source_header + origin). Always derives
     # source_header from the parsed source location; origin is only
     # classified when a public-header set is supplied (ADR-015, D4).
     from .provenance import apply_provenance
 
     return apply_provenance(snapshot, public_headers, public_header_dirs)
-
-
-_ELF_VIS_MAP: dict[str, ElfVisibility] = {
-    "default": ElfVisibility.DEFAULT,
-    "protected": ElfVisibility.PROTECTED,
-    "hidden": ElfVisibility.HIDDEN,
-    "internal": ElfVisibility.INTERNAL,
-}
-
-
-def _populate_elf_visibility(snap: AbiSnapshot) -> None:
-    """Populate elf_visibility on Function/Variable from ELF metadata symbols."""
-    if snap.elf is None:
-        return
-    sym_map = snap.elf.symbol_map
-    for func in snap.functions:
-        elf_sym = sym_map.get(func.mangled)
-        if elf_sym is not None:
-            func.elf_visibility = _ELF_VIS_MAP.get(elf_sym.visibility)
-    for var in snap.variables:
-        elf_sym = sym_map.get(var.mangled)
-        if elf_sym is not None:
-            var.elf_visibility = _ELF_VIS_MAP.get(elf_sym.visibility)
-
-
-def _elf_classify_symbols(
-    elf_meta: ElfMetadata,
-    exported_dynamic: set[str],
-    *,
-    library_name: str | None = None,
-) -> tuple[set[str], set[str], set[str], set[str]]:
-    """Split ELF metadata symbols into typed subsets for the no-header path.
-
-    Returns ``(exported_dynamic, funcs, objects, tls)`` where *exported_dynamic*
-    may be the original fallback set when *elf_meta* has no symbols.
-    """
-    from .elf_metadata import SymbolType
-
-    exported_dynamic_funcs: set[str] = exported_dynamic  # fallback
-    exported_dynamic_objects: set[str] = set()
-    exported_dynamic_tls: set[str] = set()
-    if elf_meta.symbols:
-        runtime_name = elf_meta.soname or library_name
-        filter_transitive_runtime_symbols = not is_cxx_runtime_library(runtime_name)
-        # Apply the shared ABI-relevance filter here too: this no-header path
-        # rebuilds the exported sets directly from ``elf_meta.symbols`` rather
-        # than the already-filtered ``_pyelftools_exported_symbols`` result, so
-        # lifecycle stubs (``_init``/``_fini``) and transitive runtime symbols
-        # would otherwise re-enter the symbol-only ABI surface as ELF_ONLY
-        # functions. Keeping it consistent with the DWARF-backed path.
-        exported_dynamic_funcs = {
-            sym.name
-            for sym in elf_meta.symbols
-            if sym.sym_type in (SymbolType.FUNC, SymbolType.IFUNC, SymbolType.NOTYPE)
-            and is_abi_relevant_elf_symbol(
-                sym.name,
-                filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
-            )
-        }
-        exported_dynamic_objects = {
-            sym.name
-            for sym in elf_meta.symbols
-            if sym.sym_type == SymbolType.OBJECT
-            and is_abi_relevant_elf_symbol(
-                sym.name,
-                filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
-            )
-        }
-        exported_dynamic_tls = {
-            sym.name
-            for sym in elf_meta.symbols
-            if sym.sym_type == SymbolType.TLS
-            and is_abi_relevant_elf_symbol(
-                sym.name,
-                filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
-            )
-        }
-        # Full set for CastxmlParser: determines PUBLIC vs ELF_ONLY visibility
-        exported_dynamic = (
-            exported_dynamic_funcs | exported_dynamic_objects | exported_dynamic_tls
-        )
-    return (
-        exported_dynamic,
-        exported_dynamic_funcs,
-        exported_dynamic_objects,
-        exported_dynamic_tls,
-    )
 
 
 def _lang_to_profile(lang: str | None) -> str | None:

@@ -225,9 +225,18 @@ def test_clang_backend_still_false_positives_case61_alignment_risk(
     if not (_have("clang") and _have("gcc")):
         pytest.skip("clang and gcc are required for the clang-frontend case61 regression")
 
-    old_header = tmp_path / "old.h"
+    # Same header basename ("api.h") on both sides, in separate directories
+    # (ADR-050 D1: scope_fingerprint is keyed on each dump's own
+    # declared-header basename, not its absolute path — so two differently
+    # *named* headers, as an earlier "old.h"/"new.h" version of this test
+    # used, correctly ScopeMismatchError under the now-live comparability
+    # gate; that's not what this test is about, so give both sides the same
+    # conceptual header name, the way a real old/new library compare would).
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
     old_header.write_text("extern int lib_version;\nint get_version(void);\n")
-    old_src = tmp_path / "old.c"
+    old_src = old_dir / "old.c"
     old_src.write_text("int lib_version = 1;\nint get_version(void) { return lib_version; }\n")
     v1_so = tmp_path / "libv1.so"
     subprocess.run(
@@ -235,11 +244,13 @@ def test_clang_backend_still_false_positives_case61_alignment_risk(
         check=True, capture_output=True,
     )
 
-    new_header = tmp_path / "new.h"
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
     new_header.write_text(
         "extern int lib_version;\nextern int lib_build_number;\nint get_version(void);\n"
     )
-    new_src = tmp_path / "new.c"
+    new_src = new_dir / "new.c"
     new_src.write_text(
         "int lib_version = 1;\nint lib_build_number = 1042;\n"
         "int get_version(void) { return lib_version; }\n"

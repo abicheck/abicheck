@@ -190,6 +190,33 @@ def _tool_identity_metadata(executable: str) -> dict[str, str]:
     }
 
 
+def _compiler_family_from_toolchain(ast_toolchain: dict[str, str]) -> str | None:
+    """Best-effort ADR-050 ``compiler_family`` label from the resolved host
+    compiler binary (low-stakes: used for ``profile_fingerprint`` stability,
+    not semantic parsing, so a reasonable guess is fine — Codex review,
+    PR #624).
+
+    Reads ``compiler_selected`` first, not the bare ``selected`` key: for a
+    castxml-produced snapshot, ``selected`` names the castxml binary itself
+    (e.g. ``/usr/bin/castxml``), never the host compiler whose family/ABI
+    dialect actually matters here; ``compiler_selected`` is the resolved
+    host cc (see ``dumper._header_ast_parser``'s ``_stamp_parser``). For a
+    clang-produced snapshot the two keys already carry the same value
+    (clang is both frontend and compiler), so the fallback is harmless.
+    """
+    path = ast_toolchain.get("compiler_selected") or ast_toolchain.get("selected") or ""
+    name = Path(path).name.lower() if path else ""
+    if not name:
+        return None
+    if "clang" in name:
+        return "clang"
+    if name in ("cl", "cl.exe"):
+        return "msvc"
+    if "gcc" in name or "g++" in name:
+        return "gnu"
+    return name
+
+
 def _ast_fallback_enabled() -> bool:
     return os.environ.get("ABICHECK_ALLOW_AST_FALLBACK", "").strip().lower() in {
         "1",

@@ -8,18 +8,23 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from abicheck.api_types import CompareRequest, InputSpec
 from abicheck.checker_types import DiffResult
-from abicheck.errors import SnapshotError, ValidationError
+from abicheck.comparability import compute_extraction_contract
+from abicheck.errors import ScopeMismatchError, SnapshotError, ValidationError
 from abicheck.model import AbiSnapshot, DependencyInfo, Function, Visibility
+from abicheck.serialization import load_snapshot, save_snapshot
 from abicheck.service import (
     _render_deps_section_md,
     collect_metadata,
+    compare_snapshots,
     detect_binary_format,
     expand_header_inputs,
     load_suppression_and_policy,
     render_output,
     resolve_input,
     run_compare,
+    run_compare_request,
     run_dump,
     sniff_text_format,
 )
@@ -459,10 +464,13 @@ class TestRunDumpHybridHeaderGraphAttachedOnce:
             calls.append((snap, header_graph))
             return snap
 
-        with patch(
-            "abicheck.service._dump_elf",
-            side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
-        ), patch("abicheck.service._attach_header_graph", side_effect=_fake_attach):
+        with (
+            patch(
+                "abicheck.service._dump_elf",
+                side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
+            ),
+            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+        ):
             result = run_dump(p, "elf", header_backend="hybrid")
 
         # _attach_header_graph is invoked on each recursive sub-dump's OWN
@@ -513,10 +521,13 @@ class TestRunDumpHybridDoesNotDoubleEnrichLayout:
             calls.append(snap)
             return snap
 
-        with patch(
-            "abicheck.service._dump_elf",
-            side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
-        ), patch("abicheck.service.attach_clang_layout", side_effect=_fake_attach):
+        with (
+            patch(
+                "abicheck.service._dump_elf",
+                side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
+            ),
+            patch("abicheck.service.attach_clang_layout", side_effect=_fake_attach),
+        ):
             result = run_dump(p, "elf", header_backend="hybrid")
 
         # attach_clang_layout is called once per recursive sub-dump's OWN
@@ -1460,15 +1471,113 @@ class TestRunCompare:
         # Codex review (PR #551): debuginfod_url was originally inserted right
         # after enable_debuginfod, ahead of scope_to_public_surface — any
         # caller invoking run_compare positionally that far would have every
-        # later positional argument silently shift by one slot. It must be
-        # the LAST parameter so no pre-existing positional binding moves.
+        # later positional argument silently shift by one slot. It was the
+        # LAST parameter at the time; diagnostic_comparison (ADR-050 D2) was
+        # later appended after it by the same rule, so "last" itself moved on
+        # — see test_diagnostic_comparison_appended_last_preserves_positional_order
+        # for that -- but debuginfod_url's own position relative to its
+        # pre-existing neighbors must still be unchanged.
         import inspect
 
         params = list(inspect.signature(run_compare).parameters)
-        assert params[-1] == "debuginfod_url"
         assert params.index("scope_to_public_surface") == (
             params.index("enable_debuginfod") + 1
         )
+        assert (
+            params.index("debuginfod_url")
+            == params.index("public_surface_allowlist") + 1
+        )
+
+
+class TestDiagnosticComparisonThreading:
+    """ADR-050 D2's escape hatch, threaded through every service.py
+    chokepoint (rollout-risk follow-up, PR #624): checker.compare()'s
+    comparability gate was already live from Tier-1, but unreachable from
+    every real front-end (CLI/MCP/scan/appcompat all route through
+    service.py, never checker.compare directly -- ADR-037 D1/D10.1), since
+    none of compare_snapshots/run_compare_request/run_compare forwarded
+    diagnostic_comparison. These tests build a genuinely scope-mismatched
+    contract pair (by hand, since dumper.py wiring is separate work) and
+    confirm the escape hatch reaches checker.compare from each entry
+    point."""
+
+    def _mismatched_pair(self, tmp_path):
+        old_h = tmp_path / "old" / "foo.h"
+        new_h = tmp_path / "new" / "bar.h"
+        old_h.parent.mkdir(parents=True)
+        new_h.parent.mkdir(parents=True)
+        old_h.write_text("int f(void);\n")
+        new_h.write_text("int f(void);\n")
+
+        def _snap(version, header):
+            return AbiSnapshot(
+                library="libtest.so",
+                version=version,
+                functions=[
+                    Function(
+                        name="f",
+                        mangled="f",
+                        return_type="int",
+                        visibility=Visibility.PUBLIC,
+                        is_extern_c=True,
+                    )
+                ],
+                contract=compute_extraction_contract(declared_headers=[header]),
+            )
+
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        save_snapshot(_snap("1.0", old_h), old_p)
+        save_snapshot(_snap("2.0", new_h), new_p)
+        return old_p, new_p
+
+    def test_compare_snapshots_raises_by_default(self, tmp_path):
+        old_p, new_p = self._mismatched_pair(tmp_path)
+        with pytest.raises(ScopeMismatchError):
+            compare_snapshots(load_snapshot(old_p), load_snapshot(new_p))
+
+    def test_compare_snapshots_diagnostic_comparison_downgrades(self, tmp_path):
+        old_p, new_p = self._mismatched_pair(tmp_path)
+        result = compare_snapshots(
+            load_snapshot(old_p), load_snapshot(new_p), diagnostic_comparison=True
+        )
+        assert result.assurance == "none"
+
+    def test_run_compare_request_raises_by_default(self, tmp_path):
+        old_p, new_p = self._mismatched_pair(tmp_path)
+        request = CompareRequest(old=InputSpec(path=old_p), new=InputSpec(path=new_p))
+        with pytest.raises(ScopeMismatchError):
+            run_compare_request(request)
+
+    def test_run_compare_request_diagnostic_comparison_downgrades(self, tmp_path):
+        old_p, new_p = self._mismatched_pair(tmp_path)
+        request = CompareRequest(
+            old=InputSpec(path=old_p),
+            new=InputSpec(path=new_p),
+            diagnostic_comparison=True,
+        )
+        result, _, _ = run_compare_request(request)
+        assert result.assurance == "none"
+
+    def test_run_compare_shim_raises_by_default(self, tmp_path):
+        old_p, new_p = self._mismatched_pair(tmp_path)
+        with pytest.raises(ScopeMismatchError):
+            run_compare(old_p, new_p)
+
+    def test_run_compare_shim_diagnostic_comparison_downgrades(self, tmp_path):
+        old_p, new_p = self._mismatched_pair(tmp_path)
+        result, _, _ = run_compare(old_p, new_p, diagnostic_comparison=True)
+        assert result.assurance == "none"
+
+    def test_diagnostic_comparison_appended_last_preserves_positional_order(self):
+        # Same rule as debuginfod_url (Codex review, PR #551): appended after
+        # every pre-existing parameter so a positional caller's existing
+        # bindings don't shift.
+        import inspect
+
+        params = list(inspect.signature(run_compare).parameters)
+        assert params[-1] == "diagnostic_comparison"
+        assert params[-2] == "debuginfod_url"
 
 
 class TestParallelOldNewExtraction:
@@ -2293,7 +2402,9 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         with (
             patch("abicheck.service._dump_elf", return_value=snap),
             patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
-            patch("abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s),
+            patch(
+                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+            ),
         ):
             result = run_dump(p, "elf", [header], [], "1.0", "c++", dwarf_only=True)
 
@@ -2315,7 +2426,9 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         with (
             patch("abicheck.service._dump_elf", return_value=snap),
             patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
-            patch("abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s),
+            patch(
+                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+            ),
         ):
             run_dump(p, "elf", [header], [], "1.0", "c++", dwarf_only=False)
 
@@ -2374,7 +2487,9 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         with (
             patch("abicheck.service._dump_elf", return_value=snap),
             patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
-            patch("abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s),
+            patch(
+                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+            ),
         ):
             run_dump(p, "elf", [header], [], "1.0", "c++", symbols_only=True)
 
@@ -2399,7 +2514,9 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
             patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
-            patch("abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s),
+            patch(
+                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+            ),
         ):
             run_dump(p, "pe", [header], [], "1.0", "c++", symbols_only=True)
 
@@ -2422,7 +2539,9 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         with (
             patch("abicheck.service._dump_macho", return_value=snap),
             patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
-            patch("abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s),
+            patch(
+                "abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s
+            ),
         ):
             run_dump(p, "macho", [header], [], "1.0", "c++", symbols_only=True)
 

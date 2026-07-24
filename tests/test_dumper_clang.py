@@ -1261,6 +1261,75 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
     assert [f.name for f in parser.parse_functions()] == ["foo"]
 
 
+def test_header_ast_parser_clang_branch_records_abi_dialect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ADR-050 D1 (Codex review, PR #624 follow-up): abi_dialect must reach
+    # ast_toolchain, not be silently discarded, for the clang backend too.
+    ast = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "foo",
+            "loc": {"file": "foo.h", "line": 1},
+            "mangledName": "_Z3foov",
+            "type": {"qualType": "void ()"},
+        }
+    )
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: ast)
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic={"_Z3foov"},
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+    assert parser._abicheck_ast_toolchain["abi_dialect"] == "gnu"
+
+
+def test_header_ast_parser_clang_branch_records_msvc_abi_dialect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ast = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "foo",
+            "loc": {"file": "foo.h", "line": 1},
+            "mangledName": "_Z3foov",
+            "type": {"qualType": "void ()"},
+        }
+    )
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: ast)
+    monkeypatch.setattr(
+        dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/llvm/bin/cl.exe"
+    )
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic={"_Z3foov"},
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+    assert parser._abicheck_ast_toolchain["abi_dialect"] == "msvc"
+
+
 def test_header_ast_parser_castxml_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     sentinel = object()
     parser_cls = dumper._CastxmlParser
@@ -1285,6 +1354,64 @@ def test_header_ast_parser_castxml_branch(monkeypatch: pytest.MonkeyPatch) -> No
     )
     assert parser is parser_sentinel
     assert parser._abicheck_ast_toolchain["producer"] == "castxml"
+
+
+def test_header_ast_parser_castxml_branch_records_abi_dialect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ADR-050 D1 (Codex review, PR #624 follow-up): the castxml branch's
+    # _resolve_compiler_binary(...) already resolves (host_cc, cc_id) -- this
+    # pins that cc_id reaches ast_toolchain["abi_dialect"] instead of being
+    # discarded as `_`.
+    sentinel = object()
+    parser_cls = dumper._CastxmlParser
+    parser_sentinel = parser_cls.__new__(parser_cls)
+    monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: sentinel)
+    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="castxml",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+    assert parser._abicheck_ast_toolchain["abi_dialect"] == "gnu"
+
+
+def test_header_ast_parser_castxml_branch_records_msvc_abi_dialect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sentinel = object()
+    parser_cls = dumper._CastxmlParser
+    parser_sentinel = parser_cls.__new__(parser_cls)
+    monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: sentinel)
+    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="castxml",
+        compiler="cl",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+    assert parser._abicheck_ast_toolchain["abi_dialect"] == "msvc"
 
 
 def test_clang_header_dump_success_and_cache(

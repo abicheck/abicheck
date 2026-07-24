@@ -1590,6 +1590,7 @@ def compare_snapshots(
     public_surface_allowlist: set[str] | None = None,
     reconcile_build_context: bool = False,
     env_matrix: EnvironmentMatrix | None = None,
+    diagnostic_comparison: bool = False,
 ) -> DiffResult:
     """Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 
@@ -1630,6 +1631,7 @@ def compare_snapshots(
         public_surface_allowlist=public_surface_allowlist,
         reconcile_build_context=reconcile_build_context,
         env_matrix=env_matrix,
+        diagnostic_comparison=diagnostic_comparison,
     )
 
 
@@ -1748,6 +1750,7 @@ def run_compare_request(
         pattern_verdicts=request.pattern_verdicts,
         reconcile_build_context=request.reconcile_build_context,
         env_matrix=load_env_matrix(request.env_matrix_path),
+        diagnostic_comparison=request.diagnostic_comparison,
     )
     result.old_metadata = collect_metadata(request.old.path)
     result.new_metadata = collect_metadata(request.new.path)
@@ -1778,6 +1781,7 @@ def run_compare(
     pattern_verdicts: bool = False,
     public_surface_allowlist: set[str] | None = None,
     debuginfod_url: str | None = None,
+    diagnostic_comparison: bool = False,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -1786,10 +1790,11 @@ def run_compare(
     callers keep working while the typed request is the real chokepoint
     (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
 
-    ``debuginfod_url`` is appended after every pre-existing parameter (not
-    inserted alongside ``enable_debuginfod``) so a caller invoking this
-    positionally keeps binding every argument after it to the same parameter
-    it always did (Codex review, PR #551).
+    ``debuginfod_url`` and ``diagnostic_comparison`` are appended after every
+    pre-existing parameter (not inserted alongside their thematically-closer
+    neighbors) so a caller invoking this positionally keeps binding every
+    argument after them to the same parameter it always did (Codex review,
+    PR #551; same rule applied again for ADR-050 D2's escape hatch).
 
     Returns:
         A tuple of (DiffResult, old_snapshot, new_snapshot).
@@ -1832,6 +1837,7 @@ def run_compare(
         pattern_verdicts=pattern_verdicts,
         enable_debuginfod=enable_debuginfod,
         debuginfod_url=debuginfod_url,
+        diagnostic_comparison=diagnostic_comparison,
     )
     return run_compare_request(request)
 
