@@ -282,3 +282,38 @@ class TestCompileContextForwardingParity:
             _COMPARE_COMPILE_CONTEXT_START,
         )
         assert "not support" not in stderr
+
+    def test_compare_release_style_succeeds_with_ast_frontend_auto(self) -> None:
+        """Regression (Codex review, second round): "auto" is the
+        documented no-op spelling of ast-frontend -- it resolves to the
+        same default castxml selection as leaving the input unset entirely
+        (see the input's description in action.yml), so a workflow that
+        spells it out explicitly requests nothing the release fan-out
+        could actually drop. Must not trip the fail-loud guard, unlike a
+        real frontend choice such as "clang"."""
+        cmd, stderr = _run_region(
+            _COMPARE_MODE_MARKER,
+            {
+                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_AST_FRONTEND": "auto",
+            },
+            _COMPARE_COMPILE_CONTEXT_START,
+        )
+        assert "not support" not in stderr
+        assert "--ast-frontend" not in cmd
+
+    def test_compare_release_style_fails_with_ast_frontend_clang(self) -> None:
+        """Companion: an actual, non-"auto" frontend choice still trips
+        the guard -- only the documented no-op spelling is exempt."""
+        result = _run_region_raw(
+            _COMPARE_MODE_MARKER,
+            {
+                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_AST_FRONTEND": "clang",
+            },
+            _COMPARE_COMPILE_CONTEXT_START,
+        )
+        assert result.returncode != 0
+        assert "not support" in result.stdout

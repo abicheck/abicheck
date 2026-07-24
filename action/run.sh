@@ -335,9 +335,15 @@ elif [[ "$MODE" == "compare" ]]; then
   # same treatment as an explicitly-configured evidence input.
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
-    if [[ -n "${INPUT_AST_FRONTEND:-}" || -n "${INPUT_GCC_PATH:-}" \
-          || -n "${INPUT_GCC_PREFIX:-}" || -n "${INPUT_GCC_OPTIONS:-}" \
-          || -n "${INPUT_SYSROOT:-}" || "${INPUT_NOSTDINC:-false}" == "true" ]]; then
+    # "auto" is the documented no-op spelling of ast-frontend (resolves to
+    # the same default castxml selection as leaving the input unset, per
+    # its description above) -- a workflow that spells it out explicitly
+    # requests nothing the release fan-out could actually drop, so it must
+    # not trip this guard (Codex review, second round).
+    if [[ (-n "${INPUT_AST_FRONTEND:-}" && "${INPUT_AST_FRONTEND:-}" != "auto") \
+          || -n "${INPUT_GCC_PATH:-}" || -n "${INPUT_GCC_PREFIX:-}" \
+          || -n "${INPUT_GCC_OPTIONS:-}" || -n "${INPUT_SYSROOT:-}" \
+          || "${INPUT_NOSTDINC:-false}" == "true" ]]; then
       echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
       exit 1
     fi
