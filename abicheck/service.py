@@ -1293,6 +1293,27 @@ def _try_header_scoped_dump(
         )
         return None, "header-backend-unavailable"
 
+    # ADR-050 D1 (Codex review, PR #624 follow-up): this path calls
+    # dumper._dump_pe/_dump_macho directly, bypassing dumper.dump() entirely
+    # -- without this call, every PE/Mach-O header-scoped dump would leave
+    # snap.contract=None regardless of whether headers were genuinely used,
+    # unlike the ELF service path (_dump_elf above), which already routes
+    # through dumper.dump() and gets this for free. No public_headers/
+    # public_header_dirs equivalent exists on this path today (a separate,
+    # pre-existing gap, not introduced here).
+    from .dumper import _attach_extraction_contract
+
+    _attach_extraction_contract(
+        snap,
+        headers=resolved_headers,
+        extra_includes=eff_includes,
+        gcc_options=cc.gcc_options,
+        gcc_option_tokens=eff_tokens,
+        lang=lang_arg,
+        public_headers=None,
+        public_header_dirs=None,
+    )
+
     if not _has_matched_public_surface(snap):
         warnings.warn(
             f"None of the provided headers matched exported symbols in "

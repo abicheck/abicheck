@@ -42,11 +42,7 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline
-from ._compiler_options import (
-    explicit_language_standard,
-    has_explicit_cpp_std,
-    has_explicit_std,
-)
+from ._compiler_options import has_explicit_cpp_std, has_explicit_std
 from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
     _build_castxml_command as _build_castxml_command,
@@ -77,6 +73,14 @@ from .dumper_clang_errors import (
     diagnose_header_compile_failure,
     retry_excluding_error_headers,
     run_clang_to_ast_file,
+)
+from .dumper_contract import (
+    # ADR-050 D1 extraction-contract attachment lives in the sibling module
+    # (dumper.py is at the file-size cap); re-exported here so
+    # ``dumper._attach_extraction_contract`` remains a valid bare-name call
+    # in ``dump()`` and a valid import target for ``service.py``'s
+    # PE/Mach-O header-scoped dump path.
+    _attach_extraction_contract as _attach_extraction_contract,
 )
 from .dumper_debug import (
     # DWARF/BTF/CTF format resolution + the kernel-binary heuristic live in the
@@ -1290,58 +1294,15 @@ def dump(
     # and service native-binary paths that call those builders directly (e.g.
     # service._try_header_scoped_dump), bypassing this function — records it
     # correctly. DWARF-only and symbols-only builds leave it False.
-
-    # ADR-050 D1 — attach this dump's extraction contract (profile/scope
-    # fingerprints) so a later compare() can prove the two snapshots were
-    # extracted comparably (comparability.check_contracts_comparable, wired
-    # into checker.compare since PR #624 but inert until every snapshot's
-    # contract was None). compute_extraction_contract itself returns None
-    # when there is nothing to fingerprint at all (see its docstring).
-    from .comparability import IncludeDir, compute_extraction_contract
-    from .dumper_toolchain import _compiler_family_from_toolchain
-    from .header_conditionals import (
-        ordered_macro_ops,
-        pass_through_flags_from_tokens,
-        resolve_pass_through_paths,
-    )
-
-    _flag_tokens = list(gcc_option_tokens)
-    if gcc_options:
-        try:
-            _flag_tokens = (
-                shlex.split(gcc_options, posix=os.name != "nt") + _flag_tokens
-            )
-        except ValueError:
-            pass  # malformed --gcc-options must not abort the dump
-
-    snapshot.contract = compute_extraction_contract(
-        compiler_family=_compiler_family_from_toolchain(snapshot.ast_toolchain),
-        compiler_version=(
-            snapshot.ast_toolchain.get("compiler_version")
-            or snapshot.ast_toolchain.get("version")
-            or None
-        ),
-        abi_dialect=snapshot.ast_toolchain.get("abi_dialect"),
-        language_standard=explicit_language_standard(gcc_options, gcc_option_tokens),
-        macro_ops=ordered_macro_ops(_flag_tokens),
-        pass_through_flags=resolve_pass_through_paths(
-            pass_through_flags_from_tokens(_flag_tokens), extra_includes or []
-        ),
-        # Gate declared_headers/declared_includes on from_headers, NOT on
-        # `headers` being non-empty: headers can be supplied yet fully
-        # ignored (dwarf_only=True / symbols_only=True force a DWARF/
-        # symbols path even with headers given — see _dump_elf). Feeding an
-        # ignored `headers` list in would falsely assert a header-parsed
-        # scope for a DWARF-derived surface.
-        declared_headers=list(headers) if snapshot.from_headers else [],
-        declared_includes=(
-            [IncludeDir(path=p) for p in extra_includes]
-            if snapshot.from_headers and extra_includes
-            else []
-        ),
-        l2_frontend_ran=snapshot.from_headers,
-        public_header_paths=list(public_headers or []),
-        public_header_dirs=list(public_header_dirs or []),
+    _attach_extraction_contract(
+        snapshot,
+        headers=headers,
+        extra_includes=extra_includes,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        lang=lang,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
     )
 
     # Tag declaration provenance (source_header + origin). Always derives

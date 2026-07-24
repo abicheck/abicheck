@@ -5,6 +5,7 @@ from abicheck._compiler_options import (
     explicit_language_standard,
     has_explicit_cpp_std,
     has_explicit_std,
+    language_standard_field,
 )
 
 
@@ -61,3 +62,36 @@ class TestExplicitLanguageStandard:
         assert explicit_language_standard(
             "-std=c++17", ()
         ) != explicit_language_standard("-std=c++20", ())
+
+
+class TestLanguageStandardField:
+    """ADR-050 D1's combined language_standard profile field (Codex review,
+    PR #624 follow-up): --lang alone (no explicit -std=) must still
+    distinguish two extraction profiles."""
+
+    def test_none_when_neither_lang_nor_std_given(self) -> None:
+        assert language_standard_field(None, None, ()) is None
+
+    def test_lang_alone_used_when_no_explicit_std(self) -> None:
+        assert language_standard_field("c", None, ()) == "c"
+        assert language_standard_field("c++", None, ()) == "c++"
+
+    def test_lang_is_case_and_whitespace_normalized(self) -> None:
+        assert language_standard_field("C++", None, ()) == "c++"
+        assert language_standard_field(" c ", None, ()) == "c"
+
+    def test_explicit_std_alone_matches_bare_helper(self) -> None:
+        # No lang given -- output must exactly match explicit_language_standard
+        # (backward compatible with the pre-existing language_standard tests).
+        assert language_standard_field(None, "-std=gnu11", ()) == "gnu11"
+
+    def test_lang_and_explicit_std_both_present_are_combined(self) -> None:
+        assert language_standard_field("c++", "-std=gnu++20", ()) == "c++:gnu++20"
+
+    def test_lang_alone_distinguishes_two_profiles(self) -> None:
+        """Pins the exact scenario the reviewer flagged: the same executable,
+        no explicit -std=, differing only by --lang c vs --lang c++, must not
+        collapse to the same language_standard value."""
+        assert language_standard_field("c", None, ()) != language_standard_field(
+            "c++", None, ()
+        )

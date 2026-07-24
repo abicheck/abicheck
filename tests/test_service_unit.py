@@ -1058,6 +1058,40 @@ class TestHeaderScopedInferredRoots:
         assert str(root) in toks and toks[toks.index(str(root)) - 1] == "-isystem"
         assert root in captured["extra_hash_dirs"]
 
+    def test_pe_header_scoped_dump_attaches_extraction_contract(self, tmp_path):
+        """ADR-050 D1 (Codex review, PR #624 follow-up): this path calls
+        dumper._dump_pe directly, bypassing dumper.dump() entirely -- without
+        the _attach_extraction_contract call, contract would silently stay
+        None for every real PE header-scoped dump, unlike the ELF service
+        path (_dump_elf), which already routes through dumper.dump()."""
+        from abicheck.service import _try_header_scoped_dump
+
+        root, umb = self._umbrella(tmp_path)
+
+        def fake_pe(path, headers, extra_includes, version, compiler, **k):
+            return AbiSnapshot(
+                library="x",
+                version="1.0",
+                from_headers=True,
+                functions=[
+                    Function(
+                        name="f",
+                        mangled="f",
+                        return_type="int",
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
+            )
+
+        with patch("abicheck.dumper._dump_pe", fake_pe):
+            snap, reason = _try_header_scoped_dump(
+                "pe", tmp_path / "x.dll", [umb], [], "1.0", "c++"
+            )
+        assert reason is None
+        assert snap is not None
+        assert snap.contract is not None
+        assert snap.contract.profile_fingerprint is not None
+
     def test_deadline_exceeded_propagates_not_swallowed_as_fallback(self, tmp_path):
         # Codex review on the P0 fix: the broad `except Exception` below (which
         # exists to fall back to export-table mode when a header backend is

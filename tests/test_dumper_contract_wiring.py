@@ -179,6 +179,24 @@ def test_explicit_language_standard_flows_into_profile_fingerprint(
     assert snap_17.contract.scope_fingerprint == snap_99.contract.scope_fingerprint
 
 
+def test_lang_mode_alone_flows_into_profile_fingerprint(
+    built_lib: tuple[Path, Path],
+) -> None:
+    """Codex review, PR #624 follow-up: the same clang executable, no
+    explicit -std=, differing only by --lang c vs --lang c++, must not
+    share a profile_fingerprint — the actual frontend commands parse
+    different languages (-x c vs. C++ default) regardless."""
+    so, header = built_lib
+    snap_c = dump(so, [header], compiler="cc", header_backend="clang", lang="c")
+    snap_cpp = dump(so, [header], compiler="cc", header_backend="clang", lang="c++")
+
+    assert snap_c.contract is not None
+    assert snap_cpp.contract is not None
+    assert snap_c.contract.profile_fields["language_standard"] == "c"
+    assert snap_cpp.contract.profile_fields["language_standard"] == "c++"
+    assert snap_c.contract.profile_fingerprint != snap_cpp.contract.profile_fingerprint
+
+
 def test_forced_include_resolved_via_extra_includes_is_content_hashed(
     tmp_path: Path,
 ) -> None:

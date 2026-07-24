@@ -67,3 +67,27 @@ def explicit_language_standard(
         elif normalized.lower().startswith("/std:"):
             value = normalized.partition(":")[2]
     return value
+
+
+def language_standard_field(
+    lang: str | None, gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+) -> str | None:
+    """ADR-050 D1's ``language_standard`` profile field: combines the
+    explicit ``--lang`` mode (if any) with an explicit ``-std=`` value (if
+    any).
+
+    A same-executable, no-``-std=`` dump differing only by ``lang="c"`` vs.
+    ``lang="c++"`` must still fingerprint differently — the actual frontend
+    command forces a different language mode (``-x c`` vs. C++ default)
+    regardless of whether an explicit standard was also given (Codex
+    review, PR #624 follow-up). Pure content-based auto-detection (no
+    explicit ``--lang``, header content alone triggering C++ mode via
+    ``_detect_cpp_headers``) is **not** captured here — that needs the
+    frontend's own *resolved* ``force_cpp`` decision threaded out as
+    toolchain metadata, deferred as a narrower follow-up.
+    """
+    lang_mode = (lang or "").strip().lower()
+    explicit_std = explicit_language_standard(gcc_options, gcc_option_tokens)
+    if lang_mode and explicit_std:
+        return f"{lang_mode}:{explicit_std}"
+    return explicit_std or (lang_mode or None)
