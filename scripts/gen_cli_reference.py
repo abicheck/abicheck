@@ -146,6 +146,8 @@ def render() -> str:
     # fails there without this.
     if str(REPO_DIR) not in sys.path:
         sys.path.insert(0, str(REPO_DIR))
+    import click
+
     from abicheck.cli import main
 
     lines = [
@@ -161,6 +163,19 @@ def render() -> str:
         "exhaustive field list only.",
         "",
     ]
+    root_options = [p for p in main.params if isinstance(p, click.Option)]
+    if root_options:
+        lines += [
+            "## Root options",
+            "",
+            "Options available directly on `abicheck`, before any subcommand "
+            "(shown by `python -m abicheck --help`).",
+            "",
+            "| Option | Required | Default | Description |",
+            "|---|:--:|---|---|",
+        ]
+        lines += [_option_row(p) for p in root_options]
+        lines.append("")
     for name, cmd in sorted(main.commands.items()):
         lines += _render_command(name, cmd, heading_level=2)
     while lines and lines[-1] == "":

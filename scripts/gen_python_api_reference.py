@@ -91,6 +91,9 @@ def _function_section(name: str, fn: object) -> list[str]:
             continue
         default = "*(required)*" if param.default is inspect.Parameter.empty else f"`{param.default!r}`"
         lines.append(f"| `{param_name}` | `{_type_str(param.annotation)}` | {default} |")
+    return_type = _type_str(sig.return_annotation)
+    if return_type:
+        lines += ["", f"**Returns:** `{return_type}`"]
     lines.append("")
     return lines
 

@@ -4,6 +4,14 @@
 
 Every `abicheck` command, subcommand, argument, and option, generated directly from the live Click command tree (the same `help=` text `--help` shows). See [CLI Usage](../user-guide/cli-usage.md) and [Dump & Compare Flags](../user-guide/dump-compare-flags.md) for the narrative walkthroughs of the primary workflows; this page is the exhaustive field list only.
 
+## Root options
+
+Options available directly on `abicheck`, before any subcommand (shown by `python -m abicheck --help`).
+
+| Option | Required | Default | Description |
+|---|:--:|---|---|
+| `--version` | no | — | Show the version and exit. |
+
 ## `aggregate`
 
 Aggregate per-target ABI reports in REPORTS_DIR into one CI gate verdict.

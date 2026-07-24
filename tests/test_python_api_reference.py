@@ -53,6 +53,16 @@ def test_every_public_name_appears_in_generated_reference():
         assert f"`{name}`" in content, f"{name!r} missing from generated Python API reference"
 
 
+def test_run_compare_return_annotation_appears_in_generated_reference():
+    # A parameter table alone isn't a full signature reference -- a reader
+    # still has to open the source to learn what a function returns without
+    # this.
+    gen = _load_gen()
+    content = gen.OUT_PATH.read_text(encoding="utf-8")
+    section = content.split("## `run_compare`", 1)[1].split("## `run_compare_request`", 1)[0]
+    assert "**Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`" in section
+
+
 def test_generated_reference_has_marker_comment():
     gen = _load_gen()
     text = gen.OUT_PATH.read_text(encoding="utf-8")

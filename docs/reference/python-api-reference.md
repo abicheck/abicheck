@@ -153,6 +153,8 @@ Compute SHA-256 and file size for a library artifact.
 |---|---|---|
 | `path` | `Path` | *(required)* |
 
+**Returns:** `LibraryMetadata \| None`
+
 ## `compare_snapshots`
 
 Classify two already-resolved snapshots — the Tier-2 snapshot verb.
@@ -174,6 +176,8 @@ Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 | `reconcile_build_context` | `bool` | `False` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 
+**Returns:** `DiffResult`
+
 ## `detect_binary_format`
 
 Detect binary format from magic bytes.
@@ -181,6 +185,8 @@ Detect binary format from magic bytes.
 | Parameter | Type | Default |
 |---|---|---|
 | `path` | `Path` | *(required)* |
+
+**Returns:** `str \| None`
 
 ## `estimate_scan`
 
@@ -191,6 +197,8 @@ Dry-run: projected per-layer cost of *req* for this project (ADR-035 D10).
 | `req` | `ScanRequest` | *(required)* |
 | `resolved_level` | `tuple[SourceMethod, EvidenceDepth] \| None` | `None` |
 
+**Returns:** `list[CostEstimate]`
+
 ## `expand_header_inputs`
 
 Expand header inputs where each item can be a file or a directory.
@@ -198,6 +206,8 @@ Expand header inputs where each item can be a file or a directory.
 | Parameter | Type | Default |
 |---|---|---|
 | `inputs` | `list[Path]` | *(required)* |
+
+**Returns:** `list[Path]`
 
 ## `load_suppression_and_policy`
 
@@ -208,6 +218,8 @@ Load suppression list and policy file from paths.
 | `suppress` | `Path \| None` | *(required)* |
 | `policy` | `str` | `'strict_abi'` |
 | `policy_file_path` | `Path \| None` | `None` |
+
+**Returns:** `tuple[SuppressionList \| None, PolicyFile \| None]`
 
 ## `render_output`
 
@@ -227,6 +239,8 @@ Render comparison result in the requested output format.
 | `severity_config` | `SeverityConfig \| None` | `None` |
 | `show_recommendation` | `bool` | `False` |
 | `demangle` | `bool` | `False` |
+
+**Returns:** `str`
 
 ## `resolve_input`
 
@@ -255,6 +269,8 @@ Auto-detect input type and return an ABI snapshot.
 | `compile` | `CompileContext \| None` | `None` |
 | `notify` | `Callable[[str], None] \| None` | `None` |
 
+**Returns:** `AbiSnapshot`
+
 ## `run_audit`
 
 Single-release hygiene audit — :func:`run_scan` with the AUDIT mode (no baseline, ADR-035 D8). A thin convenience wrapper so callers can name intent.
@@ -262,6 +278,8 @@ Single-release hygiene audit — :func:`run_scan` with the AUDIT mode (no baseli
 | Parameter | Type | Default |
 |---|---|---|
 | `req` | `ScanRequest` | *(required)* |
+
+**Returns:** `ScanResult`
 
 ## `run_compare`
 
@@ -293,6 +311,8 @@ Compare two ABI inputs and return the classified diff result.
 | `public_surface_allowlist` | `set[str] \| None` | `None` |
 | `debuginfod_url` | `str \| None` | `None` |
 
+**Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`
+
 ## `run_compare_request`
 
 Compare two ABI inputs described by a :class:`CompareRequest`.
@@ -300,6 +320,8 @@ Compare two ABI inputs described by a :class:`CompareRequest`.
 | Parameter | Type | Default |
 |---|---|---|
 | `request` | `CompareRequest` | *(required)* |
+
+**Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`
 
 ## `run_dump`
 
@@ -328,6 +350,8 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `notify` | `Callable[[str], None] \| None` | `None` |
 | `_skip_header_graph_attach` | `bool` | `False` |
 
+**Returns:** `AbiSnapshot`
+
 ## `run_scan`
 
 Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10).
@@ -335,6 +359,8 @@ Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10).
 | Parameter | Type | Default |
 |---|---|---|
 | `req` | `ScanRequest` | *(required)* |
+
+**Returns:** `ScanResult`
 
 ## `run_scan_subprocess`
 
@@ -345,6 +371,8 @@ Run :func:`run_scan` in a killable child process; return ``ScanResult.to_dict()`
 | `req` | `ScanRequest` | *(required)* |
 | `timeout` | `float` | *(required)* |
 
+**Returns:** `dict[str, Any]`
+
 ## `sniff_text_format`
 
 Read a small header chunk and return ``'json'``, ``'perl'``, or ``'unknown'``.
@@ -352,3 +380,5 @@ Read a small header chunk and return ``'json'``, ``'perl'``, or ``'unknown'``.
 | Parameter | Type | Default |
 |---|---|---|
 | `path` | `Path` | *(required)* |
+
+**Returns:** `str`
