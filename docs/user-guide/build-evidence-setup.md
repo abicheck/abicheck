@@ -1,33 +1,23 @@
+---
+doc_type: reference
+audience:
+  - library-maintainer
+level: advanced
+lifecycle: active
+generated: false
+---
+
 # Build Evidence Setup
 
 This page is the operational reference for *setting up* build/source evidence
-collection — the pack producers (`abicheck-cc` wrapper, Clang plugin), the
-`.abicheck.yml` project-contract block, out-of-band packs, a full worked CMake
-example, and external CLI extractors. For the concept
-and the [authority rule](../concepts/build-source-data.md#the-authority-rule-the-one-rule-that-matters),
+collection — the Clang-plugin build/wiring/traps, the `.abicheck.yml`
+project-contract block, out-of-band packs, a full worked CMake example, and
+external CLI extractors. For the `abicheck-cc` wrapper — the portable,
+supported producer, including build-system wiring and extractor selection —
+see [Producing source facts](producing-source-facts.md#wrapper-injection-the-abicheck-cc-compiler-wrapper),
+which is also the place to start when deciding *which* producer to use. For
+the concept and the [authority rule](../concepts/build-source-data.md#the-authority-rule-the-one-rule-that-matters),
 see [Build Info & Sources](../concepts/build-source-data.md).
-
-## Producing a pack — `abicheck-cc` (the supported producer)
-
-Prefix any compile with **`abicheck-cc`** to capture each TU's source ABI *during
-the real build*, with that TU's exact flags and macros:
-
-```bash
-export ABICHECK_INPUTS_DIR=abicheck_inputs
-export ABICHECK_CC_LIBRARY=libfoo.so
-export ABICHECK_CC_HEADERS=include            # public-header roots (ADR-015)
-
-abicheck-cc c++ -std=c++17 -Iinclude -c src/foo.cpp -o foo.o   # …per TU
-abicheck dump libfoo.so -H include/ --build-info ./abicheck_inputs/ \
-  -o libfoo.baseline.json
-```
-
-`abicheck-cc` runs the real compile (pass-through, preserving the exit code),
-then best-effort extracts a normalized `SourceAbiTu` and appends it to the pack.
-**Fact extraction never fails the build** (authority rule): a missing front-end
-or a parse error degrades to a warning. Set `ABICHECK_CC_DISABLE=1` for a pure
-pass-through. The wrapper reuses the castxml/clang extractors, so it is the
-**portable, supported producer**.
 
 ## Producing a pack — the Clang plugin (zero extra parse)
 

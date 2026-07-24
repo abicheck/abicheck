@@ -1,16 +1,31 @@
+---
+doc_type: how-to
+audience:
+  - library-maintainer
+level: intermediate
+canonical_for:
+  - source-evidence-producers
+lifecycle: active
+generated: false
+---
+
 # Producing source facts (Full source scan / Wrapper injection / Plugin injection)
 
 `abicheck`'s deepest evidence — **L4** (the source-ABI replay: inline bodies,
 default arguments, templates, `constexpr`, macro values) and **L5** (the source
 graph: call/include/dependency edges) — is derived from your **source**, not from
-the shipped binary. This page is the practical guide to *producing* that source
-evidence. For what the layers mean, see
+the shipped binary. This page is the practical guide to *choosing and using* a
+producer. For what the layers mean, see
 [Build Info & Sources](../concepts/build-source-data.md) and
 [Evidence & Detectability](../concepts/evidence-and-detectability.md); for a
 worked example of the concrete L4/L5 data these producers yield (and what the
 lower levels miss), see the
 [level-by-level walk-through](../concepts/what-each-level-sees.md).
-For how a scan *consumes* it, see [Source-scan depth](scan-levels.md).
+For how a scan *consumes* it, see [Source-scan depth](scan-levels.md). For the
+deeper operational reference on setting up the Clang plugin (per-build-system
+wiring, the Bazel/ccache traps, `.abicheck.yml` project-contract blocks,
+out-of-band packs, and external CLI extractors), see
+[Build Evidence Setup](build-evidence-setup.md).
 
 Whichever producer you pick, the **output contract is identical** — an
 `abicheck_inputs/` pack (or an inline `--sources` collection) that
@@ -126,21 +141,12 @@ prefers castxml and never falls back merely because it is absent. Set
 ## Plugin injection — the Clang facts plugin
 
 A compiled plugin that emits the same facts from the AST Clang already built —
-**no second parse**. Build it once against your pinned Clang, then inject it:
-
-```bash
-clang++ -std=c++17 -Iinclude \
-  -fplugin=./libabicheck-facts.so \
-  -Xclang -plugin-arg-abicheck-facts -Xclang out=abicheck_inputs \
-  -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=include \
-  -c src/foo.cpp -o foo.o
-```
-
-See [`contrib/abicheck-clang-plugin/README.md`](https://github.com/abicheck/abicheck/blob/main/contrib/abicheck-clang-plugin/README.md)
-for the build. The plugin is **ABI-locked to the loading Clang's LLVM major**
+**no second parse**. It is **ABI-locked to the loading Clang's LLVM major**
 (a plugin built against LLVM 18 only loads into `clang` 18) — that is the price
 of the zero-parse path, and why Full source scan and Wrapper injection remain
-the portable defaults.
+the portable defaults. See [Build Evidence Setup](build-evidence-setup.md#producing-a-pack-the-clang-plugin-zero-extra-parse)
+for the build-it-once / wire-it-into-CMake-Make-Bazel / fold-it-in walkthrough,
+including the Bazel-sandbox and ccache/sccache traps.
 
 This also works with vendor compilers built on top of Clang, e.g. Intel's
 `icpx`/`icx` oneAPI compilers — the `collect-facts` Action (below) detects the
