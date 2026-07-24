@@ -1254,6 +1254,35 @@ def test_cpp20_detector_detects_constrained_return_type_after_statement(tmp_path
     assert _detect_cpp20_headers(headers) is True
 
 
+def test_cpp20_detector_detects_constrained_return_type_with_leading_inline(tmp_path):
+    """Regression (Codex review): a constrained placeholder return type
+    routinely has an ordinary leading decl-specifier keyword directly
+    before it (``inline MyConcept auto f();``) -- that keyword must be
+    stripped before the statement-boundary check runs, or it wrongly
+    looks like the check failed to find a genuine boundary."""
+    headers = _write(tmp_path, "a.h", "inline MyConcept auto f();\n")
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_detects_constrained_return_type_with_leading_attribute(
+    tmp_path,
+):
+    """Companion: the same for a leading ``[[attr]]`` (e.g.
+    ``[[nodiscard]]``) directly before the constrained return type."""
+    headers = _write(tmp_path, "a.h", "[[nodiscard]] MyConcept auto f();\n")
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_detects_constrained_return_type_with_stacked_specifiers(
+    tmp_path,
+):
+    """Companion: an attribute and a decl-specifier keyword can stack in
+    either order -- both must be stripped in a fixed-point loop, not just
+    once each."""
+    headers = _write(tmp_path, "a.h", "[[nodiscard]] inline MyConcept auto f();\n")
+    assert _detect_cpp20_headers(headers) is True
+
+
 def test_cpp20_detector_ignores_identifier_auto_without_statement_boundary(tmp_path):
     """Companion: without a genuine statement boundary immediately
     before the identifier, ``IDENTIFIER auto`` must not be treated as a

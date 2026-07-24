@@ -270,6 +270,30 @@ def _strip_trailing_attributes(prefix: bytes) -> bytes:
         prefix = prefix[: m.start()].rstrip()
 
 
+_LEADING_DECL_SPECIFIER_WORDS = frozenset(
+    {b"inline", b"static", b"virtual", b"explicit", b"friend", b"extern", b"constexpr"}
+)
+
+
+def _strip_trailing_leading_decl_specifier_words(prefix: bytes) -> bytes:
+    """Strip zero or more trailing decl-specifier-seq keywords that can
+    precede a declaration's return type (``inline``, ``static``,
+    ``virtual``, ``explicit``, ``friend``, ``extern``, ``constexpr``) from
+    *prefix* — Codex review: a constrained placeholder *return type*
+    (``MyConcept auto f();``) routinely has one or more of these directly
+    before it (``inline MyConcept auto f();``), which otherwise leaves the
+    prefix ending mid-keyword instead of the genuine statement boundary
+    the caller checks for next. Uses :data:`_TRAILING_IDENTIFIER_PATTERN`,
+    defined further below alongside this file's other trailing-identifier
+    matchers."""
+    prefix = prefix.rstrip()
+    while True:
+        m = _TRAILING_IDENTIFIER_PATTERN.search(prefix)
+        if not m or m.group(1) not in _LEADING_DECL_SPECIFIER_WORDS:
+            return prefix
+        prefix = prefix[: m.start()].rstrip()
+
+
 def _is_lambda_param_list_open_paren(text: bytes, open_paren_pos: int) -> bool:
     """True if the ``(`` at *open_paren_pos* opens a lambda's parameter
     list — immediately preceded (skipping whitespace) by the ``]`` that
@@ -424,7 +448,12 @@ def _has_custom_constrained_auto_param(
     defaults to empty for callers that don't track it (matching this
     module's other lookahead-only helpers) — the return-type check simply
     never fires for a caller that doesn't pass it, the same conservative
-    default as any other unattempted shape here."""
+    default as any other unattempted shape here. Ordinary leading
+    decl-specifier keywords (``inline``, ``static``, ``virtual``, ...)
+    and attributes routinely precede a return type too (``inline
+    MyConcept auto f();``, ``[[nodiscard]] MyConcept auto f();`` — Codex
+    review), so they're stripped in the same fixed-point loop, in any
+    order, before the statement-boundary check runs."""
     for m in re.finditer(rb"\bauto\b", lookahead):
         prefix = _strip_trailing_declarator_specifiers(lookahead[: m.start()])
         prefix = _strip_trailing_attributes(prefix)
@@ -432,7 +461,13 @@ def _has_custom_constrained_auto_param(
         if not ident_match:
             continue
         before_ident = prefix[: ident_match.start()].rstrip()
-        before_ident = _strip_trailing_declarator_specifiers(before_ident)
+        while True:
+            stripped = _strip_trailing_declarator_specifiers(before_ident)
+            stripped = _strip_trailing_attributes(stripped)
+            stripped = _strip_trailing_leading_decl_specifier_words(stripped)
+            if stripped == before_ident:
+                break
+            before_ident = stripped
         last = before_ident[-1:]
         open_pos: int | None
         if last == b"(":
