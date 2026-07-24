@@ -1,8 +1,20 @@
+---
+doc_type: how-to
+audience:
+  - ci-owner
+level: intermediate
+summarizes:
+  - verdicts
+lifecycle: active
+generated: false
+---
+
 # Severity Configuration
 
 abicheck classifies every detected change into one of four **issue categories**,
 each with a configurable severity level that controls exit codes and report
-presentation.
+presentation. Severity is layered on top of the overall
+[verdict](../concepts/verdicts.md) — it doesn't replace it.
 
 > Severity is the last step of the CI gating pipeline (classify → suppress →
 > severity → exit code), and any active severity setting — a `--severity-*`
@@ -75,28 +87,21 @@ Available flags:
 
 ### Presets reference
 
-| Preset | `abi_breaking` | `potential_breaking` | `quality_issues` | `addition` |
-|--------|---------------|---------------------|------------------|-----------|
-| `default` | error | warning | warning | info |
-| `strict` | error | error | error | error |
-| `info-only` | info | info | info | info |
+See [Severity presets](../reference/exit-codes.md#severity-presets) for the
+exact `abi_breaking`/`potential_breaking`/`quality_issues`/`addition` level
+each preset assigns — that table is the authority `compare`'s exit-code
+computation follows; this page only documents how to select and override it.
 
 ## Exit codes
 
 When any severity setting is active — a `--severity-*` flag or a severity
 value in `.abicheck.yml` — the exit code is computed from the severity
-configuration instead of the legacy verdict system:
-
-| Exit code | Meaning |
-|-----------|---------|
-| `0` | No error-level findings |
-| `1` | Error-level findings in `addition` or `quality_issues` only |
-| `2` | Error-level findings in `potential_breaking` (but not `abi_breaking`) |
-| `4` | Error-level findings in `abi_breaking` |
-
-The highest applicable code wins. Without any active severity setting (no
-`--severity-*` flag and no config severity value), the legacy
-verdict-based exit codes apply (see [exit codes reference](../reference/exit-codes.md)).
+configuration instead of the legacy verdict system. See
+[Severity-aware exit codes](../reference/exit-codes.md#severity-aware-exit-codes-with-any-severity-flag)
+for the exact code-to-condition table; the highest applicable code wins.
+Without any active severity setting (no `--severity-*` flag and no config
+severity value), the legacy verdict-based exit codes apply (see
+[exit codes reference](../reference/exit-codes.md)).
 
 ## Report output
 

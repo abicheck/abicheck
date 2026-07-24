@@ -1,3 +1,15 @@
+---
+doc_type: hub
+audience:
+  - library-maintainer
+  - ci-owner
+level: beginner
+summarizes:
+  - evidence-model
+lifecycle: active
+generated: false
+---
+
 # Choose Your Workflow
 
 This is the **decision guide**. It answers a single question:
@@ -28,7 +40,7 @@ command** when you need more confidence or a CI gate.
 | Same public header for both versions | `abicheck compare libv1.so libv2.so -H include/foo.h` (`-H include/` scans a directory recursively) | When compiler flags affect the ABI, capture build context at dump time (`abicheck dump … -H include/foo.h -p build/`) and compare the snapshots |
 | No headers at all | `abicheck compare libv1.so libv2.so` | Binary-only fallback is weaker (see [the input-quality ladder](#2-how-much-accuracy-do-you-need)); add debug info via `--debug-root old=old-debug --debug-root new=new-debug` |
 | Stripped production binaries | `abicheck compare old.so new.so --debug-root old=old-debug --debug-root new=new-debug` (or `--debuginfod` to fetch by build-id) | Also pass public headers (`-H`) for highest confidence |
-| A CI baseline vs a fresh build | `abicheck dump libfoo.so -H include/ -o baseline.json`, then `abicheck compare baseline.json build/libfoo.so --header new=include/` | Store baselines in GitHub Releases, the repo, the Actions cache, or artifact storage — see [Baseline Management](baseline-management.md) |
+| A CI baseline vs a fresh build | `abicheck dump libfoo.so -H include/ -o baseline.json`, then `abicheck compare baseline.json build/libfoo.so --header new=include/` | Store baselines in GitHub Releases, the repo, the Actions cache, or artifact storage — see [Storing Baselines](baseline-storage.md) |
 | A PR with source/build context (catch source-only & build-flag breaks) | `abicheck scan build/libfoo.so -H include/ --sources . --against baseline.json --since origin/main` | One orchestrator over dump/compare: always-on pattern + cross-source checks plus the pinned L3/L4/L5 level — see [Source & Build Data](../concepts/build-source-data.md) and the [GitHub Action: Source Scans](github-action-source-scans.md) |
 | Build emits source facts in parallel (combine into one baseline) | `abicheck compare old.so new.so --build-info old=abicheck_inputs/v1 --build-info new=abicheck_inputs/v2` (also auto-detects an `abicheck_inputs/` pack alongside each input with no flag at all) | No standalone merge step — `dump`/`compare` auto-ingest each side's embedded or out-of-band build/source pack directly |
 | Two snapshots (offline / air-gapped) | `abicheck compare old.json new.json` | No headers/castxml/network needed — everything is baked into the snapshots |
@@ -180,7 +192,7 @@ changes under their root cause. Full reference:
 | CI need | Pattern |
 |---|---|
 | Fast PR gate for one library | Commit/download `abi-baseline.json`; run `compare` on each PR. |
-| Release-quality baseline | Generate the baseline at release time and upload it as a release asset — see [Baseline Management](baseline-management.md). |
+| Release-quality baseline | Generate the baseline at release time and upload it as a release asset — see [Storing Baselines](baseline-storage.md). |
 | GitHub-native | Use the [GitHub Action](github-action.md); upload SARIF for the Security tab and inline annotations. |
 | GitLab / Jenkins / Azure | Emit `--format junit`; publish it to the native test dashboard (see [Output Formats → JUnit](output-formats.md#junit-xml-output)). |
 | Raw shell CI (any system) | Drive the CLI directly; gate on the exit code. See [CLI Usage](cli-usage.md) and [Baseline Management](baseline-management.md). |

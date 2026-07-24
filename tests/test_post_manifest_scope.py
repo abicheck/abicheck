@@ -209,6 +209,43 @@ def test_loader_level_finding_survives_manifest_scope() -> None:
     assert not ctx.out_of_surface
 
 
+def test_hidden_friend_removal_survives_manifest_scope() -> None:
+    # Codex: a hidden friend can never appear in an ELF/PE/Mach-O export
+    # table by construction, but its mangled name still shows up in a
+    # header/L2 snapshot's function list -- the same list
+    # _snapshot_export_ids reads with no visibility filter. Without the
+    # hidden-friend exclusion, is_symbol_level_finding(c) and "sym in
+    # export_ids" both come back True, so the removal reads as "a real
+    # export missing from the committed manifest" and gets silently
+    # demoted -- hiding a genuine public ADL break.
+    from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
+
+    snap_old = _snap([_cfn("pp_foo")])
+    hidden_friend = Function(
+        name="operator==",
+        mangled="_ZN2ns3FooeqERKS0_S1_",
+        return_type="bool",
+        params=[Param(name="a", type="const Foo&"), Param(name="b", type="const Foo&")],
+        visibility=Visibility.HIDDEN,
+        is_hidden_friend=True,
+    )
+    snap_old.functions.append(hidden_friend)
+    snap_new = _snap([_cfn("pp_foo")])
+    ctx = PipelineContext(
+        old=snap_old, new=snap_new, public_surface_allowlist={"pp_foo"}
+    )
+    finding = Change(
+        kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+        symbol=hidden_friend.mangled,
+        old_value=hidden_friend.name,
+        description="",
+    )
+
+    kept = FilterNonPublicSurface().run([finding], ctx)
+    assert finding in kept
+    assert finding not in ctx.out_of_surface
+
+
 def test_metadata_only_private_export_is_demoted() -> None:
     # Codex: a private __pp_* helper present only in platform export metadata
     # (ELF .dynsym) — not in DWARF functions/variables — must still be

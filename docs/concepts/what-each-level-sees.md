@@ -1,3 +1,14 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: intermediate
+summarizes:
+  - evidence-model
+lifecycle: active
+generated: false
+---
+
 # What Each Level Sees — a level-by-level walk-through
 
 Different evidence levels observe **different slices of reality**, and no single

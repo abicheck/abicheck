@@ -1,3 +1,17 @@
+---
+doc_type: reference
+audience:
+  - library-maintainer
+level: intermediate
+canonical_for:
+  - change-kinds
+depends_on:
+  - abicheck/change_registry.py
+  - abicheck/checker_policy.py
+lifecycle: active
+generated: false
+---
+
 # Change Kind Reference
 
 This page documents the most commonly encountered `ChangeKind` values, their

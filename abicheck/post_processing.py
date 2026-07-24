@@ -359,18 +359,17 @@ class FilterNonPublicSurface:
     def _run_allowlist(changes: list[Change], ctx: PipelineContext) -> list[Change]:
         """Scope against an explicit committed-surface allowlist (POST manifest).
 
-        A finding is demoted to ``out_of_surface`` only when it is a *concrete
-        exported symbol* (a function/variable actually present in either
-        snapshot's export universe) that is not in the committed set — e.g. churn
-        on a private ``__pp_*`` kernel symbol. Everything else is kept
-        conservatively (ADR-024 §D5): type-level and never-filter (leak)
-        findings, findings with no symbol, and — crucially — loader/dynamic
-        findings whose ``symbol`` is a pseudo-name (``DT_SONAME``, ``DT_NEEDED``)
-        rather than a real export. A SONAME/NEEDED change breaks linked clients
-        independently of the POST export set, so it must survive scoping. This
-        mirrors the header path, where an unknown (non-exported) symbol is kept.
+        A finding is demoted to ``out_of_surface`` only when it is a *concrete*
+        exported symbol (a function/variable present in either snapshot's export
+        universe) not in the committed set — e.g. churn on a private ``__pp_*``
+        kernel symbol. Kept conservatively (ADR-024 §D5): type-level,
+        never-filter (leak), and hidden-friend findings (never a real export —
+        Codex review); findings with no symbol; and loader/dynamic pseudo-name
+        findings (``DT_SONAME``, ``DT_NEEDED``), which break linked clients
+        independently of the POST export set. This mirrors the header path,
+        where an unknown (non-exported) symbol is kept.
         """
-        from .surface import is_symbol_level_finding
+        from .surface import is_hidden_friend_finding, is_symbol_level_finding
 
         allow = ctx.public_surface_allowlist or set()
         force_public = ctx.force_public_symbols
@@ -378,10 +377,13 @@ class FilterNonPublicSurface:
         kept: list[Change] = []
         for c in changes:
             sym = c.symbol or ""
-            if not sym or not is_symbol_level_finding(c) or sym not in export_ids:
-                # Non-export findings (type-level, leaks, loader/dynamic
-                # pseudo-symbols) are outside the export-name filter — keep.
-                kept.append(c)
+            if (
+                not sym
+                or not is_symbol_level_finding(c)
+                or is_hidden_friend_finding(c)
+                or sym not in export_ids
+            ):
+                kept.append(c)  # not a concrete export subject to the filter
                 continue
             # The manifest allowlist is a set of *exact* C export names, so match
             # exactly — the suffix-tolerant `_change_matches_symbols` would let an

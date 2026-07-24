@@ -8,6 +8,8 @@ identical logical content. Tests verify:
 - Reserialization always writes current schema version
 """
 import json
+import re
+import warnings
 from pathlib import Path
 
 import pytest
@@ -242,3 +244,33 @@ class TestReserialization:
         d["schema_version"] = 999
         with pytest.raises(IncompatibleSnapshotSchemaError):
             snapshot_from_dict(d)
+
+
+# ---------------------------------------------------------------------------
+# Documentation/constant sync — a stale docs number silently misleads readers
+# about what "current" means (docs/reference/snapshot-format.md drifted to a
+# hardcoded "8" while SCHEMA_VERSION had moved on to 11; this pins them together).
+# ---------------------------------------------------------------------------
+
+
+def test_docs_snapshot_schema_version_matches_constant():
+    docs_path = (
+        Path(__file__).parent.parent / "docs" / "reference" / "snapshot-format.md"
+    )
+    text = docs_path.read_text()
+    assert f"**`{SCHEMA_VERSION}`**" in text, (
+        f"docs/reference/snapshot-format.md does not mention the current "
+        f"SCHEMA_VERSION ({SCHEMA_VERSION}) — update it alongside any schema bump."
+    )
+    assert f"(currently `{SCHEMA_VERSION}`)" in text
+    # Every "currently `N`" occurrence (there are two: the schema-version
+    # section and the "Two contracts" table) must agree with the constant —
+    # a page can drift to a stale number in one spot while another was
+    # updated (CodeRabbit review: this table's "currently `8`" survived an
+    # earlier SCHEMA_VERSION bump to 11 unnoticed).
+    stale = [
+        m.group(0)
+        for m in re.finditer(r"currently `(\d+)`", text)
+        if m.group(1) != str(SCHEMA_VERSION)
+    ]
+    assert not stale, f"stale schema-version literal(s) in docs: {stale}"

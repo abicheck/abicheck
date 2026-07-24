@@ -70,7 +70,8 @@ class TestHiddenFriendDetector:
         new = _snap("2.0", [_friend_op_eq()])
         r = compare(old, new)
         assert not any(
-            c.kind in (
+            c.kind
+            in (
                 ChangeKind.HIDDEN_FRIEND_ADDED,
                 ChangeKind.HIDDEN_FRIEND_REMOVED,
             )
@@ -107,12 +108,54 @@ class TestHiddenFriendDetector:
         )
         r = compare(old, new)
         assert not any(
-            c.kind in (
+            c.kind
+            in (
                 ChangeKind.HIDDEN_FRIEND_ADDED,
                 ChangeKind.HIDDEN_FRIEND_REMOVED,
             )
             for c in r.changes
         )
+
+    def test_friend_transition_for_inline_only_same_symbol(self) -> None:
+        """Regression (Codex review): an inline-only hidden friend (no
+        exported symbol on either side, so ``check_hidden_friend_change``'s
+        public-symbol pairing never sees it at all) keeps the same mangled
+        key across versions but flips ``is_hidden_friend`` — e.g. an
+        in-class ``friend`` declaration pulled out to file scope, which
+        preserves the mangled name since a hidden friend already mangles
+        under its enclosing namespace, not the class. ``diff_inline_hidden_
+        friends`` must still catch this via the same-key pair, not just the
+        symbol-appears/disappears cases."""
+        old = _snap("1.0", [_friend_op_eq(is_hidden_friend=True)])
+        new = _snap("2.0", [_friend_op_eq(is_hidden_friend=False)])
+        r = compare(old, new)
+        assert any(c.kind == ChangeKind.HIDDEN_FRIEND_REMOVED for c in r.changes)
+
+    def test_friend_transition_for_inline_only_same_symbol_added(self) -> None:
+        """Symmetric case: the friend is added, not removed, for the same
+        inline-only same-mangled-key shape."""
+        old = _snap("1.0", [_friend_op_eq(is_hidden_friend=False)])
+        new = _snap("2.0", [_friend_op_eq(is_hidden_friend=True)])
+        r = compare(old, new)
+        assert any(c.kind == ChangeKind.HIDDEN_FRIEND_ADDED for c in r.changes)
+
+    def test_public_pairing_transition_not_duplicated_by_inline_pass(self) -> None:
+        """The full-function-map pass (``diff_inline_hidden_friends``) must
+        skip a same-key pair already covered by the public-symbol pairing
+        (both sides ``PUBLIC``/``ELF_ONLY``) — otherwise the transition
+        already tested by ``test_friend_transition_for_matched_symbol``
+        would be emitted twice."""
+        old = _snap(
+            "1.0",
+            [_friend_op_eq(is_hidden_friend=False, visibility=Visibility.PUBLIC)],
+        )
+        new = _snap(
+            "2.0",
+            [_friend_op_eq(is_hidden_friend=True, visibility=Visibility.PUBLIC)],
+        )
+        r = compare(old, new)
+        kinds = [c.kind for c in r.changes if c.kind == ChangeKind.HIDDEN_FRIEND_ADDED]
+        assert len(kinds) == 1
 
     def test_out_of_line_friend_emits_both_kinds(self) -> None:
         """A hidden friend that was also defined out-of-line (so it has a

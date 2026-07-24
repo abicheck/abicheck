@@ -1,0 +1,510 @@
+name: 'abicheck check-target'
+description: >-
+  Compose resolve-baseline + collect-facts + the root abicheck Action for
+  ONE resolved check (target or bundle), always emitting the ADR-047 §7
+  report envelope regardless of outcome. Accepts gate-mode: local|deferred|
+  advisory (ADR-047 §4/§7): local sets this job's own exit code (today's
+  root-action behavior); deferred/advisory always emit the report and only
+  fail this job on an operational error (resolve-baseline failure), leaving
+  the compatibility gate to check-project.yml's trailing aggregate job
+  (deferred) or nothing at all (advisory, shadow-rollout burn-in).
+
+branding:
+  icon: 'check-circle'
+  color: 'blue'
+
+inputs:
+  # ── Identity (ADR-047 §5/§7) ────────────────────────────────────────────
+  kind:
+    description: "'target' (default) or 'bundle' -- which resolution/compare shape this check uses."
+    required: false
+    default: 'target'
+  target-kind:
+    description: >
+      'library' (default), 'app-consumer', or 'plugin-contract' (ADR-047
+      §3's targets: kind discriminator) -- only meaningful when kind:
+      target. Selects which compare flags this check builds: a plain
+      compare for library, --used-by for app-consumer, --required-symbols
+      for plugin-contract. Never used for kind: bundle.
+    required: false
+    default: 'library'
+  name:
+    description: >
+      The target id (kind: target) or bundle id (kind: bundle) -- this
+      check's own reporting identity (check_id/target_id). For target-kind
+      app-consumer/plugin-contract this is the contract target's own name
+      (e.g. "myapp-consumer"), NOT the library it resolves through -- see
+      baseline-target below (ADR-047 §3's "library redirect").
+    required: true
+  baseline-target:
+    description: >
+      Which target's baseline actually gets resolved -- defaults to name.
+      Set this to the referenced library's id for target-kind: app-consumer/
+      plugin-contract (ADR-047 §3: "resolve-baseline resolves the baseline
+      for the target's library field ... while the check's own identity
+      stays the contract target's name"). Ignored for kind: bundle (use
+      bundle-members instead).
+    required: false
+    default: ''
+  bundle-members:
+    description: >
+      JSON array of the bundle's member target ids, e.g.
+      '["libpvxs", "libpvxsIoc"]'. Required when kind is bundle.
+    required: false
+    default: '[]'
+  profile:
+    description: 'The build profile.id this check runs under (ADR-047 §2/§3/§7).'
+    required: true
+  baseline-channel:
+    description: >
+      Baseline channel name (release-contract, accepted-main, explicit, or a
+      project-defined custom channel), or the literal 'none' for a
+      single-build audit with no baseline (ADR-047 §8 S5) -- when 'none',
+      resolve-baseline is skipped entirely and this check runs the existing
+      scan audit path directly (no --against) instead of compare.
+    required: true
+  baseline-path:
+    description: >
+      Path to baseline-channel's already-staged baseline-set (forwarded to
+      resolve-baseline's baseline-path input). Required unless
+      baseline-channel is 'none'.
+    required: false
+    default: ''
+  baseline-required:
+    description: >
+      'true' (default) -- no baseline set yet is a hard failure. 'false' --
+      explicit bootstrap opt-in (forwarded to resolve-baseline's required
+      input). Ignored when baseline-channel is 'none'.
+    required: false
+    default: 'true'
+  candidate-build-output:
+    description: >
+      Path to the candidate build's build-output.json, forwarded to
+      resolve-baseline for its incompatible_evidence check. Omit to skip
+      that check. Ignored when baseline-channel is 'none'.
+    required: false
+    default: ''
+  requested-depth:
+    description: 'Evidence-depth this check asks for: binary, headers, build, or source (ADR-047 §7).'
+    required: true
+  gate-mode:
+    description: "'local' (default), 'deferred', or 'advisory' (ADR-047 §7)."
+    required: false
+    default: 'local'
+  project:
+    description: 'Project identifier recorded in the report envelope, e.g. "owner/repo".'
+    required: false
+    default: ${{ github.repository }}
+  head-sha:
+    description: 'Candidate commit SHA recorded in the report envelope.'
+    required: false
+    default: ${{ github.sha }}
+  base-ref:
+    description: 'Base ref recorded in the report envelope, when known (e.g. a PR target branch).'
+    required: false
+    default: ''
+
+  # ── Evidence collection composition (ADR-047 §4) ────────────────────────
+  evidence-producer:
+    description: >
+      '' (default -- no source evidence needed, e.g. binary/headers depth),
+      'replay', 'wrapper', or 'clang-plugin'. wrapper/clang-plugin compose
+      collect-facts phase: verify (the caller's workflow must run
+      collect-facts phase: prepare before its own build step, earlier in
+      the job -- check-target runs after that build already happened and
+      cannot retroactively instrument it). replay composes collect-facts
+      phase: auto (no pre-build hook needed).
+    required: false
+    default: ''
+  evidence-pack-path:
+    description: >
+      Path to the wrapper/clang-plugin abicheck_inputs/ pack an earlier
+      collect-facts phase: prepare step wrote (must match that step's own
+      output path). Forwarded to compare/dump's --build-info. Ignored for
+      evidence-producer: replay/''.
+    required: false
+    default: 'abicheck_inputs'
+
+  # ── Candidate/new-side inputs (forwarded to root action.yml) ────────────
+  new-library:
+    description: >
+      Candidate binary (kind: target) or directory of candidate member
+      binaries (kind: bundle). Required.
+    required: true
+  header:
+    description: 'Public header file(s) applied to both sides (space-separated). Forwarded to the internal analysis step.'
+    required: false
+  old-header:
+    description: 'Public header(s) for the baseline side only. Forwarded to the internal analysis step.'
+    required: false
+  new-header:
+    description: 'Public header(s) for the candidate side only. Forwarded to the internal analysis step.'
+    required: false
+  include:
+    description: 'Extra include directories, applied to both sides. Forwarded to the internal analysis step.'
+    required: false
+  old-include:
+    description: 'Include directories for the baseline side only. Forwarded to the internal analysis step.'
+    required: false
+  new-include:
+    description: 'Include directories for the candidate side only. Forwarded to the internal analysis step.'
+    required: false
+  lang:
+    description: 'Language mode for header AST parsing: "c++" or "c". Forwarded to the internal analysis step.'
+    required: false
+    default: 'c++'
+  ast-frontend:
+    description: 'L2 header-AST frontend: auto, castxml, clang, or hybrid. Forwarded to the internal analysis step.'
+    required: false
+  gcc-path:
+    description: 'Path to GCC/G++ cross-compiler binary. Forwarded to the internal analysis step.'
+    required: false
+  gcc-prefix:
+    description: 'Cross-toolchain prefix, e.g. aarch64-linux-gnu-. Forwarded to the internal analysis step.'
+    required: false
+  gcc-options:
+    description: 'Extra compiler flags passed through to castxml. Forwarded to the internal analysis step.'
+    required: false
+  sysroot:
+    description: 'Alternative system root directory for cross-compilation. Forwarded to the internal analysis step.'
+    required: false
+  sources:
+    description: 'Source checkout for L3/L4/L5 evidence (forwarded to compare/dump --sources and to collect-facts).'
+    required: false
+  build-info:
+    description: >
+      Out-of-tree L3 build context. When evidence-producer is
+      wrapper/clang-plugin, this is set from evidence-pack-path
+      automatically -- set it directly only for a producer-less
+      build/source-depth check that already has an out-of-band pack.
+    required: false
+  compile-db:
+    description: 'Explicit path to a compile_commands.json. Forwarded to the internal analysis step.'
+    required: false
+  build-config:
+    description: 'Path to a trusted .abicheck.yml. Forwarded to the internal analysis step.'
+    required: false
+  consumer-binary:
+    description: 'target-kind: app-consumer only. Consumer binary/binaries whose imports scope the comparison (forwarded as --used-by).'
+    required: false
+  verify-runtime:
+    description: 'target-kind: app-consumer only. Forwarded to --verify-runtime.'
+    required: false
+    default: 'false'
+  contract-file:
+    description: 'target-kind: plugin-contract only. A .syms file (one required linker symbol per line, # comments allowed), forwarded as --required-symbols.'
+    required: false
+  policy:
+    description: 'Built-in policy profile: strict_abi (default), sdk_vendor, plugin_abi. Forwarded to the internal analysis step.'
+    required: false
+    default: 'strict_abi'
+  policy-file:
+    description: 'Path to a YAML policy file with per-kind verdict overrides. Forwarded to the internal analysis step.'
+    required: false
+  suppress:
+    description: 'Path to a YAML suppression file to filter known/intentional changes. Forwarded to the internal analysis step.'
+    required: false
+  severity-preset:
+    description: >
+      Forwarded to the internal compare step. Defaults to 'default' (not
+      left unset) so the analysis report always carries a severity block --
+      without one, a legacy compare report has no severity to neutralize for
+      gate-mode: advisory, and aggregate.py's own GateInfo.from_report_data
+      falls back to legacy_from_verdict(verdict) instead, which would still
+      see the real BREAKING/API_BREAK verdict and derive a blocking gate
+      regardless of gate-mode. Ignored for a scan-mode audit (baseline-
+      channel: none), which always carries its own top-level exit_code.
+    required: false
+    default: 'default'
+  severity-addition:
+    description: 'Severity for new public API additions: error, warning, or info. Forwarded to the internal analysis step.'
+    required: false
+  extra-args:
+    description: 'Additional CLI arguments passed directly to the internal abicheck invocation.'
+    required: false
+    default: ''
+  python-version:
+    description: 'Python version for setup-python.'
+    required: false
+    default: '3.13'
+  install-deps:
+    description: 'Install system dependencies (castxml, gcc). Set to false if pre-installed.'
+    required: false
+    default: 'true'
+  action-version:
+    description: 'Recorded in the report envelope as the abicheck Action ref that ran this check.'
+    required: false
+    default: ${{ format('{0}@{1}', github.action_repository || github.repository, github.action_ref || github.sha) }}
+
+outputs:
+  outcome:
+    description: 'resolve-baseline outcome (resolved, not_found, ambiguous, wrong_profile, stale_schema, incompatible_evidence), or "skipped" when baseline-channel is none.'
+    value: ${{ steps.finalize.outputs.outcome }}
+  check-id:
+    description: "This check's full identity: target@profile#baseline_channel@requested_depth."
+    value: ${{ steps.finalize.outputs.check-id }}
+  verdict:
+    description: 'The legacy verdict field (a Verdict enum value, "ERROR" for an operational failure, or "NO_BASELINE" for a bootstrap pass).'
+    value: ${{ steps.finalize.outputs.verdict }}
+  compatibility-verdict:
+    description: 'ADR-047 §7''s new compatibility_verdict field (empty when unavailable).'
+    value: ${{ steps.finalize.outputs.compatibility-verdict }}
+  policy-gate-decision:
+    description: '"pass" or "fail" -- this check''s own real gate decision, before any advisory neutralization.'
+    value: ${{ steps.finalize.outputs.policy-gate-decision }}
+  report-path:
+    description: 'Path to the final, enriched report JSON.'
+    value: ${{ steps.finalize.outputs.report-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate check-target inputs
+      shell: bash
+      env:
+        INPUT_KIND: ${{ inputs.kind }}
+        INPUT_TARGET_KIND: ${{ inputs.target-kind }}
+        INPUT_NAME: ${{ inputs.name }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_BUNDLE_MEMBERS: ${{ inputs.bundle-members }}
+        INPUT_BASELINE_CHANNEL: ${{ inputs.baseline-channel }}
+        INPUT_BASELINE_PATH: ${{ inputs.baseline-path }}
+        INPUT_GATE_MODE: ${{ inputs.gate-mode }}
+        INPUT_REQUESTED_DEPTH: ${{ inputs.requested-depth }}
+        INPUT_EVIDENCE_PRODUCER: ${{ inputs.evidence-producer }}
+        INPUT_CONSUMER_BINARY: ${{ inputs.consumer-binary }}
+        INPUT_CONTRACT_FILE: ${{ inputs.contract-file }}
+      run: bash "${{ github.action_path }}/validate-inputs.sh"
+
+    # ── Capture this Action's own identity before any nested `uses:` step ──
+    # overwrites it. `github.action_repository`/`github.action_ref` describe
+    # whichever action is *about to run* -- the runner updates them as it
+    # prepares each step, including composite-nested ones, and critically
+    # **before** evaluating that same step's own `with:` expressions. A
+    # first attempt at the self-checkout step below read `github.
+    # action_repository`/`github.action_ref` directly in its own `with:`
+    # block and got back its own target's identity (`actions/checkout`/
+    # `v6`) instead of check-target's -- confirmed against a real CI run
+    # (job 89082423642). Reading them here instead, in a plain `run:` step
+    # that is the *first* thing check-target does, captures the correct
+    # values before anything nested has a chance to overwrite them.
+    - name: Capture this Action's identity
+      id: identity
+      shell: bash
+      env:
+        ACTION_REPOSITORY: ${{ github.action_repository }}
+        ACTION_REF: ${{ github.action_ref }}
+        FALLBACK_REPOSITORY: ${{ github.repository }}
+        FALLBACK_REF: ${{ github.sha }}
+      run: |
+        echo "repository=${ACTION_REPOSITORY:-$FALLBACK_REPOSITORY}" >> "$GITHUB_OUTPUT"
+        echo "ref=${ACTION_REF:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
+
+    # ── Self-checkout for nested composite Actions ──────────────────────────
+    # A relative `uses: ./x` step ALWAYS resolves against $GITHUB_WORKSPACE
+    # (the calling workflow's own checkout) -- never against the repository
+    # that contains *this* composite Action. This is a well-documented
+    # GitHub Actions limitation (github/docs: "When referencing an action
+    # using a relative path, the path is always relative to
+    # $GITHUB_WORKSPACE"; see also actions/runner#1348). When check-target
+    # is consumed externally (`uses: abicheck/abicheck/actions/check-target@
+    # v1` from a caller's own repository), a bare `uses: ./actions/
+    # resolve-baseline` below would resolve against the CALLER's own
+    # checkout, which has no such path, and fail before ever reaching
+    # baseline resolution -- confirmed by review; the existing
+    # test-action.yml fixture never caught this because it invokes
+    # check-target from *within* this same repository, the one case where a
+    # bare relative path happens to already work. Fix: check out this exact
+    # abicheck/abicheck ref into a side directory of the caller's own
+    # workspace first, then reference every nested Action relative to that
+    # directory instead of bare `./`. For a local `uses: ./actions/
+    # check-target` call within this same repository (as `.github/
+    # workflows/test-action.yml` does), `github.action_repository`/
+    # `github.action_ref` are empty, so the identity step above falls back
+    # to `github.repository`/`github.sha` -- checking out the same repo/
+    # commit the caller's own workspace already has, redundant but
+    # harmless.
+    - name: Checkout abicheck (for nested Action composition)
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ steps.identity.outputs.repository }}
+        ref: ${{ steps.identity.outputs.ref }}
+        path: .abicheck-check-target-src
+        persist-credentials: false
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install abicheck
+      shell: bash
+      run: pip install "${{ github.action_path }}/../.."
+
+    # ── Baseline resolution (skipped entirely for baseline-channel: none, ──
+    # ADR-047 §8 S5 -- never routed through not_found/bootstrap handling for
+    # a check that never wanted a baseline in the first place) ─────────────
+    - name: Resolve baseline
+      id: resolve
+      if: inputs.baseline-channel != 'none'
+      continue-on-error: true
+      uses: ./.abicheck-check-target-src/actions/resolve-baseline
+      with:
+        baseline-path: ${{ inputs.baseline-path }}
+        channel: ${{ inputs.baseline-channel }}
+        kind: ${{ inputs.kind }}
+        target: ${{ inputs.kind == 'target' && (inputs.baseline-target != '' && inputs.baseline-target || inputs.name) || '' }}
+        bundle: ${{ inputs.kind == 'bundle' && inputs.name || '' }}
+        bundle-members: ${{ inputs.bundle-members }}
+        profile: ${{ inputs.profile }}
+        required: ${{ inputs.baseline-required }}
+        candidate-build-output: ${{ inputs.candidate-build-output }}
+        python-version: ${{ inputs.python-version }}
+
+    # ── Evidence collection (ADR-047 §4's collect-facts composition note: ──
+    # phase: verify for wrapper/clang-plugin, phase: auto only for replay -- ─
+    # check-target runs after the caller's own build, so phase: prepare must
+    # be a separate, earlier step in the caller's workflow, not here) ───────
+    - name: Collect source facts (verify)
+      id: collect_verify
+      if: |
+        (inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') &&
+        (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved')
+      continue-on-error: true
+      uses: ./.abicheck-check-target-src/actions/collect-facts
+      with:
+        phase: 'verify'
+        producer: ${{ inputs.evidence-producer }}
+        output: ${{ inputs.evidence-pack-path }}
+        python-version: ${{ inputs.python-version }}
+
+    - name: Collect source facts (replay)
+      id: collect_replay
+      if: |
+        inputs.evidence-producer == 'replay' &&
+        (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved')
+      continue-on-error: true
+      uses: ./.abicheck-check-target-src/actions/collect-facts
+      with:
+        phase: 'auto'
+        producer: 'replay'
+        sources: ${{ inputs.sources }}
+        python-version: ${{ inputs.python-version }}
+
+    # ── Analysis: compare against the resolved baseline, or (baseline: ─────
+    # none) a scan audit with no --against -- continue-on-error so the ─────
+    # report-envelope step below always runs, per ADR-047 §7's required ─────
+    # "internal analysis step must run with continue-on-error: true" rule. ──
+    # Also skipped when a required collect-facts step failed: without this,
+    # a broken/empty wrapper or clang-plugin pack (collect_verify failure)
+    # would still be handed to compare as --build-info, silently running the
+    # comparison against invalid evidence instead of surfacing the
+    # collection failure as the operational error it is (review). ──────────
+    # The analysis output filename below is a fixed workspace-relative path
+    # (unlike the final envelope, which is already scoped per check-id) --
+    # if a job runs check-target more than once and a LATER invocation's
+    # nested root Action crashes before ever reaching its own report-write
+    # step (e.g. a CLI usage/config error), an EARLIER invocation's file
+    # would still be sitting at that same path. run.sh's own "only emit
+    # report-path when a real report file was produced" check
+    # (`-f "$OUTPUT_FILE"`) would then find the stale file and report it as
+    # this run's own report-path, so the finalize step below would augment
+    # the PREVIOUS check's JSON as if it were this check's real result --
+    # with gate-mode: deferred/advisory, silently turning a genuine
+    # operational failure into a false pass, since operational_errors would
+    # be read from the stale (successful) report instead (Codex review).
+    # Deleting any stale file first, unconditionally (not gated on this
+    # step's own `if:` below), closes that window regardless of whether
+    # analysis runs this time.
+    - name: Clean stale analysis output
+      shell: bash
+      run: rm -f check-target-analysis.json
+
+    - name: Run analysis
+      id: analysis
+      if: |
+        (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved') &&
+        steps.collect_verify.outcome != 'failure' &&
+        steps.collect_replay.outcome != 'failure'
+      continue-on-error: true
+      uses: ./.abicheck-check-target-src
+      with:
+        mode: ${{ inputs.baseline-channel == 'none' && 'scan' || 'compare' }}
+        old-library: ${{ inputs.kind == 'bundle' && steps.resolve.outputs.binaries-dir || steps.resolve.outputs.snapshot-path }}
+        new-library: ${{ inputs.new-library }}
+        header: ${{ inputs.header }}
+        old-header: ${{ inputs.old-header }}
+        new-header: ${{ inputs.new-header }}
+        include: ${{ inputs.include }}
+        old-include: ${{ inputs.old-include }}
+        new-include: ${{ inputs.new-include }}
+        lang: ${{ inputs.lang }}
+        ast-frontend: ${{ inputs.ast-frontend }}
+        gcc-path: ${{ inputs.gcc-path }}
+        gcc-prefix: ${{ inputs.gcc-prefix }}
+        gcc-options: ${{ inputs.gcc-options }}
+        sysroot: ${{ inputs.sysroot }}
+        # collect-facts' own replay phase defaults an empty `sources` to '.'
+        # internally (run.sh: `SOURCES="${INPUT_SOURCES:-.}"`) but never
+        # surfaces that resolved value as an output -- it only prints a
+        # notice telling the caller to "pass sources: $SOURCES directly to
+        # dump/scan/compare". Forwarding the raw (still-empty) inputs.sources
+        # here instead left action/run.sh's add_single_flag skipping --sources
+        # entirely (it omits the flag for an empty value), so a replay check
+        # with sources: left unset would pass the collect-facts step but then
+        # run compare/scan with NO source evidence at all -- silently missing
+        # source-only findings at requested-depth: build/source (Codex
+        # review). Mirror collect-facts' own default here so the analysis
+        # step sees the same directory replay validated.
+        sources: ${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '') }}
+        build-info: ${{ (inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info }}
+        compile-db: ${{ inputs.compile-db }}
+        build-config: ${{ inputs.build-config }}
+        depth: ${{ inputs.requested-depth }}
+        used-by: ${{ inputs.target-kind == 'app-consumer' && inputs.consumer-binary || '' }}
+        verify-runtime: ${{ inputs.target-kind == 'app-consumer' && inputs.verify-runtime || 'false' }}
+        required-symbols: ${{ inputs.target-kind == 'plugin-contract' && inputs.contract-file || '' }}
+        policy: ${{ inputs.policy }}
+        policy-file: ${{ inputs.policy-file }}
+        suppress: ${{ inputs.suppress }}
+        severity-preset: ${{ inputs.severity-preset }}
+        severity-addition: ${{ inputs.severity-addition }}
+        extra-args: ${{ inputs.extra-args }}
+        format: 'json'
+        output-file: 'check-target-analysis.json'
+        add-job-summary: 'false'
+        pr-comment: 'false'
+        upload-sarif: 'false'
+        python-version: ${{ inputs.python-version }}
+        install-deps: ${{ inputs.install-deps }}
+
+    # ── Always write the report envelope, regardless of the above steps' ───
+    # outcomes (ADR-047 §7: "always execute the report-envelope-writing ─────
+    # step") and own check-target's actual composite exit code last. ───────
+    - name: Write report envelope and finalize
+      id: finalize
+      shell: bash
+      env:
+        INPUT_KIND: ${{ inputs.kind }}
+        INPUT_NAME: ${{ inputs.name }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_BASELINE_CHANNEL: ${{ inputs.baseline-channel }}
+        INPUT_REQUESTED_DEPTH: ${{ inputs.requested-depth }}
+        INPUT_GATE_MODE: ${{ inputs.gate-mode }}
+        INPUT_PROJECT: ${{ inputs.project }}
+        INPUT_HEAD_SHA: ${{ inputs.head-sha }}
+        INPUT_BASE_REF: ${{ inputs.base-ref }}
+        INPUT_ACTION_VERSION: ${{ inputs.action-version }}
+        RESOLVE_RAN: ${{ inputs.baseline-channel != 'none' }}
+        RESOLVE_OUTCOME: ${{ steps.resolve.outputs.outcome }}
+        RESOLVE_BOOTSTRAP: ${{ steps.resolve.outputs.bootstrap }}
+        RESOLVE_MESSAGE: ${{ steps.resolve.outputs.message }}
+        ANALYSIS_RAN: ${{ steps.analysis.outcome != 'skipped' }}
+        ANALYSIS_OUTCOME: ${{ steps.analysis.outcome }}
+        ANALYSIS_VERDICT: ${{ steps.analysis.outputs.verdict }}
+        ANALYSIS_REPORT_PATH: ${{ steps.analysis.outputs.report-path }}
+        ANALYSIS_EXIT_CODE: ${{ steps.analysis.outputs.exit-code }}
+        COLLECT_VERIFY_OUTCOME: ${{ steps.collect_verify.outcome }}
+        COLLECT_REPLAY_OUTCOME: ${{ steps.collect_replay.outcome }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "${{ github.action_path }}/run.sh"

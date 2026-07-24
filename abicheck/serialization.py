@@ -84,7 +84,22 @@ from .model import (
 # v11: persist the resolved header-AST executable/compiler identity and an
 #     explicit CastXML→Clang fallback reason.  This makes producer changes
 #     observable in saved baselines instead of only in transient logs.
-# v12: ADR-050 D1 — ``AbiSnapshot.contract`` (profile/scope fingerprints
+# v12: `Function.hidden_friend_owner` — the qualified name of the class whose
+#     body declares an in-class `friend` (resolved from castxml's
+#     `befriending` attribute). Lets surface classification demote a hidden
+#     friend whose owner lives in a system/private header instead of always
+#     retaining it (previously an unconditional exemption keyed only on
+#     ChangeKind — see AGENTS.md P0 "hidden-friend origin-before-exemption").
+#     Purely additive: a pre-v12 reader loads `hidden_friend_owner` as None,
+#     which only means the origin-based demotion cannot fire for that
+#     snapshot — the finding stays retained (conservative fallback), never
+#     silently mis-demoted.
+# v13: `AbiSnapshot.ast_toolchain_supported` / `ast_toolchain_unsupported_reasons`
+#     — the outcome of the CastXML version gate (`castxml_policy.py`) run
+#     before headers were parsed. Purely additive: a pre-v13 reader loads both
+#     as their defaults (None / []), i.e. "gate outcome unknown" — the same
+#     conservative default a fresh in-memory snapshot has before any gate ran.
+# v14: ADR-050 D1 — ``AbiSnapshot.contract`` (profile/scope fingerprints
 #     proving the extraction contract two snapshots were compared under).
 #     Unlike every earlier bump, this one is *verdict-blocking*: a reader
 #     that doesn't recognize ``contract`` would silently compare two
@@ -94,8 +109,8 @@ from .model import (
 #     ``snapshot_from_dict``'s hard-rejection guard protects any reader BUILT
 #     FROM THIS COMMIT ONWARD whose own ``SCHEMA_VERSION`` constant is below
 #     a future verdict-blocking bump's threshold — it cannot, and structurally
-#     never could, retroactively protect an already-released pre-v12 install
-#     (e.g. a deployed abicheck whose ``SCHEMA_VERSION`` is 11): such a reader
+#     never could, retroactively protect an already-released pre-v14 install
+#     (e.g. a deployed abicheck whose ``SCHEMA_VERSION`` is 13): such a reader
 #     simply does not contain this guard's code at all, so it falls through
 #     to the ordinary warn-and-continue path every earlier additive bump got,
 #     silently drops the unrecognized ``contract`` key, and produces an
@@ -103,8 +118,8 @@ from .model import (
 #     change can close that gap for code that already shipped without it.
 #     `checker.compare`'s ``contract_coverage="partial"`` disclosure (ADR-050
 #     D2) is the mitigation available for exactly this case -- but it comes
-#     from whichever *v12-aware* `compare()` later evaluates the resulting
-#     pair, never from the pre-v12 reader that did the dropping (that reader
+#     from whichever *v14-aware* `compare()` later evaluates the resulting
+#     pair, never from the pre-v14 reader that did the dropping (that reader
 #     predates the coverage logic too, and stays just as unaware of the drop
 #     as it was of ``contract`` itself; Codex review, PR #624). A pair where
 #     one side's contract is missing -- whether dropped by an old re-save or
@@ -113,7 +128,7 @@ from .model import (
 #     PR no real producer populates ``contract`` yet (``dumper.py`` wiring
 #     is separate, later work), so there is no snapshot in the wild today
 #     for an old reader to mis-handle.
-SCHEMA_VERSION: int = 12
+SCHEMA_VERSION: int = 14
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -124,14 +139,14 @@ _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
 # it cannot retroactively make an already-released, pre-this-commit reader
 # (whose own code simply doesn't have this check) hard-reject — that reader
 # falls through to its old warn-and-continue path regardless of what this
-# constant says (Codex review, PR #624; see the v12 note above for the full
+# constant says (Codex review, PR #624; see the v14 note above for the full
 # scope of what this guard can and cannot protect). Within code that DOES
 # contain this guard, ``snapshot_from_dict`` raises IncompatibleSnapshotSchemaError
 # whenever the snapshot's version is BOTH newer than this reader's own
 # SCHEMA_VERSION AND at or above this threshold — not merely "this reader
 # predates the threshold," which would stop protecting the moment a reader's
 # own SCHEMA_VERSION reaches it.
-_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION = 12
+_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION = 14
 
 
 def _sets_to_lists(obj: Any) -> Any:
@@ -686,6 +701,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             # an older snapshot loads as None and suppresses the
             # HIDDEN_FRIEND_ADDED/_REMOVED transition detector.
             is_hidden_friend=f.get("is_hidden_friend"),
+            # Owner class of a hidden friend — missing on older snapshots (and
+            # for non-friends) loads as None.
+            hidden_friend_owner=f.get("hidden_friend_owner"),
             # Provenance (v6) — missing on older snapshots → None / UNKNOWN.
             source_header=f.get("source_header"),
             origin=_scope_origin_or_unknown(f.get("origin")),
@@ -897,6 +915,16 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     ast_fallback_reason = (
         raw_fallback_reason if isinstance(raw_fallback_reason, str) else None
     )
+    raw_ast_supported = d.get("ast_toolchain_supported")
+    ast_toolchain_supported = (
+        raw_ast_supported if isinstance(raw_ast_supported, bool) else None
+    )
+    raw_ast_unsupported_reasons = d.get("ast_toolchain_unsupported_reasons")
+    ast_toolchain_unsupported_reasons = (
+        [str(r) for r in raw_ast_unsupported_reasons]
+        if isinstance(raw_ast_unsupported_reasons, list)
+        else []
+    )
     if "header_cv_facts_reliable" in d:
         # Trust an explicit marker over re-deriving from schema_version: a
         # load -> snapshot_to_dict -> (save) -> load round-trip always
@@ -955,6 +983,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         ast_producer=ast_producer_value,
         ast_toolchain=ast_toolchain,
         ast_fallback_reason=ast_fallback_reason,
+        ast_toolchain_supported=ast_toolchain_supported,
+        ast_toolchain_unsupported_reasons=ast_toolchain_unsupported_reasons,
         # See header_cv_facts_reliable_value's computation above: prefers an
         # explicit dict key (round-trip stability) and otherwise derives
         # from schema_version scoped to the CastXML header path specifically

@@ -1,3 +1,16 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+level: intermediate
+canonical_for:
+  - public-surface
+depends_on:
+  - abicheck/surface.py
+lifecycle: active
+generated: false
+---
+
 # What Is Part of Your ABI Surface?
 
 The single most common ABI-review mistake is judging a change by *where the

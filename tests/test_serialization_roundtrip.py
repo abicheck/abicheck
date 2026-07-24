@@ -147,6 +147,50 @@ class TestAstProducerRoundTrip:
         assert snapshot_from_dict(d).ast_producer is None
 
 
+class TestAstToolchainSupportedRoundTrip:
+    """AbiSnapshot.ast_toolchain_supported / ast_toolchain_unsupported_reasons
+    (schema v13, castxml_policy) must survive JSON serialisation and
+    deserialisation, and default conservatively (unknown, not "supported")
+    on a snapshot predating this field."""
+
+    def test_supported_true_survives_roundtrip(self) -> None:
+        snap = _make_snap(
+            from_headers=True,
+            ast_producer="castxml",
+            ast_toolchain_supported=True,
+            ast_toolchain_unsupported_reasons=[],
+        )
+        j = json.loads(snapshot_to_json(snap))
+        assert j.get("ast_toolchain_supported") is True
+        restored = snapshot_from_dict(j)
+        assert restored.ast_toolchain_supported is True
+        assert restored.ast_toolchain_unsupported_reasons == []
+
+    def test_supported_false_with_reasons_survives_roundtrip(self) -> None:
+        snap = _make_snap(
+            from_headers=True,
+            ast_producer="castxml",
+            ast_toolchain_supported=False,
+            ast_toolchain_unsupported_reasons=["castxml_version_below_minimum"],
+        )
+        j = json.loads(snapshot_to_json(snap))
+        assert j.get("ast_toolchain_supported") is False
+        restored = snapshot_from_dict(j)
+        assert restored.ast_toolchain_supported is False
+        assert restored.ast_toolchain_unsupported_reasons == [
+            "castxml_version_below_minimum"
+        ]
+
+    def test_defaults_to_none_and_empty_when_absent(self) -> None:
+        """A pre-v13 snapshot predating this field must deserialise to
+        None/[] — "gate outcome unknown", never silently "supported"."""
+        d = _minimal_dict()
+        assert "ast_toolchain_supported" not in d
+        restored = snapshot_from_dict(d)
+        assert restored.ast_toolchain_supported is None
+        assert restored.ast_toolchain_unsupported_reasons == []
+
+
 class TestHeaderCvFactsReliableRoundTrip:
     """AbiSnapshot.header_cv_facts_reliable must be derived from
     schema_version, but SCOPED to the CastXML header path specifically —
@@ -177,7 +221,7 @@ class TestHeaderCvFactsReliableRoundTrip:
 
         snap = _make_snap()
         j = json.loads(snapshot_to_json(snap))
-        assert j["schema_version"] == SCHEMA_VERSION == 12
+        assert j["schema_version"] == SCHEMA_VERSION == 14
 
     def test_legacy_castxml_header_snapshot_loads_as_unreliable(self) -> None:
         d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
@@ -246,7 +290,7 @@ class TestHeaderCvFactsReliableRoundTrip:
         assert legacy.header_cv_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 12
+        assert reserialized["schema_version"] == 14
         assert reserialized["header_cv_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)

@@ -100,6 +100,18 @@ class ScopeMismatchError(AbicheckError):
     """
 
 
+class UnsupportedCastxmlVersionError(SnapshotError):
+    """Raised when a CastXML build outside the supported version range would
+    be used for an authoritative L2 scan, before any header is parsed.
+
+    A subclass of :class:`SnapshotError` — existing ``except SnapshotError``
+    handling still catches it unchanged. See :mod:`abicheck.castxml_policy`
+    for the version range and the explicit ``allow_unsupported`` override
+    that turns this hard failure into a degraded, clearly-flagged snapshot
+    instead.
+    """
+
+
 class SuppressionError(AbicheckError, ValueError):
     """Raised for invalid suppression rules or patterns.
 

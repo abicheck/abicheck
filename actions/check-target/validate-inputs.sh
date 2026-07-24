@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# Fails fast on an unsupported check-target input combination, before Python
+# setup or any nested Action runs -- mirrors action/validate-inputs.sh's
+# rationale for the root Action. See action.yml for the full input contract.
+set -euo pipefail
+
+_fail() {
+  echo "::error::$1"
+  exit 64
+}
+
+KIND="${INPUT_KIND:-target}"
+TARGET_KIND="${INPUT_TARGET_KIND:-library}"
+NAME="${INPUT_NAME:-}"
+PROFILE="${INPUT_PROFILE:-}"
+BUNDLE_MEMBERS="${INPUT_BUNDLE_MEMBERS:-[]}"
+BASELINE_CHANNEL="${INPUT_BASELINE_CHANNEL:-}"
+BASELINE_PATH="${INPUT_BASELINE_PATH:-}"
+GATE_MODE="${INPUT_GATE_MODE:-local}"
+REQUESTED_DEPTH="${INPUT_REQUESTED_DEPTH:-}"
+EVIDENCE_PRODUCER="${INPUT_EVIDENCE_PRODUCER:-}"
+CONSUMER_BINARY="${INPUT_CONSUMER_BINARY:-}"
+CONTRACT_FILE="${INPUT_CONTRACT_FILE:-}"
+
+# ── Required-input checks run before the enum/case validations below, so an
+# empty required input (name, profile, baseline-channel, requested-depth)
+# gets the clearer "input is required" message instead of being caught by
+# a case statement's generic "not recognized" branch first (an empty string
+# never matches any case pattern, so it would otherwise fall through to
+# that branch's *) arm).
+if [[ -z "$NAME" ]]; then
+  _fail "name input is required."
+fi
+if [[ -z "$PROFILE" ]]; then
+  # action.yml declares profile: required: true, but GitHub Actions does
+  # NOT actually enforce `required: true` for composite-action inputs --
+  # it's documentation only; an omitted input simply arrives as an empty
+  # string (github.com/orgs/community/discussions/26777). Without this
+  # check, a workflow that forgot `profile:` would sail past this step and
+  # only fail deep inside run.sh's `PROFILE="${INPUT_PROFILE:?}"` bash
+  # parameter expansion -- which aborts the finalize step immediately,
+  # before report_envelope.py ever runs, so the check produces no
+  # check-target-report*.json/outputs at all despite ADR-047 §7's "the
+  # report-envelope step always executes" contract (Codex review).
+  _fail "profile input is required."
+fi
+if [[ -z "$BASELINE_CHANNEL" ]]; then
+  # baseline-channel is declared required: true, same GitHub-Actions-doesn't-
+  # enforce-required-inputs caveat as profile above -- was previously a bare
+  # `:?` parameter expansion, which does fire on empty but exits 1 with a raw
+  # bash stderr message and no `::error::` annotation, diverging from every
+  # other required-input check here (CodeRabbit review).
+  _fail "baseline-channel input is required."
+fi
+if [[ -z "$REQUESTED_DEPTH" ]]; then
+  # Same rationale as baseline-channel above. Must run before the
+  # REQUESTED_DEPTH case statement below, or an empty value would instead
+  # get caught there with the less precise "not recognized" message.
+  _fail "requested-depth input is required."
+fi
+
+case "$KIND" in
+  target | bundle) ;;
+  *) _fail "kind '$KIND' is not recognized. Use 'target' or 'bundle'." ;;
+esac
+case "$TARGET_KIND" in
+  library | app-consumer | plugin-contract) ;;
+  *) _fail "target-kind '$TARGET_KIND' is not recognized. Use 'library', 'app-consumer', or 'plugin-contract'." ;;
+esac
+case "$GATE_MODE" in
+  local | deferred | advisory) ;;
+  *) _fail "gate-mode '$GATE_MODE' is not recognized. Use 'local', 'deferred', or 'advisory'." ;;
+esac
+case "$REQUESTED_DEPTH" in
+  binary | headers | build | source) ;;
+  *) _fail "requested-depth '$REQUESTED_DEPTH' is not recognized. Use 'binary', 'headers', 'build', or 'source'." ;;
+esac
+case "$EVIDENCE_PRODUCER" in
+  "" | wrapper | clang-plugin | replay) ;;
+  *) _fail "evidence-producer '$EVIDENCE_PRODUCER' is not recognized. Use '' (none), 'wrapper', 'clang-plugin', or 'replay' -- a misspelled value silently skips fact collection instead of failing loud." ;;
+esac
+if [[ "$KIND" == "bundle" ]]; then
+  if [[ "$TARGET_KIND" != "library" ]]; then
+    _fail "target-kind must be 'library' when kind is 'bundle' -- app-consumer/plugin-contract are single-target concepts."
+  fi
+  if [[ "$BUNDLE_MEMBERS" == "[]" ]]; then
+    _fail "bundle-members must be a non-empty JSON array when kind is 'bundle'."
+  fi
+  if [[ "$REQUESTED_DEPTH" == "build" || "$REQUESTED_DEPTH" == "source" ]]; then
+    # kind: bundle always compares directories (the resolved binaries-dir vs.
+    # the candidate bundle directory), which routes through the CLI's
+    # per-library release fan-out -- that fan-out never collects inline
+    # build/source evidence and the root Action's run.sh now fails loud
+    # rather than silently dropping a build/source-depth request for a
+    # directory operand (Codex review). Failing here, before resolve-
+    # baseline/collect-facts even run, gives a clearer and cheaper error
+    # than letting the nested analysis step fail later.
+    _fail "requested-depth '$REQUESTED_DEPTH' is not supported when kind is 'bundle' -- a bundle compares directories, which the CLI's per-library release fan-out never collects inline build/source evidence for. Use requested-depth: binary or headers for a bundle check, or kind: target to compare one library at build/source depth."
+  fi
+fi
+if [[ "$TARGET_KIND" == "app-consumer" && -z "$CONSUMER_BINARY" ]]; then
+  _fail "consumer-binary is required when target-kind is 'app-consumer'."
+fi
+if [[ "$TARGET_KIND" == "plugin-contract" && -z "$CONTRACT_FILE" ]]; then
+  _fail "contract-file is required when target-kind is 'plugin-contract'."
+fi
+if [[ "$BASELINE_CHANNEL" == "none" && "$TARGET_KIND" != "library" ]]; then
+  # baseline-channel: none routes the analysis step to `scan` (a one-build
+  # audit), but the root Action's --used-by/--required-symbols contract
+  # scoping only exists in its `compare` branch -- `scan` has no equivalent
+  # flag at all. Without this check, an app-consumer/plugin-contract check
+  # with no baseline would silently run as a plain unscoped scan under the
+  # contract target's name and could pass without ever checking the
+  # consumer/plugin contract it claims to (Codex review).
+  _fail "target-kind '$TARGET_KIND' is not supported with baseline-channel: none -- a single-build audit (scan) has no --used-by/--required-symbols equivalent to scope the contract check against. Use target-kind: library for a baseline-channel: none audit, or set a real baseline-channel to run the scoped compare."
+fi
+if [[ "$BASELINE_CHANNEL" != "none" && -z "$BASELINE_PATH" ]]; then
+  _fail "baseline-path is required when baseline-channel is not 'none'."
+fi
+
+exit 0

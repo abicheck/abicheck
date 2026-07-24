@@ -1,3 +1,14 @@
+---
+doc_type: how-to
+audience:
+  - ci-owner
+level: intermediate
+summarizes:
+  - verdicts
+lifecycle: active
+generated: false
+---
+
 # CI Gating: How the Pieces Fit Together
 
 Four mechanisms decide what fails your build: **baselines** (what you compare
@@ -36,7 +47,7 @@ four stages (the numbers match the diagram above):
    the build; it is tallied separately (`suppressed_count` in the JSON
    output).
 3. **Score (verdict + severity).** The surviving changes produce the overall
-   verdict (`NO_CHANGE` … `BREAKING`) and, when
+   [verdict](../concepts/verdicts.md) (`NO_CHANGE` … `BREAKING`) and, when
    [severity](severity.md) is configured, per-category
    (`abi_breaking` / `potential_breaking` / `quality_issues` / `addition`)
    severity levels.
@@ -95,7 +106,7 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
 - **Baselines → everything.** All of the above only gates what changed
   *relative to the baseline you chose*. Compare against the last release (not
   the previous commit) to catch cumulative drift; see
-  [Baseline Management](baseline-management.md) for storage workflows.
+  [Storing Baselines](baseline-storage.md) for storage workflows.
 
 ## Recipes
 

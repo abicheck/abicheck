@@ -7,14 +7,14 @@ one of [ADR-047](../development/adr/047-github-actions-integration-model.md)
 baseline is never silently treated as "compatible."
 
 > **Status.** This page documents the `actions/resolve-baseline` composite
-> Action shipped in G30 P1.2. `actions/check-target`, the primitive that
-> composes this Action with the root `action.yml` and `collect-facts` into
-> one check, is G30 P1.3, not built yet — see the
-> [G30 plan](../development/plans/g30-github-actions-integration-model.md).
-> `actions/baseline` does not yet stage bundle-member ELF binaries into a
-> `binaries/` directory (G30 P1.6) — bundle-scoped resolution (below) is
-> defined and tested against a hand-authored fixture in the meantime, the
-> same "defines the contract, no producer yet" scoping G30 P1.1 used for
+> Action shipped in G30 P1.2. `actions/check-target` (G30 P1.3), the
+> primitive that composes this Action with the root `action.yml` and
+> `collect-facts` into one check, is documented separately — see the
+> [check-target Action reference](check-target.md). `actions/baseline`
+> does not yet stage bundle-member ELF binaries into a `binaries/`
+> directory (G30 P1.6) — bundle-scoped resolution (below) is defined and
+> tested against a hand-authored fixture in the meantime, the same "defines
+> the contract, no producer yet" scoping G30 P1.1 used for
 > `build-output.json`.
 
 ## Why a separate primitive

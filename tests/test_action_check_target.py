@@ -1,0 +1,970 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Behavioral tests for ``actions/check-target``'s shell layer (G30 P1.3,
+ADR-047 §4/§7).
+
+``action.yml``'s own step orchestration (composing ``resolve-baseline`` +
+``collect-facts`` + the root Action as nested ``uses:`` steps) needs a real
+GitHub Actions runner to exercise end-to-end -- these tests instead drive
+``validate-inputs.sh`` and ``run.sh`` directly, simulating the env vars
+``action.yml`` would inject from those steps' own outputs (``RESOLVE_*``,
+``ANALYSIS_*``, ``COLLECT_*``). The pure report-envelope logic those two
+scripts delegate to is unit-tested in isolation in
+``tests/test_check_report.py``.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+ACTION_DIR = Path(__file__).resolve().parents[1] / "actions" / "check-target"
+RUN_SH = ACTION_DIR / "run.sh"
+VALIDATE_SH = ACTION_DIR / "validate-inputs.sh"
+
+PROFILE = "linux-x86_64-gcc13-release"
+
+
+def _bash_executable() -> str:
+    if os.name != "nt":
+        return "bash"
+    for candidate in (
+        os.environ.get("GIT_BASH_PATH"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ):
+        if candidate and Path(candidate).is_file():
+            return candidate
+    return "bash"
+
+
+def _run(
+    script: Path, env_extra: dict[str, str], cwd: Path
+) -> subprocess.CompletedProcess[str]:
+    base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+    env = {**base_env, "ACTION_PATH": str(ACTION_DIR), **env_extra}
+    return subprocess.run(
+        [_bash_executable(), str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=cwd,
+        check=False,
+    )
+
+
+def _run_finalize(
+    env_extra: dict[str, str], cwd: Path
+) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
+    github_output = cwd / "github_output"
+    github_output.write_text("")
+    result = _run(RUN_SH, {"GITHUB_OUTPUT": str(github_output), **env_extra}, cwd)
+    outputs: dict[str, str] = {}
+    for line in github_output.read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            outputs[k] = v
+    return result, outputs
+
+
+_BASE_IDENTITY = {
+    "INPUT_NAME": "libpvxs",
+    "INPUT_PROFILE": PROFILE,
+    "INPUT_BASELINE_CHANNEL": "accepted-main",
+    "INPUT_REQUESTED_DEPTH": "headers",
+    "INPUT_GATE_MODE": "local",
+    "INPUT_PROJECT": "epics-base/pvxs",
+    "INPUT_HEAD_SHA": "deadbeef",
+    "INPUT_BASE_REF": "main",
+    "INPUT_ACTION_VERSION": "abicheck/abicheck@v1",
+}
+
+
+def _write_compare_report(
+    path: Path,
+    *,
+    verdict: str = "BREAKING",
+    exit_code: int = 4,
+    old_depth: str = "headers",
+    new_depth: str = "headers",
+) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "report_schema_version": "2.12",
+                "library": "libpvxs",
+                "verdict": verdict,
+                "old_evidence_depth": old_depth,
+                "new_evidence_depth": new_depth,
+                "severity": {
+                    "config": {},
+                    "categories": {},
+                    "exit_code": exit_code,
+                    "blocking": exit_code != 0,
+                    "blocking_categories": ["abi_breaking"] if exit_code else [],
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(),
+    reason="actions/check-target/validate-inputs.sh not found",
+)
+class TestValidateInputs:
+    def test_valid_library_target_passes(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_PATH": "./baseline",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_baseline_channel_none_does_not_require_baseline_path(
+        self, tmp_path: Path
+    ) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {**_BASE_IDENTITY, "INPUT_BASELINE_CHANNEL": "none"},
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_missing_baseline_path_fails_for_real_channel(self, tmp_path: Path) -> None:
+        result = _run(VALIDATE_SH, {**_BASE_IDENTITY}, tmp_path)
+        assert result.returncode == 64
+
+    def test_missing_profile_fails_here_not_deep_in_run_sh(
+        self, tmp_path: Path
+    ) -> None:
+        """action.yml declares profile: required: true, but GitHub Actions
+        does not actually enforce `required: true` for composite-action
+        inputs -- an omitted input just arrives as an empty string. Without
+        this check, a workflow that forgot `profile:` would sail past this
+        step and only fail deep inside run.sh's bash parameter expansion,
+        producing no report/outputs at all (Codex review)."""
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_PROFILE": "",
+                "INPUT_BASELINE_PATH": "./baseline",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_missing_baseline_channel_fails_with_required_message(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression (CodeRabbit review): baseline-channel was previously a
+        bare `:?` parameter expansion, which fires on empty but exits 1 with
+        a raw bash message and no `::error::` annotation -- diverging from
+        every other required-input check here. Must now use the same
+        exit-64 + `::error::` `_fail` convention as name/profile."""
+        env = dict(_BASE_IDENTITY)
+        del env["INPUT_BASELINE_CHANNEL"]
+        result = _run(VALIDATE_SH, env, tmp_path)
+        assert result.returncode == 64
+        assert "::error::baseline-channel input is required." in result.stdout
+
+    def test_missing_requested_depth_fails_with_required_message_not_enum_message(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression (CodeRabbit review): same `:?` -> `_fail` conversion
+        as baseline-channel above. Also pins the check ordering: the
+        required-input check must run BEFORE the requested-depth enum/case
+        validation, or an empty value would instead be caught there with
+        the less precise "not recognized" message (an empty string never
+        matches any case pattern, so it falls through to that branch's
+        catch-all arm)."""
+        env = dict(_BASE_IDENTITY)
+        del env["INPUT_REQUESTED_DEPTH"]
+        result = _run(VALIDATE_SH, env, tmp_path)
+        assert result.returncode == 64
+        assert "::error::requested-depth input is required." in result.stdout
+        assert "not recognized" not in result.stdout
+
+    def test_unknown_kind_fails(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {**_BASE_IDENTITY, "INPUT_KIND": "bogus", "INPUT_BASELINE_PATH": "./b"},
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_unknown_target_kind_fails(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_TARGET_KIND": "bogus",
+                "INPUT_BASELINE_PATH": "./b",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_unknown_gate_mode_fails(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_GATE_MODE": "bogus",
+                "INPUT_BASELINE_PATH": "./b",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_unknown_requested_depth_fails(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_REQUESTED_DEPTH": "bogus",
+                "INPUT_BASELINE_PATH": "./b",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_bundle_kind_requires_bundle_members(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_BUNDLE_MEMBERS": "[]",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_bundle_kind_rejects_build_depth(self, tmp_path: Path) -> None:
+        # kind: bundle compares directories, which the CLI's per-library
+        # release fan-out never collects build/source evidence for -- must
+        # fail loud rather than silently running at a shallower depth
+        # (Codex review).
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_REQUESTED_DEPTH": "build",
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_bundle_kind_rejects_source_depth(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_REQUESTED_DEPTH": "source",
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_bundle_kind_allows_headers_depth(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_REQUESTED_DEPTH": "headers",
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_bundle_kind_rejects_non_library_target_kind(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_TARGET_KIND": "app-consumer",
+                "INPUT_BASELINE_PATH": "./b",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_app_consumer_requires_consumer_binary(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_TARGET_KIND": "app-consumer",
+                "INPUT_BASELINE_PATH": "./b",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_plugin_contract_requires_contract_file(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_TARGET_KIND": "plugin-contract",
+                "INPUT_BASELINE_PATH": "./b",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_app_consumer_rejects_baseline_channel_none(self, tmp_path: Path) -> None:
+        # baseline-channel: none routes to `scan`, which has no --used-by
+        # equivalent -- an app-consumer check would silently run unscoped
+        # (Codex review).
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "none",
+                "INPUT_TARGET_KIND": "app-consumer",
+                "INPUT_CONSUMER_BINARY": "./consumer.so",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_plugin_contract_rejects_baseline_channel_none(
+        self, tmp_path: Path
+    ) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "none",
+                "INPUT_TARGET_KIND": "plugin-contract",
+                "INPUT_CONTRACT_FILE": "./contract.syms",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
+    def test_library_target_allows_baseline_channel_none(self, tmp_path: Path) -> None:
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "none",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/check-target/run.sh not found"
+)
+class TestFinalizeAugmentMode:
+    """The common path: baseline resolved (or channel: none), analysis ran."""
+
+    def test_local_gate_mode_reflects_real_exit_code(self, tmp_path: Path) -> None:
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(report_path, verdict="BREAKING", exit_code=4)
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 4, result.stderr
+        assert outputs["outcome"] == "resolved"
+        assert outputs["verdict"] == "BREAKING"
+        assert outputs["compatibility-verdict"] == "BREAKING"
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["check_id"] == f"libpvxs@{PROFILE}#accepted-main@headers"
+        assert report["severity"]["exit_code"] == 4
+
+    def test_deferred_gate_mode_never_fails_job_but_keeps_real_severity(
+        self, tmp_path: Path
+    ) -> None:
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(report_path, verdict="BREAKING", exit_code=4)
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_GATE_MODE": "deferred",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["severity"]["exit_code"] == 4  # aggregate needs the real value
+        assert report["policy_gate_decision"] == "fail"
+
+    def test_analysis_exit_code_folds_into_local_gate_even_with_clean_severity(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact Codex-flagged gap: --fail-on-removed-library on a
+        bundle/directory compare makes the CLI process exit 8 "in
+        preference to the severity code" -- the persisted report's own
+        severity.exit_code can read 0 even though a library was actually
+        removed. run.sh must forward the analysis step's own real exit code
+        (ANALYSIS_EXIT_CODE) so gate-mode: local doesn't silently pass, and
+        the persisted severity block must also be escalated (exit_code 4,
+        abi_breaking) so a later gate-mode: deferred aggregate pass -- which
+        reads only severity.exit_code, never policy_gate_decision -- can't
+        silently miss it either (Codex review, second pass)."""
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(report_path, verdict="COMPATIBLE_WITH_RISK", exit_code=0)
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+                "ANALYSIS_EXIT_CODE": "8",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 8, result.stderr
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["policy_gate_decision"] == "fail"
+        assert report["severity"]["exit_code"] == 4
+        assert report["severity"]["blocking"] is True
+        assert "abi_breaking" in report["severity"]["blocking_categories"]
+
+    def test_removed_library_gate_survives_deferred_mode_for_a_real_aggregate_read(
+        self, tmp_path: Path
+    ) -> None:
+        """End-to-end proof this doesn't just look right on paper: feed the
+        persisted report straight into the real
+        abicheck.aggregate.GateInfo.from_report_data and confirm it reads a
+        blocking gate, for gate-mode: deferred specifically (the mode that
+        actually depends on aggregate re-reading the report later)."""
+        from abicheck.aggregate import GateInfo
+
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(report_path, verdict="COMPATIBLE_WITH_RISK", exit_code=0)
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_GATE_MODE": "deferred",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+                "ANALYSIS_EXIT_CODE": "8",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr  # deferred never fails locally
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        gate = GateInfo.from_report_data(report)
+        assert gate is not None
+        assert gate.blocking is True
+        assert gate.exit_code == 4
+
+    def test_advisory_gate_mode_neutralizes_severity(self, tmp_path: Path) -> None:
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(report_path, verdict="BREAKING", exit_code=4)
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_GATE_MODE": "advisory",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["severity"]["exit_code"] == 0
+        assert report["severity"]["blocking"] is False
+        assert report["compatibility_verdict"] == "BREAKING"
+        assert report["policy_gate_decision"] == "fail"
+
+    def test_baseline_channel_none_skips_resolve_and_still_augments(
+        self, tmp_path: Path
+    ) -> None:
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(report_path, verdict="COMPATIBLE", exit_code=0)
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "none",
+                "RESOLVE_RAN": "false",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert outputs["outcome"] == "skipped"
+
+    def test_two_invocations_in_the_same_job_do_not_overwrite_each_others_report(
+        self, tmp_path: Path
+    ) -> None:
+        """A fixed "check-target-report.json" filename would collide across
+        two check-target calls in the same job (e.g. the same target against
+        two baseline channels) -- an earlier step's own report-path output
+        would end up pointing at the LATER check's envelope by the time
+        anything reads it (Codex review). The filename must be scoped to
+        each check's own identity."""
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(report_path, verdict="BREAKING", exit_code=4)
+        first_result, first_outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "accepted-main",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+            },
+            tmp_path,
+        )
+        assert first_result.returncode == 4, first_result.stderr
+        second_report_path = tmp_path / "analysis2.json"
+        _write_compare_report(second_report_path, verdict="COMPATIBLE", exit_code=0)
+        second_result, second_outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "release-contract",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(second_report_path),
+            },
+            tmp_path,
+        )
+        assert second_result.returncode == 0, second_result.stderr
+        assert first_outputs["report-path"] != second_outputs["report-path"]
+        # The first report is still on disk, unmodified by the second call.
+        first_report = json.loads((tmp_path / first_outputs["report-path"]).read_text())
+        assert first_report["severity"]["exit_code"] == 4
+        second_report = json.loads(
+            (tmp_path / second_outputs["report-path"]).read_text()
+        )
+        assert second_report["severity"]["exit_code"] == 0
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/check-target/run.sh not found"
+)
+class TestFinalizeOperationalError:
+    @pytest.mark.parametrize("gate_mode", ["local", "deferred", "advisory"])
+    def test_resolve_failure_always_fails_regardless_of_gate_mode(
+        self, gate_mode: str, tmp_path: Path
+    ) -> None:
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_GATE_MODE": gate_mode,
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "wrong_profile",
+                "RESOLVE_MESSAGE": "baseline built for a different profile.",
+                "ANALYSIS_RAN": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1, result.stderr
+        assert outputs["outcome"] == "wrong_profile"
+        assert outputs["verdict"] == "ERROR"
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["operational_errors"] == [
+            {
+                "kind": "wrong_profile",
+                "message": "baseline built for a different profile.",
+            }
+        ]
+        assert "severity" not in report
+
+    def test_analysis_never_producing_a_report_is_an_operational_error(
+        self, tmp_path: Path
+    ) -> None:
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1, result.stderr
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["operational_errors"][0]["kind"] == "ambiguous"
+
+    def test_collect_verify_failure_is_a_distinct_operational_error(
+        self, tmp_path: Path
+    ) -> None:
+        """action.yml gates the analysis step on collect_verify not having
+        failed -- a broken/empty wrapper or clang-plugin pack must never be
+        silently handed to compare as --build-info (review)."""
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "false",
+                "COLLECT_VERIFY_OUTCOME": "failure",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1, result.stderr
+        assert outputs["verdict"] == "ERROR"
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert "verify failed" in report["operational_errors"][0]["message"]
+
+    def test_collect_replay_failure_is_a_distinct_operational_error(
+        self, tmp_path: Path
+    ) -> None:
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "false",
+                "COLLECT_REPLAY_OUTCOME": "failure",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1, result.stderr
+        assert outputs["verdict"] == "ERROR"
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert "replay" in report["operational_errors"][0]["message"]
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/check-target/run.sh not found"
+)
+class TestFinalizeBootstrap:
+    def test_bootstrap_pass_never_fails_the_job(self, tmp_path: Path) -> None:
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_REQUIRED": "false",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "not_found",
+                "RESOLVE_BOOTSTRAP": "true",
+                "RESOLVE_MESSAGE": "no baseline set exists yet.",
+                "ANALYSIS_RAN": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert outputs["outcome"] == "not_found"
+        assert outputs["verdict"] == "NO_BASELINE"
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["baseline_bootstrap"] is True
+        assert report["operational_errors"] == []
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/check-target/run.sh not found"
+)
+class TestFinalizeEvidenceDegradation:
+    """ADR-047 §7's effective_depth reads the real achieved depth straight
+    from the analysis report's own old_evidence_depth/new_evidence_depth --
+    correct regardless of *how* that depth was achieved (a composed
+    collect-facts producer, or a direct --build-info/--sources input with no
+    producer at all -- the case an earlier producer-based heuristic here got
+    wrong, Codex review)."""
+
+    def test_source_depth_degrades_when_report_only_reached_headers(
+        self, tmp_path: Path
+    ) -> None:
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(
+            report_path,
+            verdict="COMPATIBLE",
+            exit_code=0,
+            old_depth="headers",
+            new_depth="headers",
+        )
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_REQUESTED_DEPTH": "source",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["requested_depth"] == "source"
+        assert report["effective_depth"] == "headers"
+        assert report["check_evidence_coverage"]["state"] == "degraded"
+
+    def test_source_depth_stays_when_report_reached_source(
+        self, tmp_path: Path
+    ) -> None:
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(
+            report_path,
+            verdict="COMPATIBLE",
+            exit_code=0,
+            old_depth="source",
+            new_depth="source",
+        )
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_REQUESTED_DEPTH": "source",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["effective_depth"] == "source"
+        assert report["check_evidence_coverage"]["state"] == "complete"
+
+    def test_source_depth_via_direct_build_info_with_no_producer_is_not_degraded(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact Codex-flagged regression: evidence-producer is unset
+        (a producer-less check using --build-info/--sources directly), but
+        the analysis genuinely reached source depth on both sides."""
+        report_path = tmp_path / "analysis.json"
+        _write_compare_report(
+            report_path,
+            verdict="COMPATIBLE",
+            exit_code=0,
+            old_depth="source",
+            new_depth="source",
+        )
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_REQUESTED_DEPTH": "source",
+                "RESOLVE_RAN": "true",
+                "RESOLVE_OUTCOME": "resolved",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["effective_depth"] == "source"
+        assert report["check_evidence_coverage"]["state"] == "complete"
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/check-target/run.sh not found"
+)
+class TestFinalizeScanGuardSentinel:
+    """A baseline-channel: none scan run that hits a guard (--budget
+    exceeded, service_scan.py's BUDGET_OVERFLOW) is not a compatibility
+    finding -- the scan never completed its comparison. gate-mode: deferred/
+    advisory must not turn that into a quiet pass the way they do for a real
+    BREAKING/API_BREAK compatibility verdict (Codex review)."""
+
+    @pytest.mark.parametrize("gate_mode", ["local", "deferred", "advisory"])
+    def test_budget_overflow_always_fails_regardless_of_gate_mode(
+        self, gate_mode: str, tmp_path: Path
+    ) -> None:
+        report_path = tmp_path / "analysis.json"
+        report_path.write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.1",
+                    "verdict": "BUDGET_OVERFLOW",
+                    "exit_code": 5,
+                    "level": {"depth": "headers"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        result, outputs = _run_finalize(
+            {
+                **_BASE_IDENTITY,
+                "INPUT_BASELINE_CHANNEL": "none",
+                "INPUT_GATE_MODE": gate_mode,
+                "RESOLVE_RAN": "false",
+                "ANALYSIS_RAN": "true",
+                "ANALYSIS_REPORT_PATH": str(report_path),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1, result.stderr
+        report = json.loads((tmp_path / outputs["report-path"]).read_text())
+        assert report["operational_errors"] == [
+            {
+                "kind": "scan_guard_triggered",
+                "message": "the analysis reported a non-compatibility verdict: 'BUDGET_OVERFLOW'",
+            }
+        ]
+
+
+@pytest.mark.skipif(
+    not (ACTION_DIR / "action.yml").is_file(),
+    reason="actions/check-target/action.yml not found",
+)
+class TestStaleAnalysisOutputIsCleanedBeforeEachRun:
+    """Regression (Codex review): the nested analysis step always writes to
+    the same fixed workspace-relative path (``check-target-analysis.json``),
+    unlike the final envelope, which is already scoped per check-id. If a
+    job runs check-target more than once and a LATER invocation's nested
+    root Action crashes before ever writing its own report (e.g. a CLI
+    usage/config error), run.sh's "only emit report-path when a real report
+    file was produced" check only tests file *existence*, not freshness --
+    so it would find an EARLIER invocation's stale file and hand it to the
+    finalize step as if it were the current run's real result. With
+    gate-mode: deferred/advisory that silently turns a genuine operational
+    failure into a false pass, since operational_errors would be read from
+    the stale (successful) report instead. action.yml must unconditionally
+    delete that file immediately before the analysis step runs, every time,
+    regardless of whether the analysis step itself ends up running (its
+    own `if:` gates skip it for a prior resolve/collect failure).
+
+    action.yml's own step orchestration needs a real GitHub Actions runner
+    to exercise end-to-end (see this module's docstring), so this is a
+    structural assertion over the parsed YAML rather than a behavioral one
+    -- mirroring test_action_validate_inputs.py's
+    TestUnsetFormatUsesEachModesOwnDefault precedent for the same
+    action.yml-only-fix problem.
+    """
+
+    def test_cleanup_step_runs_unconditionally_immediately_before_analysis(
+        self,
+    ) -> None:
+        import yaml
+
+        action_yml = ACTION_DIR / "action.yml"
+        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        steps = data["runs"]["steps"]
+        names = [s.get("name") for s in steps]
+        assert "Clean stale analysis output" in names, (
+            "action.yml must have a step that removes the stale "
+            "check-target-analysis.json before the analysis step runs"
+        )
+        assert "Run analysis" in names
+        cleanup_index = names.index("Clean stale analysis output")
+        analysis_index = names.index("Run analysis")
+        assert cleanup_index == analysis_index - 1, (
+            "the cleanup step must run immediately before the analysis "
+            "step, so no other step can write check-target-analysis.json "
+            "in between"
+        )
+        cleanup_step = steps[cleanup_index]
+        assert "if" not in cleanup_step, (
+            "the cleanup step must be unconditional -- it has to run even "
+            "when the analysis step's own `if:` will skip it (e.g. a "
+            "prior resolve/collect failure), or a stale file from an "
+            "earlier invocation in the same job would survive"
+        )
+        assert "check-target-analysis.json" in cleanup_step.get("run", "")
+        analysis_step = steps[analysis_index]
+        assert analysis_step["with"]["output-file"] == "check-target-analysis.json", (
+            "the cleanup step must target the same filename the analysis step writes"
+        )
+
+
+@pytest.mark.skipif(
+    not (ACTION_DIR / "action.yml").is_file(),
+    reason="actions/check-target/action.yml not found",
+)
+class TestReplaySourcesForwardedWithDefault:
+    """Regression (Codex review): actions/collect-facts's replay phase
+    defaults an unset `sources` input to '.' internally
+    (actions/collect-facts/run.sh: ``SOURCES="${INPUT_SOURCES:-.}"``) but
+    never surfaces that resolved value as an output -- it only prints a
+    notice telling the caller to pass `sources: $SOURCES` straight to
+    dump/scan/compare. check-target's analysis step was instead forwarding
+    the raw, still-empty `inputs.sources`, and action/run.sh's
+    `add_single_flag` skips `--sources` entirely for an empty value -- so a
+    check with `evidence-producer: replay` and `sources:` left unset would
+    pass the collect-facts step but then run compare/scan with NO source
+    evidence at all, silently missing source-only findings at
+    requested-depth: build/source. action.yml must forward the same
+    resolved default collect-facts used.
+    """
+
+    def test_sources_expression_matches_collect_facts_own_default(self) -> None:
+        import yaml
+
+        action_yml = ACTION_DIR / "action.yml"
+        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        steps = data["runs"]["steps"]
+        analysis_step = next(s for s in steps if s.get("name") == "Run analysis")
+        expr = analysis_step["with"]["sources"]
+        assert expr == (
+            "${{ inputs.sources != '' && inputs.sources || "
+            "(inputs.evidence-producer == 'replay' && '.' || '') }}"
+        ), (
+            "the analysis step's `sources` must fall back to '.' for "
+            "evidence-producer: replay when inputs.sources is empty, "
+            "mirroring collect-facts' own default -- a bare "
+            "`${{ inputs.sources }}` forward would leave --sources unset "
+            "entirely for that case"
+        )
+
+    @staticmethod
+    def _resolve(sources: str, evidence_producer: str) -> str:
+        """Pure-Python mirror of the GitHub Actions ternary asserted above,
+        to pin down its actual selection behavior independent of the raw
+        expression string."""
+        if sources != "":
+            return sources
+        return "." if evidence_producer == "replay" else ""
+
+    def test_empty_sources_defaults_to_dot_only_for_replay(self) -> None:
+        assert self._resolve("", "replay") == "."
+        assert self._resolve("", "wrapper") == ""
+        assert self._resolve("", "clang-plugin") == ""
+        assert self._resolve("", "") == ""
+
+    def test_explicit_sources_always_wins(self) -> None:
+        assert self._resolve("./mysrc", "replay") == "./mysrc"
+        assert self._resolve("./mysrc", "wrapper") == "./mysrc"
+        assert self._resolve("./mysrc", "") == "./mysrc"

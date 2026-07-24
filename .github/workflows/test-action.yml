@@ -8,6 +8,8 @@ on:
     paths:
       - 'action.yml'
       - 'action/**'
+      - 'actions/check-target/**'
+      - 'actions/resolve-baseline/**'
       - 'abicheck/**'
       - '.github/workflows/test-action.yml'
       - 'tests/fixtures/action/**'
@@ -16,6 +18,8 @@ on:
     paths:
       - 'action.yml'
       - 'action/**'
+      - 'actions/check-target/**'
+      - 'actions/resolve-baseline/**'
       - 'abicheck/**'
       - '.github/workflows/test-action.yml'
       - 'tests/fixtures/action/**'
@@ -216,6 +220,85 @@ jobs:
           test -f test-output.json
           python -m json.tool test-output.json > /dev/null
           echo "Output file is valid JSON"
+
+  # ── Test: check-target (G30 P1.3, ADR-047 §4/§7) ─────────────────────────
+  test-check-target:
+    name: 'check-target: gate-mode: deferred never fails on a real finding, report envelope is well-formed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Stage a fake baseline-set directly (no actions/baseline run needed --
+      # check-target only cares that resolve-baseline can read manifest.json
+      # + the snapshot it points at). action_test_v1.json/v2.json is the same
+      # pair test-compare-breaking already establishes as a real BREAKING
+      # finding -- reused here to prove check-target's own envelope/gate-mode
+      # logic on top of a known compatibility result, not to re-test compare
+      # itself.
+      - name: Stage baseline-set
+        shell: bash
+        run: |
+          mkdir -p /tmp/baseline-set
+          cp tests/fixtures/action/action_test_v1.json /tmp/baseline-set/libexample.abicheck.json
+          python3 -c "
+          import json
+          manifest = {
+              'manifest_version': 1,
+              'project_ref': 'v1.0.0',
+              'profile': 'linux-x86_64-gcc-test',
+              'snapshot_schema': 9,
+              'fact_set': None,
+              'artifacts': [
+                  {
+                      'library': 'libexample',
+                      'artifact': 'build/libexample.so',
+                      'snapshot': 'libexample.abicheck.json',
+                      'sha256': '',
+                  }
+              ],
+          }
+          with open('/tmp/baseline-set/manifest.json', 'w') as f:
+              json.dump(manifest, f, indent=2)
+          "
+
+      - name: 'Run check-target (gate-mode: deferred)'
+        id: check
+        uses: ./actions/check-target
+        with:
+          name: libexample
+          profile: linux-x86_64-gcc-test
+          baseline-channel: accepted-main
+          baseline-path: /tmp/baseline-set
+          requested-depth: headers
+          gate-mode: deferred
+          new-library: tests/fixtures/action/action_test_v2.json
+          install-deps: false
+
+      - name: "Verify outcome, envelope identity, and gate-mode: deferred's non-failing job"
+        shell: bash
+        run: |
+          echo "outcome=${{ steps.check.outputs.outcome }}"
+          echo "check-id=${{ steps.check.outputs.check-id }}"
+          echo "verdict=${{ steps.check.outputs.verdict }}"
+          echo "compatibility-verdict=${{ steps.check.outputs.compatibility-verdict }}"
+          echo "policy-gate-decision=${{ steps.check.outputs.policy-gate-decision }}"
+          test "${{ steps.check.outputs.outcome }}" = "resolved"
+          test "${{ steps.check.outputs.check-id }}" = "libexample@linux-x86_64-gcc-test#accepted-main@headers"
+          test "${{ steps.check.outputs.verdict }}" = "BREAKING"
+          test "${{ steps.check.outputs.compatibility-verdict }}" = "BREAKING"
+          test "${{ steps.check.outputs.policy-gate-decision }}" = "fail"
+          # gate-mode: deferred must not fail this job on a real finding --
+          # reaching this step at all (after a nonzero-exit internal compare)
+          # already proves that; also assert the persisted report kept its
+          # REAL severity (never neutralized for deferred -- only advisory
+          # neutralizes, since a trailing aggregate job needs the real value).
+          python -m json.tool "${{ steps.check.outputs.report-path }}" > /dev/null
+          python3 -c "import json, sys
+          report = json.load(open(sys.argv[1]))
+          assert report['severity']['exit_code'] == 4, report['severity']
+          assert report['operational_errors'] == []
+          assert report['check_evidence_coverage']['state'] == 'complete'
+          print('report envelope OK')" "${{ steps.check.outputs.report-path }}"
 
   # ── Test: multiplatform ─────────────────────────────────────────────────
   test-multiplatform:

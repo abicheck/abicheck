@@ -1,3 +1,14 @@
+---
+doc_type: how-to
+audience:
+  - library-maintainer
+level: intermediate
+summarizes:
+  - public-surface
+lifecycle: active
+generated: false
+---
+
 # API Surface Intelligence
 
 abicheck does not only diff symbols one at a time — it also reasons about the
@@ -5,6 +16,10 @@ abicheck does not only diff symbols one at a time — it also reasons about the
 **idiom-aware** features introduced in [ADR-027](../development/adr/027-api-surface-intelligence.md):
 single-snapshot surface metrics, idiom & anti-pattern recognition, and
 **pattern-aware verdicts** that modulate a diff using that knowledge.
+
+These metrics and idioms run over your **public surface** — see
+[What Is Part of Your ABI Surface?](../concepts/abi-surface.md) for what
+counts as public vs. internal and how scoping decides it.
 
 > **History note:** this used to be a standalone `abicheck surface-report`
 > command. The ADR-043 CLI reset removed it with no direct replacement command
