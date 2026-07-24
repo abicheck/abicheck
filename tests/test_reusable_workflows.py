@@ -35,6 +35,7 @@ import yaml
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 CHECK_SINGLE = WORKFLOWS_DIR / "check-single.yml"
 CHECK_PROJECT = WORKFLOWS_DIR / "check-project.yml"
+TEST_ACTION = WORKFLOWS_DIR / "test-action.yml"
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -302,3 +303,81 @@ class TestCheckProjectArtifactNaming:
             == upload.get("if")
             == ("always() && steps.run.outputs.report-path != ''")
         )
+
+
+class TestNoArrayLiteralsInExpressions:
+    """GitHub Actions expression syntax has no array-literal form -- only
+    boolean/null/number/string literals plus values from contexts or
+    fromJSON() (confirmed: docs.github.com/actions/reference/workflows-and-
+    actions/expressions, and community discussion #27223 reproducing the
+    parse failure). A bare `[]` inside `${{ ... }}` is a workflow-file
+    syntax error, which fails the ENTIRE workflow before any job schedules
+    -- not just the one expression using it (Codex review; confirmed
+    empirically: this repo's own real CI run for the commit that introduced
+    the bug shows the `test-action.yml` run resolving to zero jobs)."""
+
+    def test_check_project_yml_has_no_bare_array_literal_expressions(self) -> None:
+        text = CHECK_PROJECT.read_text(encoding="utf-8")
+        assert "|| [])" not in text
+        assert "&& [])" not in text
+        assert "fromJSON('[]')" in text, (
+            "bundle-members must build its empty-array fallback via "
+            "fromJSON('[]'), not a bare [] literal"
+        )
+
+    def test_check_single_yml_has_no_bare_array_literal_expressions(self) -> None:
+        text = CHECK_SINGLE.read_text(encoding="utf-8")
+        assert "|| [])" not in text
+        assert "&& [])" not in text
+
+
+class TestAppConsumerBinaryResolvedSeparately:
+    """target_kind: app-consumer needs TWO distinct candidate artifacts --
+    the library (new-library, from binary_pattern) and the consumer
+    executable (consumer-binary, from consumer_binary_pattern) -- reusing
+    new-library for both would scope --used-by against the library itself
+    instead of the actual consumer (Codex review)."""
+
+    def test_resolver_script_resolves_consumer_binary_pattern_separately(
+        self,
+    ) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        resolver = next(
+            s for s in steps if s.get("name") == "Resolve candidate binary/binaries"
+        )
+        run = resolver["run"]
+        assert "consumer_binary_pattern" in run
+        assert "consumer-binary=" in run
+
+    def test_run_check_target_consumer_binary_uses_its_own_resolved_output(
+        self,
+    ) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        consumer_binary_expr = run_step["with"]["consumer-binary"]
+        assert "steps.candidate.outputs.consumer-binary" in consumer_binary_expr
+        assert "steps.candidate.outputs.new-library" not in consumer_binary_expr
+
+
+class TestCheckProjectFixtureDoesNotFailTheRequiredWorkflow:
+    """The test-check-project job group deliberately exercises an expected
+    failure (a matrix cell whose baseline can never resolve) to prove the
+    always()-conditioned aggregate job survives it -- but that means the
+    call to check-project.yml itself is *expected* to fail, and without
+    continue-on-error that expected failure would fail the whole required
+    `Test GitHub Action` workflow on every single run (Codex review)."""
+
+    def test_test_check_project_job_has_continue_on_error(self) -> None:
+        data = _load(TEST_ACTION)
+        job = data["jobs"]["test-check-project"]
+        assert job.get("continue-on-error") is True
+
+    def test_verify_job_does_not_have_continue_on_error(self) -> None:
+        """The verification job's own assertions must still fail the
+        workflow for real if they're wrong -- only the intentionally-
+        failing fixture call itself should be shielded."""
+        data = _load(TEST_ACTION)
+        job = data["jobs"]["test-check-project-verify"]
+        assert "continue-on-error" not in job

@@ -278,6 +278,26 @@ class TestBundleChecks:
         assert not plan.checks
         assert any("libpvxsIoc" in e for e in report.errors)
 
+    def test_bundle_check_missing_build_output_for_an_explicit_profile_is_an_error(
+        self,
+    ) -> None:
+        raw = json.loads(json.dumps(self._RAW))
+        raw["bundles"]["pvxs-release"]["checks"][0]["profiles"] = ["linux"]
+        config = _parsed(raw)
+        plan, report = generate_run_plan(config, {})
+        assert not report.ok
+        assert not plan.checks
+        assert any("linux" in e for e in report.errors)
+
+    def test_bundle_check_missing_build_output_for_an_implicit_sweep_is_a_warning(
+        self,
+    ) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(config, {})
+        assert report.ok
+        assert not plan.checks
+        assert any("linux" in w for w in report.warnings)
+
 
 class TestBundleOnlyTargetsHaveNoStandaloneChecks:
     def test_bundle_only_target_never_emits_its_own_check(self) -> None:
@@ -313,6 +333,50 @@ class TestRunPlanRoundTrip:
             binary_pattern="build/libfoo*.so",
         )
         plan = RunPlan(project="acme/foo", head_sha="deadbeef", checks=[check])
+        restored = RunPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
+        assert restored == plan
+
+    def test_app_consumer_check_with_every_redirect_field_round_trips(self) -> None:
+        """kind: target, target_kind != library exercises the
+        baseline_target/consumer_binary_pattern/contract_file branches of
+        to_dict() the plain library-kind case above never touches."""
+        check = RunPlanCheck(
+            check_id="consumer@linux#release@binary",
+            kind=RUN_PLAN_KIND_TARGET,
+            target_kind="app-consumer",
+            name="consumer",
+            profile_id="linux",
+            baseline_channel="release",
+            requested_depth="binary",
+            required=True,
+            gate_mode="local",
+            baseline_target="libfoo",
+            binary_pattern="build/libfoo*.so",
+            consumer_binary_pattern="build/consumer",
+        )
+        plan = RunPlan(checks=[check])
+        d = check.to_dict()
+        assert d["baseline_target"] == "libfoo"
+        assert d["consumer_binary_pattern"] == "build/consumer"
+        restored = RunPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
+        assert restored == plan
+
+    def test_plugin_contract_check_with_contract_file_round_trips(self) -> None:
+        check = RunPlanCheck(
+            check_id="plugin@linux#release@binary",
+            kind=RUN_PLAN_KIND_TARGET,
+            target_kind="plugin-contract",
+            name="plugin",
+            profile_id="linux",
+            baseline_channel="release",
+            requested_depth="binary",
+            baseline_target="libfoo",
+            binary_pattern="build/libfoo*.so",
+            contract_file="plugin.syms",
+        )
+        plan = RunPlan(checks=[check])
+        d = check.to_dict()
+        assert d["contract_file"] == "plugin.syms"
         restored = RunPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
         assert restored == plan
 
@@ -472,6 +536,43 @@ class TestRunPlanGenerateCli:
         assert result.exit_code == 0
         assert "libfoo@linux#release@headers" in result.output
 
+    def test_generate_exits_64_when_build_output_dir_has_no_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        """A syntactically valid PROFILE=DIR spec whose DIR has no
+        build-output.json at all (load_build_output's FileNotFoundError)."""
+        config = _write_config(tmp_path, _LIBRARY_ONLY_RAW)
+        empty_dir = tmp_path / "empty-build-dir"
+        empty_dir.mkdir()
+        result = CliRunner().invoke(
+            main,
+            [
+                "run-plan",
+                "generate",
+                str(config),
+                "--build-output",
+                f"linux={empty_dir}",
+            ],
+        )
+        assert result.exit_code == 64
+        assert "linux" in result.output
+
+    def test_generate_exits_64_on_malformed_yaml(self, tmp_path: Path) -> None:
+        config = tmp_path / ".abicheck.yml"
+        config.write_text(
+            "targets: [this is not, valid: yaml: at all", encoding="utf-8"
+        )
+        result = CliRunner().invoke(main, ["run-plan", "generate", str(config)])
+        assert result.exit_code == 64
+
+    def test_generate_exits_64_when_config_is_not_a_mapping(
+        self, tmp_path: Path
+    ) -> None:
+        config = tmp_path / ".abicheck.yml"
+        config.write_text("- just\n- a\n- list\n", encoding="utf-8")
+        result = CliRunner().invoke(main, ["run-plan", "generate", str(config)])
+        assert result.exit_code == 64
+
 
 class TestRunPlanToAggregateManifestCli:
     def test_projects_run_plan_json_to_manifest(self, tmp_path: Path) -> None:
@@ -518,6 +619,36 @@ class TestRunPlanToAggregateManifestCli:
             main, ["run-plan", "to-aggregate-manifest", str(run_plan_path)]
         )
         assert result.exit_code == 64
+
+    def test_json_object_that_is_not_a_mapping_is_a_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text("[1, 2, 3]", encoding="utf-8")
+        result = CliRunner().invoke(
+            main, ["run-plan", "to-aggregate-manifest", str(run_plan_path)]
+        )
+        assert result.exit_code == 64
+
+    def test_output_file_option_writes_to_disk(self, tmp_path: Path) -> None:
+        plan = RunPlan(checks=[RunPlanCheck(check_id="a@b#c@d")])
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text(json.dumps(plan.to_dict()), encoding="utf-8")
+        out_path = tmp_path / "manifest.json"
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "run-plan",
+                "to-aggregate-manifest",
+                str(run_plan_path),
+                "-o",
+                str(out_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        manifest = json.loads(out_path.read_text(encoding="utf-8"))
+        assert manifest["targets"] == [{"id": "a@b#c@d", "required": True}]
 
 
 @pytest.mark.parametrize(
