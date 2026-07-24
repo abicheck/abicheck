@@ -113,9 +113,13 @@ def render() -> str:
             "",
             "Recognized (so they don't trigger the unknown-key warning) but "
             "parsed by a sibling module rather than `BuildConfig` itself — "
-            "see [`abicheck/buildsource/CLAUDE.md`]"
-            "(https://github.com/abicheck/abicheck/blob/main/abicheck/buildsource/CLAUDE.md)'s "
-            "module map for which one:",
+            # abicheck/buildsource/CLAUDE.md lives outside docs/ and isn't
+            # built by mkdocs, so there's no relative site path to resolve
+            # this to (an absolute github.com/.../blob/main link would send
+            # readers of an older release or a fork to the current main
+            # branch instead of the version they're reading) -- leave it as
+            # an unlinked code path instead.
+            "see `abicheck/buildsource/CLAUDE.md`'s module map for which one:",
             "",
         ]
         lines += [f"- `{key}`" for key in other_keys]

@@ -164,6 +164,7 @@ Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 | `old` | `AbiSnapshot` | *(required)* |
 | `new` | `AbiSnapshot` | *(required)* |
 | `suppression` | `SuppressionList \| None` | `None` |
+| *(keyword-only below)* | | |
 | `policy` | `str` | `'strict_abi'` |
 | `policy_file` | `PolicyFile \| None` | `None` |
 | `scope_to_public_surface` | `bool` | `True` |
@@ -195,6 +196,7 @@ Dry-run: projected per-layer cost of *req* for this project (ADR-035 D10).
 | Parameter | Type | Default |
 |---|---|---|
 | `req` | `ScanRequest` | *(required)* |
+| *(keyword-only below)* | | |
 | `resolved_level` | `tuple[SourceMethod, EvidenceDepth] \| None` | `None` |
 
 **Returns:** `list[CostEstimate]`
@@ -231,6 +233,7 @@ Render comparison result in the requested output format.
 | `result` | `DiffResult` | *(required)* |
 | `old` | `AbiSnapshot` | *(required)* |
 | `new` | `AbiSnapshot \| None` | `None` |
+| *(keyword-only below)* | | |
 | `follow_deps` | `bool` | `False` |
 | `show_only` | `str \| None` | `None` |
 | `report_mode` | `str` | `'full'` |
@@ -253,6 +256,7 @@ Auto-detect input type and return an ABI snapshot.
 | `includes` | `list[Path] \| None` | `None` |
 | `version` | `str` | `''` |
 | `lang` | `str` | `'c++'` |
+| *(keyword-only below)* | | |
 | `is_elf` | `bool \| None` | `None` |
 | `pdb_path` | `Path \| None` | `None` |
 | `dwarf_only` | `bool` | `False` |
@@ -335,6 +339,7 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `includes` | `list[Path] \| None` | `None` |
 | `version` | `str` | `''` |
 | `lang` | `str` | `'c++'` |
+| *(keyword-only below)* | | |
 | `pdb_path` | `Path \| None` | `None` |
 | `dwarf_only` | `bool` | `False` |
 | `debug_roots` | `list[Path] \| None` | `None` |

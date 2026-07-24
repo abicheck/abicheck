@@ -63,6 +63,21 @@ def test_run_compare_return_annotation_appears_in_generated_reference():
     assert "**Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`" in section
 
 
+def test_keyword_only_parameters_are_marked_in_generated_reference():
+    # compare_snapshots only accepts old/new/suppression positionally --
+    # `policy` and everything after it is keyword-only. A flat parameter
+    # table with no marker makes `policy` look like the next positional
+    # arg, and following that row order raises TypeError.
+    gen = _load_gen()
+    content = gen.OUT_PATH.read_text(encoding="utf-8")
+    section = content.split("## `compare_snapshots`", 1)[1].split("## `", 1)[0]
+    before, after = section.split("*(keyword-only below)*", 1)
+    assert "`suppression`" in before
+    assert "`policy`" in after
+    assert "`old`" in before
+    assert "`old`" not in after
+
+
 def test_generated_reference_has_marker_comment():
     gen = _load_gen()
     text = gen.OUT_PATH.read_text(encoding="utf-8")

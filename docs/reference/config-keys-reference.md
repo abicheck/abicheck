@@ -83,7 +83,7 @@ Every recognized `.abicheck.yml` top-level key and block sub-key, with its exact
 
 ## Other recognized top-level keys
 
-Recognized (so they don't trigger the unknown-key warning) but parsed by a sibling module rather than `BuildConfig` itself — see [`abicheck/buildsource/CLAUDE.md`](https://github.com/abicheck/abicheck/blob/main/abicheck/buildsource/CLAUDE.md)'s module map for which one:
+Recognized (so they don't trigger the unknown-key warning) but parsed by a sibling module rather than `BuildConfig` itself — see `abicheck/buildsource/CLAUDE.md`'s module map for which one:
 
 - `baseline`
 - `bundles`

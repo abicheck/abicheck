@@ -83,12 +83,20 @@ def _dataclass_section(name: str, cls: type) -> list[str]:
 def _function_section(name: str, fn: object) -> list[str]:
     sig = inspect.signature(fn)  # type: ignore[arg-type]
     lines = [f"## `{name}`", "", _summary(fn), "", "| Parameter | Type | Default |", "|---|---|---|"]
+    seen_keyword_only = False
     for param_name, param in sig.parameters.items():
         if param.kind in (
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
         ):
             continue
+        # Mirror Python's own `*` separator: everything below can only be
+        # passed by keyword, so a caller who follows the table's row order
+        # as positional args (e.g. compare_snapshots(old, new, suppression,
+        # policy)) would hit a TypeError the table gave no hint of.
+        if param.kind is inspect.Parameter.KEYWORD_ONLY and not seen_keyword_only:
+            lines.append("| *(keyword-only below)* | | |")
+            seen_keyword_only = True
         default = "*(required)*" if param.default is inspect.Parameter.empty else f"`{param.default!r}`"
         lines.append(f"| `{param_name}` | `{_type_str(param.annotation)}` | {default} |")
     return_type = _type_str(sig.return_annotation)

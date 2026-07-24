@@ -71,6 +71,18 @@ def test_every_block_subkey_has_a_resolved_type_or_is_flagged_unspecified():
             assert type_str in {"bool", "str", "list[str] (or a single str)", "unspecified"}
 
 
+def test_other_recognized_keys_section_has_no_absolute_github_link():
+    # abicheck/buildsource/CLAUDE.md lives outside docs/ and isn't part of
+    # the published mkdocs site, so there's no relative site path to point
+    # at -- a github.com/.../blob/main link would send a reader of an older
+    # release or a fork to the current main branch instead of the version
+    # they're reading (docs/AGENTS.md's relative-links convention).
+    gen = _load_gen()
+    content = gen.OUT_PATH.read_text(encoding="utf-8")
+    assert "github.com" not in content
+    assert "abicheck/buildsource/CLAUDE.md" in content
+
+
 def test_generated_reference_has_marker_comment():
     gen = _load_gen()
     text = gen.OUT_PATH.read_text(encoding="utf-8")
