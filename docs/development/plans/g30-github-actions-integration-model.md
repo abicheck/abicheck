@@ -1774,6 +1774,48 @@ rejected before anything reaches `$GITHUB_OUTPUT`) and covered by two new
 tests, `test_newline_bearing_match_is_rejected_end_to_end` and
 `test_carriage_return_bearing_match_is_also_rejected`.
 
+**An eighth round (Codex, against `63ed063`) found two more issues, one
+fixed and one deferred to the same already-acknowledged gap:**
+
+- **`run_plan.py`'s implicit profile sweep conflated two different
+  "missing" cases.** A `checks[]` entry without an explicit `profiles:`
+  selector considers every `contract: true` profile -- correctly, a profile
+  whose `build-output.json` exists but doesn't list the referenced target
+  is silently skipped (the whole point of the sweep: "every profile where
+  it makes sense"). But a profile with **no `build-output.json` at all**
+  was *also* only a warning in that path, not an error -- so a caller who
+  forgot to build/upload one of their declared contract profiles (or
+  misnamed its artifact) would get a silently under-covered matrix instead
+  of a generation-time failure, and `abicheck run-plan generate` would
+  still exit 0. Fixed in `_generate_target_checks`/`_generate_bundle_checks`:
+  a profile absent from `build_outputs` entirely is now always a hard error
+  (`report.errors`), explicit or implicit sweep alike; the "doesn't build
+  this target" skip is untouched. Two pre-existing tests
+  (`test_profile_missing_from_build_outputs_is_a_warning_not_an_error`,
+  `test_bundle_check_missing_build_output_for_an_implicit_sweep_is_a_warning`)
+  asserted the old behavior and were renamed/updated to the corrected
+  contract; three CLI/duplicate-detection tests that incidentally relied on
+  the old tolerance (via `_LIBRARY_ONLY_RAW`'s two declared profiles, only
+  one of which they ever supplied build-output for) were switched to a new
+  single-profile `_SINGLE_PROFILE_LIBRARY_RAW` fixture so they test what
+  they're actually about without tripping the new, unrelated coverage-gap
+  error.
+- **`check-project.yml`'s "Download build-output artifact" step still
+  carries `continue-on-error: true`, so a failed/misnamed download for a
+  baseline-backed cell silently degrades `resolve-baseline`'s
+  `incompatible_evidence` cross-check** (a baseline produced by a mismatched
+  evidence-producer/tool-version could be compared against anyway) instead
+  of surfacing as an operational error. Real, but deliberately not fixed
+  here -- it's the same underlying gap the round-5 "Route candidate-resolution
+  failures through reports" item already documents as deferred: making this
+  a hard failure means the "Resolve candidate binary/binaries" step fails
+  before `check-target` ever runs, which (per that same round-5 writeup)
+  currently produces no report at all for `aggregate` to see, rather than a
+  proper operational-error envelope. Fixing the download-failure case in
+  isolation, without also closing that report-routing gap, would just trade
+  one silent-pass failure mode for a different not-actually-visible one.
+  Tracked together with the round-5 item, not as a new separate gap.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —

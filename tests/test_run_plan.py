@@ -79,12 +79,45 @@ def _parsed(raw: dict) -> ProjectTargetsConfig:
     return ProjectTargetsConfig.from_dict(raw)
 
 
+# A single-contract-profile variant of _LIBRARY_ONLY_RAW, for tests that only
+# care about one profile's coverage -- providing build-output for just
+# "linux" out of _LIBRARY_ONLY_RAW's two declared profiles is now a hard
+# error (a declared contract profile with no build-output.json at all,
+# Codex review), so those tests would otherwise be asserting on an
+# unrelated coverage-gap error instead of what they're actually testing.
+_SINGLE_PROFILE_LIBRARY_RAW = {
+    "targets": {
+        "libfoo": {
+            "kind": "library",
+            "binary_pattern": "build/libfoo*.so",
+            "checks": [
+                {"channel": "release", "depth": "headers", "required": True},
+            ],
+        },
+    },
+    "profiles": {
+        "linux": {"contract": True},
+    },
+    "baseline": {
+        "channels": {
+            "release": {"source": "github-release", "asset_pattern": "libfoo-*"},
+        },
+    },
+}
+
+
 class TestImplicitSweep:
-    def test_profile_missing_from_build_outputs_is_a_warning_not_an_error(self) -> None:
+    def test_profile_missing_from_build_outputs_entirely_is_an_error(self) -> None:
+        # Distinct from test_target_absent_from_a_profiles_build_output_is_
+        # silently_skipped below: a declared contract profile with NO
+        # build-output.json at all (not even an empty one) almost always
+        # means that profile's build/upload failed or was misnamed, so it's
+        # a hard error even for the implicit sweep (Codex review) -- the
+        # profiles that DID resolve still produce their checks.
         config = _parsed(_LIBRARY_ONLY_RAW)
         plan, report = generate_run_plan(config, {"linux": _bo("libfoo")})
-        assert report.ok
-        assert any("mac" in w for w in report.warnings)
+        assert not report.ok
+        assert any("mac" in e for e in report.errors)
         assert [c.check_id for c in plan.checks] == ["libfoo@linux#release@headers"]
 
     def test_target_absent_from_a_profiles_build_output_is_silently_skipped(
@@ -289,14 +322,18 @@ class TestBundleChecks:
         assert not plan.checks
         assert any("linux" in e for e in report.errors)
 
-    def test_bundle_check_missing_build_output_for_an_implicit_sweep_is_a_warning(
+    def test_bundle_check_missing_build_output_entirely_is_an_error_even_implicit(
         self,
     ) -> None:
+        # Distinct from test_bundle_check_is_silently_skipped_when_a_member_
+        # is_missing_implicit_sweep above: a declared contract profile with
+        # NO build-output.json at all is a hard error even for the implicit
+        # sweep (Codex review).
         config = _parsed(self._RAW)
         plan, report = generate_run_plan(config, {})
-        assert report.ok
+        assert not report.ok
         assert not plan.checks
-        assert any("linux" in w for w in report.warnings)
+        assert any("linux" in e for e in report.errors)
 
 
 class TestDuplicateCheckIdIsRejected:
@@ -353,7 +390,7 @@ class TestDuplicateCheckIdIsRejected:
         assert len(plan.checks) == 2
 
     def test_distinct_depths_on_the_same_channel_are_not_duplicates(self) -> None:
-        config = _parsed(_LIBRARY_ONLY_RAW)
+        config = _parsed(_SINGLE_PROFILE_LIBRARY_RAW)
         plan, report = generate_run_plan(config, {"linux": _bo("libfoo")})
         assert report.ok
         assert len(plan.checks) == 1
@@ -535,7 +572,7 @@ def _write_build_output(tmp_path: Path, profile: str, target_ids: list[str]) -> 
 
 class TestRunPlanGenerateCli:
     def test_generate_writes_valid_json_and_exits_zero(self, tmp_path: Path) -> None:
-        config = _write_config(tmp_path, _LIBRARY_ONLY_RAW)
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
         build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
         result = CliRunner().invoke(
             main,
@@ -579,7 +616,7 @@ class TestRunPlanGenerateCli:
         assert result.exit_code == 64
 
     def test_generate_text_format_lists_checks(self, tmp_path: Path) -> None:
-        config = _write_config(tmp_path, _LIBRARY_ONLY_RAW)
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
         build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
         result = CliRunner().invoke(
             main,
