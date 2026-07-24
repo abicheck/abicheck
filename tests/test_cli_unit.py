@@ -127,7 +127,9 @@ class TestCompareSarif:
         content = json.loads(out.read_text(encoding="utf-8"))
         results = content["runs"][0]["results"]
         assert results
-        assert all("rootCauseId" in r["properties"] for r in results)
+        assert all(
+            {"rootCauseId", "rootCause"} <= r["properties"].keys() for r in results
+        )
 
 
 # ── compare HTML ────────────────────────────────────────────────────────

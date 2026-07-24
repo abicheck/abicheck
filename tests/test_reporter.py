@@ -568,6 +568,25 @@ class TestRootCauseReporter:
         assert len(ids) == 2
         assert d["root_causes"][0]["finding_count"] == 1
 
+    def test_root_cause_mode_carries_redundant_count_and_pattern_modulations(self):
+        """Codex review: root-cause JSON built its own payload from scratch
+        instead of going through _add_changes_block (or mirroring leaf mode's
+        own copy of the same fields), silently dropping the
+        redundant_count/pattern_modulations audit trail full/leaf JSON both
+        surface whenever they're non-empty."""
+        c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+        r = DiffResult(
+            old_version="1.0", new_version="2.0",
+            library="libtest.so.1",
+            changes=[c],
+            verdict=Verdict.BREAKING,
+            redundant_count=3,
+            pattern_modulations=[{"pattern": "cpp_pimpl", "action": "demoted"}],
+        )
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert d["redundant_count"] == 3
+        assert d["pattern_modulations"] == [{"pattern": "cpp_pimpl", "action": "demoted"}]
+
     def test_root_cause_id_is_stable_for_the_same_root(self):
         c1 = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
         c2 = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")

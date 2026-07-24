@@ -1715,10 +1715,10 @@ class DetectVersionedSymbolScheme:
                 "version, so dependents must relink against the new library even though "
                 "the symbol churn is a version-rename."
             )
-        if ctx.suppression is not None and ctx.suppression.is_suppressed(advisory):
-            ctx.suppressed.append(advisory)
-        else:
-            changes.append(advisory)
+        # Codex review: route through the shared helper (evaluate() + stamp
+        # suppression_rule) instead of the bare is_suppressed this replaced,
+        # which left a labelled rule's match unattributed.
+        _merge_findings_respecting_suppression(changes, [advisory], ctx)
         if ctx.collapse_versioned_symbols and matched:
             # G15: report the collapse count in the summary. caused_count is the
             # number of old-side version-rename pairs reclassified as compatible;

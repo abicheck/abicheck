@@ -32,7 +32,7 @@ can query as one thing.
 
 A second, independently discovered gap made this concrete rather than
 aspirational: **`Change.reachability_state` has existed in memory since PR
-#607, but `reporter.py`/`sarif.py` never serialize it.** A JSON/SARIF
+`#607`, but `reporter.py`/`sarif.py` never serialize it.** A JSON/SARIF
 consumer today can see `public_reachable: false` for two changes — one the
 graph walk *proved* unreachable, one it never examined at all (`UNKNOWN`,
 e.g. because the relevant `extractor_passes` family was narrowed/degraded) —
@@ -388,6 +388,25 @@ root-cause grouping, deliberately scoped to JSON only:
   identical computation, so both passes agree on which symbols are
   "referenced" before either one runs.
 
+**Follow-up fix (Codex review), later commit:** `_to_json_root_cause` built
+its JSON payload from scratch instead of reusing `_add_changes_block`,
+silently dropping the `redundant_count`/`pattern_modulations` audit-trail
+fields `full`/`leaf` JSON both carry when non-empty. Fixed by adding the same
+two conditional fields to the root-cause payload.
+
+**Follow-up fix (Codex review), later commit:** the `suppression_rule`
+attribution fix earlier in this slice covered `DetectCppPatterns`/
+`DetectTemplatePatterns`/`DetectNamespacePatterns` via
+`_merge_findings_respecting_suppression`, but missed a fourth late-detector
+path: `DetectVersionedSymbolScheme` suppressed its
+`versioned_symbol_scheme_detected` advisory with the cheaper
+`SuppressionList.is_suppressed` and appended it to `ctx.suppressed` directly,
+leaving a labelled rule's match unattributed. Fixed by routing it through the
+same shared helper (`_merge_findings_respecting_suppression(changes,
+[advisory], ctx)`) instead of duplicating the `evaluate()`/stamp logic
+inline — which also keeps `post_processing.py` from growing past the
+AI-readiness file-size hard cap a naive inline fix would have pushed it over.
+
 ## Slice 4 — `--report-mode root-cause` markdown/text rendering
 
 Landed in a follow-up commit on the same PR. Adds `reporter_markdown._to_markdown_root_cause`,
@@ -567,9 +586,12 @@ remaining four tiers):
   `affected_public_roots`/`impact_proof_path`/`impact_is_direct`/
   `correlated_change_kind` all stay exactly as they are; `impact_assessment`
   is additive.
-- **Not** a new CLI flag or user-facing behavior change — `--report-mode
-  root-cause` is explicitly deferred (see above).
-- **Not** JUnit surfacing, for the same reason ADR-048 D4 already gave.
+- **Not** JUnit surfacing for `--report-mode root-cause`, for the same reason
+  ADR-048 D4 already gave (`--format junit` still renders `root-cause` mode as
+  `full`). `--report-mode root-cause` itself is *not* deferred — Slices 3-5
+  above ship it for JSON, markdown/text, and SARIF; what remains deferred to
+  Phase 6 is the fuller `RootCauseCorrelator` (see "Deliberately not
+  implemented this slice" above).
 
 ## Consequences
 
@@ -587,8 +609,9 @@ redundancy (D3 above), not an oversight. This slice does not reduce the
 scattered-field problem Phase 3 exists to solve at the *producer* level
 (D2) — only at the *reporting* level. The remaining phases (the D2 flip,
 Phase 4's consumer/use-case join, Phase 5's new graph families, Phase 6's
-detectors/root-cause correlator/`--report-mode root-cause`) are unaffected
-by and do not depend on anything in this slice being done differently.
+detectors and the fuller `RootCauseCorrelator` beyond Slices 3-5's shipped
+`--report-mode root-cause`) are unaffected by and do not depend on anything
+in this slice being done differently.
 
 ## References
 

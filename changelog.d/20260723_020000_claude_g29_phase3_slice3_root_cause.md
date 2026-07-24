@@ -51,3 +51,21 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   grouping decision up front (mirroring `sarif.to_sarif`'s single-pass
   computation), so the later scoped-gate fold-in's merge attempt actually
   finds the group to join.
+
+- **`versioned_symbol_scheme_detected` suppression left unattributed**
+  (ADR-052 follow-up, Codex review): the attribution fix above covered
+  `DetectCppPatterns`/`DetectTemplatePatterns`/`DetectNamespacePatterns`
+  but missed `DetectVersionedSymbolScheme`, which suppressed its advisory
+  via the cheaper `SuppressionList.is_suppressed` and appended it to
+  `ctx.suppressed` directly — a labelled rule matching this advisory still
+  produced `suppression_rule: null`. Fixed by routing it through the same
+  `_merge_findings_respecting_suppression` helper instead of duplicating
+  the `evaluate()`/stamp logic inline.
+
+- **`--report-mode root-cause` JSON dropped `redundant_count`/
+  `pattern_modulations`** (ADR-052 follow-up, Codex review): `full`/`leaf`
+  JSON both surface these audit-trail fields whenever non-empty, but
+  `_to_json_root_cause` built its own payload from scratch and never
+  carried them over, silently hiding the redundant/modulated-finding trail
+  for a root-cause-mode report. Added the same conditional fields root-cause
+  JSON was missing.

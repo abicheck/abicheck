@@ -552,6 +552,14 @@ def _to_json_root_cause(
     d["changes"] = entries
     d["root_causes"] = root_causes
     d["root_cause_count"] = len(root_causes)
+    # Codex review: full mode's _add_changes_block (and leaf mode's own copy)
+    # both surface these audit-trail fields whenever they're non-empty --
+    # root-cause mode built its own JSON path and skipped them, silently
+    # dropping the redundant/modulated-finding trail for a filtered report.
+    if result.redundant_count > 0:
+        d["redundant_count"] = result.redundant_count
+    if result.pattern_modulations:
+        d["pattern_modulations"] = result.pattern_modulations
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)

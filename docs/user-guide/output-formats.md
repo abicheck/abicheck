@@ -202,10 +202,11 @@ abicheck compare old.json new.json --report-mode leaf
 Groups findings that share a root cause under one entry, instead of listing
 every change individually — e.g. an internal helper's `func_removed` finding
 and the `internal_symbol_required_by_public_api` overlay finding that names
-it both land in the same group. Supported for `--format json`/`markdown`/
-`text`, and `sarif` (as additive `properties`, see below); `junit` still
-renders as `full` (no testsuite grouping equivalent yet — JUnit's
-`<testcase>` model already groups by symbol, not by finding). This is a
+it both land in the same group. Supported for `--format json`/`markdown`
+(the default rendered text output), and `sarif` (as additive `properties`,
+see below); `junit` still renders as `full` (no testsuite grouping
+equivalent yet — JUnit's `<testcase>` model already groups by symbol, not
+by finding). This is a
 first slice reusing the existing `Change.caused_by_type` field (see
 [ADR-052](../development/adr/052-unified-impact-assessment-model.md));
 a future slice (G29 Phase 6) will additionally correlate consumer-overlay
