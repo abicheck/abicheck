@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any
 
 REPO_DIR = Path(__file__).resolve().parent.parent
@@ -79,6 +79,17 @@ def _argument_row(param: Any) -> str:
     return f"| `{param.name}` | {_help_with_choices(param)} |"
 
 
+def _default_str(default: Any) -> str:
+    # pathlib renders its root separator per-platform (str(Path("/")) is "/"
+    # on POSIX but "\\" on Windows) -- without this, regenerating on Windows
+    # vs. Linux/macOS would produce a genuinely different committed file for
+    # any option defaulting to a Path, which is exactly the kind of
+    # platform-dependent drift a generated reference must not have.
+    if isinstance(default, PurePath):
+        return default.as_posix()
+    return str(default)
+
+
 def _option_row(param: Any) -> str:
     opts = ", ".join(f"`{o}`" for o in sorted(param.opts))
     default = param.default
@@ -90,7 +101,7 @@ def _option_row(param: Any) -> str:
     is_unset = type(default).__name__ == "Sentinel"
     default_str = "—"
     if not is_unset and default is not None and default != () and default is not False:
-        default_str = f"`{default}`"
+        default_str = f"`{_default_str(default)}`"
     required = "yes" if param.required else "no"
     return f"| {opts} | {required} | {default_str} | {_help_with_choices(param)} |"
 
