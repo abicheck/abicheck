@@ -70,9 +70,23 @@ def _parse_build_output_specs(
                 f"--build-output: profile {profile_id!r} was specified more than once"
             )
         try:
-            build_outputs[profile_id] = load_build_output(dir_str)
+            build_output = load_build_output(dir_str)
         except (FileNotFoundError, ValueError) as exc:
             raise click.UsageError(f"--build-output {spec}: {exc}") from exc
+        manifest_profile_id = build_output.profile.id
+        if manifest_profile_id and manifest_profile_id != profile_id:
+            # A stale or misnamed build-output directory passed under the
+            # wrong PROFILE key would otherwise make generate_run_plan()
+            # emit cells as if a build for a different ABI environment
+            # covered this profile (Codex review). profile.id is optional/
+            # defaulted like every build-output.json field, so an empty
+            # (unset) id can't be verified and is allowed through -- only a
+            # manifest that *does* declare a profile.id gets cross-checked.
+            raise click.UsageError(
+                f"--build-output {spec}: manifest declares profile.id "
+                f"{manifest_profile_id!r}, which does not match {profile_id!r}"
+            )
+        build_outputs[profile_id] = build_output
     return build_outputs
 
 

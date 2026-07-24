@@ -615,6 +615,40 @@ class TestRunPlanGenerateCli:
         )
         assert result.exit_code == 64
 
+    def test_generate_exits_64_on_build_output_profile_id_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        """A build-output.json whose own declared profile.id doesn't match
+        the PROFILE key it's passed under is almost certainly a stale or
+        misnamed artifact -- rejected instead of silently trusting the
+        caller-provided key (Codex review)."""
+        config = _write_config(tmp_path, _LIBRARY_ONLY_RAW)
+        build_dir = tmp_path / "build-mismatched"
+        build_dir.mkdir()
+        (build_dir / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": "abicheck.build-output/v1",
+                    "profile": {"id": "mac"},
+                    "targets": [{"id": "libfoo", "binary": "artifacts/libfoo.so"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "run-plan",
+                "generate",
+                str(config),
+                "--build-output",
+                f"linux={build_dir}",
+            ],
+        )
+        assert result.exit_code == 64
+        assert "mac" in result.output
+        assert "linux" in result.output
+
     def test_generate_exits_64_on_duplicate_build_output_profile(
         self, tmp_path: Path
     ) -> None:
