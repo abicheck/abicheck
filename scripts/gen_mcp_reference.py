@@ -44,6 +44,7 @@ import inspect
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 OUT_PATH = REPO_DIR / "docs" / "reference" / "mcp-tools-reference.md"
@@ -53,19 +54,17 @@ GENERATED_NOTE = (
     "Run `python scripts/gen_mcp_reference.py` to regenerate. -->"
 )
 
-#: Order matches `docs/user-guide/mcp-integration.md`'s existing tool
-#: sections, not source-file declaration order.
-TOOL_NAMES = (
-    "abi_compare",
-    "abi_dump",
-    "abi_list_changes",
-    "abi_explain_change",
-    "abi_audit",
-    "abi_estimate",
-    "abi_scan",
-)
-
 _ARG_LINE_RE = re.compile(r"^(\w+):\s*(.*)$")
+
+
+def _registered_tools(mcp_server: Any) -> list[tuple[str, Any]]:
+    """The live `(name, function)` pairs FastMCP has actually registered via
+    `@mcp.tool()`, sorted by name. A hand-maintained name list would silently
+    go stale the moment a tool is added, renamed, or removed -- this reads
+    the server's own tool manager instead, so an unlisted tool is structurally
+    impossible."""
+    tools = mcp_server.mcp._tool_manager.list_tools()
+    return sorted(((t.name, t.fn) for t in tools), key=lambda pair: pair[0])
 
 
 def _parse_args_section(doc: str | None) -> dict[str, str]:
@@ -158,8 +157,8 @@ def render() -> str:
         "exhaustive parameter list only.",
         "",
     ]
-    for name in TOOL_NAMES:
-        lines += _tool_section(name, getattr(mcp_server, name))
+    for name, fn in _registered_tools(mcp_server):
+        lines += _tool_section(name, fn)
     while lines and lines[-1] == "":
         lines.pop()
     lines.append("")

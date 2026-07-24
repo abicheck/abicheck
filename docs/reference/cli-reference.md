@@ -18,9 +18,9 @@ Aggregate per-target ABI reports in REPORTS_DIR into one CI gate verdict.
 
 **Arguments**
 
-| Name | Description |
-|---|---|
-| `reports_dir` |  |
+| Name | Required | Description |
+|---|:--:|---|
+| `reports_dir` | yes |  |
 
 **Options**
 
@@ -47,9 +47,9 @@ Validate DIRECTORY's build-output.json (ADR-047 §11.1).
 
 **Arguments**
 
-| Name | Description |
-|---|---|
-| `directory` |  |
+| Name | Required | Description |
+|---|:--:|---|
+| `directory` | yes |  |
 
 **Options**
 
@@ -65,10 +65,10 @@ Compare two ABI surfaces and report changes.
 
 **Arguments**
 
-| Name | Description |
-|---|---|
-| `old_input` |  |
-| `new_input` |  |
+| Name | Required | Description |
+|---|:--:|---|
+| `old_input` | yes |  |
+| `new_input` | yes |  |
 
 **Options**
 
@@ -290,9 +290,9 @@ Compare a binary's full dependency stack across two environments.
 
 **Arguments**
 
-| Name | Description |
-|---|---|
-| `binary` |  |
+| Name | Required | Description |
+|---|:--:|---|
+| `binary` | yes |  |
 
 **Options**
 
@@ -313,9 +313,9 @@ Show the resolved dependency tree and symbol binding status.
 
 **Arguments**
 
-| Name | Description |
-|---|---|
-| `binary` |  |
+| Name | Required | Description |
+|---|:--:|---|
+| `binary` | yes |  |
 
 **Options**
 
@@ -335,9 +335,9 @@ Dump ABI snapshot of a shared library to JSON.
 
 **Arguments**
 
-| Name | Description |
-|---|---|
-| `so_path` |  |
+| Name | Required | Description |
+|---|:--:|---|
+| `so_path` | no |  |
 
 **Options**
 
@@ -398,9 +398,9 @@ Validate CONFIG's targets:/bundles:/profiles:/baseline: block (ADR-047 §3).
 
 **Arguments**
 
-| Name | Description |
-|---|---|
-| `config` |  |
+| Name | Required | Description |
+|---|:--:|---|
+| `config` | no |  |
 
 **Options**
 
@@ -416,9 +416,9 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 
 **Arguments**
 
-| Name | Description |
-|---|---|
-| `artifact` |  |
+| Name | Required | Description |
+|---|:--:|---|
+| `artifact` | yes |  |
 
 **Options**
 

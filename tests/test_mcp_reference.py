@@ -49,10 +49,17 @@ def test_generated_reference_is_in_sync_with_mcp_server():
     )
 
 
-def test_every_tool_appears_in_generated_reference():
+def test_every_registered_tool_appears_in_generated_reference():
+    # _registered_tools reads the live FastMCP tool manager rather than a
+    # hand-maintained name list, so a newly added/renamed @mcp.tool() can't
+    # silently go missing from the "exhaustive" reference.
+    from abicheck import mcp_server
+
     gen = _load_gen()
     content = gen.OUT_PATH.read_text(encoding="utf-8")
-    for name in gen.TOOL_NAMES:
+    names = [name for name, _fn in gen._registered_tools(mcp_server)]
+    assert names, "no tools found on the live MCP server -- something is wrong with the test setup"
+    for name in names:
         assert f"`{name}`" in content, f"{name!r} missing from generated MCP reference"
 
 

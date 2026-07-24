@@ -4,6 +4,17 @@
 
 Every parameter of every `abicheck-mcp` tool, generated directly from `abicheck/mcp_server.py`'s function signatures and docstrings. See [MCP Server (Agent Integration)](../user-guide/mcp-integration.md) for install/configure steps, response envelope shapes, agent workflow examples, and the security model — this page is the exhaustive parameter list only.
 
+## `abi_audit`
+
+Single-release ABI-hygiene audit — no baseline (ADR-035 D8).
+
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `library_path` | `str` | yes | — | Path to .so/.dll/.dylib or a JSON snapshot. |
+| `headers` | `list[str] \| None` | no | `None` | Public header files (classifies declarations + drives the pattern pre-scan). Strongly recommended — most checks skip cleanly without public-header provenance. |
+| `include_dirs` | `list[str] \| None` | no | `None` | Extra include directories for the C/C++ parser. |
+| `language` | `str` | no | `c++` | Language mode — "c++" (default) or "c". |
+
 ## `abi_compare`
 
 Compare two ABI surfaces and report breaking changes.
@@ -46,33 +57,6 @@ Dump ABI snapshot of a C/C++ shared library to JSON.
 | `language` | `str` | no | `c++` | Language mode — "c++" (default) or "c". |
 | `output_path` | `str \| None` | no | `None` | If provided, write snapshot to this file and return the path. Otherwise the snapshot JSON is returned inline. |
 
-## `abi_list_changes`
-
-List all ABI change kinds that abicheck can detect.
-
-| Parameter | Type | Required | Default | Description |
-|---|---|:--:|---|---|
-| `impact` | `str \| None` | no | `None` | Filter by impact level. One of: "breaking", "api_break", "risk", "compatible". If omitted, returns all change kinds. |
-
-## `abi_explain_change`
-
-Get a detailed explanation of a specific ABI change kind.
-
-| Parameter | Type | Required | Default | Description |
-|---|---|:--:|---|---|
-| `change_kind` | `str` | yes | — | The change kind to explain (e.g. "func_removed", "type_size_changed"). Use abi_list_changes to see all available kinds. |
-
-## `abi_audit`
-
-Single-release ABI-hygiene audit — no baseline (ADR-035 D8).
-
-| Parameter | Type | Required | Default | Description |
-|---|---|:--:|---|---|
-| `library_path` | `str` | yes | — | Path to .so/.dll/.dylib or a JSON snapshot. |
-| `headers` | `list[str] \| None` | no | `None` | Public header files (classifies declarations + drives the pattern pre-scan). Strongly recommended — most checks skip cleanly without public-header provenance. |
-| `include_dirs` | `list[str] \| None` | no | `None` | Extra include directories for the C/C++ parser. |
-| `language` | `str` | no | `c++` | Language mode — "c++" (default) or "c". |
-
 ## `abi_estimate`
 
 Dry-run scan cost estimate for a project (ADR-035 D10 / ADR-043).
@@ -86,6 +70,22 @@ Dry-run scan cost estimate for a project (ADR-035 D10 / ADR-043).
 | `compile_db` | `str \| None` | no | `None` | Explicit compile_commands.json (else discovered in sources). |
 | `depth` | `str \| None` | no | `None` | Coarse evidence-depth selector: "binary", "headers", "build", or "source" (None = inferred from inputs, escalating with the changed-path risk score once seeded). |
 | `changed_paths` | `list[str] \| None` | no | `None` | Changed-path set for the focused (D7) replay-scope estimate. |
+
+## `abi_explain_change`
+
+Get a detailed explanation of a specific ABI change kind.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `change_kind` | `str` | yes | — | The change kind to explain (e.g. "func_removed", "type_size_changed"). Use abi_list_changes to see all available kinds. |
+
+## `abi_list_changes`
+
+List all ABI change kinds that abicheck can detect.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `impact` | `str \| None` | no | `None` | Filter by impact level. One of: "breaking", "api_break", "risk", "compatible". If omitted, returns all change kinds. |
 
 ## `abi_scan`
 

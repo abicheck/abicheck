@@ -76,7 +76,11 @@ def _help_with_choices(param: Any) -> str:
 
 
 def _argument_row(param: Any) -> str:
-    return f"| `{param.name}` | {_help_with_choices(param)} |"
+    # click.Argument.required can be False (e.g. dump's SO_PATH is optional
+    # for a source-only invocation) -- omitting this made every positional
+    # argument look required regardless of the actual CLI contract.
+    required = "yes" if param.required else "no"
+    return f"| `{param.name}` | {required} | {_help_with_choices(param)} |"
 
 
 def _default_str(default: Any) -> str:
@@ -126,7 +130,7 @@ def _render_command(name: str, cmd: Any, heading_level: int) -> list[str]:
     options = [p for p in cmd.params if isinstance(p, click.Option)]
 
     if arguments:
-        lines += ["**Arguments**", "", "| Name | Description |", "|---|---|"]
+        lines += ["**Arguments**", "", "| Name | Required | Description |", "|---|:--:|---|"]
         lines += [_argument_row(p) for p in arguments]
         lines.append("")
     if options:
