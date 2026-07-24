@@ -1204,6 +1204,23 @@ _PP_IFNDEF_CPLUSPLUS_PATTERN = re.compile(rb"^[ \t]*#[ \t]*ifndef[ \t]+__cpluspl
 # syntax exists behind it would itself be the circular mistake this
 # masking exists to avoid.
 _PP_IFDEF_CPLUSPLUS_PATTERN = re.compile(rb"^[ \t]*#[ \t]*ifdef[ \t]+__cplusplus\b")
+# ``#ifndef __cplusplus``/``#if !defined(__cplusplus)`` (Codex review,
+# twenty-third round): the general mask-bucket's unconditional treatment
+# of these ("always parsed in a C++-ish mode, so never reachable") is the
+# same dialect-decision-only assumption as ``#ifdef __cplusplus`` above,
+# and just as wrong for ``mask_cplusplus_defined_guards`` -- in C mode
+# ``__cplusplus`` really is undefined, so this guarded arm (the C
+# fallback) is exactly the reachable one there, and the ``#else`` (C++-
+# only content) is the circular one instead. Opposite polarity from
+# ``#ifdef __cplusplus`` for the same reason ``#ifndef __cpp_x`` is
+# opposite from ``#ifdef __cpp_x``.
+_PP_NOT_DEFINED_CPLUSPLUS = rb"![ \t]*" + _PP_DEFINED_CPLUSPLUS
+_PP_IF_NOT_DEFINED_CPLUSPLUS_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*if[ \t]+" + _PP_NOT_DEFINED_CPLUSPLUS + rb"[ \t]*$"
+)
+_PP_ELIF_NOT_DEFINED_CPLUSPLUS_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*elif[ \t]+" + _PP_NOT_DEFINED_CPLUSPLUS + rb"[ \t]*$"
+)
 # ``#ifndef __cpp_x`` is the *negated* mirror of ``#ifdef __cpp_x`` —
 # logically ``#if defined(__cpp_x) ... [B] ... #else ... [A] ... #endif``
 # with the arms swapped, so it needs the opposite polarity, not the same
@@ -1421,6 +1438,18 @@ def _strip_inactive_if_zero_blocks(
                 stack.append([True, False, True])
                 out.append(b"")
                 continue
+            if mask_cplusplus_defined_guards and (
+                _PP_IFNDEF_CPLUSPLUS_PATTERN.match(line)
+                or _PP_IF_NOT_DEFINED_CPLUSPLUS_PATTERN.match(line)
+            ):
+                # Opposite polarity from the general branch below's
+                # unconditional #ifndef __cplusplus/!defined(__cplusplus)
+                # treatment -- checked ahead of it since it would
+                # otherwise also match. See the docstring above
+                # _PP_NOT_DEFINED_CPLUSPLUS.
+                stack.append([True, False, True])
+                out.append(b"")
+                continue
             if (
                 _PP_IF_ZERO_PATTERN.match(line)
                 or _PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN.match(line)
@@ -1527,6 +1556,18 @@ def _strip_inactive_if_zero_blocks(
                 # Same inverted polarity as #if !defined(__cpp_x) above,
                 # checked ahead of the general branch since it would
                 # otherwise also match. Same shadow-scan exception.
+                frame[1] = frame[2]
+                frame[2] = True
+                out.append(b"" if frame[1] else line)
+                continue
+            if (
+                mask_cplusplus_defined_guards
+                and _PP_ELIF_NOT_DEFINED_CPLUSPLUS_PATTERN.match(line)
+            ):
+                # Opposite polarity from the general branch below's
+                # unconditional !defined(__cplusplus) treatment, checked
+                # ahead of it since it would otherwise also match. Same
+                # reasoning as the #if-opening case above.
                 frame[1] = frame[2]
                 frame[2] = True
                 out.append(b"" if frame[1] else line)

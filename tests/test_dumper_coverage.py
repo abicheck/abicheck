@@ -818,6 +818,60 @@ class TestResolveForceCppLanguageModeDecision:
         assert _resolve_force_cpp("c++", [h], None, ()) is True
         assert _resolve_force_cpp("c", [h], None, ()) is False
 
+    def test_ignores_construct_behind_else_of_ifndef_cplusplus(self, tmp_path):
+        """Regression (Codex review, twenty-third round): the opposite
+        polarity case -- ``#ifndef __cplusplus`` with a genuine C
+        fallback in the guarded arm and C++20-only syntax in its
+        ``#else``. In C mode ``__cplusplus`` is undefined, so the guarded
+        arm (the C fallback, e.g. ``int consteval;``) is exactly the
+        reachable one, and the ``#else`` (C++-only) is the one that's
+        circular for the language-mode decision -- the opposite of
+        ``#ifdef __cplusplus``'s polarity, mirroring ``#ifndef __cpp_x``
+        vs. ``#ifdef __cpp_x``. Before this fix the guarded arm was
+        unconditionally masked (correct only for the dialect decision),
+        leaving the ``#else`` visible and wrongly forcing C++ mode."""
+        h = tmp_path / "h.h"
+        h.write_text(
+            "#ifndef __cplusplus\nint consteval;\n#else\nconsteval int f();\n#endif\n",
+            encoding="utf-8",
+        )
+        assert _resolve_force_cpp(None, [h], None, ()) is False
+
+    def test_ignores_construct_behind_else_of_not_defined_cplusplus(self, tmp_path):
+        """Companion: the ``#if !defined(__cplusplus)`` spelling needs
+        the same opposite polarity as ``#ifndef __cplusplus``."""
+        h = tmp_path / "h.h"
+        h.write_text(
+            "#if !defined(__cplusplus)\nint consteval;\n#else\n"
+            "consteval int f();\n#endif\n",
+            encoding="utf-8",
+        )
+        assert _resolve_force_cpp(None, [h], None, ()) is False
+
+    def test_settles_on_elif_not_defined_cplusplus(self, tmp_path):
+        """Companion: the ``#elif !defined(__cplusplus)`` spelling,
+        reached as a later arm in a chain that opens on something else,
+        must settle the chain the same way."""
+        h = tmp_path / "h.h"
+        h.write_text(
+            "#if 0\nint a;\n#elif !defined(__cplusplus)\nint consteval;\n"
+            "#else\nconsteval int f();\n#endif\n",
+            encoding="utf-8",
+        )
+        assert _resolve_force_cpp(None, [h], None, ()) is False
+
+    def test_still_forces_cpp_for_genuine_construct_behind_ifndef_cplusplus(
+        self, tmp_path
+    ):
+        """Companion: a genuine C++20 construct sitting in the *live*
+        ``#ifndef __cplusplus`` arm itself (the C fallback) must still
+        force C++ mode -- only the ``#else`` is exempted."""
+        h = tmp_path / "h.h"
+        h.write_text(
+            "#ifndef __cplusplus\nconsteval int f();\n#endif\n", encoding="utf-8"
+        )
+        assert _resolve_force_cpp(None, [h], None, ()) is True
+
 
 class TestCastxmlParserAccessLevel:
     def test_protected_access(self):
