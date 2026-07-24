@@ -71,7 +71,7 @@ Compare two ABI surfaces and report changes.
 | `--jobs`, `-j` | no | `0` | Parallel library comparisons for directory/package inputs (0 = auto-detect CPU count, the default). |
 | `--dso-only` | no | — | Only compare shared objects, skip executables (directory/package inputs only). |
 | `--output-dir` | no | — | Directory to write per-library reports (directory/package inputs only). |
-| `--fail-on-removed-library` | no | — | Exit 8 when a library present in old_dir is absent in new_dir. (directory/package inputs only) |
+| `--fail-on-removed-library`, `--no-fail-on-removed-library` | no | — | Exit 8 when a library present in old_dir is absent in new_dir. (directory/package inputs only) |
 | `--debug-info` | no | — | Debug info package (RPM/Deb/tar), scoped per side with an 'old='/'new=' prefix (e.g. --debug-info old=a-dbg.rpm --debug-info new=b-dbg.rpm). Directory/package inputs only (ADR-040). |
 | `--devel-pkg` | no | — | Development package with headers, scoped per side with an 'old='/'new=' prefix (e.g. --devel-pkg old=a-dev.rpm --devel-pkg new=b-dev.rpm). Directory/package inputs only (ADR-040). |
 | `--include-private-dso` | no | — | Include private (non-public) shared objects from non-standard paths. (directory/package inputs only) |
@@ -90,7 +90,7 @@ Compare two ABI surfaces and report changes.
 | `--gcc-options` | no | — | Extra compiler flags passed through to the header frontend (split on whitespace). For a flag whose value contains spaces use --gcc-option. |
 | `--gcc-option` | no | — | A single extra compiler flag passed to the header frontend verbatim (repeatable; not whitespace-split). Use two for a flag + spaced value, e.g. --gcc-option=-include --gcc-option='some header.h'. |
 | `--sysroot` | no | — | Alternative system root directory for header resolution. |
-| `--nostdinc` | no | — | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
+| `--nostdinc`, `--no-nostdinc` | no | — | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
 | `--lang` | no | `c++` | Language mode for the header backend. Choices: `c++`, `c`. |
 | `--old-ast-frontend` | no | — | C/C++ AST frontend for the old side only (overrides --ast-frontend for old). Use when the old release parses on castxml but the new one needs clang (or vice versa). Choices: `auto`, `castxml`, `clang`, `hybrid`. |
 | `--new-ast-frontend` | no | — | C/C++ AST frontend for the new side only (overrides --ast-frontend for new). Choices: `auto`, `castxml`, `clang`, `hybrid`. |
@@ -98,7 +98,7 @@ Compare two ABI surfaces and report changes.
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
 | `--secondary-format` | no | — | Emit a second output format from this same comparison run, without re-running the comparison a second time (e.g. a human --format markdown report alongside a --secondary-format json artifact for tooling). Requires --secondary-output (writing two formats to the same stream would be ambiguous). Always renders the full, unfiltered report (ignores --show-only/--stat). Not supported for directory/package (release) comparisons. Choices: `json`, `markdown`, `sarif`, `html`, `junit`, `review`. |
 | `--secondary-output` | no | — | File path to write --secondary-format's output to. Must differ from --output/-o, or the secondary render would silently overwrite the primary report. |
-| `--demangle` | no | — | Demangle C++ symbol names in markdown/review output (default ON; use --no-demangle to turn off). json/sarif always keep raw mangled names, and HTML is rendered structurally and is never demangled regardless of this flag. |
+| `--demangle`, `--no-demangle` | no | — | Demangle C++ symbol names in markdown/review output (default ON; use --no-demangle to turn off). json/sarif always keep raw mangled names, and HTML is rendered structurally and is never demangled regardless of this flag. |
 | `--policy` | no | `strict_abi` | Built-in policy profile for verdict classification. Ignored when --policy-file is given. Choices: `strict_abi`, `sdk_vendor`, `plugin_abi`. |
 | `--policy-file` | no | — | YAML policy file with per-kind verdict overrides, or a built-in name (e.g. 'security'). Overrides --policy. |
 | `--suppress` | no | — | Suppression file (YAML) to filter known/intentional changes. |
@@ -121,8 +121,8 @@ Compare two ABI surfaces and report changes.
 | `--ld-library-path` | no | `` | Simulated LD_LIBRARY_PATH (with --follow-deps). |
 | `--header-graph` | no | — | Deprecated, no-op: the L2 header-only semantic graph (ADR-041 addendum) is now always built for --depth headers and above. Planned removal: two minor releases out. |
 | `--header-graph-includes` | no | — | Deprecated, no-op: the include-file graph pass is now always run alongside --header-graph's replacement (always-on L2 header graph). Planned removal: two minor releases out. |
-| `--show-redundant` | no | — | Disable redundancy filtering and show all changes including those derived from root type changes. Demoted to config (scope.show_redundant, ADR-040); --show-redundant/--no-show-redundant still overrides it either way. |
-| `--scope-public-headers` | no | `True` | Restrict findings to the public-header ABI surface (ADR-024): changes to symbols/types not reachable from public-header-declared exported API are recorded as filtered, not reported. Internal-type leaks are never hidden. On by default; use --no-scope-public-headers to report every finding regardless of surface. |
+| `--show-redundant`, `--no-show-redundant` | no | — | Disable redundancy filtering and show all changes including those derived from root type changes. Demoted to config (scope.show_redundant, ADR-040); --show-redundant/--no-show-redundant still overrides it either way. |
+| `--scope-public-headers`, `--no-scope-public-headers` | no | `True` | Restrict findings to the public-header ABI surface (ADR-024): changes to symbols/types not reachable from public-header-declared exported API are recorded as filtered, not reported. Internal-type leaks are never hidden. On by default; use --no-scope-public-headers to report every finding regardless of surface. |
 | `--collapse-versioned-symbols` | no | — | Opt-in (G15): when a versioned-symbol scheme is detected (most removed symbols reappear differing only by a version token, e.g. ICU u_*_NN), reclassify those version-rename pairs as compatible so the verdict reflects the real delta, not the rename churn. A real SONAME bump and non-versioned removals still drive the verdict. Demoted to config (scope.collapse_versioned_symbols, ADR-037 D4). |
 | `--show-filtered` | no | — | List findings excluded by --scope-public-headers (audit trail). |
 | `--public-symbol` | no | — | Widening overlay (ADR-024 §D6): force a symbol (mangled or demangled name) into the public surface even when header provenance can't see it (asm stubs, .def exports, extern "C" shims, MSVC-mangling gaps). Repeatable. Only meaningful with --scope-public-headers. Demoted to config (scope.public_symbols, ADR-037 D4). |
@@ -136,9 +136,9 @@ Compare two ABI surfaces and report changes.
 | `--recommend` | no | — | Append a release recommendation (semver bump + SONAME action) to the report. Always present in --format json under 'release_recommendation'. |
 | `--annotate` | no | — | Emit GitHub Actions workflow command annotations to stderr. Annotations appear as inline comments on PR diffs. Only effective when GITHUB_ACTIONS=true. |
 | `--annotate-additions` | no | — | Include additions/compatible changes as ::notice annotations (requires --annotate). |
-| `--dwarf-only` | no | — | Force DWARF-only mode for both sides: use DWARF debug info as primary data source even when headers are available. Demoted to the debug.dwarf_only config key (ADR-040 L2); --dwarf-only/--no-dwarf-only still overrides it either way (e.g. --no-dwarf-only restores header parsing for a one-off run). |
+| `--dwarf-only`, `--no-dwarf-only` | no | — | Force DWARF-only mode for both sides: use DWARF debug info as primary data source even when headers are available. Demoted to the debug.dwarf_only config key (ADR-040 L2); --dwarf-only/--no-dwarf-only still overrides it either way (e.g. --no-dwarf-only restores header parsing for a one-off run). |
 | `--debug-root` | no | — | Directory containing separate debug files (build-id trees, path-mirror, dSYM bundles). Applies to both sides; scope to one with an 'old='/'new=' prefix, repeating the flag per side (e.g. --debug-root old=dbg1 --debug-root new=dbg2). Repeatable (ADR-040). |
-| `--debuginfod` | no | — | Enable debuginfod network resolution for debug info (opt-in). Demoted to the debug.debuginfod config key (ADR-040 L2); --debuginfod/--no-debuginfod still overrides it either way. |
+| `--debuginfod`, `--no-debuginfod` | no | — | Enable debuginfod network resolution for debug info (opt-in). Demoted to the debug.debuginfod config key (ADR-040 L2); --debuginfod/--no-debuginfod still overrides it either way. |
 | `--debuginfod-url` | no | — | debuginfod server URL (overrides DEBUGINFOD_URLS env var). Demoted to the debug.debuginfod_url config key (ADR-040 L2); this flag still overrides it. |
 | `--debug-format` | no | — | Force the ELF debug format for both sides (auto=pick best available). Supersedes the individual --btf/--ctf/--dwarf flags. Demoted to the debug.format config key (ADR-040 L2); this flag still overrides it. Choices: `auto`, `dwarf`, `btf`, `ctf`. |
 | `--btf` | no | — | Force BTF debug format for both sides (ELF only). |
@@ -147,7 +147,7 @@ Compare two ABI surfaces and report changes.
 | `--build-info` | no | — | Out-of-band build context: a build dir, a compile_commands.json, or a pack, overriding embedded. Applies to both sides; scope to one with an 'old='/'new=' prefix, repeating the flag per side (e.g. --build-info old=b1 --build-info new=b2) (ADR-040). |
 | `--sources` | no | — | Source checkout for --depth build/source (collected inline, embedding build/source/graph facts) or a pre-built `collect` pack, overriding embedded. Applies to both sides; scope to one with an 'old='/'new=' prefix, repeating the flag per side (e.g. --sources old=src_v1 --sources new=src_v2) (ADR-040). |
 | `--depth` | no | — | Evidence-depth dial: binary=symbols only, headers=+header AST (default), build=+build context, source=+source replay & call graph. Deeper-than-headers needs --sources or --build-info. |
-| `--pattern-verdicts` | no | — | Modulate verdicts with idiom/anti-pattern evidence (ADR-027): demote opaque-pointer/PIMPL-hidden layout changes (header-aware only) and raise breaks when an opacity/handle guarantee is lost. Disclosed in the pattern_modulations ledger; reversible. |
+| `--pattern-verdicts`, `--no-pattern-verdicts` | no | — | Modulate verdicts with idiom/anti-pattern evidence (ADR-027): demote opaque-pointer/PIMPL-hidden layout changes (header-aware only) and raise breaks when an opacity/handle guarantee is lost. Disclosed in the pattern_modulations ledger; reversible. |
 | `--explain-patterns` | no | — | Print idiom evidence behind each modulation (implies --pattern-verdicts). |
 | `--surface-metrics` | no | — | Emit aggregate public-surface metric drift (ADR-027): public_surface_grew/shrank, undocumented_export_ratio_increased. Informational (COMPATIBLE). |
 | `--env-matrix` | no | — | Environment-matrix YAML declaring deployment constraints (ADR-020b). With runtime_floors (e.g. 'runtime_floors: {GLIBC: "2.28"}'), a new symbol-version requirement is judged against the declared floor: at/below it -> compatible, above it -> breaking, instead of the default deployment-risk verdict. |
@@ -378,7 +378,7 @@ Dump ABI snapshot of a shared library to JSON.
 | `--gcc-options` | no | — | Extra compiler flags passed through to the header frontend (split on whitespace). For a flag whose value contains spaces use --gcc-option. |
 | `--gcc-option` | no | — | A single extra compiler flag passed to the header frontend verbatim (repeatable; not whitespace-split). Use two for a flag + spaced value, e.g. --gcc-option=-include --gcc-option='some header.h'. |
 | `--sysroot` | no | — | Alternative system root directory for header resolution. |
-| `--nostdinc` | no | — | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
+| `--nostdinc`, `--no-nostdinc` | no | — | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
 
 ## `project-targets`
 
@@ -444,4 +444,4 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 | `--gcc-options` | no | — | Extra compiler flags passed through to the header frontend (split on whitespace). For a flag whose value contains spaces use --gcc-option. |
 | `--gcc-option` | no | — | A single extra compiler flag passed to the header frontend verbatim (repeatable; not whitespace-split). Use two for a flag + spaced value, e.g. --gcc-option=-include --gcc-option='some header.h'. |
 | `--sysroot` | no | — | Alternative system root directory for header resolution. |
-| `--nostdinc` | no | — | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
+| `--nostdinc`, `--no-nostdinc` | no | — | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |

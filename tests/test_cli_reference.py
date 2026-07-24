@@ -71,6 +71,23 @@ def test_default_str_renders_a_path_default_platform_independently():
     assert gen._default_str("plain-string") == "plain-string"
 
 
+def test_option_row_includes_secondary_opts_for_a_boolean_flag_pair():
+    gen = _load_gen()
+
+    class _FakeParam:
+        opts = ["--demangle"]
+        secondary_opts = ["--no-demangle"]
+        default = None
+        required = False
+        help = "Demangle names."
+        type = None
+
+    row = gen._option_row(_FakeParam())
+    assert "`--demangle`" in row
+    assert "`--no-demangle`" in row
+    assert row.startswith("| `--demangle`, `--no-demangle` |")
+
+
 def test_option_row_hides_click_internal_unset_sentinel():
     gen = _load_gen()
 

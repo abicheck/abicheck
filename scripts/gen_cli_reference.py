@@ -91,7 +91,15 @@ def _default_str(default: Any) -> str:
 
 
 def _option_row(param: Any) -> str:
-    opts = ", ".join(f"`{o}`" for o in sorted(param.opts))
+    # A boolean flag pair (e.g. --demangle/--no-demangle) is one Click Option
+    # with opts=["--demangle"] and secondary_opts=["--no-demangle"] -- listing
+    # only opts drops the disable flag from the reference even though --help
+    # shows both. Primary flags sort before secondary ones (rather than
+    # merging then sorting all together) so a "--no-X"/"--X" pair reads in
+    # its natural enable/disable order instead of alphabetically reversing
+    # whenever "no-" sorts ahead of the rest of the primary flag's name.
+    all_opts = sorted(param.opts) + sorted(getattr(param, "secondary_opts", []))
+    opts = ", ".join(f"`{o}`" for o in all_opts)
     default = param.default
     # Click represents "no default was explicitly given" (relying on its own
     # implicit default — `()` for a `multiple=True` option, `None` otherwise)
