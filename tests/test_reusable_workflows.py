@@ -30,6 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
@@ -381,3 +382,66 @@ class TestCheckProjectFixtureDoesNotFailTheRequiredWorkflow:
         data = _load(TEST_ACTION)
         job = data["jobs"]["test-check-project-verify"]
         assert "continue-on-error" not in job
+
+
+class TestEveryCheckProjectJobInstallsAbicheckFromItsOwnSource:
+    """`pip install .` on the preceding `actions/checkout@v6` step installs
+    whatever is at the CALLER's own repository root -- correct only when
+    this workflow is invoked from within abicheck/abicheck itself. An
+    external consumer (`uses: abicheck/abicheck/.github/workflows/
+    check-project.yml@v1` from their own repository) would have every job
+    try to install their own project instead of abicheck (Codex review).
+    Every job that runs an `abicheck` CLI command must self-checkout
+    abicheck's own source first and install from that directory."""
+
+    @pytest.mark.parametrize("job_name", ["plan", "check", "aggregate"])
+    def test_job_installs_from_the_self_checkout_not_the_caller_repo(
+        self, job_name: str
+    ) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"][job_name])
+        names = [s.get("name") for s in steps]
+        assert "Checkout abicheck (for installing the CLI)" in names or (
+            "Checkout abicheck (for installing the CLI and nested Action composition)"
+            in names
+        )
+        install_step = next(s for s in steps if s.get("name") == "Install abicheck")
+        assert install_step["run"] == "pip install ./.check-project-src"
+        assert install_step["run"] != "pip install ."
+
+    @pytest.mark.parametrize("job_name", ["plan", "check", "aggregate"])
+    def test_self_checkout_runs_before_install(self, job_name: str) -> None:
+        data = _load(CHECK_PROJECT)
+        names = _step_names(data["jobs"][job_name])
+        checkout_idx = next(
+            i for i, n in enumerate(names) if n and n.startswith("Checkout abicheck")
+        )
+        install_idx = names.index("Install abicheck")
+        assert checkout_idx < install_idx
+
+
+class TestCandidateResolverRejectsAmbiguousMatches:
+    """A glob pattern matching more than one file under candidate/ (e.g.
+    both a linker symlink and the real versioned DSO) must fail loud, not
+    silently pick the first sorted match and compare/scope against an
+    arbitrary artifact (Codex review)."""
+
+    def test_resolve_helper_fails_on_more_than_one_match(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        resolver = next(
+            s for s in steps if s.get("name") == "Resolve candidate binary/binaries"
+        )
+        run = resolver["run"]
+        assert "len(matches) > 1" in run
+        assert "matches[0] if matches else None" in run
+
+    def test_target_binary_pattern_call_site_passes_a_label(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        resolver = next(
+            s for s in steps if s.get("name") == "Resolve candidate binary/binaries"
+        )
+        run = resolver["run"]
+        assert "label=f'target {cell" in run
+        assert "label=f'bundle {cell" in run
