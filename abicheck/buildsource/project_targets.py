@@ -95,7 +95,7 @@ from pathlib import Path
 from typing import Any
 
 from .inline import KNOWN_TOP_LEVEL_KEYS
-from .scan_levels import USER_DEPTHS
+from .scan_levels import USER_DEPTHS, EvidenceDepth
 
 #: The identifier charset every target/bundle/profile/channel id must satisfy
 #: — matches the per-component pattern the report-identity envelope (ADR-047
@@ -123,6 +123,16 @@ BASELINE_SOURCES = frozenset({"github-release", "actions-cache", "git"})
 #: the same four public rungs ``requested_depth``/``effective_depth`` accept
 #: in the report schema (ADR-047 §7).
 CHECK_DEPTHS = frozenset(d.value for d in USER_DEPTHS)
+
+#: A ``bundle`` check's ``depth`` is further restricted to these two rungs --
+#: ``kind: bundle`` always compares directories (the resolved binaries-dir vs.
+#: the candidate bundle directory) in ``actions/check-target``, which routes
+#: through the CLI's per-library release fan-out and never collects inline
+#: build/source evidence for that path (``actions/check-target/
+#: validate-inputs.sh`` rejects ``build``/``source`` for ``kind: bundle``).
+BUNDLE_CHECK_DEPTHS = frozenset(
+    {EvidenceDepth.BINARY.value, EvidenceDepth.HEADERS.value}
+)
 
 #: Sentinel ``channel`` value for a ``baseline: none`` check (ADR-047 §6 S5
 #: correction) — ``check-target`` (P1.3) must skip ``resolve-baseline``
@@ -727,6 +737,26 @@ def _target_issues(config: ProjectTargetsConfig, target: TargetSpec) -> list[str
                 f"target {target.id!r}: kind: plugin-contract requires contract_file."
             )
         issues.extend(_library_reference_issues(config, target))
+    if target.kind != TARGET_KIND_LIBRARY:
+        # actions/check-target/validate-inputs.sh rejects baseline-channel:
+        # none for any target-kind other than library -- a no-baseline audit
+        # routes to `scan` (a one-build check), which has no
+        # --used-by/--required-symbols equivalent to scope an app-consumer/
+        # plugin-contract check against. Reject at generation time rather
+        # than letting a validated-looking config produce a run-plan cell
+        # that check-target refuses with no per-cell report for aggregate
+        # to read.
+        for i, check in enumerate(target.checks):
+            if check.channel == NO_BASELINE_CHANNEL:
+                issues.append(
+                    f"target {target.id!r}.checks[{i}]: channel: "
+                    f"{NO_BASELINE_CHANNEL!r} is not supported for kind: "
+                    f"{target.kind!r} -- a no-baseline audit check has no "
+                    "--used-by/--required-symbols equivalent to scope an "
+                    "app-consumer/plugin-contract check against "
+                    "(actions/check-target/validate-inputs.sh). Use kind: "
+                    "library for a no-baseline audit, or set a real channel."
+                )
     for i, check in enumerate(target.checks):
         issues.extend(_check_issues(config, f"target {target.id!r}.checks[{i}]", check))
     return issues
@@ -816,6 +846,17 @@ def _bundle_issues(config: ProjectTargetsConfig, bundle: BundleSpec) -> list[str
                 "bundle: field and its membership here must agree."
             )
     for i, check in enumerate(bundle.checks):
+        if check.depth not in BUNDLE_CHECK_DEPTHS and check.depth in CHECK_DEPTHS:
+            # A depth outside CHECK_DEPTHS entirely is already reported by
+            # _check_issues below -- only flag the bundle-specific
+            # restriction for an otherwise-valid depth (build/source).
+            issues.append(
+                f"bundle {bundle.id!r}.checks[{i}]: depth {check.depth!r} is not "
+                f"supported for a bundle check -- use one of "
+                f"{sorted(BUNDLE_CHECK_DEPTHS)} (actions/check-target/"
+                "validate-inputs.sh rejects build/source for kind: bundle, "
+                "which always compares directories)."
+            )
         issues.extend(_check_issues(config, f"bundle {bundle.id!r}.checks[{i}]", check))
     return issues
 

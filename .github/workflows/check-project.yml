@@ -222,12 +222,20 @@ jobs:
       # (identical technique to the `check` job's own nested-Action
       # composition below, and to check-target's own established pattern)
       # and install from there instead (Codex review).
+      #
+      # Uses `github.workflow_ref`/`github.workflow_sha` (added to the
+      # `github` context specifically so a reusable workflow can identify
+      # itself) -- NOT `job.workflow_ref`/`job.workflow_sha`: the `job`
+      # context only exposes `container`/`services`/`status`, so that
+      # property access silently resolves to empty at runtime (not a syntax
+      # error) rather than failing loud. See check-single.yml's identical
+      # step for the fuller writeup.
       - name: Capture this reusable workflow's identity
         id: identity
         shell: bash
         env:
-          WORKFLOW_REF: ${{ job.workflow_ref }}
-          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
           FALLBACK_REPOSITORY: ${{ github.repository }}
           FALLBACK_REF: ${{ github.sha }}
         run: |
@@ -314,8 +322,8 @@ jobs:
         id: identity
         shell: bash
         env:
-          WORKFLOW_REF: ${{ job.workflow_ref }}
-          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
           FALLBACK_REPOSITORY: ${{ github.repository }}
           FALLBACK_REF: ${{ github.sha }}
         run: |
@@ -493,12 +501,17 @@ jobs:
       # (actions/upload-artifact#473: a `#` in the name triggers an
       # Authorization error against the underlying Actions API, even though
       # it isn't in the officially-disallowed list), not just a style
-      # preference. Sanitize before using it in an artifact name, mirroring
-      # `actions/check-target/run.sh`'s own `tr -c 'A-Za-z0-9._-' '_'`
-      # precedent for its per-check report filename (P1.3's identical
-      # cross-invocation-collision fix, reused here for the identical
-      # underlying reason: a raw identity string is not a safe filesystem/
-      # artifact-name component).
+      # preference. `actions/check-target/run.sh`'s own precedent for its
+      # per-check report *filename* collapses every disallowed character to
+      # `_` via `tr -c 'A-Za-z0-9._-' '_'` -- fine there (informational only,
+      # not used to address anything), but lossy for an artifact *name*:
+      # target `a`/profile `b_c` and target `a_b`/profile `c` on the same
+      # channel/depth have distinct check_ids that both collapse to the same
+      # `tr` output, so one legitimate report upload can collide with
+      # another and `aggregate` then treats a cell as missing (Codex
+      # review). Keep the readable `tr` form but append a short content
+      # hash of the *original* check_id so two check_ids that collide under
+      # `tr` still produce distinct artifact names.
       - name: Sanitize check-id for artifact name
         id: sanitized
         if: always() && steps.run.outputs.report-path != ''
@@ -506,7 +519,16 @@ jobs:
         env:
           CHECK_ID: ${{ steps.run.outputs.check-id }}
         run: |
-          echo "id=$(printf '%s' "$CHECK_ID" | tr -c 'A-Za-z0-9._-' '_')" >> "$GITHUB_OUTPUT"
+          python3 -c "
+          import hashlib
+          import os
+
+          check_id = os.environ['CHECK_ID']
+          safe = ''.join(c if c.isalnum() or c in '._-' else '_' for c in check_id)
+          digest = hashlib.sha256(check_id.encode()).hexdigest()[:12]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+              fh.write(f'id={safe}-{digest}\n')
+          "
 
       # Required sub-task (ADR-047 §4): this upload step must carry its own
       # always-on condition, not just the trailing aggregate job -- under
@@ -546,8 +568,8 @@ jobs:
         id: identity
         shell: bash
         env:
-          WORKFLOW_REF: ${{ job.workflow_ref }}
-          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
           FALLBACK_REPOSITORY: ${{ github.repository }}
           FALLBACK_REF: ${{ github.sha }}
         run: |

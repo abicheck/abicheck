@@ -1,0 +1,131 @@
+name: 'Test check-project.yml: deferred operational failure survives to aggregate'
+
+# G30 P1.4 (ADR-047 §4/§5): live end-to-end coverage of check-project.yml's
+# failure-survival contract -- proving the trailing `aggregate` job's
+# `if: always()` keeps running (and reporting) despite its `needs: check`
+# dependency failing, and that the matrix `check` job's own `Upload report`
+# step's `if: always()` still uploads the operational-error report for
+# `aggregate` to read.
+#
+# **This workflow's own run conclusion is EXPECTED to be "failure" on every
+# successful test run.** `test-check-project` calls check-project.yml (a
+# reusable workflow, `uses:`) against a fixture that deliberately omits the
+# baseline artifact -- an operational error that fails `check-project.yml`'s
+# own `aggregate` job by design, exactly the behaviour real callers rely on
+# to gate merges on a real ABI break. GitHub Actions does not allow
+# `continue-on-error` on a job that calls a reusable workflow via `uses:`
+# (https://github.com/orgs/community/discussions/77915) -- there is no way
+# to make *this* run end "success" while still exercising the real failure
+# path through the real check-project.yml file, short of reimplementing its
+# steps by hand (which would stop testing the actual reusable workflow).
+#
+# So: this lives in its own, deliberately NON-required workflow file, kept
+# separate from `test-action.yml` (which IS a required check and must stay
+# green). Do not add this workflow's own status to branch protection's
+# required checks -- the real pass/fail signal is `test-check-project-verify`
+# succeeding (it asserts the operational failure was reported *correctly*,
+# not swallowed), which is what a human reviewing this workflow's job list
+# should check, not the run's overall conclusion badge.
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/check-project.yml'
+      - '.github/workflows/test-check-project-failure-path.yml'
+      - 'abicheck/**'
+      - 'tests/fixtures/action/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/check-project.yml'
+      - '.github/workflows/test-check-project-failure-path.yml'
+      - 'abicheck/**'
+      - 'tests/fixtures/action/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # Stages a run-plan.json cell whose baseline deliberately cannot resolve
+  # (no abicheck-baseline-accepted-main artifact uploaded, required: true)
+  # -- an operational error, which fails gate-mode: deferred's own matrix
+  # job regardless (operational errors are never deferred).
+  test-check-project-stage:
+    name: 'check-project: stage fixture artifacts'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Stage build-output.json
+        shell: bash
+        run: |
+          mkdir -p abicheck-build-linux-x86_64-gcc-test
+          python3 -c "
+          import json
+          data = {
+              'schema': 'abicheck.build-output/v1',
+              'targets': [{'id': 'libexample', 'binary': 'libexample.so'}],
+          }
+          json.dump(data, open('abicheck-build-linux-x86_64-gcc-test/build-output.json', 'w'))
+          "
+
+      - name: Stage candidate binary
+        shell: bash
+        run: |
+          mkdir -p candidate
+          cp tests/fixtures/action/action_test_v2.json candidate/action_test_v2.json
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: abicheck-build-linux-x86_64-gcc-test
+          path: abicheck-build-linux-x86_64-gcc-test/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: abicheck-candidate-linux-x86_64-gcc-test
+          path: candidate/
+
+      # Deliberately NO abicheck-baseline-accepted-main artifact -- see the
+      # workflow-level header comment above.
+
+  # EXPECTED TO FAIL -- see the workflow-level header comment above. Do not
+  # add continue-on-error here: GitHub Actions rejects it on a job that
+  # calls a reusable workflow via `uses:`.
+  test-check-project:
+    name: 'check-project: run-plan + matrix + aggregate'
+    needs: test-check-project-stage
+    uses: ./.github/workflows/check-project.yml
+    with:
+      config-path: tests/fixtures/action/check_project.abicheck.yml
+      install-deps: false
+
+  test-check-project-verify:
+    name: 'check-project: verify the deferred operational failure survives to aggregate'
+    needs: test-check-project
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: abicheck-aggregate-result
+
+      - name: Verify aggregate reports the coverage/gate failure
+        shell: bash
+        run: |
+          echo "gate-exit-code=${{ needs.test-check-project.outputs.gate-exit-code }}"
+          test "${{ needs.test-check-project.outputs.gate-exit-code }}" != "0"
+          python -m json.tool aggregate-result.json > /dev/null
+          python3 -c "
+          import json, sys
+          result = json.load(open('aggregate-result.json'))
+          print(json.dumps(result, indent=2))
+          assert result['status'] == 'fail', result
+          assert result['gate']['exit_code'] != 0, result
+          print('aggregate result OK: the operational failure was not silently dropped')
+          "
