@@ -1739,7 +1739,9 @@ issues, one fixed and one deferred with a documented rationale:**
   operational-error path writes the report (cleaner, but changes what
   inputs `check-target` needs to accept a "resolution already failed,
   write the envelope anyway" case). Tracked as a known gap rather than
-  rushed into either shape without picking one deliberately.
+  rushed into either shape without picking one deliberately. Filed as
+  [#628](https://github.com/abicheck/abicheck/issues/628) once a third
+  review round re-raised the same gap (see the ninth-round addendum below).
 
 **A sixth round (Codex, against `06e1fcb`) caught one more real issue,
 fixed in the same commit style as the rest of this section:** the "Download
@@ -1857,7 +1859,10 @@ fixed and one re-raising an already-tracked gap:**
   an operational-error envelope for `aggregate` to see) with slightly
   different framing ("route pre-check failures into aggregation before
   merge"). Not a new item -- same deferred design decision, same rationale
-  as those two addenda.
+  as those two addenda. Filed as
+  [#628](https://github.com/abicheck/abicheck/issues/628) (requested in
+  the review thread and opened by CodeRabbit) to track the design decision
+  and acceptance criteria outside the plan doc.
 
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
