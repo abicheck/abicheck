@@ -394,8 +394,8 @@ in `reporter_markdown.py`, with `reporter.py` importing them back via its
 existing re-export block. Both renderers therefore call the identical
 grouping function — they cannot disagree about which findings share a root
 cause the way two independently-written implementations could drift.
-`--report-mode root-cause` still renders as `full` for `--format sarif`/
-`junit` (unchanged from Slice 3).
+`--report-mode root-cause` still renders as `full` for `--format junit`
+(and, prior to Slice 5 below, `sarif` too).
 
 **Follow-up fix (Codex review), same PR:** the initial version of
 `_to_markdown_root_cause` did not accept/forward `show_impact`, so
@@ -403,6 +403,40 @@ cause the way two independently-written implementations could drift.
 Summary table that full/leaf markdown both append. Fixed by threading
 `show_impact` through to `_build_impact_table`, matching the other two
 markdown modes.
+
+## Slice 5 — `--report-mode root-cause` SARIF properties
+
+Landed in a follow-up commit on the same PR. Unlike JSON/markdown, SARIF's
+`runs[].results[]` is a flat, one-result-per-finding array with no natural
+place for a nested grouping structure — GitHub Code Scanning and other SARIF
+consumers expect that shape. Restructuring it (e.g. one result per root
+cause, findings nested underneath) would break every existing SARIF
+consumer of abicheck's output for a mode that is opt-in by design. Instead,
+`to_sarif`/`to_sarif_str` gain a `report_mode` parameter; when
+`"root-cause"`, every result (from `result.changes`, `scoped_only_changes`,
+and synthetic missing-contract labels alike) gets two additional
+`properties`: `rootCauseId` (a stable hash of the grouping key, identical to
+JSON's `root_causes[].root_cause_id` for the same finding) and `rootCause`
+(the human-readable root). A consumer that wants grouped output can bucket
+`results` by `properties.rootCauseId` itself; one that doesn't care ignores
+the two extra properties, exactly like any other additive SARIF property
+this ADR has added (`reachabilityState`, `impactAssessment`, etc.).
+
+The grouping key/referenced-causes computation is the same
+`_root_cause_key_and_display` (`reporter_markdown.py`) JSON/markdown already
+share — SARIF computes its own `referenced_causes` set spanning `changes`
+and `scoped_only_changes` up front (mirroring the identical computation in
+`cli_compare_fold.py`'s JSON scoped-gate fold-in) since SARIF builds every
+result in one function rather than fold-in-after-the-fact. `report_mode` is
+threaded through `service_render.render_output` and
+`mcp_server._render_output`'s `sarif` branches, both of which previously
+accepted (but silently dropped) the parameter for that format.
+
+`--report-mode root-cause` still renders as `full` for `--format junit` —
+JUnit's `<testcase>` model already groups by *symbol* (`_partition_changes`),
+not by finding, so a caused_by_type-keyed grouping would need to decide what
+happens when a multi-change testcase's changes disagree on root cause; left
+for a dedicated slice rather than bolted on here.
 
 ## Deliberately not implemented this slice
 
@@ -436,11 +470,13 @@ remaining four tiers):
   suppression correctness, not just to this reporting layer. Left for a
   dedicated slice.
 - **The full `RootCauseCorrelator` correlation across consumer-overlay
-  findings that don't share a `caused_by_type` today** — Slices 3-4 above
-  ship the `caused_by_type`-based first cut (now in both JSON and
-  markdown/text); Phase 6's `RootCauseCorrelator` is the fuller job that adds
+  findings that don't share a `caused_by_type` today** — Slices 3-5 above
+  ship the `caused_by_type`-based first cut (JSON, markdown/text, and SARIF
+  properties); Phase 6's `RootCauseCorrelator` is the fuller job that adds
   correlation for findings with no `caused_by_type` link at all. `--format
-  sarif`/`junit` still render `root-cause` mode as `full`.
+  junit` still renders `root-cause` mode as `full` (Slice 5's ADR section
+  above explains why JUnit's symbol-grouped `<testcase>` model doesn't take
+  the same properties-only approach SARIF did).
 - **Stable `finding_id`/`occurrence_id`/`root_cause_id`/`impact_group_id`
   identifiers independent of `description` text** — `reporter._finding_id`
   already exists (schema 2.3) and is stable across repeated runs, but (unlike

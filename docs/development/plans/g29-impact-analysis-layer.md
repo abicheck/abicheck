@@ -75,13 +75,13 @@ model:
   `UNKNOWN` unless `allow_unknown_reachability: true` is set explicitly. See
   [PR #607](https://github.com/abicheck/abicheck/pull/607) and
   `docs/concepts/graph-coverage.md`.
-- **G29.2** (Phase 3, **slices 1-4 done, ADR-051**) — A single
+- **G29.2** (Phase 3, **slices 1-5 done, ADR-051**) — A single
   `abicheck/impact/` package with `ImpactAssessment`, `GraphProofPath`, and
-  `FindingDecision` dataclasses. **Slices 1-4 implement the read-view
+  `FindingDecision` dataclasses. **Slices 1-5 implement the read-view
   direction only**: the dataclasses exist and `reporter.py`/`sarif.py`
   surface them (including the suppression audit trail, slice 2, and
-  `--report-mode root-cause` grouping in both JSON and markdown/text,
-  slices 3-4), but `source_graph_findings.py`/`internal_leak.py`/
+  `--report-mode root-cause` grouping in JSON, markdown/text, and SARIF
+  properties, slices 3-5), but `source_graph_findings.py`/`internal_leak.py`/
   `suppression.py`/`appcompat.py` do not yet populate `ImpactAssessment`
   directly — they still independently set the overlapping `Change` fields
   it derives from (see ADR-051 D2). The originally-stated direction (those
@@ -243,7 +243,7 @@ partial implemented, D4 deliberately deferred); this paragraph originally
 described the pre-implementation "needs a recorded decision" gate
 (ADR-044's own bar) before the ADR existed.
 
-### Phase 3 — Reporting & root causes — **slices 1-4 implemented (ADR-051)**
+### Phase 3 — Reporting & root causes — **slices 1-5 implemented (ADR-051)**
 
 [ADR-051](../adr/051-unified-impact-assessment-model.md) records the slice 1
 decisions: `abicheck/impact/model.py`'s `ImpactAssessment`/`GraphProofPath`/
@@ -274,17 +274,25 @@ grouping findings by the existing `Change.caused_by_type` field rather than
 waiting on Phase 6's `RootCauseCorrelator`. `REPORT_SCHEMA_VERSION` reached
 2.14. Slice 4 added the matching markdown/text rendering
 (`reporter_markdown._to_markdown_root_cause`) reusing the same grouping
-function slice 3's JSON path now also calls (`_group_changes_by_root_cause`);
-`--format sarif`/`junit` still render `root-cause` mode as `full`, mirroring
-`leaf` mode's own SARIF/JUnit gap.
+function slice 3's JSON path now also calls (`_group_changes_by_root_cause`).
+Slice 5 extended `--report-mode root-cause` to `--format sarif`: rather than
+restructuring SARIF's flat one-result-per-finding shape (which would break
+every existing SARIF/code-scanning consumer), each result gains additive
+`properties.rootCauseId`/`properties.rootCause` computed via the same
+`_root_cause_key_and_display` JSON/markdown share. `--format junit` still
+renders `root-cause` mode as `full` — its `<testcase>` model already groups
+by symbol, not by finding, so a caused_by_type-keyed grouping needs its own
+design pass for what happens when one testcase's changes disagree on root
+cause.
 **Still open under this same ADR**: the D2 direction flip (deliberately not
 attempted — touches five producer modules' core control flow at once,
 several of them performance-sensitive graph walks under active
 suppression-safety guarantees; see ADR-051's "Deliberately not implemented"
 section), the full `RootCauseCorrelator`-based correlation across
-consumer-overlay findings with no `caused_by_type` link (Phase 6), stable
-`occurrence_id`/`root_cause_id`/`impact_group_id`, and the reference docs
-below — the original Phase 3 scope this section describes:
+consumer-overlay findings with no `caused_by_type` link (Phase 6), JUnit
+`root-cause` rendering, stable `occurrence_id`/`root_cause_id`/
+`impact_group_id`, and the reference docs below — the original Phase 3 scope
+this section describes:
 
 - `abicheck/impact/model.py`: `ImpactAssessment` (`reachability_state`,
   `contract_effect`, `changed_entities`, `public_entries`, `proof_paths`,

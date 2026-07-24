@@ -1682,8 +1682,11 @@ def _embed_inline_source_side(
                    "'impact' behaves as 'full' with the impact summary table enabled "
                    "(equivalent to --report-mode full --show-impact), "
                    "'root-cause' groups findings sharing a root cause "
-                   "(Change.caused_by_type) under one entry -- supported for "
-                   "--format json/markdown/text; sarif/junit render as 'full'.")
+                   "(Change.caused_by_type) under one entry for "
+                   "--format json/markdown/text; --format sarif keeps its "
+                   "normal one-result-per-finding shape but adds "
+                   "properties.rootCauseId/rootCause to each result; "
+                   "--format junit still renders as 'full'.")
 @click.option("--show-impact", is_flag=True, default=False,
               help="Append an impact summary table showing root changes and affected interfaces.")
 @click.option("--recommend", is_flag=True, default=False,

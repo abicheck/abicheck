@@ -27,6 +27,7 @@ SARIF spec: https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
 
 from __future__ import annotations
 
+import hashlib
 import json
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -43,7 +44,7 @@ from abicheck.checker_policy import (
 from abicheck.impact import assess_change
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import _finding_id, apply_show_only
-from abicheck.reporter_markdown import ShowOnlyFilter
+from abicheck.reporter_markdown import ShowOnlyFilter, _root_cause_key_and_display
 from abicheck.severity import missing_contract_exit_code
 
 if TYPE_CHECKING:
@@ -216,8 +217,15 @@ def _result_for(
     *,
     relevant_ids: frozenset[str] | None = None,
     evidence_status_override: EvidenceStatus | None = None,
+    root_cause: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Produce a SARIF result object for a Change.
+
+    *root_cause*, when given (``--report-mode root-cause``, G29 Phase 3
+    slice 5, ADR-051), is this finding's ``(root_cause_id, root_display)``
+    pair -- added as ``properties.rootCauseId``/``properties.rootCause`` so
+    a SARIF consumer can group results the same way JSON/markdown root-cause
+    mode does, without restructuring SARIF's one-result-per-finding shape.
 
     *relevant_ids*, when not ``None``, means a ``--used-by``/``--required-symbol``
     gate is active: a change whose :func:`_finding_id` is absent from the set is
@@ -311,6 +319,10 @@ def _result_for(
     evidence_status = evidence_status_override or evidence_status_for_change(change)
     if evidence_status is not None:
         properties["evidenceStatus"] = evidence_status.value
+    if root_cause is not None:
+        root_cause_id, root_display = root_cause
+        properties["rootCauseId"] = root_cause_id
+        properties["rootCause"] = root_display
 
     level = _severity(change, result, severity_config)
     if relevant_ids is not None:
@@ -377,7 +389,11 @@ def _severity_gate_properties(
 
 
 def _missing_contract_result(
-    label: str, gate_scope: str, severity_config: SeverityConfig | None,
+    label: str,
+    gate_scope: str,
+    severity_config: SeverityConfig | None,
+    *,
+    root_cause: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Synthesize a SARIF result for a missing required symbol/version/entrypoint.
 
@@ -406,6 +422,22 @@ def _missing_contract_result(
         severity_config is None
         or missing_contract_exit_code(severity_config) != 0
     )
+    properties: dict[str, Any] = {
+        "relevantToGate": True,
+        "blocksGate": blocks,
+        "missingContractMember": label,
+        # G29 Phase 3 slice 1 (ADR-051, Codex review): a missing-contract
+        # member has no backing Change for assess_change to read, but
+        # reachabilityState is "always present" everywhere else this
+        # slice touches (D3/D4) -- a missing symbol/version is a hard
+        # absence, not a reachability question, so UNKNOWN (not proven
+        # either way) is the honest, consistent value here.
+        "reachabilityState": ReachabilityState.UNKNOWN.value,
+    }
+    if root_cause is not None:
+        root_cause_id, root_display = root_cause
+        properties["rootCauseId"] = root_cause_id
+        properties["rootCause"] = root_display
     return {
         "ruleId": rule_id,
         "level": "error" if blocks else "note",
@@ -417,18 +449,7 @@ def _missing_contract_result(
         # from whether severity config makes it block (`blocksGate`). The two
         # axes are orthogonal: severity decides blocking, not scope
         # membership (CodeRabbit review).
-        "properties": {
-            "relevantToGate": True,
-            "blocksGate": blocks,
-            "missingContractMember": label,
-            # G29 Phase 3 slice 1 (ADR-051, Codex review): a missing-contract
-            # member has no backing Change for assess_change to read, but
-            # reachabilityState is "always present" everywhere else this
-            # slice touches (D3/D4) -- a missing symbol/version is a hard
-            # absence, not a reachability question, so UNKNOWN (not proven
-            # either way) is the honest, consistent value here.
-            "reachabilityState": ReachabilityState.UNKNOWN.value,
-        },
+        "properties": properties,
     }
 
 
@@ -489,6 +510,7 @@ def to_sarif(
     result: DiffResult,
     *,
     show_only: str | None = None,
+    report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
 ) -> dict[str, Any]:
     """Convert a DiffResult to a SARIF 2.1.0 document (dict).
@@ -509,6 +531,15 @@ def to_sarif(
     successful execution here; gate/verdict outcome belongs solely in
     ``exitCode``, ``exitCodeDescription``, result ``level``\\ s, and
     ``properties.severityGate``.
+
+    *report_mode* ``"root-cause"`` (G29 Phase 3 slice 5, ADR-051) adds
+    ``properties.rootCauseId``/``properties.rootCause`` to every result
+    instead of changing SARIF's one-result-per-finding structure -- unlike
+    JSON/markdown's dedicated grouped rendering, this keeps every existing
+    SARIF/code-scanning consumer working unchanged while letting a
+    root-cause-aware one group results by ``rootCauseId``. Any other value
+    (including ``"leaf"``) renders as ``full``, unchanged from before this
+    parameter existed.
     """
     tool_version = _tool_version()
 
@@ -526,6 +557,38 @@ def to_sarif(
     rules_seen: dict[str, dict[str, Any]] = {}
     sarif_results: list[dict[str, Any]] = []
 
+    # G29 Phase 3 slice 5 (ADR-051): --report-mode root-cause adds
+    # properties.rootCauseId/rootCause to every result rather than
+    # restructuring SARIF's flat one-result-per-finding shape. referenced_causes
+    # spans `changes` and `scoped_only_changes` (computed once, up front) so a
+    # scoped-only change's own caused_by_type can still correlate with a
+    # regular change the same run of _root_cause_key_and_display would see --
+    # mirrors the identical computation in cli_compare_fold.py's JSON fold-in.
+    root_cause_mode = report_mode == "root-cause"
+    referenced_causes: frozenset[str] = frozenset()
+    if root_cause_mode:
+        scoped_only_preview = list(getattr(result, "scoped_only_changes", ()) or ())
+        referenced_causes = frozenset(
+            c.caused_by_type for c in changes if c.caused_by_type
+        ) | frozenset(c.caused_by_type for c in scoped_only_preview if c.caused_by_type)
+
+    def _root_cause_for(
+        caused_by_type: str | None,
+        symbol: str | None,
+        kind_value: str,
+        finding_id: str,
+    ) -> tuple[str, str] | None:
+        if not root_cause_mode:
+            return None
+        key, root_display = _root_cause_key_and_display(
+            caused_by_type,
+            symbol,
+            kind_value,
+            finding_id,
+            referenced_causes=referenced_causes,
+        )
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16], root_display
+
     # When --used-by/--required-symbol scoping is active, relevant_ids makes
     # each result's own level follow the scoped gate rather than the full
     # library verdict (CLI-audit P1 fix); None means no scoping is active, so
@@ -536,7 +599,18 @@ def to_sarif(
         if rule_id not in rules_seen:
             rules_seen[rule_id] = _rule_for(change.kind)
         sarif_results.append(
-            _result_for(change, result, severity_config, relevant_ids=relevant_ids)
+            _result_for(
+                change,
+                result,
+                severity_config,
+                relevant_ids=relevant_ids,
+                root_cause=_root_cause_for(
+                    change.caused_by_type,
+                    change.symbol,
+                    change.kind.value,
+                    _finding_id(change),
+                ),
+            )
         )
 
     # Scoped-only changes: `scope_diff_to_app`/`scope_diff_to_required_symbols`
@@ -564,12 +638,21 @@ def to_sarif(
             rules_seen[rule_id] = _rule_for(change.kind)
         sarif_results.append(
             _result_for(
-                change, result, severity_config, relevant_ids=relevant_ids,
+                change,
+                result,
+                severity_config,
+                relevant_ids=relevant_ids,
                 # Codex review: proven by the real consumer's own import
                 # table/execution, not an artifact-level library diff --
                 # mirrors reporter.appcompat_to_json's own override for this
                 # exact finding shape.
                 evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
+                root_cause=_root_cause_for(
+                    change.caused_by_type,
+                    change.symbol,
+                    change.kind.value,
+                    _finding_id(change),
+                ),
             )
         )
 
@@ -601,7 +684,16 @@ def to_sarif(
                 if rule_id not in rules_seen:
                     rules_seen[rule_id] = _missing_contract_rule(rule_id)
                 sarif_results.append(
-                    _missing_contract_result(label, gate_scope, severity_config)
+                    _missing_contract_result(
+                        label, gate_scope, severity_config,
+                        # A missing-contract label has no caused_by_type; its
+                        # `symbol` (the label) only becomes a *grouping* key
+                        # when some other finding's caused_by_type names it
+                        # (see referenced_causes above). There is no real
+                        # Change/finding_id to disambiguate an unreferenced
+                        # label by, so the label itself fills that role.
+                        root_cause=_root_cause_for(None, label, rule_id, label),
+                    )
                 )
 
     severity_gate = (
@@ -812,11 +904,17 @@ def to_sarif_str(
     indent: int = 2,
     *,
     show_only: str | None = None,
+    report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
 ) -> str:
     """Serialize DiffResult to a SARIF JSON string."""
     return json.dumps(
-        to_sarif(result, show_only=show_only, severity_config=severity_config),
+        to_sarif(
+            result,
+            show_only=show_only,
+            report_mode=report_mode,
+            severity_config=severity_config,
+        ),
         indent=indent,
     )
 
