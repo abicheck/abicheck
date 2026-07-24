@@ -34,10 +34,15 @@ not reachable by the calling workflow directly (a `workflow_call` job runs
 on a separate runner, same caveat as the artifact-staging inputs below).
 The job unconditionally uploads the report (`if: always() &&
 steps.run.outputs.report-path != ''`, same condition `check-project.yml`
-uses for each matrix cell) under `inputs.report-artifact-name` (default
-`abicheck-check-single-report`) — echoed back as the `report-artifact-name`
-output so a caller can `download-artifact` it without repeating the
-default.
+uses for each matrix cell) under `<inputs.report-artifact-prefix><sanitized
+check-id>` (prefix default `abicheck-check-single-report-`) — the same
+prefix-plus-sanitized-check-id convention `check-project.yml` uses for each
+matrix cell's own report artifact, so a caller invoking `check-single.yml`
+more than once in one workflow run (a matrix, or several single-check jobs)
+doesn't collide on `actions/upload-artifact`'s per-run name-uniqueness
+requirement. The full computed name is echoed back as the
+`report-artifact-name` output so a caller can `download-artifact` it
+without re-deriving the sanitization.
 
 **This job always runs in its own fresh, isolated runner** — unlike
 `check-target` itself (a composite Action a caller can nest as one step

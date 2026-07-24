@@ -138,32 +138,50 @@ class TestCheckSingleReportUpload:
     a composite Action a caller nests in their OWN job) this reusable
     workflow's job runs on a separate runner. Before this fix there was no
     upload step at all, making report-path effectively unusable for any
-    reusable-workflow caller (Codex review)."""
+    reusable-workflow caller (Codex review). The artifact name is
+    <report-artifact-prefix><sanitized-check-id>, not a bare fixed name --
+    a caller invoking check-single.yml more than once in the same workflow
+    run (e.g. from a matrix) would otherwise collide, since
+    actions/upload-artifact requires unique names within one run (a second
+    Codex review), mirroring check-project.yml's own per-cell convention."""
 
-    def test_report_artifact_name_input_has_a_default(self) -> None:
+    def test_report_artifact_prefix_input_has_a_default(self) -> None:
         data = _load(CHECK_SINGLE)
-        report_input = data[True]["workflow_call"]["inputs"]["report-artifact-name"]
-        assert report_input["default"]
+        prefix_input = data[True]["workflow_call"]["inputs"]["report-artifact-prefix"]
+        assert prefix_input["default"]
 
-    def test_upload_report_step_runs_after_check_target_with_always_condition(
-        self,
-    ) -> None:
+    def test_sanitize_step_runs_between_check_target_and_upload(self) -> None:
         data = _load(CHECK_SINGLE)
         steps = _steps(data["jobs"]["check"])
         names = [s.get("name") for s in steps]
         assert "Run check-target" in names
+        assert "Sanitize check-id for artifact name" in names
         assert "Upload report" in names
-        assert names.index("Run check-target") < names.index("Upload report")
+        run_idx = names.index("Run check-target")
+        sanitize_idx = names.index("Sanitize check-id for artifact name")
+        upload_idx = names.index("Upload report")
+        assert run_idx < sanitize_idx < upload_idx
+        sanitize_step = next(
+            s for s in steps if s.get("name") == "Sanitize check-id for artifact name"
+        )
+        assert sanitize_step["if"] == "always() && steps.run.outputs.report-path != ''"
+        assert sanitize_step["env"]["CHECK_ID"] == "${{ steps.run.outputs.check-id }}"
+
+    def test_upload_report_step_uses_prefix_plus_sanitized_id(self) -> None:
+        data = _load(CHECK_SINGLE)
+        steps = _steps(data["jobs"]["check"])
         upload_step = next(s for s in steps if s.get("name") == "Upload report")
         assert upload_step["if"] == "always() && steps.run.outputs.report-path != ''"
-        assert upload_step["with"]["name"] == "${{ inputs.report-artifact-name }}"
+        assert upload_step["with"]["name"] == (
+            "${{ inputs.report-artifact-prefix }}${{ steps.sanitized.outputs.id }}"
+        )
         assert upload_step["with"]["path"] == "${{ steps.run.outputs.report-path }}"
 
-    def test_report_artifact_name_output_echoes_the_input(self) -> None:
+    def test_report_artifact_name_output_matches_the_uploaded_name(self) -> None:
         data = _load(CHECK_SINGLE)
         job_outputs = data["jobs"]["check"]["outputs"]
-        assert (
-            job_outputs["report-artifact-name"] == "${{ inputs.report-artifact-name }}"
+        assert job_outputs["report-artifact-name"] == (
+            "${{ inputs.report-artifact-prefix }}${{ steps.sanitized.outputs.id }}"
         )
 
 
