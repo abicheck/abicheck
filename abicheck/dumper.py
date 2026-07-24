@@ -1299,7 +1299,11 @@ def dump(
     # when there is nothing to fingerprint at all (see its docstring).
     from .comparability import IncludeDir, compute_extraction_contract
     from .dumper_toolchain import _compiler_family_from_toolchain
-    from .header_conditionals import ordered_macro_ops, pass_through_flags_from_tokens
+    from .header_conditionals import (
+        ordered_macro_ops,
+        pass_through_flags_from_tokens,
+        resolve_pass_through_paths,
+    )
 
     _flag_tokens = list(gcc_option_tokens)
     if gcc_options:
@@ -1320,7 +1324,9 @@ def dump(
         abi_dialect=snapshot.ast_toolchain.get("abi_dialect"),
         language_standard=explicit_language_standard(gcc_options, gcc_option_tokens),
         macro_ops=ordered_macro_ops(_flag_tokens),
-        pass_through_flags=pass_through_flags_from_tokens(_flag_tokens),
+        pass_through_flags=resolve_pass_through_paths(
+            pass_through_flags_from_tokens(_flag_tokens), extra_includes or []
+        ),
         # Gate declared_headers/declared_includes on from_headers, NOT on
         # `headers` being non-empty: headers can be supplied yet fully
         # ignored (dwarf_only=True / symbols_only=True force a DWARF/

@@ -179,6 +179,85 @@ def test_explicit_language_standard_flows_into_profile_fingerprint(
     assert snap_17.contract.scope_fingerprint == snap_99.contract.scope_fingerprint
 
 
+def test_forced_include_resolved_via_extra_includes_is_content_hashed(
+    tmp_path: Path,
+) -> None:
+    """A ``-include`` operand only reachable through the ``-I`` dir passed
+    as ``extra_includes`` (not CWD) resolves to a real content hash rather
+    than falling back to opaque string hashing."""
+    if not (_have("clang") and _have("gcc")):
+        pytest.skip(
+            "clang and gcc are required for the contract-wiring integration test"
+        )
+    inc_dir = tmp_path / "inc"
+    inc_dir.mkdir()
+    (inc_dir / "force.h").write_text("#define FORCED_MACRO 1\n")
+    header = tmp_path / "api.h"
+    header.write_text(_HEADER)
+    src = tmp_path / "api.c"
+    src.write_text(_SOURCE)
+    so = tmp_path / "libapi.so"
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-o", str(so), str(src), f"-I{tmp_path}"],
+        check=True,
+        capture_output=True,
+    )
+
+    snap = dump(
+        so,
+        [header],
+        [inc_dir],
+        compiler="cc",
+        header_backend="clang",
+        gcc_options="-include force.h",
+    )
+
+    assert snap.contract is not None
+    pass_through = snap.contract.profile_fields["pass_through_flags"]
+    assert '"str:-include"' in pass_through
+    assert '"str:force.h"' not in pass_through
+    assert '"path:' in pass_through
+
+
+def test_unresolvable_forced_include_does_not_crash_dump(tmp_path: Path) -> None:
+    """Regression pin for the reviewer-flagged crash: a forced-include
+    operand the compiler resolves through search paths abicheck doesn't
+    model (not CWD, not the known extra_includes) must degrade the profile
+    fingerprint to an opaque string hash, never raise out of dump()."""
+    if not (_have("clang") and _have("gcc")):
+        pytest.skip(
+            "clang and gcc are required for the contract-wiring integration test"
+        )
+    inc_dir = tmp_path / "inc"
+    inc_dir.mkdir()
+    (inc_dir / "force.h").write_text("#define FORCED_MACRO 1\n")
+    header = tmp_path / "api.h"
+    header.write_text(_HEADER)
+    src = tmp_path / "api.c"
+    src.write_text(_SOURCE)
+    so = tmp_path / "libapi.so"
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-o", str(so), str(src), f"-I{tmp_path}"],
+        check=True,
+        capture_output=True,
+    )
+
+    # -I passed as raw gcc_options text (not the dedicated extra_includes
+    # param) -- the compiler resolves force.h fine, but resolve_pass_through_paths
+    # only consults extra_includes + CWD, so this operand is unresolvable by
+    # abicheck's own search. Must fall back to str, not raise.
+    snap = dump(
+        so,
+        [header],
+        compiler="cc",
+        header_backend="clang",
+        gcc_options=f"-I{inc_dir} -include force.h",
+    )
+
+    assert snap.contract is not None
+    assert '"str:force.h"' in snap.contract.profile_fields["pass_through_flags"]
+
+
 def test_contract_is_deterministic_and_gate_does_not_spuriously_raise(
     built_lib: tuple[Path, Path],
 ) -> None:

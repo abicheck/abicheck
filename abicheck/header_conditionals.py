@@ -77,15 +77,17 @@ def _macro_name(body: str) -> str | None:
 
 
 def _iter_define_tokens(flags: Iterable[str]) -> Iterator[tuple[str, str]]:
-    """Yield ``(op, raw_body)`` for each ``-D``/``-U`` flag in *flags*, in
+    """Yield ``(op, raw_body)`` for every ``-D``/``-U`` flag in *flags*, in
     order — the shared low-level walker behind both :func:`defines_from_flags`
-    (nets these down to an active *set*, dropping order and value) and
-    :func:`ordered_macro_ops` (ADR-050 profile field — keeps both). ``op`` is
-    ``"D"`` or ``"U"``; *raw_body* is the un-stripped operand text (e.g.
-    ``"FOO=1"`` for ``-DFOO=1``). A flag whose operand is not a valid macro
-    identifier is skipped (via :func:`_macro_name`) so every consumer agrees
-    on what counts as a macro flag at all — this is a pure extraction of the
-    token walk `defines_from_flags` already did, not a behavior change.
+    (nets these down to an active *set*, dropping order and value, and
+    additionally filters to valid bare-identifier macro names) and
+    :func:`ordered_macro_ops` (ADR-050 profile field — keeps every token
+    unfiltered, including function-like macros like ``-DAPI(x)=x``: a
+    non-identifier body is real macro content that can change the parsed
+    AST and must still distinguish two extraction profiles, even though it
+    is not a name `defines_from_flags`'s reconciler consumer can act on —
+    Codex review, PR #624). ``op`` is ``"D"`` or ``"U"``; *raw_body* is the
+    un-stripped operand text (e.g. ``"FOO=1"`` for ``-DFOO=1``).
     """
     tokens = list(flags)
     i = 0
@@ -100,7 +102,7 @@ def _iter_define_tokens(flags: Iterable[str]) -> Iterator[tuple[str, str]]:
             body, op = tok[2:], "D"
         elif tok.startswith("-U") and len(tok) > 2:
             body, op = tok[2:], "U"
-        if body is not None and _macro_name(body) is not None:
+        if body is not None:
             yield op, body
         i += 1
 
@@ -124,7 +126,8 @@ def defines_from_flags(
     active: set[str] = set(initial) if initial else set()
     for op, body in _iter_define_tokens(flags):
         name = _macro_name(body)
-        assert name is not None  # _iter_define_tokens already filtered
+        if name is None:  # function-like/malformed body -- not a plain macro name
+            continue
         if op == "D":
             active.add(name)
         else:
@@ -167,6 +170,48 @@ def pass_through_flags_from_tokens(flags: Iterable[str]) -> list[str | Path]:
             continue
         i += 1
     return result
+
+
+def resolve_pass_through_paths(
+    items: Iterable[str | Path], search_dirs: Iterable[Path] = ()
+) -> list[str | Path]:
+    """Best-effort real-filesystem resolution of each ``Path``-valued
+    element of :func:`pass_through_flags_from_tokens`'s output, run by the
+    caller (``dumper.dump()``) that actually knows the ``-I`` search
+    directories used for this extraction (Codex review, PR #624 follow-up).
+
+    A bare ``Path(operand)`` for a forced-include flag (e.g.
+    ``-include config.h``) can name a file that only exists relative to the
+    frontend's own include search path, not abicheck's CWD — left
+    unresolved, ``compute_extraction_contract`` would either raise on a
+    perfectly valid dump (no such CWD file) or silently content-hash an
+    unrelated CWD file that happens to share the name. *search_dirs* (the
+    ``-I`` directories, in order) plus CWD are tried as candidate resolution
+    roots, mirroring basic ``-I`` precedence. When the operand cannot be
+    resolved anywhere known, the raw flag text is kept as a plain ``str``
+    instead — opaque, hashed as literal text, the same treatment
+    ``compute_extraction_contract`` already gives any unclassified flag —
+    rather than risk either failure mode above. System default include
+    directories, sysroot, and any ``-I``/``-isystem`` passed as raw text
+    inside ``gcc_options``/``gcc_option_tokens`` (as opposed to the
+    dedicated ``extra_includes`` param) are *not* modeled: those cases
+    degrade safely to the same opaque ``str`` fallback rather than crash,
+    but full resolution needs real compiler search-path evidence (the
+    depfile mechanism, ADR-050 D1's still-deferred
+    ``depfile_resolved_paths``/``generated_driver_path``).
+    """
+    roots = [*search_dirs, Path.cwd()]
+    resolved: list[str | Path] = []
+    for item in items:
+        if not isinstance(item, Path):
+            resolved.append(item)
+            continue
+        if item.is_absolute():
+            resolved.append(item if item.is_file() else str(item))
+            continue
+        found = next((root / item for root in roots if (root / item).is_file()), None)
+        resolved.append(found if found is not None else str(item))
+    return resolved
 
 
 def _split_command(command: object) -> list[str]:
