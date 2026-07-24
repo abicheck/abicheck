@@ -8,98 +8,98 @@ Every parameter of every `abicheck-mcp` tool, generated directly from `abicheck/
 
 Compare two ABI surfaces and report breaking changes.
 
-| Parameter | Type | Required | Description |
-|---|---|:--:|---|
-| `old_input` | `str` | yes | Path to old library (.so/.dll/.dylib) or JSON snapshot. |
-| `new_input` | `str` | yes | Path to new library (.so/.dll/.dylib) or JSON snapshot. |
-| `old_headers` | `list[str] \| None` | no | Header files for old side (required if old is ELF binary). |
-| `new_headers` | `list[str] \| None` | no | Header files for new side (required if new is ELF binary). |
-| `headers` | `list[str] \| None` | no | Header files for both sides (shorthand; overridden by old_headers/new_headers). |
-| `include_dirs` | `list[str] \| None` | no | Include directories for the C/C++ parser. |
-| `language` | `str` | no | Language mode — "c++" (default) or "c". |
-| `policy` | `str` | no | Built-in policy: "strict_abi" (default), "sdk_vendor", or "plugin_abi". |
-| `policy_file` | `str \| None` | no | Path to custom YAML policy file (overrides policy parameter). |
-| `suppression_file` | `str \| None` | no | Path to YAML suppression file to filter known changes. |
-| `output_format` | `str` | no | Output format for the rendered report: "json" (default), "markdown", "sarif", "html". |
-| `show_only` | `str \| None` | no | Comma-separated filter tokens (display-only). Severity: breaking, api-break, risk, compatible. Element: functions, variables, types, enums, elf. Action: added, removed, changed. |
-| `report_mode` | `str` | no | "full" (default) or "leaf" (root-type-grouped view). |
-| `show_impact` | `bool` | no | If True, append an impact summary table. |
-| `stat` | `bool` | no | If True, emit one-line summary instead of full report. |
-| `severity_preset` | `str \| None` | no | Severity preset: "default", "strict", or "info-only". Presence of this (or any other severity_* argument) switches exit_code to the severity-aware scheme. |
-| `severity_abi_breaking` | `str \| None` | no | Override severity for abi_breaking findings ("error", "warning", or "info"). |
-| `severity_potential_breaking` | `str \| None` | no | Override severity for potential_breaking findings. |
-| `severity_quality_issues` | `str \| None` | no | Override severity for quality_issues findings. |
-| `severity_addition` | `str \| None` | no | Override severity for addition findings. |
-| `used_by` | `list[str] \| None` | no | Application binary paths (ADR-043) — scope the comparison to what each app actually imports/requires, instead of the full library surface. old_input/new_input may be real library binaries or JSON snapshots carrying binary evidence (a dump of a real library, not headers-only). Mutually exclusive with required_symbols. Adds a ``used_by`` list to the response and computes ``exit_code`` from the worst-scoped app: the legacy BREAKING → 4 / API_BREAK → 2 floor, or — when any ``severity_*`` argument is given — the severity-aware scheme (which can return ``0`` for a scoped BREAKING verdict under ``severity_preset= "info-only"``). |
-| `required_symbols` | `list[str] \| None` | no | An explicit plugin/host required-entrypoint contract (ADR-043) — scope the comparison to only these exported symbols. Mutually exclusive with used_by. Adds a ``required_symbol_contract`` object to the response and computes ``exit_code`` from its verdict under the same legacy/severity-aware scheme as ``used_by`` above. |
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `old_input` | `str` | yes | — | Path to old library (.so/.dll/.dylib) or JSON snapshot. |
+| `new_input` | `str` | yes | — | Path to new library (.so/.dll/.dylib) or JSON snapshot. |
+| `old_headers` | `list[str] \| None` | no | `None` | Header files for old side (required if old is ELF binary). |
+| `new_headers` | `list[str] \| None` | no | `None` | Header files for new side (required if new is ELF binary). |
+| `headers` | `list[str] \| None` | no | `None` | Header files for both sides (shorthand; overridden by old_headers/new_headers). |
+| `include_dirs` | `list[str] \| None` | no | `None` | Include directories for the C/C++ parser. |
+| `language` | `str` | no | `c++` | Language mode — "c++" (default) or "c". |
+| `policy` | `str` | no | `strict_abi` | Built-in policy: "strict_abi" (default), "sdk_vendor", or "plugin_abi". |
+| `policy_file` | `str \| None` | no | `None` | Path to custom YAML policy file (overrides policy parameter). |
+| `suppression_file` | `str \| None` | no | `None` | Path to YAML suppression file to filter known changes. |
+| `output_format` | `str` | no | `json` | Output format for the rendered report: "json" (default), "markdown", "sarif", "html". |
+| `show_only` | `str \| None` | no | `None` | Comma-separated filter tokens (display-only). Severity: breaking, api-break, risk, compatible. Element: functions, variables, types, enums, elf. Action: added, removed, changed. |
+| `report_mode` | `str` | no | `full` | "full" (default) or "leaf" (root-type-grouped view). |
+| `show_impact` | `bool` | no | `False` | If True, append an impact summary table. |
+| `stat` | `bool` | no | `False` | If True, emit one-line summary instead of full report. |
+| `severity_preset` | `str \| None` | no | `None` | Severity preset: "default", "strict", or "info-only". Presence of this (or any other severity_* argument) switches exit_code to the severity-aware scheme. |
+| `severity_abi_breaking` | `str \| None` | no | `None` | Override severity for abi_breaking findings ("error", "warning", or "info"). |
+| `severity_potential_breaking` | `str \| None` | no | `None` | Override severity for potential_breaking findings. |
+| `severity_quality_issues` | `str \| None` | no | `None` | Override severity for quality_issues findings. |
+| `severity_addition` | `str \| None` | no | `None` | Override severity for addition findings. |
+| `used_by` | `list[str] \| None` | no | `None` | Application binary paths (ADR-043) — scope the comparison to what each app actually imports/requires, instead of the full library surface. old_input/new_input may be real library binaries or JSON snapshots carrying binary evidence (a dump of a real library, not headers-only). Mutually exclusive with required_symbols. Adds a ``used_by`` list to the response and computes ``exit_code`` from the worst-scoped app: the legacy BREAKING → 4 / API_BREAK → 2 floor, or — when any ``severity_*`` argument is given — the severity-aware scheme (which can return ``0`` for a scoped BREAKING verdict under ``severity_preset= "info-only"``). |
+| `required_symbols` | `list[str] \| None` | no | `None` | An explicit plugin/host required-entrypoint contract (ADR-043) — scope the comparison to only these exported symbols. Mutually exclusive with used_by. Adds a ``required_symbol_contract`` object to the response and computes ``exit_code`` from its verdict under the same legacy/severity-aware scheme as ``used_by`` above. |
 
 ## `abi_dump`
 
 Dump ABI snapshot of a C/C++ shared library to JSON.
 
-| Parameter | Type | Required | Description |
-|---|---|:--:|---|
-| `library_path` | `str` | yes | Path to .so, .dll, or .dylib file. |
-| `headers` | `list[str] \| None` | no | Public header file paths. For ELF (.so), omitting them produces a symbol-only snapshot with no type information (strongly recommended to supply headers). Not used for PE (.dll) or Mach-O (.dylib) inputs. |
-| `include_dirs` | `list[str] \| None` | no | Extra include directories for the C/C++ parser. |
-| `version` | `str` | no | Version label to embed in the snapshot (e.g. "1.2.3"). |
-| `language` | `str` | no | Language mode — "c++" (default) or "c". |
-| `output_path` | `str \| None` | no | If provided, write snapshot to this file and return the path. Otherwise the snapshot JSON is returned inline. |
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `library_path` | `str` | yes | — | Path to .so, .dll, or .dylib file. |
+| `headers` | `list[str] \| None` | no | `None` | Public header file paths. For ELF (.so), omitting them produces a symbol-only snapshot with no type information (strongly recommended to supply headers). Not used for PE (.dll) or Mach-O (.dylib) inputs. |
+| `include_dirs` | `list[str] \| None` | no | `None` | Extra include directories for the C/C++ parser. |
+| `version` | `str` | no | `unknown` | Version label to embed in the snapshot (e.g. "1.2.3"). |
+| `language` | `str` | no | `c++` | Language mode — "c++" (default) or "c". |
+| `output_path` | `str \| None` | no | `None` | If provided, write snapshot to this file and return the path. Otherwise the snapshot JSON is returned inline. |
 
 ## `abi_list_changes`
 
 List all ABI change kinds that abicheck can detect.
 
-| Parameter | Type | Required | Description |
-|---|---|:--:|---|
-| `impact` | `str \| None` | no | Filter by impact level. One of: "breaking", "api_break", "risk", "compatible". If omitted, returns all change kinds. |
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `impact` | `str \| None` | no | `None` | Filter by impact level. One of: "breaking", "api_break", "risk", "compatible". If omitted, returns all change kinds. |
 
 ## `abi_explain_change`
 
 Get a detailed explanation of a specific ABI change kind.
 
-| Parameter | Type | Required | Description |
-|---|---|:--:|---|
-| `change_kind` | `str` | yes | The change kind to explain (e.g. "func_removed", "type_size_changed"). Use abi_list_changes to see all available kinds. |
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `change_kind` | `str` | yes | — | The change kind to explain (e.g. "func_removed", "type_size_changed"). Use abi_list_changes to see all available kinds. |
 
 ## `abi_audit`
 
 Single-release ABI-hygiene audit — no baseline (ADR-035 D8).
 
-| Parameter | Type | Required | Description |
-|---|---|:--:|---|
-| `library_path` | `str` | yes | Path to .so/.dll/.dylib or a JSON snapshot. |
-| `headers` | `list[str] \| None` | no | Public header files (classifies declarations + drives the pattern pre-scan). Strongly recommended — most checks skip cleanly without public-header provenance. |
-| `include_dirs` | `list[str] \| None` | no | Extra include directories for the C/C++ parser. |
-| `language` | `str` | no | Language mode — "c++" (default) or "c". |
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `library_path` | `str` | yes | — | Path to .so/.dll/.dylib or a JSON snapshot. |
+| `headers` | `list[str] \| None` | no | `None` | Public header files (classifies declarations + drives the pattern pre-scan). Strongly recommended — most checks skip cleanly without public-header provenance. |
+| `include_dirs` | `list[str] \| None` | no | `None` | Extra include directories for the C/C++ parser. |
+| `language` | `str` | no | `c++` | Language mode — "c++" (default) or "c". |
 
 ## `abi_estimate`
 
 Dry-run scan cost estimate for a project (ADR-035 D10 / ADR-043).
 
-| Parameter | Type | Required | Description |
-|---|---|:--:|---|
-| `binary_path` | `str` | yes | Library/artifact the scan would target (existence checked). |
-| `headers` | `list[str] \| None` | no | Public header files (for the L2 header-AST fan-out estimate). |
-| `include_dirs` | `list[str] \| None` | no | Extra include directories. |
-| `sources` | `str \| None` | no | Source tree (compile DB auto-discovered within it). |
-| `compile_db` | `str \| None` | no | Explicit compile_commands.json (else discovered in sources). |
-| `depth` | `str \| None` | no | Coarse evidence-depth selector: "binary", "headers", "build", or "source" (None = inferred from inputs, escalating with the changed-path risk score once seeded). |
-| `changed_paths` | `list[str] \| None` | no | Changed-path set for the focused (D7) replay-scope estimate. |
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `binary_path` | `str` | yes | — | Library/artifact the scan would target (existence checked). |
+| `headers` | `list[str] \| None` | no | `None` | Public header files (for the L2 header-AST fan-out estimate). |
+| `include_dirs` | `list[str] \| None` | no | `None` | Extra include directories. |
+| `sources` | `str \| None` | no | `None` | Source tree (compile DB auto-discovered within it). |
+| `compile_db` | `str \| None` | no | `None` | Explicit compile_commands.json (else discovered in sources). |
+| `depth` | `str \| None` | no | `None` | Coarse evidence-depth selector: "binary", "headers", "build", or "source" (None = inferred from inputs, escalating with the changed-path risk score once seeded). |
+| `changed_paths` | `list[str] \| None` | no | `None` | Changed-path set for the focused (D7) replay-scope estimate. |
 
 ## `abi_scan`
 
 Run a deterministic source-intelligence scan (ADR-035 D3/D10 / ADR-043).
 
-| Parameter | Type | Required | Description |
-|---|---|:--:|---|
-| `binary_path` | `str` | yes | Library/artifact (or JSON snapshot) to scan. |
-| `headers` | `list[str] \| None` | no | Public header files (provenance + pattern pre-scan). |
-| `include_dirs` | `list[str] \| None` | no | Extra include directories for the parser. |
-| `public_header_dirs` | `list[str] \| None` | no | Directories whose headers are public; establishes the public/internal boundary so the leakage / RTTI / exported-vs-public cross-checks run instead of skipping. A directory passed via ``headers`` also counts; a lone umbrella header file cannot establish a boundary. |
-| `sources` | `str \| None` | no | Source tree (compile DB auto-discovered within it). |
-| `compile_db` | `str \| None` | no | Explicit compile_commands.json (else discovered in sources). |
-| `against` | `str \| None` | no | Previous build's dump/library to compare against (omit for a single-release audit — the always-on hygiene catalog runs either way). |
-| `depth` | `str \| None` | no | Coarse evidence-depth selector: "binary", "headers", "build", or "source" (None = inferred from inputs, escalating with the changed-path risk score once seeded). |
-| `changed_paths` | `list[str] \| None` | no | Changed-path set focusing the scan (ADR-035 D7). |
-| `language` | `str` | no | Language mode — "c++" (default) or "c". |
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `binary_path` | `str` | yes | — | Library/artifact (or JSON snapshot) to scan. |
+| `headers` | `list[str] \| None` | no | `None` | Public header files (provenance + pattern pre-scan). |
+| `include_dirs` | `list[str] \| None` | no | `None` | Extra include directories for the parser. |
+| `public_header_dirs` | `list[str] \| None` | no | `None` | Directories whose headers are public; establishes the public/internal boundary so the leakage / RTTI / exported-vs-public cross-checks run instead of skipping. A directory passed via ``headers`` also counts; a lone umbrella header file cannot establish a boundary. |
+| `sources` | `str \| None` | no | `None` | Source tree (compile DB auto-discovered within it). |
+| `compile_db` | `str \| None` | no | `None` | Explicit compile_commands.json (else discovered in sources). |
+| `against` | `str \| None` | no | `None` | Previous build's dump/library to compare against (omit for a single-release audit — the always-on hygiene catalog runs either way). |
+| `depth` | `str \| None` | no | `None` | Coarse evidence-depth selector: "binary", "headers", "build", or "source" (None = inferred from inputs, escalating with the changed-path risk score once seeded). |
+| `changed_paths` | `list[str] \| None` | no | `None` | Changed-path set focusing the scan (ADR-035 D7). |
+| `language` | `str` | no | `c++` | Language mode — "c++" (default) or "c". |

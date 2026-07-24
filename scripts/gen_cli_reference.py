@@ -141,6 +141,11 @@ def _render_command(name: str, cmd: Any, heading_level: int) -> list[str]:
 
 
 def render() -> str:
+    # Make the command work from a clean checkout (no install / no PYTHONPATH):
+    # sys.path[0] is scripts/, not the repo root, so the abicheck import below
+    # fails there without this.
+    if str(REPO_DIR) not in sys.path:
+        sys.path.insert(0, str(REPO_DIR))
     from abicheck.cli import main
 
     lines = [

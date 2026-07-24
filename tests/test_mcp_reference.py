@@ -56,6 +56,14 @@ def test_every_tool_appears_in_generated_reference():
         assert f"`{name}`" in content, f"{name!r} missing from generated MCP reference"
 
 
+def test_default_values_appear_in_generated_reference():
+    gen = _load_gen()
+    content = gen.OUT_PATH.read_text(encoding="utf-8")
+    # abi_dump's version parameter has a real default ("unknown") that must
+    # show up in the Default column, not just an implicit "no" in Required.
+    assert "| `version` | `str` | no | `unknown` |" in content
+
+
 def test_parse_args_section_folds_wrapped_continuation_lines():
     gen = _load_gen()
     doc = """Summary line.

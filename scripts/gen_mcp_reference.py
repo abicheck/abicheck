@@ -117,18 +117,32 @@ def _tool_section(name: str, fn: object) -> list[str]:
     summary = (doc or "").split("\n\n", 1)[0].strip().replace("\n", " ")
     arg_docs = _parse_args_section(doc)
 
-    lines = [f"## `{name}`", "", summary, "", "| Parameter | Type | Required | Description |", "|---|---|:--:|---|"]
+    lines = [
+        f"## `{name}`",
+        "",
+        summary,
+        "",
+        "| Parameter | Type | Required | Default | Description |",
+        "|---|---|:--:|---|---|",
+    ]
     for param_name, param in sig.parameters.items():
-        required = "yes" if param.default is inspect.Parameter.empty else "no"
+        has_default = param.default is not inspect.Parameter.empty
+        required = "no" if has_default else "yes"
+        default_str = f"`{_escape(str(param.default))}`" if has_default else "—"
         lines.append(
             f"| `{param_name}` | `{_escape(_type_str(param.annotation))}` | {required} | "
-            f"{_escape(arg_docs.get(param_name, ''))} |"
+            f"{default_str} | {_escape(arg_docs.get(param_name, ''))} |"
         )
     lines.append("")
     return lines
 
 
 def render() -> str:
+    # Make the command work from a clean checkout (no install / no PYTHONPATH):
+    # sys.path[0] is scripts/, not the repo root, so the abicheck import below
+    # fails there without this.
+    if str(REPO_DIR) not in sys.path:
+        sys.path.insert(0, str(REPO_DIR))
     from abicheck import mcp_server
 
     lines = [
