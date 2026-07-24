@@ -235,6 +235,29 @@ inputs:
     description: 'Recorded in the report envelope as the abicheck Action ref that ran this check.'
     required: false
     default: ${{ format('{0}@{1}', github.action_repository || github.repository, github.action_ref || github.sha) }}
+  abicheck-repository:
+    description: >-
+      Override this Action's own self-checkout identity (which repository
+      it checks out for its nested resolve-baseline/root-action
+      composition) instead of auto-detecting from github.action_repository/
+      github.repository. Set this when check-target is invoked as a nested
+      `uses: ./x` step from INSIDE another reusable workflow's own
+      self-checkout copy of abicheck (check-project.yml/check-single.yml
+      do this) -- from check-target's own perspective that local path
+      reference is indistinguishable from a genuine same-repository
+      invocation, so github.action_repository comes back empty and the
+      auto-detected fallback (github.repository/github.sha) would silently
+      resolve to the CALLER's own repository instead of abicheck's for an
+      external consumer, sending its nested resolve-baseline checkout to
+      the wrong place. Leave empty for a direct `uses: abicheck/abicheck/
+      actions/check-target@ref` or a same-repository `uses: ./actions/
+      check-target` invocation, where auto-detection is already correct.
+    required: false
+    default: ''
+  abicheck-ref:
+    description: 'Paired with abicheck-repository above -- the ref/SHA to check out.'
+    required: false
+    default: ''
 
 outputs:
   outcome:
@@ -288,17 +311,34 @@ runs:
     # (job 89082423642). Reading them here instead, in a plain `run:` step
     # that is the *first* thing check-target does, captures the correct
     # values before anything nested has a chance to overwrite them.
+    #
+    # `abicheck-repository`/`abicheck-ref` (explicit `inputs:`, checked
+    # first) take priority over `github.action_repository`/
+    # `github.action_ref` (checked second): when check-project.yml/
+    # check-single.yml invoke this Action via a local `uses: ./x` step
+    # inside THEIR OWN self-checkout copy of abicheck, that local reference
+    # is indistinguishable, from check-target's own perspective, from a
+    # genuine same-repository invocation -- `github.action_repository`
+    # comes back empty either way. Left to the `github.repository`/
+    # `github.sha` fallback, an external consumer's nested resolve-baseline
+    # checkout would silently resolve to the CALLER's own repository
+    # instead of abicheck's (Codex review). check-project.yml/
+    # check-single.yml already computed their own correct identity in
+    # their own first step for exactly this reason, and pass it straight
+    # through via these two inputs so check-target never has to guess.
     - name: Capture this Action's identity
       id: identity
       shell: bash
       env:
+        INPUT_ABICHECK_REPOSITORY: ${{ inputs.abicheck-repository }}
+        INPUT_ABICHECK_REF: ${{ inputs.abicheck-ref }}
         ACTION_REPOSITORY: ${{ github.action_repository }}
         ACTION_REF: ${{ github.action_ref }}
         FALLBACK_REPOSITORY: ${{ github.repository }}
         FALLBACK_REF: ${{ github.sha }}
       run: |
-        echo "repository=${ACTION_REPOSITORY:-$FALLBACK_REPOSITORY}" >> "$GITHUB_OUTPUT"
-        echo "ref=${ACTION_REF:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
+        echo "repository=${INPUT_ABICHECK_REPOSITORY:-${ACTION_REPOSITORY:-$FALLBACK_REPOSITORY}}" >> "$GITHUB_OUTPUT"
+        echo "ref=${INPUT_ABICHECK_REF:-${ACTION_REF:-$FALLBACK_REF}}" >> "$GITHUB_OUTPUT"
 
     # ── Self-checkout for nested composite Actions ──────────────────────────
     # A relative `uses: ./x` step ALWAYS resolves against $GITHUB_WORKSPACE

@@ -68,6 +68,7 @@ jobs:
           import json
           data = {
               'schema': 'abicheck.build-output/v1',
+              'profile': {'id': 'linux-x86_64-gcc-test'},
               'targets': [{'id': 'libexample', 'binary': 'libexample.so'}],
           }
           json.dump(data, open('abicheck-build-linux-x86_64-gcc-test/build-output.json', 'w'))

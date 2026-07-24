@@ -27,6 +27,7 @@ pattern every nested ``uses: ./x`` step depends on.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -74,9 +75,11 @@ class TestBothFilesParseAsValidWorkflowYaml:
 class TestCheckSingleSelfCheckout:
     """Mirrors check-target/action.yml's own "Capture this Action's
     identity" -> "Checkout abicheck" -> nested `uses:` pattern, but keyed
-    off `job.workflow_ref`/`job.workflow_sha` (the reusable-workflow
-    equivalent of `github.action_repository`/`github.action_ref`) since a
-    relative `uses: ./x` step inside THIS reusable workflow's own steps
+    off `github.workflow_ref`/`github.workflow_sha` (the reusable-workflow
+    equivalent of `github.action_repository`/`github.action_ref` -- NOT
+    `job.workflow_ref`/`job.workflow_sha`, an earlier version of this
+    workflow's own mistake; the `job` context has no such properties) since
+    a relative `uses: ./x` step inside THIS reusable workflow's own steps
     resolves against the caller's checkout, not this repository, exactly
     like the composite-Action case check-target itself already had to fix
     (confirmed via GitHub Community Discussion #107558)."""
@@ -521,3 +524,103 @@ class TestCandidateResolverRejectsAmbiguousMatches:
         run = resolver["run"]
         assert "label=f'target {cell" in run
         assert "label=f'bundle {cell" in run
+
+
+class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
+    """binary_pattern/consumer_binary_pattern/member_binary_patterns come
+    from the project's own .abicheck.yml -- an absolute or `../`-escaping
+    pattern must not be able to glob outside candidate/ (Codex review)."""
+
+    def _resolver_script(self) -> str:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        resolver = next(
+            s for s in steps if s.get("name") == "Resolve candidate binary/binaries"
+        )
+        return resolver["run"]
+
+    def _inner_python(self) -> str:
+        return self._resolver_script().split('python3 -c "', 1)[1].rsplit('"', 1)[0]
+
+    def test_resolver_checks_commonpath_against_the_root(self) -> None:
+        run = self._inner_python()
+        assert "os.path.commonpath" in run
+        assert "root_abs" in run
+
+    def _run_bash(
+        self, tmp_path: Path, matrix: dict[str, Any]
+    ) -> subprocess.CompletedProcess[str]:
+        # Run the FULL bash script (not just the inner python3 -c text) via
+        # `bash -c`, exactly as the real runner does -- the inner script
+        # contains bash-escaped `\"` sequences that are only valid Python
+        # once bash's own double-quote unescaping has run; extracting and
+        # feeding the raw text straight to `python3 -c` skips that step and
+        # is a SyntaxError (backslash in an f-string expression part).
+        github_output = tmp_path / "github_output"
+        github_output.write_text("")
+        env = {
+            **os.environ,
+            "MATRIX_JSON": json.dumps(matrix),
+            "GITHUB_OUTPUT": str(github_output),
+        }
+        result = subprocess.run(
+            ["bash", "-c", self._resolver_script()],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        result.stdout = github_output.read_text() + result.stdout
+        return result
+
+    def test_escaping_pattern_is_rejected_end_to_end(self, tmp_path: Path) -> None:
+        (tmp_path / "candidate").mkdir()
+        (tmp_path / "candidate" / "libexample.so").write_text("real")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "leaked.so").write_text("secret")
+
+        result = self._run_bash(
+            tmp_path,
+            {
+                "kind": "target",
+                "name": "libexample",
+                "binary_pattern": "../outside/leaked.so",
+            },
+        )
+        assert result.returncode != 0
+        assert "outside candidate/" in result.stderr
+
+    def test_in_root_pattern_still_resolves(self, tmp_path: Path) -> None:
+        (tmp_path / "candidate").mkdir()
+        (tmp_path / "candidate" / "libexample.so").write_text("real")
+
+        result = self._run_bash(
+            tmp_path,
+            {"kind": "target", "name": "libexample", "binary_pattern": "*.so"},
+        )
+        assert result.returncode == 0, result.stderr
+        assert "new-library=candidate/libexample.so" in result.stdout
+
+
+class TestCheckTargetIdentityPassthrough:
+    """check-target's own github.action_repository/github.action_ref
+    auto-detection cannot tell a nested `uses: ./.check-project-src/...`
+    (or `./.check-single-src/...`) local reference apart from a genuine
+    same-repository invocation -- both reusable workflows must pass their
+    own already-resolved identity through explicitly (Codex review)."""
+
+    @pytest.mark.parametrize(
+        ("path", "job_name"),
+        [(CHECK_PROJECT, "check"), (CHECK_SINGLE, "check")],
+    )
+    def test_run_check_target_forwards_resolved_identity(
+        self, path: Path, job_name: str
+    ) -> None:
+        data = _load(path)
+        steps = _steps(data["jobs"][job_name])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["with"]["abicheck-repository"] == (
+            "${{ steps.identity.outputs.repository }}"
+        )
+        assert run_step["with"]["abicheck-ref"] == "${{ steps.identity.outputs.ref }}"
