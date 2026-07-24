@@ -1004,8 +1004,22 @@ _PP_ELIF_CPLUSPLUS_GUARD_PATTERN = re.compile(
 # comparison operators (``==``, ``!=``) are not attempted here and keep
 # falling through to the general pattern above, the same conservative
 # default an entirely unrecognized condition gets.
-_PP_CPLUSPLUS_LESS_THAN_CPP20_TAIL = (
+#
+# The whole comparison may also be wrapped in one level of parentheses
+# (``#if (__cplusplus < 202002L)``, Codex review, twenty-sixth round) —
+# just as common a spelling as the parenthesized ``#if (0)``/``#if (1)``
+# literals this file already accepts (``_PP_LITERAL_ZERO``/
+# ``_PP_LITERAL_TRUE``) — matched the same way: an outer optional-parens
+# alternation around the bare comparison.
+_PP_CPLUSPLUS_LESS_THAN_CPP20_COMPARISON = (
     rb"__cplusplus[ \t]*(?:<[ \t]*202002L?|<=[ \t]*201703L?)"
+)
+_PP_CPLUSPLUS_LESS_THAN_CPP20_TAIL = (
+    rb"(?:\([ \t]*"
+    + _PP_CPLUSPLUS_LESS_THAN_CPP20_COMPARISON
+    + rb"[ \t]*\)|"
+    + _PP_CPLUSPLUS_LESS_THAN_CPP20_COMPARISON
+    + rb")"
 )
 _PP_IF_CPLUSPLUS_LESS_THAN_PATTERN = re.compile(
     rb"^[ \t]*#[ \t]*if[ \t]+" + _PP_CPLUSPLUS_LESS_THAN_CPP20_TAIL + rb"[ \t]*$"
@@ -1514,6 +1528,57 @@ class Cpp20Requirement:
     line: int
 
 
+_QUOTED_INCLUDE_PATTERN = re.compile(
+    rb'^[ \t]*#[ \t]*include[ \t]+"([^"]+)"', re.MULTILINE
+)
+
+
+def _expand_with_quoted_includes(header_paths: list[Path]) -> list[Path]:
+    """Expand *header_paths* with files reachable via a quoted ``#include
+    "..."``, resolved relative to the including file's own directory
+    (Codex review): a caller often designates just one umbrella entry
+    point (``#include "concepts.hpp"`` and nothing else) whose only C++20
+    signal actually lives in the included file, not the umbrella file
+    itself — castxml/clang parse the transitive include as part of the
+    same translation unit regardless of whether it was named directly, so
+    the dialect decision must see it too.
+
+    Deliberately narrow, matching this file's incremental-per-reported-
+    case scope: only the quoted spelling is followed (an angle-bracket
+    ``#include <...>`` is typically a system/toolchain header resolved via
+    ``-I`` search paths this heuristic doesn't have access to, not a
+    project header); resolution checks only the including file's own
+    directory (the first location the standard's quoted-include search
+    always checks), not any ``-I`` search path. Cycle-safe (visited by
+    resolved absolute path) and silently skips an unreadable file or an
+    include that doesn't resolve to a real file on disk — the same
+    conservative, best-effort spirit as the rest of this scan.
+    """
+    seen: set[Path] = set()
+    expanded: list[Path] = []
+    stack = list(header_paths)
+    while stack:
+        p = stack.pop(0)
+        try:
+            resolved = p.resolve()
+        except OSError:
+            resolved = p
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        expanded.append(p)
+        try:
+            content = p.read_bytes()
+        except OSError:
+            continue
+        for m in _QUOTED_INCLUDE_PATTERN.finditer(content):
+            name = m.group(1).decode("utf-8", "surrogateescape")
+            included = p.parent / name
+            if included.is_file():
+                stack.append(included)
+    return expanded
+
+
 def _find_cpp20_requirements(
     header_paths: list[Path], *, for_language_mode_decision: bool = False
 ) -> list[Cpp20Requirement]:
@@ -1545,7 +1610,16 @@ def _find_cpp20_requirements(
     always-true, unmasked signal — that assumption only holds once C++
     mode is already chosen, and is exactly backwards for the decision of
     whether to choose it in the first place.
+
+    *header_paths* is expanded with any file reachable via a quoted
+    ``#include "..."`` before scanning (Codex review, twenty-sixth
+    round) — see :func:`_expand_with_quoted_includes`. castxml/clang
+    parse a transitively-included header as part of the same
+    translation unit regardless of whether the caller named it directly,
+    so a C++20 signal that lives only in an included file (a common
+    umbrella-header shape) must count too.
     """
+    header_paths = _expand_with_quoted_includes(header_paths)
     per_file: list[tuple[Path, bytes]] = []
     concept_type_shadowed = False
     requires_type_shadowed = False

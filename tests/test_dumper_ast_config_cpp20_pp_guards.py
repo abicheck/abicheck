@@ -826,6 +826,60 @@ def test_cpp20_detector_detects_construct_behind_elif_less_than_cplusplus_guard(
     assert any(r.reason == "consteval-declaration" for r in reqs)
 
 
+def test_cpp20_detector_detects_construct_behind_parenthesized_less_than_guard(
+    tmp_path,
+):
+    """Regression (Codex review): ``#if (__cplusplus < 202002L)`` — the
+    comparison wrapped in parentheses, an established idiom this file
+    already accepts for ``#if (0)``/``#if (1)`` via ``_PP_LITERAL_ZERO``/
+    ``_PP_LITERAL_TRUE`` — must get the same inverted-polarity treatment
+    as the bare (unparenthesized) form. Before this fix the parenthesized
+    spelling didn't match ``_PP_IF_CPLUSPLUS_LESS_THAN_PATTERN`` at all,
+    so it fell through to the wrong bucket: the pre-C++20-safe fallback
+    arm got masked and the circular ``#else`` got trusted instead."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if (__cplusplus < 202002L)\nconsteval int f();\n#else\nint old_style;\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
+def test_cpp20_detector_ignores_construct_behind_parenthesized_less_than_else(
+    tmp_path,
+):
+    """Companion: the circular ``#else`` sibling of a parenthesized
+    ``#if (__cplusplus < 202002L)`` fallback must be masked, mirroring
+    ``test_cpp20_detector_ignores_construct_behind_less_than_cplusplus_else``
+    for the bare spelling."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if (__cplusplus < 202002L)\nint consteval;\n#else\nconsteval int f();\n"
+        "#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_detects_construct_behind_elif_parenthesized_less_than_guard(
+    tmp_path,
+):
+    """Companion: the same parenthesized form written as a later
+    ``#elif`` arm (after an earlier disabled arm)."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint disabled;\n#elif (__cplusplus <= 201703L)\nconsteval int f();\n"
+        "#else\nint old_style;\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
 def test_cpp20_detector_settles_on_elif_less_than_cplusplus(tmp_path):
     """Companion: once an ``#elif __cplusplus < N`` arm is reached, it
     settles the chain like ``#elif 1`` does -- a later sibling arm

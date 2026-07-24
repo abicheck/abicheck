@@ -1442,3 +1442,41 @@ def test_cpp20_detector_ignores_generic_lambda_auto_param_with_attribute(tmp_pat
         "auto g() { return [](  [[maybe_unused]] auto x) { return x; }; }\n",
     )
     assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_follows_quoted_include_to_sibling_header(tmp_path):
+    """Regression (Codex review): an umbrella header whose only C++20
+    signal lives in a file it ``#include``s (quoted, same directory) must
+    still be detected -- ``header_paths`` previously only scanned the
+    literally-passed files, never following ``#include`` directives, so a
+    header that just re-exports a sibling's declarations went
+    undetected."""
+    (tmp_path / "concepts_impl.hpp").write_text(
+        "template<class T> concept MyConcept = true;\n"
+    )
+    umbrella = _write(tmp_path, "umbrella.hpp", '#include "concepts_impl.hpp"\n')
+    assert _detect_cpp20_headers(umbrella) is True
+    reqs = _find_cpp20_requirements(umbrella)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
+def test_cpp20_detector_ignores_angle_bracket_include(tmp_path):
+    """Companion: only quoted ``#include "..."`` is followed -- an
+    angle-bracket ``#include <...>`` is left alone, since it isn't
+    resolvable relative to the including file's own directory (it's a
+    search-path include, e.g. a system or ``-I`` header)."""
+    (tmp_path / "concepts_impl.hpp").write_text(
+        "template<class T> concept MyConcept = true;\n"
+    )
+    umbrella = _write(tmp_path, "umbrella.hpp", "#include <concepts_impl.hpp>\n")
+    assert _detect_cpp20_headers(umbrella) is False
+
+
+def test_cpp20_detector_handles_cyclic_quoted_includes(tmp_path):
+    """Companion: mutually-including headers must not hang or recurse
+    forever -- the expansion tracks resolved paths already visited."""
+    (tmp_path / "cyc_b.hpp").write_text(
+        '#include "cyc_a.hpp"\ntemplate<class T> concept CycConcept = true;\n'
+    )
+    headers = _write(tmp_path, "cyc_a.hpp", '#include "cyc_b.hpp"\nint a();\n')
+    assert _detect_cpp20_headers(headers) is True
