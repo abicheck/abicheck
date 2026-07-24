@@ -1214,7 +1214,9 @@ _PP_ELIF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN = re.compile(
 )
 
 
-def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
+def _strip_inactive_if_zero_blocks(
+    content: bytes, *, invert_dialect_fallback_guards: bool = True
+) -> bytes:
     """Blank out unreachable arms of an ``#if 0``/``#if false`` chain.
 
     A disabled compatibility stub (``#if 0\\nstruct consteval {};\\n#endif``)
@@ -1274,6 +1276,25 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
     to an unrecognized ``#if``), but any frame with an unreachable
     *ancestor* is unconditionally unreachable regardless of its own
     condition.
+
+    ``invert_dialect_fallback_guards`` (default ``True``) controls the
+    ``__cplusplus < N``/``#ifndef __cpp_x``/``#if !defined(__cpp_x)``
+    inverted-polarity treatment described above. It must be **disabled**
+    (``False``) for masking content that feeds the *shadow*-name scan
+    (Codex review, nineteenth round): that scan asks "does 'concept' name
+    an ordinary pre-C++20 compatibility type *in code that would still be
+    reachable if C++20 were chosen*" — the inverted polarity is exactly
+    backwards for that question, since it treats the guarded arm of e.g.
+    ``#if __cplusplus < 202002L`` as live specifically *because* it is a
+    pre-C++20 fallback shim, i.e. content that goes away once C++20 is
+    chosen. Left enabled there, a ``struct concept {};`` compatibility
+    shim confined entirely to such a guard would wrongly shadow a genuine
+    ``concept`` declaration in another header of the same aggregate,
+    permanently keeping the whole translation unit off ``-std=gnu++20``
+    even though the shim itself would never coexist with that declaration
+    under any dialect choice. The *requirements* scan (deciding whether
+    unconditionally-reachable code needs C++20) is unaffected and keeps
+    the default ``True``.
     """
     lines = content.split(b"\n")
     out: list[bytes] = []
@@ -1312,21 +1333,31 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 stack.append([False, True, True])
                 out.append(b"")
                 continue
-            if _PP_IF_CPLUSPLUS_LESS_THAN_PATTERN.match(line):
+            if (
+                invert_dialect_fallback_guards
+                and _PP_IF_CPLUSPLUS_LESS_THAN_PATTERN.match(line)
+            ):
                 # Opposite polarity from the general __cplusplus-guard
                 # branch below: a less-than comparison's guarded arm is
                 # the pre-C++20-safe fallback, so it's scanned live and
                 # immediately settled so any #else (feature present,
                 # circular) stays masked -- checked ahead of the general
-                # branch since it would otherwise also match.
+                # branch since it would otherwise also match. Skipped
+                # entirely when invert_dialect_fallback_guards is False
+                # (shadow-scan callers), falling through to the general
+                # branch below instead -- see the docstring.
                 stack.append([True, False, True])
                 out.append(b"")
                 continue
-            if _PP_IF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN.match(line):
+            if (
+                invert_dialect_fallback_guards
+                and _PP_IF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN.match(line)
+            ):
                 # Same inverted polarity as #ifndef __cpp_x below --
                 # checked ahead of the general branch since this spelling
                 # (unlike #ifndef) starts with "#if" and would otherwise
-                # be caught there first.
+                # be caught there first. Same shadow-scan exception as
+                # above.
                 stack.append([True, False, True])
                 out.append(b"")
                 continue
@@ -1334,6 +1365,10 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 _PP_IF_ZERO_PATTERN.match(line)
                 or _PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN.match(line)
                 or _PP_IFNDEF_CPLUSPLUS_PATTERN.match(line)
+                or (
+                    not invert_dialect_fallback_guards
+                    and _PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN.match(line)
+                )
                 or (
                     _PP_IF_CPLUSPLUS_GUARD_PATTERN.match(line)
                     and not _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
@@ -1346,11 +1381,16 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 stack.append([True, False, True])
                 out.append(b"")
                 continue
-            if _PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN.match(line):
+            if (
+                invert_dialect_fallback_guards
+                and _PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN.match(line)
+            ):
                 # Opposite polarity from the branch above: the
                 # #ifndef-guarded arm (feature absent) is the trustworthy
                 # one here, so it's scanned live and immediately settled
                 # so any #else (feature present, circular) stays masked.
+                # Skipped for a shadow-scan caller -- already folded into
+                # the general mask branch above instead.
                 stack.append([True, False, True])
                 out.append(b"")
                 continue
@@ -1378,18 +1418,26 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 # pass-through.
                 out.append(line)
                 continue
-            if _PP_ELIF_CPLUSPLUS_LESS_THAN_PATTERN.match(line):
+            if (
+                invert_dialect_fallback_guards
+                and _PP_ELIF_CPLUSPLUS_LESS_THAN_PATTERN.match(line)
+            ):
                 # Same inverted polarity as the #if-opening case, checked
                 # ahead of the general branch below since it would
-                # otherwise also match.
+                # otherwise also match. Same shadow-scan exception as the
+                # #if-opening case: falls through to the general branch
+                # (mask) when invert_dialect_fallback_guards is False.
                 frame[1] = frame[2]
                 frame[2] = True
                 out.append(b"" if frame[1] else line)
                 continue
-            if _PP_ELIF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN.match(line):
+            if (
+                invert_dialect_fallback_guards
+                and _PP_ELIF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN.match(line)
+            ):
                 # Same inverted polarity as #if !defined(__cpp_x) above,
                 # checked ahead of the general branch since it would
-                # otherwise also match.
+                # otherwise also match. Same shadow-scan exception.
                 frame[1] = frame[2]
                 frame[2] = True
                 out.append(b"" if frame[1] else line)
@@ -1506,26 +1554,40 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
         # Also strip out #if 0/#if false regions before any of the three
         # shadow scans below — a disabled compatibility stub must not shadow
         # a genuine keyword used elsewhere in the header (Codex review).
+        content_no_double_slash_comments = re.sub(rb"//[^\n]*", b"", content)
         content_no_line_comments = _strip_inactive_if_zero_blocks(
-            re.sub(rb"//[^\n]*", b"", content)
+            content_no_double_slash_comments
         )
         per_file.append((p, content_no_line_comments))
+        # A *separate* masking pass, not the one above, feeds the shadow
+        # scans below: invert_dialect_fallback_guards=False (Codex review,
+        # nineteenth round) — the shadow scan asks "does 'concept' name an
+        # ordinary type in code still reachable if C++20 were chosen", so a
+        # ``struct concept {};`` compatibility shim confined to e.g.
+        # ``#if __cplusplus < 202002L`` (content that specifically goes
+        # away once C++20 is chosen) must not count, unlike for the
+        # requirements scan above where that same guarded arm is the
+        # unconditionally-relevant one. See the docstring of
+        # _strip_inactive_if_zero_blocks.
+        content_for_shadow_scan = _strip_inactive_if_zero_blocks(
+            content_no_double_slash_comments, invert_dialect_fallback_guards=False
+        )
         concept_type_shadowed = concept_type_shadowed or bool(
-            _CONCEPT_AS_TYPE_NAME_PATTERN.search(content_no_line_comments)
+            _CONCEPT_AS_TYPE_NAME_PATTERN.search(content_for_shadow_scan)
         )
         # Same reasoning as concept_type_shadowed above, for "requires" used
         # as an ordinary pre-C++20 type name (Codex review).
         requires_type_shadowed = requires_type_shadowed or bool(
-            _REQUIRES_AS_TYPE_NAME_PATTERN.search(content_no_line_comments)
+            _REQUIRES_AS_TYPE_NAME_PATTERN.search(content_for_shadow_scan)
         )
         # Same reasoning and "//"-comment-stripped-copy caveat as
         # concept_type_shadowed above, for "consteval"/"constinit" used as
         # an ordinary pre-C++20 type name (Codex review, third round).
         consteval_type_shadowed = consteval_type_shadowed or bool(
-            _CONSTEVAL_AS_TYPE_NAME_PATTERN.search(content_no_line_comments)
+            _CONSTEVAL_AS_TYPE_NAME_PATTERN.search(content_for_shadow_scan)
         )
         constinit_type_shadowed = constinit_type_shadowed or bool(
-            _CONSTINIT_AS_TYPE_NAME_PATTERN.search(content_no_line_comments)
+            _CONSTINIT_AS_TYPE_NAME_PATTERN.search(content_for_shadow_scan)
         )
 
     found: list[Cpp20Requirement] = []

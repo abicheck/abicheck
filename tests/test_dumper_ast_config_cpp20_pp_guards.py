@@ -460,6 +460,75 @@ def test_cpp20_detector_still_detects_genuine_concept_across_header_set(tmp_path
     assert any(r.reason == "concept-declaration" for r in reqs)
 
 
+def test_cpp20_detector_ignores_shadow_shim_confined_to_pre_cxx20_fallback(
+    tmp_path,
+):
+    """Regression (Codex review, nineteenth round): unlike the unconditional
+    shim above, a ``struct concept {};`` compatibility shim confined
+    entirely to a ``#if __cplusplus < 202002L`` guard is content that
+    specifically goes away once C++20 is chosen -- it can never coexist
+    with a genuine concept declaration under any dialect choice, so it
+    must not shadow one in a different file of the same aggregate. Before
+    this fix, the shadow scan reused the requirements scan's masking,
+    which treats that guarded arm as live (correct for the requirements
+    scan, since it decides what's reachable if C++20 is *not* forced) --
+    wrong for the shadow scan's different question of what's reachable if
+    C++20 *is* forced."""
+    compat = tmp_path / "compat.hpp"
+    compat.write_bytes(b"#if __cplusplus < 202002L\nstruct concept {};\n#endif\n")
+    api = tmp_path / "api.hpp"
+    api.write_bytes(b"template<class T> concept C = true;\n")
+    assert _detect_cpp20_headers([compat, api]) is True
+    reqs = _find_cpp20_requirements([compat, api])
+    assert any(r.reason == "concept-declaration" for r in reqs)
+    # Order in the header set must not matter.
+    assert _detect_cpp20_headers([api, compat]) is True
+
+
+def test_cpp20_detector_ignores_shadow_shim_confined_to_ifndef_feature_guard(
+    tmp_path,
+):
+    """Companion: same fix, ``#ifndef __cpp_concepts`` spelling."""
+    compat = tmp_path / "compat.hpp"
+    compat.write_bytes(b"#ifndef __cpp_concepts\nstruct concept {};\n#endif\n")
+    api = tmp_path / "api.hpp"
+    api.write_bytes(b"template<class T> concept C = true;\n")
+    assert _detect_cpp20_headers([compat, api]) is True
+
+
+def test_cpp20_detector_ignores_shadow_shim_confined_to_negated_defined_guard(
+    tmp_path,
+):
+    """Companion: same fix, ``#if !defined(__cpp_concepts)`` spelling."""
+    compat = tmp_path / "compat.hpp"
+    compat.write_bytes(b"#if !defined(__cpp_concepts)\nstruct concept {};\n#endif\n")
+    api = tmp_path / "api.hpp"
+    api.write_bytes(b"template<class T> concept C = true;\n")
+    assert _detect_cpp20_headers([compat, api]) is True
+
+
+def test_cpp20_detector_still_masks_shadow_shim_in_feature_present_else_arm(
+    tmp_path,
+):
+    """Companion: the shim's *placement* still matters, not just the guard
+    spelling -- a shim confined to the ``#else`` of ``#if __cplusplus <
+    202002L`` (the feature-*present* arm, code that specifically *would*
+    be reachable once C++20 is chosen) must still shadow a genuine
+    concept declaration elsewhere in the aggregate, unlike the guarded
+    (feature-absent) arm tested above."""
+    compat = tmp_path / "compat.hpp"
+    compat.write_bytes(
+        b"#if __cplusplus < 202002L\n"
+        b"int portable_fallback;\n"
+        b"#else\n"
+        b"struct concept {};\n"
+        b"#endif\n"
+    )
+    api = tmp_path / "api.hpp"
+    api.write_bytes(b"template<class T> concept C = true;\n")
+    assert _detect_cpp20_headers([compat, api]) is False
+
+
 def test_cpp20_detector_ignores_construct_guarded_by_cplusplus_version_check(
     tmp_path,
 ):
