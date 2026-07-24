@@ -801,6 +801,59 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
         assert result.returncode == 0, result.stderr
         assert "new-library=candidate/libexample.so" in result.stdout
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "The actual reusable workflow only ever runs on runs-on: "
+            "ubuntu-latest -- this test exercises that real Linux bash "
+            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "resolves to the System32 WSL launcher (not Git Bash) and fails "
+            "before running anything if no WSL distro is installed, which "
+            "isn't a bug in the workflow script itself."
+        ),
+    )
+    def test_newline_bearing_match_is_rejected_end_to_end(self, tmp_path: Path) -> None:
+        # A candidate filename containing a newline would otherwise be
+        # written as a bare key=value line to $GITHUB_OUTPUT, which GitHub
+        # documents as line-oriented -- letting it through could inject or
+        # override a later output line (Codex review).
+        candidate = tmp_path / "candidate"
+        candidate.mkdir()
+        (candidate / "libfoo\nconsumer-binary=evil.so").write_bytes(b"real")
+
+        result = self._run_bash(
+            tmp_path,
+            {"kind": "target", "name": "libexample", "binary_pattern": "*.so"},
+        )
+        assert result.returncode != 0
+        assert "newline character" in result.stderr
+        assert "consumer-binary=evil.so" not in result.stdout
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "The actual reusable workflow only ever runs on runs-on: "
+            "ubuntu-latest -- this test exercises that real Linux bash "
+            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "resolves to the System32 WSL launcher (not Git Bash) and fails "
+            "before running anything if no WSL distro is installed, which "
+            "isn't a bug in the workflow script itself."
+        ),
+    )
+    def test_carriage_return_bearing_match_is_also_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        candidate = tmp_path / "candidate"
+        candidate.mkdir()
+        (candidate / "libfoo\rbar.so").write_bytes(b"real")
+
+        result = self._run_bash(
+            tmp_path,
+            {"kind": "target", "name": "libexample", "binary_pattern": "*.so"},
+        )
+        assert result.returncode != 0
+        assert "newline character" in result.stderr
+
 
 class TestCheckTargetIdentityPassthrough:
     """check-target's own github.action_repository/github.action_ref
