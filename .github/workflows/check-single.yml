@@ -88,6 +88,17 @@ on:
           build-output/build-output.json).
         type: string
         default: ''
+      report-artifact-name:
+        description: >-
+          Artifact name the report-path output's JSON file is uploaded
+          under. report-path is a path inside this job's own ephemeral
+          runner workspace -- unlike a composite Action a caller nests in
+          their OWN job, a reusable workflow's `check` job runs on a
+          separate runner, so that path is not reachable by the calling
+          workflow without an explicit upload/download round-trip (Codex
+          review). Always uploaded when check-target produced a report.
+        type: string
+        default: 'abicheck-check-single-report'
 
       requested-depth:
         description: 'Evidence-depth this check asks for: binary, headers, build, or source -- required.'
@@ -251,8 +262,15 @@ on:
         description: '"pass" or "fail" -- before any advisory neutralization.'
         value: ${{ jobs.check.outputs.policy-gate-decision }}
       report-path:
-        description: 'Path to the final, enriched report JSON, inside this job''s own workspace.'
+        description: >-
+          Path to the final, enriched report JSON, inside this job's own
+          ephemeral workspace -- not reachable by the calling workflow
+          directly. Download the report-artifact-name artifact instead to
+          actually consume the report file.
         value: ${{ jobs.check.outputs.report-path }}
+      report-artifact-name:
+        description: 'The artifact name the report was uploaded under (== inputs.report-artifact-name, echoed for convenience).'
+        value: ${{ jobs.check.outputs.report-artifact-name }}
 
 jobs:
   check:
@@ -265,6 +283,7 @@ jobs:
       compatibility-verdict: ${{ steps.run.outputs.compatibility-verdict }}
       policy-gate-decision: ${{ steps.run.outputs.policy-gate-decision }}
       report-path: ${{ steps.run.outputs.report-path }}
+      report-artifact-name: ${{ inputs.report-artifact-name }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -416,3 +435,10 @@ jobs:
           # input docs for the full explanation).
           abicheck-repository: ${{ steps.identity.outputs.repository }}
           abicheck-ref: ${{ steps.identity.outputs.ref }}
+
+      - name: Upload report
+        if: always() && steps.run.outputs.report-path != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.report-artifact-name }}
+          path: ${{ steps.run.outputs.report-path }}

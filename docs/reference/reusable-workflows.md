@@ -27,7 +27,17 @@ built on top of [`actions/check-target`](check-target.md):
 Every input mirrors [`actions/check-target/action.yml`](check-target.md)'s
 own input surface 1:1 (same names, same defaults) — see that page for the
 full rationale behind each one. Outputs are `check-target`'s own six
-outputs, forwarded unchanged.
+outputs, forwarded unchanged, plus `report-artifact-name`.
+
+`report-path` is a path inside this job's own ephemeral runner workspace —
+not reachable by the calling workflow directly (a `workflow_call` job runs
+on a separate runner, same caveat as the artifact-staging inputs below).
+The job unconditionally uploads the report (`if: always() &&
+steps.run.outputs.report-path != ''`, same condition `check-project.yml`
+uses for each matrix cell) under `inputs.report-artifact-name` (default
+`abicheck-check-single-report`) — echoed back as the `report-artifact-name`
+output so a caller can `download-artifact` it without repeating the
+default.
 
 **This job always runs in its own fresh, isolated runner** — unlike
 `check-target` itself (a composite Action a caller can nest as one step

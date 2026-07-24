@@ -125,9 +125,46 @@ class TestCheckSingleSelfCheckout:
             "compatibility-verdict",
             "policy-gate-decision",
             "report-path",
+            "report-artifact-name",
         }
         job_outputs = set(data["jobs"]["check"]["outputs"])
         assert wf_outputs == job_outputs
+
+
+class TestCheckSingleReportUpload:
+    """report-path is a path inside check-single.yml's own ephemeral `check`
+    job workspace -- unreachable by the calling workflow without an
+    explicit upload/download round-trip, since (unlike actions/check-target,
+    a composite Action a caller nests in their OWN job) this reusable
+    workflow's job runs on a separate runner. Before this fix there was no
+    upload step at all, making report-path effectively unusable for any
+    reusable-workflow caller (Codex review)."""
+
+    def test_report_artifact_name_input_has_a_default(self) -> None:
+        data = _load(CHECK_SINGLE)
+        report_input = data[True]["workflow_call"]["inputs"]["report-artifact-name"]
+        assert report_input["default"]
+
+    def test_upload_report_step_runs_after_check_target_with_always_condition(
+        self,
+    ) -> None:
+        data = _load(CHECK_SINGLE)
+        steps = _steps(data["jobs"]["check"])
+        names = [s.get("name") for s in steps]
+        assert "Run check-target" in names
+        assert "Upload report" in names
+        assert names.index("Run check-target") < names.index("Upload report")
+        upload_step = next(s for s in steps if s.get("name") == "Upload report")
+        assert upload_step["if"] == "always() && steps.run.outputs.report-path != ''"
+        assert upload_step["with"]["name"] == "${{ inputs.report-artifact-name }}"
+        assert upload_step["with"]["path"] == "${{ steps.run.outputs.report-path }}"
+
+    def test_report_artifact_name_output_echoes_the_input(self) -> None:
+        data = _load(CHECK_SINGLE)
+        job_outputs = data["jobs"]["check"]["outputs"]
+        assert (
+            job_outputs["report-artifact-name"] == "${{ inputs.report-artifact-name }}"
+        )
 
 
 class TestCheckSingleOptionalArtifactStaging:
