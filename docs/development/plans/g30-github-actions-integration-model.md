@@ -1696,8 +1696,8 @@ issues, one fixed and one deferred with a documented rationale:**
   on the same channel/depth both produce
   `check-target-report-a-b-c-<channel>-<depth>.json`) — harmless for a
   single `check-target` invocation writing its own report, but
-  `check-project.yml`'s artifact *names* are already injective (the round-3
-  sanitizer fix above), so both cells' reports land under different
+  `check-project.yml`'s artifact *names* are already collision-resistant
+  (the round-3 sanitizer fix above), so both cells' reports land under different
   artifacts and then get merged into ONE flat directory
   (`abicheck/aggregate.py`'s `collect_reports` globs `*.json`
   non-recursively — a per-artifact subdirectory isn't an option here), where
@@ -1707,9 +1707,13 @@ issues, one fixed and one deferred with a documented rationale:**
   `check-project.yml`: `actions/check-target/run.sh`'s `REPORT_OUT` now
   appends a 12-hex-char SHA-256 prefix of the original, unsanitized
   `name`/`profile`/`baseline_channel`/`requested_depth` tuple — the same
-  injective-suffix technique the round-3 artifact-name sanitizer already
-  uses — so two identities that collapse to the same slug still produce
-  distinct filenames. This touches a shared component from the already-merged
+  collision-resistant-suffix technique the round-3 artifact-name sanitizer
+  already uses (a 48-bit truncated hash, not a mathematically-guaranteed-
+  unique one — fine for the tiny, single-CI-run identifier space this
+  disambiguates, the same tradeoff git's own short-hash prefixes make) — so
+  two identities that collapse to the same slug are overwhelmingly likely to
+  still produce distinct filenames. This touches a shared component from the
+  already-merged
   P1.3 PR (#625; `check-single.yml` also depends on it), but was chosen over
   a `check-project.yml`-side workaround because `collect_reports`' flat,
   non-recursive glob leaves no viable fix on the download side — the
@@ -1815,6 +1819,45 @@ fixed and one deferred to the same already-acknowledged gap:**
   isolation, without also closing that report-routing gap, would just trade
   one silent-pass failure mode for a different not-actually-visible one.
   Tracked together with the round-5 item, not as a new separate gap.
+
+**A ninth round (CodeRabbit, against `ed7e577`) found three more issues, two
+fixed and one re-raising an already-tracked gap:**
+
+- **Bundle members resolving to files with the same basename silently
+  overwrote one another in the shared `bundle-staging/` directory.** The
+  candidate resolver copies each bundle member into one flat staging
+  directory via `shutil.copy2(match, os.path.join(staging,
+  os.path.basename(match)))` -- two distinct members (e.g. `build/linux/
+  libfoo.so` and `build/plugins/libfoo.so`) sharing a basename would have
+  the second `copy2` silently clobber the first, dropping a member from the
+  bundle comparison with no signal at all. Fixed: the resolver now tracks
+  which member claimed each destination basename and fails loud
+  (`::error::` + exit 1, naming both colliding members) on a second claim,
+  matching this same script's established "fail loud instead of guessing"
+  posture for escaping/ambiguous/newline-bearing matches. Verified by hand
+  (two members resolving to `libfoo.so` under different subdirectories,
+  confirmed rejected with both member names in the error) and covered by
+  two new tests, `test_bundle_members_with_colliding_basenames_are_rejected`
+  and a control case confirming distinct basenames still resolve.
+- **A nitpick, applied:** the `_IDENTITY_DIGEST` inline Python helper in
+  `actions/check-target/run.sh` used `print(...)` instead of
+  `sys.stdout.write(...)` -- functionally identical here (bash's `$(...)`
+  strips the trailing newline either way), but switched for consistency.
+  While there, corrected this doc's and that script's own comment wording:
+  earlier rounds called the 12-hex-char SHA-256 report-filename/artifact-
+  name suffixes "injective," which overclaims -- a truncated hash is
+  collision-*resistant*, not mathematically guaranteed collision-free.
+  Left the actual technique unchanged (no functional fix needed): 48 bits
+  of collision resistance is far more than enough for the tiny,
+  single-CI-run identifier space these disambiguate (dozens of checks, not
+  millions) -- the same tradeoff git's own short-hash prefixes and Docker's
+  short image IDs make.
+- **A third finding re-raised the same gap round-5/round-8 already track**
+  (candidate-resolution and build-output-download failures not producing
+  an operational-error envelope for `aggregate` to see) with slightly
+  different framing ("route pre-check failures into aggregation before
+  merge"). Not a new item -- same deferred design decision, same rationale
+  as those two addenda.
 
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared

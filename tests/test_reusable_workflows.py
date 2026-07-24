@@ -854,6 +854,78 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
         assert result.returncode != 0
         assert "newline character" in result.stderr
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "The actual reusable workflow only ever runs on runs-on: "
+            "ubuntu-latest -- this test exercises that real Linux bash "
+            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "resolves to the System32 WSL launcher (not Git Bash) and fails "
+            "before running anything if no WSL distro is installed, which "
+            "isn't a bug in the workflow script itself."
+        ),
+    )
+    def test_bundle_members_with_colliding_basenames_are_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # Two distinct members resolving to files with the same basename
+        # (e.g. build/linux/libfoo.so vs. build/plugins/libfoo.so) would
+        # otherwise silently overwrite one another in the shared flat
+        # bundle-staging/ directory (Codex review).
+        candidate = tmp_path / "candidate"
+        (candidate / "linux").mkdir(parents=True)
+        (candidate / "plugins").mkdir(parents=True)
+        (candidate / "linux" / "libfoo.so").write_bytes(b"core")
+        (candidate / "plugins" / "libfoo.so").write_bytes(b"plugin")
+
+        result = self._run_bash(
+            tmp_path,
+            {
+                "kind": "bundle",
+                "name": "mybundle",
+                "member_binary_patterns": {
+                    "core": "linux/libfoo.so",
+                    "plugin": "plugins/libfoo.so",
+                },
+            },
+        )
+        assert result.returncode != 0
+        assert "libfoo.so" in result.stderr
+        assert "'core'" in result.stderr and "'plugin'" in result.stderr
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "The actual reusable workflow only ever runs on runs-on: "
+            "ubuntu-latest -- this test exercises that real Linux bash "
+            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "resolves to the System32 WSL launcher (not Git Bash) and fails "
+            "before running anything if no WSL distro is installed, which "
+            "isn't a bug in the workflow script itself."
+        ),
+    )
+    def test_bundle_members_with_distinct_basenames_still_resolve(
+        self, tmp_path: Path
+    ) -> None:
+        candidate = tmp_path / "candidate"
+        candidate.mkdir()
+        (candidate / "libpvxs.so").write_bytes(b"core")
+        (candidate / "libpvxsIoc.so").write_bytes(b"ioc")
+
+        result = self._run_bash(
+            tmp_path,
+            {
+                "kind": "bundle",
+                "name": "pvxs",
+                "member_binary_patterns": {
+                    "libpvxs": "libpvxs.so",
+                    "libpvxsIoc": "libpvxsIoc.so",
+                },
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        assert "new-library=bundle-staging" in result.stdout
+
 
 class TestCheckTargetIdentityPassthrough:
     """check-target's own github.action_repository/github.action_ref
