@@ -90,3 +90,10 @@ topics:
     canonical_page: concepts/limitations.md
     allowed_summaries:
       - concepts/architecture.md
+
+  source-evidence-producers:
+    canonical_page: user-guide/producing-source-facts.md
+    fact_sources:
+      - abicheck/buildsource
+      - contrib/abicheck-clang-plugin
+    reference_page: user-guide/build-evidence-setup.md
