@@ -617,6 +617,11 @@ def check_doc_count_sync(f: Findings) -> None:
       guard silently stopped covering that spot — update the regex here).
     """
     try:
+        from abicheck.castxml_policy import (
+            MAX_CASTXML,
+            MIN_CASTXML,
+            MIN_CASTXML_CLANG_MAJOR,
+        )
         from abicheck.checker_policy import ChangeKind
         from abicheck.serialization import SCHEMA_VERSION
     except Exception:
@@ -713,6 +718,26 @@ def check_doc_count_sync(f: Findings) -> None:
             SCHEMA_VERSION,
             r"Snapshot format version \(currently `(\d+)`\)",
         ),
+        (
+            DOCS / "reference/environment.md",
+            "CastXML policy minimum version (ABICHECK_ALLOW_UNSUPPORTED_CASTXML row)",
+            MIN_CASTXML,
+            r">=(\d+\.\d+\.\d+),<\d+\.\d+\.\d+",
+        ),
+        (
+            DOCS / "reference/environment.md",
+            "CastXML policy exclusive-upper-bound version"
+            " (ABICHECK_ALLOW_UNSUPPORTED_CASTXML row)",
+            MAX_CASTXML,
+            r">=\d+\.\d+\.\d+,<(\d+\.\d+\.\d+)",
+        ),
+        (
+            DOCS / "reference/environment.md",
+            "CastXML policy minimum bundled Clang major version"
+            " (ABICHECK_ALLOW_UNSUPPORTED_CASTXML row)",
+            MIN_CASTXML_CLANG_MAJOR,
+            r"bundled/linked Clang `>=(\d+)`",
+        ),
     ]
 
     for path, label, expected, pattern in anchors:
@@ -725,7 +750,10 @@ def check_doc_count_sync(f: Findings) -> None:
                 "update the regex in check_doc_count_sync if the wording changed.",
             )
             continue
-        found = int(m.group(1))
+        # Most anchors pin an integer count; the CastXML version anchors pin a
+        # dotted version string instead (MIN_CASTXML/MAX_CASTXML aren't plain
+        # ints) — compare in whichever type the source of truth actually is.
+        found: int | str = int(m.group(1)) if isinstance(expected, int) else m.group(1)
         if found != expected:
             f.err(
                 "doc-count-sync",
