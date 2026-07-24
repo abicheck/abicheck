@@ -1723,6 +1723,211 @@ class TestUsedByScoping:
         )
         assert entry["symbol"] == "needed_symbol"
         assert entry["blocks_gate"] is True
+        # G29 Phase 3 slice 1 (ADR-052, Codex review): reachability_state is
+        # "always present" for every changes[] entry -- a missing-contract
+        # label has no backing Change, but it still needs the honest
+        # UNKNOWN value rather than silently omitting the field.
+        assert entry["reachability_state"] == "unknown"
+
+    def test_root_cause_mode_includes_scoped_only_change(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Codex review: --report-mode root-cause groups result.changes before
+        # the scoped fold-in appends scoped_only_changes to `changes` -- a
+        # scoped run whose only gated issue is one of these must still show
+        # up in root_causes, not just the flat backward-compat `changes[]`.
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--format", "json", "--report-mode", "root-cause",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        assert data["root_cause_count"] == 1
+        group = data["root_causes"][0]
+        assert group["root"] == "ordinal:5"
+        assert group["findings"][0]["kind"] == "pe_ordinal_retargeted"
+
+    def test_root_cause_mode_includes_missing_symbol_label(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Same gap as above, for a missing required symbol with no backing
+        # Change (scoped_missing_labels, not scoped_only_changes).
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--format", "json", "--report-mode", "root-cause",
+        )
+        data = json.loads(result.stdout)
+        assert data["root_cause_count"] == 1
+        group = data["root_causes"][0]
+        assert group["root"] == "needed_symbol"
+        assert group["findings"][0]["kind"] == "used_by_missing_symbol"
+
+    def test_root_cause_mode_regroups_existing_cause_with_scoped_only(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Codex review: _to_json_root_cause groups result.changes *before*
+        # the scoped fold-in appends scoped_only_changes -- if a scoped-only
+        # finding's caused_by_type matches an existing real change's symbol,
+        # that existing change must already be keyed by that shared cause
+        # from the start (mirroring sarif.to_sarif's single-pass grouping),
+        # or the fold-in's later merge attempt creates a second, disagreeing
+        # root-cause group for the same logical cause instead of joining it.
+        from abicheck import dumper as dumper_mod
+
+        old, new = _breaking_pair()  # real diff: "bar"/_Z3barv removed
+        app_path = tmp_path / "app"
+        app_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_p = tmp_path / "old.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new_p = tmp_path / "new.so"
+        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[old, new]))
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="pub_entry",
+            description="ordinal retargeted",
+            caused_by_type="_Z3barv",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old_p), str(new_p), "--used-by", str(app_path),
+            "--format", "json", "--report-mode", "root-cause",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        assert data["root_cause_count"] == 1
+        group = data["root_causes"][0]
+        assert group["root"] == "_Z3barv"
+        assert group["finding_count"] == 2
+        assert {f["kind"] for f in group["findings"]} == {
+            "func_removed", "pe_ordinal_retargeted",
+        }
+
+    def test_markdown_root_cause_mode_merges_scoped_only_into_existing_group(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Codex review: markdown/text root-cause mode must merge a
+        # scoped-only finding into an existing group when its caused_by_type
+        # matches a real change's symbol, not just list it separately in
+        # "## Additional scoped-gate findings" -- mirrors the JSON fix above.
+        from abicheck import dumper as dumper_mod
+
+        old, new = _breaking_pair()  # real diff: "bar"/_Z3barv removed
+        app_path = tmp_path / "app"
+        app_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_p = tmp_path / "old.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new_p = tmp_path / "new.so"
+        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[old, new]))
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="pub_entry",
+            description="ordinal retargeted",
+            caused_by_type="_Z3barv",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--used-by",
+            str(app_path),
+            "--report-mode",
+            "root-cause",
+        )
+        assert result.exit_code == 4
+        assert "## Root Causes (1)" in result.output
+        # Markdown demangles by default -- the group's display root is the
+        # demangled `bar()`, not the raw mangled `_Z3barv`.
+        assert "### `bar()` (2 finding" in result.output
+        assert "ordinal retargeted" in result.output
+        # Not duplicated in the flat appendix.
+        assert "## Additional scoped-gate findings" not in result.output
+
+    def test_markdown_root_cause_mode_still_lists_uncorrelated_scoped_only(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # An uncorrelated scoped-only finding must still show up as its own
+        # singleton group, not silently disappear now that the flat
+        # appendix is suppressed for root-cause mode.
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "--report-mode",
+            "root-cause",
+        )
+        assert result.exit_code == 4
+        assert "### `ordinal:5` (1 finding)" in result.output
+        assert "ordinal 5 retargeted" in result.output
+        assert "## Additional scoped-gate findings" not in result.output
+        # Codex review: result.changes itself is empty here (old/new are
+        # identical) -- the only finding is the scoped-only change above, so
+        # the report must not also claim "No ABI changes detected" right
+        # next to a populated "## Root Causes" section.
+        assert "No ABI changes detected" not in result.output
+
+    def test_markdown_root_cause_severity_table_reflects_scoped_only_finding(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Codex review: the "## Severity Configuration" table was built from
+        # `result.changes` before the scoped-only change/missing-contract
+        # label below was resolved -- a scoped run whose only breaking issue
+        # is one of these showed every category at Count 0/"no exit impact"
+        # immediately above a "## Root Causes" section naming a real,
+        # gate-blocking finding.
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "--report-mode",
+            "root-cause",
+            "--severity-abi-breaking",
+            "error",
+        )
+        assert result.exit_code == 4
+        assert "### `ordinal:5` (1 finding)" in result.output
+        table_line = next(
+            line for line in result.output.splitlines()
+            if line.startswith("| ABI/API Incompatibilities")
+        )
+        assert "| 1 |" in table_line
+        assert "causes non-zero exit" in table_line
 
     def test_json_uncovered_missing_symbol_not_blocking_under_demoted_severity(
         self, tmp_path, monkeypatch

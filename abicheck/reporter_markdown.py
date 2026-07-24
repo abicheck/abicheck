@@ -22,6 +22,7 @@ so it stays a leaf; ``reporter`` re-exports these names for backward compat.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -623,6 +624,335 @@ def _to_markdown_leaf(
     return "\n".join(lines)
 
 
+def _finding_id(c: object) -> str:
+    """Stable per-finding fingerprint (schema 2.3, additive).
+
+    Deterministic across repeated runs of the same comparison, so a
+    consumer can tell "is this the same finding" across two report runs
+    (e.g. to correlate a suppression/waiver, or diff two CI runs' findings)
+    without relying on array order or index — neither of which abicheck
+    guarantees stays stable release to release.
+
+    Derived only from fields that identify the finding's *identity* (kind,
+    symbol, old/new value, source location, description) — deliberately
+    excluding ``severity``/``evidence_status``, which are policy-derived and
+    would make the same underlying finding hash differently under a
+    different ``--policy``.
+
+    ``description`` is included as a discriminator: two findings of the same
+    kind on the same symbol with the same old/new value and no distinct
+    source location (e.g. ``param_pointer_level_changed`` on two different
+    parameters of one function, both going from pointer-depth 1 to 2) would
+    otherwise collide on an identical id even though they are different
+    findings — ``description`` embeds the per-finding detail (parameter
+    name/index, member name, …) that disambiguates them.
+
+    Lives here (not ``reporter.py``) so this leaf module can also key
+    ``--report-mode root-cause`` markdown groups without importing back from
+    ``reporter`` (which would form an import cycle); ``reporter`` re-exports
+    it for backward compat, same as every other name in this module.
+    """
+    key = "\x1f".join(
+        [
+            str(getattr(getattr(c, "kind", None), "value", getattr(c, "kind", ""))),
+            str(getattr(c, "symbol", None) or ""),
+            str(getattr(c, "old_value", None) or ""),
+            str(getattr(c, "new_value", None) or ""),
+            str(getattr(c, "source_location", None) or ""),
+            str(getattr(c, "description", None) or ""),
+        ]
+    )
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def _root_cause_key_and_display(
+    caused_by_type: str | None,
+    symbol: str | None,
+    kind_value: str,
+    finding_id: str,
+    *,
+    referenced_causes: frozenset[str] = frozenset(),
+) -> tuple[str, str]:
+    """Grouping key + display root for one root-cause finding: ``caused_by_type``
+    when set, else its own ``symbol`` -- but only as a *grouping* key when
+    some other finding's ``caused_by_type`` actually names that symbol
+    (Codex review: two independent findings that merely share a symbol with
+    no producer-set correlation, e.g. ``func_return_changed`` and
+    ``func_params_changed`` both on ``foo``, must stay singleton -- the
+    first-slice contract is that only ``caused_by_type`` correlates
+    findings). Otherwise a unique per-finding key, with the symbol (or, if
+    empty, the kind) still used as the *display* root. Shared by
+    :func:`abicheck.reporter._to_json_root_cause`, :func:`_to_markdown_root_cause`,
+    and the scoped-gate fold-in in ``cli_compare_fold.py``, which appends
+    synthetic findings afterwards.
+    """
+    if caused_by_type:
+        return caused_by_type, caused_by_type
+    if symbol:
+        if symbol in referenced_causes:
+            return symbol, symbol
+        return f"finding:{finding_id}", symbol
+    return f"finding:{finding_id}", kind_value
+
+
+def _group_changes_by_root_cause(
+    changes: list[Change],
+    *,
+    extra_causes: frozenset[str] = frozenset(),
+) -> list[tuple[str, str, list[Change]]]:
+    """Group ``changes`` into root-cause buckets, in first-seen order.
+
+    Returns ``(key, root_display, changes_in_group)`` triples. ``key`` is the
+    raw grouping key (a stable hash of it becomes ``root_cause_id``);
+    ``root_display`` is the human-readable root shown to a consumer. Shared
+    by the JSON and markdown ``--report-mode root-cause`` renderers so the
+    two formats can never disagree about which findings share a root cause
+    (Codex review; see :func:`_root_cause_key_and_display` for the key/display
+    rules, including the ``referenced_causes`` guard against grouping
+    independent findings that merely share a symbol).
+
+    *extra_causes* folds in ``caused_by_type`` values from findings outside
+    *changes* itself (e.g. JSON's scoped-only ``--used-by``/
+    ``--required-symbol`` changes, appended to the report only after this
+    grouping runs) -- without this, a change in *changes* whose symbol only
+    became a real correlation via one of those later-appended findings would
+    already be locked into its own singleton group, unable to join the
+    combined root cause the scoped-gate fold-in later assembles (Codex
+    review: JSON's two-phase build let a scoped-only finding's
+    ``caused_by_type`` disagree with SARIF's single-pass grouping of the
+    identical changes).
+    """
+    referenced_causes = (
+        frozenset(c.caused_by_type for c in changes if c.caused_by_type) | extra_causes
+    )
+    groups: dict[str, list[Change]] = {}
+    roots: dict[str, str] = {}
+    order: list[str] = []
+    for c in changes:
+        key, root_display = _root_cause_key_and_display(
+            c.caused_by_type,
+            c.symbol,
+            c.kind.value,
+            _finding_id(c),
+            referenced_causes=referenced_causes,
+        )
+        if key not in groups:
+            groups[key] = []
+            roots[key] = root_display
+            order.append(key)
+        groups[key].append(c)
+    return [(key, roots[key], groups[key]) for key in order]
+
+
+def _resolve_scoped_gate_findings(
+    result: DiffResult,
+    severity_config: SeverityConfig | None,
+    show_only: str | None,
+) -> tuple[list[Change], list[str], bool, str]:
+    """Resolve the scoped-only ``Change``s and missing-contract labels relevant
+    to the ``--used-by``/``--required-symbol`` gate, deduped against
+    ``result.changes`` and filtered by ``--show-only``.
+
+    Factored out of ``cli_compare_fold.py``'s JSON branch so markdown/text/
+    review output can render the identical actionable findings instead of
+    only a bare count (Codex review: a scoped run whose only gated issue was
+    a missing contract member or a scoped-only change like
+    ``PE_ORDINAL_RETARGETED`` didn't name either one in the default text
+    report, unlike JSON/SARIF/JUnit). Lives here (not ``cli_compare_fold.py``)
+    so ``_to_markdown_root_cause`` below can also call it directly to merge
+    these into its own root-cause groups, without ``cli_compare_fold``
+    importing back into this leaf module -- ``cli_compare_fold.py`` imports
+    it from ``reporter``'s re-export, same as every other name in this
+    module.
+
+    Returns ``(scoped_only_changes, missing_labels, blocks, missing_kind)``.
+    """
+    from .severity import missing_contract_exit_code
+
+    existing_ids = {_finding_id(c) for c in result.changes}
+    eff_sets = result._effective_kind_sets()
+    scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
+    if show_only and scoped_only:
+        scoped_only = apply_show_only(
+            scoped_only,
+            show_only,
+            policy=result.policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+        )
+    scoped_only = [c for c in scoped_only if _finding_id(c) not in existing_ids]
+
+    gate_scope = getattr(result, "gate_scope", None)
+    missing_kind = (
+        "used_by_missing_symbol"
+        if gate_scope == "used_by"
+        else "required_symbol_missing"
+    )
+    blocks = severity_config is None or missing_contract_exit_code(severity_config) != 0
+    # A missing-contract label has no backing Change/ChangeKind, so it can't
+    # run through apply_show_only -- but --show-only's severity dimension
+    # still applies: without this, a --show-only run that excludes breaking
+    # findings would still include a blocking missing-contract entry the
+    # filter was meant to exclude (Codex review, mirrors the identical
+    # sarif.to_sarif fix). Element/action tokens don't cleanly apply to "a
+    # symbol is simply absent", so only the severity dimension is checked.
+    missing_severity_label = "breaking" if blocks else "compatible"
+    show_only_severities = (
+        ShowOnlyFilter.parse(show_only).severities if show_only else frozenset()
+    )
+    missing_labels = list(
+        getattr(result, "scoped_missing_labels", ()) or ()
+        if not show_only_severities or missing_severity_label in show_only_severities
+        else ()
+    )
+    return scoped_only, missing_labels, blocks, missing_kind
+
+
+def _to_markdown_root_cause(
+    result: DiffResult,
+    show_only: str | None = None,
+    show_recommendation: bool = False,
+    show_impact: bool = False,
+    *,
+    severity_config: SeverityConfig | None = None,
+) -> str:
+    """``--report-mode root-cause`` markdown rendering (G29 Phase 3 slice 4, ADR-052).
+
+    Groups findings under one heading per root cause instead of full mode's
+    severity-bucketed sections -- root-cause mode's point is "what's the
+    minimal set of things that actually broke", not "what severity bucket
+    does each finding independently fall into".
+    """
+    v = result.verdict
+    emoji = _VERDICT_EMOJI[v]
+    label = _VERDICT_LABEL[v]
+
+    lines: list[str] = [
+        f"# ABI Report: {result.library} (root-cause view)",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| **Old version** | `{result.old_version}` |",
+        f"| **New version** | `{result.new_version}` |",
+        f"| **Verdict** | {emoji} `{label}` |",
+        "",
+    ]
+
+    if show_recommendation:
+        _append_recommendation_section(lines, result)
+
+    changes = list(result.changes)
+    if show_only:
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+        lines.append(
+            f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
+        )
+        lines.append("")
+
+    # G29 Phase 3 slice 3 follow-up (Codex review): a --used-by/
+    # --required-symbol scoped-only change or missing-contract label whose
+    # caused_by_type/symbol correlates with a change above must join that
+    # same root-cause group here, not only appear separately in
+    # cli_compare_fold.py's "## Additional scoped-gate findings" appendix --
+    # otherwise the grouped section under-reports finding_count and hides
+    # the correlation, unlike the JSON/SARIF paths (which fold these in).
+    # Real Change objects (scoped_only) can simply be grouped alongside
+    # `changes` in one pass; missing_labels have no Change to group with, so
+    # they're keyed and merged in separately below. Resolved before the
+    # severity table (Codex review, further follow-up) so a scoped run whose
+    # only gating issue is one of these can pass the scoped counts below
+    # instead of the table always reading the pre-scoped `result.changes`.
+    scoped_only, missing_labels, blocks, missing_kind = _resolve_scoped_gate_findings(
+        result,
+        severity_config,
+        show_only,
+    )
+
+    if severity_config is not None:
+        lines += _build_severity_summary_md(
+            changes,
+            severity_config,
+            all_changes=list(result.changes),
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+            scoped_counts=getattr(result, "scoped_severity_counts", None),
+            scoped_blocking_categories=getattr(
+                result, "scoped_blocking_categories", None
+            ),
+        )
+    groups = _group_changes_by_root_cause(changes + scoped_only)
+    has_root_cause_entries = bool(groups or missing_labels)
+    if has_root_cause_entries:
+        order: list[str] = []
+        root_by_key: dict[str, str] = {}
+        finding_lines_by_key: dict[str, list[str]] = {}
+        count_by_key: dict[str, int] = {}
+        for key, root_display, group_changes in groups:
+            order.append(key)
+            root_by_key[key] = root_display
+            finding_lines_by_key[key] = [_format_change_md(c) for c in group_changes]
+            count_by_key[key] = len(group_changes)
+
+        if missing_labels:
+            referenced_causes = frozenset(
+                c.caused_by_type for c in changes + scoped_only if c.caused_by_type
+            )
+            severity_tag = "breaking" if blocks else "compatible"
+            for label in missing_labels:
+                key, root_display = _root_cause_key_and_display(
+                    None, label, missing_kind, label,
+                    referenced_causes=referenced_causes,
+                )
+                line = (
+                    f"- `{label}` is required but missing from the new "
+                    f"library ({severity_tag})"
+                )
+                if key in finding_lines_by_key:
+                    finding_lines_by_key[key].append(line)
+                    count_by_key[key] += 1
+                else:
+                    order.append(key)
+                    root_by_key[key] = root_display
+                    finding_lines_by_key[key] = [line]
+                    count_by_key[key] = 1
+
+        lines += [f"## Root Causes ({len(order)})", ""]
+        for key in order:
+            n = count_by_key[key]
+            plural = "" if n == 1 else "s"
+            lines.append(f"### `{root_by_key[key]}` ({n} finding{plural})")
+            lines.append("")
+            lines.extend(finding_lines_by_key[key])
+            lines.append("")
+
+    # Codex review: a scoped-only change or missing-contract label can be the
+    # *only* displayed finding (result.changes itself empty/filtered out) --
+    # gating this purely on `changes` produced a contradictory report with a
+    # populated "## Root Causes" section immediately followed by "No ABI
+    # changes detected."
+    if not changes and not has_root_cause_entries:
+        if show_only and result.changes:
+            lines.append("_No changes match the current filter._")
+        else:
+            lines.append("_No ABI changes detected._")
+
+    _append_redundancy_note(lines, result)
+    _append_suppression_note(lines, result)
+
+    if show_impact:
+        lines += _build_impact_table(result, displayed_changes=changes)
+
+    lines += _footer_lines()
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Markdown output
 # ---------------------------------------------------------------------------
@@ -700,6 +1030,8 @@ def _build_severity_summary_md(
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    scoped_counts: dict[str, int] | None = None,
+    scoped_blocking_categories: tuple[str, ...] | None = None,
 ) -> list[str]:
     """Build a severity configuration summary table for markdown output.
 
@@ -708,6 +1040,16 @@ def _build_severity_summary_md(
     unfiltered set used for the ``Exit Impact`` column so that filtering the
     display doesn't make this table claim "no exit impact" for a category
     that still fails the actual (unfiltered) severity gate.
+
+    *scoped_counts*/*scoped_blocking_categories* (Codex review), when given
+    (from ``result.scoped_severity_counts``/``scoped_blocking_categories``
+    on a ``--used-by``/``--required-symbol`` run), override both columns
+    with the scoped gate's own numbers -- otherwise this table always
+    reflects the full-library ``changes``, so a scoped run whose only
+    gating issue is a scoped-only change or missing-contract label (neither
+    of which is in ``result.changes``) would show every category at 0 and
+    "no exit impact" while the report elsewhere names a real, blocking
+    finding.
     """
     from .severity import SeverityLevel, categorize_changes
 
@@ -765,10 +1107,16 @@ def _build_severity_summary_md(
         level = getattr(severity_config, attr, SeverityLevel.INFO)
         level_val = level.value if hasattr(level, "value") else str(level)
         emoji = _SEVERITY_EMOJI.get(level_val, "")
-        count = len(cat_changes)
+        count = (
+            scoped_counts.get(attr, 0) if scoped_counts is not None else len(cat_changes)
+        )
         impact = (
             "causes non-zero exit"
-            if level_val == "error" and len(exit_cat_changes) > 0
+            if (
+                attr in scoped_blocking_categories
+                if scoped_blocking_categories is not None
+                else level_val == "error" and len(exit_cat_changes) > 0
+            )
             else "no exit impact"
         )
         lines.append(
@@ -1088,6 +1436,17 @@ def to_markdown(
                 show_impact=show_impact,
                 show_only=show_only,
                 show_recommendation=show_recommendation,
+                severity_config=severity_config,
+            )
+        )
+
+    if report_mode == "root-cause":
+        return _out(
+            _to_markdown_root_cause(
+                result,
+                show_only=show_only,
+                show_recommendation=show_recommendation,
+                show_impact=show_impact,
                 severity_config=severity_config,
             )
         )

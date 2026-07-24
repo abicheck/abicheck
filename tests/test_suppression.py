@@ -128,6 +128,44 @@ def test_suppressed_changes_audit_trail(tmp_path: Path) -> None:
     assert all(c.symbol != "_ZN3foo3barEv" for c in result.changes)
 
 
+def test_suppressed_change_records_matching_rule_label(tmp_path: Path) -> None:
+    """G29 Phase 3 slice 2 (ADR-052 follow-up): Change.suppression_rule
+    carries the label of the rule that actually suppressed it, so
+    impact_assessment.decision.suppression_rule isn't always None."""
+    yaml_path = write_yaml(tmp_path, """
+        version: 1
+        suppressions:
+          - symbol: "_ZN3foo3barEv"
+            change_kind: "func_removed"
+            label: "workaround-123"
+    """)
+    sl = SuppressionList.load(yaml_path)
+    old, new = _make_snapshots_with_removed_func("_ZN3foo3barEv")
+    result = compare(old, new, suppression=sl)
+
+    assert result.suppressed_changes[0].suppression_rule == "workaround-123"
+
+
+def test_suppressed_change_falls_back_to_reason_when_unlabeled(tmp_path: Path) -> None:
+    """No label set on the matching rule -- fall back to reason rather than
+    leaving suppression_rule None when there's a perfectly good description
+    available."""
+    yaml_path = write_yaml(tmp_path, """
+        version: 1
+        suppressions:
+          - symbol: "_ZN3foo3barEv"
+            change_kind: "func_removed"
+            reason: "internal ABI churn, not user-facing"
+    """)
+    sl = SuppressionList.load(yaml_path)
+    old, new = _make_snapshots_with_removed_func("_ZN3foo3barEv")
+    result = compare(old, new, suppression=sl)
+
+    assert result.suppressed_changes[0].suppression_rule == (
+        "internal ABI churn, not user-facing"
+    )
+
+
 def test_suppression_file_provided_flag(tmp_path: Path) -> None:
     """suppression_file_provided=True even when 0 rules matched."""
     yaml_path = write_yaml(tmp_path, "version: 1\nsuppressions: []\n")

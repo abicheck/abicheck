@@ -157,7 +157,27 @@ from typing import Any
 #:       has already produced it -- nothing in the CLI/service layer sets
 #:       these directly either, same as 2.12's five keys. All additive/
 #:       optional; omitted entirely (never emitted as null) when unset.
-REPORT_SCHEMA_VERSION = "2.13"
+#:   2.14: added two additive optional per-change keys (G29 Phase 3 slice 1,
+#:       ADR-052) -- ``reachability_state`` (the tri-state signal from PR
+#:       #607's ``Change.reachability_state``, always present, never
+#:       serialized before this) and ``impact_assessment`` (a unified read
+#:       view over the scattered reachability/impact fields above --
+#:       ``reachability_state``/``public_reachable``/``reachability_kind``/
+#:       the proof path/decision state/``evidence_category``/
+#:       ``correlated_change_kind`` -- present only when it carries
+#:       information beyond the all-defaults case).
+#:   2.15: added two additive optional top-level keys, present only under
+#:       ``--report-mode root-cause`` (G29 Phase 3 slices 3-4, ADR-052) --
+#:       ``root_causes`` (groups ``changes`` by ``Change.caused_by_type``,
+#:       falling back to the change's own symbol for an ungrouped finding)
+#:       and ``root_cause_count``. This schema field is JSON-specific by
+#:       nature, but the same grouping also renders for ``--format
+#:       markdown``/text (slice 4) and as additive SARIF ``properties``
+#:       (slice 5, SARIF has no ``report_schema_version`` of its own) --
+#:       ``root_cause_id`` is a stable hash of the grouping key, not the
+#:       eventual G29 Phase 6 ``RootCauseCorrelator``'s own identifier
+#:       scheme.
+REPORT_SCHEMA_VERSION = "2.15"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

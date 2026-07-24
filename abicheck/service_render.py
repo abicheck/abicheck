@@ -81,7 +81,10 @@ def render_output(
         from .sarif import to_sarif_str
 
         return to_sarif_str(
-            result, show_only=show_only, severity_config=severity_config
+            result,
+            show_only=show_only,
+            report_mode=report_mode,
+            severity_config=severity_config,
         )
 
     if fmt == "html":

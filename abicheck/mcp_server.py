@@ -439,7 +439,12 @@ def _render_output(
     if fmt == "sarif":
         from .sarif import to_sarif_str
 
-        return to_sarif_str(result, show_only=show_only, severity_config=severity_config)
+        return to_sarif_str(
+            result,
+            show_only=show_only,
+            report_mode=report_mode,
+            severity_config=severity_config,
+        )
     if fmt == "html":
         from .html_report import generate_html_report
 
@@ -1295,7 +1300,7 @@ def abi_compare(
             # though the top-level verdict/exit_code are scoped (Codex review).
             rendered = _fold_scoped_compat_into_text(
                 rendered, output_format, result, severity_config=severity_config,
-                show_only=show_only,
+                show_only=show_only, report_mode=report_mode,
             )
         if output_format == "json":
             response["report"] = json.loads(rendered)

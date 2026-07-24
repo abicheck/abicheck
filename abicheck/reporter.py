@@ -37,6 +37,7 @@ from .checker_policy import (
     policy_kind_sets as _policy_kind_sets,
 )
 from .checker_types import validate_check_id, validate_evidence_depth
+from .impact import assess_change
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
 
@@ -66,12 +67,17 @@ from .reporter_markdown import (
     _build_library_files_section as _build_library_files_section,
     _build_severity_sections as _build_severity_sections,
     _build_severity_summary_md as _build_severity_summary_md,
+    _finding_id as _finding_id,
     _fmt_size as _fmt_size,
     _footer_lines as _footer_lines,
     _format_change_md as _format_change_md,
     _format_leaf_type_change as _format_leaf_type_change,
+    _group_changes_by_root_cause as _group_changes_by_root_cause,
+    _resolve_scoped_gate_findings as _resolve_scoped_gate_findings,
+    _root_cause_key_and_display as _root_cause_key_and_display,
     _section_severity_label as _section_severity_label,
     _to_markdown_leaf as _to_markdown_leaf,
+    _to_markdown_root_cause as _to_markdown_root_cause,
     apply_show_only as apply_show_only,
     operation_for_kind as operation_for_kind,
     to_markdown as to_markdown,
@@ -341,6 +347,16 @@ def _to_json_leaf(
             proof_path = getattr(c, "reachability_proof_path", None)
             if proof_path:
                 entry["reachability_proof_path"] = proof_path
+        # G29 Phase 3 slice 1 (ADR-052, Codex review): _leaf_entry duplicates
+        # _change_to_dict's reachability fields rather than routing through
+        # it (see the ADR-044 block above) -- reachability_state/
+        # impact_assessment follow the same precedent so a root TYPE_*
+        # change (exactly the category the layout-reachability walk tags
+        # most often) doesn't lose them in --report-mode leaf.
+        assessment = assess_change(c)
+        entry["reachability_state"] = assessment.reachability_state.value
+        if assessment.has_signal():
+            entry["impact_assessment"] = assessment.to_dict()
         return entry
 
     leaf_changes_list = [_leaf_entry(c) for c in type_changes]
@@ -398,6 +414,162 @@ def _to_json_leaf(
         d["coverage_warnings"] = list(result.coverage_warnings)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
+    scope = _scope_dict(result)
+    if scope is not None:
+        d["scope"] = scope
+    return json.dumps(d, indent=indent)
+
+
+def _add_entries_to_root_causes(
+    d: dict[str, object],
+    keyed_entries: list[tuple[str, str, dict[str, object]]],
+) -> None:
+    """Fold additional ``(key, root_display, entry)`` triples into an
+    already-built ``--report-mode root-cause`` payload, for synthetic
+    scoped-gate entries computed after :func:`_to_json_root_cause` already
+    grouped ``result.changes`` (else they'd sit in ``changes[]`` but never in
+    ``root_causes``). No-op if *d* has no ``root_causes`` list.
+    """
+    root_causes = d.get("root_causes")
+    if not isinstance(root_causes, list):
+        return
+    by_id = {
+        group["root_cause_id"]: group
+        for group in root_causes
+        if isinstance(group, dict)
+    }
+    for key, root_display, entry in keyed_entries:
+        root_cause_id = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+        group = by_id.get(root_cause_id)
+        if group is None:
+            group = {
+                "root_cause_id": root_cause_id,
+                "root": root_display,
+                "finding_count": 0,
+                "findings": [],
+            }
+            root_causes.append(group)
+            by_id[root_cause_id] = group
+        group["findings"].append(entry)
+        group["finding_count"] = len(group["findings"])
+    d["root_cause_count"] = len(root_causes)
+
+
+def _to_json_root_cause(
+    result: DiffResult,
+    indent: int = 2,
+    *,
+    show_only: str | None = None,
+    severity_config: SeverityConfig | None = None,
+) -> str:
+    """``--report-mode root-cause`` JSON output (G29 Phase 3, ADR-052 slice 3).
+
+    Groups ``result.changes`` (after ``--show-only`` filtering) by
+    ``Change.caused_by_type`` when set, else each change is its own
+    singleton group keyed by its own ``symbol`` -- reusing the existing
+    ``caused_by_type`` field ``diff_filtering.py``'s redundancy collapse and
+    ``internal_leak.py``'s call-graph-leak overlay already set, rather than
+    requiring new producer wiring. This is a first, JSON-only slice of the
+    plan's root-cause grouping: the full `RootCauseCorrelator` (G29 Phase 6)
+    will additionally correlate across consumer-overlay findings that don't
+    share a `caused_by_type` today; `root_cause_id` here is a stable hash of
+    the grouping key, not the eventual correlator's own identifier scheme
+    (ADR-052, "Deliberately not implemented this slice").
+    """
+    changes = list(result.changes)
+    if show_only:
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+    effective_policy = result.policy or "strict_abi"
+    eff_sets = result._effective_kind_sets()
+
+    # G29 Phase 3 slice 3 follow-up (Codex review): the scoped-gate
+    # (--used-by/--required-symbol) fold-in in cli_compare_fold.py appends
+    # scoped-only changes to this report *after* this function has already
+    # built root_causes -- without folding their caused_by_type into the
+    # grouping here too, a change in `changes` that only correlates via one
+    # of those later-appended findings would already be locked into its own
+    # singleton group by the time the fold-in tries to join it, contradicting
+    # SARIF's identical grouping (computed in one pass, so it doesn't have
+    # this two-phase gap). Filtered by the same --show-only as `changes`
+    # above, mirroring sarif.to_sarif's identical computation.
+    scoped_only_for_causes = list(getattr(result, "scoped_only_changes", ()) or ())
+    if show_only and scoped_only_for_causes:
+        scoped_only_for_causes = apply_show_only(
+            scoped_only_for_causes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+    extra_causes = frozenset(
+        c.caused_by_type for c in scoped_only_for_causes if c.caused_by_type
+    )
+
+    # Build each finding's dict exactly once; group the same dict objects by
+    # key so `changes` (flat, backward-compatible -- every existing report
+    # mode provides it, `_to_json_leaf` included) and `root_causes[].findings`
+    # never drift from each other.
+    entry_by_id = {
+        id(c): _change_to_dict(
+            c, policy=effective_policy, kind_sets=eff_sets, policy_file=result.policy_file
+        )
+        for c in changes
+    }
+    entries = [entry_by_id[id(c)] for c in changes]
+    grouped = _group_changes_by_root_cause(changes, extra_causes=extra_causes)
+
+    root_causes = [
+        {
+            "root_cause_id": hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
+            "root": root_display,
+            "finding_count": len(group_changes),
+            "findings": [entry_by_id[id(c)] for c in group_changes],
+        }
+        for key, root_display, group_changes in grouped
+    ]
+
+    d = _build_json_base(result)
+    _add_abi_surface_breakdown(d, result)
+    _add_evidence_fields(d, result)
+    d["policy"] = effective_policy
+    if show_only:
+        _add_show_only_filter(d, result, changes, show_only)
+    if severity_config is not None:
+        d["severity"] = _build_severity_json(
+            changes,
+            severity_config,
+            all_changes=list(result.changes),
+            policy=result.policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+        )
+    d["changes"] = entries
+    d["root_causes"] = root_causes
+    d["root_cause_count"] = len(root_causes)
+    # Codex review: full mode's _add_changes_block (and leaf mode's own copy)
+    # both surface these audit-trail fields whenever they're non-empty --
+    # root-cause mode built its own JSON path and skipped them, silently
+    # dropping the redundant/modulated-finding trail for a filtered report.
+    if result.redundant_count > 0:
+        d["redundant_count"] = result.redundant_count
+    if result.pattern_modulations:
+        d["pattern_modulations"] = result.pattern_modulations
+    _add_suppression(d, result)
+    _add_surface_scope(d, result)
+    _add_reconciled(d, result)
+    _add_detectors(d, result)
+    _add_confidence_evidence(d, result)
+    _add_policy_overrides(d, result)
+    # Codex review: full/leaf JSON both emit the machine-readable
+    # `scope` block (resolved/fell_back/manual_review_required) when
+    # --scope-public-headers was requested -- root-cause mode dropped it,
+    # hiding the fallback/manual-review warning for scoped root-cause runs.
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
@@ -551,18 +723,32 @@ def _add_show_only_filter(
     }
 
 
+def _suppressed_change_entry(c: Change) -> dict[str, object]:
+    """Minimal audit-trail entry for one suppressed change, plus the
+    impact-assessment decision it was actually suppressed with (G29 Phase 3
+    slice 1, ADR-052 follow-up, Codex review: this is the one call site that
+    passes ``suppressed=True`` -- without it, ``decision.state:
+    "suppressed"`` was advertised but never actually reachable from
+    production reporting)."""
+    entry: dict[str, object] = {
+        "kind": c.kind.value,
+        "symbol": c.symbol,
+        "description": c.description,
+    }
+    assessment = assess_change(c, suppressed=True)
+    entry["reachability_state"] = assessment.reachability_state.value
+    if assessment.has_signal():
+        entry["impact_assessment"] = assessment.to_dict()
+    return entry
+
+
 def _add_suppression(d: dict[str, object], result: DiffResult) -> None:
     """Add suppression block (file flag, count, suppressed change list)."""
     d["suppression"] = {
         "file_provided": result.suppression_file_provided,
         "suppressed_count": result.suppressed_count,
         "suppressed_changes": [
-            {
-                "kind": c.kind.value,
-                "symbol": c.symbol,
-                "description": c.description,
-            }
-            for c in result.suppressed_changes
+            _suppressed_change_entry(c) for c in result.suppressed_changes
         ],
     }
 
@@ -661,6 +847,14 @@ def to_json(
             severity_config=severity_config,
         )
 
+    if report_mode == "root-cause":
+        return _to_json_root_cause(
+            result,
+            indent=indent,
+            show_only=show_only,
+            severity_config=severity_config,
+        )
+
     changes = list(result.changes)
     if show_only:
         changes = apply_show_only(
@@ -701,42 +895,6 @@ def to_json(
     _add_policy_overrides(d, result)
     _add_trailing_fields(d, result, show_impact, show_only)
     return json.dumps(d, indent=indent)
-
-
-def _finding_id(c: object) -> str:
-    """Stable per-finding fingerprint (schema 2.3, additive).
-
-    Deterministic across repeated runs of the same comparison, so a
-    consumer can tell "is this the same finding" across two report runs
-    (e.g. to correlate a suppression/waiver, or diff two CI runs' findings)
-    without relying on array order or index — neither of which abicheck
-    guarantees stays stable release to release.
-
-    Derived only from fields that identify the finding's *identity* (kind,
-    symbol, old/new value, source location, description) — deliberately
-    excluding ``severity``/``evidence_status``, which are policy-derived and
-    would make the same underlying finding hash differently under a
-    different ``--policy``.
-
-    ``description`` is included as a discriminator: two findings of the same
-    kind on the same symbol with the same old/new value and no distinct
-    source location (e.g. ``param_pointer_level_changed`` on two different
-    parameters of one function, both going from pointer-depth 1 to 2) would
-    otherwise collide on an identical id even though they are different
-    findings — ``description`` embeds the per-finding detail (parameter
-    name/index, member name, …) that disambiguates them.
-    """
-    key = "\x1f".join(
-        [
-            str(getattr(getattr(c, "kind", None), "value", getattr(c, "kind", ""))),
-            str(getattr(c, "symbol", None) or ""),
-            str(getattr(c, "old_value", None) or ""),
-            str(getattr(c, "new_value", None) or ""),
-            str(getattr(c, "source_location", None) or ""),
-            str(getattr(c, "description", None) or ""),
-        ]
-    )
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
 _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {
@@ -973,6 +1131,18 @@ def _change_to_dict(
     impact_direct = getattr(c, "impact_is_direct", None)
     if impact_direct is not None:
         d["impact_is_direct"] = impact_direct
+    # G29 Phase 3 slice 1 (ADR-052): reachability_state has existed on Change
+    # since PR #607 but was never serialized -- without it, a JSON consumer
+    # cannot tell a PROVEN_UNREACHABLE finding apart from one the graph walk
+    # never examined at all (UNKNOWN), since both leave public_reachable
+    # False. impact_assessment is the unified read view over the scattered
+    # reachability/impact fields above; only emitted when it carries
+    # information beyond the all-defaults case, matching this function's own
+    # convention of not padding every plain finding with an empty object.
+    assessment = assess_change(c)
+    d["reachability_state"] = assessment.reachability_state.value
+    if assessment.has_signal():
+        d["impact_assessment"] = assessment.to_dict()
     return d
 
 

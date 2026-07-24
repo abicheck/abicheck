@@ -1,0 +1,71 @@
+<!--
+A new changelog fragment. See changelog.d/README.md for the workflow.
+-->
+
+### Added
+
+- **`--report-mode root-cause`** (ADR-052, G29 Phase 3 slice 3): groups
+  findings sharing a root cause (`Change.caused_by_type`) under one entry
+  instead of listing every change individually — e.g. an internal helper's
+  `func_removed` finding and the `internal_symbol_required_by_public_api`
+  overlay finding that names it now land in the same group. JSON output
+  only (`--format json`); other formats render as `full`. Adds two
+  additive top-level keys, `root_causes` and `root_cause_count`
+  (`report_schema_version` 2.14 → 2.15); `changes` is still emitted in
+  full for backward compatibility. See `docs/user-guide/output-formats.md`.
+
+### Fixed
+
+- **`impact_assessment.decision.suppression_rule` missing for late-detector
+  suppressions** (ADR-052 follow-up): a suppression rule that suppressed a
+  finding built by `DetectCppPatterns`/`DetectTemplatePatterns`/
+  `DetectNamespacePatterns` (which run after the main suppression pass and
+  route through their own shared helper) did not get
+  `Change.suppression_rule` stamped, unlike a finding suppressed by the
+  main pass — `suppression.suppressed_changes[]`'s
+  `impact_assessment.decision.suppression_rule` was silently absent for
+  these. Fixed by applying the same attribution in
+  `post_processing._merge_findings_respecting_suppression`.
+
+- **`--report-mode root-cause` grouping edge cases** (ADR-052 follow-up):
+  two or more findings that both lack `caused_by_type` and carry an empty
+  `symbol` (e.g. `SOURCE_FACT_COVERAGE_INCOMPLETE`,
+  `SOURCE_BINARY_PROVENANCE_MISMATCH`) no longer collapse into one fake
+  shared root cause keyed on `""` — each now keys uniquely, matching the
+  contract that only `caused_by_type` correlates findings. Separately, a
+  `--used-by`/`--required-symbol` scoped gate whose only failure is a
+  synthetic scoped-only change or missing-contract label (folded into
+  `changes[]` after `root_causes` is built) is now folded into
+  `root_causes`/`root_cause_count` too, instead of only the flat
+  `changes[]`. Separately, two *independent* findings that merely share a
+  non-empty symbol with no `caused_by_type` correlation (e.g. a
+  `func_return_changed` and a `func_params_changed` finding both on `foo`)
+  no longer wrongly collapse into one root cause either — a symbol is
+  only used as a grouping key when some other finding's `caused_by_type`
+  actually names it; otherwise each finding keys uniquely, with the
+  symbol still shown as its own singleton group's display root. Finally, a
+  scoped-only finding whose `caused_by_type` matches an existing real
+  change's symbol now correctly joins that change's root-cause group
+  instead of forming a second, disagreeing group — `_to_json_root_cause`
+  now folds `scoped_only_changes`' `caused_by_type` values into its own
+  grouping decision up front (mirroring `sarif.to_sarif`'s single-pass
+  computation), so the later scoped-gate fold-in's merge attempt actually
+  finds the group to join.
+
+- **`versioned_symbol_scheme_detected` suppression left unattributed**
+  (ADR-052 follow-up, Codex review): the attribution fix above covered
+  `DetectCppPatterns`/`DetectTemplatePatterns`/`DetectNamespacePatterns`
+  but missed `DetectVersionedSymbolScheme`, which suppressed its advisory
+  via the cheaper `SuppressionList.is_suppressed` and appended it to
+  `ctx.suppressed` directly — a labelled rule matching this advisory still
+  produced `suppression_rule: null`. Fixed by routing it through the same
+  `_merge_findings_respecting_suppression` helper instead of duplicating
+  the `evaluate()`/stamp logic inline.
+
+- **`--report-mode root-cause` JSON dropped `redundant_count`/
+  `pattern_modulations`** (ADR-052 follow-up, Codex review): `full`/`leaf`
+  JSON both surface these audit-trail fields whenever non-empty, but
+  `_to_json_root_cause` built its own payload from scratch and never
+  carried them over, silently hiding the redundant/modulated-finding trail
+  for a root-cause-mode report. Added the same conditional fields root-cause
+  JSON was missing.
