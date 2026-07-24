@@ -19,24 +19,23 @@ name: 'Test check-project.yml: deferred operational failure survives to aggregat
 # path through the real check-project.yml file, short of reimplementing its
 # steps by hand (which would stop testing the actual reusable workflow).
 #
-# So: this lives in its own, deliberately NON-required workflow file, kept
-# separate from `test-action.yml` (which IS a required check and must stay
-# green). Do not add this workflow's own status to branch protection's
-# required checks -- the real pass/fail signal is `test-check-project-verify`
-# succeeding (it asserts the operational failure was reported *correctly*,
-# not swallowed), which is what a human reviewing this workflow's job list
-# should check, not the run's overall conclusion badge.
-
+# **`push: branches: [main]` only, deliberately NOT `pull_request`.** A
+# called reusable workflow's own jobs get separate check-runs attached to
+# the SAME commit SHA as the calling workflow -- "not required" doesn't
+# make them invisible, they still show up red in a PR's checks list, and a
+# human reviewing that list has no way to tell "expected, by design" apart
+# from a real failure without reading this comment. Running this only on
+# `push` to `main` (i.e. only after a PR has already merged) means the
+# fixture still catches a real regression before it reaches users, without
+# ever posting a red check against an open PR. The cost: a PR that itself
+# changes check-project.yml (like the one that introduced this file) is
+# not re-validated against this exact fixture before merging -- mitigated
+# by hand-verifying the mechanism locally/via manual runs before merging
+# such a PR, as this file's own G30 plan-doc history documents.
 permissions:
   contents: read
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/check-project.yml'
-      - '.github/workflows/test-check-project-failure-path.yml'
-      - 'abicheck/**'
-      - 'tests/fixtures/action/**'
   push:
     branches: [main]
     paths:

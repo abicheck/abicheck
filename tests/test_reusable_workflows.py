@@ -859,6 +859,20 @@ class TestCheckProjectFixtureDoesNotFailTheRequiredWorkflow:
         assert ".github/workflows/check-project.yml" not in pr_paths
         assert ".github/workflows/check-project.yml" not in push_paths
 
+    def test_failure_path_workflow_does_not_trigger_on_pull_request(self) -> None:
+        """Even in its own non-required workflow file, this fixture's
+        expected failure still posts a real, visible red check-run against
+        whatever commit SHA triggered it -- 'not required' doesn't mean
+        'invisible' on a PR's checks list, and a human skimming that list
+        has no way to tell 'expected, by design' apart from a genuine
+        failure without reading this file's own header comment. Restricting
+        the trigger to `push: branches: [main]` (i.e. only after a PR has
+        already merged) means no open PR ever shows this fixture's
+        deliberate failure as one of its own checks."""
+        data = _load(TEST_CHECK_PROJECT_FAILURE_PATH)
+        assert "pull_request" not in data[True]
+        assert data[True]["push"]["branches"] == ["main"]
+
 
 class TestEveryCheckProjectJobInstallsAbicheckFromItsOwnSource:
     """`pip install .` on the preceding `actions/checkout@v6` step installs

@@ -2029,6 +2029,27 @@ pattern that looked confined). Covered by a new
 `test_escaping_pattern_is_rejected_end_to_end` updated to assert the new
 upfront-rejection message.
 
+**A user-driven fix (not from Codex/CodeRabbit review):** the "not
+required" framing above for `test-check-project-failure-path.yml`
+undersold the real problem it still caused. GitHub attaches a called
+reusable workflow's own job-level check-runs to the *same commit SHA* as
+the calling workflow -- "not a required branch-protection check" doesn't
+make them invisible, they still post as real, visibly red entries on that
+commit's (and therefore the open PR's) checks list, indistinguishable at a
+glance from a genuine failure without reading this file's own header
+comment. A maintainer reviewing PR #627 explicitly rejected merging with
+any red check showing, expected-by-design or not. Fixed: removed the
+`pull_request:` trigger entirely, leaving only `push: branches: [main]` --
+this fixture (and the real failure it deliberately produces) now only
+runs *after* a PR has already merged, so no open PR ever shows it as one
+of its own checks. The tradeoff: a PR that itself changes
+`check-project.yml` (like this one) is no longer re-validated against this
+exact fixture before merging -- mitigated the same way this PR's own
+~20 rounds of Codex/CodeRabbit fixes already were, by hand-verifying the
+mechanism (manually running the workflow, or reasoning through the YAML
+directly) before merging changes that touch it. Covered by a new
+`test_failure_path_workflow_does_not_trigger_on_pull_request`.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —
