@@ -97,3 +97,29 @@ topics:
       - abicheck/buildsource
       - contrib/abicheck-clang-plugin
     reference_page: user-guide/build-evidence-setup.md
+
+  cli-surface:
+    canonical_page: user-guide/cli-usage.md
+    fact_sources:
+      - abicheck/cli.py
+    reference_page: reference/cli-reference.md
+    task_pages:
+      - user-guide/dump-compare-flags.md
+
+  mcp-tools:
+    canonical_page: user-guide/mcp-integration.md
+    fact_sources:
+      - abicheck/mcp_server.py
+    reference_page: reference/mcp-tools-reference.md
+
+  python-api:
+    canonical_page: user-guide/python-api.md
+    fact_sources:
+      - abicheck/service.py
+    reference_page: reference/python-api-reference.md
+
+  config-keys:
+    canonical_page: reference/config-file.md
+    fact_sources:
+      - abicheck/buildsource/inline.py
+    reference_page: reference/config-keys-reference.md

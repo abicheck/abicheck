@@ -1,9 +1,25 @@
+---
+doc_type: reference
+audience:
+  - library-maintainer
+level: intermediate
+canonical_for:
+  - config-keys
+depends_on:
+  - abicheck/buildsource/inline.py
+lifecycle: active
+generated: false
+---
+
 # The `.abicheck.yml` config file
 
 `.abicheck.yml` is the per-project configuration file (ADR-037 D4). It holds
 the *stable, reviewed-in-a-PR* properties of a project's ABI contract — build
 system, header compile context, severity policy, public-surface scoping, and
-suppression hygiene — as opposed to per-run invocation flags.
+suppression hygiene — as opposed to per-run invocation flags. See the
+[Config Keys Reference](config-keys-reference.md) for the exhaustive,
+generated list of every recognized key and its exact required type; this page
+covers effective defaults, precedence, and a worked example.
 
 Every field is optional; an absent, empty, or non-mapping file yields the
 all-defaults configuration. **CLI flags always override the config**, which in

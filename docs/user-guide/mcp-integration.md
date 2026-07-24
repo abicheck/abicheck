@@ -1,3 +1,15 @@
+---
+doc_type: how-to
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+canonical_for:
+  - mcp-tools
+lifecycle: active
+generated: false
+---
+
 # MCP Server (Agent Integration)
 
 abicheck includes an MCP ([Model Context Protocol](https://modelcontextprotocol.io/)) server that exposes ABI checking as structured tools for AI agents — Claude Code, Cursor, VS Code Copilot, OpenAI Agents, and any other MCP-compatible client.
@@ -90,27 +102,8 @@ Each input is auto-detected and may be a shared library
 (`.so` / `.dll` / `.dylib`), a JSON snapshot produced by `abi_dump`, or an
 ABICC Perl dump (`.pl` / `.dump`).
 
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `old_input` | string | yes | Path to old `.so`/`.dll`/`.dylib`, JSON snapshot, or ABICC Perl dump |
-| `new_input` | string | yes | Path to new `.so`/`.dll`/`.dylib`, JSON snapshot, or ABICC Perl dump |
-| `headers` | string[] | no | Shared header file list applied to both sides. Overridden per-side by `old_headers` / `new_headers` when those are supplied |
-| `old_headers` | string[] | no | Headers for old side only. Takes precedence over `headers` |
-| `new_headers` | string[] | no | Headers for new side only. Takes precedence over `headers` |
-| `include_dirs` | string[] | no | Include directories for the C/C++ parser |
-| `language` | string | no | `"c++"` (default) or `"c"` |
-| `policy` | string | no | `"strict_abi"` (default), `"sdk_vendor"`, or `"plugin_abi"`. See [Policy Profiles](policies.md) |
-| `policy_file` | string | no | Path to custom YAML policy file. Overrides `policy` when set |
-| `suppression_file` | string | no | Path to YAML [suppression](suppressions.md) file |
-| `output_format` | string | no | Report format: `"json"` (default), `"markdown"`, `"sarif"`, `"html"` |
-| `show_only` | string | no | Comma-separated filter tokens (display only). Severity: `breaking`, `api-break`, `risk`, `compatible`. Element: `functions`, `variables`, `types`, `enums`, `elf`. Action: `added`, `removed`, `changed` |
-| `report_mode` | string | no | `"full"` (default) or `"leaf"` (root-type-grouped view) |
-| `show_impact` | boolean | no | If `true`, append an impact summary table to the rendered report |
-| `stat` | boolean | no | If `true`, emit a one-line summary instead of the full report |
-| `used_by` | string[] | no | Application binary paths — scope the comparison to what each app actually imports/requires instead of the full library surface (folds the old `appcompat` command). `old_input`/`new_input` may be real library binaries or JSON snapshots carrying binary evidence (a dump of a real library, not headers-only). Mutually exclusive with `required_symbols`. Adds a `used_by` list to the response and floors `exit_code` on the worst-scoped app's verdict |
-| `required_symbols` | string[] | no | An explicit plugin/host required-entrypoint contract — scope the comparison to only these exported symbols (folds the old `plugin-check` command). Mutually exclusive with `used_by`. Adds a `required_symbol_contract` object to the response and floors `exit_code` on its verdict |
+See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_compare)
+for the exhaustive, generated parameter list.
 
 **Response fields:**
 
@@ -178,16 +171,9 @@ See [Exit Codes](../reference/exit-codes.md) for the full CLI matrix.
 Extracts the public ABI surface from a shared library (and, for ELF, its
 headers) into a JSON snapshot.
 
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `library_path` | string | yes | Path to `.so`/`.dll`/`.dylib` file |
-| `headers` | string[] | no | Public header file paths. For ELF (`.so`), omitting headers produces a **symbol-only** snapshot with no type information. Not used for PE (`.dll`) or Mach-O (`.dylib`) inputs |
-| `include_dirs` | string[] | no | Extra include directories for the C/C++ parser |
-| `version` | string | no | Version label embedded in the snapshot (default: `"unknown"`) |
-| `language` | string | no | `"c++"` (default) or `"c"` |
-| `output_path` | string | no | If provided, write the snapshot to this file; otherwise the snapshot is returned inline. See [Path restrictions](#path-restrictions-for-output_path) |
+See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_dump) for
+the exhaustive, generated parameter list. `output_path` is subject to the
+[path restrictions](#path-restrictions-for-output_path) below.
 
 **Response — inline snapshot** (no `output_path`):
 
@@ -236,11 +222,8 @@ Enumerates all 394 `ChangeKind` values with their impact classification. See
 the [Change Kinds Reference](../reference/change-kinds.md) for canonical
 documentation of each kind.
 
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `impact` | string | no | Filter: `"breaking"`, `"api_break"`, `"risk"`, or `"compatible"` |
+See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_list_changes)
+for the exhaustive, generated parameter list.
 
 **Response:**
 
@@ -264,11 +247,8 @@ documentation of each kind.
 
 Returns a detailed explanation of what a change kind means, why it's dangerous, and how to fix it.
 
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `change_kind` | string | yes | e.g. `"func_removed"`, `"type_size_changed"` |
+See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_explain_change)
+for the exhaustive, generated parameter list.
 
 **Response:**
 
@@ -300,14 +280,8 @@ header/build-context mismatch, and private-header leaks, plus advisory pattern
 facts. Per the authority rule these findings are never `BREAKING` on their own —
 they are advisory (`RISK`/`API_BREAK`).
 
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `library_path` | string | yes | Path to `.so`/`.dll`/`.dylib` or a JSON snapshot |
-| `headers` | string[] | no | Public header files. Strongly recommended — most hygiene checks skip cleanly without public-header provenance |
-| `include_dirs` | string[] | no | Extra include directories for the C/C++ parser |
-| `language` | string | no | `"c++"` (default) or `"c"` |
+See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_audit)
+for the exhaustive, generated parameter list.
 
 **Response fields:** `verdict` (`COMPATIBLE` or `API_BREAK`), `exit_code`
 (`0` or `2`), `catalog` (the cross-source findings), and `pattern_scan`
@@ -323,17 +297,8 @@ fan-out) and returns the **projected per-layer cost** of the chosen scan level
 without running any compiler or parsing any binary. Use it to pick a
 `depth` on measured cost before spending on `abi_scan`.
 
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `binary_path` | string | yes | Library/artifact the scan would target (existence checked) |
-| `headers` | string[] | no | Public header files (for the L2 header-AST fan-out estimate) |
-| `include_dirs` | string[] | no | Extra include directories |
-| `sources` | string | no | Source tree (compile DB auto-discovered within it) |
-| `compile_db` | string | no | Explicit `compile_commands.json` (else discovered in `sources`) |
-| `depth` | string | no | The evidence dial: `binary`, `headers`, `build`, or `source`; omit to infer automatically (escalating with the changed-path risk score once `changed_paths` is given) |
-| `changed_paths` | string[] | no | Changed-path set for the focused replay-scope estimate |
+See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_estimate)
+for the exhaustive, generated parameter list.
 
 **Response fields:** `estimate` (per-layer cost rows) and
 `total_est_seconds`.
@@ -351,20 +316,8 @@ preserved: source/cross-source findings are `RISK`/`API_BREAK` only, never
 for the `depth` model — `mode`/`source_method` are no longer accepted; depth
 is inferred automatically, or pinned explicitly via `depth`.
 
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `binary_path` | string | yes | Library/artifact (or JSON snapshot) to scan |
-| `headers` | string[] | no | Public header files (provenance + pattern pre-scan) |
-| `include_dirs` | string[] | no | Extra include directories for the parser |
-| `public_header_dirs` | string[] | no | Directories whose headers are public; establishes the public/internal boundary so the leakage/RTTI/exported-vs-public cross-checks run instead of skipping. Must be existing directories |
-| `sources` | string | no | Source tree (compile DB auto-discovered within it) |
-| `compile_db` | string | no | Explicit `compile_commands.json` (else discovered in `sources`) |
-| `against` | string | no | Previous build's dump/library to compare `binary_path` against. Omit for a single-release run — the always-on hygiene catalog runs either way; there is no separate audit switch, omitting `against` alone selects it |
-| `depth` | string | no | The evidence dial: `binary`, `headers`, `build`, or `source`; omit to infer automatically (escalating with the changed-path risk score once `changed_paths` is given) |
-| `changed_paths` | string[] | no | Changed-path set focusing the scan |
-| `language` | string | no | `"c++"` (default) or `"c"` |
+See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_scan) for
+the exhaustive, generated parameter list.
 
 **Response fields:** `verdict`, `exit_code`, `findings` (count), `layers`
 (the per-layer evidence-coverage rows — always read these before trusting the

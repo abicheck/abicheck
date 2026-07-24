@@ -231,9 +231,13 @@ duplication fixes, the document lifecycle, and the PR checklist.
 ## Regenerating generated docs
 
 ```bash
-python scripts/gen_examples_docs.py     # docs/examples/*.md
-python scripts/gen_detector_spec.py     # docs/reference/detector-spec.{md,json}
-python scripts/gen_action_reference.py  # docs/reference/github-action-inputs.md
+python scripts/gen_examples_docs.py       # docs/examples/*.md
+python scripts/gen_detector_spec.py       # docs/reference/detector-spec.{md,json}
+python scripts/gen_action_reference.py    # docs/reference/github-action-inputs.md
+python scripts/gen_cli_reference.py       # docs/reference/cli-reference.md
+python scripts/gen_mcp_reference.py       # docs/reference/mcp-tools-reference.md (needs the `mcp` extra)
+python scripts/gen_python_api_reference.py  # docs/reference/python-api-reference.md
+python scripts/gen_config_reference.py    # docs/reference/config-keys-reference.md
 ```
 
 Commit the resulting files. `scripts/verify.py --profile pr` (via the

@@ -1,3 +1,14 @@
+---
+doc_type: how-to
+audience:
+  - library-maintainer
+level: intermediate
+canonical_for:
+  - python-api
+lifecycle: active
+generated: false
+---
+
 # Python API
 
 abicheck's functionality is available as a Python library through the
@@ -58,8 +69,8 @@ will reach for most often:
 The table above is the common subset, not the full surface. `run_compare` also
 takes per-side PDB paths, debug roots, forced public symbols, and pattern
 verdicts; for those, build a `CompareRequest`/`InputSpec` directly and call
-`run_compare_request`. See the `run_compare` and `CompareRequest` docstrings in
-`abicheck/service.py` for the complete argument list.
+`run_compare_request`. See the [Python API Reference](../reference/python-api-reference.md)
+for the complete, generated argument/field list of every name in `service.__all__`.
 
 ## Work with snapshots directly
 
@@ -133,6 +144,7 @@ Supported `fmt` values: `"markdown"`, `"json"`, `"sarif"`, `"html"`, `"junit"`.
 - **`AbiSnapshot`** (`abicheck.model`) — the serialisable ABI surface produced
   by `resolve_input` / `run_dump`.
 
-The complete list of exported names is `abicheck.service.__all__`. Public types
-live in `model.py`, `checker_types.py`, and `checker_policy.py`; treat changes to
-their surface as breaking changes to this API.
+The complete list of exported names, with full signatures/dataclass fields, is
+the generated [Python API Reference](../reference/python-api-reference.md).
+Public types live in `model.py`, `checker_types.py`, and `checker_policy.py`;
+treat changes to their surface as breaking changes to this API.

@@ -51,25 +51,33 @@ nav:
       - Storing Baselines: user-guide/baseline-storage.md
     - CI & Gating:
       - CI Gating Pipeline: user-guide/ci-gating.md
-      - GitHub Action: user-guide/github-action.md
-      - 'GitHub Action: More Recipes': user-guide/github-action-recipes.md
-      - 'GitHub Action: Source Scans': user-guide/github-action-source-scans.md
-      - GitHub PR Annotations: user-guide/annotations.md
+      - GitHub Action:
+        - Overview & Setup: user-guide/github-action.md
+        - More Recipes: user-guide/github-action-recipes.md
+        - Source Scans: user-guide/github-action-source-scans.md
+        - PR Annotations: user-guide/annotations.md
       - Severity Configuration: user-guide/severity.md
       - Policy Profiles: user-guide/policies.md
       - Suppressions: user-guide/suppressions.md
     - Specialised Checks:
-      - Debian Symbols Files: user-guide/debian-symbols.md
-      - Multi-Binary Releases: user-guide/multi-binary.md
-      - Application Compatibility: user-guide/appcompat.md
-      - Plugin Systems: user-guide/plugin-systems.md
-      - POST Python Manifests: user-guide/post-python.md
-      - Build Evidence Setup: user-guide/build-evidence-setup.md
-      - API Surface Intelligence: user-guide/api-surface-intelligence.md
-      - Kernel & eBPF (BTF): user-guide/kernel-btf.md
-      - Python Extensions (abi3): user-guide/python-extensions.md
-      - Security Hardening: user-guide/security-hardening.md
-      - Probe Harness: user-guide/probe-harness.md
+      - Packages & Multi-Library Products:
+        - Debian Symbols Files: user-guide/debian-symbols.md
+        - Multi-Binary Releases: user-guide/multi-binary.md
+      - Applications & Consumers:
+        - Application Compatibility: user-guide/appcompat.md
+        - API Surface Intelligence: user-guide/api-surface-intelligence.md
+      - Plugins & Dynamic Loading:
+        - Plugin Systems: user-guide/plugin-systems.md
+      - Python Extensions:
+        - Python Extensions (abi3): user-guide/python-extensions.md
+        - POST Python Manifests: user-guide/post-python.md
+      - Kernel & eBPF:
+        - Kernel & eBPF (BTF): user-guide/kernel-btf.md
+      - Build & Toolchain Contracts:
+        - Build Evidence Setup: user-guide/build-evidence-setup.md
+        - Probe Harness: user-guide/probe-harness.md
+      - Security & Deployment:
+        - Security Hardening: user-guide/security-hardening.md
     - Integrations & Migration:
       - Tool Modes: user-guide/tool-modes.md
       - Python API: user-guide/python-api.md
@@ -91,6 +99,7 @@ nav:
     - Limitations: concepts/limitations.md
   # Lookup tables — precise, exhaustive, no narrative.
   - Reference:
+    - CLI Reference: reference/cli-reference.md
     - Change Kinds: reference/change-kinds.md
     - Detector Spec Matrix: reference/detector-spec.md
     - Exit Codes: reference/exit-codes.md
@@ -102,11 +111,14 @@ nav:
     - Run Plan Schema: reference/run-plan-schema.md
     - Reusable Workflows: reference/reusable-workflows.md
     - Configuration File: reference/config-file.md
+    - Config Keys Reference: reference/config-keys-reference.md
     - Environment Variables: reference/environment.md
     - Platforms: reference/platforms.md
     - Tool Comparison: reference/tool-comparison.md
     - ABICC Flag Reference: reference/abicc-flags.md
     - GitHub Action Inputs/Outputs: reference/github-action-inputs.md
+    - MCP Tools Reference: reference/mcp-tools-reference.md
+    - Python API Reference: reference/python-api-reference.md
   # Track 1 (educational): what ABI/API compatibility is and how to manage it,
   # from first principles (series part 0) to expert-level design guidance.
   - ABI/API Handling & Recommendations:

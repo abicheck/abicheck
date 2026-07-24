@@ -1,3 +1,14 @@
+---
+doc_type: how-to
+audience:
+  - library-maintainer
+level: beginner
+canonical_for:
+  - cli-surface
+lifecycle: active
+generated: false
+---
+
 # Using abicheck, Compatibility Modes, and Coverage
 
 ## What abicheck is
@@ -99,6 +110,9 @@ signature/type-level ABI breaks.
 > [Evidence, Build-Context, and Debug Flags](dump-compare-flags.md).
 
 ### Related flags and pages
+
+For the exhaustive, generated list of every command/subcommand/option (the
+same `help=` text `--help` shows), see the [CLI Reference](../reference/cli-reference.md).
 
 Beyond the core `compare`/`dump` flow:
 
