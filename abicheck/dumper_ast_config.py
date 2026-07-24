@@ -1193,6 +1193,17 @@ _PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN = re.compile(
     rb"^[ \t]*#[ \t]*ifdef[ \t]+__cpp_\w+\b"
 )
 _PP_IFNDEF_CPLUSPLUS_PATTERN = re.compile(rb"^[ \t]*#[ \t]*ifndef[ \t]+__cplusplus\b")
+# ``#ifdef __cplusplus`` itself (Codex review, twenty-first round): the
+# reasoning above ("unconditionally true for every -std= this heuristic
+# could pick") only holds once the language mode is *already* C++ --
+# ``mask_cplusplus_defined_guards`` (see the docstring below) is for the
+# one caller (deciding whether to treat an auto-detected header as C or
+# C++ at all) where that assumption doesn't hold: in C mode __cplusplus
+# is undefined, so this guard's content is exactly as unreachable there
+# as any other feature-test guard, and forcing C++ purely because C++20
+# syntax exists behind it would itself be the circular mistake this
+# masking exists to avoid.
+_PP_IFDEF_CPLUSPLUS_PATTERN = re.compile(rb"^[ \t]*#[ \t]*ifdef[ \t]+__cplusplus\b")
 # ``#ifndef __cpp_x`` is the *negated* mirror of ``#ifdef __cpp_x`` —
 # logically ``#if defined(__cpp_x) ... [B] ... #else ... [A] ... #endif``
 # with the arms swapped, so it needs the opposite polarity, not the same
@@ -1243,7 +1254,10 @@ _PP_ELIF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN = re.compile(
 
 
 def _strip_inactive_if_zero_blocks(
-    content: bytes, *, invert_dialect_fallback_guards: bool = True
+    content: bytes,
+    *,
+    invert_dialect_fallback_guards: bool = True,
+    mask_cplusplus_defined_guards: bool = False,
 ) -> bytes:
     """Blank out unreachable arms of an ``#if 0``/``#if false`` chain.
 
@@ -1323,6 +1337,24 @@ def _strip_inactive_if_zero_blocks(
     under any dialect choice. The *requirements* scan (deciding whether
     unconditionally-reachable code needs C++20) is unaffected and keeps
     the default ``True``.
+
+    ``mask_cplusplus_defined_guards`` (default ``False``) additionally
+    masks ``#if __cplusplus``/``#ifdef __cplusplus``/``#if
+    defined(__cplusplus)`` (bare or with the SWIG-idiom ``&&
+    !defined(X)`` extension) instead of treating them as an
+    unconditionally-true, unmasked signal. Those forms are exempted by
+    default because *given the header is already being parsed as C++*,
+    ``__cplusplus`` really is always defined — correct for deciding the
+    C++ **dialect** (which ``-std=gnu++NN``). It must be **enabled**
+    (``True``) for the one caller that instead uses this scan's result to
+    decide whether to treat an auto-detected header as C or C++ **at
+    all** (Codex review, twenty-first round): in C mode ``__cplusplus``
+    is undefined, so a ``consteval``/``concept``/... construct confined
+    to such a guard is not actually reachable there, and letting it force
+    C++ mode is the exact same circularity this function exists to
+    prevent elsewhere — worse, it then turns an *active*, unguarded use
+    of the same word as an ordinary C identifier elsewhere in the header
+    into a reserved-word parse error once C++20 mode is wrongly forced.
     """
     lines = content.split(b"\n")
     out: list[bytes] = []
@@ -1398,8 +1430,15 @@ def _strip_inactive_if_zero_blocks(
                     and _PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN.match(line)
                 )
                 or (
+                    mask_cplusplus_defined_guards
+                    and _PP_IFDEF_CPLUSPLUS_PATTERN.match(line)
+                )
+                or (
                     _PP_IF_CPLUSPLUS_GUARD_PATTERN.match(line)
-                    and not _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+                    and (
+                        mask_cplusplus_defined_guards
+                        or not _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+                    )
                 )
             ):
                 stack.append([True, True, False])
@@ -1472,14 +1511,18 @@ def _strip_inactive_if_zero_blocks(
                 continue
             if _PP_ELIF_ZERO_PATTERN.match(line) or (
                 _PP_ELIF_CPLUSPLUS_GUARD_PATTERN.match(line)
-                and not _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+                and (
+                    mask_cplusplus_defined_guards
+                    or not _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+                )
             ):
                 frame[1] = True
                 out.append(b"")
                 continue
-            if _PP_ELIF_TRUE_PATTERN.match(
-                line
-            ) or _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line):
+            if _PP_ELIF_TRUE_PATTERN.match(line) or (
+                not mask_cplusplus_defined_guards
+                and _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+            ):
                 frame[1] = frame[2]
                 frame[2] = True
                 out.append(b"" if frame[1] else line)
@@ -1513,7 +1556,9 @@ class Cpp20Requirement:
     line: int
 
 
-def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]:
+def _find_cpp20_requirements(
+    header_paths: list[Path], *, for_language_mode_decision: bool = False
+) -> list[Cpp20Requirement]:
     """Scan *header_paths* for structural C++20 syntax, with reasons/locations.
 
     Conservative and directive/literal/comment-aware: only definition-site
@@ -1531,6 +1576,17 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
     and preprocesses every file and ORs each shadow flag across all of
     them; the second reuses that same preprocessed content to run the
     per-line scan against the now aggregate-wide flags.
+
+    ``for_language_mode_decision`` (default ``False``) must be set by the
+    one caller that uses this scan's result to decide whether an
+    auto-detected header is C or C++ **at all**, not just which C++
+    dialect (Codex review, twenty-first round): it masks
+    ``#if __cplusplus``/``#ifdef __cplusplus``/``defined(__cplusplus)``
+    -guarded content (see ``_strip_inactive_if_zero_blocks``'s
+    ``mask_cplusplus_defined_guards``) instead of treating it as an
+    always-true, unmasked signal — that assumption only holds once C++
+    mode is already chosen, and is exactly backwards for the decision of
+    whether to choose it in the first place.
     """
     per_file: list[tuple[Path, bytes]] = []
     concept_type_shadowed = False
@@ -1584,7 +1640,8 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
         # a genuine keyword used elsewhere in the header (Codex review).
         content_no_double_slash_comments = re.sub(rb"//[^\n]*", b"", content)
         content_no_line_comments = _strip_inactive_if_zero_blocks(
-            content_no_double_slash_comments
+            content_no_double_slash_comments,
+            mask_cplusplus_defined_guards=for_language_mode_decision,
         )
         per_file.append((p, content_no_line_comments))
         # A *separate* masking pass, not the one above, feeds the shadow
@@ -1718,7 +1775,9 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
     return found
 
 
-def _detect_cpp20_headers(header_paths: list[Path]) -> bool:
+def _detect_cpp20_headers(
+    header_paths: list[Path], *, for_language_mode_decision: bool = False
+) -> bool:
     """Return True if any header contains structural C++20-only syntax
     (concept/requires, a constrained or abbreviated function template
     parameter, ``consteval``, or ``constinit``).
@@ -1729,8 +1788,17 @@ def _detect_cpp20_headers(header_paths: list[Path]) -> bool:
     declarations. This detection is conservative: only definition-site
     syntax counts, not the keyword in arbitrary text — see
     ``_find_cpp20_requirements`` for the directive/literal/comment-aware scan.
+
+    ``for_language_mode_decision`` — see ``_find_cpp20_requirements``, to
+    which it's passed through unchanged. Must be set by the one caller
+    that uses this result to decide C vs. C++ auto-detection itself, not
+    just the C++ dialect.
     """
-    return bool(_find_cpp20_requirements(header_paths))
+    return bool(
+        _find_cpp20_requirements(
+            header_paths, for_language_mode_decision=for_language_mode_decision
+        )
+    )
 
 
 def _detect_cpp_headers(

@@ -21,6 +21,7 @@ from abicheck.dumper import (
     _cache_key,
     _castxml_dump,
     _CastxmlParser,
+    _resolve_force_cpp,
     dump,
 )
 from abicheck.elf_metadata import ElfMetadata
@@ -766,6 +767,56 @@ class TestCacheKeyToolchain:
         k_false = _cache_key([h], [], "c++", lang=None, force_cpp20=False)
         k_true = _cache_key([h], [], "c++", lang=None, force_cpp20=True)
         assert k_false != k_true
+
+
+class TestResolveForceCppLanguageModeDecision:
+    """Regression (Codex review, twenty-first round): a C++20 construct
+    confined to a ``#if __cplusplus``/``#ifdef __cplusplus``-guarded arm
+    must not by itself promote an auto-detected header to C++ mode -- in C
+    mode ``__cplusplus`` is undefined, so that guard's content is not
+    actually reachable there. Forcing C++ (and then C++20) purely because
+    it exists there turns an *active*, unguarded use of the same word as
+    an ordinary C identifier elsewhere in the header into a reserved-word
+    parse error once C++20 mode is wrongly forced."""
+
+    def test_ignores_construct_behind_bare_if_cplusplus(self, tmp_path):
+        h = tmp_path / "h.h"
+        h.write_text(
+            "#if __cplusplus\nconsteval int f();\n#endif\nint consteval;\n",
+            encoding="utf-8",
+        )
+        assert _resolve_force_cpp(None, [h], None, ()) is False
+
+    def test_ignores_construct_behind_ifdef_cplusplus(self, tmp_path):
+        h = tmp_path / "h.h"
+        h.write_text(
+            "#ifdef __cplusplus\nconsteval int f();\n#endif\nint consteval;\n",
+            encoding="utf-8",
+        )
+        assert _resolve_force_cpp(None, [h], None, ()) is False
+
+    def test_ignores_construct_behind_defined_cplusplus(self, tmp_path):
+        h = tmp_path / "h.h"
+        h.write_text(
+            "#if defined(__cplusplus)\nconsteval int f();\n#endif\nint consteval;\n",
+            encoding="utf-8",
+        )
+        assert _resolve_force_cpp(None, [h], None, ()) is False
+
+    def test_still_forces_cpp_for_unguarded_construct(self, tmp_path):
+        """Companion: a genuine, unguarded C++20 construct must still
+        force C++ mode -- only guarded content is exempted."""
+        h = tmp_path / "h.h"
+        h.write_text("template<class T> concept C = true;\n", encoding="utf-8")
+        assert _resolve_force_cpp(None, [h], None, ()) is True
+
+    def test_explicit_lang_still_wins(self, tmp_path):
+        """Companion: an explicit --lang always wins regardless of any
+        guarded content, unchanged from before this fix."""
+        h = tmp_path / "h.h"
+        h.write_text("#if __cplusplus\nconsteval int f();\n#endif\n", encoding="utf-8")
+        assert _resolve_force_cpp("c++", [h], None, ()) is True
+        assert _resolve_force_cpp("c", [h], None, ()) is False
 
 
 class TestCastxmlParserAccessLevel:

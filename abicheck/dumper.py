@@ -236,12 +236,21 @@ def _resolve_force_cpp(
     syntax stayed auto-detected as C (Codex review). Shared by both the clang
     and castxml frontends so the auto-detection rule cannot drift between
     them.
+
+    ``for_language_mode_decision=True`` (Codex review): a
+    ``#if __cplusplus``/``#ifdef __cplusplus``-guarded C++20 construct
+    must not by itself promote an auto-detected header to C++ mode — in C
+    mode ``__cplusplus`` is undefined, so that guard's content is not
+    actually reachable there, and forcing C++ purely because it exists
+    would then turn an *active*, unguarded use of the same word as an
+    ordinary C identifier elsewhere in the header into a reserved-word
+    parse error once C++20 mode is wrongly forced.
     """
     if lang:
         return bool(lang.upper() in ("C++", "CPP"))
     return (
         _detect_cpp_headers(headers)
-        or _detect_cpp20_headers(headers)
+        or _detect_cpp20_headers(headers, for_language_mode_decision=True)
         or has_explicit_cpp_std(gcc_options, gcc_option_tokens)
     )
 
