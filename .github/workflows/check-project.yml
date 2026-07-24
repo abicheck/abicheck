@@ -418,6 +418,26 @@ jobs:
         shell: bash
         run: pip install ./.check-project-src
 
+      # The three downloads below are all `continue-on-error: true` -- a
+      # missing/failed download is meant to fall through to the later
+      # resolve/consume steps' own "nothing landed" handling, not fail the
+      # job outright. But the earlier `actions/checkout` step already
+      # populated the whole workspace from the caller's own repository, so
+      # if that repository happens to contain checked-in `candidate/`,
+      # `build-output/`, or `baseline-sets/...` directories at these same
+      # paths, a swallowed download failure would silently fall through to
+      # comparing against those stale repository files instead of the
+      # intended build artifact (Codex review). Clear every path these
+      # tolerated downloads write to first, so a failed download always
+      # leaves an empty (or absent) directory behind, never stale
+      # pre-existing content.
+      - name: Clear staging directories before tolerated downloads
+        shell: bash
+        env:
+          BASELINE_STAGING_DIR: 'baseline-sets/${{ matrix.profile_id }}-${{ matrix.baseline_channel }}'
+        run: |
+          rm -rf candidate build-output "$BASELINE_STAGING_DIR"
+
       - name: Download candidate artifact
         uses: actions/download-artifact@v8
         with:

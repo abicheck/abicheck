@@ -1937,6 +1937,29 @@ adjacent app-consumer/plugin-contract `baseline-channel: none` rejection
 already there. Documented in `check-target.md`'s `baseline-channel` row;
 covered by a new `test_bundle_kind_rejects_baseline_channel_none`.
 
+**Another round (Codex, against `afa381c`) caught a stale-content gap in
+the `check` job's three `continue-on-error: true` artifact downloads,
+fixed:** those downloads (candidate, baseline-set, build-output) are
+deliberately tolerant of a missing/failed download — the later resolve/
+consume steps treat "nothing landed" as their own signal (a glob match of
+zero, an absent `build-output/build-output.json`) rather than the download
+step itself hard-failing the job. But the job's earlier `actions/checkout`
+step already populates the whole workspace from the *caller's own
+repository* first, at the same relative paths (`candidate/`, `build-output/`,
+`baseline-sets/<profile>-<channel>`) these downloads write to. A caller
+repository that happens to have checked-in directories at any of those
+paths — plausible for `candidate/`, less so but not impossible for the
+others — would leave that repository content in place after a swallowed
+download failure, and the later resolve/consume steps would then silently
+compare against those stale files instead of erroring on the missing
+artifact. Fixed: a new "Clear staging directories before tolerated
+downloads" step runs immediately before the three downloads and unconditionally
+`rm -rf`s all three paths, so a failed download always leaves an empty (or
+absent) directory behind rather than whatever the checkout happened to
+populate. Covered by new
+`TestCheckProjectClearsStagingDirsBeforeTolerantDownloads` tests in
+`tests/test_reusable_workflows.py` (72 cases in that file now).
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —

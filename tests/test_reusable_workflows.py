@@ -520,6 +520,45 @@ class TestCheckProjectArtifactNaming:
         )
 
 
+class TestCheckProjectClearsStagingDirsBeforeTolerantDownloads:
+    """The three artifact downloads in the `check` job (candidate,
+    baseline-set, build-output) are all `continue-on-error: true`, so a
+    missing/failed download must not leave stale content behind for the
+    later resolve/consume steps to pick up instead. The earlier
+    `actions/checkout` step populates the whole workspace from the caller's
+    own repository first -- if that repository happens to contain checked-in
+    `candidate/`, `build-output/`, or `baseline-sets/...` directories at
+    these same paths, a swallowed download failure would otherwise fall
+    through to comparing against those stale repository files rather than
+    the intended build artifact (Codex review)."""
+
+    def test_clear_step_exists_and_removes_all_three_staging_paths(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        clear = next(
+            s
+            for s in steps
+            if s.get("name") == "Clear staging directories before tolerated downloads"
+        )
+        run = clear["run"]
+        assert "rm -rf candidate build-output" in run
+        assert clear["env"]["BASELINE_STAGING_DIR"] == (
+            "baseline-sets/${{ matrix.profile_id }}-${{ matrix.baseline_channel }}"
+        )
+        assert "$BASELINE_STAGING_DIR" in run
+
+    def test_clear_step_runs_before_all_three_downloads(self) -> None:
+        data = _load(CHECK_PROJECT)
+        names = _step_names(data["jobs"]["check"])
+        clear_idx = names.index("Clear staging directories before tolerated downloads")
+        for download_name in (
+            "Download candidate artifact",
+            "Download baseline-set artifact",
+            "Download build-output artifact",
+        ):
+            assert clear_idx < names.index(download_name), download_name
+
+
 class TestBaselineRequiredAndCandidateBuildOutputForwarded:
     """check-single.yml already forwards baseline-required/
     candidate-build-output to check-target -- check-project.yml's own
