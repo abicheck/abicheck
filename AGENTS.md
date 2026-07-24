@@ -87,12 +87,20 @@ let that test tell you what else needs updating.
 `docs-build` step needs `mkdocs` (`pip install -e ".[dev,docs]"`) and the
 `distribution-build` step needs `build`/`twine` (`pip install -e ".[dev,dist]"`)
 — neither is in bare `[dev]`, matching the CI `lint-and-types`/`fair-metadata`
-jobs' separate installs. Run `pip install -e ".[dev,docs,dist]"` for full
-parity. `verify.py` never silently claims success when a step like this is
-skipped for a missing tool: a `pr`-profile run with any skip prints an
-explicit `WARNING: this pr-profile run is INCOMPLETE` line and sets
-`"complete": false` in the `--json` receipt — don't treat a skip-containing
-run as equivalent to a clean CI pass.
+jobs' separate installs. Run `pip install -e ".[dev,docs,dist,mcp]"` for full
+parity — the `mcp` extra matches what the CI `unit-tests` job itself installs
+(`pip install -e ".[dev,mcp]"`), so the generated-doc mirror tests that need
+it (`tests/test_mcp_reference.py`) actually run instead of silently skipping.
+`verify.py` never silently claims success when *its own* step is skipped for
+a missing tool: a `pr`-profile run with any step-level skip prints an explicit
+`WARNING: this pr-profile run is INCOMPLETE` line and sets `"complete": false`
+in the `--json` receipt — don't treat a skip-containing run as equivalent to
+a clean CI pass. That completeness tracking is at the *step* level, though
+(`unit-pr` = "did `pytest tests/...` run"), not inside pytest itself — a test
+module that skips itself via `pytest.importorskip("mcp")` when the extra is
+missing still reports `unit-pr` as passed, with no separate warning for that
+one file. Installing `mcp` (as above) is what actually closes that gap
+locally; don't rely on `verify.py`'s completeness line alone to catch it.
 
 [pixi](https://pixi.sh) is also supported (`pixi install && pixi run test`,
 `pixi run check`) and additionally manages the `castxml`/compiler/`libabigail`/
