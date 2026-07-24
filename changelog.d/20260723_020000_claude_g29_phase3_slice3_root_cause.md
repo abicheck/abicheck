@@ -43,4 +43,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   no longer wrongly collapse into one root cause either — a symbol is
   only used as a grouping key when some other finding's `caused_by_type`
   actually names it; otherwise each finding keys uniquely, with the
-  symbol still shown as its own singleton group's display root.
+  symbol still shown as its own singleton group's display root. Finally, a
+  scoped-only finding whose `caused_by_type` matches an existing real
+  change's symbol now correctly joins that change's root-cause group
+  instead of forming a second, disagreeing group — `_to_json_root_cause`
+  now folds `scoped_only_changes`' `caused_by_type` values into its own
+  grouping decision up front (mirroring `sarif.to_sarif`'s single-pass
+  computation), so the later scoped-gate fold-in's merge attempt actually
+  finds the group to join.

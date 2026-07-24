@@ -372,6 +372,21 @@ root-cause grouping, deliberately scoped to JSON only:
   root-cause consumer. Fixed via `reporter._add_entries_to_root_causes`,
   which folds additional `(key, root, entry)` triples into an
   already-built root-cause payload, called from the same fold-in.
+- The fix above still had a gap (Codex review, later commit): when a
+  scoped-only finding's `caused_by_type` matched an existing *real*
+  change's symbol, `_to_json_root_cause` had already grouped that change
+  under its own unique per-finding key (since, at that point, nothing in
+  `result.changes` alone referenced its symbol) — so the fold-in's later
+  merge attempt found no existing group to join and created a second,
+  disagreeing `root_causes` entry for the same logical cause, unlike
+  SARIF (which computes its grouping in one pass and got this right from
+  the start). Fixed by having `_to_json_root_cause` fold
+  `scoped_only_changes`' `caused_by_type` values into its own
+  `referenced_causes` computation up front
+  (`reporter_markdown._group_changes_by_root_cause` gained an
+  `extra_causes` parameter for this), mirroring `sarif.to_sarif`'s
+  identical computation, so both passes agree on which symbols are
+  "referenced" before either one runs.
 
 ## Slice 4 — `--report-mode root-cause` markdown/text rendering
 

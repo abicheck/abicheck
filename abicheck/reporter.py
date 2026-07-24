@@ -487,6 +487,29 @@ def _to_json_root_cause(
     effective_policy = result.policy or "strict_abi"
     eff_sets = result._effective_kind_sets()
 
+    # G29 Phase 3 slice 3 follow-up (Codex review): the scoped-gate
+    # (--used-by/--required-symbol) fold-in in cli_compare_fold.py appends
+    # scoped-only changes to this report *after* this function has already
+    # built root_causes -- without folding their caused_by_type into the
+    # grouping here too, a change in `changes` that only correlates via one
+    # of those later-appended findings would already be locked into its own
+    # singleton group by the time the fold-in tries to join it, contradicting
+    # SARIF's identical grouping (computed in one pass, so it doesn't have
+    # this two-phase gap). Filtered by the same --show-only as `changes`
+    # above, mirroring sarif.to_sarif's identical computation.
+    scoped_only_for_causes = list(getattr(result, "scoped_only_changes", ()) or ())
+    if show_only and scoped_only_for_causes:
+        scoped_only_for_causes = apply_show_only(
+            scoped_only_for_causes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+    extra_causes = frozenset(
+        c.caused_by_type for c in scoped_only_for_causes if c.caused_by_type
+    )
+
     # Build each finding's dict exactly once; group the same dict objects by
     # key so `changes` (flat, backward-compatible -- every existing report
     # mode provides it, `_to_json_leaf` included) and `root_causes[].findings`
@@ -498,7 +521,7 @@ def _to_json_root_cause(
         for c in changes
     }
     entries = [entry_by_id[id(c)] for c in changes]
-    grouped = _group_changes_by_root_cause(changes)
+    grouped = _group_changes_by_root_cause(changes, extra_causes=extra_causes)
 
     root_causes = [
         {

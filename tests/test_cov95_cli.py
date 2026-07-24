@@ -1774,6 +1774,50 @@ class TestUsedByScoping:
         assert group["root"] == "needed_symbol"
         assert group["findings"][0]["kind"] == "used_by_missing_symbol"
 
+    def test_root_cause_mode_regroups_existing_cause_with_scoped_only(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Codex review: _to_json_root_cause groups result.changes *before*
+        # the scoped fold-in appends scoped_only_changes -- if a scoped-only
+        # finding's caused_by_type matches an existing real change's symbol,
+        # that existing change must already be keyed by that shared cause
+        # from the start (mirroring sarif.to_sarif's single-pass grouping),
+        # or the fold-in's later merge attempt creates a second, disagreeing
+        # root-cause group for the same logical cause instead of joining it.
+        from abicheck import dumper as dumper_mod
+
+        old, new = _breaking_pair()  # real diff: "bar"/_Z3barv removed
+        app_path = tmp_path / "app"
+        app_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_p = tmp_path / "old.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new_p = tmp_path / "new.so"
+        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            dumper_mod, "dump", MagicMock(side_effect=[old, new])
+        )
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="pub_entry",
+            description="ordinal retargeted",
+            caused_by_type="_Z3barv",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old_p), str(new_p), "--used-by", str(app_path),
+            "--format", "json", "--report-mode", "root-cause",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        assert data["root_cause_count"] == 1
+        group = data["root_causes"][0]
+        assert group["root"] == "_Z3barv"
+        assert group["finding_count"] == 2
+        assert {f["kind"] for f in group["findings"]} == {
+            "func_removed", "pe_ordinal_retargeted",
+        }
+
     def test_json_uncovered_missing_symbol_not_blocking_under_demoted_severity(
         self, tmp_path, monkeypatch
     ) -> None:

@@ -697,6 +697,8 @@ def _root_cause_key_and_display(
 
 def _group_changes_by_root_cause(
     changes: list[Change],
+    *,
+    extra_causes: frozenset[str] = frozenset(),
 ) -> list[tuple[str, str, list[Change]]]:
     """Group ``changes`` into root-cause buckets, in first-seen order.
 
@@ -708,8 +710,21 @@ def _group_changes_by_root_cause(
     (Codex review; see :func:`_root_cause_key_and_display` for the key/display
     rules, including the ``referenced_causes`` guard against grouping
     independent findings that merely share a symbol).
+
+    *extra_causes* folds in ``caused_by_type`` values from findings outside
+    *changes* itself (e.g. JSON's scoped-only ``--used-by``/
+    ``--required-symbol`` changes, appended to the report only after this
+    grouping runs) -- without this, a change in *changes* whose symbol only
+    became a real correlation via one of those later-appended findings would
+    already be locked into its own singleton group, unable to join the
+    combined root cause the scoped-gate fold-in later assembles (Codex
+    review: JSON's two-phase build let a scoped-only finding's
+    ``caused_by_type`` disagree with SARIF's single-pass grouping of the
+    identical changes).
     """
-    referenced_causes = frozenset(c.caused_by_type for c in changes if c.caused_by_type)
+    referenced_causes = (
+        frozenset(c.caused_by_type for c in changes if c.caused_by_type) | extra_causes
+    )
     groups: dict[str, list[Change]] = {}
     roots: dict[str, str] = {}
     order: list[str] = []
