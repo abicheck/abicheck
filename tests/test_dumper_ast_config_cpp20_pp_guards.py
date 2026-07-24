@@ -548,14 +548,41 @@ def test_cpp20_detector_ignores_construct_behind_ifdef_feature_test_macro(tmp_pa
     assert _detect_cpp20_headers(headers) is False
 
 
-def test_cpp20_detector_ignores_construct_behind_ifndef_feature_test_macro(tmp_path):
-    """Companion: the negated ``#ifndef __cpp_concepts`` form (the
-    "feature not yet available" fallback guard) is equally circular and
-    must also be masked."""
+def test_cpp20_detector_detects_construct_behind_ifndef_feature_test_macro(tmp_path):
+    """Regression (Codex review, fourteenth round): ``#ifndef __cpp_x``
+    is the *negated* mirror of ``#ifdef __cpp_x``, not "equally circular
+    and masked the same way" as previously assumed here -- it needs the
+    opposite polarity. The ``#ifndef``-guarded arm is the feature-*absent*
+    content, exactly like the ``#else`` fallback of the positive form,
+    and must be trusted as live; only an ``#else`` here (the
+    feature-*present*, genuinely circular content) would be masked. A
+    genuine C++20 construct written directly in the ``#ifndef``-guarded
+    arm (unusual in practice, but not masked away) must still be
+    detected -- see the companion test below for the realistic case
+    where the circular content sits behind the ``#else`` instead, which
+    correctly stays masked."""
     headers = _write(
         tmp_path,
         "a.h",
         "#ifndef __cpp_concepts\ntemplate<class T> concept C = true;\n#endif\nint x;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_ignores_construct_behind_ifndef_feature_test_macro_else(
+    tmp_path,
+):
+    """Companion: the realistic shape -- portable fallback content in the
+    ``#ifndef``-guarded arm, with the actual C++20 construct sitting
+    behind the ``#else`` (reached only once the feature is already
+    available) -- must stay masked, since forcing ``-std=gnu++20`` purely
+    because of that circular ``#else`` could break an unrelated,
+    genuinely pre-C++20 use of the same word elsewhere in the header."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#ifndef __cpp_consteval\nint fallback;\n#else\nconsteval int f();\n#endif\n"
+        "int consteval;\n",
     )
     assert _detect_cpp20_headers(headers) is False
 

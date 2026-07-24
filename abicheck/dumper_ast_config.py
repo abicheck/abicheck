@@ -1025,12 +1025,14 @@ _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN = re.compile(
     rb"^[ \t]*#[ \t]*elif[ \t]+(?:" + _PP_DEFINED_CPLUSPLUS + rb"|__cplusplus)[ \t]*$"
 )
 # The common shorthand spellings of a feature-test guard (Codex review,
-# seventh round): ``#ifdef __cpp_concepts`` / ``#ifndef __cpp_concepts``
-# is exactly as circular as ``#if defined(__cpp_concepts)`` — masked for
-# the same reason. ``#ifndef __cplusplus`` is different but still
-# mask-worthy: castxml/clang always parse these headers in a C++-ish mode
-# (see ``_CPP_PATTERNS`` above), so that branch is never reachable
-# regardless of which ``-std=`` gets picked, exactly like ``#if 0``.
+# seventh round): ``#ifdef __cpp_concepts`` is exactly as circular as
+# ``#if defined(__cpp_concepts)`` — masked for the same reason (the
+# feature-guarded arm is untrustworthy; its ``#else`` fallback is treated
+# as live, same as the general ``#if defined(__cpp_x)`` case).
+# ``#ifndef __cplusplus`` is different and still mask-worthy the same
+# way: castxml/clang always parse these headers in a C++-ish mode (see
+# ``_CPP_PATTERNS`` above), so that branch is never reachable regardless
+# of which ``-std=`` gets picked, exactly like ``#if 0``.
 # ``#ifdef __cplusplus`` is deliberately *not* included here — unlike a
 # version/feature-test comparison, it is unconditionally true for every
 # ``-std=`` this heuristic could pick (castxml always defines it), so its
@@ -1039,8 +1041,25 @@ _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN = re.compile(
 _PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN = re.compile(
     rb"^[ \t]*#[ \t]*ifdef[ \t]+__cpp_\w+\b"
 )
-_PP_IFNDEF_CPLUSPLUS_GUARD_PATTERN = re.compile(
-    rb"^[ \t]*#[ \t]*ifndef[ \t]+(?:__cplusplus|__cpp_\w+)\b"
+_PP_IFNDEF_CPLUSPLUS_PATTERN = re.compile(rb"^[ \t]*#[ \t]*ifndef[ \t]+__cplusplus\b")
+# ``#ifndef __cpp_x`` is the *negated* mirror of ``#ifdef __cpp_x`` —
+# logically ``#if defined(__cpp_x) ... [B] ... #else ... [A] ... #endif``
+# with the arms swapped, so it needs the opposite polarity, not the same
+# masking as ``#ifndef __cplusplus`` (Codex review, fourteenth round). The
+# ``#ifndef``-guarded arm here is the feature-*absent* content — the
+# portable/pre-C++20-safe fallback, exactly like the ``#else`` of the
+# positive form — and must be the one trusted as live; the ``#else`` here
+# is the feature-*present* content (typically the C++20-specific code,
+# circular for the same reason the positive form's guarded arm is) and
+# must be the one masked instead. Reusing the ``__cplusplus``-style
+# dead-first treatment for this pattern got the polarity backwards: it
+# masked the safe fallback and trusted the circular feature-present
+# ``#else`` arm, so a header whose *only* C++20 construct sat behind such
+# an ``#else`` forced ``-std=gnu++20`` purely because the guard's content
+# was there — which could then break an unrelated, genuinely pre-C++20
+# use of the same word as an ordinary identifier elsewhere in the header.
+_PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*ifndef[ \t]+__cpp_\w+\b"
 )
 
 
@@ -1145,7 +1164,7 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
             if (
                 _PP_IF_ZERO_PATTERN.match(line)
                 or _PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN.match(line)
-                or _PP_IFNDEF_CPLUSPLUS_GUARD_PATTERN.match(line)
+                or _PP_IFNDEF_CPLUSPLUS_PATTERN.match(line)
                 or (
                     _PP_IF_CPLUSPLUS_GUARD_PATTERN.match(line)
                     and not _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
@@ -1155,6 +1174,14 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 out.append(b"")
                 continue
             if _PP_IF_TRUE_PATTERN.match(line):
+                stack.append([True, False, True])
+                out.append(b"")
+                continue
+            if _PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN.match(line):
+                # Opposite polarity from the branch above: the
+                # #ifndef-guarded arm (feature absent) is the trustworthy
+                # one here, so it's scanned live and immediately settled
+                # so any #else (feature present, circular) stays masked.
                 stack.append([True, False, True])
                 out.append(b"")
                 continue
