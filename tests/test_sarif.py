@@ -929,3 +929,28 @@ class TestRootCauseMode:
         doc = to_sarif(r, report_mode="root-cause")
         ids = {res["properties"]["rootCauseId"] for res in doc["runs"][0]["results"]}
         assert len(ids) == 2
+
+    def test_hidden_scoped_only_cause_does_not_leak_into_referenced_causes(
+        self,
+    ) -> None:
+        # Regression (Codex review): a scoped-only change filtered out by
+        # --show-only must not still contribute its caused_by_type to
+        # referenced_causes -- otherwise its hidden correlation could wrongly
+        # group two unrelated *visible* findings that merely share its
+        # symbol, disagreeing with JSON/markdown root-cause mode (which
+        # computes referenced_causes from the filtered set only).
+        hidden_scoped_only = Change(
+            kind=ChangeKind.FUNC_ADDED,
+            symbol="unrelated_addition",
+            description="added",
+            caused_by_type="foo",
+        )
+        a = Change(ChangeKind.FUNC_RETURN_CHANGED, "foo", "return type changed")
+        b = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "parameter changed")
+        r = _make_result([a, b], verdict=Verdict.BREAKING)
+        r.scoped_only_changes = (hidden_scoped_only,)  # type: ignore[attr-defined]
+        doc = to_sarif(r, report_mode="root-cause", show_only="breaking")
+        results = doc["runs"][0]["results"]
+        assert all(res["ruleId"] != "func_added" for res in results)
+        ids = {res["properties"]["rootCauseId"] for res in results}
+        assert len(ids) == 2

@@ -557,6 +557,31 @@ def to_sarif(
     rules_seen: dict[str, dict[str, Any]] = {}
     sarif_results: list[dict[str, Any]] = []
 
+    # Scoped-only changes: `scope_diff_to_app`/`scope_diff_to_required_symbols`
+    # can synthesize a Change (e.g. PE_ORDINAL_RETARGETED) that is relevant to
+    # the gate but was never added to `result.changes` -- without rendering
+    # these too, a --used-by run that fails solely because of one of these
+    # would report a nonzero gate exitCode with zero results to explain it
+    # (Codex review). Run them through the same `--show-only` filter as
+    # `result.changes` above -- otherwise a `--show-only additions` run would
+    # still upload a scoped-only breaking result the user explicitly asked
+    # to filter out, unlike the normal `result.changes` path (Codex review
+    # follow-up). Computed up front (not just before its own results loop
+    # below) so the root-cause referenced_causes set below sees the same
+    # filtered set (Codex review: an unfiltered preview let a hidden,
+    # filtered-out scoped-only change's caused_by_type still group two
+    # unrelated *visible* findings, disagreeing with JSON/markdown root-cause
+    # mode, which computes from the filtered set only).
+    scoped_only_changes = list(getattr(result, "scoped_only_changes", ()) or ())
+    if show_only and scoped_only_changes:
+        scoped_only_changes = apply_show_only(
+            scoped_only_changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+
     # G29 Phase 3 slice 5 (ADR-052): --report-mode root-cause adds
     # properties.rootCauseId/rootCause to every result rather than
     # restructuring SARIF's flat one-result-per-finding shape. referenced_causes
@@ -567,10 +592,9 @@ def to_sarif(
     root_cause_mode = report_mode == "root-cause"
     referenced_causes: frozenset[str] = frozenset()
     if root_cause_mode:
-        scoped_only_preview = list(getattr(result, "scoped_only_changes", ()) or ())
         referenced_causes = frozenset(
             c.caused_by_type for c in changes if c.caused_by_type
-        ) | frozenset(c.caused_by_type for c in scoped_only_preview if c.caused_by_type)
+        ) | frozenset(c.caused_by_type for c in scoped_only_changes if c.caused_by_type)
 
     def _root_cause_for(
         caused_by_type: str | None,
@@ -613,25 +637,6 @@ def to_sarif(
             )
         )
 
-    # Scoped-only changes: `scope_diff_to_app`/`scope_diff_to_required_symbols`
-    # can synthesize a Change (e.g. PE_ORDINAL_RETARGETED) that is relevant to
-    # the gate but was never added to `result.changes` -- without rendering
-    # these too, a --used-by run that fails solely because of one of these
-    # would report a nonzero gate exitCode with zero results to explain it
-    # (Codex review). Run them through the same `--show-only` filter as
-    # `result.changes` above -- otherwise a `--show-only additions` run would
-    # still upload a scoped-only breaking result the user explicitly asked
-    # to filter out, unlike the normal `result.changes` path (Codex review
-    # follow-up).
-    scoped_only_changes = list(getattr(result, "scoped_only_changes", ()) or ())
-    if show_only and scoped_only_changes:
-        scoped_only_changes = apply_show_only(
-            scoped_only_changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
     for change in scoped_only_changes:
         rule_id = change.kind.value
         if rule_id not in rules_seen:

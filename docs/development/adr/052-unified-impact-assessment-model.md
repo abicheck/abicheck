@@ -438,6 +438,17 @@ not by finding, so a caused_by_type-keyed grouping would need to decide what
 happens when a multi-change testcase's changes disagree on root cause; left
 for a dedicated slice rather than bolted on here.
 
+**Follow-up fix (Codex review), same PR:** `to_sarif`'s `referenced_causes`
+was originally computed from an *unfiltered* preview of
+`scoped_only_changes`, read before the same list's own `--show-only`
+filtering ran later in the function — so a scoped-only finding hidden by
+`--show-only` could still leak its `caused_by_type` into `referenced_causes`
+and wrongly group two unrelated *visible* findings sharing its symbol,
+disagreeing with JSON/markdown root-cause mode (which computes
+`referenced_causes` from the filtered set only). Fixed by computing the
+filtered `scoped_only_changes` once, up front, and reusing that single list
+for both `referenced_causes` and the results loop.
+
 ## Deliberately not implemented this slice
 
 Per the "ship each phase independently" mitigation this initiative committed
