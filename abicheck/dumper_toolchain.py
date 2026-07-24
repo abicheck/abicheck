@@ -199,6 +199,18 @@ def _ast_fallback_enabled() -> bool:
     }
 
 
+def _allow_unsupported_castxml_enabled() -> bool:
+    """Explicit opt-in override for the CastXML version gate
+    (``castxml_policy``). Same convention as ``_ast_fallback_enabled`` — a
+    hard failure by default, degraded only on deliberate request."""
+    return os.environ.get("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _auto_ast_fallback_eligible(backend: str) -> bool:
     """Whether this request is genuinely unpinned ``auto`` selection."""
     choice = (backend or "auto").strip().lower()
@@ -213,3 +225,12 @@ def _parser_ast_toolchain(parser: Any) -> dict[str, str]:
 def _parser_ast_fallback_reason(parser: Any) -> str | None:
     value = getattr(parser, "_abicheck_ast_fallback_reason", None)
     return str(value) if value else None
+
+
+def _parser_ast_supported(parser: Any) -> bool | None:
+    value = getattr(parser, "_abicheck_ast_supported", None)
+    return bool(value) if value is not None else None
+
+
+def _parser_ast_unsupported_reasons(parser: Any) -> list[str]:
+    return list(getattr(parser, "_abicheck_ast_unsupported_reasons", []) or [])

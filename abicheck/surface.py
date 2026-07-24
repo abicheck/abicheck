@@ -104,17 +104,45 @@ _NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
         "constant_changed",
         "constant_removed",
         "constant_added",
-        # A hidden friend (an in-class `friend` operator with no namespace-
-        # scope declaration, found only via ADL) can never produce an
-        # exported symbol by construction — it is compiled inline into every
-        # caller. Requiring ELF-export presence for this kind is therefore
-        # never satisfiable, so the reachability classifier would demote
-        # every hidden-friend finding as "not-exported" regardless of how
-        # genuinely public the operator is (examples/case96_hidden_friend_removed).
+    }
+)
+
+# A hidden friend (an in-class `friend` operator with no namespace-scope
+# declaration, found only via ADL) can never produce an exported symbol by
+# construction — it is compiled inline into every caller. Requiring
+# ELF-export presence for this kind is therefore never satisfiable, so the
+# ordinary not-exported gate must never apply to it (examples/
+# case96_hidden_friend_removed). That is a reason to skip *that one* gate,
+# not a reason to skip header-provenance demotion entirely: a hidden friend
+# whose befriending class lives in a system/private header is exactly as
+# out-of-surface as any other declaration from that header. These kinds get
+# their own classification path (``_classify_hidden_friend_surface``) instead
+# of the unconditional keep in ``_NEVER_FILTER_KIND_NAMES`` above.
+_HIDDEN_FRIEND_KIND_NAMES: frozenset[str] = frozenset(
+    {
         "hidden_friend_removed",
         "hidden_friend_added",
     }
 )
+
+
+def is_hidden_friend_finding(change: Change) -> bool:
+    """True when *change* is a ``hidden_friend_removed``/``hidden_friend_added``.
+
+    Used by manifest-scoped comparison (``compare --post-manifest``, in
+    ``post_processing.FilterNonPublicSurface._run_allowlist``) to keep a
+    hidden friend out of the *concrete exported symbol* demotion check
+    (Codex review): a hidden friend can never produce a real export, but its
+    mangled name can still appear in a header/L2 snapshot's function list —
+    the same list ``_snapshot_export_ids`` reads from, with no visibility
+    filter — so it would otherwise be misread as "a real export not in the
+    committed manifest" and silently demoted, hiding a genuine public ADL
+    break. The allowlist path doesn't go through
+    :func:`classify_change_surface`/``_classify_hidden_friend_surface`` at
+    all, so ``is_symbol_level_finding`` alone isn't enough there.
+    """
+    return change.kind.value in _HIDDEN_FRIEND_KIND_NAMES
+
 
 # Findings whose ``symbol`` field identifies a type (or a member under a type)
 # rather than a function/variable symbol. These must be classified through
@@ -230,6 +258,7 @@ def is_symbol_level_finding(change: Change) -> bool:
     kv = change.kind.value
     return kv not in _NEVER_FILTER_KIND_NAMES and kv not in _TYPE_LEVEL_KIND_NAMES
 
+
 # Tokens that are type qualifiers / keywords, not type names.
 _TYPE_NOISE: frozenset[str] = frozenset(
     {
@@ -312,6 +341,29 @@ class PublicSurface:
     # name. Only populated when the snapshot was dumped with a public-header
     # set; otherwise every value is UNKNOWN and provenance reasons never fire.
     origin_by_key: dict[str, ScopeOrigin] = field(default_factory=dict)
+    # Origin keyed by a type's *qualified* name (``RecordType.qualified_name``
+    # / ``EnumType.qualified_name``), populated only for types that actually
+    # carry one. ``origin_by_key`` is keyed by the deliberately-bare ``name``
+    # (see model.py), so two distinct types sharing a leaf name in different
+    # namespaces (``pub::Foo`` vs. ``priv::Foo``) collide there and their
+    # origins merge conservatively (public wins). This index lets a caller
+    # holding a fully-qualified owner identity (e.g. a hidden friend's
+    # ``befriending`` class) resolve it exactly instead of falling into that
+    # collision (Codex review).
+    origin_by_qualified_key: dict[str, ScopeOrigin] = field(default_factory=dict)
+    # Names (bare or full) that resolve to *more than one* record/enum in
+    # this snapshot — the same collision ``origin_by_qualified_key`` exists
+    # to route around, but that only helps when a qualified name was
+    # actually recorded. When it wasn't (a producer that doesn't populate
+    # ``qualified_name`` at all), a caller must know the plain ``origin_by_key``
+    # lookup for such a name is unreliable (merged across unrelated types,
+    # public wins conservatively) rather than trust it outright — see
+    # :func:`_hidden_friend_owner_effective_origin` (Codex review). Computed
+    # across records *and* enums combined, not per-kind: a private record
+    # and an unrelated public enum sharing a bare name each look unique
+    # within their own kind, but still collide in the single ``origin_by_key``
+    # both kinds share (Codex review, thirteenth round).
+    ambiguous_type_names: set[str] = field(default_factory=set)
     # True when *any* declaration carried a non-UNKNOWN origin — i.e. the
     # snapshot was dumped with a public-header set so provenance is available.
     # Lets the classifier distinguish a confident reachability demotion from one
@@ -381,7 +433,12 @@ def _index_surface_types(
             tail = rec.name.rsplit("::", 1)[1]
             record_by_name.setdefault(tail, []).append(rec)
             keys.add(tail)
-        _record_origin(surface, keys, getattr(rec, "origin", ScopeOrigin.UNKNOWN))
+        origin = getattr(rec, "origin", ScopeOrigin.UNKNOWN)
+        _record_origin(surface, keys, origin)
+        if rec.qualified_name:
+            surface.origin_by_qualified_key[rec.qualified_name] = _merge_origin(
+                surface.origin_by_qualified_key.get(rec.qualified_name), origin
+            )
     enum_by_name: dict[str, list[EnumType]] = {}
     for en in snap.enums:
         surface.all_types.add(en.name)
@@ -391,9 +448,26 @@ def _index_surface_types(
             tail = en.name.rsplit("::", 1)[1]
             enum_by_name.setdefault(tail, []).append(en)
             keys.add(tail)
-        _record_origin(surface, keys, getattr(en, "origin", ScopeOrigin.UNKNOWN))
+        origin = getattr(en, "origin", ScopeOrigin.UNKNOWN)
+        _record_origin(surface, keys, origin)
+        if en.qualified_name:
+            surface.origin_by_qualified_key[en.qualified_name] = _merge_origin(
+                surface.origin_by_qualified_key.get(en.qualified_name), origin
+            )
     for alias in snap.typedefs:
         surface.all_types.add(alias)
+    # Combine both kinds before counting: a bare name ambiguous *across*
+    # records and enums (one record entry, one enum entry -- neither list
+    # individually looks ambiguous) collides in ``origin_by_key`` exactly
+    # the same way a within-kind collision does, since that dict is shared
+    # by both kinds (Codex review, thirteenth round).
+    combined_counts: dict[str, int] = {}
+    for name_map in (record_by_name, enum_by_name):
+        for name, entries in name_map.items():
+            combined_counts[name] = combined_counts.get(name, 0) + len(entries)
+    surface.ambiguous_type_names.update(
+        name for name, count in combined_counts.items() if count > 1
+    )
     return record_by_name, enum_by_name
 
 
@@ -743,7 +817,16 @@ def classify_change_surface(
         # If either side lacks a resolvable surface we cannot confidently
         # place a finding as private on *both* versions — keep everything
         # rather than risk hiding a real change from the unresolved side.
+        # Hidden-friend findings must go through this guard too (Codex
+        # review): dispatching to _classify_hidden_friend_surface before
+        # this check let it demote from whichever side happens to have
+        # resolvable origin data, even when the other side (e.g. an
+        # ELF-only baseline) offers nothing to cross-check against —
+        # exactly the mixed-evidence case this guard exists to protect
+        # every other kind of finding from.
         return True, None
+    if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
+        return _classify_hidden_friend_surface(change, surf_old, surf_new)
 
     if unions is None:
         unions = surface_unions(surf_old, surf_new)
@@ -790,6 +873,172 @@ def classify_change_surface(
         surf_old,
         surf_new,
     )
+
+
+def _hidden_friend_owner_effective_origin(
+    surf: PublicSurface, owner: str, bare: str
+) -> ScopeOrigin | None:
+    """Resolve one side's origin for a qualified hidden-friend owner: an
+    exact ``origin_by_qualified_key`` match if present, else an exact match
+    on ``owner`` itself in ``origin_by_key`` (a producer that stores the
+    owner's ``RecordType.name`` as the full qualified string rather than
+    populating ``qualified_name`` separately — legacy/DWARF-style), else
+    the bare tail's origin when the type exists on this side at all — even
+    if that origin is ``UNKNOWN`` — else ``None`` only when the type is
+    genuinely absent from this snapshot (the common add/remove-together
+    case). "Present but unclassified" must never collapse to the same
+    ``None`` as "absent": the caller treats ``None`` as a side that cannot
+    disagree, but a present-and-unclassified side very much can (Codex
+    review — a prior version of this fallback used ``None`` for both,
+    letting an exact private match on one side demote a friend even when
+    the other side's bare-name entry neither confirms nor refutes that,
+    because the type is right there, just unclassified). The full-``owner``
+    check matters because ``all_types`` only ever indexes a record's own
+    ``name`` (never the bare tail extracted from it), so a legacy side
+    whose ``name`` *is* the qualified string was otherwise treated as
+    absent even though its origin is recorded under that exact key too
+    (Codex review, third round).
+
+    Neither the ``owner`` nor the ``bare`` key is trusted when
+    ``ambiguous_type_names`` says it names more than one record/enum on
+    this side (Codex review, sixth round): an unrelated *public* type
+    sharing that bare tail (``pub::Foo`` alongside the actually-private
+    ``priv::Foo``) would otherwise merge into ``origin_by_key`` as
+    PUBLIC_HEADER (conservative "any side public" merge — safe for
+    reachability, but wrong here, since it would hide a genuinely private
+    owner's demotion). Reported as ``UNKNOWN`` rather than ``None`` in that
+    case — the type genuinely exists on this side, we just can't tell
+    which one, which is a real disagreement signal, not absence."""
+    exact = surf.origin_by_qualified_key.get(owner)
+    if exact is not None:
+        return exact
+    if owner in surf.all_types:
+        if owner in surf.ambiguous_type_names:
+            return ScopeOrigin.UNKNOWN
+        return surf.origin_by_key.get(owner, ScopeOrigin.UNKNOWN)
+    if bare in surf.all_types:
+        if bare in surf.ambiguous_type_names:
+            return ScopeOrigin.UNKNOWN
+        return surf.origin_by_key.get(bare, ScopeOrigin.UNKNOWN)
+    return None
+
+
+def _one_sided_key_origin(
+    surf: PublicSurface, key: str, universe: frozenset[str] | set[str]
+) -> ScopeOrigin | None:
+    """Resolve *key*'s origin on one *surf*, distinguishing "present but
+    unclassified" (an actual :class:`ScopeOrigin`, possibly ``UNKNOWN``)
+    from "genuinely absent" (``None``) — the same distinction
+    :func:`_hidden_friend_owner_effective_origin` makes for a type owner,
+    generalized to any flat key already indexed by *universe* (a symbol's
+    ``all_symbols``, or a type's ``all_types`` when no ``::``-qualified/
+    bare-tail ambiguity needs resolving)."""
+    if key not in universe:
+        return None
+    return surf.origin_by_key.get(key, ScopeOrigin.UNKNOWN)
+
+
+def _hidden_friend_owner_reason_qualified(
+    eff_old: ScopeOrigin | None,
+    eff_new: ScopeOrigin | None,
+) -> str | None:
+    """Combine two per-side *effective* origins (see
+    :func:`_hidden_friend_owner_effective_origin`) into a single ledger
+    reason, the way :func:`_origin_reason` combines two ``origin_by_key``
+    lookups. ``None`` for a side means the owner is genuinely absent from
+    that snapshot (removed/added together with the friend); a
+    present-but-``UNKNOWN`` side blocks the reason exactly like an ordinary
+    origin disagreement would, via ``_ORIGIN_REASON.get`` returning
+    ``None`` for it."""
+    origins = [o for o in (eff_old, eff_new) if o is not None]
+    if not origins:
+        return None
+    reasons = {_ORIGIN_REASON.get(o) for o in origins}
+    if None in reasons:
+        return None
+    return (
+        REASON_PRIVATE_HEADER
+        if REASON_PRIVATE_HEADER in reasons
+        else REASON_SYSTEM_HEADER
+    )
+
+
+def _classify_hidden_friend_surface(
+    change: Change,
+    surf_old: PublicSurface,
+    surf_new: PublicSurface,
+) -> tuple[bool, str | None]:
+    """Classify a ``hidden_friend_removed``/``hidden_friend_added`` finding.
+
+    A hidden friend can never produce an exported symbol (it is compiled
+    inline into every caller via ADL), so the ordinary not-exported gate must
+    never demote it — but its *origin* still decides surface membership,
+    exactly like any other declaration. Preference order:
+
+    1. The befriending class (``change.caused_by_type``, resolved from
+       castxml's ``befriending`` attribute / clang's friend-scope walk) — if
+       every snapshot that actually contains the owner confidently agrees it
+       is a system- or private-header declaration, demote. A hidden friend is
+       most often added/removed *together with* its owner, so the owner
+       legitimately exists on only one side — that side alone decides.
+    2. Fall back to the friend function's own recorded origin
+       (``change.symbol``) — covers both the case where the owner could not
+       be resolved at all (older snapshot, DWARF-only path) *and* the case
+       where the owner was found but its origin was inconclusive (present on
+       only one side with an unknown origin, or the two sides disagree). For
+       an in-class-defined hidden friend the owner and the friend function
+       share the same declaration site, so this is often independent
+       confirmation rather than a weaker signal.
+    3. Otherwise the origin is unknown/unconfirmed: keep the finding
+       (conservative — never silently hide a hidden-friend break) rather than
+       claim a provenance-confirmed demotion that was never verified.
+    """
+    owner = change.caused_by_type
+    if owner:
+        # RecordType.name stays deliberately bare (model.py) — a namespaced
+        # owner ("ns::Foo", from castxml/clang's qualified-name walk) would
+        # never match origin_by_key's bare-name keys directly, so resolve
+        # both the qualified spelling and its trailing ``::`` segment via
+        # the same tiered lookup regardless of whether the owner itself is
+        # namespaced (a bare owner degenerates to bare == owner). Each
+        # side's *effective* origin falls back to its bare-name entry when
+        # the type exists there without a qualified match — genuinely
+        # distinct from a side that lacks the type entirely (added/removed
+        # together with the friend) — so an unclassified-but-present owner
+        # on one side can neither be silently ignored (it might disagree)
+        # nor mistaken for proof of anything (Codex review).
+        bare = owner.rsplit("::", 1)[-1] if "::" in owner else owner
+        eff_old = _hidden_friend_owner_effective_origin(surf_old, owner, bare)
+        eff_new = _hidden_friend_owner_effective_origin(surf_new, owner, bare)
+        if eff_old is not None or eff_new is not None:
+            if ScopeOrigin.PUBLIC_HEADER in (eff_old, eff_new):
+                # Owner confidently public on either side — never let the
+                # friend-function fallback below override that signal
+                # (CodeRabbit review).
+                return True, None
+            reason = _hidden_friend_owner_reason_qualified(eff_old, eff_new)
+            if reason is not None:
+                return False, reason
+            # Owner found but inconclusive (UNKNOWN on the only side that
+            # has it, or the two sides disagree) — fall through to the
+            # friend function's own origin (step 2) instead of returning
+            # (True, None) here, exactly like the owner-not-found case.
+    sym = change.symbol or ""
+    # A plain both-sides-must-agree _origin_reason lookup treats a symbol
+    # genuinely absent from one side (the common case: the friend function
+    # itself was added/removed together with the finding, not just its
+    # owner) identically to a side that has it but is UNKNOWN — starving
+    # this fallback of the same one-sided relaxation already applied to
+    # the owner above (Codex review). Resolve each side's own presence
+    # first so an absent side can neither block nor fabricate a reason.
+    eff_sym_old = _one_sided_key_origin(surf_old, sym, surf_old.all_symbols)
+    eff_sym_new = _one_sided_key_origin(surf_new, sym, surf_new.all_symbols)
+    if ScopeOrigin.PUBLIC_HEADER in (eff_sym_old, eff_sym_new):
+        return True, None
+    reason = _hidden_friend_owner_reason_qualified(eff_sym_old, eff_sym_new)
+    if reason is not None:
+        return False, reason
+    return True, None
 
 
 def _classify_symbol_level(

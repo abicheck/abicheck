@@ -82,7 +82,22 @@ from .model import (
 # v11: persist the resolved header-AST executable/compiler identity and an
 #     explicit CastXML→Clang fallback reason.  This makes producer changes
 #     observable in saved baselines instead of only in transient logs.
-SCHEMA_VERSION: int = 11
+# v12: `Function.hidden_friend_owner` — the qualified name of the class whose
+#     body declares an in-class `friend` (resolved from castxml's
+#     `befriending` attribute). Lets surface classification demote a hidden
+#     friend whose owner lives in a system/private header instead of always
+#     retaining it (previously an unconditional exemption keyed only on
+#     ChangeKind — see AGENTS.md P0 "hidden-friend origin-before-exemption").
+#     Purely additive: a pre-v12 reader loads `hidden_friend_owner` as None,
+#     which only means the origin-based demotion cannot fire for that
+#     snapshot — the finding stays retained (conservative fallback), never
+#     silently mis-demoted.
+# v13: `AbiSnapshot.ast_toolchain_supported` / `ast_toolchain_unsupported_reasons`
+#     — the outcome of the CastXML version gate (`castxml_policy.py`) run
+#     before headers were parsed. Purely additive: a pre-v13 reader loads both
+#     as their defaults (None / []), i.e. "gate outcome unknown" — the same
+#     conservative default a fresh in-memory snapshot has before any gate ran.
+SCHEMA_VERSION: int = 13
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -310,7 +325,9 @@ def _elf_from_dict(e: dict[str, Any]) -> Any:
         # Tri-state loader-contract fields: absent key (legacy snapshot) must
         # stay None ("not captured"), not default to a comparable value.
         dynamic_flags=(
-            frozenset(e["dynamic_flags"]) if e.get("dynamic_flags") is not None else None
+            frozenset(e["dynamic_flags"])
+            if e.get("dynamic_flags") is not None
+            else None
         ),
         has_init=e.get("has_init"),
         has_fini=e.get("has_fini"),
@@ -619,6 +636,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             # an older snapshot loads as None and suppresses the
             # HIDDEN_FRIEND_ADDED/_REMOVED transition detector.
             is_hidden_friend=f.get("is_hidden_friend"),
+            # Owner class of a hidden friend — missing on older snapshots (and
+            # for non-friends) loads as None.
+            hidden_friend_owner=f.get("hidden_friend_owner"),
             # Provenance (v6) — missing on older snapshots → None / UNKNOWN.
             source_header=f.get("source_header"),
             origin=_scope_origin_or_unknown(f.get("origin")),
@@ -683,7 +703,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             is_opaque=t.get("is_opaque", False),
             is_final=t.get("is_final"),  # tri-state; absent on pre-v? snapshots → None
             is_template_pattern=t.get("is_template_pattern", False),
-            has_anonymous_aggregate_fields=t.get("has_anonymous_aggregate_fields", False),
+            has_anonymous_aggregate_fields=t.get(
+                "has_anonymous_aggregate_fields", False
+            ),
             source_header=t.get("source_header"),
             origin=_scope_origin_or_unknown(t.get("origin")),
             # Fine-grained layout descriptor (layout-closure work); all
@@ -828,6 +850,16 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     ast_fallback_reason = (
         raw_fallback_reason if isinstance(raw_fallback_reason, str) else None
     )
+    raw_ast_supported = d.get("ast_toolchain_supported")
+    ast_toolchain_supported = (
+        raw_ast_supported if isinstance(raw_ast_supported, bool) else None
+    )
+    raw_ast_unsupported_reasons = d.get("ast_toolchain_unsupported_reasons")
+    ast_toolchain_unsupported_reasons = (
+        [str(r) for r in raw_ast_unsupported_reasons]
+        if isinstance(raw_ast_unsupported_reasons, list)
+        else []
+    )
     if "header_cv_facts_reliable" in d:
         # Trust an explicit marker over re-deriving from schema_version: a
         # load -> snapshot_to_dict -> (save) -> load round-trip always
@@ -881,6 +913,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         ast_producer=ast_producer_value,
         ast_toolchain=ast_toolchain,
         ast_fallback_reason=ast_fallback_reason,
+        ast_toolchain_supported=ast_toolchain_supported,
+        ast_toolchain_unsupported_reasons=ast_toolchain_unsupported_reasons,
         # See header_cv_facts_reliable_value's computation above: prefers an
         # explicit dict key (round-trip stability) and otherwise derives
         # from schema_version scoped to the CastXML header path specifically

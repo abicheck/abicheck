@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import shlex
 import shutil as shutil  # noqa: F401  # legacy test patch target
 import subprocess
@@ -43,14 +42,15 @@ from defusedxml import ElementTree as DefusedET
 
 from . import deadline
 from ._compiler_options import has_explicit_cpp_std, has_explicit_std
+from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
     _build_castxml_command as _build_castxml_command,
     _cache_key as _cache_key,
-    _detect_cpp20_headers as _detect_cpp20_headers,
     _detect_cpp_headers as _detect_cpp_headers,
     _resolve_compiler_binary as _resolve_compiler_binary,
 )
+from .dumper_ast_config_cpp20 import _detect_cpp20_headers as _detect_cpp20_headers
 from .dumper_cache import _atomic_write, _cache_path
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
@@ -58,8 +58,11 @@ from .dumper_castxml import (
     _vt_sort_key as _vt_sort_key,
 )
 from .dumper_castxml_probe import (
+    _castxml_failure_hint as _castxml_failure_hint,
     _castxml_version_note as _castxml_version_note,
+    _is_toolchain_version_failure as _is_toolchain_version_failure,
     _parse_castxml_version as _parse_castxml_version,
+    _validate_castxml_output as _validate_castxml_output,
 )
 from .dumper_clang import (
     _clang_available as _clang_available,
@@ -70,7 +73,6 @@ from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
     _is_missing_cpp_stdlib_header_error,
     _parse_clang_ast_result,
-    diagnose_header_compile_failure,
     retry_excluding_error_headers,
     run_clang_to_ast_file,
 )
@@ -91,11 +93,14 @@ from .dumper_sysinc import (
     _resolve_probe_compiler as _resolve_probe_compiler,
 )
 from .dumper_toolchain import (
+    _allow_unsupported_castxml_enabled as _allow_unsupported_castxml_enabled,
     _ast_fallback_enabled as _ast_fallback_enabled,
     _auto_ast_fallback_eligible as _auto_ast_fallback_eligible,
     _castxml_available as _castxml_available,
     _parser_ast_fallback_reason as _parser_ast_fallback_reason,
+    _parser_ast_supported as _parser_ast_supported,
     _parser_ast_toolchain as _parser_ast_toolchain,
+    _parser_ast_unsupported_reasons as _parser_ast_unsupported_reasons,
     _resolve_selected_tool as _resolve_selected_tool,
     _safe_mtime as _safe_mtime,
     _safe_size as _safe_size,
@@ -103,7 +108,7 @@ from .dumper_toolchain import (
     _tool_identity_metadata as _tool_identity_metadata,
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
-from .errors import HeaderToolchainError, SnapshotError, ValidationError
+from .errors import SnapshotError, UnsupportedCastxmlVersionError, ValidationError
 from .model import (
     AbiSnapshot,
     ElfVisibility,
@@ -215,6 +220,41 @@ def _build_clang_header_command(
     return cmd
 
 
+def _resolve_force_cpp(
+    lang: str | None,
+    headers: list[Path],
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+) -> bool:
+    """Decide whether the TU is C++ when no ``lang`` was explicitly given.
+
+    An explicit ``--lang c++``/``cpp`` always wins. Otherwise, C++20
+    concept/requires syntax (including an abbreviated constrained parameter
+    like ``void f(std::integral auto x);``, which needs no
+    class/namespace/template keyword at all) is on its own sufficient proof
+    the header is C++ — without this, a header whose only C++ signal is such
+    syntax stayed auto-detected as C (Codex review). Shared by both the clang
+    and castxml frontends so the auto-detection rule cannot drift between
+    them.
+
+    ``for_language_mode_decision=True`` (Codex review): a
+    ``#if __cplusplus``/``#ifdef __cplusplus``-guarded C++20 construct
+    must not by itself promote an auto-detected header to C++ mode — in C
+    mode ``__cplusplus`` is undefined, so that guard's content is not
+    actually reachable there, and forcing C++ purely because it exists
+    would then turn an *active*, unguarded use of the same word as an
+    ordinary C identifier elsewhere in the header into a reserved-word
+    parse error once C++20 mode is wrongly forced.
+    """
+    if lang:
+        return bool(lang.upper() in ("C++", "CPP"))
+    return (
+        _detect_cpp_headers(headers)
+        or _detect_cpp20_headers(headers, for_language_mode_decision=True)
+        or has_explicit_cpp_std(gcc_options, gcc_option_tokens)
+    )
+
+
 def _resolve_clang_langmode(
     lang: str | None,
     headers: list[Path],
@@ -228,11 +268,7 @@ def _resolve_clang_langmode(
     (``--lang c``) vs auto-detected — both leave ``force_cpp`` False, but the
     C→C++ self-heal treats them differently (warning vs debug; Codex review).
     """
-    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
-    if not lang:
-        force_cpp = _detect_cpp_headers(headers) or has_explicit_cpp_std(
-            gcc_options, gcc_option_tokens
-        )
+    force_cpp = _resolve_force_cpp(lang, headers, gcc_options, gcc_option_tokens)
     force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
     explicit_c_request = bool(lang) and not force_cpp
     cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
@@ -342,6 +378,7 @@ def _clang_header_dump(
         extra_hash_dirs=extra_hash_dirs,
         frontend_identity=frontend_identity,
         compiler_identity=compiler_identity,
+        force_cpp20=force_cpp20,
     )
     cached = _cache_path(key, backend="clang")
     if cached.exists():
@@ -502,6 +539,10 @@ def _header_ast_parser(
         )
         setattr(parser, "_abicheck_ast_toolchain", metadata)
         setattr(parser, "_abicheck_ast_fallback_reason", fallback_reason)
+        if producer == "castxml":
+            check = evaluate_castxml_version(metadata.get("version", ""))
+            setattr(parser, "_abicheck_ast_supported", check.supported)
+            setattr(parser, "_abicheck_ast_unsupported_reasons", check.reasons)
         return parser
 
     def _run_clang(*, fallback_reason: str | None = None) -> _ClangAstParser:
@@ -569,30 +610,46 @@ def _header_ast_parser(
             except SnapshotError:
                 return False
 
+        # A proactive UnsupportedCastxmlVersionError (raised before castxml
+        # even runs) is exactly the same "this castxml can't be trusted"
+        # signal as the two string-matched stderr signatures below — it's
+        # just detected earlier and more precisely (an exact version
+        # comparison instead of a diagnostic-text guess). The opt-in
+        # fallback's whole purpose is letting a user accept the
+        # castxml/clang discrepancy risk to keep scanning on a host whose
+        # castxml can't be trusted; excluding this one reason a castxml is
+        # untrusted defeated that opt-in for exactly the case this PR's own
+        # new gate creates (Codex review).
+        is_version_gate_failure = isinstance(exc, UnsupportedCastxmlVersionError)
         if (
             auto_selected
             and _ast_fallback_enabled()
             and _clang_fallback_ready()
             and (
-                _is_toolchain_version_failure(str(exc))
+                is_version_gate_failure
+                or _is_toolchain_version_failure(str(exc))
                 or _is_direct_include_guard_failure(str(exc))
             )
         ):
             log.warning(
-                "castxml could not parse the header(s) (toolchain mismatch or a "
-                "header that refuses direct inclusion); falling back to the clang "
-                "header backend, which parses against the host toolchain and can "
-                "exclude direct-include #error guard headers. Set --ast-frontend "
-                "castxml to force castxml and see the original error."
+                "castxml could not parse the header(s) (toolchain mismatch, an "
+                "unsupported castxml version, or a header that refuses direct "
+                "inclusion); falling back to the clang header backend, which "
+                "parses against the host toolchain and can exclude direct-include "
+                "#error guard headers. Set --ast-frontend castxml to force castxml "
+                "and see the original error."
             )
             fallback_reason = (
-                "castxml-toolchain-version-mismatch"
+                "castxml-unsupported-version"
+                if is_version_gate_failure
+                else "castxml-toolchain-version-mismatch"
                 if _is_toolchain_version_failure(str(exc))
                 else "castxml-direct-include-guard"
             )
             return _run_clang(fallback_reason=fallback_reason)
         if auto_selected and (
-            _is_toolchain_version_failure(str(exc))
+            is_version_gate_failure
+            or _is_toolchain_version_failure(str(exc))
             or _is_direct_include_guard_failure(str(exc))
         ):
             message = (
@@ -681,133 +738,6 @@ def _pyelftools_exported_symbols(so_path: Path) -> tuple[set[str], set[str]]:
         raise SnapshotError(f"Failed to parse ELF file {so_path}: {exc}") from exc
 
 
-# clang's diagnostic for an unrecognised sized-float keyword, e.g.
-#   error: unknown type name '_Float32'
-_SIZED_FLOAT_RE = re.compile(r"_Float(?:16|32|64|128)(?:x)?\b")
-
-
-def _is_toolchain_version_failure(stderr: str) -> bool:
-    """True when a castxml failure is a bundled-Clang-too-old signature
-    (sized-float keywords or the GCC ``__assume__`` attribute) — the only
-    failures for which the ``castxml --version`` upgrade note is relevant."""
-    return bool(stderr) and (
-        bool(_SIZED_FLOAT_RE.search(stderr)) or "__assume__" in stderr
-    )
-
-
-def _castxml_failure_hint(
-    stderr: str,
-    *,
-    force_cpp: bool,
-    headers: list[Path],
-    version_note: str = "",
-) -> str:
-    """Map a known castxml/host-toolchain failure to an actionable remediation.
-
-    Returns the empty string when no known signature matches. These three
-    signatures account for the header-scoped scan aborts seen across the
-    real-world scan campaign (see plan G16); each previously surfaced only as an
-    opaque clang stderr dump. The durable fix for the first two is a castxml
-    built against a newer Clang (or the libclang extractor, G4) — abicheck cannot
-    reliably work around a frontend that is simply older than the host headers,
-    so it diagnoses precisely (optionally with the detected version via
-    ``version_note``) instead of guessing.
-    """
-    # 1) glibc sized-float types (the dominant case): _Float32/64/128 keywords
-    #    the bundled clang frontend rejects while emulating a newer host GCC.
-    if stderr and _SIZED_FLOAT_RE.search(stderr):
-        return (
-            "\n\nHint: the host glibc declares sized-float types "
-            "(_Float32/_Float64/_Float128) that this castxml/clang frontend "
-            "cannot parse — the bundled clang is older than the host gcc/glibc. "
-            "Install a newer castxml (newer bundled Clang), or point abicheck at "
-            f"a clang-parsable toolchain via --gcc-path / --sysroot.{version_note}"
-        )
-    # 2) GCC 13+ libstdc++ uses the [[__assume__]] / __attribute__((__assume__))
-    #    spelling the bundled clang frontend doesn't know.
-    if "__assume__" in stderr:
-        return (
-            "\n\nHint: the host libstdc++ uses the GCC '__assume__' attribute "
-            "that this castxml/clang frontend rejects. Install a newer castxml "
-            "matching the host GCC, or scan against an older/clang-parsable "
-            f"libstdc++ via --gcc-path / --sysroot.{version_note}"
-        )
-    # 3) Explicit --lang c on headers needing C++. _CPP_ONLY_PATTERNS (like the
-    # retry gate below) excludes extern "C" so a valid guarded-C header's real
-    # failure isn't misreported with this hint (Codex review).
-    if not force_cpp and _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS):
-        return (
-            "\n\nHint: The header files appear to contain C++ syntax "
-            "(class, namespace, template) but --lang c was specified. "
-            "Try removing --lang or using --lang c++."
-        )
-    # 4) Generic remediable signatures (missing dependency header, required
-    #    config macro, undeclared type from a missing umbrella) — frontend-
-    #    agnostic, so the castxml path benefits from the same guidance as clang.
-    return diagnose_header_compile_failure(stderr) or ""
-
-
-def _validate_castxml_output(
-    result: subprocess.CompletedProcess[str],
-    out_xml: Path,
-    headers: list[Path],
-    force_cpp: bool,
-    castxml_bin: str = "castxml",
-) -> Element:
-    """Validate castxml output and return parsed XML root."""
-    if result.returncode != 0:
-        # Only probe `castxml --version` when the failure is a frontend-too-old
-        # signature — otherwise the upgrade note is irrelevant (and unused).
-        version_note = (
-            _castxml_version_note(castxml_bin)
-            if _is_toolchain_version_failure(result.stderr)
-            else ""
-        )
-        hint = _castxml_failure_hint(
-            result.stderr,
-            force_cpp=force_cpp,
-            headers=headers,
-            version_note=version_note,
-        )
-        message = (
-            f"castxml failed (exit {result.returncode}):\n{result.stderr[:2000]}{hint}"
-        )
-        # Must mirror _castxml_failure_hint's case-3 predicate exactly
-        # (_CPP_ONLY_PATTERNS) or the class and hint text disagree.
-        is_toolchain = _is_toolchain_version_failure(result.stderr) or (
-            not force_cpp and _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS)
-        )
-        raise (HeaderToolchainError if is_toolchain else SnapshotError)(message)
-    if not out_xml.exists() or out_xml.stat().st_size == 0:
-        stderr_snippet = result.stderr[:1000].strip()
-        detail = f"\ncastxml stderr: {stderr_snippet}" if stderr_snippet else ""
-        raise SnapshotError(
-            f"castxml exited 0 but produced no output file (or empty file).{detail}"
-        )
-    deadline.check()  # before parsing; outside the try below (Exception would swallow it)
-    try:
-        root = cast(Element, DefusedET.parse(str(out_xml)).getroot())
-    except Exception as xml_exc:
-        stderr_snippet = result.stderr[:1000].strip()
-        detail = f"\ncastxml stderr: {stderr_snippet}" if stderr_snippet else ""
-        raise SnapshotError(
-            f"castxml produced invalid XML: {xml_exc}{detail}"
-        ) from xml_exc
-    if len(root) == 0:
-        stderr_snippet = result.stderr[:1000].strip()
-        detail = f"\ncastxml stderr: {stderr_snippet}" if stderr_snippet else ""
-        raise SnapshotError(
-            f"castxml produced an empty XML document (no declarations found). "
-            f"Check that the header paths are correct and the compiler can "
-            f"parse them.{detail}"
-        )
-    # The parse itself can consume the rest of the budget on a huge fresh
-    # XML tree; re-check before handing it off (Codex review, PR #591,
-    # round 3, mirrors the cached-hit and clang-AST paths).
-    deadline.check()
-    return root
-
-
 def _castxml_dump(
     headers: list[Path],
     extra_includes: list[Path],
@@ -850,14 +780,31 @@ def _castxml_dump(
     if _selected_tool_out is not None:
         _selected_tool_out.append(castxml_bin)
 
+    # CastXML version gate (castxml_policy) — fail closed *before* any header
+    # is parsed. An out-of-policy build (notably the legacy PyPI ``castxml``
+    # distribution) is rejected unless the caller explicitly opted in via
+    # ABICHECK_ALLOW_UNSUPPORTED_CASTXML. Skipped when the executable itself
+    # could not even be resolved/probed (``"error"`` key) — that is a
+    # different, pre-existing failure mode (missing/unreadable binary) that
+    # the actual castxml invocation below already reports precisely; this
+    # gate only judges a version it could actually observe.
+    _castxml_meta = _tool_identity_metadata(castxml_bin)
+    if "error" not in _castxml_meta:
+        _version_check = evaluate_castxml_version(_castxml_meta.get("version", ""))
+        if not _version_check.supported and not _allow_unsupported_castxml_enabled():
+            raise UnsupportedCastxmlVersionError(
+                _version_check.message(found_at=castxml_bin)
+            )
+
     # Determine language before selecting the emulated compiler: C mode uses
     # gcc/cc, not g++, and both cache identity and execution must describe the
     # same driver.
-    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
-    if not lang:
-        force_cpp = _detect_cpp_headers(headers) or has_explicit_cpp_std(
-            gcc_options, gcc_option_tokens
-        )
+    force_cpp = _resolve_force_cpp(lang, headers, gcc_options, gcc_option_tokens)
+    # Same expression _run_castxml_attempt uses for its (non-retry) call below —
+    # folded into the cache key ahead of time so the resolved dialect decision,
+    # not just the explicit --lang, invalidates a stale cache entry (Codex
+    # review).
+    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
     resolved_compiler = compiler
     if not force_cpp and not gcc_path and not gcc_prefix:
         resolved_compiler = {
@@ -887,6 +834,7 @@ def _castxml_dump(
         extra_hash_dirs=extra_hash_dirs,
         frontend_identity=frontend_identity,
         compiler_identity=compiler_identity,
+        force_cpp20=force_cpp20,
     )
     cached = _cache_path(key)
     if cached.exists():
@@ -925,10 +873,11 @@ def _castxml_dump(
             )
         except SnapshotError as primary:
             # G16/A3: an explicit ``--lang c`` on a header that actually requires
-            # C++ (a stray class/namespace/template) should degrade to a C++ retry
-            # rather than hard-fail. Skip the retry when we are already in C++
-            # mode, when the failure is a frontend-too-old signature (a mode switch
-            # won't help), or when the header has no *genuinely C++-only* construct
+            # C++ (a stray class/namespace/template, or C++20 concept/requires
+            # syntax — Codex review) should degrade to a C++ retry rather than
+            # hard-fail. Skip the retry when we are already in C++ mode, when
+            # the failure is a frontend-too-old signature (a mode switch won't
+            # help), or when the header has no *genuinely C++-only* construct
             # (``_CPP_ONLY_PATTERNS`` excludes ``extern "C"``: a guarded
             # ``extern "C"`` header is valid C, so a C-mode failure there is real
             # and must NOT be masked by re-parsing as C++, which would skip the
@@ -936,7 +885,10 @@ def _castxml_dump(
             if (
                 force_cpp
                 or _is_toolchain_version_failure(str(primary))
-                or not _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS)
+                or not (
+                    _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS)
+                    or _detect_cpp20_headers(headers)
+                )
             ):
                 raise
             log.warning(
@@ -1691,6 +1643,8 @@ def _dump_elf(
         ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
         ast_toolchain=_parser_ast_toolchain(parser),
         ast_fallback_reason=_parser_ast_fallback_reason(parser),
+        ast_toolchain_supported=_parser_ast_supported(parser),
+        ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
         platform="elf",
         language_profile=profile_hint,
     )
@@ -1849,6 +1803,8 @@ def _dump_macho(
         ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
         ast_toolchain=_parser_ast_toolchain(parser),
         ast_fallback_reason=_parser_ast_fallback_reason(parser),
+        ast_toolchain_supported=_parser_ast_supported(parser),
+        ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
         platform="macho",
         language_profile=profile_hint,
     )
@@ -1955,6 +1911,8 @@ def _dump_pe(
         ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
         ast_toolchain=_parser_ast_toolchain(parser),
         ast_fallback_reason=_parser_ast_fallback_reason(parser),
+        ast_toolchain_supported=_parser_ast_supported(parser),
+        ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
         platform="pe",
         language_profile=profile_hint,
     )

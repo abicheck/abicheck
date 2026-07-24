@@ -84,6 +84,12 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_VERIFY_RUNTIME",
     "INPUT_REQUIRED_SYMBOL",
     "INPUT_REQUIRED_SYMBOLS",
+    "INPUT_AST_FRONTEND",
+    "INPUT_GCC_PATH",
+    "INPUT_GCC_PREFIX",
+    "INPUT_GCC_OPTIONS",
+    "INPUT_SYSROOT",
+    "INPUT_NOSTDINC",
 )
 
 
@@ -416,6 +422,101 @@ class TestCompareFormatAllowlistMatchesCli:
             f"validate-inputs.sh's release-style compare allowlist {sorted(validator_formats)} "
             f"has drifted from abicheck/cli.py's _RELEASE_FORMATS {sorted(cli_formats)}"
         )
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
+class TestCompareRejectsCompileContextForDirectoryOrPackage:
+    """Mirrors run.sh's compile-context guard (Codex review): the per-
+    library release fan-out never threads ast-frontend/gcc-*/sysroot/
+    nostdinc to each pair's header dump, so a directory/package compare
+    with any of these set must fail here, before dependency install --
+    not only later in run.sh, reopening the exact silent-fallback-until-
+    late-failure bug this validator exists to prevent (action/AGENTS.md:
+    "Keep validate-inputs.sh and run.sh in sync")."""
+
+    def test_gcc_path_against_directory_is_rejected(self, tmp_path: Path) -> None:
+        lib_dir = tmp_path / "lib"
+        lib_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(lib_dir),
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+            }
+        )
+        assert result.returncode == 1
+        assert "does not support ast-frontend/gcc-path" in result.stdout
+
+    @pytest.mark.parametrize(
+        "var,value",
+        [
+            ("INPUT_AST_FRONTEND", "clang"),
+            ("INPUT_GCC_PATH", "/opt/gcc-14/bin/g++"),
+            ("INPUT_GCC_PREFIX", "aarch64-linux-gnu-"),
+            ("INPUT_GCC_OPTIONS", "-DFOO=1"),
+            ("INPUT_SYSROOT", "/opt/sysroot"),
+            ("INPUT_NOSTDINC", "true"),
+        ],
+    )
+    def test_each_compile_context_input_is_rejected(
+        self, tmp_path: Path, var: str, value: str
+    ) -> None:
+        pkg = tmp_path / "libfoo.rpm"
+        pkg.write_text("")
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": str(pkg),
+                var: value,
+            }
+        )
+        assert result.returncode == 1, f"{var}={value} should have been rejected"
+        assert "does not support ast-frontend/gcc-path" in result.stdout
+
+    def test_ast_frontend_auto_is_not_rejected(self, tmp_path: Path) -> None:
+        """ "auto" is the documented no-op spelling -- resolves to the same
+        default castxml selection as leaving the input unset -- and must
+        not trip this guard, unlike a real frontend choice."""
+        lib_dir = tmp_path / "lib"
+        lib_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(lib_dir),
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_AST_FRONTEND": "auto",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_single_pair_compare_with_gcc_path_passes(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_directory_compare_with_no_compile_context_passes(
+        self, tmp_path: Path
+    ) -> None:
+        lib_dir = tmp_path / "lib"
+        lib_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(lib_dir),
+                "INPUT_NEW_LIBRARY": "new.so",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.skipif(

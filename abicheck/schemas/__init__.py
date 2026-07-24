@@ -157,7 +157,15 @@ from typing import Any
 #:       has already produced it -- nothing in the CLI/service layer sets
 #:       these directly either, same as 2.12's five keys. All additive/
 #:       optional; omitted entirely (never emitted as null) when unset.
-REPORT_SCHEMA_VERSION = "2.13"
+#:   2.14: ``release_recommendation`` gained a new optional ``state`` key
+#:       (one of "actionable"/"review"/"unavailable" -- how much weight the
+#:       recommendation itself can bear, independent of what it recommends)
+#:       and ``soname_action`` gained a new enum member, ``"not_determined"``
+#:       -- set on a BREAKING verdict whose comparison carried no
+#:       ELF/PE/Mach-O/DWARF evidence at all, so abicheck no longer asserts a
+#:       confident SONAME action it cannot back with a real binary artifact
+#:       (Codex review). Both additive.
+REPORT_SCHEMA_VERSION = "2.14"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

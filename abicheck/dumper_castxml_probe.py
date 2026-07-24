@@ -32,8 +32,18 @@ from __future__ import annotations
 
 import re
 import subprocess
+from pathlib import Path
+from typing import cast
+from xml.etree.ElementTree import (
+    Element,  # type annotation only; parsing uses defusedxml
+)
+
+from defusedxml import ElementTree as DefusedET
 
 from . import deadline
+from .dumper_ast_config import _CPP_ONLY_PATTERNS, _detect_cpp_headers
+from .dumper_clang_errors import diagnose_header_compile_failure
+from .errors import HeaderToolchainError, SnapshotError
 
 # castxml drives an internal Clang frontend; it must be new enough to parse
 # modern host headers. _Float32/_Float64/_Float128 land in Clang 16, and the
@@ -127,3 +137,130 @@ def _castxml_version_note(castxml_bin: str = "castxml") -> str:
             f"the host gcc (clang >= {_RECOMMENDED_CLANG_MAJOR} recommended)."
         )
     return ""
+
+
+# clang's diagnostic for an unrecognised sized-float keyword, e.g.
+#   error: unknown type name '_Float32'
+_SIZED_FLOAT_RE = re.compile(r"_Float(?:16|32|64|128)(?:x)?\b")
+
+
+def _is_toolchain_version_failure(stderr: str) -> bool:
+    """True when a castxml failure is a bundled-Clang-too-old signature
+    (sized-float keywords or the GCC ``__assume__`` attribute) — the only
+    failures for which the ``castxml --version`` upgrade note is relevant."""
+    return bool(stderr) and (
+        bool(_SIZED_FLOAT_RE.search(stderr)) or "__assume__" in stderr
+    )
+
+
+def _castxml_failure_hint(
+    stderr: str,
+    *,
+    force_cpp: bool,
+    headers: list[Path],
+    version_note: str = "",
+) -> str:
+    """Map a known castxml/host-toolchain failure to an actionable remediation.
+
+    Returns the empty string when no known signature matches. These three
+    signatures account for the header-scoped scan aborts seen across the
+    real-world scan campaign (see plan G16); each previously surfaced only as an
+    opaque clang stderr dump. The durable fix for the first two is a castxml
+    built against a newer Clang (or the libclang extractor, G4) — abicheck cannot
+    reliably work around a frontend that is simply older than the host headers,
+    so it diagnoses precisely (optionally with the detected version via
+    ``version_note``) instead of guessing.
+    """
+    # 1) glibc sized-float types (the dominant case): _Float32/64/128 keywords
+    #    the bundled clang frontend rejects while emulating a newer host GCC.
+    if stderr and _SIZED_FLOAT_RE.search(stderr):
+        return (
+            "\n\nHint: the host glibc declares sized-float types "
+            "(_Float32/_Float64/_Float128) that this castxml/clang frontend "
+            "cannot parse — the bundled clang is older than the host gcc/glibc. "
+            "Install a newer castxml (newer bundled Clang), or point abicheck at "
+            f"a clang-parsable toolchain via --gcc-path / --sysroot.{version_note}"
+        )
+    # 2) GCC 13+ libstdc++ uses the [[__assume__]] / __attribute__((__assume__))
+    #    spelling the bundled clang frontend doesn't know.
+    if "__assume__" in stderr:
+        return (
+            "\n\nHint: the host libstdc++ uses the GCC '__assume__' attribute "
+            "that this castxml/clang frontend rejects. Install a newer castxml "
+            "matching the host GCC, or scan against an older/clang-parsable "
+            f"libstdc++ via --gcc-path / --sysroot.{version_note}"
+        )
+    # 3) Explicit --lang c on headers needing C++. _CPP_ONLY_PATTERNS (like the
+    # retry gate below) excludes extern "C" so a valid guarded-C header's real
+    # failure isn't misreported with this hint (Codex review).
+    if not force_cpp and _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS):
+        return (
+            "\n\nHint: The header files appear to contain C++ syntax "
+            "(class, namespace, template) but --lang c was specified. "
+            "Try removing --lang or using --lang c++."
+        )
+    # 4) Generic remediable signatures (missing dependency header, required
+    #    config macro, undeclared type from a missing umbrella) — frontend-
+    #    agnostic, so the castxml path benefits from the same guidance as clang.
+    return diagnose_header_compile_failure(stderr) or ""
+
+
+def _validate_castxml_output(
+    result: subprocess.CompletedProcess[str],
+    out_xml: Path,
+    headers: list[Path],
+    force_cpp: bool,
+    castxml_bin: str = "castxml",
+) -> Element:
+    """Validate castxml output and return parsed XML root."""
+    if result.returncode != 0:
+        # Only probe `castxml --version` when the failure is a frontend-too-old
+        # signature — otherwise the upgrade note is irrelevant (and unused).
+        version_note = (
+            _castxml_version_note(castxml_bin)
+            if _is_toolchain_version_failure(result.stderr)
+            else ""
+        )
+        hint = _castxml_failure_hint(
+            result.stderr,
+            force_cpp=force_cpp,
+            headers=headers,
+            version_note=version_note,
+        )
+        message = (
+            f"castxml failed (exit {result.returncode}):\n{result.stderr[:2000]}{hint}"
+        )
+        # Must mirror _castxml_failure_hint's case-3 predicate exactly
+        # (_CPP_ONLY_PATTERNS) or the class and hint text disagree.
+        is_toolchain = _is_toolchain_version_failure(result.stderr) or (
+            not force_cpp and _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS)
+        )
+        raise (HeaderToolchainError if is_toolchain else SnapshotError)(message)
+    if not out_xml.exists() or out_xml.stat().st_size == 0:
+        stderr_snippet = result.stderr[:1000].strip()
+        detail = f"\ncastxml stderr: {stderr_snippet}" if stderr_snippet else ""
+        raise SnapshotError(
+            f"castxml exited 0 but produced no output file (or empty file).{detail}"
+        )
+    deadline.check()  # before parsing; outside the try below (Exception would swallow it)
+    try:
+        root = cast(Element, DefusedET.parse(str(out_xml)).getroot())
+    except Exception as xml_exc:
+        stderr_snippet = result.stderr[:1000].strip()
+        detail = f"\ncastxml stderr: {stderr_snippet}" if stderr_snippet else ""
+        raise SnapshotError(
+            f"castxml produced invalid XML: {xml_exc}{detail}"
+        ) from xml_exc
+    if len(root) == 0:
+        stderr_snippet = result.stderr[:1000].strip()
+        detail = f"\ncastxml stderr: {stderr_snippet}" if stderr_snippet else ""
+        raise SnapshotError(
+            f"castxml produced an empty XML document (no declarations found). "
+            f"Check that the header paths are correct and the compiler can "
+            f"parse them.{detail}"
+        )
+    # The parse itself can consume the rest of the budget on a huge fresh
+    # XML tree; re-check before handing it off (Codex review, PR #591,
+    # round 3, mirrors the cached-hit and clang-AST paths).
+    deadline.check()
+    return root

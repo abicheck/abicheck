@@ -603,10 +603,13 @@ def check_changekind_docs(f: Findings) -> None:
 def check_doc_count_sync(f: Findings) -> None:
     """Keep hand-written headline counts in sync with their source of truth.
 
-    Two numbers historically drifted across the docs: the number of `ChangeKind`
-    values ("N change types") and the size of the example catalog
-    (`examples/ground_truth.json`). Each anchor below pins a specific sentence to
-    a computed value:
+    Three numbers historically drifted across the docs: the number of `ChangeKind`
+    values ("N change types"), the size of the example catalog
+    (`examples/ground_truth.json`), and the snapshot `schema_version` (Codex
+    review — a doc page hand-copying a version number that already has a fact
+    owner, per AGENTS.md's "don't hand-copy a count/version that has a fact
+    owner elsewhere" rule, with nothing catching the next bump forgetting it).
+    Each anchor below pins a specific sentence to a computed value:
 
     - ERROR if the anchor sentence is present but the number is wrong (the real
       drift bug — forces docs to be updated when a ChangeKind or case is added).
@@ -614,7 +617,13 @@ def check_doc_count_sync(f: Findings) -> None:
       guard silently stopped covering that spot — update the regex here).
     """
     try:
+        from abicheck.castxml_policy import (
+            MAX_CASTXML,
+            MIN_CASTXML,
+            MIN_CASTXML_CLANG_MAJOR,
+        )
         from abicheck.checker_policy import ChangeKind
+        from abicheck.serialization import SCHEMA_VERSION
     except Exception:
         # Package not importable (e.g. pre-install lane) — skip silently, like
         # the other ChangeKind checks.
@@ -691,6 +700,62 @@ def check_doc_count_sync(f: Findings) -> None:
             n_kinds,
             r"\"count\": (\d+)",
         ),
+        (
+            DOCS / "reference/snapshot-format.md",
+            "snapshot schema_version (headline sentence)",
+            SCHEMA_VERSION,
+            r"The current value is \*\*`(\d+)`\*\*",
+        ),
+        (
+            DOCS / "reference/snapshot-format.md",
+            "snapshot schema_version (JSON example)",
+            SCHEMA_VERSION,
+            r'"schema_version":\s*(\d+),',
+        ),
+        (
+            DOCS / "reference/snapshot-format.md",
+            "snapshot schema_version (field table)",
+            SCHEMA_VERSION,
+            r"Snapshot format version \(currently `(\d+)`\)",
+        ),
+        (
+            DOCS / "reference/environment.md",
+            "CastXML policy minimum version (ABICHECK_ALLOW_UNSUPPORTED_CASTXML row)",
+            MIN_CASTXML,
+            r">=(\d+\.\d+\.\d+),<\d+\.\d+\.\d+",
+        ),
+        (
+            DOCS / "reference/environment.md",
+            "CastXML policy exclusive-upper-bound version"
+            " (ABICHECK_ALLOW_UNSUPPORTED_CASTXML row)",
+            MAX_CASTXML,
+            r">=\d+\.\d+\.\d+,<(\d+\.\d+\.\d+)",
+        ),
+        (
+            DOCS / "reference/environment.md",
+            "CastXML policy minimum bundled Clang major version"
+            " (ABICHECK_ALLOW_UNSUPPORTED_CASTXML row)",
+            MIN_CASTXML_CLANG_MAJOR,
+            r"bundled/linked Clang `>=(\d+)`",
+        ),
+        (
+            DOCS / "troubleshooting.md",
+            "CastXML policy minimum version (version-gate section)",
+            MIN_CASTXML,
+            r"supported range \(currently `>=(\d+\.\d+\.\d+),<\d+\.\d+\.\d+`",
+        ),
+        (
+            DOCS / "troubleshooting.md",
+            "CastXML policy exclusive-upper-bound version (version-gate section)",
+            MAX_CASTXML,
+            r"supported range \(currently `>=\d+\.\d+\.\d+,<(\d+\.\d+\.\d+)`",
+        ),
+        (
+            DOCS / "troubleshooting.md",
+            "CastXML policy minimum bundled Clang major version (version-gate section)",
+            MIN_CASTXML_CLANG_MAJOR,
+            r"bundled/linked Clang `>=(\d+)`",
+        ),
     ]
 
     for path, label, expected, pattern in anchors:
@@ -703,7 +768,10 @@ def check_doc_count_sync(f: Findings) -> None:
                 "update the regex in check_doc_count_sync if the wording changed.",
             )
             continue
-        found = int(m.group(1))
+        # Most anchors pin an integer count; the CastXML version anchors pin a
+        # dotted version string instead (MIN_CASTXML/MAX_CASTXML aren't plain
+        # ints) — compare in whichever type the source of truth actually is.
+        found: int | str = int(m.group(1)) if isinstance(expected, int) else m.group(1)
         if found != expected:
             f.err(
                 "doc-count-sync",

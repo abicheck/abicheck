@@ -210,8 +210,9 @@
       "additionalProperties": true,
       "properties": {
         "version_bump": { "type": "string", "enum": ["major", "minor", "patch", "none"] },
-        "soname_action": { "type": "string", "enum": ["bump_required", "bump_performed", "bump_missing", "no_bump_needed"] },
-        "rationale": { "type": "string" }
+        "soname_action": { "type": "string", "enum": ["bump_required", "bump_performed", "bump_missing", "no_bump_needed", "not_determined"], "description": "'not_determined' added in schema 2.14: a BREAKING verdict whose comparison carried no ELF/PE/Mach-O/DWARF evidence at all." },
+        "rationale": { "type": "string" },
+        "state": { "type": "string", "enum": ["actionable", "review", "unavailable"], "description": "Schema 2.14. How much weight the recommendation itself can bear, independent of what it recommends: 'actionable' (act on it), 'review' (a source/API break was found but no binary evidence confirms a SONAME action either way), or 'unavailable' (a BREAKING verdict with no ELF/PE/Mach-O/DWARF evidence at all — abicheck cannot confirm a binary action)." }
       }
     },
     "layer_coverage": {

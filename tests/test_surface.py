@@ -37,8 +37,14 @@ from abicheck.surface import (
 )
 
 
-def _fn(name, ret="void", params=(), vis=Visibility.PUBLIC, mangled=None,
-        origin=ScopeOrigin.UNKNOWN):
+def _fn(
+    name,
+    ret="void",
+    params=(),
+    vis=Visibility.PUBLIC,
+    mangled=None,
+    origin=ScopeOrigin.UNKNOWN,
+):
     return Function(
         name=name,
         mangled=mangled if mangled is not None else f"_Z{len(name)}{name}",
@@ -49,7 +55,9 @@ def _fn(name, ret="void", params=(), vis=Visibility.PUBLIC, mangled=None,
     )
 
 
-def _rec(name, fields=(), bases=(), size=64, origin=ScopeOrigin.UNKNOWN):
+def _rec(
+    name, fields=(), bases=(), size=64, origin=ScopeOrigin.UNKNOWN, qualified_name=None
+):
     return RecordType(
         name=name,
         kind="struct",
@@ -57,11 +65,13 @@ def _rec(name, fields=(), bases=(), size=64, origin=ScopeOrigin.UNKNOWN):
         fields=[TypeField(name=n, type=t) for n, t in fields],
         bases=list(bases),
         origin=origin,
+        qualified_name=qualified_name,
     )
 
 
-def _enum(name, members=(("A", 0), ("B", 1)), origin=ScopeOrigin.UNKNOWN,
-          source_header=None):
+def _enum(
+    name, members=(("A", 0), ("B", 1)), origin=ScopeOrigin.UNKNOWN, source_header=None
+):
     return EnumType(
         name=name,
         members=[EnumMember(name=n, value=v) for n, v in members],
@@ -218,8 +228,13 @@ class TestComputePublicSurface:
             library="l",
             version="1",
             functions=[_fn("get_result", ret="int")],
-            enums=[_enum("Internal", origin=ScopeOrigin.PRIVATE_HEADER,
-                          source_header="impl.h")],
+            enums=[
+                _enum(
+                    "Internal",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                    source_header="impl.h",
+                )
+            ],
         )
         surf = compute_public_surface(snap)
         assert "Internal" not in surf.public_types
@@ -374,12 +389,18 @@ class TestChangeClassification:
             library="l",
             version="1",
             functions=[_fn("api", ret="int")],
-            enums=[_enum("Internal", origin=ScopeOrigin.PRIVATE_HEADER,
-                          source_header="impl.h")],
+            enums=[
+                _enum(
+                    "Internal",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                    source_header="impl.h",
+                )
+            ],
         )
         s = self._surf(snap)
         c = Change(
-            kind=ChangeKind.ENUM_MEMBER_VALUE_CHANGED, symbol="Internal::A",
+            kind=ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+            symbol="Internal::A",
             description="",
         )
         assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
@@ -496,12 +517,15 @@ class TestSurfaceExclusionReason:
         # unresolved side means we keep the finding (anti-hiding).
         resolvable = self._surf(
             AbiSnapshot(
-                library="l", version="1",
+                library="l",
+                version="1",
                 functions=[_fn("api"), _fn("internal", vis=Visibility.ELF_ONLY)],
             )
         )
         unresolvable = PublicSurface()  # resolvable defaults to False
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description=""
+        )
         assert classify_change_surface(c, resolvable, unresolvable) == (True, None)
         assert classify_change_surface(c, unresolvable, resolvable) == (True, None)
 
@@ -512,7 +536,9 @@ class TestSurfaceExclusionReason:
             functions=[_fn("api"), _fn("internal", vis=Visibility.ELF_ONLY)],
         )
         s = self._surf(snap)
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description=""
+        )
         assert classify_change_surface(c, s, s) == (False, REASON_NOT_EXPORTED)
 
     def test_struct_return_convention_symbol_scoped(self):
@@ -526,11 +552,15 @@ class TestSurfaceExclusionReason:
         )
         s = self._surf(snap)
         c = Change(
-            kind=ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED, symbol="internal", description=""
+            kind=ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED,
+            symbol="internal",
+            description="",
         )
         assert classify_change_surface(c, s, s) == (False, REASON_NOT_EXPORTED)
         c_pub = Change(
-            kind=ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED, symbol="api", description=""
+            kind=ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED,
+            symbol="api",
+            description="",
         )
         assert classify_change_surface(c_pub, s, s) == (True, None)
 
@@ -730,9 +760,9 @@ class TestScopedCompareNoFalsePositives:
         old, new = _mk(64), _mk(128)
         scoped = compare(old, new, scope_to_public_surface=True)
         kinds = {c.kind for c in scoped.changes}
-        assert (
-            ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API in kinds
-        ), f"leak hidden by scoping; got kinds={[k.value for k in kinds]}"
+        assert ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API in kinds, (
+            f"leak hidden by scoping; got kinds={[k.value for k in kinds]}"
+        )
         # The internal type's change must not have been silently filtered.
         assert not any(
             "detail::Impl" in c.symbol for c in scoped.out_of_surface_changes
@@ -907,7 +937,8 @@ class TestProvenanceReasons:
         # private header is demoted with the provenance reason — the leaked
         # private-header case scoping targets.
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[
                 _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
                 _fn("leaked", origin=ScopeOrigin.PRIVATE_HEADER),
@@ -921,30 +952,37 @@ class TestProvenanceReasons:
 
     def test_system_header_symbol_demoted(self):
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[
                 _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
                 _fn("from_libc", origin=ScopeOrigin.SYSTEM_HEADER),
             ],
         )
         s = self._surf(snap)
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="from_libc", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="from_libc", description=""
+        )
         assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
 
     def test_public_header_origin_kept_in_surface(self):
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
         )
         s = self._surf(snap)
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="public_api", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="public_api", description=""
+        )
         assert classify_change_surface(c, s, s) == (True, None)
 
     def test_unknown_origin_falls_back_to_linkage_reason(self):
         # No public set was used → origin UNKNOWN → provenance never fires;
         # the linkage reason (not-exported) is emitted as before.
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[
                 _fn("public_api"),
                 _fn("hidden", vis=Visibility.ELF_ONLY),
@@ -956,7 +994,8 @@ class TestProvenanceReasons:
 
     def test_private_header_type_finding_demoted(self):
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("api", ret="Result *")],
             types=[
                 _rec("Result", origin=ScopeOrigin.PUBLIC_HEADER),
@@ -964,20 +1003,24 @@ class TestProvenanceReasons:
             ],
         )
         s = self._surf(snap)
-        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="InternalCache", description="")
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="InternalCache", description=""
+        )
         assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
 
     def test_disagreeing_sides_block_demotion(self):
         # Public-header origin on one side blocks demotion (conservative).
         old = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[
                 _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
                 _fn("sym", origin=ScopeOrigin.PRIVATE_HEADER),
             ],
         )
         new = AbiSnapshot(
-            library="l", version="2",
+            library="l",
+            version="2",
             functions=[
                 _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
                 _fn("sym", origin=ScopeOrigin.PUBLIC_HEADER),
@@ -988,6 +1031,664 @@ class TestProvenanceReasons:
         # sym is in public_symbols on both sides; the public-header side blocks
         # the private-header demotion, so it stays in surface.
         assert classify_change_surface(c, s_old, s_new) == (True, None)
+
+
+# ── hidden-friend surface classification (origin-before-exemption fix) ──────
+#
+# hidden_friend_removed/added used to be unconditionally retained regardless
+# of where the befriending class lived (_NEVER_FILTER_KIND_NAMES). That is
+# right for the not-exported gate (a hidden friend can never have an ELF
+# export) but wrong for header provenance: a hidden friend whose owner class
+# is a system/private-header declaration is exactly as out-of-surface as any
+# other private declaration. These tests exercise the fix.
+
+
+class TestHiddenFriendSurface:
+    def _surf_with_owner(self, owner_origin):
+        # RecordType.name stays deliberately bare (model.py) — castxml/clang
+        # only ever populate the qualified spelling on hidden_friend_owner /
+        # RecordType.qualified_name, never on RecordType.name itself. Using
+        # a bare "point" here (not "mylib::point") reproduces the real shape
+        # a namespaced owner has in a genuine snapshot (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("point", origin=owner_origin)],
+        )
+        return compute_public_surface(snap)
+
+    def test_system_header_hidden_friend_out_of_surface(self):
+        s = self._surf_with_owner(ScopeOrigin.SYSTEM_HEADER)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
+
+    def test_private_header_hidden_friend_out_of_surface(self):
+        s = self._surf_with_owner(ScopeOrigin.PRIVATE_HEADER)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
+
+    def test_public_project_hidden_friend_retained(self):
+        s = self._surf_with_owner(ScopeOrigin.PUBLIC_HEADER)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (True, None)
+
+    def test_confidently_public_owner_overrides_divergent_friend_own_origin(self):
+        """Regression (CodeRabbit review): the owner's confident PUBLIC_HEADER
+        verdict must short-circuit before the symbol-level fallback runs — a
+        friend function whose *own* recorded origin happens to disagree
+        (e.g. system-header) must not override an owner already confirmed
+        public, matching this module's anti-hiding "either side public blocks
+        demotion" convention elsewhere (_origin_reason)."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "mylib::operator==",
+                    mangled="_ZN5mylibeqERKNS_5pointES2_",
+                    origin=ScopeOrigin.SYSTEM_HEADER,
+                ),
+            ],
+            types=[_rec("point", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (True, None)
+
+    def test_hidden_friend_added_uses_same_owner_check(self):
+        s = self._surf_with_owner(ScopeOrigin.SYSTEM_HEADER)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
+
+    def test_unknown_hidden_friend_owner_stays_retained(self):
+        # No caused_by_type (owner could not be resolved) and no matching
+        # function-level origin either — conservative fallback keeps it.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type=None,
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (True, None)
+
+    def test_namespaced_owner_resolves_via_bare_tail(self):
+        """Regression (Codex review): hidden_friend_owner is the fully
+        qualified owner name ("ns::Foo") from castxml/clang's qualified-name
+        walk, but RecordType.name stays bare ("Foo") by design — a direct
+        _origin_reason(..., "ns::Foo") lookup would never match origin_by_key
+        (keyed by the bare name), silently keeping every namespaced-owner
+        hidden friend in the public surface regardless of its real origin.
+        Uses a qualified caused_by_type against a bare-named record, exactly
+        the real-world shape (unlike _surf_with_owner's other callers, which
+        already exercise this via the shared bare-name fixture)."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("point", origin=ScopeOrigin.SYSTEM_HEADER)],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
+
+    def test_owner_unresolved_falls_back_to_function_own_origin(self):
+        # No caused_by_type, but the friend function's own recorded origin
+        # (the common in-class-defined case, where function origin == owner
+        # header) is system-header — the fallback still demotes it.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "mylib::operator==",
+                    mangled="_ZN5mylibeqERKNS_5pointES2_",
+                    origin=ScopeOrigin.SYSTEM_HEADER,
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type=None,
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
+
+    def test_friend_symbol_added_together_demotes_from_one_sided_private(self):
+        """Regression (Codex review): with no caused_by_type (owner
+        unresolved), the friend function's own recorded origin is the only
+        fallback signal. The friend is most often added/removed *together
+        with* the finding itself, so the symbol legitimately exists in only
+        ONE snapshot's function map. A plain both-sides-must-agree lookup
+        treats the absent side identically to "present but unknown" and
+        never demotes this common case, even though the one side that has
+        the symbol confidently says private-header — the same one-sided
+        relaxation already applied to the owner fallback above must also
+        apply here."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "mylib::operator==",
+                    mangled="_ZN5mylibeqERKNS_5pointES2_",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+            ],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type=None,
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (
+            False,
+            REASON_PRIVATE_HEADER,
+        )
+
+    def test_friend_symbol_removed_together_demotes_from_one_sided_system(self):
+        """Symmetric case: the friend function existed only in the *old*
+        snapshot (removed together with the finding), confidently
+        originating from a system header there."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "mylib::operator==",
+                    mangled="_ZN5mylibeqERKNS_5pointES2_",
+                    origin=ScopeOrigin.SYSTEM_HEADER,
+                ),
+            ],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type=None,
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (False, REASON_SYSTEM_HEADER)
+
+    def test_friend_symbol_added_together_with_unknown_origin_stays_retained(self):
+        """The one-sided relaxation must still be conservative: a friend
+        symbol added together with the finding but recorded with an
+        UNKNOWN origin (not confidently private/system) must not demote."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "mylib::operator==",
+                    mangled="_ZN5mylibeqERKNS_5pointES2_",
+                    origin=ScopeOrigin.UNKNOWN,
+                ),
+            ],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type=None,
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (True, None)
+
+    def test_owner_added_together_with_friend_demotes_from_one_sided_private(self):
+        """Regression (Codex review): a hidden friend is most often added or
+        removed *together with* its owner class, so the owner legitimately
+        exists in only ONE snapshot's ``all_types``. The previous
+        both-sides-must-agree check treated the absent side identically to
+        "present but unknown" and so never demoted this common case, even
+        though the one side that has the owner confidently says
+        private-header."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("point", origin=ScopeOrigin.PRIVATE_HEADER)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (
+            False,
+            REASON_PRIVATE_HEADER,
+        )
+
+    def test_owner_removed_together_with_friend_demotes_from_one_sided_system(self):
+        """Symmetric case: the owner existed only in the *old* snapshot
+        (removed together with the friend), and confidently originated from
+        a system header there."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("point", origin=ScopeOrigin.SYSTEM_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (False, REASON_SYSTEM_HEADER)
+
+    def test_ambiguous_bare_name_resolves_via_qualified_owner(self):
+        """Regression (Codex review): two distinct classes sharing a bare
+        leaf name in different namespaces (``pub::Foo`` public, ``priv::Foo``
+        private) must not be conflated via the bare-name ``origin_by_key``
+        collision (which would merge to PUBLIC_HEADER, the conservative
+        "any side public" winner, and wrongly keep a hidden friend whose
+        *specific* owner is confidently private). An exact qualified-name
+        match resolves the ambiguity."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "Foo", origin=ScopeOrigin.PUBLIC_HEADER, qualified_name="pub::Foo"
+                ),
+                _rec(
+                    "Foo", origin=ScopeOrigin.PRIVATE_HEADER, qualified_name="priv::Foo"
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN4priv3FooeqERKS0_S1_",
+            caused_by_type="priv::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
+
+    def test_ambiguous_bare_name_public_owner_still_retained(self):
+        """Symmetric case: the specific owner is the public one — must stay
+        retained despite the same bare-name collision as the test above."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "Foo", origin=ScopeOrigin.PUBLIC_HEADER, qualified_name="pub::Foo"
+                ),
+                _rec(
+                    "Foo", origin=ScopeOrigin.PRIVATE_HEADER, qualified_name="priv::Foo"
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN3pub3FooeqERKS0_S1_",
+            caused_by_type="pub::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (True, None)
+
+    def test_ambiguous_bare_name_without_qualified_data_falls_through(self):
+        """Regression (Codex review, sixth round): when *neither* colliding
+        type carries a ``qualified_name`` (a producer that never populates
+        it — the realistic "legacy" case, unlike the two tests above which
+        rely on the qualified-key index to disambiguate), the bare-name
+        ``origin_by_key`` collision must not be trusted either.  An
+        unrelated *public* ``Foo`` sharing the bare tail with the
+        confidently-private actual owner must not silently keep this
+        finding via a false PUBLIC_HEADER signal from the merged bare-name
+        origin — it must fall through to the friend function's own
+        recorded origin (private-header) instead."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "priv::operator==",
+                    mangled="_ZN4priv3FooeqERKS0_S1_",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+            ],
+            types=[
+                _rec("Foo", origin=ScopeOrigin.PUBLIC_HEADER),
+                _rec("Foo", origin=ScopeOrigin.PRIVATE_HEADER),
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert "Foo" in s.ambiguous_type_names
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN4priv3FooeqERKS0_S1_",
+            caused_by_type="priv::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
+
+    def test_ambiguous_bare_name_across_record_and_enum_kinds(self):
+        """Regression (Codex review, thirteenth round): ``ambiguous_type_names``
+        was computed separately for records and enums, so a private
+        hidden-friend owner *record* ``Foo`` and an unrelated public *enum*
+        ``Foo`` (neither carrying a ``qualified_name``) each looked unique
+        within their own kind's name map and were never flagged ambiguous
+        — even though both land under the same bare ``origin_by_key["Foo"]``
+        entry, which the public enum then merges to PUBLIC_HEADER
+        (conservative "any side public" winner). That silently confirmed a
+        record owner that is actually private, keeping a hidden friend that
+        should instead fall through to (and be demoted by) the friend
+        function's own private-header origin."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "operator==",
+                    mangled="_ZN3FooeqERKS0_S1_",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+            ],
+            types=[_rec("Foo", origin=ScopeOrigin.PRIVATE_HEADER)],
+            enums=[
+                EnumType(
+                    name="Foo",
+                    members=[EnumMember(name="A", value=0)],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert "Foo" in s.ambiguous_type_names
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN3FooeqERKS0_S1_",
+            caused_by_type="Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
+
+    def test_owner_added_together_with_unknown_origin_stays_retained(self):
+        """The one-sided-presence relaxation must still be conservative: an
+        owner added together with the friend but recorded with an UNKNOWN
+        origin (not confidently private/system) must not demote."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("point", origin=ScopeOrigin.UNKNOWN)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (True, None)
+
+    def test_unresolvable_side_blocks_hidden_friend_demotion(self):
+        """Regression (Codex review): when either side lacks a resolvable
+        surface (e.g. an ELF-only baseline with no header data at all), the
+        classifier cannot confidently place a finding as private on *both*
+        versions — every other kind of finding is protected by the
+        resolvable-guard, and hidden-friend findings must be too. Demoting
+        from the one resolvable side's confidently-private owner while the
+        other side offers nothing to cross-check is exactly the
+        mixed-evidence hazard that guard exists to prevent."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            elf_only_mode=True,
+            functions=[_fn("public_api", vis=Visibility.ELF_ONLY)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("point", origin=ScopeOrigin.PRIVATE_HEADER)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        assert s_old.resolvable is False
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (True, None)
+
+    def test_qualified_demotion_checks_bare_public_fallback_on_missing_side(self):
+        """Regression (Codex review): when one side has an exact qualified
+        entry (private/system) but the *other* side lacks any qualified
+        entry for the same owner (an older snapshot, or a producer that
+        never populated ``qualified_name`` for this record), the other
+        side's bare-name origin can still prove the owner is public. The
+        qualified path must check that bare-name fallback before demoting,
+        not just the two exact lookups."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "Foo",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                    qualified_name="ns::Foo",
+                )
+            ],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("Foo", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN2ns3FooeqERKS0_S1_",
+            caused_by_type="ns::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (True, None)
+
+    def test_qualified_demotion_blocked_by_unknown_bare_origin_on_other_side(self):
+        """Regression (Codex review, second round): when one side has an
+        exact qualified entry (private/system) but the *other* side's
+        bare-name entry for the same owner exists with an ``UNKNOWN``
+        origin (present, just unclassified — e.g. an older/non-qualified
+        producer that never ran with a --public-header set), that side
+        neither confirms nor refutes private/system, and must not be
+        silently ignored the way a genuinely *absent* owner is. The
+        finding must stay retained rather than demote on the strength of
+        only one side."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "Foo",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                    qualified_name="ns::Foo",
+                )
+            ],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("Foo", origin=ScopeOrigin.UNKNOWN)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN2ns3FooeqERKS0_S1_",
+            caused_by_type="ns::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (True, None)
+
+    def test_qualified_demotion_checks_legacy_full_name_owner_match(self):
+        """Regression (Codex review, third round): a producer that stores
+        the hidden-friend owner's ``RecordType.name`` as the full qualified
+        string (``"ns::Foo"``) rather than populating ``qualified_name``
+        separately (legacy/DWARF-style) records its origin under that exact
+        key in ``origin_by_key`` — but ``all_types`` only ever indexes a
+        record's own ``name``, never a bare tail extracted from it, so the
+        bare-tail fallback in ``_hidden_friend_owner_effective_origin``
+        never finds it either. That side was wrongly treated as absent even
+        though it's right there under the full owner string, letting a
+        confidently-public legacy side get silently ignored while the other
+        (qualified-style) side's private/system origin demoted the
+        finding."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("ns::Foo", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "Foo",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                    qualified_name="ns::Foo",
+                )
+            ],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN2ns3FooeqERKS0_S1_",
+            caused_by_type="ns::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (True, None)
+
+    def test_qualified_owner_ambiguous_falls_back_to_friend_symbol_origin(self):
+        """When a qualified owner is present but its origin is inconclusive
+        (``UNKNOWN``), the classifier must still fall back to the friend
+        function's own recorded origin (step 2 of the docstring's
+        preference order) — the same fallback already applied when the
+        owner cannot be resolved at all. Consolidating the qualified- and
+        bare-owner code paths must not skip this step for a qualified
+        owner."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "ns::operator==",
+                    mangled="_ZN2ns3FooeqERKS0_S1_",
+                    origin=ScopeOrigin.SYSTEM_HEADER,
+                ),
+            ],
+            types=[_rec("Foo", origin=ScopeOrigin.UNKNOWN, qualified_name="ns::Foo")],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN2ns3FooeqERKS0_S1_",
+            caused_by_type="ns::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
 
 
 # ── widening overlay (ADR-024 §D6 / Phase 4) ─────────────────────────────────
@@ -1001,7 +1702,9 @@ class TestWideningOverlay:
         from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
 
         ctx = PipelineContext(
-            old=old, new=new, scope_to_public_surface=True,
+            old=old,
+            new=new,
+            scope_to_public_surface=True,
             force_public_symbols=set(force_public),
         )
         kept = FilterNonPublicSurface().run(list(changes), ctx)
@@ -1009,18 +1712,22 @@ class TestWideningOverlay:
 
     def _pair(self):
         old = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("public_api"), _fn("stub_sym", vis=Visibility.ELF_ONLY)],
         )
         new = AbiSnapshot(
-            library="l", version="2",
+            library="l",
+            version="2",
             functions=[_fn("public_api"), _fn("stub_sym", vis=Visibility.ELF_ONLY)],
         )
         return old, new
 
     def test_forced_symbol_kept_in_surface(self):
         old, new = self._pair()
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="stub_sym", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="stub_sym", description=""
+        )
         # Without widening: demoted (not-exported / non-public).
         kept_off, ledger_off = self._run([c], old, new, force_public=set())
         assert kept_off == [] and len(ledger_off) == 1
@@ -1030,13 +1737,17 @@ class TestWideningOverlay:
 
     def test_forced_symbol_matches_qualified_tail(self):
         old, new = self._pair()
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="ns::stub_sym", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="ns::stub_sym", description=""
+        )
         kept, ledger = self._run([c], old, new, force_public={"stub_sym"})
         assert kept == [c] and ledger == []
 
     def test_widening_does_not_affect_unlisted_symbols(self):
         old, new = self._pair()
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="stub_sym", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="stub_sym", description=""
+        )
         kept, ledger = self._run([c], old, new, force_public={"other"})
         assert kept == [] and len(ledger) == 1
 
@@ -1061,12 +1772,14 @@ class TestWideningCLI:
         # its layout change is demoted under scoping. Widening by its name
         # re-promotes it into the reported surface.
         old = AbiSnapshot(
-            library="lib", version="1",
+            library="lib",
+            version="1",
             functions=[_fn("public_api", ret="Result *")],
             types=[_rec("Result", size=64), _rec("InternalCache", size=64)],
         )
         new = AbiSnapshot(
-            library="lib", version="2",
+            library="lib",
+            version="2",
             functions=[_fn("public_api", ret="Result *")],
             types=[_rec("Result", size=64), _rec("InternalCache", size=128)],
         )
@@ -1090,8 +1803,14 @@ class TestWideningCLI:
         # Scoped + widened: the change is back in the report.
         widened = runner.invoke(
             main,
-            ["compare", str(op), str(np_), "--scope-public-headers",
-             "--public-symbol", "InternalCache"],
+            [
+                "compare",
+                str(op),
+                str(np_),
+                "--scope-public-headers",
+                "--public-symbol",
+                "InternalCache",
+            ],
         )
         assert "InternalCache" in widened.stdout
 
@@ -1106,7 +1825,13 @@ class TestWideningCLI:
         runner = CliRunner()
         result = runner.invoke(
             main,
-            ["compare", str(op), str(np_), "--scope-public-headers",
-             "--public-symbols-list", str(syms)],
+            [
+                "compare",
+                str(op),
+                str(np_),
+                "--scope-public-headers",
+                "--public-symbols-list",
+                str(syms),
+            ],
         )
         assert "InternalCache" in result.stdout

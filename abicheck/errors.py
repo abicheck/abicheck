@@ -20,6 +20,7 @@ the built-in Exception class for easy catch-all error handling.
 SuppressionError inherits both AbicheckError and ValueError so that
 existing code catching ValueError continues to work without changes.
 """
+
 from __future__ import annotations
 
 
@@ -54,6 +55,18 @@ class HeaderToolchainError(SnapshotError):
     :func:`abicheck.dumper._castxml_failure_hint` recognised) can do so,
     instead of treating every castxml failure as equally opaque. The
     remediation text is already folded into the exception message.
+    """
+
+
+class UnsupportedCastxmlVersionError(SnapshotError):
+    """Raised when a CastXML build outside the supported version range would
+    be used for an authoritative L2 scan, before any header is parsed.
+
+    A subclass of :class:`SnapshotError` — existing ``except SnapshotError``
+    handling still catches it unchanged. See :mod:`abicheck.castxml_policy`
+    for the version range and the explicit ``allow_unsupported`` override
+    that turns this hard failure into a degraded, clearly-flagged snapshot
+    instead.
     """
 
 
