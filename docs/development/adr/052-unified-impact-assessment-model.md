@@ -440,6 +440,19 @@ markdown/text root-cause mode specifically, to avoid double-listing the
 same findings; `review` format ignores `report_mode` (no root-cause
 rendering exists for it) and always keeps the appendix.
 
+**Follow-up fix (Codex review), later commit:** merging scoped-only/missing
+findings into the same groups (the fix immediately above) exposed a second
+bug in the surrounding empty-state check. `_to_markdown_root_cause` decided
+whether to print `_No ABI changes detected._` by looking only at
+`result.changes`; once a scoped-only change or missing-contract label could
+be the *only* displayed finding (`result.changes` itself empty, e.g. an
+identical old/new snapshot pair scoped only via `--used-by`), the report
+printed a populated `## Root Causes` section immediately followed by the
+contradictory "no changes" note. Fixed by tracking
+`has_root_cause_entries = bool(groups or missing_labels)` and gating the
+empty-state note on `not changes and not has_root_cause_entries` instead of
+`not changes` alone.
+
 ## Slice 5 — `--report-mode root-cause` SARIF properties
 
 Landed in a follow-up commit on the same PR. Unlike JSON/markdown, SARIF's

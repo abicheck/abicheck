@@ -1886,6 +1886,11 @@ class TestUsedByScoping:
         assert "### `ordinal:5` (1 finding)" in result.output
         assert "ordinal 5 retargeted" in result.output
         assert "## Additional scoped-gate findings" not in result.output
+        # Codex review: result.changes itself is empty here (old/new are
+        # identical) -- the only finding is the scoped-only change above, so
+        # the report must not also claim "No ABI changes detected" right
+        # next to a populated "## Root Causes" section.
+        assert "No ABI changes detected" not in result.output
 
     def test_json_uncovered_missing_symbol_not_blocking_under_demoted_severity(
         self, tmp_path, monkeypatch

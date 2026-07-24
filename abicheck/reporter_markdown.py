@@ -881,7 +881,8 @@ def _to_markdown_root_cause(
         show_only,
     )
     groups = _group_changes_by_root_cause(changes + scoped_only)
-    if groups or missing_labels:
+    has_root_cause_entries = bool(groups or missing_labels)
+    if has_root_cause_entries:
         order: list[str] = []
         root_by_key: dict[str, str] = {}
         finding_lines_by_key: dict[str, list[str]] = {}
@@ -924,7 +925,12 @@ def _to_markdown_root_cause(
             lines.extend(finding_lines_by_key[key])
             lines.append("")
 
-    if not changes:
+    # Codex review: a scoped-only change or missing-contract label can be the
+    # *only* displayed finding (result.changes itself empty/filtered out) --
+    # gating this purely on `changes` produced a contradictory report with a
+    # populated "## Root Causes" section immediately followed by "No ABI
+    # changes detected."
+    if not changes and not has_root_cause_entries:
         if show_only and result.changes:
             lines.append("_No changes match the current filter._")
         else:

@@ -32,3 +32,12 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `reporter_markdown.py` so both sides can share it); the scoped-gate
   fold-in skips its own appendix for markdown/text root-cause mode to
   avoid double-listing.
+
+- **Contradictory "No ABI changes detected" next to a populated root-cause
+  section** (ADR-052 follow-up): when a scoped-only change or
+  missing-contract label was the *only* displayed finding (`result.changes`
+  itself empty or fully filtered out), `_to_markdown_root_cause` still
+  appended the empty-state note purely because its check only looked at
+  `changes`, producing a report that listed a real root cause immediately
+  followed by "No ABI changes detected." The empty-state note now also
+  checks whether any root-cause entries were actually rendered.
