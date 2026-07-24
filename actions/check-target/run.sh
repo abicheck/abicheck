@@ -73,12 +73,17 @@ _slug() {
 # artifacts last-writer-wins -- two colliding identities would silently
 # overwrite one another's report before `aggregate` ever reads it (Codex
 # review). Append a short content hash of the *original*, unsanitized
-# identity tuple -- mirroring check-project.yml's own injective
-# artifact-name sanitizer -- so slugs that collapse under `tr` still produce
-# distinct filenames.
+# identity tuple -- mirroring check-project.yml's own artifact-name
+# sanitizer -- so slugs that collapse under `tr` are overwhelmingly likely
+# to still produce distinct filenames. A 12-hex-char (48-bit) truncated
+# SHA-256 prefix is collision-resistant, not mathematically guaranteed
+# collision-free -- fine here given the tiny, single-CI-run identifier
+# space this disambiguates (dozens of checks, not millions), the same
+# tradeoff git's own short-hash prefixes and Docker's short image IDs make
+# (CodeRabbit review).
 _IDENTITY_DIGEST="$(
   printf '%s\x1f%s\x1f%s\x1f%s' "$NAME" "$PROFILE" "$BASELINE_CHANNEL" "$REQUESTED_DEPTH" \
-    | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:12])'
+    | python3 -c 'import hashlib, sys; sys.stdout.write(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:12])'
 )"
 REPORT_OUT="check-target-report-$(_slug "$NAME")-$(_slug "$PROFILE")-$(_slug "$BASELINE_CHANNEL")-$(_slug "$REQUESTED_DEPTH")-${_IDENTITY_DIGEST}.json"
 

@@ -496,12 +496,26 @@ jobs:
               staging = 'bundle-staging'
               os.makedirs(staging, exist_ok=True)
               missing = []
+              # Two distinct members can resolve to files that share a
+              # basename (e.g. build/linux/libfoo.so vs. build/plugins/
+              # libfoo.so) -- copy2 into one shared flat staging directory
+              # would then silently overwrite the first with the second,
+              # dropping a member from the bundle comparison without any
+              # signal (Codex review). Track which member claimed each
+              # destination basename and fail loud on a second claim,
+              # instead of guessing.
+              staged_by_basename = {}
               for member, pattern in cell.get('member_binary_patterns', {}).items():
                   match = resolve(pattern, label=f'bundle {cell[\"name\"]!r} member {member!r}')
                   if match is None:
                       missing.append(member)
                       continue
-                  shutil.copy2(match, os.path.join(staging, os.path.basename(match)))
+                  basename = os.path.basename(match)
+                  if basename in staged_by_basename:
+                      print(f'::error::bundle {cell[\"name\"]!r}: members {staged_by_basename[basename]!r} and {member!r} both resolve to a candidate named {basename!r} -- staging would silently drop one', file=sys.stderr)
+                      sys.exit(1)
+                  staged_by_basename[basename] = member
+                  shutil.copy2(match, os.path.join(staging, basename))
               if missing:
                   print(f'::error::bundle {cell[\"name\"]!r}: no candidate binary matched for member(s) {missing}', file=sys.stderr)
                   sys.exit(1)
