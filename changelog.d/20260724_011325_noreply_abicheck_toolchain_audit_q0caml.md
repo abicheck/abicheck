@@ -62,11 +62,14 @@ it should read in CHANGELOG.md. Delete the other sections.
   `--policy-file`.
 
 -->
-<!--
 ### Documentation
 
-- **Short bold summary** — the rest of the sentence: what changed, for
-  whom, and why it matters. Backtick identifiers like `ChangeKind` or
-  `--policy-file`.
+- **`docs/reference/snapshot-format.md`'s hand-copied `schema_version`
+  mentions are now sync-checked against `abicheck.serialization.SCHEMA_VERSION`.**
+  The page hand-copied the current value in three places (the headline
+  sentence, the JSON example, and the field table) with no automated
+  check catching drift on the next schema bump — `scripts/check_ai_readiness.py`'s
+  `doc-count-sync` check (already used for `ChangeKind` counts and the
+  example catalog size) now covers all three.
 
 -->

@@ -603,10 +603,13 @@ def check_changekind_docs(f: Findings) -> None:
 def check_doc_count_sync(f: Findings) -> None:
     """Keep hand-written headline counts in sync with their source of truth.
 
-    Two numbers historically drifted across the docs: the number of `ChangeKind`
-    values ("N change types") and the size of the example catalog
-    (`examples/ground_truth.json`). Each anchor below pins a specific sentence to
-    a computed value:
+    Three numbers historically drifted across the docs: the number of `ChangeKind`
+    values ("N change types"), the size of the example catalog
+    (`examples/ground_truth.json`), and the snapshot `schema_version` (Codex
+    review — a doc page hand-copying a version number that already has a fact
+    owner, per AGENTS.md's "don't hand-copy a count/version that has a fact
+    owner elsewhere" rule, with nothing catching the next bump forgetting it).
+    Each anchor below pins a specific sentence to a computed value:
 
     - ERROR if the anchor sentence is present but the number is wrong (the real
       drift bug — forces docs to be updated when a ChangeKind or case is added).
@@ -615,6 +618,7 @@ def check_doc_count_sync(f: Findings) -> None:
     """
     try:
         from abicheck.checker_policy import ChangeKind
+        from abicheck.serialization import SCHEMA_VERSION
     except Exception:
         # Package not importable (e.g. pre-install lane) — skip silently, like
         # the other ChangeKind checks.
@@ -690,6 +694,24 @@ def check_doc_count_sync(f: Findings) -> None:
             "ChangeKind count (abi_list_changes JSON sample)",
             n_kinds,
             r"\"count\": (\d+)",
+        ),
+        (
+            DOCS / "reference/snapshot-format.md",
+            "snapshot schema_version (headline sentence)",
+            SCHEMA_VERSION,
+            r"The current value is \*\*`(\d+)`\*\*",
+        ),
+        (
+            DOCS / "reference/snapshot-format.md",
+            "snapshot schema_version (JSON example)",
+            SCHEMA_VERSION,
+            r'"schema_version":\s*(\d+),',
+        ),
+        (
+            DOCS / "reference/snapshot-format.md",
+            "snapshot schema_version (field table)",
+            SCHEMA_VERSION,
+            r"Snapshot format version \(currently `(\d+)`\)",
         ),
     ]
 
