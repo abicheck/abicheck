@@ -408,8 +408,18 @@ jobs:
       # the two downloads above: the "Resolve candidate binary/binaries"
       # step below checks the file actually landed before referencing it,
       # the same way it already resolves new-library from candidate/.
+      #
+      # Gated on baseline_channel alone would wrongly skip this download for
+      # a channel: none audit-only cell whose evidence-producer is wrapper/
+      # clang-plugin: `evidence-pack-path` (docs/reference/check-target.md)
+      # "must match an earlier collect-facts phase: prepare step's own
+      # output path", which can legitimately live inside this same
+      # build-output artifact ("whatever it references", per this
+      # workflow's own artifact-staging contract above) -- independent of
+      # whether the cell has a baseline to compare against at all (Codex
+      # review). Download whenever either consumer might need it.
       - name: Download build-output artifact
-        if: matrix.baseline_channel != 'none'
+        if: matrix.baseline_channel != 'none' || inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin'
         uses: actions/download-artifact@v8
         with:
           name: '${{ inputs.build-output-artifact-prefix }}${{ matrix.profile_id }}'
