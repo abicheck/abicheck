@@ -13,10 +13,12 @@ up front, before any of that, and produces no report or outputs at all.
 > **Status.** This page documents the `actions/check-target` composite
 > Action shipped in G30 P1.3. The reusable workflows that generate a
 > `run-plan.json` and fan this Action out over a matrix
-> (`check-single.yml`/`check-project.yml`) are G30 P1.4, not built yet — see
-> the [G30 plan](../development/plans/g30-github-actions-integration-model.md).
-> Until then, `check-target` can be called directly as a step (ADR-047's S4
-> shortcut) or from a hand-written per-target workflow (S1/S2/S5/S6/S15/S21).
+> (`check-single.yml`/`check-project.yml`, G30 P1.4) are documented
+> separately — see the
+> [run-plan schema](run-plan-schema.md) and the
+> [reusable workflows reference](reusable-workflows.md). `check-target` can
+> also still be called directly as a step (ADR-047's S4 shortcut) or from a
+> hand-written per-target workflow (S1/S2/S5/S6/S15/S21) without either.
 
 ## What it does
 

@@ -1292,6 +1292,182 @@ a dependency while P1.5's own entry said it "should land before P1.4" —
 inconsistent instructions that would leave an implementer with no real
 config schema to generate the matrix from. P1.5 must land first.
 
+**Status:** implemented. **First required sub-task (run-plan.json →
+aggregate-manifest projection) — implemented as the CLI-helper option, not
+inline `jq`/shell.** New `abicheck/buildsource/run_plan.py` is the pure
+generator: `generate_run_plan(config, build_outputs)` derives the ordered
+`RunPlanCheck` cell list per target/bundle `checks[]` entry, resolving
+`(target, profile)` pairs exactly per the "never a blind cross-product"
+design `project_targets.py` deferred here — an explicit `checks[].profiles:`
+selector must resolve against that profile's `build-output.json` or it's a
+hard error, while the implicit "every `contract: true` profile" sweep
+silently skips a profile that doesn't build the target. Neither
+`app-consumer` nor `plugin-contract` targets ever get their own
+`build-output.json` entry (they're checks, not build products); their
+cell's existence and `binary_pattern` instead redirect through their own
+`library` field, matching ADR-047 §3. `build-output.json` is used purely as
+an existence oracle — no binary *path* is ever carried through `run-plan.json`
+(the candidate a real check compares is whatever the *current* run's build
+produced, addressed by `binary_pattern`/`consumer_binary_pattern`/
+`member_binary_patterns` glob patterns the calling workflow resolves against
+a live filesystem at matrix-cell time, not a historical build-output.json
+path). `to_aggregate_manifest(plan)` implements the required projection
+exactly as specified — `targets[].id` is each check's own `check_id`, never
+the bare name — verified not just structurally but by feeding a generated
+manifest straight into `abicheck.aggregate.ExpectedTargets.from_manifest_data`,
+the real reader (`tests/test_run_plan.py::TestToAggregateManifest::
+test_produces_a_manifest_aggregate_itself_accepts`). Both are exposed via a
+new `abicheck run-plan` CLI group (`generate`, `to-aggregate-manifest`;
+`abicheck/cli_run_plan.py`), registered as a new top-level command exactly
+like P1.1/P1.5's `build-output`/`project-targets` groups (same
+`cli_options.output_options`-reuse justification for joining the existing
+by-design CLI-registration SCC in `scripts/check_ai_readiness.py`'s
+`IMPORT_CYCLE_ALLOWLIST`). `docs/reference/run-plan-schema.md` (new, linked
+from mkdocs nav) documents the schema and CLI; `tests/test_run_plan.py` (29
+cases) covers the implicit-sweep/explicit-selector matrix, the library
+redirect, bundle member resolution (including the "silently skipped" vs.
+"hard error" distinction for a missing member under each sweep mode), the
+round-trip, the manifest projection, and the CLI's exit codes (`0`/`1`/`64`).
+
+**Second/third required sub-tasks (the two `if: always()` placements) —
+implemented exactly as specified, plus one more not anticipated by this
+plan.** `check-project.yml`'s trailing `aggregate` job carries
+`if: always() && needs.plan.outputs.has-checks == 'true'` (never a bare
+`needs:`), and each matrix cell's `Upload report` step carries
+`if: always() && steps.run.outputs.report-path != ''`. A third place this
+plan didn't call out but the same failure mode applies to: the `Run
+check-target` step deliberately carries **no** `continue-on-error` — letting
+a real `gate-mode: local` break or an operational error fail that step (and
+therefore the matrix job's own conclusion, which branch-protection reads)
+propagate naturally, since `steps.run.outputs.*` stay populated even for a
+failed step (`check-target`'s internal finalize step writes them before its
+own exit code is returned) — the always()-conditioned `Upload report` step
+still sees them regardless. An initial draft added `continue-on-error: true`
+to "Run check-target" plus a separate "fail this job" step to compensate;
+removed once `always()`'s actual semantics (later steps still run despite an
+earlier failure, without needing `continue-on-error` on that earlier step)
+were re-derived from GitHub's documented behavior — the extra step was
+dead weight, not a bug, but simplifying it removes one more place a future
+edit could get the failure-propagation logic wrong.
+
+**Files delivered:** `abicheck/buildsource/run_plan.py`,
+`abicheck/cli_run_plan.py`, `.github/workflows/check-single.yml` (a thin
+1:1 wrapper around one `check-target` invocation, for a caller that wants
+exactly one check without a run-plan), `.github/workflows/check-project.yml`
+(the three-job `plan` → `check` (matrix) → `aggregate` flow).
+
+**A real, confirmed architectural gap found during implementation, not
+anticipated by ADR-047 or this plan's own text — the same class of bug
+`check-target`'s own nested `uses: ./x` fix (G30 P1.3) already closed one
+level down, but one level up.** A relative `uses: ./x` step inside a
+*reusable workflow's own steps* resolves against the **caller's** checkout,
+never against the repository that defines the reusable workflow — confirmed
+for reusable workflows specifically (not just composite Actions) via GitHub
+Community Discussion #107558, "How can callable workflows in a dedicated
+repo use its local actions with relative paths?". Both `check-single.yml`
+and `check-project.yml`'s `check` job reference `actions/check-target` via
+`uses: ./x`, so an external consumer (`uses: abicheck/abicheck/.github/
+workflows/check-project.yml@v1` from their own repository) would hit the
+identical failure `check-target` itself was fixed for in P1.3 — before this
+fix, only a same-repository caller (this repo's own `test-action.yml`) would
+have worked, exactly the blind spot that let the original `check-target` bug
+ship unnoticed. **Fixed the same way**, adapted to the reusable-workflow
+context: `check-target`'s fix reads `github.action_repository`/
+`github.action_ref` (which describe the composite *Action* about to run);
+the reusable-workflow equivalent is `job.workflow_ref`/`job.workflow_sha`
+(part of the `job` context, populated specifically so a reusable workflow
+can identify itself independent of the calling workflow's own `github.*`
+context — always the fully-qualified `owner/repo/.github/workflows/
+name.yml@ref` form). Both workflows capture this identity in a first
+`run:` step (mirroring `check-target`'s own "capture before any nested
+`uses:` step overwrites it" ordering, though `job.workflow_ref`/
+`workflow_sha` describe the whole job rather than "whichever action is
+about to run," so they are not actually subject to check-target's specific
+third-bug per-step-flip issue — captured early anyway for defense in depth
+and pattern consistency), then checks out that repository/ref into a side
+directory before any nested `uses:` step, falling back to
+`github.repository`/`github.sha` if `workflow_ref` is ever empty (matching
+`check-target`'s own defense-in-depth pattern for the local-same-repository
+case). **Honesty note, since this is exactly the kind of design decision
+this plan's own history shows is easy to get subtly wrong: this specific
+mechanism could not be verified against a real external-consumer run in
+this session** — no second repository was available to test cross-repo
+reusable-workflow consumption end to end, only same-repository invocation
+(`test-action.yml`'s own `uses: ./.github/workflows/check-project.yml`,
+where `job.workflow_ref`/`job.workflow_sha` resolve to this same repository
+regardless of whether the fallback branch is ever exercised — so this run
+cannot distinguish "the primary branch worked" from "the fallback saved it"
+the way check-target's own three-round bug history needed a real cross-repo
+run to surface). Treat this as reviewed-but-unverified until a real
+external-consumer run confirms it, the same caveat this plan already gives
+S14 bundle-scoped resolution and other "defines the contract, no producer
+yet" gaps.
+
+**Required fixture-workflow test — implemented as specified, not skipped.**
+This plan's own text requires a fixture "that deliberately fails one matrix
+cell and asserts the aggregate job still runs and reports the failure." New
+`test-check-project-stage` → `test-check-project` (the real `uses: ./.github/
+workflows/check-project.yml` call) → `test-check-project-verify` job group
+in `.github/workflows/test-action.yml`, driven by a new
+`tests/fixtures/action/check_project.abicheck.yml`: one target, `gate_mode:
+deferred`, `required: true` (default), and **no** `abicheck-baseline-
+accepted-main` artifact staged — resolve-baseline's `not_found` outcome is
+an operational error regardless of `gate-mode` (`deferred` only defers a
+*compatibility* finding, never an operational one), so the matrix `check`
+job is expected to fail. `test-check-project-verify` downloads the
+`abicheck-aggregate-result` artifact and asserts `status: "fail"` and a
+nonzero `gate.exit_code` — proving the `aggregate` job actually ran (its own
+`if: always()`) and actually saw the failing report (the matrix job's
+`Upload report` step's own `if: always()`), not that the whole pipeline
+just silently stopped. Also proves `abicheck/aggregate.py`'s existing
+`verdict: "ERROR"` special case (`_load_report_file`, matched by
+`check-target`'s own `build_operational_error_report`) correctly floors the
+gate to `exit_code: 4` for an operational failure, not a silent coverage gap.
+Like the self-checkout mechanism above, this fixture is reviewed and passes
+local structural validation (`abicheck project-targets validate` +
+`abicheck run-plan generate` against the fixture config, by hand) but its
+real GitHub Actions execution will only be confirmed once this branch's own
+PR CI runs `test-action.yml` for real — the session that authored it had no
+way to execute a live GitHub Actions workflow to confirm end to end.
+
+**A real bug found and fixed during implementation via self-review (no
+external review round available in this session, unlike this plan's other
+entries), not anticipated by ADR-047 or this plan's own text.** The initial
+`check-project.yml` used each check's own `check_id`
+(`target@profile#baseline_channel@depth`) directly as an
+`actions/upload-artifact`/`download-artifact` artifact *name* component.
+`#` in an artifact name is a **documented, reproducible bug**
+(`actions/upload-artifact#473`: a `#` triggers an Authorization error
+against the underlying Actions API), not merely a style concern — it is not
+even in the officially-documented disallowed-character list
+(`"`/`:`/`<`/`>`/`|`/`*`/`?`/`\r`/`\n`/`\`/`/`), so nothing about reading
+that list alone would have caught it. Fixed by adding a "Sanitize check-id
+for artifact name" step (`tr -c 'A-Za-z0-9._-' '_'`) immediately before the
+report-upload step, sharing its exact `if:` condition — the identical
+sanitization approach `actions/check-target/run.sh` already uses for its own
+per-check report *filename* (P1.3's cross-invocation-collision fix), applied
+here for the analogous artifact-*name* case. `profile_id`/`baseline_channel`
+individually (used directly in the candidate/baseline-set *download*
+artifact names) needed no equivalent fix — both are already constrained to
+`project_targets.py`'s `^[A-Za-z0-9][A-Za-z0-9._-]*$` identifier charset,
+which excludes `#`; only the *combined* `check_id` string introduces the
+`#`/`@` delimiters that make sanitization necessary.
+
+**Deliberately out of scope for this pass, documented rather than
+silently absent:** a per-cell override of `check-project.yml`'s shared
+analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —
+every matrix cell in one `check-project.yml` call currently shares one
+project-wide value for each; a project needing different policy/suppression
+per target must currently split across multiple `check-project.yml` calls.
+`run-plan.json`'s schema would need to grow per-cell override fields to lift
+this, deferred to a later iteration rather than expanding this item's scope
+further. `tests/test_reusable_workflows.py` (25 cases) covers the structural
+assertions both workflows' own step orchestration needs (the always()
+placements, step ordering, matrix wiring, artifact-naming/sanitization
+conventions, self-checkout pattern) — the same "needs a real runner to exercise
+end-to-end" scoping `tests/test_action_check_target.py` already established
+for `check-target`'s own `action.yml`.
+
 ### P1.5 — `.abicheck.yml` `targets:`/`profiles:`/`baseline:` block — **done**
 
 Implements ADR-047 §3. Config schema extension + `abicheck/policy_file.py`
