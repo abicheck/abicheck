@@ -413,6 +413,128 @@ def test_check_channel_none_sentinel_skips_baseline_lookup() -> None:
     assert report.ok, report.errors
 
 
+def test_app_consumer_check_with_channel_none_is_rejected() -> None:
+    """actions/check-target/validate-inputs.sh rejects baseline-channel:
+    none for target-kind: app-consumer -- a no-baseline audit routes to
+    `scan`, which has no --used-by equivalent to scope the check against.
+    A validated config must not produce an unrunnable run-plan cell."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {"kind": "library", "binary_pattern": "lib/libfoo.so"},
+                "myapp": {
+                    "kind": "app-consumer",
+                    "consumer_binary_pattern": "bin/myapp",
+                    "library": "libfoo",
+                    "checks": [{"channel": "none", "depth": "headers"}],
+                },
+            }
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any(
+        "channel: 'none' is not supported for kind: 'app-consumer'" in e
+        for e in report.errors
+    )
+
+
+def test_plugin_contract_check_with_channel_none_is_rejected() -> None:
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {"kind": "library", "binary_pattern": "lib/libfoo.so"},
+                "plugin": {
+                    "kind": "plugin-contract",
+                    "contract_file": "contracts/plugin.syms",
+                    "library": "libfoo",
+                    "checks": [{"channel": "none", "depth": "headers"}],
+                },
+            }
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any(
+        "channel: 'none' is not supported for kind: 'plugin-contract'" in e
+        for e in report.errors
+    )
+
+
+def test_library_check_with_channel_none_is_still_accepted() -> None:
+    """The restriction is kind-scoped -- a plain library target's own
+    channel: none audit check (ADR-047 §6 S5) is unaffected."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.so",
+                    "checks": [{"channel": "none", "depth": "headers"}],
+                }
+            }
+        }
+    )
+    report = validate_project_targets(config)
+    assert report.ok, report.errors
+
+
+def test_bundle_check_depth_build_is_rejected() -> None:
+    """actions/check-target/validate-inputs.sh rejects requested-depth:
+    build/source for kind: bundle -- a bundle check always compares
+    directories, which never collects inline build/source evidence."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.so",
+                    "bundle": "release",
+                },
+            },
+            "bundles": {
+                "release": {
+                    "targets": ["libfoo"],
+                    "checks": [{"channel": "none", "depth": "build"}],
+                }
+            },
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any(
+        "depth 'build' is not supported for a bundle check" in e for e in report.errors
+    )
+
+
+def test_bundle_check_depth_binary_and_headers_are_accepted() -> None:
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.so",
+                    "bundle": "release",
+                },
+            },
+            "bundles": {
+                "release": {
+                    "targets": ["libfoo"],
+                    "checks": [
+                        {"channel": "accepted", "depth": "binary"},
+                        {"channel": "accepted", "depth": "headers"},
+                    ],
+                }
+            },
+            "baseline": {
+                "channels": {"accepted": {"source": "git"}},
+            },
+        }
+    )
+    report = validate_project_targets(config)
+    assert report.ok, report.errors
+
+
 def test_check_depth_must_be_a_valid_rung() -> None:
     config = ProjectTargetsConfig.from_dict(
         {
@@ -800,6 +922,25 @@ def test_check_spec_explicit_gate_mode_overrides_none_channel_default() -> None:
     assert check.gate_mode == "local"
 
 
+def test_check_spec_explicit_empty_profiles_list_raises() -> None:
+    """`profiles: []` is rejected outright rather than silently treated the
+    same as an omitted key -- both parse to `[]` via `_require_str_list`,
+    but an omitted key means "every contract profile" while a config author
+    writing `profiles: []` almost certainly meant "select nothing" (Codex
+    review)."""
+    with pytest.raises(ValueError, match="must not be an explicit empty list"):
+        CheckSpec.from_dict(
+            {"channel": "none", "depth": "headers", "profiles": []}, where="x"
+        )
+
+
+def test_check_spec_omitted_profiles_still_defaults_to_empty_list() -> None:
+    """Control case: omitting the key entirely is still valid and means
+    "every contract profile" (the sweep, resolved downstream in run_plan.py)."""
+    check = CheckSpec.from_dict({"channel": "none", "depth": "headers"}, where="x")
+    assert check.profiles == []
+
+
 def test_check_spec_to_dict_includes_profiles_when_set() -> None:
     check = CheckSpec(
         channel="accepted-main", depth="headers", profiles=["linux-x86_64"]
@@ -930,17 +1071,26 @@ def test_bundle_checks_round_trip_and_validate() -> None:
             "bundles": {
                 "rel": {
                     "targets": ["a", "b"],
-                    "checks": [{"channel": "none", "depth": "headers"}],
+                    "checks": [
+                        {
+                            "channel": "release",
+                            "depth": "headers",
+                            "gate_mode": "advisory",
+                        }
+                    ],
                 }
+            },
+            "baseline": {
+                "channels": {"release": {"source": "git"}},
             },
         }
     )
     assert config.bundles["rel"].checks == [
-        CheckSpec(channel="none", depth="headers", gate_mode="advisory")
+        CheckSpec(channel="release", depth="headers", gate_mode="advisory")
     ]
     assert config.bundles["rel"].to_dict()["checks"] == [
         {
-            "channel": "none",
+            "channel": "release",
             "depth": "headers",
             "required": True,
             "gate_mode": "advisory",
@@ -950,6 +1100,32 @@ def test_bundle_checks_round_trip_and_validate() -> None:
     assert round_tripped == config
     report = validate_project_targets(config)
     assert report.ok, report.errors
+
+
+def test_bundle_check_with_channel_none_is_rejected() -> None:
+    """A bundle's candidate is always a staged directory of member
+    binaries -- channel: none routes check-target to scan mode, which
+    rejects a directory/package new-library outright (Codex review)."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "a": {"kind": "library", "binary_pattern": "a.so", "bundle": "rel"},
+                "b": {"kind": "library", "binary_pattern": "b.so", "bundle": "rel"},
+            },
+            "bundles": {
+                "rel": {
+                    "targets": ["a", "b"],
+                    "checks": [{"channel": "none", "depth": "headers"}],
+                }
+            },
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any(
+        "channel: 'none' is not supported for a bundle check" in e
+        for e in report.errors
+    )
 
 
 def test_bundle_checks_not_a_list_raises() -> None:

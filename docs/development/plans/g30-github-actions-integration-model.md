@@ -1292,6 +1292,594 @@ a dependency while P1.5's own entry said it "should land before P1.4" —
 inconsistent instructions that would leave an implementer with no real
 config schema to generate the matrix from. P1.5 must land first.
 
+**Status:** implemented. **First required sub-task (run-plan.json →
+aggregate-manifest projection) — implemented as the CLI-helper option, not
+inline `jq`/shell.** New `abicheck/buildsource/run_plan.py` is the pure
+generator: `generate_run_plan(config, build_outputs)` derives the ordered
+`RunPlanCheck` cell list per target/bundle `checks[]` entry, resolving
+`(target, profile)` pairs exactly per the "never a blind cross-product"
+design `project_targets.py` deferred here — an explicit `checks[].profiles:`
+selector must resolve against that profile's `build-output.json` or it's a
+hard error, while the implicit "every `contract: true` profile" sweep
+silently skips a profile that doesn't build the target. Neither
+`app-consumer` nor `plugin-contract` targets ever get their own
+`build-output.json` entry (they're checks, not build products); their
+cell's existence and `binary_pattern` instead redirect through their own
+`library` field, matching ADR-047 §3. `build-output.json` is used purely as
+an existence oracle — no binary *path* is ever carried through `run-plan.json`
+(the candidate a real check compares is whatever the *current* run's build
+produced, addressed by `binary_pattern`/`consumer_binary_pattern`/
+`member_binary_patterns` glob patterns the calling workflow resolves against
+a live filesystem at matrix-cell time, not a historical build-output.json
+path). `to_aggregate_manifest(plan)` implements the required projection
+exactly as specified — `targets[].id` is each check's own `check_id`, never
+the bare name — verified not just structurally but by feeding a generated
+manifest straight into `abicheck.aggregate.ExpectedTargets.from_manifest_data`,
+the real reader (`tests/test_run_plan.py::TestToAggregateManifest::
+test_produces_a_manifest_aggregate_itself_accepts`). Both are exposed via a
+new `abicheck run-plan` CLI group (`generate`, `to-aggregate-manifest`;
+`abicheck/cli_run_plan.py`), registered as a new top-level command exactly
+like P1.1/P1.5's `build-output`/`project-targets` groups (same
+`cli_options.output_options`-reuse justification for joining the existing
+by-design CLI-registration SCC in `scripts/check_ai_readiness.py`'s
+`IMPORT_CYCLE_ALLOWLIST`). `docs/reference/run-plan-schema.md` (new, linked
+from mkdocs nav) documents the schema and CLI; `tests/test_run_plan.py` (29
+cases) covers the implicit-sweep/explicit-selector matrix, the library
+redirect, bundle member resolution (including the "silently skipped" vs.
+"hard error" distinction for a missing member under each sweep mode), the
+round-trip, the manifest projection, and the CLI's exit codes (`0`/`1`/`64`).
+
+**Second/third required sub-tasks (the two `if: always()` placements) —
+implemented exactly as specified, plus one more not anticipated by this
+plan.** `check-project.yml`'s trailing `aggregate` job carries
+`if: always() && needs.plan.outputs.has-checks == 'true'` (never a bare
+`needs:`), and each matrix cell's `Upload report` step carries
+`if: always() && steps.run.outputs.report-path != ''`. A third place this
+plan didn't call out but the same failure mode applies to: the `Run
+check-target` step deliberately carries **no** `continue-on-error` — letting
+a real `gate-mode: local` break or an operational error fail that step (and
+therefore the matrix job's own conclusion, which branch-protection reads)
+propagate naturally, since `steps.run.outputs.*` stay populated even for a
+failed step (`check-target`'s internal finalize step writes them before its
+own exit code is returned) — the always()-conditioned `Upload report` step
+still sees them regardless. An initial draft added `continue-on-error: true`
+to "Run check-target" plus a separate "fail this job" step to compensate;
+removed once `always()`'s actual semantics (later steps still run despite an
+earlier failure, without needing `continue-on-error` on that earlier step)
+were re-derived from GitHub's documented behavior — the extra step was
+dead weight, not a bug, but simplifying it removes one more place a future
+edit could get the failure-propagation logic wrong.
+
+**Files delivered:** `abicheck/buildsource/run_plan.py`,
+`abicheck/cli_run_plan.py`, `.github/workflows/check-single.yml` (a thin
+1:1 wrapper around one `check-target` invocation, for a caller that wants
+exactly one check without a run-plan), `.github/workflows/check-project.yml`
+(the three-job `plan` → `check` (matrix) → `aggregate` flow).
+
+**A real, confirmed architectural gap found during implementation, not
+anticipated by ADR-047 or this plan's own text — the same class of bug
+`check-target`'s own nested `uses: ./x` fix (G30 P1.3) already closed one
+level down, but one level up.** A relative `uses: ./x` step inside a
+*reusable workflow's own steps* resolves against the **caller's** checkout,
+never against the repository that defines the reusable workflow — confirmed
+for reusable workflows specifically (not just composite Actions) via GitHub
+Community Discussion #107558, "How can callable workflows in a dedicated
+repo use its local actions with relative paths?". Both `check-single.yml`
+and `check-project.yml`'s `check` job reference `actions/check-target` via
+`uses: ./x`, so an external consumer (`uses: abicheck/abicheck/.github/
+workflows/check-project.yml@v1` from their own repository) would hit the
+identical failure `check-target` itself was fixed for in P1.3 — before this
+fix, only a same-repository caller (this repo's own `test-action.yml`) would
+have worked, exactly the blind spot that let the original `check-target` bug
+ship unnoticed. **Fixed the same way**, adapted to the reusable-workflow
+context: `check-target`'s fix reads `github.action_repository`/
+`github.action_ref` (which describe the composite *Action* about to run);
+the reusable-workflow equivalent is `job.workflow_ref`/`job.workflow_sha`
+(part of the `job` context, populated specifically so a reusable workflow
+can identify itself independent of the calling workflow's own `github.*`
+context — always the fully-qualified `owner/repo/.github/workflows/
+name.yml@ref` form). **This is the final, verified conclusion after two
+self-inflicted reversals documented in the round-3 and round-4 addenda
+below — read those for the full story of how this got flipped twice.**
+Both workflows capture this identity in a first `run:` step (mirroring
+`check-target`'s own "capture before any nested `uses:` step overwrites
+it" ordering, though `workflow_ref`/`workflow_sha` describe the whole job
+rather than "whichever action is about to run," so they are not actually
+subject to check-target's specific third-bug per-step-flip issue —
+captured early anyway for defense in depth and pattern consistency), then
+checks out that repository/ref into a side directory before any nested
+`uses:` step, falling back to `github.repository`/`github.sha` if
+`workflow_ref` is ever empty (matching `check-target`'s own
+defense-in-depth pattern for the local-same-repository case). **Honesty
+note, since this is exactly the kind of design decision this plan's own
+history shows is easy to get subtly wrong: this specific mechanism could
+not be verified against a real external-consumer run in this session** —
+no second repository was available to test cross-repo reusable-workflow
+consumption end to end, only same-repository invocation (`test-action.yml`'s
+own `uses: ./.github/workflows/check-project.yml`, where `job.workflow_ref`/
+`job.workflow_sha` resolve to this same repository regardless of whether
+the fallback branch is ever exercised — so this run cannot distinguish "the
+primary branch worked" from "the fallback saved it" the way check-target's
+own three-round bug history needed a real cross-repo run to surface). Treat
+this as reviewed-but-unverified until a real external-consumer run confirms
+it, the same caveat this plan already gives S14 bundle-scoped resolution
+and other "defines the contract, no producer yet" gaps.
+
+**Required fixture-workflow test — implemented as specified, not skipped.**
+This plan's own text requires a fixture "that deliberately fails one matrix
+cell and asserts the aggregate job still runs and reports the failure." New
+`test-check-project-stage` → `test-check-project` (the real `uses: ./.github/
+workflows/check-project.yml` call) → `test-check-project-verify` job group
+in `.github/workflows/test-action.yml`, driven by a new
+`tests/fixtures/action/check_project.abicheck.yml`: one target, `gate_mode:
+deferred`, `required: true` (default), and **no** `abicheck-baseline-
+accepted-main` artifact staged — resolve-baseline's `not_found` outcome is
+an operational error regardless of `gate-mode` (`deferred` only defers a
+*compatibility* finding, never an operational one), so the matrix `check`
+job is expected to fail. `test-check-project-verify` downloads the
+`abicheck-aggregate-result` artifact and asserts `status: "fail"` and a
+nonzero `gate.exit_code` — proving the `aggregate` job actually ran (its own
+`if: always()`) and actually saw the failing report (the matrix job's
+`Upload report` step's own `if: always()`), not that the whole pipeline
+just silently stopped. Also proves `abicheck/aggregate.py`'s existing
+`verdict: "ERROR"` special case (`_load_report_file`, matched by
+`check-target`'s own `build_operational_error_report`) correctly floors the
+gate to `exit_code: 4` for an operational failure, not a silent coverage gap.
+Like the self-checkout mechanism above, this fixture is reviewed and passes
+local structural validation (`abicheck project-targets validate` +
+`abicheck run-plan generate` against the fixture config, by hand) but its
+real GitHub Actions execution will only be confirmed once this branch's own
+PR CI runs `test-action.yml` for real — the session that authored it had no
+way to execute a live GitHub Actions workflow to confirm end to end.
+
+**A real bug found and fixed during implementation via self-review (no
+external review round available in this session, unlike this plan's other
+entries), not anticipated by ADR-047 or this plan's own text.** The initial
+`check-project.yml` used each check's own `check_id`
+(`target@profile#baseline_channel@depth`) directly as an
+`actions/upload-artifact`/`download-artifact` artifact *name* component.
+`#` in an artifact name is a **documented, reproducible bug**
+(`actions/upload-artifact#473`: a `#` triggers an Authorization error
+against the underlying Actions API), not merely a style concern — it is not
+even in the officially-documented disallowed-character list
+(`"`/`:`/`<`/`>`/`|`/`*`/`?`/`\r`/`\n`/`\`/`/`), so nothing about reading
+that list alone would have caught it. Fixed by adding a "Sanitize check-id
+for artifact name" step (`tr -c 'A-Za-z0-9._-' '_'`) immediately before the
+report-upload step, sharing its exact `if:` condition — the identical
+sanitization approach `actions/check-target/run.sh` already uses for its own
+per-check report *filename* (P1.3's cross-invocation-collision fix), applied
+here for the analogous artifact-*name* case. `profile_id`/`baseline_channel`
+individually (used directly in the candidate/baseline-set *download*
+artifact names) needed no equivalent fix — both are already constrained to
+`project_targets.py`'s `^[A-Za-z0-9][A-Za-z0-9._-]*$` identifier charset,
+which excludes `#`; only the *combined* `check_id` string introduces the
+`#`/`@` delimiters that make sanitization necessary.
+
+**A round of Codex review on the PR (#627) then caught three more real
+issues, all fixed in one follow-up commit:**
+
+- **`bundle-members: ${{ toJSON(matrix.bundle_members || []) }}` used a
+  bare `[]` array literal.** GitHub Actions expression syntax has no
+  array-literal form at all — only boolean/null/number/string literals plus
+  values obtained from contexts or `fromJSON()` (confirmed via GitHub's own
+  expressions reference and community discussion #27223, which reproduces
+  the identical parse failure). A workflow-file expression syntax error
+  fails the **entire workflow before any job is even scheduled** — not
+  just the one expression using it — confirmed against this PR's own real
+  CI run: the `test-action.yml` run for the commit introducing this bug
+  resolved to **zero jobs** (`list_workflow_jobs` returned
+  `{"total_count": 0}` for a run whose top-level `conclusion` was already
+  `failure`), exactly the signature of a workflow that never parsed.
+  Fixed: `toJSON(matrix.bundle_members || fromJSON('[]'))`.
+- **`target-kind: app-consumer`'s `consumer-binary` reused the already-
+  resolved `new-library` output instead of resolving its own
+  `consumer_binary_pattern`.** The candidate-resolution step only ever
+  globbed `binary_pattern` (the library) and never touched
+  `consumer_binary_pattern` (the actual consumer executable) at all — so
+  every app-consumer check was scoping `--used-by` against the library
+  binary instead of the real consumer, which could miss or misreport the
+  consumer's actual import surface. Fixed by resolving
+  `consumer_binary_pattern` as a second, independent glob in the same
+  step (only when `target_kind` carries one — bundle/library cells never
+  do, matching `RunPlanCheck.to_dict()`'s own kind-scoped field omission),
+  emitting a distinct `consumer-binary` output, and pointing
+  `check-target`'s `consumer-binary:` input at that output instead of
+  `new-library`.
+- **The `test-check-project` fixture job's own expected failure failed the
+  whole required `Test GitHub Action` workflow.** The fixture (above)
+  deliberately makes `check-project.yml`'s own `aggregate` job exit
+  non-zero — that is the behavior under test. But `test-check-project`
+  calls `check-project.yml` directly via `uses:`, so its expected failure
+  was already enough to fail the entire `Test GitHub Action` run before
+  `test-check-project-verify` ever got to confirm the failure was reported
+  *correctly*. **This bullet's original fix — adding `continue-on-error:
+  true` to `test-check-project` — was itself wrong and is corrected in the
+  round-3 addendum below**: GitHub Actions does not allow
+  `continue-on-error` on a job that calls a reusable workflow via `uses:`
+  at all, so that "fix" made the whole workflow *file* invalid rather than
+  making the one job's failure non-blocking.
+
+A separate, superficially alarming P1 finding from the same review round —
+that the `python3 -c "..."` heredoc blocks in `check-project.yml`'s
+`Generate run-plan.json`/`Resolve candidate binary/binaries` steps would
+raise `IndentationError` because the embedded Python source is indented —
+was investigated and found to be a **false positive** for this specific
+file, not applied: YAML's `|` block-scalar strips exactly the block's own
+common baseline indentation (measured from its first line) from *every*
+line in the block, including the `python3 -c "` line and the Python source
+lines nested at the same or deeper level — since both were written at the
+same indentation as the block's baseline, the resulting bash script text
+(verified directly via `yaml.safe_load` on the real committed file, then
+executed both stripped snippets standalone through `bash`/`python3`) has
+zero leading whitespace before `import json`/etc. and runs cleanly. No
+change made; a brief reply on the review thread explains the verification
+performed rather than silently ignoring a P1-flagged comment.
+
+**A second round of Codex review on PR #627 (against dc2834d) then caught
+two more real issues, both fixed in one follow-up commit:**
+
+- **`pip install .` in every `check-project.yml` job installed the
+  CALLER's own repository, not abicheck.** All three jobs (`plan`, `check`,
+  `aggregate`) do `actions/checkout@v6` (checking out whichever repository
+  is calling this reusable workflow) and then ran `pip install .` directly
+  against that checkout. This happens to work when the caller is
+  abicheck/abicheck itself (`test-action.yml`'s own `uses: ./.github/
+  workflows/check-project.yml`) — but a real external consumer
+  (`uses: abicheck/abicheck/.github/workflows/check-project.yml@v1` from
+  their own repository, exactly as this page's own examples show)
+  would have every job either install the *caller's* project instead of
+  abicheck, or fail outright if the caller's repository isn't even a
+  Python package — the same class of "only worked because the fixture
+  happens to call from within this same repository" blind spot the
+  `check` job's own nested-Action self-checkout (and, before it,
+  `check-target`'s own P1.3 fix) already exists to close, just not yet
+  applied to the plain `pip install` step itself. Fixed: added the same
+  "capture `github.workflow_ref`/`github.workflow_sha` identity,
+  self-checkout into `.check-project-src`" steps to `plan` and `aggregate`
+  (the `check` job already had them, for its own nested `uses:` step — just reordered
+  so they run *before* `Install abicheck` instead of after) and changed
+  every job's install command to `pip install ./.check-project-src`.
+- **The candidate-binary glob resolver silently picked `matches[0]` on an
+  ambiguous match.** A `binary_pattern` like `*.so*` commonly matches both
+  a linker symlink and the real versioned DSO; picking whichever sorts
+  first is an arbitrary artifact, not necessarily the intended build
+  product, and the caller gets no signal anything was ambiguous. Fixed:
+  `resolve()` now takes a `label` (identifying which target/bundle-member/
+  consumer pattern is being resolved) and fails loud
+  (`::error::`, exit 1, listing every match) when more than one file
+  matches, instead of silently disambiguating.
+
+New `TestEveryCheckProjectJobInstallsAbicheckFromItsOwnSource` and
+`TestCandidateResolverRejectsAmbiguousMatches` classes in
+`tests/test_reusable_workflows.py` (39 cases total in that file now) pin
+both fixes structurally, plus a manual `bash`/`python3` reproduction of the
+ambiguous-match failure (two candidate files matching one glob, confirmed
+exit 1 with both paths named in the error) the same way the array-literal
+and app-consumer fixes from the first review round were hand-verified
+before relying on structural assertions alone.
+
+**A third round, self-caught (not from external review): both fixes above
+that touched `job.workflow_ref`/`continue-on-error` were themselves wrong,
+and the workflow silently kept resolving to zero scheduled jobs across both
+"fixed" commits.** After the array-literal and app-consumer fixes landed,
+`test-action.yml`'s own CI run for that commit still showed
+`list_workflow_jobs` returning `{"total_count": 0}` with the run's
+top-level `conclusion` already `failure` — the exact zero-jobs signature
+the array-literal bug produced, now persisting through a commit that had
+supposedly fixed it. The `pip install ./.check-project-src` follow-up
+commit (second review round, above) didn't change that signature either.
+Neither GitHub's job-log-based CI checks nor the run's own API surface a
+human-readable parse-error message for this failure mode, so it took
+installing `actionlint` (rhysd/actionlint, a static checker for the actual
+GitHub Actions workflow schema — beyond what plain YAML-syntax validation
+via `yaml.safe_load()` catches) locally and running it against all three
+files to find the real causes:
+
+- **`continue-on-error: true` on `test-check-project` — the fix from the
+  first review round — is not valid on a job that calls a reusable
+  workflow via `uses:`.** GitHub Actions restricts such a job to `name`,
+  `uses`, `with`, `secrets`, `needs`, `if`, and `permissions` only (also
+  confirmed via GitHub Community Discussion #77915, "Cannot use
+  continue-on-error in a job that uses a reusable workflow" — an
+  acknowledged, still-open platform limitation, not a mistake specific to
+  this workflow). Any other key present makes the **entire workflow file**
+  invalid, which GitHub reports as a run with `conclusion: failure` and
+  zero scheduled jobs — indistinguishable, from the job-log tooling used
+  in the first two rounds, from the array-literal expression-syntax
+  failure it was chasing. There is no way to make a `uses:`-calling job's
+  failure non-blocking to the rest of the workflow short of not letting it
+  fail the *same* workflow run at all. **Fixed structurally, not with a
+  flag:** moved `test-check-project-stage` → `test-check-project` →
+  `test-check-project-verify` out of `test-action.yml` into a new,
+  dedicated `.github/workflows/test-check-project-failure-path.yml`, whose
+  header explicitly documents that this workflow's own run conclusion is
+  *expected* to read "failure" on every successful test run (the real
+  signal is `test-check-project-verify` succeeding, which now needs its
+  own `if: always()` since nothing shields it from its `needs:` job's
+  real, unshielded failure) — and that this workflow must not be added to
+  branch protection's required checks, only `test-action.yml` is. Removed
+  `.github/workflows/check-project.yml` from `test-action.yml`'s own
+  trigger `paths:` (no job there exercises it any more).
+- **`job.workflow_ref`/`job.workflow_sha` (all four occurrences: one in
+  `check-single.yml`, three in `check-project.yml`) do not exist — the
+  correct context is `github.workflow_ref`/`github.workflow_sha`,
+  corrected above at both original call sites.** The `job` context only
+  exposes `container`/`services`/`status` (confirmed both via `actionlint`
+  flagging every occurrence as an undefined-property expression error, and
+  independently via a fresh web search after the first, unverified pass
+  of research that originated this claim). Unlike the `continue-on-error`
+  bug, this one is **not** what caused the zero-jobs failures — accessing
+  an undefined context property evaluates to empty at runtime rather than
+  a schema violation, so every affected step was silently falling through
+  to its `github.repository`/`github.sha` fallback branch on every run
+  without ever failing loud. Still a real, worth-fixing bug: the fallback
+  makes the self-checkout technique work by coincidence for a
+  same-repository caller (exactly `test-action.yml`'s own case, so nothing
+  about this PR's own CI could have caught it either way) but would silently
+  point every external consumer's self-checkout at the *caller's* own
+  repository instead of abicheck's, defeating the entire point of the
+  self-checkout fix from earlier in P1.4.
+
+`tests/test_reusable_workflows.py`'s `TestCheckProjectFixtureDoesNotFailTheRequiredWorkflow`
+class (previously pinning the wrong `continue-on-error` fix) now asserts
+the corrected shape instead: `test-check-project` carries no
+`continue-on-error` key at all, `test-check-project-verify` carries
+`if: always()`, none of the three jobs remain in `test-action.yml`, and
+`test-action.yml`'s own trigger `paths:` no longer names
+`check-project.yml` (41 cases total in that file now). Re-ran `actionlint`
+against every file under `.github/workflows/` after these fixes — clean,
+zero findings — the verification step the first two rounds lacked and
+should have used from the start.
+
+**A fourth round, from external review again (Codex, against `d93cc9d`),
+caught that the round-3 `job.*` → `github.*` "fix" above was itself wrong
+— flipping the same bug back the other way.** The round-3 fix treated
+`actionlint`'s "not defined in object type" flag on `job.workflow_ref`/
+`job.workflow_sha` as proof the properties don't exist, and switched to
+`github.workflow_ref`/`github.workflow_sha` instead. That flag was a false
+negative, not a real error: `actionlint`'s hardcoded `job` context type
+table is stale and doesn't know about `workflow_ref`/`workflow_sha`/
+`workflow_repository`/`workflow_file_path`, all four of which are real,
+current, documented `job` context properties
+(`contexts-reference#job-context`: *"The full ref of the workflow file
+that defines the current job... For jobs defined in a [reusable
+workflow], this refers to the reusable workflow file"*). Meanwhile
+`github.workflow_ref`/`github.workflow_sha` — the fields the round-3 fix
+switched to — are explicitly documented as **caller-associated** inside a
+called reusable workflow (`reusing-workflow-configurations#github-context`:
+*"When a reusable workflow is triggered by a caller workflow, the `github`
+context is always associated with the caller workflow"*). So the round-3
+"fix" made every external consumer's self-checkout resolve to the
+*caller's* own repository/ref instead of abicheck's — silently breaking
+`pip install ./.check-project-src` and the nested
+`uses: ./.check-project-src/actions/check-target` step for exactly the
+external-consumer scenario this whole self-checkout mechanism exists to
+support, while leaving `test-action.yml`'s own same-repository CI run
+green throughout (both fields happen to resolve identically when caller
+and callee are the same repository, so nothing in this PR's own CI could
+have caught either direction of this mistake — the same blind spot noted
+above for the original bug).
+
+Verified this time via **primary-source GitHub documentation directly**
+(four separate fetches against `docs.github.com`, not a web-search
+summary — the round-3 mistake originated from an "insufficiently-verified
+web search," a lesson applied here deliberately) before reverting: all
+four occurrences (`check-single.yml`'s one identity step,
+`check-project.yml`'s `plan`/`check`/`aggregate` jobs' three) switched
+back to `job.workflow_ref`/`job.workflow_sha`, with corrected comments in
+both YAML files explaining the true caller/callee association and flagging
+the `actionlint` false negative so a future reader doesn't repeat the same
+mistake a third time. `actionlint` still flags these two properties as
+"not defined" after this revert — expected and understood as a tooling gap,
+not a signal to change course again. No test assertions needed to change:
+`tests/test_reusable_workflows.py`'s `test_identity_step_falls_back_to_
+github_repository_and_sha` only asserts the `WORKFLOW_REF`/`WORKFLOW_SHA`
+env var *names* and fallback-substring presence, not which context
+expression populates them — only the `TestCheckSingleSelfCheckout` class
+docstring needed correcting to match.
+
+**A fifth round (CodeRabbit, against `557996f`/`ee3f5ce`) found two more real
+issues, one fixed and one deferred with a documented rationale:**
+
+- **The initial caller-repo `actions/checkout@v6` step in every job (all
+  four: `plan`/`check`/`aggregate` in `check-project.yml`, `check` in
+  `check-single.yml`) used the default `persist-credentials: true`,
+  leaving the caller's `GITHUB_TOKEN` in `.git/config` even though none of
+  these jobs push and the paired self-checkout steps a few lines later
+  already set `persist-credentials: false` (zizmor's `artipacked` rule).
+  Fixed by adding the same `persist-credentials: false` to all four.
+- **`check-project.yml`'s "Download every check report" step
+  (`merge-multiple: true`) can silently drop a report to a filename
+  collision.** Two distinct check identities can slug to the same string
+  under `actions/check-target/run.sh`'s own lossy `tr -c 'A-Za-z0-9._-' '_'`
+  report filename (e.g. name `a`/profile `b-c` and name `a-b`/profile `c`
+  on the same channel/depth both produce
+  `check-target-report-a-b-c-<channel>-<depth>.json`) — harmless for a
+  single `check-target` invocation writing its own report, but
+  `check-project.yml`'s artifact *names* are already collision-resistant
+  (the round-3 sanitizer fix above), so both cells' reports land under different
+  artifacts and then get merged into ONE flat directory
+  (`abicheck/aggregate.py`'s `collect_reports` globs `*.json`
+  non-recursively — a per-artifact subdirectory isn't an option here), where
+  `actions/download-artifact`'s documented same-named-file resolution is
+  last-writer-wins. One report silently overwrites the other before
+  `aggregate` ever sees it. **Fixed at the source**, not in
+  `check-project.yml`: `actions/check-target/run.sh`'s `REPORT_OUT` now
+  appends a 12-hex-char SHA-256 prefix of the original, unsanitized
+  `name`/`profile`/`baseline_channel`/`requested_depth` tuple — the same
+  collision-resistant-suffix technique the round-3 artifact-name sanitizer
+  already uses (a 48-bit truncated hash, not a mathematically-guaranteed-
+  unique one — fine for the tiny, single-CI-run identifier space this
+  disambiguates, the same tradeoff git's own short-hash prefixes make) — so
+  two identities that collapse to the same slug are overwhelmingly likely to
+  still produce distinct filenames. This touches a shared component from the
+  already-merged
+  P1.3 PR (#625; `check-single.yml` also depends on it), but was chosen over
+  a `check-project.yml`-side workaround because `collect_reports`' flat,
+  non-recursive glob leaves no viable fix on the download side — the
+  collision is genuinely a property of the report *filename*, not of how it
+  gets downloaded.
+- **A separate P2 finding — candidate-resolution failures (missing
+  candidate, an escaping/ambiguous glob, a missing bundle member) never
+  produce a per-cell report** — is real but deliberately deferred, not
+  fixed in this round. The "Resolve candidate binary/binaries" step runs
+  *before* `Run check-target` and `sys.exit(1)`s directly on any of these
+  failures, so `check-target`'s own report-envelope finalizer (which is
+  what actually writes `steps.run.outputs.report-path`) never runs — for a
+  `required: false` bootstrap cell, `aggregate` then can't distinguish
+  "legitimately no report because the check is optional" from "the
+  resolver crashed on a misconfigured pattern," and passes either way.
+  Properly closing this needs a real design decision this round didn't
+  have the scope for: either duplicate enough of
+  `actions/check-target/report_envelope.py`'s operational-error mode
+  directly in the resolver step (works, but reimplements logic that
+  belongs to `check-target` and that this codebase otherwise keeps behind
+  one boundary), or restructure candidate resolution to still invoke
+  `check-target` on a resolution failure so its own existing
+  operational-error path writes the report (cleaner, but changes what
+  inputs `check-target` needs to accept a "resolution already failed,
+  write the envelope anyway" case). Tracked as a known gap rather than
+  rushed into either shape without picking one deliberately. Filed as
+  [#628](https://github.com/abicheck/abicheck/issues/628) once a third
+  review round re-raised the same gap (see the ninth-round addendum below).
+
+**A sixth round (Codex, against `06e1fcb`) caught one more real issue,
+fixed in the same commit style as the rest of this section:** the "Download
+build-output artifact" step's `if: matrix.baseline_channel != 'none'`
+condition assumed the artifact is only ever needed for baseline comparison
+(`candidate-build-output`'s `incompatible_evidence` check). But
+`evidence-pack-path` (`docs/reference/check-target.md`: "must match an
+earlier `collect-facts phase: prepare` step's own output path") can
+legitimately live inside this same build-output artifact — it's exactly
+the kind of thing this workflow's own artifact-staging contract already
+allows for ("`abicheck-build-<profile>/` directory (build-output.json + whatever
+it references)"). A `channel: none` audit-only cell with
+`evidence-producer: wrapper`/`clang-plugin` and an `evidence-pack-path`
+pointing inside the build-output download would therefore silently skip the
+download it needed, and `collect-facts phase: verify` would fail to find
+the pack. Fixed by broadening the condition to
+`matrix.baseline_channel != 'none' || inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin'`.
+Covered by a new
+`test_build_output_download_also_runs_for_no_baseline_wrapper_or_clang_plugin_evidence`.
+
+**A seventh round (Codex, against `9982fb3`) caught a `$GITHUB_OUTPUT`
+injection risk in the candidate resolver:** every resolved path (`new-library`,
+`consumer-binary`, a bundle member's staged copy) was written as a bare
+`key=value` line straight to `$GITHUB_OUTPUT`, which GitHub documents as
+line-oriented. A candidate artifact filename containing an embedded newline
+or carriage return could therefore inject or override a later output line
+(e.g. a spoofed `consumer-binary=`) before `check-target` ever runs,
+bypassing every confinement/ambiguity check the resolver already performs.
+Fixed by rejecting any `resolve()` match containing `\n`/`\r` outright
+(`::error::` + exit 1, matching this same function's existing "fail loud
+instead of guessing" posture for escaping/ambiguous matches) rather than
+switching to the safer multiline delimiter output form — simpler, and a
+legitimate build artifact has no reason to contain one. Verified by hand
+(a synthetic `libfoo\nconsumer-binary=evil.so` candidate file, confirmed
+rejected before anything reaches `$GITHUB_OUTPUT`) and covered by two new
+tests, `test_newline_bearing_match_is_rejected_end_to_end` and
+`test_carriage_return_bearing_match_is_also_rejected`.
+
+**An eighth round (Codex, against `63ed063`) found two more issues, one
+fixed and one deferred to the same already-acknowledged gap:**
+
+- **`run_plan.py`'s implicit profile sweep conflated two different
+  "missing" cases.** A `checks[]` entry without an explicit `profiles:`
+  selector considers every `contract: true` profile -- correctly, a profile
+  whose `build-output.json` exists but doesn't list the referenced target
+  is silently skipped (the whole point of the sweep: "every profile where
+  it makes sense"). But a profile with **no `build-output.json` at all**
+  was *also* only a warning in that path, not an error -- so a caller who
+  forgot to build/upload one of their declared contract profiles (or
+  misnamed its artifact) would get a silently under-covered matrix instead
+  of a generation-time failure, and `abicheck run-plan generate` would
+  still exit 0. Fixed in `_generate_target_checks`/`_generate_bundle_checks`:
+  a profile absent from `build_outputs` entirely is now always a hard error
+  (`report.errors`), explicit or implicit sweep alike; the "doesn't build
+  this target" skip is untouched. Two pre-existing tests
+  (`test_profile_missing_from_build_outputs_is_a_warning_not_an_error`,
+  `test_bundle_check_missing_build_output_for_an_implicit_sweep_is_a_warning`)
+  asserted the old behavior and were renamed/updated to the corrected
+  contract; three CLI/duplicate-detection tests that incidentally relied on
+  the old tolerance (via `_LIBRARY_ONLY_RAW`'s two declared profiles, only
+  one of which they ever supplied build-output for) were switched to a new
+  single-profile `_SINGLE_PROFILE_LIBRARY_RAW` fixture so they test what
+  they're actually about without tripping the new, unrelated coverage-gap
+  error.
+- **`check-project.yml`'s "Download build-output artifact" step still
+  carries `continue-on-error: true`, so a failed/misnamed download for a
+  baseline-backed cell silently degrades `resolve-baseline`'s
+  `incompatible_evidence` cross-check** (a baseline produced by a mismatched
+  evidence-producer/tool-version could be compared against anyway) instead
+  of surfacing as an operational error. Real, but deliberately not fixed
+  here -- it's the same underlying gap the round-5 "Route candidate-resolution
+  failures through reports" item already documents as deferred: making this
+  a hard failure means the "Resolve candidate binary/binaries" step fails
+  before `check-target` ever runs, which (per that same round-5 writeup)
+  currently produces no report at all for `aggregate` to see, rather than a
+  proper operational-error envelope. Fixing the download-failure case in
+  isolation, without also closing that report-routing gap, would just trade
+  one silent-pass failure mode for a different not-actually-visible one.
+  Tracked together with the round-5 item, not as a new separate gap.
+
+**A ninth round (CodeRabbit, against `ed7e577`) found three more issues, two
+fixed and one re-raising an already-tracked gap:**
+
+- **Bundle members resolving to files with the same basename silently
+  overwrote one another in the shared `bundle-staging/` directory.** The
+  candidate resolver copies each bundle member into one flat staging
+  directory via `shutil.copy2(match, os.path.join(staging,
+  os.path.basename(match)))` -- two distinct members (e.g. `build/linux/
+  libfoo.so` and `build/plugins/libfoo.so`) sharing a basename would have
+  the second `copy2` silently clobber the first, dropping a member from the
+  bundle comparison with no signal at all. Fixed: the resolver now tracks
+  which member claimed each destination basename and fails loud
+  (`::error::` + exit 1, naming both colliding members) on a second claim,
+  matching this same script's established "fail loud instead of guessing"
+  posture for escaping/ambiguous/newline-bearing matches. Verified by hand
+  (two members resolving to `libfoo.so` under different subdirectories,
+  confirmed rejected with both member names in the error) and covered by
+  two new tests, `test_bundle_members_with_colliding_basenames_are_rejected`
+  and a control case confirming distinct basenames still resolve.
+- **A nitpick, applied:** the `_IDENTITY_DIGEST` inline Python helper in
+  `actions/check-target/run.sh` used `print(...)` instead of
+  `sys.stdout.write(...)` -- functionally identical here (bash's `$(...)`
+  strips the trailing newline either way), but switched for consistency.
+  While there, corrected this doc's and that script's own comment wording:
+  earlier rounds called the 12-hex-char SHA-256 report-filename/artifact-
+  name suffixes "injective," which overclaims -- a truncated hash is
+  collision-*resistant*, not mathematically guaranteed collision-free.
+  Left the actual technique unchanged (no functional fix needed): 48 bits
+  of collision resistance is far more than enough for the tiny,
+  single-CI-run identifier space these disambiguate (dozens of checks, not
+  millions) -- the same tradeoff git's own short-hash prefixes and Docker's
+  short image IDs make.
+- **A third finding re-raised the same gap round-5/round-8 already track**
+  (candidate-resolution and build-output-download failures not producing
+  an operational-error envelope for `aggregate` to see) with slightly
+  different framing ("route pre-check failures into aggregation before
+  merge"). Not a new item -- same deferred design decision, same rationale
+  as those two addenda. Filed as
+  [#628](https://github.com/abicheck/abicheck/issues/628) (requested in
+  the review thread and opened by CodeRabbit) to track the design decision
+  and acceptance criteria outside the plan doc.
+
+**Deliberately out of scope for this pass, documented rather than
+silently absent:** a per-cell override of `check-project.yml`'s shared
+analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —
+every matrix cell in one `check-project.yml` call currently shares one
+project-wide value for each; a project needing different policy/suppression
+per target must currently split across multiple `check-project.yml` calls.
+`run-plan.json`'s schema would need to grow per-cell override fields to lift
+this, deferred to a later iteration rather than expanding this item's scope
+further. `tests/test_reusable_workflows.py` (41 cases, after the round-3
+fixes above) covers the structural
+assertions both workflows' own step orchestration needs (the always()
+placements, step ordering, matrix wiring, artifact-naming/sanitization
+conventions, self-checkout pattern) — the same "needs a real runner to exercise
+end-to-end" scoping `tests/test_action_check_target.py` already established
+for `check-target`'s own `action.yml`.
+
 ### P1.5 — `.abicheck.yml` `targets:`/`profiles:`/`baseline:` block — **done**
 
 Implements ADR-047 §3. Config schema extension + `abicheck/policy_file.py`
