@@ -211,13 +211,45 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # `pip install .` on the preceding checkout installs whatever is at
+      # the CALLER's own repository root -- fine when this workflow is
+      # invoked from within abicheck/abicheck itself (as test-action.yml
+      # does), but wrong (or a hard failure, if the caller isn't even a
+      # Python package) for any external consumer
+      # (`uses: abicheck/abicheck/.github/workflows/check-project.yml@v1`
+      # from their own repository). This job needs the real `abicheck` CLI,
+      # not the caller's own code. Self-checkout into a side directory
+      # (identical technique to the `check` job's own nested-Action
+      # composition below, and to check-target's own established pattern)
+      # and install from there instead (Codex review).
+      - name: Capture this reusable workflow's identity
+        id: identity
+        shell: bash
+        env:
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          FALLBACK_REPOSITORY: ${{ github.repository }}
+          FALLBACK_REF: ${{ github.sha }}
+        run: |
+          repository="${WORKFLOW_REF%%/.github/workflows/*}"
+          echo "repository=${repository:-$FALLBACK_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "ref=${WORKFLOW_SHA:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout abicheck (for installing the CLI)
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.identity.outputs.repository }}
+          ref: ${{ steps.identity.outputs.ref }}
+          path: .check-project-src
+          persist-credentials: false
+
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python-version }}
 
       - name: Install abicheck
         shell: bash
-        run: pip install .
+        run: pip install ./.check-project-src
 
       - name: Download build-output artifacts
         uses: actions/download-artifact@v8
@@ -273,18 +305,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: ${{ inputs.python-version }}
-
-      - name: Install abicheck
-        shell: bash
-        run: pip install .
-
-      # See check-single.yml's "Capture this reusable workflow's identity"
-      # step for the full rationale -- identical technique, needed here for
-      # the same reason (this job's own nested `uses: ./actions/check-target`
-      # step below).
+      # See the `plan` job's identical steps for the "install abicheck, not
+      # the caller's own repo" rationale -- this job needs the same fix, and
+      # additionally needs this same checked-out copy for its own nested
+      # `uses: ./.check-project-src/actions/check-target` step below, so one
+      # self-checkout now serves both purposes.
       - name: Capture this reusable workflow's identity
         id: identity
         shell: bash
@@ -298,13 +323,21 @@ jobs:
           echo "repository=${repository:-$FALLBACK_REPOSITORY}" >> "$GITHUB_OUTPUT"
           echo "ref=${WORKFLOW_SHA:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout abicheck (for nested Action composition)
+      - name: Checkout abicheck (for installing the CLI and nested Action composition)
         uses: actions/checkout@v6
         with:
           repository: ${{ steps.identity.outputs.repository }}
           ref: ${{ steps.identity.outputs.ref }}
           path: .check-project-src
           persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install abicheck
+        shell: bash
+        run: pip install ./.check-project-src
 
       - name: Download candidate artifact
         uses: actions/download-artifact@v8
@@ -341,10 +374,19 @@ jobs:
           cell = json.loads(os.environ['MATRIX_JSON'])
           root = 'candidate'
 
-          def resolve(pattern):
+          def resolve(pattern, *, label):
               if not pattern:
                   return None
               matches = sorted(glob.glob(os.path.join(root, pattern), recursive=True))
+              if len(matches) > 1:
+                  # A pattern like '*.so*' commonly matches both a linker
+                  # symlink and the real versioned DSO -- silently picking
+                  # matches[0] would compare/scope against whichever one
+                  # happens to sort first, an arbitrary artifact rather
+                  # than the intended build product (Codex review). Fail
+                  # loud instead of guessing.
+                  print(f'::error::{label}: pattern {pattern!r} matched more than one candidate under {root}/: {matches} -- narrow the pattern so it matches exactly one file', file=sys.stderr)
+                  sys.exit(1)
               return matches[0] if matches else None
 
           if cell['kind'] == 'bundle':
@@ -352,7 +394,7 @@ jobs:
               os.makedirs(staging, exist_ok=True)
               missing = []
               for member, pattern in cell.get('member_binary_patterns', {}).items():
-                  match = resolve(pattern)
+                  match = resolve(pattern, label=f'bundle {cell[\"name\"]!r} member {member!r}')
                   if match is None:
                       missing.append(member)
                       continue
@@ -362,7 +404,7 @@ jobs:
                   sys.exit(1)
               print(f'new-library={staging}')
           else:
-              match = resolve(cell.get('binary_pattern', ''))
+              match = resolve(cell.get('binary_pattern', ''), label=f'target {cell[\"name\"]!r}')
               if match is None:
                   print(f'::error::target {cell[\"name\"]!r}: no candidate binary matched binary_pattern {cell.get(\"binary_pattern\")!r} under {root}/', file=sys.stderr)
                   sys.exit(1)
@@ -376,7 +418,7 @@ jobs:
               # wrong binary).
               consumer_pattern = cell.get('consumer_binary_pattern', '')
               if consumer_pattern:
-                  consumer_match = resolve(consumer_pattern)
+                  consumer_match = resolve(consumer_pattern, label=f'target {cell[\"name\"]!r} consumer_binary_pattern')
                   if consumer_match is None:
                       print(f'::error::target {cell[\"name\"]!r}: no candidate binary matched consumer_binary_pattern {consumer_pattern!r} under {root}/', file=sys.stderr)
                       sys.exit(1)
@@ -498,13 +540,36 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # See the `plan` job's identical steps for the "install abicheck, not
+      # the caller's own repo" rationale.
+      - name: Capture this reusable workflow's identity
+        id: identity
+        shell: bash
+        env:
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          FALLBACK_REPOSITORY: ${{ github.repository }}
+          FALLBACK_REF: ${{ github.sha }}
+        run: |
+          repository="${WORKFLOW_REF%%/.github/workflows/*}"
+          echo "repository=${repository:-$FALLBACK_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "ref=${WORKFLOW_SHA:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout abicheck (for installing the CLI)
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.identity.outputs.repository }}
+          ref: ${{ steps.identity.outputs.ref }}
+          path: .check-project-src
+          persist-credentials: false
+
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python-version }}
 
       - name: Install abicheck
         shell: bash
-        run: pip install .
+        run: pip install ./.check-project-src
 
       - name: Download run-plan.json
         uses: actions/download-artifact@v8

@@ -1513,6 +1513,49 @@ zero leading whitespace before `import json`/etc. and runs cleanly. No
 change made; a brief reply on the review thread explains the verification
 performed rather than silently ignoring a P1-flagged comment.
 
+**A second round of Codex review on PR #627 (against dc2834d) then caught
+two more real issues, both fixed in one follow-up commit:**
+
+- **`pip install .` in every `check-project.yml` job installed the
+  CALLER's own repository, not abicheck.** All three jobs (`plan`, `check`,
+  `aggregate`) do `actions/checkout@v6` (checking out whichever repository
+  is calling this reusable workflow) and then ran `pip install .` directly
+  against that checkout. This happens to work when the caller is
+  abicheck/abicheck itself (`test-action.yml`'s own `uses: ./.github/
+  workflows/check-project.yml`) — but a real external consumer
+  (`uses: abicheck/abicheck/.github/workflows/check-project.yml@v1` from
+  their own repository, exactly as this page's own examples show)
+  would have every job either install the *caller's* project instead of
+  abicheck, or fail outright if the caller's repository isn't even a
+  Python package — the same class of "only worked because the fixture
+  happens to call from within this same repository" blind spot the
+  `check` job's own nested-Action self-checkout (and, before it,
+  `check-target`'s own P1.3 fix) already exists to close, just not yet
+  applied to the plain `pip install` step itself. Fixed: added the same
+  "capture `job.workflow_ref`/`job.workflow_sha` identity, self-checkout
+  into `.check-project-src`" steps to `plan` and `aggregate` (the `check`
+  job already had them, for its own nested `uses:` step — just reordered
+  so they run *before* `Install abicheck` instead of after) and changed
+  every job's install command to `pip install ./.check-project-src`.
+- **The candidate-binary glob resolver silently picked `matches[0]` on an
+  ambiguous match.** A `binary_pattern` like `*.so*` commonly matches both
+  a linker symlink and the real versioned DSO; picking whichever sorts
+  first is an arbitrary artifact, not necessarily the intended build
+  product, and the caller gets no signal anything was ambiguous. Fixed:
+  `resolve()` now takes a `label` (identifying which target/bundle-member/
+  consumer pattern is being resolved) and fails loud
+  (`::error::`, exit 1, listing every match) when more than one file
+  matches, instead of silently disambiguating.
+
+New `TestEveryCheckProjectJobInstallsAbicheckFromItsOwnSource` and
+`TestCandidateResolverRejectsAmbiguousMatches` classes in
+`tests/test_reusable_workflows.py` (39 cases total in that file now) pin
+both fixes structurally, plus a manual `bash`/`python3` reproduction of the
+ambiguous-match failure (two candidate files matching one glob, confirmed
+exit 1 with both paths named in the error) the same way the array-literal
+and app-consumer fixes from the first review round were hand-verified
+before relying on structural assertions alone.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —
