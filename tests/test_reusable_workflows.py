@@ -417,6 +417,27 @@ class TestCheckProjectArtifactNaming:
         dl = next(s for s in steps if s.get("name") == "Download baseline-set artifact")
         assert dl.get("if") == "matrix.baseline_channel != 'none'"
 
+    def test_baseline_artifact_name_is_keyed_by_profile_as_well_as_channel(
+        self,
+    ) -> None:
+        """A baseline-set is itself profile-specific (actions/baseline's
+        manifest records exactly one `profile`; resolve-baseline rejects a
+        mismatch as `wrong_profile`), so two contract profiles sharing one
+        baseline_channel each need their own artifact -- a channel-only name
+        would make every profile but one resolve the wrong baseline (Codex
+        review)."""
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        dl = next(s for s in steps if s.get("name") == "Download baseline-set artifact")
+        assert dl["with"]["name"] == (
+            "${{ inputs.baseline-artifact-prefix }}${{ matrix.profile_id }}"
+            "-${{ matrix.baseline_channel }}"
+        )
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["with"]["baseline-path"] == (
+            "baseline-sets/${{ matrix.profile_id }}-${{ matrix.baseline_channel }}"
+        )
+
     def test_report_artifact_name_uses_the_checks_own_sanitized_check_id(self) -> None:
         """check_id is `target@profile#baseline_channel@depth` -- `#` in an
         artifact name is a documented, reproducible bug

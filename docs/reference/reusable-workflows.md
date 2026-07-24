@@ -137,7 +137,7 @@ job(s) must upload, before this reusable workflow's jobs need them:
 |---|---|---|
 | `<build-output-artifact-prefix><profile-id>` | contract profile | that profile's `abicheck-build-<profile>/` directory ([build-output.json](build-output-schema.md) + whatever it references) — G30 P1.1. |
 | `<candidate-artifact-prefix><profile-id>` | contract profile | the tree each target's `binary_pattern`/`consumer_binary_pattern` globs against for this run's candidate side. |
-| `<baseline-artifact-prefix><channel>` | baseline channel referenced by any non-`none` check | that channel's staged baseline-set (`manifest.json` + snapshots, `actions/baseline`'s own output shape). |
+| `<baseline-artifact-prefix><profile-id>-<channel>` | (contract profile, baseline channel) pair with any non-`none` check on that profile | that pair's staged baseline-set (`manifest.json` + snapshots, `actions/baseline`'s own output shape). Keyed by profile as well as channel — a baseline-set is itself profile-specific (`actions/baseline`'s manifest records exactly one `profile`; `resolve-baseline` rejects a mismatch as `wrong_profile`), so two profiles sharing one channel each need their own artifact. |
 
 All three prefixes are workflow inputs (defaults `abicheck-build-`,
 `abicheck-candidate-`, `abicheck-baseline-`) — rename them if they collide
@@ -174,7 +174,7 @@ jobs:
       # ... restore from actions/cache, a release asset, or git, per ADR-047 §10 ...
       - uses: actions/upload-artifact@v7
         with:
-          name: abicheck-baseline-accepted-main
+          name: abicheck-baseline-linux-accepted-main
           path: restored-baseline/
 
   check:

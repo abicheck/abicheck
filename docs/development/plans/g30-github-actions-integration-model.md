@@ -1896,6 +1896,26 @@ found two more real issues in `check-project.yml`, both fixed:**
   `build-output-schema.md` and `reusable-workflows.md`'s artifact-staging
   table, rather than changing the behavior.
 
+**A further round (Codex, against `5b29ed9`) caught a real bug in the
+baseline-set artifact naming, fixed:** the "Download baseline-set artifact"
+step keyed its artifact purely on `matrix.baseline_channel`
+(`<baseline-artifact-prefix><channel>`) — but a baseline-set is itself
+profile-specific, not just channel-specific (`actions/baseline`'s manifest
+records exactly one `profile`; `resolve-baseline`'s own
+`_schema_and_profile_check` rejects a mismatch as `wrong_profile`). A
+project with two contract profiles sharing one `baseline_channel` (e.g.
+`accepted-main` on both `linux-x86_64` and `macos-arm64`) would have every
+matrix leg on that channel download the identical artifact, so at most one
+profile's check could ever resolve — the rest would fail as
+`wrong_profile` operational errors even with their own correct baseline-set
+uploaded, if the caller even could (the shared name would itself collide
+at upload time). Fixed: the artifact name and download path are now keyed
+by `<profile-id>-<channel>`, matching `candidate-artifact-prefix`'s and
+`build-output-artifact-prefix`'s own existing per-profile convention.
+Updated the header comment, the `baseline-artifact-prefix` input
+description, `reusable-workflows.md`'s artifact table and usage example,
+and added `test_baseline_artifact_name_is_keyed_by_profile_as_well_as_channel`.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —

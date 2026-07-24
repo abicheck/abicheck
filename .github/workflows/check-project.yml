@@ -46,13 +46,18 @@ name: 'abicheck check-project'
 #   - one `<candidate-artifact-prefix><profile-id>` artifact per contract
 #     profile, containing the tree each target's `binary_pattern`/
 #     `consumer_binary_pattern` globs against for THIS run's candidate side.
-#   - one `<baseline-artifact-prefix><channel>` artifact per baseline channel
-#     referenced by any check (unless every check on that channel uses
-#     `baseline-channel: none`), containing that channel's staged
-#     baseline-set (`manifest.json` + snapshots, `actions/baseline`'s own
-#     output shape) -- this workflow never fetches from a channel's storage
-#     backend itself (ADR-047 §10), matching resolve-baseline's own
-#     documented boundary.
+#   - one `<baseline-artifact-prefix><profile-id>-<channel>` artifact per
+#     (contract profile, baseline channel) pair referenced by any check on
+#     that profile (unless every such check uses `baseline-channel: none`),
+#     containing that pair's staged baseline-set (`manifest.json` +
+#     snapshots, `actions/baseline`'s own output shape) -- keyed by profile
+#     as well as channel because a baseline-set is itself profile-specific
+#     (`actions/baseline`'s manifest records exactly one `profile`, and
+#     resolve-baseline rejects a mismatch as `wrong_profile`); a project
+#     with two profiles sharing one channel needs two distinct baseline-set
+#     artifacts, not one shared by both (Codex review). This workflow never
+#     fetches from a channel's storage backend itself (ADR-047 §10),
+#     matching resolve-baseline's own documented boundary.
 
 on:
   workflow_call:
@@ -70,7 +75,12 @@ on:
         type: string
         default: 'abicheck-candidate-'
       baseline-artifact-prefix:
-        description: 'Each baseline channel''s staged baseline-set is downloaded from an artifact named <this><channel>.'
+        description: >-
+          Each (contract profile, baseline channel) pair's staged
+          baseline-set is downloaded from an artifact named
+          <this><profile-id>-<channel> -- keyed by profile as well as
+          channel since a baseline-set is itself profile-specific, not
+          just channel-specific.
         type: string
         default: 'abicheck-baseline-'
       run-plan-artifact-name:
@@ -415,12 +425,17 @@ jobs:
           path: candidate
         continue-on-error: true
 
+      # Keyed by profile as well as channel -- a baseline-set is itself
+      # profile-specific (actions/baseline's manifest records exactly one
+      # `profile`; resolve-baseline rejects a mismatch as `wrong_profile`),
+      # so two contract profiles sharing one baseline_channel each need
+      # their own artifact, not one shared download (Codex review).
       - name: Download baseline-set artifact
         if: matrix.baseline_channel != 'none'
         uses: actions/download-artifact@v8
         with:
-          name: '${{ inputs.baseline-artifact-prefix }}${{ matrix.baseline_channel }}'
-          path: 'baseline-sets/${{ matrix.baseline_channel }}'
+          name: '${{ inputs.baseline-artifact-prefix }}${{ matrix.profile_id }}-${{ matrix.baseline_channel }}'
+          path: 'baseline-sets/${{ matrix.profile_id }}-${{ matrix.baseline_channel }}'
         continue-on-error: true
 
       # Forwarded to check-target's own candidate-build-output input, which
@@ -592,7 +607,7 @@ jobs:
           bundle-members: ${{ toJSON(matrix.bundle_members || fromJSON('[]')) }}
           profile: ${{ matrix.profile_id }}
           baseline-channel: ${{ matrix.baseline_channel }}
-          baseline-path: 'baseline-sets/${{ matrix.baseline_channel }}'
+          baseline-path: 'baseline-sets/${{ matrix.profile_id }}-${{ matrix.baseline_channel }}'
           baseline-required: ${{ matrix.required }}
           candidate-build-output: ${{ steps.candidate.outputs.build-output }}
           requested-depth: ${{ matrix.requested_depth }}
