@@ -52,3 +52,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   default `"full"`, so an MCP client's `response["report"]` showed the same
   scoped-only/missing-contract finding twice. Fixed by passing the caller's
   `report_mode` through that call too.
+
+- **Markdown/text root-cause severity table ignored scoped-gate findings**
+  (ADR-052 follow-up, Codex review): `--report-mode root-cause`'s
+  "## Severity Configuration" table was built from `result.changes` before
+  `_resolve_scoped_gate_findings` ran, so a `--used-by`/`--required-symbol`
+  run whose only breaking issue was a scoped-only change or missing-contract
+  label showed every category at `Count 0`/"no exit impact" immediately
+  above a `## Root Causes` section naming that same real, gate-blocking
+  finding. `_build_severity_summary_md` now accepts the already-computed
+  `result.scoped_severity_counts`/`scoped_blocking_categories` (the same
+  numbers the JSON fold-in's `severity`/`full_severity` swap already uses)
+  and overrides both the `Count` and `Exit Impact` columns with them when
+  present.

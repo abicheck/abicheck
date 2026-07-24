@@ -483,6 +483,26 @@ same scoped-only/missing-contract finding duplicated in the embedded
 already correct. Fixed by passing `report_mode=report_mode` through that
 call too.
 
+**Follow-up fix (Codex review), later commit:** the `## Severity
+Configuration` table (built by `_build_severity_summary_md`, shared with
+`full`/`leaf` markdown) was populated from `result.changes` before the
+scoped-gate resolution a few fixes above runs — a `--used-by`/
+`--required-symbol` run whose only breaking issue was a scoped-only change
+or missing-contract label showed every category at `Count 0`/"no exit
+impact" directly above a `## Root Causes` section naming that same real,
+gate-blocking finding. Fixed by moving the `_resolve_scoped_gate_findings`
+call ahead of the severity table and passing `_build_severity_summary_md`
+two new optional overrides, `scoped_counts`/`scoped_blocking_categories`,
+sourced from `result.scoped_severity_counts`/`scoped_blocking_categories` —
+the same already-computed numbers the JSON fold-in's `severity`/
+`full_severity` swap in `cli_compare_fold.py` uses, so markdown and JSON
+report identical scoped counts instead of two independently-derived ones.
+`full`/`leaf` markdown's own severity-table call sites have the identical
+structural gap (their `_build_severity_summary_md` calls also predate
+scoped-gate resolution) but were not touched here — Codex's finding was
+scoped to the root-cause renderer this slice touches; fixing `full`/`leaf`
+too is deferred to a future pass rather than folded into this one.
+
 ## Slice 5 — `--report-mode root-cause` SARIF properties
 
 Landed in a follow-up commit on the same PR. Unlike JSON/markdown, SARIF's

@@ -1892,6 +1892,43 @@ class TestUsedByScoping:
         # next to a populated "## Root Causes" section.
         assert "No ABI changes detected" not in result.output
 
+    def test_markdown_root_cause_severity_table_reflects_scoped_only_finding(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Codex review: the "## Severity Configuration" table was built from
+        # `result.changes` before the scoped-only change/missing-contract
+        # label below was resolved -- a scoped run whose only breaking issue
+        # is one of these showed every category at Count 0/"no exit impact"
+        # immediately above a "## Root Causes" section naming a real,
+        # gate-blocking finding.
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare",
+            str(old),
+            str(new),
+            "--used-by",
+            str(app),
+            "--report-mode",
+            "root-cause",
+            "--severity-abi-breaking",
+            "error",
+        )
+        assert result.exit_code == 4
+        assert "### `ordinal:5` (1 finding)" in result.output
+        table_line = next(
+            line for line in result.output.splitlines()
+            if line.startswith("| ABI/API Incompatibilities")
+        )
+        assert "| 1 |" in table_line
+        assert "causes non-zero exit" in table_line
+
     def test_json_uncovered_missing_symbol_not_blocking_under_demoted_severity(
         self, tmp_path, monkeypatch
     ) -> None:

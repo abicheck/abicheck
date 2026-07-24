@@ -855,16 +855,6 @@ def _to_markdown_root_cause(
         )
         lines.append("")
 
-    if severity_config is not None:
-        lines += _build_severity_summary_md(
-            changes,
-            severity_config,
-            all_changes=list(result.changes),
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-
     # G29 Phase 3 slice 3 follow-up (Codex review): a --used-by/
     # --required-symbol scoped-only change or missing-contract label whose
     # caused_by_type/symbol correlates with a change above must join that
@@ -874,12 +864,29 @@ def _to_markdown_root_cause(
     # the correlation, unlike the JSON/SARIF paths (which fold these in).
     # Real Change objects (scoped_only) can simply be grouped alongside
     # `changes` in one pass; missing_labels have no Change to group with, so
-    # they're keyed and merged in separately below.
+    # they're keyed and merged in separately below. Resolved before the
+    # severity table (Codex review, further follow-up) so a scoped run whose
+    # only gating issue is one of these can pass the scoped counts below
+    # instead of the table always reading the pre-scoped `result.changes`.
     scoped_only, missing_labels, blocks, missing_kind = _resolve_scoped_gate_findings(
         result,
         severity_config,
         show_only,
     )
+
+    if severity_config is not None:
+        lines += _build_severity_summary_md(
+            changes,
+            severity_config,
+            all_changes=list(result.changes),
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+            scoped_counts=getattr(result, "scoped_severity_counts", None),
+            scoped_blocking_categories=getattr(
+                result, "scoped_blocking_categories", None
+            ),
+        )
     groups = _group_changes_by_root_cause(changes + scoped_only)
     has_root_cause_entries = bool(groups or missing_labels)
     if has_root_cause_entries:
@@ -1023,6 +1030,8 @@ def _build_severity_summary_md(
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    scoped_counts: dict[str, int] | None = None,
+    scoped_blocking_categories: tuple[str, ...] | None = None,
 ) -> list[str]:
     """Build a severity configuration summary table for markdown output.
 
@@ -1031,6 +1040,16 @@ def _build_severity_summary_md(
     unfiltered set used for the ``Exit Impact`` column so that filtering the
     display doesn't make this table claim "no exit impact" for a category
     that still fails the actual (unfiltered) severity gate.
+
+    *scoped_counts*/*scoped_blocking_categories* (Codex review), when given
+    (from ``result.scoped_severity_counts``/``scoped_blocking_categories``
+    on a ``--used-by``/``--required-symbol`` run), override both columns
+    with the scoped gate's own numbers -- otherwise this table always
+    reflects the full-library ``changes``, so a scoped run whose only
+    gating issue is a scoped-only change or missing-contract label (neither
+    of which is in ``result.changes``) would show every category at 0 and
+    "no exit impact" while the report elsewhere names a real, blocking
+    finding.
     """
     from .severity import SeverityLevel, categorize_changes
 
@@ -1088,10 +1107,16 @@ def _build_severity_summary_md(
         level = getattr(severity_config, attr, SeverityLevel.INFO)
         level_val = level.value if hasattr(level, "value") else str(level)
         emoji = _SEVERITY_EMOJI.get(level_val, "")
-        count = len(cat_changes)
+        count = (
+            scoped_counts.get(attr, 0) if scoped_counts is not None else len(cat_changes)
+        )
         impact = (
             "causes non-zero exit"
-            if level_val == "error" and len(exit_cat_changes) > 0
+            if (
+                attr in scoped_blocking_categories
+                if scoped_blocking_categories is not None
+                else level_val == "error" and len(exit_cat_changes) > 0
+            )
             else "no exit impact"
         )
         lines.append(
