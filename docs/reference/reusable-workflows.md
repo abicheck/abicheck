@@ -184,6 +184,24 @@ different policy/suppression files, run them through separate
 `check-project.yml` calls (one per differing option set) until a later
 iteration extends `run-plan.json`'s schema to carry per-cell overrides.
 
+**Give each parallel call its own artifact names.** `actions/upload-artifact`
+requires unique names within one workflow *run* — two `check-project.yml`
+calls in the same run that both leave `run-plan-artifact-name` /
+`aggregate-artifact-name` at their shared defaults will fail at the upload
+step before either finishes any check (Codex review); leaving
+`report-artifact-prefix` shared is worse and silently wrong rather than
+failing loud — the `aggregate` job downloads by
+`pattern: '<report-artifact-prefix>*'`, so it would pull in the *other*
+call's per-cell reports too and either misreport coverage or hit
+`aggregate`'s duplicate-target-id rejection. Set distinct values for
+`run-plan-artifact-name`, `aggregate-artifact-name`, and
+`report-artifact-prefix` on every parallel call (a per-call suffix, e.g. the
+target/option-set name, is enough); do the same for
+`build-output-artifact-prefix`/`candidate-artifact-prefix`/
+`baseline-artifact-prefix` too unless the calls intentionally share the same
+profile/channel artifacts (harmless when they do — same content, downloaded
+twice).
+
 ### Outputs
 
 | Output | Meaning |
