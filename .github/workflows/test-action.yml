@@ -602,6 +602,15 @@ jobs:
   test-check-project:
     name: 'check-project: run-plan + matrix + aggregate'
     needs: test-check-project-stage
+    # This call is EXPECTED to fail by design (see the job-group comment
+    # above: the fixture deliberately omits the baseline artifact, so the
+    # aggregate job's own exit code is non-zero). Without continue-on-error,
+    # that expected failure would make the whole `Test GitHub Action`
+    # workflow report failure before test-check-project-verify below ever
+    # gets to assert the failure was reported *correctly* -- the point of
+    # this job group is to verify the failure survives to `aggregate`, not
+    # to make this required workflow red on every run (Codex review).
+    continue-on-error: true
     uses: ./.github/workflows/check-project.yml
     with:
       config-path: tests/fixtures/action/check_project.abicheck.yml

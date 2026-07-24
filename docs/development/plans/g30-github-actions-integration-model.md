@@ -1453,6 +1453,66 @@ artifact names) needed no equivalent fix — both are already constrained to
 which excludes `#`; only the *combined* `check_id` string introduces the
 `#`/`@` delimiters that make sanitization necessary.
 
+**A round of Codex review on the PR (#627) then caught three more real
+issues, all fixed in one follow-up commit:**
+
+- **`bundle-members: ${{ toJSON(matrix.bundle_members || []) }}` used a
+  bare `[]` array literal.** GitHub Actions expression syntax has no
+  array-literal form at all — only boolean/null/number/string literals plus
+  values obtained from contexts or `fromJSON()` (confirmed via GitHub's own
+  expressions reference and community discussion #27223, which reproduces
+  the identical parse failure). A workflow-file expression syntax error
+  fails the **entire workflow before any job is even scheduled** — not
+  just the one expression using it — confirmed against this PR's own real
+  CI run: the `test-action.yml` run for the commit introducing this bug
+  resolved to **zero jobs** (`list_workflow_jobs` returned
+  `{"total_count": 0}` for a run whose top-level `conclusion` was already
+  `failure`), exactly the signature of a workflow that never parsed.
+  Fixed: `toJSON(matrix.bundle_members || fromJSON('[]'))`.
+- **`target-kind: app-consumer`'s `consumer-binary` reused the already-
+  resolved `new-library` output instead of resolving its own
+  `consumer_binary_pattern`.** The candidate-resolution step only ever
+  globbed `binary_pattern` (the library) and never touched
+  `consumer_binary_pattern` (the actual consumer executable) at all — so
+  every app-consumer check was scoping `--used-by` against the library
+  binary instead of the real consumer, which could miss or misreport the
+  consumer's actual import surface. Fixed by resolving
+  `consumer_binary_pattern` as a second, independent glob in the same
+  step (only when `target_kind` carries one — bundle/library cells never
+  do, matching `RunPlanCheck.to_dict()`'s own kind-scoped field omission),
+  emitting a distinct `consumer-binary` output, and pointing
+  `check-target`'s `consumer-binary:` input at that output instead of
+  `new-library`.
+- **The `test-check-project` fixture job's own expected failure failed the
+  whole required `Test GitHub Action` workflow.** The fixture (above)
+  deliberately makes `check-project.yml`'s own `aggregate` job exit
+  non-zero — that is the behavior under test. But `test-check-project`
+  calls `check-project.yml` directly via `uses:`, so without
+  `continue-on-error: true` on that job, its expected failure was already
+  enough to fail the entire `Test GitHub Action` run before
+  `test-check-project-verify` ever got to confirm the failure was reported
+  *correctly* — turning a fixture meant to prove a real-failure scenario
+  survives correctly into a workflow that is red on every single run by
+  design. Fixed by adding `continue-on-error: true` to `test-check-project`
+  only (`test-check-project-verify` deliberately keeps none, so a genuinely
+  wrong assertion there still fails the workflow for real).
+
+A separate, superficially alarming P1 finding from the same review round —
+that the `python3 -c "..."` heredoc blocks in `check-project.yml`'s
+`Generate run-plan.json`/`Resolve candidate binary/binaries` steps would
+raise `IndentationError` because the embedded Python source is indented —
+was investigated and found to be a **false positive** for this specific
+file, not applied: YAML's `|` block-scalar strips exactly the block's own
+common baseline indentation (measured from its first line) from *every*
+line in the block, including the `python3 -c "` line and the Python source
+lines nested at the same or deeper level — since both were written at the
+same indentation as the block's baseline, the resulting bash script text
+(verified directly via `yaml.safe_load` on the real committed file, then
+executed both stripped snippets standalone through `bash`/`python3`) has
+zero leading whitespace before `import json`/etc. and runs cleanly. No
+change made; a brief reply on the review thread explains the verification
+performed rather than silently ignoring a P1-flagged comment.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —

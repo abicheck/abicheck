@@ -367,6 +367,22 @@ jobs:
                   print(f'::error::target {cell[\"name\"]!r}: no candidate binary matched binary_pattern {cell.get(\"binary_pattern\")!r} under {root}/', file=sys.stderr)
                   sys.exit(1)
               print(f'new-library={match}')
+              # target_kind: app-consumer only -- consumer_binary_pattern
+              # locates the CONSUMER executable, a distinct artifact from
+              # the library binary_pattern already resolved above (both
+              # matched separately: reusing new-library here would pass
+              # check-target the library itself as --used-by instead of
+              # the actual consumer, scoping the comparison against the
+              # wrong binary).
+              consumer_pattern = cell.get('consumer_binary_pattern', '')
+              if consumer_pattern:
+                  consumer_match = resolve(consumer_pattern)
+                  if consumer_match is None:
+                      print(f'::error::target {cell[\"name\"]!r}: no candidate binary matched consumer_binary_pattern {consumer_pattern!r} under {root}/', file=sys.stderr)
+                      sys.exit(1)
+                  print(f'consumer-binary={consumer_match}')
+              else:
+                  print('consumer-binary=')
           " >> "$GITHUB_OUTPUT"
 
       # Deliberately no continue-on-error here: check-target's own finalize
@@ -388,7 +404,7 @@ jobs:
           target-kind: ${{ matrix.target_kind || 'library' }}
           name: ${{ matrix.name }}
           baseline-target: ${{ matrix.baseline_target || '' }}
-          bundle-members: ${{ toJSON(matrix.bundle_members || []) }}
+          bundle-members: ${{ toJSON(matrix.bundle_members || fromJSON('[]')) }}
           profile: ${{ matrix.profile_id }}
           baseline-channel: ${{ matrix.baseline_channel }}
           baseline-path: 'baseline-sets/${{ matrix.baseline_channel }}'
@@ -400,7 +416,7 @@ jobs:
           evidence-producer: ${{ inputs.evidence-producer }}
           evidence-pack-path: ${{ inputs.evidence-pack-path }}
           new-library: ${{ steps.candidate.outputs.new-library }}
-          consumer-binary: ${{ matrix.target_kind == 'app-consumer' && steps.candidate.outputs.new-library || '' }}
+          consumer-binary: ${{ matrix.target_kind == 'app-consumer' && steps.candidate.outputs.consumer-binary || '' }}
           contract-file: ${{ matrix.target_kind == 'plugin-contract' && matrix.contract_file || '' }}
           header: ${{ inputs.header }}
           old-header: ${{ inputs.old-header }}
