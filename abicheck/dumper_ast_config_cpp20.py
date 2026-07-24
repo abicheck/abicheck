@@ -1616,6 +1616,17 @@ def _expand_with_quoted_includes(
     deliberately left alone above so a genuine include's own argument
     survives) so a ``#include "..."``-looking line trapped inside one
     (never a real directive) is never mistaken for one.
+
+    Continuations are spliced *before* comments are stripped, matching
+    genuine translation-phase order (phase 2 splicing precedes phase 3
+    comment recognition) -- Codex review, further round: a ``//`` line
+    comment ending in a trailing backslash extends over its continuation
+    too, so a ``// comment`` with a trailing backslash followed by
+    ``#include "cxx20.hpp"`` on the next physical line is really one
+    comment covering both lines, and the include inside it is never
+    live. Stripping comments first (only within one physical line,
+    unaware of the continuation) would instead
+    leave that second line looking like a live, unmasked directive.
     """
     seen: set[Path] = set()
     expanded: list[Path] = []
@@ -1634,6 +1645,13 @@ def _expand_with_quoted_includes(
             content = p.read_bytes()
         except OSError:
             continue
+        # Splice backslash-newline continuations first (Codex review):
+        # joins a directive spanning one, e.g. ``#include \`` followed by
+        # ``"concepts.hpp"`` on the next physical line, back onto a single
+        # physical line the pattern below can match -- and, done before
+        # comment stripping, correctly extends a ``//`` comment ending in
+        # a trailing backslash over its continuation line too.
+        content = re.sub(rb"\\\r?\n", b"", content)
         # Raw string literals only -- NOT ordinary string/char literals,
         # unlike the main scan's preprocessing pipeline: an ordinary
         # literal has the exact same lexical shape (a bare double-quote)
@@ -1653,11 +1671,6 @@ def _expand_with_quoted_includes(
             flags=re.DOTALL,
         )
         content = re.sub(rb"//[^\n]*", b"", content)
-        # Splice backslash-newline continuations (Codex review): joins a
-        # directive spanning one, e.g. ``#include \`` followed by
-        # ``"concepts.hpp"`` on the next physical line, back onto a single
-        # physical line the pattern below can match.
-        content = re.sub(rb"\\\r?\n", b"", content)
         reachable_content = _strip_inactive_if_zero_blocks(
             content, mask_cplusplus_defined_guards=for_language_mode_decision
         )

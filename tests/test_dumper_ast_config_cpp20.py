@@ -1621,3 +1621,24 @@ def test_cpp20_detector_ignores_include_like_text_inside_raw_string(tmp_path):
     assert _detect_cpp20_headers(headers) is False
     reqs = _find_cpp20_requirements(headers)
     assert reqs == []
+
+
+def test_cpp20_detector_ignores_include_inside_continued_line_comment(tmp_path):
+    """Regression (Codex review): a ``//`` line comment ending in a
+    trailing backslash extends over its continuation line too (real
+    translation-phase order splices continuations *before* comments are
+    recognized), so ``// comment \\`` followed by ``#include
+    "cxx20.hpp"`` on the next physical line is really one comment
+    covering both lines -- the include inside it is never live and must
+    not be followed."""
+    (tmp_path / "concepts_impl.hpp").write_text(
+        "template<class T> concept MyConcept = true;\n"
+    )
+    headers = _write(
+        tmp_path,
+        "umbrella.hpp",
+        '// comment \\\n#include "concepts_impl.hpp"\nint consteval;\n',
+    )
+    assert _detect_cpp20_headers(headers) is False
+    reqs = _find_cpp20_requirements(headers)
+    assert reqs == []
