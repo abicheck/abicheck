@@ -1028,6 +1028,17 @@ _PP_ELIF_CPLUSPLUS_GUARD_PATTERN = re.compile(
 _PP_IF_CPLUSPLUS_LESS_THAN_PATTERN = re.compile(
     rb"^[ \t]*#[ \t]*if[ \t]+__cplusplus[ \t]*<=?[ \t]*\d+L?[ \t]*$"
 )
+# Same fix, ``#elif`` spelling (Codex review, sixteenth round): a
+# less-than fallback can just as well be written as a later arm in a
+# chain that starts with a disabled/unrelated arm
+# (``#if 0 ... #elif __cplusplus < N ... #else ... #endif``). Treated
+# exactly like ``#elif 1``/``#elif true`` for masking purposes: it's the
+# trustworthy arm once reached, so it settles the chain the same way —
+# masked if an earlier arm already settled it, otherwise live with every
+# later sibling masked from here on.
+_PP_ELIF_CPLUSPLUS_LESS_THAN_PATTERN = re.compile(
+    rb"^[ \t]*#[ \t]*elif[ \t]+__cplusplus[ \t]*<=?[ \t]*\d+L?[ \t]*$"
+)
 # ``#if defined(__cplusplus)``/``#if defined __cplusplus`` (the
 # parenthesized *and* the equally-valid no-parens ``defined`` operator
 # spelling — Codex review, ninth round)/``#if __cplusplus`` (bare, no
@@ -1242,6 +1253,14 @@ def _strip_inactive_if_zero_blocks(content: bytes) -> bytes:
                 # exactly like the top level's unrecognized-chain
                 # pass-through.
                 out.append(line)
+                continue
+            if _PP_ELIF_CPLUSPLUS_LESS_THAN_PATTERN.match(line):
+                # Same inverted polarity as the #if-opening case, checked
+                # ahead of the general branch below since it would
+                # otherwise also match.
+                frame[1] = frame[2]
+                frame[2] = True
+                out.append(b"" if frame[1] else line)
                 continue
             if _PP_ELIF_ZERO_PATTERN.match(line) or (
                 _PP_ELIF_CPLUSPLUS_GUARD_PATTERN.match(line)

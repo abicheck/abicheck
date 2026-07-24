@@ -719,6 +719,55 @@ def test_cpp20_detector_ignores_construct_behind_less_equal_cplusplus_else(tmp_p
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_construct_behind_elif_less_than_cplusplus_else(
+    tmp_path,
+):
+    """Regression (Codex review, sixteenth round): the same inverted
+    ``__cplusplus < N`` polarity applies when the fallback is written as
+    a later ``#elif`` arm (after an earlier disabled arm), not just the
+    opening ``#if`` -- the general ``__cplusplus``-guard branch would
+    otherwise mask this pre-C++20 fallback and trust the circular
+    ``#else`` instead, forcing ``-std=gnu++20`` and breaking an unrelated
+    pre-C++20 use of the same word in the wrongly-masked-away fallback."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint disabled;\n#elif __cplusplus < 202002L\nint consteval;\n"
+        "#else\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_detects_construct_behind_elif_less_than_cplusplus_guard(
+    tmp_path,
+):
+    """Companion: a genuine C++20 construct written directly in the
+    ``#elif``-less-than (trusted) arm itself must still be detected."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint disabled;\n#elif __cplusplus < 202002L\nconsteval int f();\n"
+        "#else\nint old_style;\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "consteval-declaration" for r in reqs)
+
+
+def test_cpp20_detector_settles_on_elif_less_than_cplusplus(tmp_path):
+    """Companion: once an ``#elif __cplusplus < N`` arm is reached, it
+    settles the chain like ``#elif 1`` does -- a later sibling arm
+    (even one that would otherwise be trusted, like ``#elif 1``) stays
+    masked."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#if 0\nint disabled;\n#elif __cplusplus < 202002L\nint fallback;\n"
+        "#elif 1\nconsteval int f();\n#endif\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_settles_on_elif_defined_cplusplus(tmp_path):
     """Companion: an ``#elif defined(__cplusplus)`` arm, once reached, is
     just as definitely-true as ``#elif 1`` — it must settle the chain
