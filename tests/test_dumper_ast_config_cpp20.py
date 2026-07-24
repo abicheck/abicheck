@@ -1179,6 +1179,47 @@ def test_cpp20_detector_ignores_bare_auto_lambda_param(tmp_path):
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_detects_custom_concept_constrained_return_type(tmp_path):
+    """Regression (Codex review, seventeenth round): a constrained
+    placeholder *return type* using a project-defined concept
+    (``MyConcept auto f();``, the concept declared in an included
+    header) has the identical unambiguous decl-specifier-seq reasoning
+    as the parameter-position form, but the detector only ever checked
+    positions immediately after ``(``/``,`` -- a return type at the very
+    start of a declaration has neither, so the only C++20 signal in a
+    header using solely this form went undetected."""
+    headers = _write(tmp_path, "a.h", '#include "concepts.hpp"\nMyConcept auto f();\n')
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "custom-constrained-auto-parameter" for r in reqs)
+
+
+def test_cpp20_detector_detects_constrained_return_type_at_start_of_file(tmp_path):
+    """Companion: the return-type form at the very start of the scanned
+    content (no preceding code at all) must still be detected."""
+    headers = _write(tmp_path, "a.h", "MyConcept auto f();\n")
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_detects_constrained_return_type_after_statement(tmp_path):
+    """Companion: the return-type form reached after an earlier
+    statement on the same logical line (``;``-separated) must still be
+    detected -- the statement boundary, not just line start, is what
+    makes this position unambiguous."""
+    headers = _write(tmp_path, "a.h", "int x; MyConcept auto f();\n")
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_ignores_identifier_auto_without_statement_boundary(tmp_path):
+    """Companion: without a genuine statement boundary immediately
+    before the identifier, ``IDENTIFIER auto`` must not be treated as a
+    constrained return type -- this is not a valid declaration shape at
+    all, but the detector must fail closed (no false positive) rather
+    than guess."""
+    headers = _write(tmp_path, "a.h", "int x MyConcept auto f();\n")
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_ignores_type_name_before_auto_variable(tmp_path):
     """Companion: an identifier followed by ``auto`` must be at a
     parameter's start position (directly after ``(``/``,``) to count — an

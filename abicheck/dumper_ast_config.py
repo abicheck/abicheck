@@ -443,7 +443,9 @@ def _has_abbreviated_unconstrained_auto_param(lookahead: bytes) -> bool:
 _QUALIFIED_IDENTIFIER_TAIL_PATTERN = re.compile(rb"(?:[A-Za-z_]\w*::)*[A-Za-z_]\w*\Z")
 
 
-def _has_custom_constrained_auto_param(lookahead: bytes) -> bool:
+def _has_custom_constrained_auto_param(
+    lookahead: bytes, prev_nonblank_code: bytes = b""
+) -> bool:
     """True if *lookahead* contains an abbreviated function parameter
     constrained by a project-defined (non-``std::``) concept
     (``void f(MyConcept auto x);``) — Codex review. Unlike a bare
@@ -475,7 +477,20 @@ def _has_custom_constrained_auto_param(lookahead: bytes) -> bool:
     the same abbreviated-function-template treatment in C++20. Excluding
     lambda parameter lists here would silently miss the only C++20 signal
     in a header whose lone use of the feature is a constrained generic
-    lambda."""
+    lambda.
+
+    A constrained placeholder *return type* (``MyConcept auto f();``,
+    Codex review) gets the identical unambiguous decl-specifier-seq
+    reasoning — it counts whenever nothing but whitespace separates the
+    identifier from a genuine statement boundary: either earlier content
+    on the same logical line ending in ``;``/``{``/``}``, or (when the
+    identifier opens the line entirely) *prev_nonblank_code*'s last
+    non-blank code ending the same way, or no preceding code at all (the
+    very first declaration in the scanned content). *prev_nonblank_code*
+    defaults to empty for callers that don't track it (matching this
+    module's other lookahead-only helpers) — the return-type check simply
+    never fires for a caller that doesn't pass it, the same conservative
+    default as any other unattempted shape here."""
     for m in re.finditer(rb"\bauto\b", lookahead):
         prefix = _strip_trailing_declarator_specifiers(lookahead[: m.start()])
         prefix = _strip_trailing_attributes(prefix)
@@ -492,9 +507,24 @@ def _has_custom_constrained_auto_param(lookahead: bytes) -> bool:
             if open_pos is None:
                 continue
         else:
+            open_pos = None
+        if open_pos is not None:
+            if not _is_decltype_open_paren(lookahead, open_pos):
+                return True
             continue
-        if not _is_decltype_open_paren(lookahead, open_pos):
-            return True
+        # Not inside a parameter list at all — only a genuine statement
+        # boundary right before the identifier (on this line, or on the
+        # last preceding non-blank code when the identifier opens the
+        # line) makes this a declaration-start return-type position
+        # rather than some other expression context.
+        if before_ident:
+            if last not in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
+                continue
+        else:
+            prev = _strip_trailing_declarator_specifiers(prev_nonblank_code.rstrip())
+            if prev and prev[-1:] not in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
+                continue
+        return True
     return False
 
 
@@ -1463,7 +1493,7 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 found.append(
                     Cpp20Requirement("constrained-template-parameter", str(p), start_no)
                 )
-            elif _has_custom_constrained_auto_param(lookahead):
+            elif _has_custom_constrained_auto_param(lookahead, prev_nonblank_code):
                 found.append(
                     Cpp20Requirement(
                         "custom-constrained-auto-parameter", str(p), start_no
