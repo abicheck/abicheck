@@ -210,6 +210,8 @@ jobs:
       run-plan-artifact-name: ${{ inputs.run-plan-artifact-name }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       # `pip install .` on the preceding checkout installs whatever is at
       # the CALLER's own repository root -- fine when this workflow is
@@ -344,6 +346,8 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       # See the `plan` job's identical steps for the "install abicheck, not
       # the caller's own repo" rationale (and for the `job.workflow_ref`/
@@ -645,6 +649,8 @@ jobs:
       exit-code: ${{ steps.aggregate.outputs.exit-code }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       # See the `plan` job's identical steps for the "install abicheck, not
       # the caller's own repo" rationale (and for the `job.workflow_ref`/

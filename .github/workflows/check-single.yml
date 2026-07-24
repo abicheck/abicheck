@@ -267,6 +267,8 @@ jobs:
       report-path: ${{ steps.run.outputs.report-path }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       # ── Self-checkout for the nested check-target Action ────────────────
       # A relative `uses: ./x` step in THIS reusable workflow's own steps
