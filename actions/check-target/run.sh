@@ -63,7 +63,24 @@ ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 _slug() {
   printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'
 }
-REPORT_OUT="check-target-report-$(_slug "$NAME")-$(_slug "$PROFILE")-$(_slug "$BASELINE_CHANNEL")-$(_slug "$REQUESTED_DEPTH").json"
+# `tr -c` is lossy: name "a"/profile "b-c" and name "a-b"/profile "c" (same
+# channel/depth) both slug to "a-b-c" -- harmless for a single check-target
+# invocation writing its own report file, but check-project.yml downloads
+# every matrix cell's report into ONE shared flat directory with
+# merge-multiple: true (abicheck's own `collect_reports` globs `*.json`
+# non-recursively, so per-cell subdirectories aren't an option there), and
+# actions/download-artifact resolves a same-named file across separate
+# artifacts last-writer-wins -- two colliding identities would silently
+# overwrite one another's report before `aggregate` ever reads it (Codex
+# review). Append a short content hash of the *original*, unsanitized
+# identity tuple -- mirroring check-project.yml's own injective
+# artifact-name sanitizer -- so slugs that collapse under `tr` still produce
+# distinct filenames.
+_IDENTITY_DIGEST="$(
+  printf '%s\x1f%s\x1f%s\x1f%s' "$NAME" "$PROFILE" "$BASELINE_CHANNEL" "$REQUESTED_DEPTH" \
+    | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:12])'
+)"
+REPORT_OUT="check-target-report-$(_slug "$NAME")-$(_slug "$PROFILE")-$(_slug "$BASELINE_CHANNEL")-$(_slug "$REQUESTED_DEPTH")-${_IDENTITY_DIGEST}.json"
 
 # ── Decide which report_envelope.py mode this check needs ──────────────────
 MODE=""
