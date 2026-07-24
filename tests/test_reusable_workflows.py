@@ -27,6 +27,10 @@ pattern every nested ``uses: ./x`` step depends on.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +41,7 @@ WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 CHECK_SINGLE = WORKFLOWS_DIR / "check-single.yml"
 CHECK_PROJECT = WORKFLOWS_DIR / "check-project.yml"
 TEST_ACTION = WORKFLOWS_DIR / "test-action.yml"
+TEST_CHECK_PROJECT_FAILURE_PATH = WORKFLOWS_DIR / "test-check-project-failure-path.yml"
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -266,15 +271,20 @@ class TestCheckProjectArtifactNaming:
         """check_id is `target@profile#baseline_channel@depth` -- `#` in an
         artifact name is a documented, reproducible bug
         (actions/upload-artifact#473: causes an Authorization error), so the
-        raw check-id output must be sanitized before use, mirroring
-        check-target/run.sh's own `tr -c 'A-Za-z0-9._-' '_'` precedent for
-        its per-check report filename."""
+        raw check-id output must be sanitized before use. The sanitizer
+        keeps a readable prefix (collapsing disallowed characters to `_`,
+        mirroring check-target/run.sh's own `tr -c 'A-Za-z0-9._-' '_'`
+        precedent for its per-check report filename) but that alone is
+        lossy -- distinct check_ids can collapse to the same string (Codex
+        review) -- so a content-hash suffix of the original check_id is
+        appended to keep artifact names distinct."""
         data = _load(CHECK_PROJECT)
         steps = _steps(data["jobs"]["check"])
         sanitize = next(
             s for s in steps if s.get("name") == "Sanitize check-id for artifact name"
         )
-        assert "tr -c 'A-Za-z0-9._-' '_'" in sanitize["run"]
+        run = sanitize["run"]
+        assert "hashlib.sha256" in run
         assert sanitize["env"]["CHECK_ID"] == "${{ steps.run.outputs.check-id }}"
 
         upload = next(s for s in steps if s.get("name") == "Upload report")
@@ -285,6 +295,39 @@ class TestCheckProjectArtifactNaming:
             "the upload step must use the sanitized id, not the raw check-id "
             "(which can contain '#', a documented artifact-name bug trigger)"
         )
+
+    def test_sanitizer_disambiguates_check_ids_that_collide_under_the_readable_prefix(
+        self,
+    ) -> None:
+        """Extract the real sanitizer script and run it against the exact
+        collision Codex flagged: target `a`/profile `b_c` and target
+        `a_b`/profile `c` on the same channel/depth both collapse to the
+        same string once `@`/`#` become `_` -- the appended hash suffix
+        must still make the two artifact names distinct."""
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        sanitize = next(
+            s for s in steps if s.get("name") == "Sanitize check-id for artifact name"
+        )
+        script = sanitize["run"].split('python3 -c "', 1)[1].rsplit('"', 1)[0]
+
+        def sanitized_id(check_id: str) -> str:
+            with tempfile.TemporaryDirectory() as tmp:
+                output_path = Path(tmp) / "github_output"
+                output_path.write_text("")
+                env = {
+                    **os.environ,
+                    "CHECK_ID": check_id,
+                    "GITHUB_OUTPUT": str(output_path),
+                }
+                subprocess.run([sys.executable, "-c", script], env=env, check=True)
+                line = output_path.read_text().strip()
+                assert line.startswith("id=")
+                return line[len("id=") :]
+
+        first = sanitized_id("a@b_c#chan@headers")
+        second = sanitized_id("a_b@c#chan@headers")
+        assert first != second
 
     def test_sanitize_step_runs_before_upload_and_shares_its_always_condition(
         self,
@@ -366,22 +409,55 @@ class TestCheckProjectFixtureDoesNotFailTheRequiredWorkflow:
     """The test-check-project job group deliberately exercises an expected
     failure (a matrix cell whose baseline can never resolve) to prove the
     always()-conditioned aggregate job survives it -- but that means the
-    call to check-project.yml itself is *expected* to fail, and without
-    continue-on-error that expected failure would fail the whole required
-    `Test GitHub Action` workflow on every single run (Codex review)."""
+    call to check-project.yml itself is *expected* to fail. GitHub Actions
+    rejects `continue-on-error` on a job that calls a reusable workflow via
+    `uses:` (https://github.com/orgs/community/discussions/77915) -- an
+    earlier version of this fixture set it anyway, which made the whole
+    workflow file invalid and silently dropped every job in the run (0
+    scheduled jobs, conclusion failure, no parse-error surfaced by any of
+    the job-log-based CI checks). The fix is structural, not a flag: this
+    job group lives in its own, deliberately non-required workflow file
+    (`test-check-project-failure-path.yml`), separate from the required
+    `Test GitHub Action` workflow (`test-action.yml`)."""
 
-    def test_test_check_project_job_has_continue_on_error(self) -> None:
-        data = _load(TEST_ACTION)
+    def test_test_check_project_job_does_not_have_continue_on_error(self) -> None:
+        """continue-on-error is invalid on a `uses:` job -- GitHub Actions
+        rejects the whole workflow file if it's present here."""
+        data = _load(TEST_CHECK_PROJECT_FAILURE_PATH)
         job = data["jobs"]["test-check-project"]
-        assert job.get("continue-on-error") is True
-
-    def test_verify_job_does_not_have_continue_on_error(self) -> None:
-        """The verification job's own assertions must still fail the
-        workflow for real if they're wrong -- only the intentionally-
-        failing fixture call itself should be shielded."""
-        data = _load(TEST_ACTION)
-        job = data["jobs"]["test-check-project-verify"]
         assert "continue-on-error" not in job
+
+    def test_verify_job_runs_even_though_its_needs_job_is_expected_to_fail(
+        self,
+    ) -> None:
+        """Without continue-on-error to paper over the expected failure,
+        test-check-project-verify needs its own if: always() so a plain
+        `needs:`-skip doesn't skip the assertion that the failure was
+        reported *correctly* instead of silently dropped."""
+        data = _load(TEST_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["test-check-project-verify"]
+        assert job.get("if") == "always()"
+        assert "continue-on-error" not in job
+
+    def test_failure_path_jobs_are_not_in_the_required_test_action_workflow(
+        self,
+    ) -> None:
+        data = _load(TEST_ACTION)
+        assert "test-check-project" not in data["jobs"]
+        assert "test-check-project-stage" not in data["jobs"]
+        assert "test-check-project-verify" not in data["jobs"]
+
+    def test_test_action_no_longer_triggers_on_check_project_yml_changes(
+        self,
+    ) -> None:
+        """test-action.yml has no job left that exercises check-project.yml
+        -- its path filters should no longer list it (that live coverage
+        moved to test-check-project-failure-path.yml's own paths)."""
+        data = _load(TEST_ACTION)
+        pr_paths = data[True]["pull_request"]["paths"]
+        push_paths = data[True]["push"]["paths"]
+        assert ".github/workflows/check-project.yml" not in pr_paths
+        assert ".github/workflows/check-project.yml" not in push_paths
 
 
 class TestEveryCheckProjectJobInstallsAbicheckFromItsOwnSource:

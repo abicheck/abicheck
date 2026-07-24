@@ -248,12 +248,18 @@ jobs:
       # The composite-Action fix used `github.action_repository`/
       # `github.action_ref` (which describe the *Action* about to run).
       # Reusable workflows have their own equivalent for the *workflow*
-      # about to run: `job.workflow_ref`/`job.workflow_sha` (part of the
-      # `job` context, populated specifically so a reusable workflow can
-      # identify itself independent of the calling workflow's own
-      # `github.*` context). `job.workflow_ref` is always the fully
-      # qualified `owner/repo/.github/workflows/check-single.yml@ref` form,
-      # even for a same-repository `uses: ./.github/workflows/check-single.yml`
+      # about to run: `github.workflow_ref`/`github.workflow_sha` (part of
+      # the `github` context, added specifically so a reusable workflow can
+      # identify itself -- NOT `job.workflow_ref`/`job.workflow_sha`: the
+      # `job` context only exposes `container`/`services`/`status`, and an
+      # earlier version of this workflow used `job.*` here, which is an
+      # undefined-property access that resolves to empty at runtime rather
+      # than a syntax error, so it silently fell through to the fallback on
+      # every run (caught via `actionlint`, not by a failed CI run turning
+      # red -- the workflow parsed fine either way). `github.workflow_ref`
+      # is always the fully qualified
+      # `owner/repo/.github/workflows/check-single.yml@ref` form, even for
+      # a same-repository `uses: ./.github/workflows/check-single.yml`
       # caller -- unlike `github.action_repository`/`github.action_ref`,
       # which go empty for a local composite-Action reference. This
       # workflow still falls back to `github.repository`/`github.sha` if
@@ -265,8 +271,8 @@ jobs:
         id: identity
         shell: bash
         env:
-          WORKFLOW_REF: ${{ job.workflow_ref }}
-          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
           FALLBACK_REPOSITORY: ${{ github.repository }}
           FALLBACK_REF: ${{ github.sha }}
         run: |

@@ -1374,18 +1374,23 @@ have worked, exactly the blind spot that let the original `check-target` bug
 ship unnoticed. **Fixed the same way**, adapted to the reusable-workflow
 context: `check-target`'s fix reads `github.action_repository`/
 `github.action_ref` (which describe the composite *Action* about to run);
-the reusable-workflow equivalent is `job.workflow_ref`/`job.workflow_sha`
-(part of the `job` context, populated specifically so a reusable workflow
-can identify itself independent of the calling workflow's own `github.*`
-context — always the fully-qualified `owner/repo/.github/workflows/
-name.yml@ref` form). Both workflows capture this identity in a first
-`run:` step (mirroring `check-target`'s own "capture before any nested
-`uses:` step overwrites it" ordering, though `job.workflow_ref`/
-`workflow_sha` describe the whole job rather than "whichever action is
-about to run," so they are not actually subject to check-target's specific
-third-bug per-step-flip issue — captured early anyway for defense in depth
-and pattern consistency), then checks out that repository/ref into a side
-directory before any nested `uses:` step, falling back to
+the reusable-workflow equivalent is `github.workflow_ref`/
+`github.workflow_sha` (part of the `github` context, added specifically so
+a reusable workflow can identify itself — always the fully-qualified
+`owner/repo/.github/workflows/name.yml@ref` form). **This page originally
+claimed the equivalent was `job.workflow_ref`/`job.workflow_sha` (the `job`
+context); that was wrong, corrected below in the round-3 addendum** — the
+`job` context only exposes `container`/`services`/`status`, so the original
+code silently read as empty at runtime and fell through to the fallback
+branch on every single run, never actually exercising the primary
+`workflow_ref` path it was written for. Both workflows capture this
+identity in a first `run:` step (mirroring `check-target`'s own "capture
+before any nested `uses:` step overwrites it" ordering, though
+`workflow_ref`/`workflow_sha` describe the whole job rather than "whichever
+action is about to run," so they are not actually subject to check-target's
+specific third-bug per-step-flip issue — captured early anyway for defense
+in depth and pattern consistency), then checks out that repository/ref into
+a side directory before any nested `uses:` step, falling back to
 `github.repository`/`github.sha` if `workflow_ref` is ever empty (matching
 `check-target`'s own defense-in-depth pattern for the local-same-repository
 case). **Honesty note, since this is exactly the kind of design decision
@@ -1394,14 +1399,14 @@ mechanism could not be verified against a real external-consumer run in
 this session** — no second repository was available to test cross-repo
 reusable-workflow consumption end to end, only same-repository invocation
 (`test-action.yml`'s own `uses: ./.github/workflows/check-project.yml`,
-where `job.workflow_ref`/`job.workflow_sha` resolve to this same repository
-regardless of whether the fallback branch is ever exercised — so this run
-cannot distinguish "the primary branch worked" from "the fallback saved it"
-the way check-target's own three-round bug history needed a real cross-repo
-run to surface). Treat this as reviewed-but-unverified until a real
-external-consumer run confirms it, the same caveat this plan already gives
-S14 bundle-scoped resolution and other "defines the contract, no producer
-yet" gaps.
+where `github.workflow_ref`/`github.workflow_sha` resolve to this same
+repository regardless of whether the fallback branch is ever exercised —
+so this run cannot distinguish "the primary branch worked" from "the
+fallback saved it" the way check-target's own three-round bug history
+needed a real cross-repo run to surface). Treat this as
+reviewed-but-unverified until a real external-consumer run confirms it, the
+same caveat this plan already gives S14 bundle-scoped resolution and other
+"defines the contract, no producer yet" gaps.
 
 **Required fixture-workflow test — implemented as specified, not skipped.**
 This plan's own text requires a fixture "that deliberately fails one matrix
@@ -1487,15 +1492,15 @@ issues, all fixed in one follow-up commit:**
   whole required `Test GitHub Action` workflow.** The fixture (above)
   deliberately makes `check-project.yml`'s own `aggregate` job exit
   non-zero — that is the behavior under test. But `test-check-project`
-  calls `check-project.yml` directly via `uses:`, so without
-  `continue-on-error: true` on that job, its expected failure was already
-  enough to fail the entire `Test GitHub Action` run before
+  calls `check-project.yml` directly via `uses:`, so its expected failure
+  was already enough to fail the entire `Test GitHub Action` run before
   `test-check-project-verify` ever got to confirm the failure was reported
-  *correctly* — turning a fixture meant to prove a real-failure scenario
-  survives correctly into a workflow that is red on every single run by
-  design. Fixed by adding `continue-on-error: true` to `test-check-project`
-  only (`test-check-project-verify` deliberately keeps none, so a genuinely
-  wrong assertion there still fails the workflow for real).
+  *correctly*. **This bullet's original fix — adding `continue-on-error:
+  true` to `test-check-project` — was itself wrong and is corrected in the
+  round-3 addendum below**: GitHub Actions does not allow
+  `continue-on-error` on a job that calls a reusable workflow via `uses:`
+  at all, so that "fix" made the whole workflow *file* invalid rather than
+  making the one job's failure non-blocking.
 
 A separate, superficially alarming P1 finding from the same review round —
 that the `python3 -c "..."` heredoc blocks in `check-project.yml`'s
@@ -1532,9 +1537,9 @@ two more real issues, both fixed in one follow-up commit:**
   `check` job's own nested-Action self-checkout (and, before it,
   `check-target`'s own P1.3 fix) already exists to close, just not yet
   applied to the plain `pip install` step itself. Fixed: added the same
-  "capture `job.workflow_ref`/`job.workflow_sha` identity, self-checkout
-  into `.check-project-src`" steps to `plan` and `aggregate` (the `check`
-  job already had them, for its own nested `uses:` step — just reordered
+  "capture `github.workflow_ref`/`github.workflow_sha` identity,
+  self-checkout into `.check-project-src`" steps to `plan` and `aggregate`
+  (the `check` job already had them, for its own nested `uses:` step — just reordered
   so they run *before* `Install abicheck` instead of after) and changed
   every job's install command to `pip install ./.check-project-src`.
 - **The candidate-binary glob resolver silently picked `matches[0]` on an
@@ -1556,6 +1561,79 @@ exit 1 with both paths named in the error) the same way the array-literal
 and app-consumer fixes from the first review round were hand-verified
 before relying on structural assertions alone.
 
+**A third round, self-caught (not from external review): both fixes above
+that touched `job.workflow_ref`/`continue-on-error` were themselves wrong,
+and the workflow silently kept resolving to zero scheduled jobs across both
+"fixed" commits.** After the array-literal and app-consumer fixes landed,
+`test-action.yml`'s own CI run for that commit still showed
+`list_workflow_jobs` returning `{"total_count": 0}` with the run's
+top-level `conclusion` already `failure` — the exact zero-jobs signature
+the array-literal bug produced, now persisting through a commit that had
+supposedly fixed it. The `pip install ./.check-project-src` follow-up
+commit (second review round, above) didn't change that signature either.
+Neither GitHub's job-log-based CI checks nor the run's own API surface a
+human-readable parse-error message for this failure mode, so it took
+installing `actionlint` (rhysd/actionlint, a static checker for the actual
+GitHub Actions workflow schema — beyond what plain YAML-syntax validation
+via `yaml.safe_load()` catches) locally and running it against all three
+files to find the real causes:
+
+- **`continue-on-error: true` on `test-check-project` — the fix from the
+  first review round — is not valid on a job that calls a reusable
+  workflow via `uses:`.** GitHub Actions restricts such a job to `name`,
+  `uses`, `with`, `secrets`, `needs`, `if`, and `permissions` only (also
+  confirmed via GitHub Community Discussion #77915, "Cannot use
+  continue-on-error in a job that uses a reusable workflow" — an
+  acknowledged, still-open platform limitation, not a mistake specific to
+  this workflow). Any other key present makes the **entire workflow file**
+  invalid, which GitHub reports as a run with `conclusion: failure` and
+  zero scheduled jobs — indistinguishable, from the job-log tooling used
+  in the first two rounds, from the array-literal expression-syntax
+  failure it was chasing. There is no way to make a `uses:`-calling job's
+  failure non-blocking to the rest of the workflow short of not letting it
+  fail the *same* workflow run at all. **Fixed structurally, not with a
+  flag:** moved `test-check-project-stage` → `test-check-project` →
+  `test-check-project-verify` out of `test-action.yml` into a new,
+  dedicated `.github/workflows/test-check-project-failure-path.yml`, whose
+  header explicitly documents that this workflow's own run conclusion is
+  *expected* to read "failure" on every successful test run (the real
+  signal is `test-check-project-verify` succeeding, which now needs its
+  own `if: always()` since nothing shields it from its `needs:` job's
+  real, unshielded failure) — and that this workflow must not be added to
+  branch protection's required checks, only `test-action.yml` is. Removed
+  `.github/workflows/check-project.yml` from `test-action.yml`'s own
+  trigger `paths:` (no job there exercises it any more).
+- **`job.workflow_ref`/`job.workflow_sha` (all four occurrences: one in
+  `check-single.yml`, three in `check-project.yml`) do not exist — the
+  correct context is `github.workflow_ref`/`github.workflow_sha`,
+  corrected above at both original call sites.** The `job` context only
+  exposes `container`/`services`/`status` (confirmed both via `actionlint`
+  flagging every occurrence as an undefined-property expression error, and
+  independently via a fresh web search after the first, unverified pass
+  of research that originated this claim). Unlike the `continue-on-error`
+  bug, this one is **not** what caused the zero-jobs failures — accessing
+  an undefined context property evaluates to empty at runtime rather than
+  a schema violation, so every affected step was silently falling through
+  to its `github.repository`/`github.sha` fallback branch on every run
+  without ever failing loud. Still a real, worth-fixing bug: the fallback
+  makes the self-checkout technique work by coincidence for a
+  same-repository caller (exactly `test-action.yml`'s own case, so nothing
+  about this PR's own CI could have caught it either way) but would silently
+  point every external consumer's self-checkout at the *caller's* own
+  repository instead of abicheck's, defeating the entire point of the
+  self-checkout fix from earlier in P1.4.
+
+`tests/test_reusable_workflows.py`'s `TestCheckProjectFixtureDoesNotFailTheRequiredWorkflow`
+class (previously pinning the wrong `continue-on-error` fix) now asserts
+the corrected shape instead: `test-check-project` carries no
+`continue-on-error` key at all, `test-check-project-verify` carries
+`if: always()`, none of the three jobs remain in `test-action.yml`, and
+`test-action.yml`'s own trigger `paths:` no longer names
+`check-project.yml` (41 cases total in that file now). Re-ran `actionlint`
+against every file under `.github/workflows/` after these fixes — clean,
+zero findings — the verification step the first two rounds lacked and
+should have used from the start.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —
@@ -1564,7 +1642,8 @@ project-wide value for each; a project needing different policy/suppression
 per target must currently split across multiple `check-project.yml` calls.
 `run-plan.json`'s schema would need to grow per-cell override fields to lift
 this, deferred to a later iteration rather than expanding this item's scope
-further. `tests/test_reusable_workflows.py` (25 cases) covers the structural
+further. `tests/test_reusable_workflows.py` (41 cases, after the round-3
+fixes above) covers the structural
 assertions both workflows' own step orchestration needs (the always()
 placements, step ordering, matrix wiring, artifact-naming/sanitization
 conventions, self-checkout pattern) — the same "needs a real runner to exercise
