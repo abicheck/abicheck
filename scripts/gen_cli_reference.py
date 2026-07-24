@@ -109,10 +109,14 @@ def _option_row(param: Any) -> str:
     # implicit default — `()` for a `multiple=True` option, `None` otherwise)
     # as an internal sentinel enum rather than the resolved value; surfacing
     # its repr (`Sentinel.UNSET`) would be a Click implementation detail
-    # leaking into a user-facing reference, not a real default.
+    # leaking into a user-facing reference, not a real default. `False` is
+    # NOT suppressed here (unlike None/()): a solo boolean flag like
+    # `--show-impact` has a real, meaningful default of False, and hiding it
+    # behind the same "—" used for no-default-at-all would make a disabled-
+    # by-default flag indistinguishable from one with no default.
     is_unset = type(default).__name__ == "Sentinel"
     default_str = "—"
-    if not is_unset and default is not None and default != () and default is not False:
+    if not is_unset and default is not None and default != ():
         default_str = f"`{_default_str(default)}`"
     required = "yes" if param.required else "no"
     return f"| {opts} | {required} | {default_str} | {_help_with_choices(param)} |"

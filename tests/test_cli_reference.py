@@ -118,6 +118,25 @@ def test_hidden_options_are_excluded_from_generated_reference():
     assert "--header-graph" not in content
 
 
+def test_option_row_shows_a_real_false_default_not_a_blank():
+    # compare's --show-impact is a solo boolean flag defaulting to False --
+    # that's a real, meaningful default, not "no default given". Rendering
+    # it as "—" (the same marker used for a genuinely absent default) makes
+    # a disabled-by-default flag indistinguishable from one with no default.
+    gen = _load_gen()
+
+    class _FakeParam:
+        opts = ["--show-impact"]
+        secondary_opts = []
+        default = False
+        required = False
+        help = "Show impact analysis."
+        type = None
+
+    row = gen._option_row(_FakeParam())
+    assert "| `--show-impact` | no | `False` | Show impact analysis. |" == row
+
+
 def test_option_row_hides_click_internal_unset_sentinel():
     gen = _load_gen()
 

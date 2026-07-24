@@ -10,7 +10,7 @@ Options available directly on `abicheck`, before any subcommand (shown by `pytho
 
 | Option | Required | Default | Description |
 |---|:--:|---|---|
-| `--version` | no | — | Show the version and exit. |
+| `--version` | no | `False` | Show the version and exit. |
 
 ## `aggregate`
 
@@ -29,13 +29,13 @@ Aggregate per-target ABI reports in REPORTS_DIR into one CI gate verdict.
 | `--manifest` | no | — | Expected-target manifest (JSON: {"targets": [{"id", "required"}]}). The single source of truth for which targets the matrix must produce — generate it in the plan job and feed the same file to both the matrix and this gate so they never drift. |
 | `--expect` | no | — | Required target id(s), as an alternative to --manifest (repeatable / comma-separated). A required target with no report is unavailable and fails the coverage gate — never treated as compatible. |
 | `--optional` | no | — | Optional target id(s) (used with --expect): analyzed when present, but a missing one never fails the coverage gate. |
-| `--discovered-only` | no | — | Explicitly aggregate whatever reports are present, with NO coverage gate. Required to run without a manifest/--expect — because with no declared target set the gate cannot tell a missing required target from an intentionally absent one. |
+| `--discovered-only` | no | `False` | Explicitly aggregate whatever reports are present, with NO coverage gate. Required to run without a manifest/--expect — because with no declared target set the gate cannot tell a missing required target from an intentionally absent one. |
 | `--report-prefix` | no | `abi-report-` | Filename prefix stripped when deriving a target id from a report file that does not self-identify a 'target_id' (e.g. 'abi-report-linux.json' -> 'linux'). |
 | `--on-missing-required` | no | `fail` | How an unavailable required target affects the exit code: 'fail' makes incomplete required coverage a gate failure (exit 1); 'warn' reports the gap but lets the per-target gate decisions alone decide. Choices: `fail`, `warn`. |
 | `--on-unexpected-target` | no | `include` | How a report for a target not in the expected set is handled: 'include' counts its real findings in the gate (but not in coverage); 'warn' surfaces it without gating; 'fail' fails the gate on any such target; 'ignore' drops it. Choices: `include`, `warn`, `fail`, `ignore`. |
 | `--format` | no | `text` | Output format for the aggregated result. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
-| `--verbose`, `-v` | no | — | Enable verbose/debug output. |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
 ## `build-output`
 
@@ -57,7 +57,7 @@ Validate DIRECTORY's build-output.json (ADR-047 §11.1).
 |---|:--:|---|---|
 | `--format` | no | `text` | Output format for the validation report. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
-| `--verbose`, `-v` | no | — | Enable verbose/debug output. |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
 ## `compare`
 
@@ -74,31 +74,31 @@ Compare two ABI surfaces and report changes.
 
 | Option | Required | Default | Description |
 |---|:--:|---|---|
-| `--help` | no | — | Show common options and exit. Use --help-all to see every option. |
-| `--help-all` | no | — | Show every option, including advanced/less-common ones. |
+| `--help` | no | `False` | Show common options and exit. Use --help-all to see every option. |
+| `--help-all` | no | `False` | Show every option, including advanced/less-common ones. |
 | `--jobs`, `-j` | no | `0` | Parallel library comparisons for directory/package inputs (0 = auto-detect CPU count, the default). |
-| `--dso-only` | no | — | Only compare shared objects, skip executables (directory/package inputs only). |
+| `--dso-only` | no | `False` | Only compare shared objects, skip executables (directory/package inputs only). |
 | `--output-dir` | no | — | Directory to write per-library reports (directory/package inputs only). |
-| `--fail-on-removed-library`, `--no-fail-on-removed-library` | no | — | Exit 8 when a library present in old_dir is absent in new_dir. (directory/package inputs only) |
+| `--fail-on-removed-library`, `--no-fail-on-removed-library` | no | `False` | Exit 8 when a library present in old_dir is absent in new_dir. (directory/package inputs only) |
 | `--debug-info` | no | — | Debug info package (RPM/Deb/tar), scoped per side with an 'old='/'new=' prefix (e.g. --debug-info old=a-dbg.rpm --debug-info new=b-dbg.rpm). Directory/package inputs only (ADR-040). |
 | `--devel-pkg` | no | — | Development package with headers, scoped per side with an 'old='/'new=' prefix (e.g. --devel-pkg old=a-dev.rpm --devel-pkg new=b-dev.rpm). Directory/package inputs only (ADR-040). |
-| `--include-private-dso` | no | — | Include private (non-public) shared objects from non-standard paths. (directory/package inputs only) |
-| `--keep-extracted` | no | — | Keep extracted temporary files for debugging. (directory/package inputs only) |
+| `--include-private-dso` | no | `False` | Include private (non-public) shared objects from non-standard paths. (directory/package inputs only) |
+| `--keep-extracted` | no | `False` | Keep extracted temporary files for debugging. (directory/package inputs only) |
 | `--manifest` | no | — | ABI instantiation manifest (YAML/JSON) listing symbols the release publicly promises (ADR-023). (directory/package inputs only) |
 | `--bundle-system-providers` | no | `` | Comma-separated extra sonames to treat as system-provided (extends the built-in libc/libstdc++/libgcc/libtbb allow-list). (directory/package inputs only) |
 | `--bundle-cohort` | no | — | Declare a co-versioned library cohort by name prefix (e.g. 'libfoo_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check. (directory/package inputs only) |
-| `--no-bundle-analysis` | no | — | Skip bundle-level cross-library analysis (debug/parity escape hatch). Bundle findings catch intra-bundle symbol removals, signature drift across DSO boundaries, type drift across siblings, provider migration, and manifest mismatches. (directory/package inputs only) |
+| `--no-bundle-analysis` | no | `False` | Skip bundle-level cross-library analysis (debug/parity escape hatch). Bundle findings catch intra-bundle symbol removals, signature drift across DSO boundaries, type drift across siblings, provider migration, and manifest mismatches. (directory/package inputs only) |
 | `--header`, `-H` | no | — | Public header file or directory. Applies to both sides; scope to one side with an 'old='/'new=' prefix, repeating the flag per side (e.g. --header old=v1/foo.h --header new=v2/foo.h). Repeatable (ADR-040). Recommended for full ABI analysis; without headers, native binaries fall back to symbols-only mode. Scopes the ABI surface to declarations in these headers for ELF; on PE/Mach-O scoping is best-effort and falls back to the export table when castxml is unavailable or names don't match (e.g. MSVC C++ mangling). Validated for native binaries; ignored for snapshots. |
 | `--include`, `-I` | no | — | Extra include directory for castxml. Applies to both sides; scope to one side with an 'old='/'new=' prefix, repeating the flag per side (e.g. --include old=inc1 --include new=inc2). Repeatable (ADR-040). |
 | `--version` | no | — | Version label used when an input is a bare .so file. Scope to one side with an 'old='/'new=' prefix, repeating the flag per side (e.g. --version old=1.0 --version new=2.0); a bare value applies to both. Defaults: old side 'old', new side 'new' (ADR-040). |
 | `--ast-frontend` | no | `auto` | C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) or clang (-ast-dump=json; for hosts where castxml is absent or its bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges them (dumper_hybrid.merge_snapshots) — needs both tools installed and costs roughly 2x a single-backend dump; never selected by auto. auto resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and never changes producer unless --allow-ast-frontend-fallback (or ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set. Env: ABICHECK_AST_FRONTEND. Choices: `auto`, `castxml`, `clang`, `hybrid`. |
-| `--allow-ast-frontend-fallback` | no | — | Allow auto-selected CastXML to fall back to Clang for a recognized toolchain mismatch or direct-include guard. Disabled by default because the frontends can produce materially different findings. |
+| `--allow-ast-frontend-fallback` | no | `False` | Allow auto-selected CastXML to fall back to Clang for a recognized toolchain mismatch or direct-include guard. Disabled by default because the frontends can produce materially different findings. |
 | `--gcc-path` | no | — | Path to a GCC/G++ (or clang) cross-compiler binary. |
 | `--gcc-prefix` | no | — | Cross-toolchain prefix (e.g. aarch64-linux-gnu-). |
 | `--gcc-options` | no | — | Extra compiler flags passed through to the header frontend (split on whitespace). For a flag whose value contains spaces use --gcc-option. |
 | `--gcc-option` | no | — | A single extra compiler flag passed to the header frontend verbatim (repeatable; not whitespace-split). Use two for a flag + spaced value, e.g. --gcc-option=-include --gcc-option='some header.h'. |
 | `--sysroot` | no | — | Alternative system root directory for header resolution. |
-| `--nostdinc`, `--no-nostdinc` | no | — | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
+| `--nostdinc`, `--no-nostdinc` | no | `False` | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
 | `--lang` | no | `c++` | Language mode for the header backend. Choices: `c++`, `c`. |
 | `--old-ast-frontend` | no | — | C/C++ AST frontend for the old side only (overrides --ast-frontend for old). Use when the old release parses on castxml but the new one needs clang (or vice versa). Choices: `auto`, `castxml`, `clang`, `hybrid`. |
 | `--new-ast-frontend` | no | — | C/C++ AST frontend for the new side only (overrides --ast-frontend for new). Choices: `auto`, `castxml`, `clang`, `hybrid`. |
@@ -112,38 +112,38 @@ Compare two ABI surfaces and report changes.
 | `--suppress` | no | — | Suppression file (YAML) to filter known/intentional changes. |
 | `--pdb-path` | no | — | Explicit PDB file path for Windows PE debug info. Applies to both sides; scope to one with an 'old='/'new=' prefix, repeating the flag per side (e.g. --pdb-path old=a.pdb --pdb-path new=b.pdb). Overrides automatic PDB discovery (ADR-040). |
 | `--used-by` | no | — | Application binary whose actual imports/required symbol versions scope the comparison (repeatable; folds `appcompat`). The full library comparison still runs once; the worst app-scoped result becomes the primary verdict/exit code, with the full verdict and unrelated changes kept as informational context. OLD/NEW may be real library binaries or JSON snapshots carrying binary evidence (a `dump` of a real library, not headers-only). Mutually exclusive with --required-symbol/--required-symbols. |
-| `--verify-runtime` | no | — | With --used-by: actually run each consumer binary once against the OLD library and once against the NEW one (LD_BIND_NOW=1), recording a consumer_runtime_load_failed RISK finding when the dynamic linker itself reports an undefined symbol against the new library after loading cleanly against the old one (ADR-044 P2 item 2). A dynamic corroborating signal alongside the static scanner, never a replacement for it. Requires OLD/NEW to be real library binaries (not JSON snapshots) and is Linux-only; a no-op elsewhere. Ignored without --used-by. |
+| `--verify-runtime` | no | `False` | With --used-by: actually run each consumer binary once against the OLD library and once against the NEW one (LD_BIND_NOW=1), recording a consumer_runtime_load_failed RISK finding when the dynamic linker itself reports an undefined symbol against the new library after loading cleanly against the old one (ADR-044 P2 item 2). A dynamic corroborating signal alongside the static scanner, never a replacement for it. Requires OLD/NEW to be real library binaries (not JSON snapshots) and is Linux-only; a no-op elsewhere. Ignored without --used-by. |
 | `--required-symbol` | no | — | An exported linker symbol a plugin host resolves via dlopen/dlsym and requires (repeatable; folds `plugin-check`). Scopes the comparison to this explicit entrypoint contract instead of the full diff. Mutually exclusive with --used-by. |
 | `--required-symbols` | no | — | File of required symbols, one per line (blank lines and '#' comments ignored). Combined with any --required-symbol values. |
 | `--severity-preset` | no | — | Severity preset: 'default', 'strict', or 'info-only'. Controls exit codes and report labels. Per-category --severity-* options override the chosen preset. Choices: `default`, `strict`, `info-only`. |
 | `--config` | no | — | Path to the project .abicheck.yml (ADR-037 D4). Default: the nearest .abicheck.yml found from the current directory upward. Supplies stable project settings (severity map, scope/FP tuning, suppression policy, exit-code scheme); CLI flags override it. |
 | `--exit-code-scheme` | no | — | Exit-code scheme (ADR-037 D12): 'legacy' (0/2/4 verdict), 'severity' (per-category error levels), or 'auto' (severity when a severity setting is in effect, else legacy). Declared explicitly here so passing --severity-* no longer silently changes the scheme. Default: config's exit_code_scheme, else auto. Choices: `auto`, `legacy`, `severity`. |
-| `--follow-deps` | no | — | Resolve transitive dependencies for both old and new, compute symbol bindings, and include a dependency-change section in the report. ELF only. |
+| `--follow-deps` | no | `False` | Resolve transitive dependencies for both old and new, compute symbol bindings, and include a dependency-change section in the report. ELF only. |
 | `--search-path` | no | — | Additional directory to search for shared libraries (with --follow-deps). |
 | `--ld-library-path` | no | `` | Simulated LD_LIBRARY_PATH (with --follow-deps). |
 | `--scope-public-headers`, `--no-scope-public-headers` | no | `True` | Restrict findings to the public-header ABI surface (ADR-024): changes to symbols/types not reachable from public-header-declared exported API are recorded as filtered, not reported. Internal-type leaks are never hidden. On by default; use --no-scope-public-headers to report every finding regardless of surface. |
-| `--show-filtered` | no | — | List findings excluded by --scope-public-headers (audit trail). |
+| `--show-filtered` | no | `False` | List findings excluded by --scope-public-headers (audit trail). |
 | `--post-manifest` | no | — | Scope the comparison to a POST Python export manifest's committed ABI surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; private __pp_* kernel churn and other non-committed exports are demoted to the filtered ledger (see --show-filtered). |
 | `--probe-matrix` | no | — | Build-configuration matrix snapshot, scoped per side with an 'old='/'new=' prefix (e.g. --probe-matrix old=m1 --probe-matrix new=m2). With both sides given, build-config findings (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, BEHAVIOURAL_DEFAULT_CHANGED) are folded into this comparison's verdict and report (G2: probe -> compare; ADR-040). |
 | `--show-only` | no | — | Comma-separated filter tokens to limit displayed changes. Severity: breaking, api-break, risk, compatible. Element: functions, variables, types, enums, elf. Action: added, removed, changed. AND across dimensions, OR within. Does not affect exit codes. |
-| `--stat` | no | — | One-line summary output for CI gates. With --format json, emits only the summary object. |
+| `--stat` | no | `False` | One-line summary output for CI gates. With --format json, emits only the summary object. |
 | `--report-mode` | no | `full` | Report mode: 'full' lists all changes individually (default), 'leaf' groups by root type changes with impact lists, 'impact' behaves as 'full' with the impact summary table enabled (equivalent to --report-mode full --show-impact). Choices: `full`, `leaf`, `impact`. |
-| `--show-impact` | no | — | Append an impact summary table showing root changes and affected interfaces. |
-| `--recommend` | no | — | Append a release recommendation (semver bump + SONAME action) to the report. Always present in --format json under 'release_recommendation'. |
-| `--annotate` | no | — | Emit GitHub Actions workflow command annotations to stderr. Annotations appear as inline comments on PR diffs. Only effective when GITHUB_ACTIONS=true. |
-| `--annotate-additions` | no | — | Include additions/compatible changes as ::notice annotations (requires --annotate). |
+| `--show-impact` | no | `False` | Append an impact summary table showing root changes and affected interfaces. |
+| `--recommend` | no | `False` | Append a release recommendation (semver bump + SONAME action) to the report. Always present in --format json under 'release_recommendation'. |
+| `--annotate` | no | `False` | Emit GitHub Actions workflow command annotations to stderr. Annotations appear as inline comments on PR diffs. Only effective when GITHUB_ACTIONS=true. |
+| `--annotate-additions` | no | `False` | Include additions/compatible changes as ::notice annotations (requires --annotate). |
 | `--debug-root` | no | — | Directory containing separate debug files (build-id trees, path-mirror, dSYM bundles). Applies to both sides; scope to one with an 'old='/'new=' prefix, repeating the flag per side (e.g. --debug-root old=dbg1 --debug-root new=dbg2). Repeatable (ADR-040). |
 | `--build-info` | no | — | Out-of-band build context: a build dir, a compile_commands.json, or a pack, overriding embedded. Applies to both sides; scope to one with an 'old='/'new=' prefix, repeating the flag per side (e.g. --build-info old=b1 --build-info new=b2) (ADR-040). |
 | `--sources` | no | — | Source checkout for --depth build/source (collected inline, embedding build/source/graph facts) or a pre-built `collect` pack, overriding embedded. Applies to both sides; scope to one with an 'old='/'new=' prefix, repeating the flag per side (e.g. --sources old=src_v1 --sources new=src_v2) (ADR-040). |
 | `--depth` | no | — | Evidence-depth dial: binary=symbols only, headers=+header AST (default), build=+build context, source=+source replay & call graph. Deeper-than-headers needs --sources or --build-info. |
-| `--pattern-verdicts`, `--no-pattern-verdicts` | no | — | Modulate verdicts with idiom/anti-pattern evidence (ADR-027): demote opaque-pointer/PIMPL-hidden layout changes (header-aware only) and raise breaks when an opacity/handle guarantee is lost. Disclosed in the pattern_modulations ledger; reversible. |
-| `--explain-patterns` | no | — | Print idiom evidence behind each modulation (implies --pattern-verdicts). |
-| `--surface-metrics` | no | — | Emit aggregate public-surface metric drift (ADR-027): public_surface_grew/shrank, undocumented_export_ratio_increased. Informational (COMPATIBLE). |
+| `--pattern-verdicts`, `--no-pattern-verdicts` | no | `False` | Modulate verdicts with idiom/anti-pattern evidence (ADR-027): demote opaque-pointer/PIMPL-hidden layout changes (header-aware only) and raise breaks when an opacity/handle guarantee is lost. Disclosed in the pattern_modulations ledger; reversible. |
+| `--explain-patterns` | no | `False` | Print idiom evidence behind each modulation (implies --pattern-verdicts). |
+| `--surface-metrics` | no | `False` | Emit aggregate public-surface metric drift (ADR-027): public_surface_grew/shrank, undocumented_export_ratio_increased. Informational (COMPATIBLE). |
 | `--env-matrix` | no | — | Environment-matrix YAML declaring deployment constraints (ADR-020b). With runtime_floors (e.g. 'runtime_floors: {GLIBC: "2.28"}'), a new symbol-version requirement is judged against the declared floor: at/below it -> compatible, above it -> breaking, instead of the default deployment-risk verdict. |
 | `--profile` | no | — | Run-profile preset bundling workflow defaults (ADR-040): 'ci-gate' (headers depth, review digest, severity exit codes), 'release-cut' (source depth, recommendation, Markdown -- the 'should I bump semver?' flow; distinct from directory/package 'release' comparisons, which this profile does not apply to), 'quick' (symbols-only, one-line summary). Explicit flags override the profile; single-pair compares only (configure release defaults in .abicheck.yml). Choices: `ci-gate`, `release-cut`, `quick`. |
-| `--reconcile-build-context` | no | — | Clear context-free header-parse false positives using the build's active preprocessor defines (ADR-039): a conditional field's phantom add/remove/size change the build proves never happened is moved to an audit bucket instead of the verdict. No-op unless snapshots carry build_context_defines + per-field guards. |
-| `--dry-run` | no | — | Resolve and validate the invocation -- classify inputs, resolve depth/scope, show tool/config resolution -- and print a report without running the diff. Writes nothing; incompatible with -o/--output. |
-| `--verbose`, `-v` | no | — | Enable verbose/debug output. |
+| `--reconcile-build-context` | no | `False` | Clear context-free header-parse false positives using the build's active preprocessor defines (ADR-039): a conditional field's phantom add/remove/size change the build proves never happened is moved to an audit bucket instead of the verdict. No-op unless snapshots carry build_context_defines + per-field guards. |
+| `--dry-run` | no | `False` | Resolve and validate the invocation -- classify inputs, resolve depth/scope, show tool/config resolution -- and print a report without running the diff. Writes nothing; incompatible with -o/--output. |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
 ## `compat`
 
@@ -168,22 +168,22 @@ Drop-in replacement for abi-compliance-checker.
 | `-src-report-path` | no | — | Separate source-mode report output path. |
 | `-report-format` | no | `html` | Report format (default: html). 'htm' is an alias for 'html'. Choices: `html`, `htm`, `xml`, `json`, `md`. |
 | `--suppress` | no | — | Suppression YAML file. |
-| `-s`, `-strict` | no | — | Strict mode: any incompatible change is an error (exit 1). |
+| `-s`, `-strict` | no | `False` | Strict mode: any incompatible change is an error (exit 1). |
 | `--strict-mode` | no | `full` | Strict promotion mode: 'full' (COMPATIBLE+API_BREAK->BREAKING, ABICC parity) or 'api' (only API_BREAK->BREAKING, COMPATIBLE stays COMPATIBLE). Only applies when -strict is also set. Choices: `full`, `api`. |
-| `-show-retval` | no | — | Show return-value changes in report. |
-| `-headers-only` | no | — | Header-only analysis mode (ELF/DWARF checks still run). |
-| `-api`, `-source`, `-src` | no | — | Check source (API) compatibility only. |
-| `-abi`, `-bin`, `-binary` | no | — | Check binary (ABI) compatibility only (default). |
-| `-warn-newsym` | no | — | Treat new symbols as compatibility breaks. |
-| `-compat-html`, `-old-style` | no | — | Generate ABICC-compatible HTML with matching element IDs and structure. |
-| `-use-dumps` | no | — | Interpret -old/-new as pre-built dumps (auto-detected). |
+| `-show-retval` | no | `False` | Show return-value changes in report. |
+| `-headers-only` | no | `False` | Header-only analysis mode (ELF/DWARF checks still run). |
+| `-api`, `-source`, `-src` | no | `False` | Check source (API) compatibility only. |
+| `-abi`, `-bin`, `-binary` | no | `False` | Check binary (ABI) compatibility only (default). |
+| `-warn-newsym` | no | `False` | Treat new symbols as compatibility breaks. |
+| `-compat-html`, `-old-style` | no | `False` | Generate ABICC-compatible HTML with matching element IDs and structure. |
+| `-use-dumps` | no | `False` | Interpret -old/-new as pre-built dumps (auto-detected). |
 | `-v1`, `-version1`, `-vnum1` | no | — | Override version label for old library. |
 | `-v2`, `-version2`, `-vnum2` | no | — | Override version label for new library. |
 | `-title` | no | — | Custom report title. |
 | `-component` | no | — | Component name shown in report. |
 | `-limit-affected` | no | `0` | Max affected symbols shown per change kind. |
-| `-list-affected` | no | — | Generate a separate file listing affected symbols. |
-| `-stdout` | no | — | Print report to stdout. |
+| `-list-affected` | no | `False` | Generate a separate file listing affected symbols. |
+| `-stdout` | no | `False` | Print report to stdout. |
 | `-skip-headers` | no | — | File listing headers to exclude from analysis, one per line. |
 | `-headers-list` | no | — | File listing specific headers to include. |
 | `-header` | no | — | Single header file to analyze. |
@@ -193,19 +193,19 @@ Drop-in replacement for abi-compliance-checker.
 | `-types-list` | no | — | File with types to check (whitelist). |
 | `-skip-internal-symbols` | no | — | Regex pattern for internal symbols to skip. |
 | `-skip-internal-types` | no | — | Regex pattern for internal types to skip. |
-| `-keep-cxx` | no | — | Include _ZS*, _ZNS*, _ZNKS* (C++ std) mangled symbols. |
-| `-keep-reserved` | no | — | Report changes in reserved fields. |
+| `-keep-cxx` | no | `False` | Include _ZS*, _ZNS*, _ZNKS* (C++ std) mangled symbols. |
+| `-keep-reserved` | no | `False` | Report changes in reserved fields. |
 | `-cross-gcc`, `-gcc-path` | no | — | Path to GCC/G++ cross-compiler binary. |
 | `-cross-prefix`, `-gcc-prefix` | no | — | Cross-toolchain prefix (e.g. aarch64-linux-gnu-). |
 | `-gcc-options` | no | — | Extra compiler flags passed through to castxml. |
 | `-sysroot` | no | — | Alternative system root directory. |
-| `-nostdinc` | no | — | Do not search standard system include paths. |
+| `-nostdinc` | no | `False` | Do not search standard system include paths. |
 | `-lang` | no | — | Force language: C or C++. |
 | `-arch` | no | — | Target architecture (informational). |
 | `-relpath` | no | — | Replace {RELPATH} macros in both descriptor paths. |
 | `-relpath1` | no | — | Replace {RELPATH} macros in old descriptor paths. |
 | `-relpath2` | no | — | Replace {RELPATH} macros in new descriptor paths. |
-| `-q`, `-quiet` | no | — | Suppress console output. |
+| `-q`, `-quiet` | no | `False` | Suppress console output. |
 | `-log-path` | no | — | Redirect log output to file. |
 | `-log1-path` | no | — | Separate log path for old library analysis. |
 | `-log2-path` | no | — | Separate log path for new library analysis. |
@@ -228,11 +228,11 @@ Create an ABI dump from an ABICC XML descriptor (ABICC -dump equivalent).
 | `-cross-prefix`, `-gcc-prefix` | no | — | Cross-toolchain prefix (e.g. aarch64-linux-gnu-). |
 | `-gcc-options` | no | — | Extra compiler flags passed through to castxml. |
 | `-sysroot` | no | — | Alternative system root directory. |
-| `-nostdinc` | no | — | Do not search standard system include paths. |
+| `-nostdinc` | no | `False` | Do not search standard system include paths. |
 | `-lang` | no | — | Force language: C or C++. |
 | `-arch` | no | — | Target architecture (informational). |
 | `-relpath` | no | — | Replace {RELPATH} macros in descriptor paths. |
-| `-q`, `-quiet` | no | — | Suppress console output. |
+| `-q`, `-quiet` | no | `False` | Suppress console output. |
 
 ## `deps`
 
@@ -258,8 +258,8 @@ Compare a binary's full dependency stack across two environments.
 | `--ld-library-path` | no | `` | Simulated LD_LIBRARY_PATH (colon-separated). |
 | `--format` | no | `markdown` | Output format. Choices: `json`, `markdown`, `html`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
-| `--dry-run` | no | — | Show old/new roots, resolved binary paths, and search order without running per-library ABI diffs. Writes nothing; incompatible with -o/--output. |
-| `--verbose`, `-v` | no | — | Enable verbose/debug output. |
+| `--dry-run` | no | `False` | Show old/new roots, resolved binary paths, and search order without running per-library ABI diffs. Writes nothing; incompatible with -o/--output. |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
 ### `deps tree`
 
@@ -280,8 +280,8 @@ Show the resolved dependency tree and symbol binding status.
 | `--ld-library-path` | no | `` | Simulated LD_LIBRARY_PATH (colon-separated). |
 | `--format` | no | `markdown` | Output format. Choices: `json`, `markdown`, `html`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
-| `--dry-run` | no | — | Show the resolved binary, sysroot, search order, and loader inputs without walking/checking the full stack. Writes nothing; incompatible with -o/--output. |
-| `--verbose`, `-v` | no | — | Enable verbose/debug output. |
+| `--dry-run` | no | `False` | Show the resolved binary, sysroot, search order, and loader inputs without walking/checking the full stack. Writes nothing; incompatible with -o/--output. |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
 ## `dump`
 
@@ -305,21 +305,21 @@ Dump ABI snapshot of a shared library to JSON.
 | `--lang` | no | `c++` | Language mode for the header backend. Choices: `c++`, `c`. |
 | `--output`, `-o` | no | — | Output JSON file. Defaults to stdout. |
 | `--pdb-path` | no | — | Explicit path to PDB file for Windows PE debug info. Overrides automatic PDB discovery from the PE debug directory. |
-| `--follow-deps` | no | — | Resolve transitive DT_NEEDED dependencies and include the full dependency graph and symbol binding status in the snapshot. ELF only. |
+| `--follow-deps` | no | `False` | Resolve transitive DT_NEEDED dependencies and include the full dependency graph and symbol binding status in the snapshot. ELF only. |
 | `--search-path` | no | — | Additional directory to search for shared libraries (with --follow-deps). |
 | `--ld-library-path` | no | `` | Simulated LD_LIBRARY_PATH (with --follow-deps). |
-| `--dwarf-only` | no | — | Force DWARF-only mode: use DWARF debug info as the primary data source even when headers are available. Enables type-aware artifact checks without requiring castxml. |
-| `--dry-run` | no | — | Resolve and validate the invocation -- classify inputs, discover config, show which evidence depths (binary/headers/build/source) are available -- and print a report without producing a snapshot. Writes nothing; incompatible with -o/--output. |
+| `--dwarf-only` | no | `False` | Force DWARF-only mode: use DWARF debug info as the primary data source even when headers are available. Enables type-aware artifact checks without requiring castxml. |
+| `--dry-run` | no | `False` | Resolve and validate the invocation -- classify inputs, discover config, show which evidence depths (binary/headers/build/source) are available -- and print a report without producing a snapshot. Writes nothing; incompatible with -o/--output. |
 | `--debug-format` | no | — | Force the ELF debug format (auto=pick best available). Supersedes the individual --btf/--ctf/--dwarf flags. Choices: `auto`, `dwarf`, `btf`, `ctf`. |
 | `--build-dir`, `-p` | no | — | Build directory containing compile_commands.json, or path to the file itself. Enables deterministic header parsing with exact build flags. Requires -H/--header. |
 | `--compile-db-filter` | no | — | Glob pattern to filter compile_commands.json entries by source file (e.g. 'src/libfoo/**'). Useful for large databases. |
 | `--debug-root` | no | — | Directory containing separate debug files (build-id trees, path-mirror debug files, or dSYM bundles). Can be repeated. |
-| `--debuginfod` | no | — | Enable debuginfod network resolution for debug info (opt-in). Uses DEBUGINFOD_URLS environment variable or --debuginfod-url. |
+| `--debuginfod` | no | `False` | Enable debuginfod network resolution for debug info (opt-in). Uses DEBUGINFOD_URLS environment variable or --debuginfod-url. |
 | `--debuginfod-url` | no | — | debuginfod server URL (overrides DEBUGINFOD_URLS env var). |
-| `--verbose`, `-v` | no | — | Enable verbose/debug output. |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 | `--git-tag` | no | — | Git tag to embed in the snapshot (e.g. v2.0.0). |
 | `--build-id` | no | — | Opaque build identifier (CI run ID, build number, etc.). |
-| `--no-git` | no | — | Do not auto-detect git commit SHA. |
+| `--no-git` | no | `False` | Do not auto-detect git commit SHA. |
 | `--build-info` | no | — | Optional build context: a build dir, a compile_commands.json, or a pre-captured pack. Auto-discovered inside the --sources tree when omitted. |
 | `--sources` | no | — | Source checkout to run source-ABI replay and build the call graph over, embedding both inline. (An existing pack directory — e.g. from the abicheck-cc wrapper or Clang plugin — is auto-detected by its manifest.json and loaded as that pack instead.) |
 | `--build-query` | no | — | Override the inferred build-system query command that emits a compile DB without a full build (e.g. 'cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON'). CLI equivalent of `.abicheck.yml` build.query — runs automatically as trusted operator input. Usually unnecessary: with just --sources, abicheck infers and runs the query itself. |
@@ -327,13 +327,13 @@ Dump ABI snapshot of a shared library to JSON.
 | `--config` | no | — | Path to the project `.abicheck.yml` (ADR-037 D4): build system, query command, compile-DB location, plus the stable severity/scope/suppression/source settings. Defaults to `.abicheck.yml` at the --sources tree root for non-executing settings; build.query runs only from an explicit --config. |
 | `--depth` | no | — | Evidence-depth dial (same vocabulary as `compare`/`scan --depth`): binary=symbols only, headers=+header AST (default), build=+build context, source=+source replay & call graph. |
 | `--ast-frontend` | no | `auto` | C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) or clang (-ast-dump=json; for hosts where castxml is absent or its bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges them (dumper_hybrid.merge_snapshots) — needs both tools installed and costs roughly 2x a single-backend dump; never selected by auto. auto resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and never changes producer unless --allow-ast-frontend-fallback (or ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set. Env: ABICHECK_AST_FRONTEND. Choices: `auto`, `castxml`, `clang`, `hybrid`. |
-| `--allow-ast-frontend-fallback` | no | — | Allow auto-selected CastXML to fall back to Clang for a recognized toolchain mismatch or direct-include guard. Disabled by default because the frontends can produce materially different findings. |
+| `--allow-ast-frontend-fallback` | no | `False` | Allow auto-selected CastXML to fall back to Clang for a recognized toolchain mismatch or direct-include guard. Disabled by default because the frontends can produce materially different findings. |
 | `--gcc-path` | no | — | Path to a GCC/G++ (or clang) cross-compiler binary. |
 | `--gcc-prefix` | no | — | Cross-toolchain prefix (e.g. aarch64-linux-gnu-). |
 | `--gcc-options` | no | — | Extra compiler flags passed through to the header frontend (split on whitespace). For a flag whose value contains spaces use --gcc-option. |
 | `--gcc-option` | no | — | A single extra compiler flag passed to the header frontend verbatim (repeatable; not whitespace-split). Use two for a flag + spaced value, e.g. --gcc-option=-include --gcc-option='some header.h'. |
 | `--sysroot` | no | — | Alternative system root directory for header resolution. |
-| `--nostdinc`, `--no-nostdinc` | no | — | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
+| `--nostdinc`, `--no-nostdinc` | no | `False` | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
 
 ## `project-targets`
 
@@ -355,7 +355,7 @@ Validate CONFIG's targets:/bundles:/profiles:/baseline: block (ADR-047 §3).
 |---|:--:|---|---|
 | `--format` | no | `text` | Output format for the validation report. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
-| `--verbose`, `-v` | no | — | Enable verbose/debug output. |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
 ## `scan`
 
@@ -384,18 +384,18 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 | `--changed-path` | no | — | Changed path to focus the scan on (repeatable; alternative to --since). |
 | `--budget` | no | — | Time guard (e.g. 15m); FAILS on overflow, never shrinks scope. |
 | `--abi3` | no | — | Audit a CPython extension against a Py_LIMITED_API floor, e.g. `3.9`. Classifies the module's imported CPython C-API against the stable ABI and flags private/unstable imports and stable symbols newer than the floor as `python_stable_abi_violation` (advisory; gate with `--crosscheck python_stable_abi_violation=error`). Requires a CPython extension module as the --binary. |
-| `--dry-run` | no | — | Resolve and validate the invocation -- classify inputs, resolve changed paths, show the audit checks and (if --against) the comparison that would run, and print projected per-layer cost -- without scanning. Writes nothing; incompatible with -o/--output. |
+| `--dry-run` | no | `False` | Resolve and validate the invocation -- classify inputs, resolve changed paths, show the audit checks and (if --against) the comparison that would run, and print projected per-layer cost -- without scanning. Writes nothing; incompatible with -o/--output. |
 | `--crosscheck` | no | — | Per-check level KEY=LEVEL (off\|info\|warning\|error); repeatable. |
 | `--risk-rules` | no | — | Override the risk_rules profile (YAML). |
 | `--lang` | no | `c++` | Language mode for the header backend. Choices: `c++`, `c`. |
 | `--format` | no | `text` | Output format. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
-| `--verbose`, `-v` | no | — | Enable verbose/debug output. |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 | `--ast-frontend` | no | `auto` | C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) or clang (-ast-dump=json; for hosts where castxml is absent or its bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges them (dumper_hybrid.merge_snapshots) — needs both tools installed and costs roughly 2x a single-backend dump; never selected by auto. auto resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and never changes producer unless --allow-ast-frontend-fallback (or ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set. Env: ABICHECK_AST_FRONTEND. Choices: `auto`, `castxml`, `clang`, `hybrid`. |
-| `--allow-ast-frontend-fallback` | no | — | Allow auto-selected CastXML to fall back to Clang for a recognized toolchain mismatch or direct-include guard. Disabled by default because the frontends can produce materially different findings. |
+| `--allow-ast-frontend-fallback` | no | `False` | Allow auto-selected CastXML to fall back to Clang for a recognized toolchain mismatch or direct-include guard. Disabled by default because the frontends can produce materially different findings. |
 | `--gcc-path` | no | — | Path to a GCC/G++ (or clang) cross-compiler binary. |
 | `--gcc-prefix` | no | — | Cross-toolchain prefix (e.g. aarch64-linux-gnu-). |
 | `--gcc-options` | no | — | Extra compiler flags passed through to the header frontend (split on whitespace). For a flag whose value contains spaces use --gcc-option. |
 | `--gcc-option` | no | — | A single extra compiler flag passed to the header frontend verbatim (repeatable; not whitespace-split). Use two for a flag + spaced value, e.g. --gcc-option=-include --gcc-option='some header.h'. |
 | `--sysroot` | no | — | Alternative system root directory for header resolution. |
-| `--nostdinc`, `--no-nostdinc` | no | — | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
+| `--nostdinc`, `--no-nostdinc` | no | `False` | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
