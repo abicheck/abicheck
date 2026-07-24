@@ -738,6 +738,24 @@ def check_doc_count_sync(f: Findings) -> None:
             MIN_CASTXML_CLANG_MAJOR,
             r"bundled/linked Clang `>=(\d+)`",
         ),
+        (
+            DOCS / "troubleshooting.md",
+            "CastXML policy minimum version (version-gate section)",
+            MIN_CASTXML,
+            r"supported range \(currently `>=(\d+\.\d+\.\d+),<\d+\.\d+\.\d+`",
+        ),
+        (
+            DOCS / "troubleshooting.md",
+            "CastXML policy exclusive-upper-bound version (version-gate section)",
+            MAX_CASTXML,
+            r"supported range \(currently `>=\d+\.\d+\.\d+,<(\d+\.\d+\.\d+)`",
+        ),
+        (
+            DOCS / "troubleshooting.md",
+            "CastXML policy minimum bundled Clang major version (version-gate section)",
+            MIN_CASTXML_CLANG_MAJOR,
+            r"bundled/linked Clang `>=(\d+)`",
+        ),
     ]
 
     for path, label, expected, pattern in anchors:
