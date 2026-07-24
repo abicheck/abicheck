@@ -1521,3 +1521,38 @@ def test_cpp20_detector_still_follows_reachable_include_for_dialect_decision(
     reqs = _find_cpp20_requirements(headers)
     assert any(r.reason == "concept-declaration" for r in reqs)
     assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_follows_backslash_continued_include(tmp_path):
+    """Regression (Codex review): a quoted include split across a
+    backslash-newline continuation (``#include \\`` then the filename on
+    the next physical line -- valid C/C++, spliced away in translation
+    phase 2) must still be followed -- the frontend includes that file
+    regardless of how the directive was physically split, so a header
+    whose only C++20 signal lives there must still be detected."""
+    (tmp_path / "concepts_impl.hpp").write_text(
+        "template<class T> concept MyConcept = true;\n"
+    )
+    umbrella = _write(tmp_path, "umbrella.hpp", '#include \\\n"concepts_impl.hpp"\n')
+    assert _detect_cpp20_headers(umbrella) is True
+    reqs = _find_cpp20_requirements(umbrella)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
+def test_cpp20_detector_ignores_include_like_text_inside_raw_string(tmp_path):
+    """Regression (Codex review): a ``#include "..."``-looking line
+    trapped inside a raw string literal's body is never a real directive
+    and must not be followed -- a naive raw-text scan for the pattern
+    would otherwise pull the referenced file's C++20 syntax into scope
+    even though the compiler never actually includes it."""
+    (tmp_path / "concepts_impl.hpp").write_text(
+        "template<class T> concept MyConcept = true;\n"
+    )
+    headers = _write(
+        tmp_path,
+        "fake.hpp",
+        'const char *msg = R"(\n#include "concepts_impl.hpp"\n)";\nint consteval;\n',
+    )
+    assert _detect_cpp20_headers(headers) is False
+    reqs = _find_cpp20_requirements(headers)
+    assert reqs == []

@@ -1569,6 +1569,20 @@ def _expand_with_quoted_includes(
     uses for its own reachability scan) before searching for the
     directive, so an include line blanked as unreachable there is never
     followed here either.
+
+    Two more Codex-review fixes narrow this scan further, in opposite
+    directions: a backslash-newline-continued directive (``#include``
+    followed by a trailing backslash, then the filename on the next
+    physical line -- valid C/C++, spliced away in translation phase 2
+    before the preprocessor ever sees an ``#include`` token split across
+    two lines) previously wasn't recognized at all, since the pattern only
+    matches within one physical line -- continuations are spliced away
+    first so the directive is joined back onto one line before matching.
+    And a raw string literal's
+    body is blanked before matching (unlike an *ordinary* string literal,
+    deliberately left alone above so a genuine include's own argument
+    survives) so a ``#include "..."``-looking line trapped inside one
+    (never a real directive) is never mistaken for one.
     """
     seen: set[Path] = set()
     expanded: list[Path] = []
@@ -1587,10 +1601,18 @@ def _expand_with_quoted_includes(
             content = p.read_bytes()
         except OSError:
             continue
-        # Comments only -- NOT string/raw-string literals, unlike the main
-        # scan's preprocessing pipeline: the quoted argument of a genuine
-        # ``#include "..."`` is exactly the text this loop needs to read
-        # next, so it must survive intact.
+        # Raw string literals only -- NOT ordinary string/char literals,
+        # unlike the main scan's preprocessing pipeline: an ordinary
+        # literal has the exact same lexical shape (a bare double-quote)
+        # as a genuine #include's argument, so blanking it here would
+        # destroy the include target this loop needs to read next. A raw
+        # string's delimiter (``R"delim(...)delim"``) is unambiguous and
+        # never collides with ``#include "..."``, so it's safe to strip
+        # -- and necessary, so a fake ``#include "x"``-looking line
+        # trapped inside a raw string's body is never mistaken for a real
+        # directive (Codex review).
+        content = _strip_raw_strings(content)
+        # Comments next.
         content = re.sub(
             rb"/\*.*?\*/",
             lambda m: b"\n" * m.group(0).count(b"\n"),
@@ -1598,6 +1620,11 @@ def _expand_with_quoted_includes(
             flags=re.DOTALL,
         )
         content = re.sub(rb"//[^\n]*", b"", content)
+        # Splice backslash-newline continuations (Codex review): joins a
+        # directive spanning one, e.g. ``#include \`` followed by
+        # ``"concepts.hpp"`` on the next physical line, back onto a single
+        # physical line the pattern below can match.
+        content = re.sub(rb"\\\r?\n", b"", content)
         reachable_content = _strip_inactive_if_zero_blocks(
             content, mask_cplusplus_defined_guards=for_language_mode_decision
         )
