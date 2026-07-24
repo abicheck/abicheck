@@ -47,10 +47,10 @@ from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
     _build_castxml_command as _build_castxml_command,
     _cache_key as _cache_key,
-    _detect_cpp20_headers as _detect_cpp20_headers,
     _detect_cpp_headers as _detect_cpp_headers,
     _resolve_compiler_binary as _resolve_compiler_binary,
 )
+from .dumper_ast_config_cpp20 import _detect_cpp20_headers as _detect_cpp20_headers
 from .dumper_cache import _atomic_write, _cache_path
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,

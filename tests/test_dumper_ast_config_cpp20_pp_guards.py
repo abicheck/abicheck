@@ -19,7 +19,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from abicheck.dumper_ast_config import _detect_cpp20_headers, _find_cpp20_requirements
+from abicheck.dumper_ast_config_cpp20 import (
+    _detect_cpp20_headers,
+    _find_cpp20_requirements,
+)
 
 
 def _write(tmp_path: Path, name: str, content: str) -> list[Path]:

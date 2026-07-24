@@ -17,7 +17,10 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.dumper_ast_config import _detect_cpp20_headers, _find_cpp20_requirements
+from abicheck.dumper_ast_config_cpp20 import (
+    _detect_cpp20_headers,
+    _find_cpp20_requirements,
+)
 
 
 def _write(tmp_path: Path, name: str, content: str) -> list[Path]:
@@ -1315,6 +1318,30 @@ def test_cpp20_detector_detects_cv_qualified_custom_concept_return_type(tmp_path
     assert _detect_cpp20_headers(headers) is True
     reqs = _find_cpp20_requirements(headers)
     assert any(r.reason == "custom-constrained-auto-parameter" for r in reqs)
+
+
+def test_cpp20_detector_detects_constrained_trailing_return_type(tmp_path):
+    """Regression (Codex review, twenty-fifth round): a constrained
+    placeholder return type written with trailing-return-type syntax
+    (``auto f() -> MyConcept auto;``, valid C++20 -- ``MyConcept auto``
+    is a placeholder-type-specifier and can appear as a trailing-return-
+    type) went undetected: the text before the concept name ends in the
+    ``->`` from the trailing-return-type arrow, not a parameter-list
+    boundary or a genuine statement boundary, so the existing checks
+    rejected it outright."""
+    headers = _write(tmp_path, "a.h", "auto f() -> MyConcept auto;\n")
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "custom-constrained-auto-parameter" for r in reqs)
+
+
+def test_cpp20_detector_detects_constrained_trailing_return_type_with_params(
+    tmp_path,
+):
+    """Companion: the same trailing-return-type shape with a non-empty
+    parameter list before the ``->``."""
+    headers = _write(tmp_path, "a.h", "auto f(int x) -> MyConcept auto;\n")
+    assert _detect_cpp20_headers(headers) is True
 
 
 def test_cpp20_detector_ignores_generic_lambda_auto_param(tmp_path):
