@@ -311,6 +311,28 @@ class TestValidateInputs:
         )
         assert result.returncode == 0, result.stderr
 
+    def test_bundle_kind_rejects_baseline_channel_none(self, tmp_path: Path) -> None:
+        # A bundle check always compares directories via the CLI's
+        # per-library release fan-out; with no baseline, the analysis step
+        # instead routes to `scan` (a one-build audit against new-library
+        # directly), which never uses bundle-members at all -- silently
+        # producing an operational error (directory candidate) or a
+        # single-artifact-only "bundle" check (file candidate) instead of
+        # failing loud (Codex review). project_targets.py already rejects
+        # this in the generated .abicheck.yml/run-plan.json path, but that
+        # never runs for a direct check-target caller (e.g. check-single.yml).
+        result = _run(
+            VALIDATE_SH,
+            {
+                **_BASE_IDENTITY,
+                "INPUT_KIND": "bundle",
+                "INPUT_BASELINE_CHANNEL": "none",
+                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+            },
+            tmp_path,
+        )
+        assert result.returncode == 64
+
     def test_bundle_kind_rejects_non_library_target_kind(self, tmp_path: Path) -> None:
         result = _run(
             VALIDATE_SH,

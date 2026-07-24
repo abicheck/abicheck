@@ -1916,6 +1916,27 @@ Updated the header comment, the `baseline-artifact-prefix` input
 description, `reusable-workflows.md`'s artifact table and usage example,
 and added `test_baseline_artifact_name_is_keyed_by_profile_as_well_as_channel`.
 
+**Another round (Codex, against `65a79ee`) caught a validation gap one
+layer deeper than `check-single.yml`, fixed at its actual source:**
+`abicheck/buildsource/project_targets.py` already rejects `kind: bundle`
+with `baseline-channel: none` in the generated `.abicheck.yml`/
+`run-plan.json` path, but that validation never runs for a caller invoking
+`actions/check-target` directly — `check-single.yml` is a thin pass-through
+with no equivalent check of its own, so that combination reached
+`check-target` unrejected. With no baseline, the analysis step routes to
+`scan` (a one-build audit against `new-library` directly), which never
+uses `bundle-members` at all — a directory candidate then fails as an
+operational error, while a single-file candidate would silently report a
+"bundle" check having scanned only one artifact. Rather than duplicating
+`project_targets.py`'s check into `check-single.yml`'s own YAML (which
+would still leave `check-target` itself, and any other direct caller,
+unprotected), fixed it at the one place every caller of
+`actions/check-target` actually goes through: `validate-inputs.sh` now
+rejects `kind: bundle` + `baseline-channel: none` outright, mirroring the
+adjacent app-consumer/plugin-contract `baseline-channel: none` rejection
+already there. Documented in `check-target.md`'s `baseline-channel` row;
+covered by a new `test_bundle_kind_rejects_baseline_channel_none`.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —

@@ -86,6 +86,22 @@ if [[ "$KIND" == "bundle" ]]; then
   if [[ "$BUNDLE_MEMBERS" == "[]" ]]; then
     _fail "bundle-members must be a non-empty JSON array when kind is 'bundle'."
   fi
+  if [[ "$BASELINE_CHANNEL" == "none" ]]; then
+    # A bundle check always compares directories (the resolved baseline
+    # binaries-dir vs. the candidate bundle directory), which routes
+    # through the CLI's per-library release fan-out; with no baseline, the
+    # analysis step instead routes to `scan` (a one-build audit against
+    # new-library directly), which never uses bundle-members at all -- a
+    # directory candidate then fails as an operational error, while a
+    # single-file candidate would silently report a "bundle" check having
+    # scanned only one artifact (Codex review). abicheck/buildsource/
+    # project_targets.py already rejects this combination in the generated
+    # .abicheck.yml/run-plan.json path, but that validation never runs for
+    # a caller invoking check-target directly (e.g. via check-single.yml,
+    # or this composite Action on its own) -- reject it here too, at the
+    # one place every caller actually goes through.
+    _fail "baseline-channel: none is not supported when kind is 'bundle' -- a bundle check has no baseline-less audit path (it always compares directories via the CLI's release fan-out, which 'scan' cannot do). Use kind: target for a no-baseline audit of a single library, or provide a real baseline-channel for the bundle."
+  fi
   if [[ "$REQUESTED_DEPTH" == "build" || "$REQUESTED_DEPTH" == "source" ]]; then
     # kind: bundle always compares directories (the resolved binaries-dir vs.
     # the candidate bundle directory), which routes through the CLI's

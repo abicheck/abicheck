@@ -111,7 +111,7 @@ caller-provided directory of the candidate build's own member binaries.
 | `baseline-target` | no | (= `name`) | Which target's baseline actually resolves — set to the referenced library for `app-consumer`/`plugin-contract`. Ignored for `kind: bundle`. |
 | `bundle-members` | when `kind: bundle` | `[]` | JSON array of the bundle's member target ids. |
 | `profile` | yes | — | The build `profile.id` this check runs under. |
-| `baseline-channel` | yes | — | A channel name, or the literal `none` for a no-baseline audit (S5). |
+| `baseline-channel` | yes | — | A channel name, or the literal `none` for a no-baseline audit (S5) — `none` is rejected for `kind: bundle` (a bundle has no no-baseline audit path; it always compares directories, which `scan` cannot do). |
 | `baseline-path` | when channel ≠ `none` | `''` | Forwarded to `resolve-baseline`. |
 | `baseline-required` | no | `true` | Forwarded to `resolve-baseline`'s `required`. |
 | `candidate-build-output` | no | `''` | Forwarded to `resolve-baseline`'s `incompatible_evidence` check. |
