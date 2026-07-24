@@ -69,7 +69,7 @@ class TestBothFilesParseAsValidWorkflowYaml:
 
     def test_check_project_parses(self) -> None:
         data = _load(CHECK_PROJECT)
-        assert set(data["jobs"]) == {"plan", "check", "aggregate"}
+        assert set(data["jobs"]) == {"plan", "check", "no-checks", "aggregate"}
 
 
 class TestCheckSingleSelfCheckout:
@@ -316,6 +316,33 @@ class TestCheckProjectStepOrdering:
         data = _load(CHECK_PROJECT)
         strategy = data["jobs"]["check"]["strategy"]
         assert strategy["fail-fast"] is False
+
+
+class TestCheckProjectFailsLoudOnEmptyRunPlan:
+    """An empty run-plan.json (checks[] == []) is only a WARNING from
+    `abicheck run-plan generate`, not an error -- but `check`/`aggregate`
+    are both gated on has-checks == 'true', so an empty run used to skip
+    both and report the whole workflow as a success having gated nothing.
+    The `no-checks` job exists to fail that case loud instead (self-review
+    finding, not from an external review round)."""
+
+    def test_no_checks_job_exists_and_depends_on_plan(self) -> None:
+        data = _load(CHECK_PROJECT)
+        assert "no-checks" in data["jobs"]
+        assert data["jobs"]["no-checks"]["needs"] == "plan"
+
+    def test_no_checks_job_runs_exactly_when_check_job_would_not(self) -> None:
+        data = _load(CHECK_PROJECT)
+        no_checks_condition = data["jobs"]["no-checks"]["if"]
+        check_condition = data["jobs"]["check"]["if"]
+        assert no_checks_condition == "needs.plan.outputs.has-checks != 'true'"
+        assert check_condition == "needs.plan.outputs.has-checks == 'true'"
+
+    def test_no_checks_job_fails(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["no-checks"])
+        assert len(steps) == 1
+        assert "exit 1" in steps[0]["run"]
 
 
 class TestCheckProjectMatrixWiring:

@@ -94,6 +94,17 @@ several profiles publishes one uniquely-named
 `abicheck-build-<profile.id>/` artifact per profile (S17 in the ADR-047
 scenario catalog), not one artifact holding several.
 
+**`profile.id` is required, not just recommended, for [`check-project.yml`](reusable-workflows.md) callers.**
+Every other field really is optional-and-defaulted per the note above, but
+`check-project.yml`'s `plan` job derives each `--build-output PROFILE=DIR`
+argument from `profile.id` alone (`find`-ing every downloaded
+`build-output.json` and reading its own `profile.id`, rather than the
+artifact/directory name — `actions/download-artifact` flattens a
+single-artifact match with no subdirectory, so the name is ambiguous by
+construction) and hard-fails the `plan` job if a file has no `profile.id`
+set. Set it explicitly if your build-output producer targets
+`check-project.yml`.
+
 ### `targets[]` fields
 
 | Field | Type | Meaning |

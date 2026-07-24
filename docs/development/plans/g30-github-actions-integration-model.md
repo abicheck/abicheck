@@ -1864,6 +1864,38 @@ fixed and one re-raising an already-tracked gap:**
   the review thread and opened by CodeRabbit) to track the design decision
   and acceptance criteria outside the plan doc.
 
+**A self-review pass (requested via `/review`, not from Codex/CodeRabbit)
+found two more real issues in `check-project.yml`, both fixed:**
+
+- **A run-plan that resolves to zero checks silently made the whole
+  workflow report success having gated nothing.** `abicheck run-plan
+  generate` treats an empty `checks[]` as a *warning*, not an error (a
+  config with no `targets:`/`bundles:` at all, or an implicit sweep that
+  matched no downloaded profile, are both legitimate reasons it doesn't
+  hard-fail on its own) — but both the `check` and `aggregate` jobs are
+  gated on `has-checks == 'true'`, so an empty run skipped both of them and
+  the reusable-workflow call itself reported success. Exactly the "a
+  skipped job reports success" failure mode this file's other `if:
+  always()` placements exist to close, but this specific path had no
+  equivalent guard. Fixed: added a fourth `no-checks` job (`needs: plan`,
+  `if: needs.plan.outputs.has-checks != 'true'`) that fails loud with a
+  diagnostic message, so the workflow can never silently pass with zero
+  checks executed. Covered by a new
+  `TestCheckProjectFailsLoudOnEmptyRunPlan` class.
+- **`check-project.yml`'s `plan` job silently requires `profile.id` in
+  every downloaded `build-output.json`, undocumented and stricter than the
+  schema.** `docs/reference/build-output-schema.md` states every field
+  including `profile.id` is optional/defaulted, but the `plan` job derives
+  each `--build-output PROFILE=DIR` argument purely from `profile.id`
+  (deliberately, to sidestep `download-artifact`'s single-artifact
+  flattening ambiguity — see the step's own comment), hard-failing if a
+  file has none. Not a functional bug (the strictness is the right call
+  given the flattening ambiguity), but undocumented, so a caller following
+  the schema's general optionality would hit a confusing first-run
+  failure. Fixed: documented the requirement explicitly in both
+  `build-output-schema.md` and `reusable-workflows.md`'s artifact-staging
+  table, rather than changing the behavior.
+
 **Deliberately out of scope for this pass, documented rather than
 silently absent:** a per-cell override of `check-project.yml`'s shared
 analysis options (`policy`, `suppress`, `severity-preset`, `gcc-*`, ...) —

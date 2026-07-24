@@ -143,6 +143,16 @@ All three prefixes are workflow inputs (defaults `abicheck-build-`,
 `abicheck-candidate-`, `abicheck-baseline-`) — rename them if they collide
 with artifacts your own workflow already produces for another purpose.
 
+**Every uploaded `build-output.json` must set `profile.id`.** The `plan`
+job identifies which downloaded `build-output.json` belongs to which
+profile by reading each file's own `profile.id` field, not the artifact or
+directory name (`actions/download-artifact` flattens a single-artifact
+match with no subdirectory, so the name is ambiguous by construction) — see
+[the schema reference](build-output-schema.md#schema-abicheckbuild-outputv1)
+for the full requirement. A `build-output.json` with no `profile.id` set
+fails the `plan` job outright, even though that field is optional in the
+schema generally.
+
 ```yaml
 jobs:
   build-linux:

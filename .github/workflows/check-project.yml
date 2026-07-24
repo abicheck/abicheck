@@ -1,7 +1,8 @@
 name: 'abicheck check-project'
 
 # G30 P1.4 (ADR-047 §4/§5): the multi-target CI run-plan + matrix + trailing
-# aggregate gate. Three jobs:
+# aggregate gate. Four jobs (three on the normal path, `no-checks` only when
+# the run-plan resolved to zero checks -- see its own comment below):
 #
 #   plan      Generate run-plan.json from .abicheck.yml's targets:/bundles:/
 #             profiles: block (G30 P1.5) plus each contract profile's
@@ -334,6 +335,28 @@ jobs:
         with:
           name: ${{ inputs.run-plan-artifact-name }}
           path: run-plan.json
+
+  # ── Guard: a zero-check run-plan must not silently succeed ─────────────
+  # `abicheck run-plan generate` treats an empty checks[] as a WARNING, not
+  # an error (a config with no targets:/bundles: at all, or an implicit
+  # sweep that matched no downloaded profile, are both legitimate reasons it
+  # doesn't hard-fail on its own) -- but both `check` and `aggregate` below
+  # are gated on has-checks == 'true', so a run that resolves to zero checks
+  # skips both of them and this workflow reports success having gated
+  # nothing. That is exactly the "a skipped job reports success" failure
+  # mode this file's other if: always() placements exist to close (see the
+  # header comment above), but this path had no equivalent guard until now
+  # (self-review finding). Fail loud instead of leaving it invisible.
+  no-checks:
+    name: 'Fail: run-plan resolved to zero checks'
+    needs: plan
+    if: needs.plan.outputs.has-checks != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail
+        run: |
+          echo "::error::run-plan.json resolved to zero checks -- this check-project.yml run would otherwise report success having gated nothing. This almost always means .abicheck.yml's targets:/bundles: checks[] didn't resolve against any downloaded build-output.json (a profile-id mismatch, a renamed target, or an implicit sweep matching nothing) -- see the 'Generate run-plan.json' step's own log above for the exact reason. If an empty run is genuinely expected (e.g. bootstrapping this workflow before any targets are declared yet), don't call check-project.yml until there is at least one check to run." >&2
+          exit 1
 
   # ── Job 2: one check-target invocation per run-plan.json cell ──────────
   check:
