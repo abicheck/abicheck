@@ -88,17 +88,24 @@ on:
           build-output/build-output.json).
         type: string
         default: ''
-      report-artifact-name:
+      report-artifact-prefix:
         description: >-
-          Artifact name the report-path output's JSON file is uploaded
-          under. report-path is a path inside this job's own ephemeral
-          runner workspace -- unlike a composite Action a caller nests in
-          their OWN job, a reusable workflow's `check` job runs on a
-          separate runner, so that path is not reachable by the calling
+          Prefix for the artifact name the report-path output's JSON file
+          is uploaded under -- the actual name is
+          <this><sanitized-check-id>, mirroring check-project.yml's own
+          per-cell convention. report-path is a path inside this job's own
+          ephemeral runner workspace -- unlike a composite Action a caller
+          nests in their OWN job, a reusable workflow's `check` job runs on
+          a separate runner, so that path is not reachable by the calling
           workflow without an explicit upload/download round-trip (Codex
-          review). Always uploaded when check-target produced a report.
+          review). A bare fixed name (no per-check suffix) would collide
+          whenever a caller invokes check-single.yml more than once in the
+          same workflow run -- e.g. from a matrix, or two single-check jobs
+          -- since actions/upload-artifact requires unique names within one
+          run (a second Codex review). Always uploaded when check-target
+          produced a report.
         type: string
-        default: 'abicheck-check-single-report'
+        default: 'abicheck-check-single-report-'
 
       requested-depth:
         description: 'Evidence-depth this check asks for: binary, headers, build, or source -- required.'
@@ -269,7 +276,7 @@ on:
           actually consume the report file.
         value: ${{ jobs.check.outputs.report-path }}
       report-artifact-name:
-        description: 'The artifact name the report was uploaded under (== inputs.report-artifact-name, echoed for convenience).'
+        description: 'The actual artifact name the report was uploaded under (<report-artifact-prefix><sanitized-check-id>).'
         value: ${{ jobs.check.outputs.report-artifact-name }}
 
 jobs:
@@ -283,7 +290,7 @@ jobs:
       compatibility-verdict: ${{ steps.run.outputs.compatibility-verdict }}
       policy-gate-decision: ${{ steps.run.outputs.policy-gate-decision }}
       report-path: ${{ steps.run.outputs.report-path }}
-      report-artifact-name: ${{ inputs.report-artifact-name }}
+      report-artifact-name: '${{ inputs.report-artifact-prefix }}${{ steps.sanitized.outputs.id }}'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -436,9 +443,35 @@ jobs:
           abicheck-repository: ${{ steps.identity.outputs.repository }}
           abicheck-ref: ${{ steps.identity.outputs.ref }}
 
+      # A bare inputs.report-artifact-prefix (no per-check suffix) would
+      # collide whenever a caller invokes this reusable workflow more than
+      # once in the same workflow run -- actions/upload-artifact requires
+      # unique names within one run (Codex review). Mirrors
+      # check-project.yml's own "Sanitize check-id for artifact name" step
+      # verbatim: keep the readable `tr`-sanitized check-id but append a
+      # short content hash of the *original* check-id, since two distinct
+      # check-ids can collapse to the same sanitized string.
+      - name: Sanitize check-id for artifact name
+        id: sanitized
+        if: always() && steps.run.outputs.report-path != ''
+        shell: bash
+        env:
+          CHECK_ID: ${{ steps.run.outputs.check-id }}
+        run: |
+          python3 -c "
+          import hashlib
+          import os
+
+          check_id = os.environ['CHECK_ID']
+          safe = ''.join(c if c.isalnum() or c in '._-' else '_' for c in check_id)
+          digest = hashlib.sha256(check_id.encode()).hexdigest()[:12]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+              fh.write(f'id={safe}-{digest}\n')
+          "
+
       - name: Upload report
         if: always() && steps.run.outputs.report-path != ''
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.report-artifact-name }}
+          name: '${{ inputs.report-artifact-prefix }}${{ steps.sanitized.outputs.id }}'
           path: ${{ steps.run.outputs.report-path }}
