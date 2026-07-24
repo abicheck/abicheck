@@ -299,6 +299,31 @@ def _is_decltype_open_paren(text: bytes, open_paren_pos: int) -> bool:
     return text[idx + 1 : end] == b"decltype"
 
 
+_CONTROL_FLOW_KEYWORDS = frozenset({b"for", b"if", b"while", b"switch"})
+
+
+def _is_control_flow_open_paren(text: bytes, open_paren_pos: int) -> bool:
+    """True if the ``(`` at *open_paren_pos* is a control-flow statement's
+    own parenthesized condition/init-statement/range-declaration —
+    immediately preceded (skipping whitespace) by the keyword ``for``,
+    ``if``, ``while``, or ``switch`` — rather than a function's parameter
+    list (Codex review). A bare ``auto`` there names an ordinary
+    variable's declared type, not a parameter: ``for (auto x : xs)`` (a
+    range-based for loop, valid since C++11) and ``if (auto x = f())``/
+    ``while (auto x = f())``/``switch (auto x = f())`` (a condition or
+    init-statement declaring a variable, valid since C++17) are the
+    *identical* textual shape — bare ``auto`` immediately inside a ``(``
+    — as a genuine abbreviated function-template parameter, but neither
+    is one."""
+    idx = open_paren_pos - 1
+    while idx >= 0 and text[idx : idx + 1] in b" \t\r\n":
+        idx -= 1
+    end = idx + 1
+    while idx >= 0 and (text[idx : idx + 1].isalnum() or text[idx : idx + 1] == b"_"):
+        idx -= 1
+    return text[idx + 1 : end] in _CONTROL_FLOW_KEYWORDS
+
+
 def _has_abbreviated_unconstrained_auto_param(lookahead: bytes) -> bool:
     """True if *lookahead* contains a bare (unconstrained) ``auto`` used
     directly as an ordinary function's parameter type (``void f(auto
@@ -307,14 +332,20 @@ def _has_abbreviated_unconstrained_auto_param(lookahead: bytes) -> bool:
     by :func:`_has_constrained_param_syntax`), from a generic lambda's
     ``auto`` parameter (``[](auto x) { ... }``), which has been valid
     since C++14 and is excluded via :func:`_is_lambda_param_list_open_paren`
-    (Codex review), and from ``decltype(auto)`` (also valid since C++14,
+    (Codex review), from ``decltype(auto)`` (also valid since C++14,
     excluded via :func:`_is_decltype_open_paren` — Codex review, second
-    round). Only matches when nothing but an optional cv-qualifier and/or
-    attribute-specifier-seq (``[[maybe_unused]] auto x`` — Codex review,
-    third round) separates ``auto`` from its enclosing ``(``/``,`` — that
-    position is unambiguous: a bare ``auto`` can never be a parameter's
-    default-argument expression or any other operand there, only its
-    type."""
+    round), and from a control-flow statement's own parenthesized
+    condition/init-statement/range-declaration (``for``/``if``/``while``/
+    ``switch``, excluded via :func:`_is_control_flow_open_paren` — Codex
+    review, further round: unlike the *constrained* form, which C++20
+    genuinely permits in a for-range-declaration or init-statement too, a
+    bare ``auto`` there is always just an ordinary variable's type, never
+    a parameter). Only matches when nothing but an optional
+    cv-qualifier and/or attribute-specifier-seq (``[[maybe_unused]] auto
+    x`` — Codex review, third round) separates ``auto`` from its
+    enclosing ``(``/``,`` — that position is unambiguous: a bare ``auto``
+    can never be a parameter's default-argument expression or any other
+    operand there, only its type."""
     for m in re.finditer(rb"\bauto\b", lookahead):
         prefix = _strip_trailing_declarator_specifiers(lookahead[: m.start()])
         prefix = _strip_trailing_attributes(prefix)
@@ -330,9 +361,11 @@ def _has_abbreviated_unconstrained_auto_param(lookahead: bytes) -> bool:
                 continue
         else:
             continue
-        if not _is_lambda_param_list_open_paren(
-            lookahead, open_pos
-        ) and not _is_decltype_open_paren(lookahead, open_pos):
+        if (
+            not _is_lambda_param_list_open_paren(lookahead, open_pos)
+            and not _is_decltype_open_paren(lookahead, open_pos)
+            and not _is_control_flow_open_paren(lookahead, open_pos)
+        ):
             return True
     return False
 

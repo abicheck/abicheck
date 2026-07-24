@@ -1398,6 +1398,71 @@ def test_cpp20_detector_detects_genuine_param_alongside_decltype_auto(tmp_path):
     assert _detect_cpp20_headers(headers) is True
 
 
+def test_cpp20_detector_ignores_bare_auto_in_range_for(tmp_path):
+    """Regression (Codex review): a range-based for loop's declaration
+    (``for (auto x : xs)``, valid since C++11) puts a bare ``auto``
+    directly inside a ``(`` — the identical textual position as a genuine
+    abbreviated parameter's enclosing ``(`` — but the ``(`` is the
+    for-statement's own, not a parameter list at all."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "inline void f() { for (auto x : xs) {} }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_bare_auto_in_if_init_statement(tmp_path):
+    """Companion: an ``if``/``while``/``switch`` condition or
+    init-statement declaring a variable with bare ``auto`` (valid since
+    C++17) is the same shape, and must be excluded the same way."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "inline void g() { if (auto x = h()) {} }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+@pytest.mark.parametrize("keyword", ["if", "while", "switch"])
+def test_cpp20_detector_ignores_bare_auto_in_control_flow_init(tmp_path, keyword):
+    """Companion: each of ``if``/``while``/``switch`` gets the same
+    exclusion."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        f"inline void g() {{ {keyword} (auto x = h()) {{}} }}\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_detects_genuine_param_alongside_range_for(tmp_path):
+    """Companion: a genuine abbreviated parameter must still be detected
+    even in a header that also contains a range-for loop with a bare
+    ``auto`` — only the for-statement's own ``auto`` is excluded, not
+    every ``auto`` occurrence in the file."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "void real(auto x);\ninline void f() { for (auto y : ys) {} }\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_detects_constrained_auto_in_range_for(tmp_path):
+    """Companion: unlike the bare form, a *constrained* placeholder in a
+    for-range-declaration (``for (MyConcept auto x : xs)``) is a genuine
+    C++20 construct — C++20 permits a constrained placeholder type
+    anywhere an ordinary placeholder type is allowed, including here —
+    and must still be detected."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "void h() { for (MyConcept auto x : xs) {} }\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+
+
 def test_cpp20_detector_ignores_trailing_return_type_auto(tmp_path):
     """A trailing-return-type ``auto`` (C++11+, ``auto f() -> int;``) must
     not be mistaken for a parameter's bare ``auto`` type."""
