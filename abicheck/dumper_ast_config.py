@@ -475,9 +475,13 @@ def _has_custom_constrained_auto_param(
     unambiguous-boundary check as :func:`_has_abbreviated_unconstrained_auto_param`
     (nothing but the identifier separates ``auto`` from its enclosing
     ``(``/``,``); a leading cv-qualifier before the identifier
-    (``const MyConcept auto& x``) is a known, deliberately narrow gap —
-    not attempted here, matching this file's incremental-per-reported-case
-    scope rather than a full parameter-declaration parser.
+    (``const MyConcept auto& x``, Codex review) is stripped via
+    :func:`_strip_trailing_declarator_specifiers` first — reused here for
+    its trailing-word-popping loop, even though this call site's prefix
+    isn't itself a trailing-specifier position — so the boundary check
+    that follows (``(``/``,``, or a genuine statement boundary for the
+    return-type shape) still sees the real enclosing punctuation once
+    ``const``/``volatile`` is out of the way.
 
     Unlike :func:`_has_abbreviated_unconstrained_auto_param`, a lambda's
     parameter list is deliberately *not* excluded here (Codex review):
@@ -509,6 +513,7 @@ def _has_custom_constrained_auto_param(
         if not ident_match:
             continue
         before_ident = prefix[: ident_match.start()].rstrip()
+        before_ident = _strip_trailing_declarator_specifiers(before_ident)
         last = before_ident[-1:]
         open_pos: int | None
         if last == b"(":

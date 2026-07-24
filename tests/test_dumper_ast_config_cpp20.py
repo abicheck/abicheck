@@ -1279,6 +1279,44 @@ def test_cpp20_detector_detects_abbreviated_param_with_cv_qualifier(tmp_path):
     assert _detect_cpp20_headers(headers) is True
 
 
+def test_cpp20_detector_detects_cv_qualified_custom_concept_auto_param(tmp_path):
+    """Regression (Codex review, twenty-fourth round): a *project-defined*
+    concept's constrained parameter, unlike the bare-``auto`` form above,
+    stayed undetected when a leading cv-qualifier sat between the
+    enclosing ``(``/``,`` and the concept name (``void f(const MyConcept
+    auto& x);``) — the boundary check saw ``const`` where it expected the
+    enclosing punctuation and rejected it outright."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        '#include "concepts.hpp"\nvoid f(const MyConcept auto& x);\n',
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "custom-constrained-auto-parameter" for r in reqs)
+
+
+def test_cpp20_detector_detects_volatile_qualified_custom_concept_auto_param(
+    tmp_path,
+):
+    """Companion: ``volatile`` (and ``const volatile`` together) need the
+    same treatment as ``const``."""
+    headers = _write(tmp_path, "a.h", "void f(volatile MyConcept auto& x);\n")
+    assert _detect_cpp20_headers(headers) is True
+    headers = _write(tmp_path, "b.h", "void f(const volatile MyConcept auto& x);\n")
+    assert _detect_cpp20_headers(headers) is True
+
+
+def test_cpp20_detector_detects_cv_qualified_custom_concept_return_type(tmp_path):
+    """Companion: the same leading cv-qualifier gap applied to the
+    constrained placeholder *return type* form too
+    (``const MyConcept auto f();``)."""
+    headers = _write(tmp_path, "a.h", "const MyConcept auto f();\n")
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "custom-constrained-auto-parameter" for r in reqs)
+
+
 def test_cpp20_detector_ignores_generic_lambda_auto_param(tmp_path):
     """A generic lambda's ``auto`` parameter (``[](auto x) { ... }``) has
     been valid since C++14 — it must never be mistaken for the C++20-only
