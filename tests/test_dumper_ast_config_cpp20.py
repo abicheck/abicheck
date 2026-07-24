@@ -992,6 +992,47 @@ def test_cpp20_detector_still_accepts_template_concept_after_qualified_check(
     assert any(r.reason == "concept-declaration" for r in reqs)
 
 
+def test_cpp20_detector_ignores_concept_type_shadow_trapped_in_continued_literal(
+    tmp_path,
+):
+    """Regression (Codex review): the concept-type-shadow check ran
+    ``_strip_literals`` (line-bounded, refuses to cross an embedded
+    newline) directly on whole-file content, before any backslash-newline
+    continuation was spliced away — a fake "struct concept {};" trapped
+    inside a *continued* string literal (a genuine, if archaic, C/C++
+    construct) was never blanked and wrongly shadowed a real concept
+    declaration elsewhere in the header, silently skipping
+    ``-std=gnu++20``."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        'const char *msg = "struct concept {}; \\\nmore text";\n'
+        "template<class T> concept C = true;\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "concept-declaration" for r in reqs)
+
+
+def test_cpp20_detector_reports_accurate_line_after_continued_literal(tmp_path):
+    """Companion: blanking a continuation-spanning literal must preserve
+    its embedded newline count, or every line number reported for code
+    that follows it silently shifts."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        'const char *msg = "line one \\\n'
+        "line two \\\n"
+        'line three";\n'
+        "int normal_code = 1;\n"
+        "template<class T> concept C = true;\n",
+    )
+    reqs = _find_cpp20_requirements(headers)
+    matches = [r for r in reqs if r.reason == "concept-declaration"]
+    assert len(matches) == 1
+    assert matches[0].line == 5
+
+
 def test_cpp20_detector_accepts_concept_after_multiline_template_header(tmp_path):
     """Non-regression: a template<...> header wrapped across several
     physical lines (a common formatting style for long parameter lists,

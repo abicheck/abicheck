@@ -954,6 +954,36 @@ def _strip_literals_joined(line: bytes) -> bytes:
     return line
 
 
+def _strip_literals_crossing_continuations(content: bytes) -> bytes:
+    """Like :func:`_strip_literals`, but — unlike it — a literal that spans a
+    backslash-newline continuation is still fully blanked, not left behind
+    because the plain patterns refuse to cross the embedded newline.
+
+    Safe to call directly on whole-file *content* (unlike
+    :func:`_strip_literals_joined`, which additionally tolerates crossing an
+    *unrelated* later line and so is only safe on a single already-joined
+    logical line): ``\\.`` under ``re.DOTALL`` already consumes a
+    continuation's ``\\<newline>`` pair as one escaped character, so the
+    match still ends at the literal's real closing quote rather than
+    wandering into unrelated later lines. Each replacement preserves the
+    literal's embedded newline count (mirrors :func:`_strip_raw_strings`) so
+    line numbers reported for code that follows a continued literal stay
+    accurate — the plain ``_strip_literals_joined`` replacement (a bare
+    ``""``/``''``) would otherwise silently swallow those newlines (Codex
+    review: a shadow-name scan run before comment-stripping needs a
+    continuation-spanning literal fully blanked, or a fake type name like
+    ``struct concept {};`` trapped inside one leaks through and wrongly
+    shadows a genuine C++20 declaration elsewhere in the header).
+    """
+    content = _JOINED_STRING_LITERAL_PATTERN.sub(
+        lambda m: b'""' + b"\n" * m.group(0).count(b"\n"), content
+    )
+    content = _JOINED_CHAR_LITERAL_PATTERN.sub(
+        lambda m: b"''" + b"\n" * m.group(0).count(b"\n"), content
+    )
+    return content
+
+
 def _iter_logical_lines(content: bytes) -> list[tuple[int, bytes]]:
     """Split *content* into ``(1-based start line, logical line)`` pairs.
 
@@ -1387,7 +1417,11 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
         content = _strip_raw_strings(content)
         # Blank string/char literals first so a literal containing comment-like
         # text ("/* not a comment */") is never mistaken for a real comment.
-        content = _strip_literals(content)
+        # Backslash-newline-continuation-tolerant (Codex review): a literal
+        # split across a continuation must not leave its trapped text — e.g.
+        # a fake "struct concept {};" inside an error message — unblanked
+        # and visible to the shadow-name scan below.
+        content = _strip_literals_crossing_continuations(content)
         # Strip real block comments, but preserve the embedded newline count so
         # later-reported line numbers stay accurate for code following a
         # multi-line comment (CodeRabbit review).
