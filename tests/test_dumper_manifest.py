@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -420,6 +421,17 @@ def _have(tool: str) -> bool:
     return shutil.which(tool) is not None
 
 
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason=(
+        "dump_manifest is ELF-only so far (ADR-050 D3) -- a `gcc -shared "
+        "-o *.so` build produces a genuine ELF binary only on Linux; on "
+        "macOS the same command produces Mach-O despite the .so extension, "
+        "which would exercise the (deliberate) Mach-O rejection path "
+        "instead of the ELF one this class tests. Same reasoning as "
+        "test_clang_header_backend_integration.py's own platform gate."
+    ),
+)
 class TestDumpWithManifest:
     """dumper.dump(so_path, [], dump_manifest=...) -- the real ELF entry
     point, not just run_tu_loop in isolation. Requires clang + g++ (real
