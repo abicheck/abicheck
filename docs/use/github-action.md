@@ -8,6 +8,12 @@ automatically, then runs ABI comparison and reports results.
 > [Choose Your Workflow](../start/choose-your-workflow.md) for the decision matrix —
 > which artifacts map to which `mode`, and which severity inputs gate the build.
 
+> **Have more than one library, profile, or baseline channel?** This page
+> covers the root Action as one step. For a project's whole CI integration
+> lifecycle — multiple targets, build profiles, baseline channels, and the
+> `check-project.yml` matrix — see
+> [Which Scenario Am I?](../integration/index.md).
+
 ## Quick start
 
 ```yaml

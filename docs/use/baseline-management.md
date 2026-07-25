@@ -23,6 +23,14 @@ breaking changes before they ship.
 > severity → exit code) — see [CI Gating](ci-gating.md) for how it combines
 > with policies, suppressions, and severity.
 
+> **See also.** For a project publishing baselines through
+> `.abicheck.yml`'s `baseline:` block and the G30/ADR-047 integration model
+> (`release-contract`/`accepted-main` channels, `resolve-baseline`), see the
+> [`publish-baseline`/`update-main-baseline` reference](../reference/publish-baseline.md)
+> and [Which Scenario Am I?](../integration/index.md#baselines) — this
+> page's own model (baseline identity, storage-agnostic snapshots) is what
+> both are built on.
+
 > **The built-in baseline registry command is gone.** The pre-1.0 CLI reset
 > (ADR-043) removed the whole `abicheck baseline` subcommand group
 > (`push`/`pull`/`list`/`delete`) with no replacement command — abicheck's
