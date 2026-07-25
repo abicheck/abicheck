@@ -1247,8 +1247,14 @@ def perform_elf_dump(
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     compile_db_context_matched: bool = False,
+    dump_manifest: Any = None,
 ) -> None:
     """Run the ELF dump pipeline and write output.
+
+    ``dump_manifest`` (ADR-050 D3, G32 Phase B): a parsed
+    ``abicheck.dump_manifest.DumpManifest``, typed ``Any`` here (matching
+    ``compile_context`` above) so this module needs no new import just for
+    a type hint -- forwarded to :func:`abicheck.dumper.dump` unchanged.
 
     ``debug_info_path`` (P1.1, ADR-021a): a resolved detached debug artifact
     (``--debug-root``/``--debuginfod``) to read DWARF sections from instead of
@@ -1352,6 +1358,7 @@ def perform_elf_dump(
             header_backend=header_backend,
             extra_hash_dirs=deferred_dirs,
             debug_info_path=debug_info_path,
+            dump_manifest=dump_manifest,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         # The header parse itself failed -- nothing downstream (including a

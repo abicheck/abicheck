@@ -336,6 +336,7 @@ Dump ABI snapshot of a shared library to JSON.
 | `--debug-root` | no | — | Directory containing separate debug files (build-id trees, path-mirror debug files, or dSYM bundles). This option can be repeated. |
 | `--debuginfod` | no | `False` | Enable debuginfod network resolution for debug info (opt-in). Uses DEBUGINFOD\_URLS environment variable or --debuginfod-url. |
 | `--debuginfod-url` | no | — | debuginfod server URL (overrides DEBUGINFOD\_URLS env var). |
+| `--dump-manifest` | no | — | A strict YAML document describing multiple translation units to compile and merge into one snapshot, instead of a single -H/--header list. Mutually exclusive with -H/--header and --public-header/--public-header-dir (declare those in the manifest's own base profile instead). ELF only so far. |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 | `--git-tag` | no | — | Git tag to embed in the snapshot (e.g. v2.0.0). |
 | `--build-id` | no | — | Opaque build identifier (CI run ID, build number, etc.). |

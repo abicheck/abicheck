@@ -566,6 +566,14 @@ def main() -> None:
                    "Uses DEBUGINFOD_URLS environment variable or --debuginfod-url.")
 @click.option("--debuginfod-url", "debuginfod_url", default=None,
               help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).")
+# ── Multi-TU manifest (ADR-050 D3) ────────────────────────────────────────────
+@click.option("--dump-manifest", "dump_manifest_path",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
+              help="A strict YAML document describing multiple translation units to compile "
+                   "and merge into one snapshot, instead of a single -H/--header list. "
+                   "Mutually exclusive with -H/--header and --public-header/"
+                   "--public-header-dir (declare those in the manifest's own base profile "
+                   "instead). ELF only so far.")
 @verbose_option
 # ── Provenance metadata ──────────────────────────────────────────────────────
 @click.option("--git-tag", "git_tag", default=None,
@@ -591,6 +599,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              compile_db_filter: str | None,
              debug_roots: tuple[Path, ...],
              debuginfod: bool, debuginfod_url: str | None,
+             dump_manifest_path: Path | None,
              verbose: bool,
              git_tag: str | None, build_id: str | None, no_git: bool,
              build_info: Path | None = None, sources: Path | None = None,
@@ -617,6 +626,30 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
 
     reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
+
+    # ADR-050 D3: parsed before the collect/compile-context resolution below so
+    # a bad manifest fails fast, and validated against the *raw* CLI values
+    # (headers/public_headers/public_header_dirs haven't been reassigned yet).
+    parsed_dump_manifest = None
+    if dump_manifest_path is not None:
+        if headers:
+            raise click.UsageError(
+                "--dump-manifest and -H/--header are mutually exclusive -- the "
+                "manifest's own 'roots' field declares the public surface instead."
+            )
+        if public_headers or public_header_dirs:
+            raise click.UsageError(
+                "--dump-manifest and --public-header/--public-header-dir are "
+                "mutually exclusive -- declare them in the manifest's own base "
+                "profile instead."
+            )
+        from .dump_manifest import load_manifest
+        from .errors import ManifestValidationError
+
+        try:
+            parsed_dump_manifest = load_manifest(dump_manifest_path)
+        except ManifestValidationError as exc:
+            raise click.UsageError(str(exc)) from exc
 
     # Resolve the evidence-depth preset into the collect mode, apply --depth binary
     # suppression, and warn on an explicitly-requested deep depth without sources.
@@ -831,6 +864,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         )
 
     if binary_fmt in ("pe", "macho"):
+        if parsed_dump_manifest is not None:
+            raise click.UsageError(
+                f"--dump-manifest is not yet supported for {binary_fmt.upper()} "
+                "binaries (ADR-050 D3); use a single-header dump for this format."
+            )
         native_cc = (
             dataclasses.replace(_cc, gcc_options=effective_gcc_options)
             if effective_gcc_options != _cc.gcc_options
@@ -903,6 +941,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         compile_context=_cc,
         depth=depth,
         compile_db_context_matched=compile_db_matched,
+        dump_manifest=parsed_dump_manifest,
     )
 
 
