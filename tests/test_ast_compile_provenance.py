@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.buildsource.redaction import DEFAULT_REDACTION
 from abicheck.dumper import (
     _ast_compile_provenance,
     _cplusplus_macro_for_standard,
@@ -117,7 +118,7 @@ class TestAstCompileProvenance:
         assert prov["ast_resolved_standard"] == "gnu++17"
         assert prov["ast_cplusplus_macro"] == "201703L"
         assert prov["ast_compile_args"] == ("-std=gnu++17", "-DFOO=1")
-        assert prov["ast_sysroot"] == str(sysroot)
+        assert prov["ast_sysroot"] == DEFAULT_REDACTION.path(str(sysroot))
 
     def test_empty_inputs_are_all_none_or_empty(self):
         prov = _ast_compile_provenance([], None, (), None)
