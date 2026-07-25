@@ -2213,7 +2213,7 @@ the from_dict structural-error taxonomy, every cross-reference validation
 rule (including the exact ADR-047 §3 PVXS two-target-one-bundle shape as a
 positive case), the loader, and the CLI command.
 
-### P1.6 — `publish-baseline.yml` / `update-main-baseline.yml` — **done, live rotation fixture added and pending its first CI confirmation**
+### P1.6 — `publish-baseline.yml` / `update-main-baseline.yml` — **done**
 
 Implements ADR-047 §6/§10. `publish-baseline.yml`: release-triggered,
 `actions/baseline` → atomic archive → release-asset upload.
@@ -2374,10 +2374,16 @@ remains covered only by the pure-Python key-format contract tests
 This is a real, narrower-than-originally-intended gap, stated plainly
 rather than glossed over.
 
-**Caveat honestly: the rescoped workflow has not yet completed a real CI
-run as of this writing** — treat it as "implemented, awaiting first live
-confirmation," not yet "confirmed passing," until that run is observed
-green.
+**Confirmed passing.** The rescoped `test-baseline-rotation.yml` completed
+a real, green CI run (`build-fixture` → `run-1` → `run-2` → `verify`, all
+green, `verify` printing the two distinct cache-entry ids), plus a
+`cleanup` job (`if: always()`) that deletes this run's own
+`rotation-test-*` cache entries afterward so repeated PR runs don't
+accumulate cache-quota churn. `docs/reference/publish-baseline.md` gained
+a "Known gap" note about the same-run cross-job restore limitation this
+item's own debugging surfaced, for any future caller wiring a custom
+`accepted-main` restore step immediately after calling
+`update-main-baseline.yml` in the same run.
 
 **Files delivered:** `actions/baseline/run.sh`, `actions/baseline/
 build_manifest.py`, `actions/baseline/action.yml` (`stage_binary` documented

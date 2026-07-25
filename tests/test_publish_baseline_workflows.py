@@ -480,3 +480,32 @@ class TestBaselineRotationFixture:
             == "Confirm both rotation-test cache entries exist as separate GitHub Actions cache entries"
         )
         assert "c1['id'] == c2['id']" in step["run"]
+
+    def test_cleanup_job_always_runs_and_needs_every_other_job(self) -> None:
+        # A failed run-1/run-2/verify still wrote real cache entries under
+        # this run's own run_id that deserve cleanup -- if: always() must
+        # not be gated on the other jobs' outcomes.
+        data = _load(TEST_BASELINE_ROTATION)
+        cleanup = data["jobs"]["cleanup"]
+        assert cleanup["if"] == "always()"
+        for job_name in ("build-fixture", "run-1", "run-2", "verify"):
+            assert job_name in cleanup["needs"]
+
+    def test_cleanup_job_declares_actions_write_permission(self) -> None:
+        # Deleting a cache entry via the REST API needs actions: write, not
+        # just the actions: read the verify job's List API call needs.
+        data = _load(TEST_BASELINE_ROTATION)
+        assert data["jobs"]["cleanup"]["permissions"]["actions"] == "write"
+
+    def test_cleanup_deletes_both_keys_via_the_delete_caches_api(self) -> None:
+        data = _load(TEST_BASELINE_ROTATION)
+        steps = _steps(data["jobs"]["cleanup"])
+        step = next(
+            s
+            for s in steps
+            if s.get("name") == "Delete rotation-test cache entries for this run"
+        )
+        assert "DELETE" in step["run"]
+        assert "actions/caches" in step["run"]
+        assert "$KEY_1" in step["run"]
+        assert "$KEY_2" in step["run"]

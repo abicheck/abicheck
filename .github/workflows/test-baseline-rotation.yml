@@ -236,4 +236,40 @@ jobs:
               f'run #1 -> id={c1[\"id\"]} size={c1.get(\"size_in_bytes\")} bytes, '
               f'run #2 -> id={c2[\"id\"]} size={c2.get(\"size_in_bytes\")} bytes'
           )
+
+  # ── Delete this run's own test cache entries -- nothing else does ────────
+  # Real accepted-main entries are managed by the calling project (GitHub's
+  # own ~7-day unaccessed-cache eviction is the only other cleanup); this
+  # fixture's own rotation-test-* entries would otherwise accumulate, one
+  # pair per CI run that touches P1.6-related paths, forever. Runs
+  # regardless of whether verify passed (if: always()) -- a failed run
+  # still wrote real cache entries under run.run_id that deserve cleanup,
+  # not just a successful one.
+  cleanup:
+    name: "Cleanup: delete this run's rotation-test cache entries"
+    needs: [build-fixture, run-1, run-2, verify]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Delete rotation-test cache entries for this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEY_1: 'rotation-test-baseline-main-${{ github.run_id }}-${{ needs.build-fixture.outputs.profile-id }}-rotation-test-sha-1'
+          KEY_2: 'rotation-test-baseline-main-${{ github.run_id }}-${{ needs.build-fixture.outputs.profile-id }}-rotation-test-sha-2'
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Not -e: a key that was never written (e.g. build-fixture itself
+          # failed, so profile-id is empty/malformed) must not fail this
+          # cleanup job -- delete is best-effort, not a required assertion.
+          for key in "$KEY_1" "$KEY_2"; do
+            if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches?key=${key}" >/dev/null 2>&1; then
+              echo "deleted cache entry: $key"
+            else
+              echo "no cache entry to delete (already gone or never written): $key"
+            fi
+          done
           "

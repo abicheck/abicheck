@@ -169,6 +169,27 @@ consumption" scoping [`build-output.json`](build-output-schema.md) and
 [`resolve-baseline`](resolve-baseline.md)'s bundle path used before their
 own producers shipped.
 
+### Known gap: restoring immediately after a same-run write can miss
+
+A GitHub Actions cache entry saved by one job is not always immediately
+restorable via `actions/cache/restore` from a *different job within the
+same workflow run* — observed directly while building this reusable
+workflow's own live test fixture
+(`.github/workflows/test-baseline-rotation.yml`): a restore attempt in a
+downstream job missed an entry a sibling job had just finished saving
+moments earlier, and `update-main-baseline.yml`'s own unmodified
+"Restore previous accepted-main baseline-set" step (used for the
+freshness comparison) failed identically when a second same-run
+invocation tried to see the first's entry. This did not reproduce as a
+simple propagation delay — a direct List Actions Caches API query
+confirmed the entry already existed at the moment the restore missed it.
+If you wire a custom `actions/cache/restore` step to consume
+`accepted-main` immediately after calling `update-main-baseline.yml` in
+the *same* workflow run (rather than in a later, separate run — the
+normal case for a day-to-day `push`-triggered refresh), be aware this
+same-run restore can transiently miss even though the entry is really
+there. A later run, or a retried restore, resolves it.
+
 ## See also
 
 - [`resolve-baseline` Action Reference](resolve-baseline.md) — consumes what
