@@ -21,9 +21,14 @@ and the gate that proves two snapshots were extracted comparably before
 Phase A): the fingerprint algorithm and the gate are real, and both are wired
 into real production dumps, not just ``checker.compare``'s call site.**
 ``dumper.py`` calls :func:`compute_extraction_contract` unconditionally on
-every dump and attaches the result, so a freshly-produced snapshot carries a
-real ``contract`` (not ``contract=None``) today; the gate is live for anyone
-comparing two current dumps. :func:`check_contracts_comparable` is reachable
+every dump and attaches whatever it returns, so a freshly-produced snapshot
+with fingerprintable extraction inputs (an L2 header/AST frontend ran, or
+public-header provenance was given) now carries a real ``contract`` — not
+``contract=None`` — and the gate is live for anyone comparing two such
+dumps. A dump with neither (plain binary/symbols-only, no headers) still
+gets ``contract=None``, exactly as documented on
+:func:`compute_extraction_contract` itself ("nothing to fingerprint at
+all"). :func:`check_contracts_comparable` is reachable
 from ``checker.compare`` (the Tier-1 core), from ``service.py``'s
 ``CompareRequest``/``run_compare_request``/legacy ``run_compare`` keyword
 shim (which thread a ``diagnostic_comparison`` keyword all the way through,

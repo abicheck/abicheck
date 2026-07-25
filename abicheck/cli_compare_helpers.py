@@ -193,6 +193,7 @@ def _reject_set_input_flags(
     secondary_fmt: str | None = None,
     used_by_apps: tuple[Path, ...] = (),
     required_symbols: tuple[str, ...] = (),
+    diagnostic_comparison: bool = False,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
 
@@ -237,6 +238,14 @@ def _reject_set_input_flags(
             "directory/package (release) comparisons: the per-library "
             "fan-out has no plugin-host-contract scoping. Compare the "
             "specific library individually with --required-symbol."
+        )
+    if diagnostic_comparison:
+        raise click.UsageError(
+            "--diagnostic-comparison is not supported for directory/package "
+            "(release) comparisons yet: the per-library fan-out does not "
+            "wire the ADR-050 D2 comparability gate's diagnostic escape "
+            "hatch (a mismatch there still raises unhandled). Compare the "
+            "specific library individually to use it."
         )
 
 
@@ -1209,6 +1218,7 @@ def run_compare(
         _reject_set_input_flags(
             exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
+            diagnostic_comparison=diagnostic_comparison,
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _reject_evidence_flags_for_set_inputs(ctx)

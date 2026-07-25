@@ -943,6 +943,25 @@ class TestCompareDispatch:
         assert "not supported for directory/package" in msg
         assert "--required-symbol" in msg
 
+    def test_diagnostic_comparison_rejected_on_set_inputs(self, tmp_path: Path) -> None:
+        # ADR-050 D2: the per-library release fan-out doesn't wire the
+        # comparability gate's diagnostic escape hatch at all yet -- reject
+        # the flag loudly rather than silently accept and ignore it
+        # (CodeRabbit review, PR #631).
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        code, out, err = _invoke(
+            "compare", str(old_dir), str(new_dir), "--diagnostic-comparison"
+        )
+        assert code != 0
+        msg = out + err
+        assert "not supported for directory/package" in msg
+        assert "--diagnostic-comparison" in msg
+
     def test_app_operand_rejected_with_hint(self, tmp_path: Path) -> None:
         app = _make_pie_executable(tmp_path / "myapp")
         new = _write_snap(tmp_path / "new.json", _snap())

@@ -27,6 +27,7 @@ covered end-to-end by ``tests/test_checker_comparability_gate.py``."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from click.testing import CliRunner
 
@@ -37,7 +38,7 @@ from abicheck.model import AbiSnapshot
 from abicheck.reporter import to_json
 
 
-def _write_placeholder_inputs(tmp_path):
+def _write_placeholder_inputs(tmp_path: Path) -> tuple[Path, Path]:
     old_p = tmp_path / "old.json"
     new_p = tmp_path / "new.json"
     old_p.write_text("{}", encoding="utf-8")

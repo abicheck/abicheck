@@ -204,6 +204,44 @@ class TestReportValidatesAgainstSchema:
             assert c["reviewer_action"] in declared_enum
 
 
+@_requires_jsonschema
+class TestNotComparableReportSchema:
+    """Schema 2.17 (ADR-050 D2): the `verdict: null` / `reason` shape a
+    not_comparable compare report uses, distinct from the ordinary
+    five-verdict shape TestReportValidatesAgainstSchema exercises above."""
+
+    def _validate(self, payload: dict) -> None:
+        schema = load_compare_report_schema()
+        jsonschema.validate(instance=payload, schema=schema)
+
+    def test_not_comparable_report_with_reason_validates(self):
+        payload = {
+            "report_schema_version": REPORT_SCHEMA_VERSION,
+            "library": "libfoo.so.1",
+            "old_version": "1.0",
+            "new_version": "2.0",
+            "verdict": None,
+            "reason": {"kind": "scope_mismatch", "message": "scope drift"},
+        }
+        self._validate(payload)
+
+    def test_not_comparable_report_without_reason_is_rejected(self):
+        # CodeRabbit review, PR #631: `reason` was documented as always
+        # present when verdict is null, but only declaring the property
+        # (not requiring it) let a null-verdict, reason-less payload validate
+        # anyway. The allOf conditional added in response must actually
+        # enforce it.
+        payload = {
+            "report_schema_version": REPORT_SCHEMA_VERSION,
+            "library": "libfoo.so.1",
+            "old_version": "1.0",
+            "new_version": "2.0",
+            "verdict": None,
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            self._validate(payload)
+
+
 class TestEvidenceDepthValidator:
     """Direct unit coverage for checker_types.validate_evidence_depth/
     EVIDENCE_DEPTH_VALUES -- the shared depth-spelling guard both

@@ -62,8 +62,11 @@ and `checker.compare` itself now calls the gate — comparing `old/` against
 `compare(..., diagnostic_comparison=True)` downgrades that to a tentative,
 `assurance: "none"`-stamped diff. `dumper.py` now calls
 `compute_extraction_contract` on every real dump too, so a fresh
-`dump`/`compare` invocation carries a real `contract`, not `contract=None`.
-**Reachable today from the native `abicheck compare` CLI command**
+`dump`/`compare` invocation with fingerprintable extraction inputs (headers
+given, or an L2 frontend ran) carries a real `contract`, not `contract=None`
+— a plain binary/symbols-only dump with no headers still gets
+`contract=None`, per `compute_extraction_contract`'s own "nothing to
+fingerprint" rule. **Reachable today from the native `abicheck compare` CLI command**
 (`--diagnostic-comparison` flag, `verdict: null` JSON report, exit code
 `16`) and from `service.py`'s `CompareRequest`/`run_compare_request`/legacy
 `run_compare` shim (parameter threaded through, no dedicated exception

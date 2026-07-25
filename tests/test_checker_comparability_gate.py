@@ -1,10 +1,10 @@
 """ADR-050 D2 — check_contracts_comparable wired into checker.compare().
-dumper.py now attaches a real contract to every snapshot it produces (see
-abicheck/comparability.py's module docstring), but these are unit tests of
-the gate itself, not an integration test of a real dump — they build
-AbiSnapshot.contract by hand via compute_extraction_contract() so each case
-can hold every other field fixed and vary only the one fingerprint under
-test."""
+dumper.py now attaches a real contract to every snapshot it produces with
+fingerprintable extraction inputs (see abicheck/comparability.py's module
+docstring), but these are unit tests of the gate itself, not an integration
+test of a real dump — they build AbiSnapshot.contract by hand via
+compute_extraction_contract() so each case can hold every other field fixed
+and vary only the one fingerprint under test."""
 
 from __future__ import annotations
 
