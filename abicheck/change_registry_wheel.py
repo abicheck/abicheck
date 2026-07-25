@@ -23,7 +23,7 @@ time — declaring a kind here is exactly equivalent to declaring it in
 ``check_platform_baseline_floor``) and ``abicheck/diff_wheel_deployment.py``
 (``check_macos_deployment_target_floor``) for the evidence extraction and
 detectors that emit these kinds, and
-``docs/development/plans/g27-wheel-deployment-verification.md`` for the full
+``docs/contribute/plans/g27-wheel-deployment-verification.md`` for the full
 design.
 """
 

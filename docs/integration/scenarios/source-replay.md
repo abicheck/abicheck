@@ -3,7 +3,7 @@
 You have a compile database (or something abicheck can derive one from) and
 want PR-scoped source-level checks — inline function bodies, template
 instantiations, macro values, default arguments, `constexpr` — not just the
-binary/header surface. [ADR-047](../../development/adr/047-github-actions-integration-model.md)
+binary/header surface. [ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
 §8's S7: on a pull request, scope the (expensive) replay to just the changed
 translation units; on a release/nightly run, replay the whole target.
 
@@ -18,7 +18,7 @@ where the *build* emits source facts as it compiles instead.
 - A compile database, or something abicheck can derive one from
   zero-config (CMake configure-only, a Bazel `aquery`, or a Make dry-run
   transcript) — see
-  [Source-Scan Depth § Obtaining a compile database](../../user-guide/scan-levels.md#obtaining-a-compile-database-without-a-full-build).
+  [Source-Scan Depth § Obtaining a compile database](../../use/scan-levels.md#obtaining-a-compile-database-without-a-full-build).
 - `clang` on the runner (installed automatically by the root Action's
   `install-deps`).
 - For a PR run: `fetch-depth: 0` on checkout, so the base ref is available to
@@ -40,7 +40,7 @@ changed paths, runs the pinned evidence level, and compares in one step:
     since: origin/${{ github.base_ref }}
 ```
 
-See [GitHub Action: Source Scans](../../user-guide/github-action-source-scans.md)
+See [GitHub Action: Source Scans](../../use/github-action-source-scans.md)
 for every input this mode accepts, cost estimation, and gating on a specific
 cross-source check.
 
@@ -67,11 +67,11 @@ full `evidence-producer` contract and how it composes with `collect-facts`.
   → [S8/S9: Source Facts From the Build Itself](build-integrated-facts.md)
   (the `abicheck-cc` wrapper or the Clang plugin).
 - **You have several DSOs sharing one facts pack** → S16,
-  [Build Info & Sources](../../concepts/build-source-data.md).
+  [Build Info & Sources](../../learn/build-source-data.md).
 
 ## See also
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
-- [GitHub Action: Source Scans](../../user-guide/github-action-source-scans.md) — the canonical `mode: scan` reference.
-- [Source-Scan Depth](../../user-guide/scan-levels.md) — the depth ladder and compile-DB acquisition options.
-- [What Each Level Sees](../../concepts/what-each-level-sees.md) — a worked example of what L3/L4/L5 actually produce.
+- [GitHub Action: Source Scans](../../use/github-action-source-scans.md) — the canonical `mode: scan` reference.
+- [Source-Scan Depth](../../use/scan-levels.md) — the depth ladder and compile-DB acquisition options.
+- [What Each Level Sees](../../learn/what-each-level-sees.md) — a worked example of what L3/L4/L5 actually produce.

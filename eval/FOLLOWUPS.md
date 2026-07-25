@@ -90,7 +90,7 @@ work is the live C++ validation campaign tracked under §C/§E.
   appears to contain C++ syntax" hint **aborts** instead of degrading.
 - **Pointers.** `abicheck/cli.py:644` / `:1506` (`--lang` option); the hint emit
   in the castxml driver (`abicheck/dumper_castxml.py`); plan
-  `docs/development/plans/g16-header-scope-toolchain-robustness.md`.
+  `docs/contribute/plans/g16-header-scope-toolchain-robustness.md`.
 - **Approach.** Demote the heuristic to a warning + auto-retry under the other
   language mode; never hard-fail a correct `extern "C"` header.
 - **Acceptance.** `dump zlib.h --lang c` succeeds (or warns + falls back), no abort.
@@ -187,7 +187,7 @@ The Amdahl wall in C1 (~60–83% serial) is partly an artifact, not inherent:
 - **PCH/modules considered, rejected:** `clang -ast-dump=json` does not re-emit
   PCH'd decls, so a PCH would drop the header surface L4 captures — wrong tool;
   the cache + replay scope are the repeated-parse levers. See
-  `docs/development/performance.md` § L4.
+  `docs/contribute/performance.md` § L4.
 
 ---
 

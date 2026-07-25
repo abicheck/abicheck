@@ -345,7 +345,7 @@ def _build_type_churn(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
     (affected-symbol enrichment, opaque/pointer-only filtering, namespace
     detection). That O(functions x types) path — not the core symbol diff — is
     what makes ``compare`` blow up on large real libraries
-    (see docs/development/performance.md). Mirrors
+    (see docs/contribute/performance.md). Mirrors
     ``scripts/benchmark_scaling.py``'s ``type_churn`` scenario.
     """
     n_types = max(50, n_funcs // 20)

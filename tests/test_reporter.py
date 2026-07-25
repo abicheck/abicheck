@@ -491,6 +491,222 @@ class TestEvidenceStatusInJson:
         assert "severity" not in d
 
 
+class TestRootCauseReporter:
+    """G29 Phase 3 slice 3 (ADR-052): --report-mode root-cause groups
+    findings sharing a Change.caused_by_type under one entry -- a first,
+    JSON-only slice reusing the existing caused_by_type field rather than
+    requiring the full G29 Phase 6 RootCauseCorrelator."""
+
+    def test_groups_findings_sharing_caused_by_type(self):
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        overlay = Change(
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
+            "required", caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root, overlay])
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert d["root_cause_count"] == 1
+        group = d["root_causes"][0]
+        assert group["root"] == "ns::internal::helper"
+        assert group["finding_count"] == 2
+        assert {f["symbol"] for f in group["findings"]} == {
+            "ns::internal::helper", "pub_entry",
+        }
+
+    def test_ungrouped_finding_is_its_own_singleton(self):
+        c = Change(ChangeKind.FUNC_ADDED, "ns::pub_new", "added")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert d["root_cause_count"] == 1
+        assert d["root_causes"][0]["root"] == "ns::pub_new"
+
+    def test_independent_findings_sharing_a_symbol_stay_separate(self):
+        """Codex review: two independent findings on the same symbol with no
+        caused_by_type correlation (e.g. a return-type change and a parameter
+        change, both on "foo") must NOT collapse into one root cause just
+        because they share a symbol -- only caused_by_type correlates
+        findings in this slice's contract."""
+        a = Change(ChangeKind.FUNC_RETURN_CHANGED, "foo", "return type changed")
+        b = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "parameter changed")
+        r = _result(Verdict.BREAKING, changes=[a, b])
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert d["root_cause_count"] == 2
+        for group in d["root_causes"]:
+            assert group["root"] == "foo"
+            assert group["finding_count"] == 1
+        ids = {group["root_cause_id"] for group in d["root_causes"]}
+        assert len(ids) == 2
+
+    def test_anonymous_findings_with_no_symbol_stay_separate(self):
+        """Codex review: SOURCE_FACT_COVERAGE_INCOMPLETE/
+        SOURCE_BINARY_PROVENANCE_MISMATCH (source_diff.py) are both
+        constructed with symbol="" and no caused_by_type -- a bare-symbol
+        grouping fallback would collapse every such aggregate finding into
+        one fake shared root cause ("" == ""), even though none of them
+        actually correlate. Each must stay its own singleton group."""
+        a = Change(
+            ChangeKind.SOURCE_FACT_COVERAGE_INCOMPLETE,
+            "",
+            "L4 source-fact evidence incomplete",
+        )
+        b = Change(
+            ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH,
+            "",
+            "source tree does not match binary",
+        )
+        r = _result(Verdict.COMPATIBLE_WITH_RISK, changes=[a, b])
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert d["root_cause_count"] == 2
+        kinds = {group["findings"][0]["kind"] for group in d["root_causes"]}
+        assert kinds == {
+            "source_fact_coverage_incomplete",
+            "source_binary_provenance_mismatch",
+        }
+        ids = {group["root_cause_id"] for group in d["root_causes"]}
+        assert len(ids) == 2
+        assert d["root_causes"][0]["finding_count"] == 1
+
+    def test_root_cause_mode_carries_redundant_count_and_pattern_modulations(self):
+        """Codex review: root-cause JSON built its own payload from scratch
+        instead of going through _add_changes_block (or mirroring leaf mode's
+        own copy of the same fields), silently dropping the
+        redundant_count/pattern_modulations audit trail full/leaf JSON both
+        surface whenever they're non-empty."""
+        c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+        r = DiffResult(
+            old_version="1.0", new_version="2.0",
+            library="libtest.so.1",
+            changes=[c],
+            verdict=Verdict.BREAKING,
+            redundant_count=3,
+            pattern_modulations=[{"pattern": "cpp_pimpl", "action": "demoted"}],
+        )
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert d["redundant_count"] == 3
+        assert d["pattern_modulations"] == [{"pattern": "cpp_pimpl", "action": "demoted"}]
+
+    def test_root_cause_id_is_stable_for_the_same_root(self):
+        c1 = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
+        c2 = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
+        d1 = json.loads(
+            to_json(_result(Verdict.BREAKING, changes=[c1]), report_mode="root-cause")
+        )
+        d2 = json.loads(
+            to_json(_result(Verdict.BREAKING, changes=[c2]), report_mode="root-cause")
+        )
+        assert (
+            d1["root_causes"][0]["root_cause_id"]
+            == d2["root_causes"][0]["root_cause_id"]
+        )
+
+    def test_changes_still_present_for_backward_compat(self):
+        """Every other report mode always provides a flat `changes` array
+        (leaf mode included, via its own backward-compat union) -- root-cause
+        mode must too, or a consumer relying on that contract breaks."""
+        c = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
+        r = _result(Verdict.BREAKING, changes=[c])
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert len(d["changes"]) == 1
+        assert d["changes"][0]["symbol"] == "ns::internal::helper"
+
+    def test_carries_severity_block(self):
+        from abicheck.severity import PRESET_DEFAULT
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(
+            to_json(r, report_mode="root-cause", severity_config=PRESET_DEFAULT)
+        )
+        assert "severity" in d
+        assert d["severity"]["categories"]["addition"]["count"] == 1
+
+    def test_show_only_filters_root_cause_groups(self):
+        breaking = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
+        addition = Change(ChangeKind.FUNC_ADDED, "ns::pub_new", "added")
+        r = _result(Verdict.BREAKING, changes=[breaking, addition])
+        d = json.loads(to_json(r, report_mode="root-cause", show_only="breaking"))
+        roots = {group["root"] for group in d["root_causes"]}
+        assert roots == {"ns::internal::helper"}
+
+    def test_carries_scope_block_when_public_headers_scoped(self):
+        """Codex review: full/leaf JSON both emit the machine-readable
+        `scope` block (resolved/fell_back/manual_review_required) when
+        --scope-public-headers was requested; root-cause mode dropped it,
+        hiding the fallback/manual-review warning for scoped root-cause
+        runs."""
+        c = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
+        r = _result(Verdict.BREAKING, changes=[c])
+        r.scope_to_public_surface = True
+        r.scope_resolved = False
+        d = json.loads(to_json(r, report_mode="root-cause"))
+        assert d["scope"]["public_headers_applied"] is True
+        assert d["scope"]["manual_review_required"] is True
+
+
+class TestRootCauseMarkdown:
+    """G29 Phase 3 slice 4 (ADR-052): --report-mode root-cause markdown/text
+    rendering, sharing reporter._group_changes_by_root_cause with the JSON
+    renderer so the two formats can never disagree about grouping."""
+
+    def test_groups_findings_sharing_caused_by_type(self):
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        overlay = Change(
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
+            "required", caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root, overlay])
+        md = to_markdown(r, report_mode="root-cause")
+        assert "## Root Causes (1)" in md
+        assert "### `ns::internal::helper` (2 findings)" in md
+        assert "func_removed" in md
+        assert "internal_symbol_required_by_public_api" in md
+
+    def test_independent_findings_sharing_a_symbol_stay_separate(self):
+        a = Change(ChangeKind.FUNC_RETURN_CHANGED, "foo", "return type changed")
+        b = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "parameter changed")
+        r = _result(Verdict.BREAKING, changes=[a, b])
+        md = to_markdown(r, report_mode="root-cause")
+        assert "## Root Causes (2)" in md
+        assert md.count("### `foo` (1 finding)") == 2
+
+    def test_show_only_filters_root_cause_groups(self):
+        breaking = Change(ChangeKind.FUNC_REMOVED, "ns::internal::helper", "removed")
+        addition = Change(ChangeKind.FUNC_ADDED, "ns::pub_new", "added")
+        r = _result(Verdict.BREAKING, changes=[breaking, addition])
+        md = to_markdown(r, report_mode="root-cause", show_only="breaking")
+        assert "ns::internal::helper" in md
+        assert "ns::pub_new" not in md
+        assert "Filtered by: `--show-only breaking`" in md
+
+    def test_no_changes_reports_no_abi_changes(self):
+        md = to_markdown(_result(Verdict.NO_CHANGE), report_mode="root-cause")
+        assert "No ABI changes detected" in md
+        assert "Root Causes" not in md
+
+    def test_carries_severity_summary(self):
+        from abicheck.severity import PRESET_DEFAULT
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        md = to_markdown(r, report_mode="root-cause", severity_config=PRESET_DEFAULT)
+        assert "## Severity Configuration" in md
+
+    def test_show_impact_appends_impact_table(self):
+        """Codex review: --show-impact silently dropped the Impact Summary
+        table under --report-mode root-cause, unlike full/leaf markdown."""
+        c = Change(
+            ChangeKind.TYPE_SIZE_CHANGED, "X", "size changed",
+            affected_symbols=["f"], caused_count=1,
+        )
+        r = _result(Verdict.BREAKING, changes=[c])
+        md = to_markdown(r, report_mode="root-cause", show_impact=True)
+        assert "Impact Summary" in md
+
+
 class TestMarkdownReporter:
     def test_no_change_contains_no_change(self):
         md = to_markdown(_result(Verdict.NO_CHANGE))

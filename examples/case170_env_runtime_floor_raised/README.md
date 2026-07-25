@@ -28,7 +28,7 @@ anyone depends on deployment targets the tool cannot see.
 ## Making it decidable: `--env-matrix`
 
 Declare the oldest runtime you ship to and the risk becomes a verdict
-(see [Environment & Toolchain Drift](../../docs/concepts/environment-drift.md)):
+(see [Environment & Toolchain Drift](../../docs/learn/environment-drift.md)):
 
 | Declared floor | Meaning | Verdict |
 |---|---|---|

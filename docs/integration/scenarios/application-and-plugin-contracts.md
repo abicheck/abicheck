@@ -2,7 +2,7 @@
 
 Not every check is "does this library's own public header/binary surface
 stay compatible." Two related but distinct questions
-[ADR-047](../../development/adr/047-github-actions-integration-model.md)
+[ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
 §8 names S22 and S23:
 
 - **S22 — application compatibility.** Will *this specific application*
@@ -35,7 +35,7 @@ baseline/candidate library lookup redirects through `library:`'s target — the
 ["library redirect"](../concepts.md#target) every app-consumer/plugin-contract
 target uses. `check-target`'s `consumer-binary` input forwards to the root
 Action's `--used-by`; see
-[Application Compatibility](../../user-guide/appcompat.md) for the full
+[Application Compatibility](../../use/appcompat.md) for the full
 `--used-by` scoping model, and the
 [`check-target` reference](../../reference/check-target.md) for the target-kind
 input table.
@@ -54,7 +54,7 @@ targets:
 ```
 
 `contract-file` forwards to the root Action's `--required-symbols`. See
-[Plugin Systems](../../user-guide/plugin-systems.md) for the full
+[Plugin Systems](../../use/plugin-systems.md) for the full
 `--required-symbol`/`--required-symbols`/`--policy plugin_abi` model.
 
 ## Neither works with `channel: none`
@@ -67,7 +67,7 @@ no-baseline audit ([S5](single-build-audit.md)) instead.
 ## See also
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
-- [Application Compatibility](../../user-guide/appcompat.md) — the full `--used-by` reference.
-- [Plugin Systems](../../user-guide/plugin-systems.md) — the full plugin/dlopen contract reference.
+- [Application Compatibility](../../use/appcompat.md) — the full `--used-by` reference.
+- [Plugin Systems](../../use/plugin-systems.md) — the full plugin/dlopen contract reference.
 - [`check-target` Action Reference](../../reference/check-target.md) — the `target-kind` input table.
 - [Project Targets Schema](../../reference/project-targets-schema.md) — the `.abicheck.yml` `kind: app-consumer`/`plugin-contract` schema.

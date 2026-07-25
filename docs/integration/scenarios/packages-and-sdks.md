@@ -3,7 +3,7 @@
 You don't have (or don't want) a source checkout in this job at all — only
 prebuilt packages (RPM, Deb, conda, wheel, tar, an SDK drop). No build step,
 no compile database, no build integration.
-[ADR-047](../../development/adr/047-github-actions-integration-model.md)
+[ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
 §8's S13 folds into the same [`check-project.yml`](../../reference/reusable-workflows.md)
 flow as [S3](existing-build-artifact.md): "no separate workflow" (D5) — a
 package is just another way to populate a
@@ -22,7 +22,7 @@ abicheck compare old.rpm new.rpm \
   --devel-pkg old=old-devel.rpm --devel-pkg new=new-devel.rpm
 ```
 
-See [Choose Your Workflow](../../user-guide/choose-your-workflow.md)'s
+See [Choose Your Workflow](../../start/choose-your-workflow.md)'s
 package row for every archive format `compare` auto-detects (RPM/Deb/tar/
 conda/wheel).
 
@@ -43,5 +43,5 @@ binaries came from a compile step or an `rpm2cpio`/`dpkg-deb -x` extraction.
 ## See also
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
-- [Choose Your Workflow](../../user-guide/choose-your-workflow.md) — the plain-CLI package row.
+- [Choose Your Workflow](../../start/choose-your-workflow.md) — the plain-CLI package row.
 - [Build Output Schema](../../reference/build-output-schema.md) — the directory layout a package extracts into.

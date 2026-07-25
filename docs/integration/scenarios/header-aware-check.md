@@ -4,7 +4,7 @@ You have public headers for your library, not just the binary — and you want
 that to matter: an internal symbol being removed is not the same finding as a
 *public* one being removed, and a header-only change (an inline function body,
 a default argument) can break API compatibility with no change to the binary
-at all. [ADR-047](../../development/adr/047-github-actions-integration-model.md)
+at all. [ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
 §8's S6 is "any" baseline channel plus one requirement: the check must
 actually reach the header parse, not silently fall back to a binary-only
 comparison.
@@ -31,9 +31,9 @@ CLI/root Action) and point at your header root:
 
 `headers` is one rung on abicheck's evidence-depth ladder
 (`binary` → `headers` → `build` → `source`) — see
-[Source-Scan Depth](../../user-guide/scan-levels.md#what-each-depth-reaches)
+[Source-Scan Depth](../../use/scan-levels.md#what-each-depth-reaches)
 for exactly what each rung adds and what it needs, and
-[Evidence & Detectability](../../concepts/evidence-and-detectability.md) for
+[Evidence & Detectability](../../learn/evidence-and-detectability.md) for
 the underlying model.
 
 ## Confirming the header parse actually ran
@@ -51,7 +51,7 @@ exact field.
 - **You also have a compile database and want build-flag drift detected, or
   full sources and want body-level (inline/template/macro) changes caught**
   → step up to `build`/`source` depth — see
-  [Source-Scan Depth](../../user-guide/scan-levels.md) and
+  [Source-Scan Depth](../../use/scan-levels.md) and
   [S7: Source Scan via Compile-DB Replay](source-replay.md).
 - **Your headers include generated (codegen) content that must be present
   for the parse to be meaningful** → S10,
@@ -61,5 +61,5 @@ exact field.
 ## See also
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
-- [Source-Scan Depth](../../user-guide/scan-levels.md) — the canonical depth-ladder reference.
+- [Source-Scan Depth](../../use/scan-levels.md) — the canonical depth-ladder reference.
 - [`check-target` Action Reference](../../reference/check-target.md) — the full report envelope.

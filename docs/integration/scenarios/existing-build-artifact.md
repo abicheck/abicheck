@@ -4,7 +4,7 @@ Your project already has a build — possibly a slow one (a large C++ codebase,
 a from-scratch toolchain bootstrap, a cross-compile). You don't want abicheck
 re-building anything, and you don't want to hand-wire binary/header paths
 into every check. This is
-[ADR-047](../../development/adr/047-github-actions-integration-model.md) §8's
+[ADR-047](../../contribute/adr/047-github-actions-integration-model.md) §8's
 S3: "build once, scan many" — the preferred flow for any repository beyond
 S1's single-file minimal case.
 
@@ -71,10 +71,10 @@ on; only the number of profiles and how the directory gets populated differ.
 - **Your build doesn't naturally produce a compile database / source facts,
   and you want source-level (not just binary/header) checks** → wire
   `abicheck_inputs/` into the build output — see
-  [Producing Source Facts](../../user-guide/producing-source-facts.md).
+  [Producing Source Facts](../../use/producing-source-facts.md).
 - **Your libraries ship as a release bundle with cross-library dependencies,
   not independently** → [S14: Multi-DSO Release Bundle](release-bundle.md),
-  [Multi-Binary Releases](../../user-guide/multi-binary.md).
+  [Multi-Binary Releases](../../use/multi-binary.md).
 
 ## See also
 

@@ -4,7 +4,7 @@ The question here isn't "did this library's ABI change" at all — it's "will
 this binary actually **resolve** its dependencies" in a given rootfs,
 container image, or sysroot. A perfectly ABI-compatible library still fails
 this check if it (or something it depends on) simply isn't *present* where
-the binary expects to find it. [ADR-047](../../development/adr/047-github-actions-integration-model.md)
+the binary expects to find it. [ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
 §8's S24 is explicit that this is **not modeled as a library baseline scan**
 — it's a separate command family, `deps tree`/`deps compare`, unchanged by
 the rest of this integration model.
@@ -31,7 +31,7 @@ per-library ABI diff extended across an entire dependency graph, for
 "did upgrading the base image change what this binary actually links
 against."
 
-See [Companion Commands](../../user-guide/companion-commands.md) for the
+See [Companion Commands](../../use/companion-commands.md) for the
 full `deps tree`/`deps compare` reference (output formats, what each command
 replaced from an earlier CLI generation).
 
@@ -44,4 +44,4 @@ replaced from an earlier CLI generation).
 ## See also
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
-- [Companion Commands](../../user-guide/companion-commands.md) — the full `deps tree`/`deps compare` reference.
+- [Companion Commands](../../use/companion-commands.md) — the full `deps tree`/`deps compare` reference.

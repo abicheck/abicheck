@@ -22,7 +22,7 @@ contract, and a policy-scoped release decision — using synthetic snapshots so
 they run in the fast (pure-Python) suite. They double as integration coverage
 for the release recommender (``abicheck/semver.py``).
 
-See docs/development/usecase-coverage-evaluation.md (gap G3 / G5).
+See docs/contribute/usecase-coverage-evaluation.md (gap G3 / G5).
 """
 
 from __future__ import annotations

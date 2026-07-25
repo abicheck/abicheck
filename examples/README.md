@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **195 cases** (190 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
+This directory contains **195 cases** (190 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -19,7 +19,7 @@ of the catalog. Each fixture-only case's own README says so explicitly;
 check `ground_truth.json`/the per-case README before assuming a `v1`/`v2`
 source pair exists.
 
-The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pitfalls. For conceptual background on what ABI stability means and how to reason about it, see [ABI/API Handling & Recommendations](../docs/concepts/abi-api-handling.md).
+The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pitfalls. For conceptual background on what ABI stability means and how to reason about it, see [ABI/API Handling & Recommendations](../docs/learn/abi-api-handling.md).
 
 > **Authoritative expected verdicts for benchmarking** live in [`ground_truth.json`](ground_truth.json).
 > If a per-case README and `ground_truth.json` disagree, `ground_truth.json` is the source of truth.
@@ -37,7 +37,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 7 | — | ✅ |
-| Bundle (multi-binary) | 5 | see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
+| Bundle (multi-binary) | 5 | see [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
 > **Verdict source of truth:** [`ground_truth.json`](ground_truth.json), which aligns with the 5-tier classification in [`abicheck/checker_policy.py`](../abicheck/checker_policy.py): `BREAKING_KINDS` → `API_BREAK_KINDS` → `RISK_KINDS` → `QUALITY_KINDS` → `ADDITION_KINDS`.
@@ -86,7 +86,7 @@ Commands below use `PYTHONPATH=.`.
 
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
-| Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 209 integration items | gcc: 149 passed / 55 skipped / 5 xfailed; clang: 149 passed / 54 skipped / 6 xfailed | Green default single-library build lane. `case115_bit_int_width_changed` needs a `_BitInt`-capable CastXML-bundled Clang; a sandbox with an older bundled Clang (unrelated to the fix in this catalog) sees it fail there instead of building — see `docs/development/examples-validation-runbook.md` |
+| Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 209 integration items | gcc: 149 passed / 55 skipped / 5 xfailed; clang: 149 passed / 54 skipped / 6 xfailed | Green default single-library build lane. `case115_bit_int_width_changed` needs a `_BitInt`-capable CastXML-bundled Clang; a sandbox with an older bundled Clang (unrelated to the fix in this catalog) sees it fail there instead of building — see `docs/contribute/examples-validation-runbook.md` |
 | Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 195 catalog cases | gcc: 153 PASS / 5 XFAIL / 37 SKIP; clang: 153 PASS / 6 XFAIL / 36 SKIP | Green default/debug verdict lane |
 | Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 195 catalog cases | 88 DEMONSTRATED / 69 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 37 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
 | Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 195 catalog cases | 146 PASS / 5 XFAIL / 44 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override |
@@ -163,7 +163,7 @@ the way it previously did (stale at a 169-case catalog for several releases).
   the gap, and the full example matrix additionally requires a case's own `source_smoke`
   oracle to have proven the canonical verdict before crediting it as `COVERED` — see
   `case111_enumerable_thread_specific_lambda_ambiguity`, the catalog's one case covered
-  this way instead of by a direct detector/CLI match (`docs/development/examples-validation-runbook.md`).
+  this way instead of by a direct detector/CLI match (`docs/contribute/examples-validation-runbook.md`).
 - **Build/source coverage is a 10-case lane, not every L3/L4/L5 catalog entry —**
   **but it is every entry that lane *can* prove.** `--artifact-variant build-source`
   needs a real compilable `v1`/`v2` pair; of the catalog's L3/L4/L5 cases, only 7
@@ -209,7 +209,7 @@ catalog keeps them in `ground_truth.json`, and dedicated tests cover those
 families.
 
 The repository-wide completion gate is not an individual row above. Follow the
-[full example validation runbook](../docs/development/examples-validation-runbook.md)
+[full example validation runbook](../docs/contribute/examples-validation-runbook.md)
 to aggregate compiler, runtime, bundle, and dedicated proof artifacts. Full
 success means one `COVERED` row per current ground-truth entry, with no
 `UNRESOLVED` or `FAILED` rows. Trusted source-smoke fixtures require the explicit
@@ -494,6 +494,6 @@ cmake --build build
 
 - **Pinned 74-case cross-tool accuracy table** (all configurations, FP/FN): [`../README.md#validation-snapshot`](../README.md#validation-snapshot)
 - **Per-case accuracy matrix and methodology:** [Tool Comparison & Benchmarks](../docs/reference/tool-comparison.md)
-- **What counts as an ABI break (with code):** [ABI/API Handling & Recommendations](../docs/concepts/abi-api-handling.md)
+- **What counts as an ABI break (with code):** [ABI/API Handling & Recommendations](../docs/learn/abi-api-handling.md)
 - **Dependency ABI leaks** (case 18 background): [`case18_dependency_leak/README.md`](case18_dependency_leak/README.md)
 - **Local build & snapshot workflow:** [Local Compare](../docs/user-guide/local-compare.md)

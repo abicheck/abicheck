@@ -4,7 +4,7 @@ You have several shared libraries, built together (one CI job, one
 [build output](../../reference/build-output-schema.md)), but they don't
 depend on each other — a break in one says nothing about the others. This is
 the oneDAL/PVXS-class case
-[ADR-047](../../development/adr/047-github-actions-integration-model.md)
+[ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
 §8 names S15: N separate checks, N separate reports, each keeping its own
 header/compiler context. Deliberately distinct from
 [S14](release-bundle.md) (a release bundle — one report, cross-library

@@ -5,7 +5,7 @@ not as independent artifacts someone could reasonably compare one at a time.
 Removing a symbol from one library that another library in the same release
 still calls is a real break, but it's a **cross-library** finding no
 single-library comparison can see.
-[ADR-047](../../development/adr/047-github-actions-integration-model.md)
+[ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
 §8's S14 is deliberately distinct from
 [S15](multi-dso-project.md) (multiple *independent* targets, N separate
 reports): a bundle is **one report**, with cross-library findings (soname
@@ -14,7 +14,7 @@ results, not N reports someone has to manually cross-reference.
 
 This is the existing directory/`--manifest` bundle-analysis capability
 `abicheck compare` already provides — see
-[Multi-Binary Releases](../../user-guide/multi-binary.md) for the full
+[Multi-Binary Releases](../../use/multi-binary.md) for the full
 model (what counts as a bundle, `--manifest` vs. plain directory mode, and
 the cross-library findings it produces). This page covers only how a bundle
 fits into the project-integration model above that.
@@ -69,5 +69,5 @@ rationale and the `binaries/` staging this depends on.
 ## See also
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
-- [Multi-Binary Releases](../../user-guide/multi-binary.md) — the canonical bundle-analysis reference.
+- [Multi-Binary Releases](../../use/multi-binary.md) — the canonical bundle-analysis reference.
 - [`publish-baseline`/`update-main-baseline` Reference](../../reference/publish-baseline.md) — how a bundle baseline is staged.

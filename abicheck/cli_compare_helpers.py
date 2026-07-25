@@ -1308,7 +1308,7 @@ def run_compare(
         # --old/new-build-info combination structurally skips the L2 graph
         # (silent, not_collected) — same behavior as before this change,
         # just without a flag to have explicitly asked for it. See
-        # docs/development/plans/g31-header-graph-default-on-followup.md for
+        # docs/contribute/plans/g31-header-graph-default-on-followup.md for
         # extending graph coverage to this path.
         import shutil
         import tempfile
@@ -1515,7 +1515,7 @@ def run_compare(
     text = _fold_scoped_compat_into_text(
         text, fmt, result,
         severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
-        show_only=show_only,
+        show_only=show_only, report_mode=report_mode,
     )
     text = _fold_evidence_depth_into_json(
         text, fmt, old, new,

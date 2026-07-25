@@ -8,8 +8,15 @@ Covers serialisation fields added in PR #63:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
-from abicheck.model import AbiSnapshot, EnumMember, EnumType, Function
+from abicheck.model import (
+    AbiSnapshot,
+    EnumMember,
+    EnumType,
+    ExtractionContract,
+    Function,
+)
 from abicheck.serialization import (
     load_snapshot,
     save_snapshot,
@@ -214,7 +221,7 @@ class TestHeaderCvFactsReliableRoundTrip:
 
         snap = _make_snap()
         j = json.loads(snapshot_to_json(snap))
-        assert j["schema_version"] == SCHEMA_VERSION == 13
+        assert j["schema_version"] == SCHEMA_VERSION == 14
 
     def test_legacy_castxml_header_snapshot_loads_as_unreliable(self) -> None:
         d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
@@ -283,7 +290,7 @@ class TestHeaderCvFactsReliableRoundTrip:
         assert legacy.header_cv_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 13
+        assert reserialized["schema_version"] == 14
         assert reserialized["header_cv_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)
@@ -397,12 +404,65 @@ class TestInferredFromHeadersProvenance:
 class TestFileRoundTrip:
     """save_snapshot / load_snapshot must preserve new fields."""
 
-    def test_elf_only_mode_and_constants_survive_file_io(
-        self, tmp_path: object
-    ) -> None:
+    def test_elf_only_mode_and_constants_survive_file_io(self, tmp_path: Path) -> None:
         snap = _make_snap(elf_only_mode=True, constants={"FOO": "bar"})
-        p = tmp_path / "snap.json"  # type: ignore[operator]
+        p = tmp_path / "snap.json"
         save_snapshot(snap, p)
         restored = load_snapshot(p)
         assert restored.elf_only_mode is True
         assert restored.constants == {"FOO": "bar"}
+
+
+# ── ExtractionContract round-trip (ADR-050 D1, schema v12) ─────────────────
+
+
+class TestExtractionContractRoundTrip:
+    def test_populated_contract_survives_json_round_trip(self) -> None:
+        contract = ExtractionContract(
+            profile_fingerprint="sha256:abc",
+            scope_fingerprint="sha256:def",
+            profile_fields={"target_triple": "x86_64-linux-gnu"},
+            scope_fields={"headers": "foo.h"},
+        )
+        snap = _make_snap(contract=contract)
+        reloaded = snapshot_from_dict(json.loads(snapshot_to_json(snap)))
+        assert reloaded.contract == contract
+
+    def test_missing_contract_key_loads_as_none(self) -> None:
+        d = _minimal_dict()
+        assert "contract" not in d
+        assert snapshot_from_dict(d).contract is None
+
+    def test_null_contract_loads_as_none(self) -> None:
+        d = _minimal_dict(contract=None)
+        assert snapshot_from_dict(d).contract is None
+
+    def test_malformed_contract_value_loads_as_none(self) -> None:
+        d = _minimal_dict(contract="not-a-dict")
+        assert snapshot_from_dict(d).contract is None
+
+    def test_contract_with_malformed_nested_fields_defaults_gracefully(self) -> None:
+        d = _minimal_dict(
+            contract={
+                "profile_fingerprint": 123,  # not a str
+                "scope_fingerprint": None,
+                "profile_fields": "not-a-dict",
+                "scope_fields": {"headers": "foo.h"},
+            }
+        )
+        restored = snapshot_from_dict(d).contract
+        assert restored is not None
+        assert restored.profile_fingerprint is None
+        assert restored.scope_fingerprint is None
+        assert restored.profile_fields == {}
+        assert restored.scope_fields == {"headers": "foo.h"}
+
+    def test_contract_survives_file_io(self, tmp_path: Path) -> None:
+        contract = ExtractionContract(
+            profile_fingerprint="sha256:abc", scope_fingerprint="sha256:def"
+        )
+        snap = _make_snap(contract=contract)
+        p = tmp_path / "snap.json"
+        save_snapshot(snap, p)
+        restored = load_snapshot(p)
+        assert restored.contract == contract

@@ -4,7 +4,7 @@ You maintain one shared library. Its previous accepted ABI/API surface is a
 snapshot file (`baseline.json`, `abicheck dump`'s output) checked directly
 into the repository — no release process, no separate baseline-storage
 backend, nothing to fetch. This is the minimal onboarding case
-[ADR-047](../../development/adr/047-github-actions-integration-model.md) §8
+[ADR-047](../../contribute/adr/047-github-actions-integration-model.md) §8
 calls S1: "the root Action alone suffices, no new primitive needed."
 
 ## What you need
@@ -32,9 +32,9 @@ the committed snapshot and `new-library` at the just-built candidate:
 ```
 
 That's the whole integration. See the
-[GitHub Action reference](../../user-guide/github-action.md) for every input/
+[GitHub Action reference](../../use/github-action.md) for every input/
 output this Action accepts, and
-[Creating and Comparing a Baseline](../../user-guide/create-baseline.md) for
+[Creating and Comparing a Baseline](../../use/create-baseline.md) for
 how `baseline.json` itself gets produced and refreshed.
 
 ## When to move past this scenario
@@ -54,6 +54,6 @@ how `baseline.json` itself gets produced and refreshed.
 ## See also
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
-- [GitHub Action reference](../../user-guide/github-action.md) — every input/output.
-- [Choose Your Workflow](../../user-guide/choose-your-workflow.md) — the
+- [GitHub Action reference](../../use/github-action.md) — every input/output.
+- [Choose Your Workflow](../../start/choose-your-workflow.md) — the
   CLI-command-level table this scenario's Action call is built on.

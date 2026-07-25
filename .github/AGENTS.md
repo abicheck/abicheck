@@ -21,7 +21,7 @@ Not every workflow here blocks a merge. Before assuming a red check means
 | `ci.yml`'s `heavy-parity-gate` → `libabigail-parity`/`abicc-parity` | Conditional | Only runs when `abicheck/**`, `tests/**`, `examples/**`, or `.github/workflows/**` changed (path-filtered via `dorny/paths-filter`) |
 | `clang-plugin.yml` | **No** | Standalone, path-filtered to `contrib/abicheck-clang-plugin/**`; never a required abicheck-CI gate (see `contrib/abicheck-clang-plugin/AGENTS.md`) |
 | `mutation.yml` | No | Weekly / `mutation` label / dispatch |
-| `performance.yml` | Partially | Runs on PRs touching detector-core files; see `docs/development/performance.md` |
+| `performance.yml` | Partially | Runs on PRs touching detector-core files; see `docs/contribute/performance.md` |
 | `examples-validation.yml` / `-nightly.yml` | No | Scheduled/manual regression sweeps over the example catalog |
 | `eval-suite.yml` | No | Real-world regression guard, scheduled |
 | `realworld-validation.yml` | No | conda-forge package validation harness |

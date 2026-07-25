@@ -9,7 +9,7 @@ abicheck recognises, its aliases, and whether it is functional or
 accepted-but-inert.
 
 For the migration walkthrough (why migrate, before/after invocations, exit-code
-mapping), see [Migrating from ABICC](../user-guide/from-abicc.md).
+mapping), see [Migrating from ABICC](../use/from-abicc.md).
 
 ## Core flags
 

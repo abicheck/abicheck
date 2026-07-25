@@ -15,7 +15,7 @@ generated: false
 **Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `scan` and `deps` have their own narrower contracts, documented below.
 
 > **Proposed contract-aware extension (not implemented):**
-> [ADR-049](../development/adr/049-contract-relevance-and-compatibility-configuration.md)
+> [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md)
 > reserves an orthogonal contract-coverage contribution for future contract
 > evaluation. Complete coverage of the mode-selected evidence domain contributes
 > `0`; missing, partial, stale, failed, contradictory, or identity-incomplete

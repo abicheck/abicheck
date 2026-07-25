@@ -5,7 +5,7 @@ import os
 import pytest
 
 from abicheck.dumper import _cache_key, _tool_identity
-from abicheck.dumper_toolchain import _resolved_tool
+from abicheck.dumper_toolchain import _compiler_family_from_toolchain, _resolved_tool
 
 
 def test_frontend_binary_identity_is_part_of_key(tmp_path):
@@ -86,3 +86,41 @@ def test_bare_missing_tool_does_not_resolve_from_cwd(tmp_path, monkeypatch):
 
     assert "unavailable=FileNotFoundError" in identity
     assert "tool not found on PATH" in identity
+
+
+class TestCompilerFamilyFromToolchain:
+    """ADR-050 D1's compiler_family extraction (Codex review, PR #624
+    follow-up)."""
+
+    def test_prefers_compiler_selected_over_bare_selected(self):
+        # The bug this test pins: for a castxml-produced snapshot,
+        # "selected" names castxml itself, not the host compiler.
+        toolchain = {
+            "selected": "/usr/bin/castxml",
+            "compiler_selected": "/usr/bin/g++",
+        }
+        assert _compiler_family_from_toolchain(toolchain) == "gnu"
+
+    def test_falls_back_to_bare_selected_for_clang_producer(self):
+        # clang is both frontend and compiler, so there is no separate
+        # "compiler_selected" key -- the fallback must still work.
+        toolchain = {"selected": "/usr/bin/clang"}
+        assert _compiler_family_from_toolchain(toolchain) == "clang"
+
+    def test_recognizes_msvc_cl_exe(self):
+        # Forward slashes so the path parses the same on POSIX and Windows
+        # test runners (a literal backslash separator only splits under a
+        # native WindowsPath, not this fast unit test's POSIX PurePath).
+        toolchain = {"compiler_selected": "C:/VC/bin/cl.exe"}
+        assert _compiler_family_from_toolchain(toolchain) == "msvc"
+
+    def test_recognizes_gcc(self):
+        toolchain = {"compiler_selected": "/usr/bin/x86_64-linux-gnu-gcc-13"}
+        assert _compiler_family_from_toolchain(toolchain) == "gnu"
+
+    def test_empty_toolchain_returns_none(self):
+        assert _compiler_family_from_toolchain({}) is None
+
+    def test_unrecognized_binary_returns_its_basename(self):
+        toolchain = {"compiler_selected": "/opt/icx/bin/icx"}
+        assert _compiler_family_from_toolchain(toolchain) == "icx"

@@ -1,7 +1,7 @@
 # Reusable Workflows Reference: `check-single.yml` / `check-project.yml`
 
 Two `workflow_call` reusable workflows (G30 P1.4,
-[ADR-047](../development/adr/047-github-actions-integration-model.md) §4/§5)
+[ADR-047](../contribute/adr/047-github-actions-integration-model.md) §4/§5)
 built on top of [`actions/check-target`](check-target.md):
 
 - **`check-single.yml`** — a thin wrapper around one `check-target`
@@ -98,7 +98,7 @@ Three jobs, always in this order:
 
 ### The two required `if: always()` placements
 
-[ADR-047 §4](../development/adr/047-github-actions-integration-model.md)
+[ADR-047 §4](../contribute/adr/047-github-actions-integration-model.md)
 flags two specific places this workflow must use `always()` (or
 `!cancelled()`), not a bare `needs:`/no condition — both because plain
 GitHub Actions semantics **skip** a dependent job or step when an earlier

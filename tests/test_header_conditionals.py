@@ -24,11 +24,15 @@ unambiguous single-positive-guard member fields, and skips everything else.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from abicheck.header_conditionals import (
     collect_build_context,
     defines_from_compile_db,
     defines_from_flags,
+    ordered_macro_ops,
+    pass_through_flags_from_tokens,
+    resolve_pass_through_paths,
     scan_conditional_fields,
 )
 
@@ -63,6 +67,144 @@ def test_defines_from_flags_applies_over_initial_set():
     assert seed == {"KEEP"}
 
 
+# ── ADR-050 ordered macro/pass-through flag extraction ─────────────────────
+
+
+def test_ordered_macro_ops_preserves_order_and_value():
+    # Unlike defines_from_flags, order and the raw value both matter here --
+    # a later -DFOO=2 must not collapse with an earlier -DFOO=1.
+    assert ordered_macro_ops(["-DFOO=1", "-DFOO=2"]) == [
+        ("D", "FOO=1"),
+        ("D", "FOO=2"),
+    ]
+
+
+def test_ordered_macro_ops_distinguishes_define_undefine_from_lone_define():
+    # -DKEEP -UKEEP nets to the same *active set* as neither flag at all, but
+    # macro_ops must still record both operations distinctly (Codex review,
+    # PR #624) -- profile_fingerprint cares about the extraction context,
+    # not just the net-active-macro outcome defines_from_flags computes.
+    assert ordered_macro_ops(["-DKEEP", "-UKEEP"]) == [("D", "KEEP"), ("U", "KEEP")]
+    assert ordered_macro_ops(["-DKEEP"]) == [("D", "KEEP")]
+
+
+def test_ordered_macro_ops_handles_all_flag_forms():
+    got = ordered_macro_ops(["-DA", "-DB=1", "-D", "C", "-Iinc", "-O2", "-Dbad name"])
+    # Unlike defines_from_flags, ordered_macro_ops keeps every -D/-U body
+    # verbatim -- even one defines_from_flags would reject as not a bare
+    # macro name -- because raw text still distinguishes two profiles.
+    assert got == [("D", "A"), ("D", "B=1"), ("D", "C"), ("D", "bad name")]
+
+
+def test_ordered_macro_ops_keeps_function_like_macros():
+    """Codex review, PR #624 follow-up: a function-like macro (a valid,
+    common -D form) must not be silently dropped from the profile
+    fingerprint just because its name isn't a bare identifier."""
+    assert ordered_macro_ops(["-DAPI(x)=x"]) == [("D", "API(x)=x")]
+    assert ordered_macro_ops(["-DAPI(x)=x"]) != ordered_macro_ops(
+        ["-DAPI(x)=__declspec(dllexport) x"]
+    )
+
+
+def test_ordered_macro_ops_empty_for_no_define_flags():
+    assert ordered_macro_ops(["-Iinc", "-O2", "-std=c++17"]) == []
+
+
+def test_pass_through_flags_from_tokens_extracts_include_path():
+    got = pass_through_flags_from_tokens(["-include", "force.h"])
+    assert got == ["-include", Path("force.h")]
+
+
+def test_pass_through_flags_from_tokens_preserves_order_of_multiple_includes():
+    got = pass_through_flags_from_tokens(["-include", "a.h", "-include", "b.h"])
+    assert got == ["-include", Path("a.h"), "-include", Path("b.h")]
+
+
+def test_pass_through_flags_from_tokens_ignores_unrecognized_flags():
+    got = pass_through_flags_from_tokens(["-DFOO", "-Iinc", "-O2"])
+    assert got == []
+
+
+def test_pass_through_flags_from_tokens_trailing_include_with_no_operand_is_dropped():
+    got = pass_through_flags_from_tokens(["-O2", "-include"])
+    assert got == []
+
+
+# ── ADR-050 forced-include operand resolution (Codex review, PR #624) ──────
+
+
+def test_resolve_pass_through_paths_resolves_via_search_dir(tmp_path):
+    inc_dir = tmp_path / "inc"
+    inc_dir.mkdir()
+    (inc_dir / "config.h").write_text("/* config */")
+
+    got = resolve_pass_through_paths(["-include", Path("config.h")], [inc_dir])
+
+    assert got == ["-include", inc_dir / "config.h"]
+
+
+def test_resolve_pass_through_paths_resolves_via_cwd(tmp_path, monkeypatch):
+    (tmp_path / "local.h").write_text("/* local */")
+    monkeypatch.chdir(tmp_path)
+
+    got = resolve_pass_through_paths(["-include", Path("local.h")])
+
+    assert got == ["-include", tmp_path / "local.h"]
+
+
+def test_resolve_pass_through_paths_falls_back_to_str_when_unresolvable(
+    tmp_path, monkeypatch
+):
+    """Pins the exact regression the reviewer flagged: a forced-include
+    operand only reachable via the frontend's own -I search path (not CWD,
+    not modeled search_dirs) must not crash a valid dump when
+    compute_extraction_contract later tries to content-hash it -- fall back
+    to the literal flag text instead."""
+    monkeypatch.chdir(tmp_path)
+
+    got = resolve_pass_through_paths(["-include", Path("nowhere.h")], [])
+
+    assert got == ["-include", "nowhere.h"]
+    assert isinstance(got[1], str)
+
+
+def test_resolve_pass_through_paths_first_search_dir_wins(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    (first / "config.h").write_text("a")
+    (second / "config.h").write_text("b")
+
+    got = resolve_pass_through_paths(["-include", Path("config.h")], [first, second])
+
+    assert got == ["-include", first / "config.h"]
+
+
+def test_resolve_pass_through_paths_absolute_operand_used_as_is_when_it_exists(
+    tmp_path,
+):
+    real = tmp_path / "abs.h"
+    real.write_text("x")
+
+    got = resolve_pass_through_paths(["-include", real])
+
+    assert got == ["-include", real]
+
+
+def test_resolve_pass_through_paths_absolute_nonexistent_falls_back_to_str():
+    missing = Path("/definitely/does/not/exist/abs.h")
+
+    got = resolve_pass_through_paths(["-include", missing])
+
+    assert got == ["-include", str(missing)]
+
+
+def test_resolve_pass_through_paths_passes_through_non_path_items():
+    got = resolve_pass_through_paths(["-include", "already-a-str"])
+    assert got == ["-include", "already-a-str"]
+
+
 def test_defines_from_compile_db_intersects_commands(tmp_path):
     """A macro is trusted only when *every* command defines it (conservative)."""
     db = tmp_path / "compile_commands.json"
@@ -85,7 +227,11 @@ def test_defines_from_compile_db_applies_source_filter(tmp_path):
     db.write_text(
         json.dumps(
             [
-                {"directory": "/b", "file": "/b/keep.c", "command": "cc -DKEEP -c keep.c"},
+                {
+                    "directory": "/b",
+                    "file": "/b/keep.c",
+                    "command": "cc -DKEEP -c keep.c",
+                },
                 {"directory": "/b", "file": "/b/other.c", "command": "cc -c other.c"},
             ]
         )
@@ -122,7 +268,12 @@ def test_compile_entry_matcher_and_command_splitter_edges():
     from pathlib import Path
 
     cwd_file = str(Path.cwd() / "src" / "libfoo" / "a.c")
-    assert _compile_entry_matches({"file": cwd_file, "directory": "/elsewhere"}, "src/libfoo/*") is True
+    assert (
+        _compile_entry_matches(
+            {"file": cwd_file, "directory": "/elsewhere"}, "src/libfoo/*"
+        )
+        is True
+    )
     assert _compile_entry_matches({"file": cwd_file}, "src/libfoo/*") is True
     # A *relative* file is resolved against directory before matching, so an
     # absolute filter matches (mirrors build_context.CompileEntry; Codex #498).
@@ -266,10 +417,7 @@ def test_scan_split_forward_declaration_does_not_capture_next_record():
     """A forward declaration split across lines (``struct S`` then ``;``) must not
     leave a stale pending opener that captures the *next* record's body: ``T``'s
     guarded field must be keyed to ``T``, never ``S`` (Codex review #498, P1)."""
-    src = (
-        "struct S\n;\n"
-        "struct T {\n#ifdef G\n int guarded;\n#endif\n};"
-    )
+    src = "struct S\n;\nstruct T {\n#ifdef G\n int guarded;\n#endif\n};"
     reg = scan_conditional_fields(src)
     assert "guarded" in reg.get("T", {})
     assert "S" not in reg  # nothing is misattributed to the forward-declared S
@@ -346,9 +494,7 @@ def test_include_guard_recognized_after_pragma_once():
     from abicheck.header_conditionals import _include_guard_macro
 
     assert _include_guard_macro(["#pragma once", "#ifndef H", "#define H"]) == "H"
-    src = (
-        "#pragma once\n#ifndef H\n#define H\nstruct S {\n#ifdef KEEP\n int legacy;\n#endif\n};\n#endif\n"
-    )
+    src = "#pragma once\n#ifndef H\n#define H\nstruct S {\n#ifdef KEEP\n int legacy;\n#endif\n};\n#endif\n"
     entry = _guard(scan_conditional_fields(src), "S", "legacy")
     assert entry["guard"] == "KEEP"  # single guard — the file wrapper is transparent
 
@@ -485,7 +631,9 @@ def test_scan_records_is_last_for_terminal_field():
     assert _guard(scan_conditional_fields(trailing), "S", "legacy")["is_last"] is True
     mid = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n int tail;\n};"
     assert _guard(scan_conditional_fields(mid), "S", "legacy")["is_last"] is False
-    first = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n int version;\n int tail;\n};"
+    first = (
+        "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n int version;\n int tail;\n};"
+    )
     assert _guard(scan_conditional_fields(first), "S", "legacy")["is_last"] is False
 
 
@@ -500,8 +648,12 @@ def test_scan_is_last_counts_unparsed_members():
     assert _guard(scan_conditional_fields(init), "S", "legacy")["is_last"] is False
     method = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n void run();\n};"
     assert _guard(scan_conditional_fields(method), "S", "legacy")["is_last"] is False
-    maybe_unused = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n [[maybe_unused]] int tail;\n};"
-    assert _guard(scan_conditional_fields(maybe_unused), "S", "legacy")["is_last"] is False
+    maybe_unused = (
+        "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n [[maybe_unused]] int tail;\n};"
+    )
+    assert (
+        _guard(scan_conditional_fields(maybe_unused), "S", "legacy")["is_last"] is False
+    )
     no_unique = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n [[no_unique_address]] T tail;\n};"
     assert _guard(scan_conditional_fields(no_unique), "S", "legacy")["is_last"] is False
     nested = "struct S {\n#ifdef KEEP\n int legacy;\n#endif\n struct Tail {};\n};"
@@ -648,12 +800,36 @@ def test_parse_field_helper_edge_cases():
     assert _parse_field("justoneword") is None  # no type/name split
     assert _parse_field("int return") is None  # keyword name
     assert _parse_field("int x") == ("x", "int", False, None, False, False, False)
-    assert _parse_field("int flags : 3") == ("flags", "int", True, 3, False, False, False)
+    assert _parse_field("int flags : 3") == (
+        "flags",
+        "int",
+        True,
+        3,
+        False,
+        False,
+        False,
+    )
     # a ``::`` before a trailing digit is not a bit-field
-    assert _parse_field("ns::T value") == ("value", "ns::T", False, None, False, False, False)
+    assert _parse_field("ns::T value") == (
+        "value",
+        "ns::T",
+        False,
+        None,
+        False,
+        False,
+        False,
+    )
     # cv/mutable qualifiers are lifted out of the type into structured bits
     assert _parse_field("const int c") == ("c", "int", False, None, True, False, False)
-    assert _parse_field("mutable long m") == ("m", "long", False, None, False, False, True)
+    assert _parse_field("mutable long m") == (
+        "m",
+        "long",
+        False,
+        None,
+        False,
+        False,
+        True,
+    )
 
 
 # ── collect_build_context (headers + db) ─────────────────────────────────────
@@ -690,7 +866,9 @@ def test_collect_build_context_forced_include_marks_fields_ambiguous(tmp_path):
     h = tmp_path / "config.h"
     h.write_text("struct Config {\n#ifdef KEEP\n int legacy;\n#endif\n};")
     # forced include via user --gcc-option pass-through
-    _, reg = collect_build_context([h], None, extra_flags=["-DKEEP", "-include", "prelude.h"])
+    _, reg = collect_build_context(
+        [h], None, extra_flags=["-DKEEP", "-include", "prelude.h"]
+    )
     assert _guard(reg, "Config", "legacy")["ambiguous"] is True
     # and via a compile-DB command line
     db = tmp_path / "compile_commands.json"
@@ -705,8 +883,16 @@ def test_collect_build_context_forced_include_marks_fields_ambiguous(tmp_path):
     db2.write_text(
         json.dumps(
             [
-                {"file": "keep.c", "directory": str(tmp_path), "command": "cc -include p.h -c keep.c"},
-                {"file": "other.c", "directory": str(tmp_path), "command": "cc -c other.c"},
+                {
+                    "file": "keep.c",
+                    "directory": str(tmp_path),
+                    "command": "cc -include p.h -c keep.c",
+                },
+                {
+                    "file": "other.c",
+                    "directory": str(tmp_path),
+                    "command": "cc -c other.c",
+                },
             ]
         )
     )

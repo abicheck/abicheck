@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Validate the use-case registry (docs/development/usecase-registry.yaml).
+"""Validate the use-case registry (docs/contribute/usecase-registry.yaml).
 
 The registry is the machine-checkable definition of abicheck's ABI/API change
 use cases. These tests keep it honest so it stays a reliable, extensible map of
@@ -34,8 +34,8 @@ import pytest
 import yaml
 
 _REPO = Path(__file__).parent.parent
-_REGISTRY = _REPO / "docs" / "development" / "usecase-registry.yaml"
-_EVAL_DOC = _REPO / "docs" / "development" / "usecase-coverage-evaluation.md"
+_REGISTRY = _REPO / "docs" / "contribute" / "usecase-registry.yaml"
+_EVAL_DOC = _REPO / "docs" / "contribute" / "usecase-coverage-evaluation.md"
 
 _STATUSES = {"complete", "partial", "modeled", "planned", "by_design_excluded"}
 _AXES = {"change_class", "archetype", "platform", "workflow", "reporting", "toolchain"}
@@ -99,8 +99,8 @@ def test_unfinished_entries_have_a_plan(case: dict) -> None:
         assert case.get("next_steps", "").strip(), f"{case['id']}: needs next_steps"
         # Each unfinished use case must link a detailed plan that actually exists.
         plan = case.get("plan", "")
-        assert plan.startswith("docs/development/plans/"), (
-            f"{case['id']}: needs a plan: under docs/development/plans/"
+        assert plan.startswith("docs/contribute/plans/"), (
+            f"{case['id']}: needs a plan: under docs/contribute/plans/"
         )
         assert (_REPO / plan).exists(), f"{case['id']}: plan file missing: {plan}"
     if case["status"] == "by_design_excluded":

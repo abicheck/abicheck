@@ -22,7 +22,7 @@ a handful of top-level, long-stable keys -- the same defensive-.get()
 philosophy abicheck/buildsource/CLAUDE.md documents for its own dataclasses.
 
 A baseline-set is *not* self-describing from a version number alone (see
-docs/user-guide/baseline-management.md#baseline-identity-is-more-than-a-version-number):
+docs/use/baseline-management.md#baseline-identity-is-more-than-a-version-number):
 this manifest records the profile string the caller supplies, plus each
 snapshot's own schema_version and (when build-source evidence is embedded)
 fact_set identity, so a mismatch against a previous manifest is a structured

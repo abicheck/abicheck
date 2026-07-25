@@ -87,12 +87,20 @@ let that test tell you what else needs updating.
 `docs-build` step needs `mkdocs` (`pip install -e ".[dev,docs]"`) and the
 `distribution-build` step needs `build`/`twine` (`pip install -e ".[dev,dist]"`)
 — neither is in bare `[dev]`, matching the CI `lint-and-types`/`fair-metadata`
-jobs' separate installs. Run `pip install -e ".[dev,docs,dist]"` for full
-parity. `verify.py` never silently claims success when a step like this is
-skipped for a missing tool: a `pr`-profile run with any skip prints an
-explicit `WARNING: this pr-profile run is INCOMPLETE` line and sets
-`"complete": false` in the `--json` receipt — don't treat a skip-containing
-run as equivalent to a clean CI pass.
+jobs' separate installs. Run `pip install -e ".[dev,docs,dist,mcp]"` for full
+parity — the `mcp` extra matches what the CI `unit-tests` job itself installs
+(`pip install -e ".[dev,mcp]"`), so the generated-doc mirror tests that need
+it (`tests/test_mcp_reference.py`) actually run instead of silently skipping.
+`verify.py` never silently claims success when *its own* step is skipped for
+a missing tool: a `pr`-profile run with any step-level skip prints an explicit
+`WARNING: this pr-profile run is INCOMPLETE` line and sets `"complete": false`
+in the `--json` receipt — don't treat a skip-containing run as equivalent to
+a clean CI pass. That completeness tracking is at the *step* level, though
+(`unit-pr` = "did `pytest tests/...` run"), not inside pytest itself — a test
+module that skips itself via `pytest.importorskip("mcp")` when the extra is
+missing still reports `unit-pr` as passed, with no separate warning for that
+one file. Installing `mcp` (as above) is what actually closes that gap
+locally; don't rely on `verify.py`'s completeness line alone to catch it.
 
 [pixi](https://pixi.sh) is also supported (`pixi install && pixi run test`,
 `pixi run check`) and additionally manages the `castxml`/compiler/`libabigail`/
@@ -249,7 +257,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `claude-md-coverage` | ERROR | `CLAUDE.md` exists in each original major sub-tree (`REQUIRED_CLAUDE_MD_DIRS`) |
 | `agent-instructions-coverage` | ERROR | `AGENTS.md` or `CLAUDE.md` exists in `.github/`, `action/`, `contrib/abicheck-clang-plugin/` (`REQUIRED_AGENT_INSTRUCTION_DIRS`) |
 | `script-inventory` | WARN | Every `scripts/*.py` is named in `scripts/CLAUDE.md`'s inventory table — an unlisted script is invisible to that discovery path |
-| `generated-file-ownership` | ERROR | A known-generated file (`GENERATED_FILE_MARKERS`, plus every `docs/examples/case*.md`) still carries its "this is generated, don't hand-edit" marker comment |
+| `generated-file-ownership` | ERROR | A known-generated file (`GENERATED_FILE_MARKERS`, plus every `docs/reference/examples/case*.md`) still carries its "this is generated, don't hand-edit" marker comment |
 | `test-ratio` | WARN | At least 20% test-to-source file ratio; test files are discovered recursively under `tests/` (not just top-level) |
 | `future-annotations` | WARN | `from __future__ import annotations` per this file's convention |
 | `changekind-partition` | ERROR | Every `ChangeKind` is in exactly one of `BREAKING_KINDS` / `API_BREAK_KINDS` / `COMPATIBLE_KINDS` / `RISK_KINDS` |
@@ -262,7 +270,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `examples-ground-truth` | ERROR | Every `examples/case*/` has a `README.md` and an entry in `ground_truth.json` |
 | `examples-readme-sync` | ERROR | `examples/README.md` headline count, verdict distribution, and case-index rows match `ground_truth.json` (catches missing/stale catalog rows) |
 | `mkdocs-nav-coverage` | WARN | Every `docs/**/*.md` is in `mkdocs.yml` nav or linked from another doc |
-| `adr-index-nav-sync` | ERROR | Every `docs/development/adr/*.md` is linked from `adr/index.md`, and the ADR index page itself (not each individual ADR — relaxed, since that overloaded top-level nav with 50+ flat entries for no reader benefit) is listed in `mkdocs.yml`'s nav, so every ADR stays reachable from published navigation (this is what originally caught ADR-041 going missing from nav despite being accepted). Also requires every ADR to carry a Status metadata line/heading, and an ADR whose status leads with "Superseded" to link to its replacement |
+| `adr-index-nav-sync` | ERROR | Every `docs/contribute/adr/*.md` is linked from `adr/index.md`, and the ADR index page itself (not each individual ADR — relaxed, since that overloaded top-level nav with 50+ flat entries for no reader benefit) is listed in `mkdocs.yml`'s nav, so every ADR stays reachable from published navigation (this is what originally caught ADR-041 going missing from nav despite being accepted). Also requires every ADR to carry a Status metadata line/heading, and an ADR whose status leads with "Superseded" to link to its replacement |
 | `banned-imports` | ERROR | No `print(...)` outside CLI/reporter modules; no `subprocess(..., shell=True)` |
 | `license-header` | WARN | Every `abicheck/**/*.py` carries the Apache-2.0 header / SPDX identifier |
 | `test-assertion-density` | WARN | Every `test_*` function asserts something (directly or via a same-file helper) — flags zero-assertion smoke tests so coverage isn't "filled" without verification |
@@ -291,7 +299,7 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   churn; L2 scoping removes it; L0/L1 under-call breaks only headers/build see). Gates on
   top-tier correctness + under-call monotonicity (more evidence never hides a break an
   earlier tier caught — authority rule). CI posts the matrix to the step summary. User
-  docs: `docs/concepts/evidence-and-detectability.md` § "What each layer buys".
+  docs: `docs/learn/evidence-and-detectability.md` § "What each layer buys".
 - **Mutation testing** — `scripts/check_mutation_score.py` + `.github/workflows/mutation.yml`.
   `mutmut` mutates the detector core (`diff_*`, `checker_policy`); a *surviving* mutant
   is a covered-but-unverified line. Runs weekly / on the `mutation` PR label, gating on a

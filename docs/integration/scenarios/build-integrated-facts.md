@@ -3,7 +3,7 @@
 Instead of replaying a compile database after the fact
 ([S7](source-replay.md)), your build can emit normalized source facts
 *while it compiles* — no second pass over the sources, and no compile
-database needed at check time. [ADR-047](../../development/adr/047-github-actions-integration-model.md)
+database needed at check time. [ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
 §8 names two producers for this:
 
 - **S8 — the `abicheck-cc` compiler wrapper.** Set `CC`/`CXX` (or your build
@@ -58,7 +58,7 @@ jobs:
           # ... baseline/candidate inputs per your baseline channel ...
 ```
 
-See [Producing Source Facts](../../user-guide/producing-source-facts.md) for
+See [Producing Source Facts](../../use/producing-source-facts.md) for
 the full wrapper/plugin setup (including `ABICHECK_CC_EXTRACTOR`, wiring into
 Make/CMake/Autotools, and the public-header-roots resolution trap), and the
 [`check-target` reference](../../reference/check-target.md) for how
@@ -69,13 +69,13 @@ Make/CMake/Autotools, and the public-header-roots resolution trap), and the
 - **You'd rather not touch the build at all** → [S7: Source Scan via
   Compile-DB Replay](source-replay.md) — replay after the fact instead.
 - **Your build is Make-based with no compile database at all** → S11,
-  still [Producing Source Facts](../../user-guide/producing-source-facts.md)
+  still [Producing Source Facts](../../use/producing-source-facts.md)
   (the wrapper is exactly the fix — it doesn't need a compile database).
 - **Several DSOs should share one facts pack** → S16,
-  [Build Info & Sources](../../concepts/build-source-data.md).
+  [Build Info & Sources](../../learn/build-source-data.md).
 
 ## See also
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
-- [Producing Source Facts](../../user-guide/producing-source-facts.md) — the canonical setup reference.
+- [Producing Source Facts](../../use/producing-source-facts.md) — the canonical setup reference.
 - [`check-target` Action Reference](../../reference/check-target.md) — the `evidence-producer` contract.

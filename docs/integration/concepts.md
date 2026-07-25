@@ -1,7 +1,7 @@
 # Integration Concepts
 
 This page is the glossary behind [Project Integration](index.md) and
-[ADR-047](../development/adr/047-github-actions-integration-model.md)'s
+[ADR-047](../contribute/adr/047-github-actions-integration-model.md)'s
 domain model — the vocabulary every scenario, reusable workflow, and Action
 in this section uses consistently. If you only remember one sentence: a
 project is checked as one or more **checks**, and a check is one application
@@ -24,7 +24,7 @@ axis that determines whether two binaries are even comparable in the first
 place. A project with more than one profile (e.g. Linux/GCC release and
 Windows/MSVC release) needs a separate baseline per profile; comparing across
 profiles is never valid and `resolve-baseline` rejects it outright
-(`wrong_profile`, see [ADR-047 §6](../development/adr/047-github-actions-integration-model.md#6-baseline-lifecycle)).
+(`wrong_profile`, see [ADR-047 §6](../contribute/adr/047-github-actions-integration-model.md#6-baseline-lifecycle)).
 Declared under `.abicheck.yml`'s `profiles:` block
 ([Project Targets Schema](../reference/project-targets-schema.md)); `contract:
 true` (the default) marks a profile as an ABI contract that gets a baseline
@@ -47,7 +47,7 @@ its own id stays the check's reporting identity.
 A set of binaries shipped and versioned together, with cross-library
 dependencies — the scope `abicheck compare` (directory/package mode) and
 `--manifest` bundle analysis already operate on
-([Multi-Binary Releases](../user-guide/multi-binary.md)). Deliberately named
+([Multi-Binary Releases](../use/multi-binary.md)). Deliberately named
 distinctly from "multiple independent targets" (bundle = S14, one report with
 cross-library findings; independent targets = S15, N separate reports).
 Declared under `.abicheck.yml`'s `bundles:` block, referencing member target
@@ -69,11 +69,11 @@ contract and its validator's failure taxonomy.
 L3 (build)/L4 (source replay)/L5 (graph) evidence collected from a compile
 database replay, the `abicheck-cc` compiler wrapper, or the Clang facts
 plugin (`abicheck/buildsource/`) — either build-wide or target-specific. See
-[Build Info & Sources](../concepts/build-source-data.md) for the full model.
+[Build Info & Sources](../learn/build-source-data.md) for the full model.
 Every evidence pack must declare which target(s) it projects onto
 (`evidence.projection: "declared"` in `build-output.json`) — a pack is never
 automatically assumed to belong to every DSO in a build, the S16 boundary
-[ADR-047 §9](../development/adr/047-github-actions-integration-model.md#9-source-evidence-safe-model-now-vs-full-model-later)
+[ADR-047 §9](../contribute/adr/047-github-actions-integration-model.md#9-source-evidence-safe-model-now-vs-full-model-later)
 documents.
 
 ## Baseline channel
@@ -136,7 +136,7 @@ something `run-plan generate` does for you. See the
 The result of one check: verdict, severity/gate decision, and full identity
 (target, profile, candidate, baseline, config, commit, evidence depth). The
 existing `compare`/`scan` JSON report, extended with the identity fields
-[ADR-047 §7](../development/adr/047-github-actions-integration-model.md#7-report-envelope)
+[ADR-047 §7](../contribute/adr/047-github-actions-integration-model.md#7-report-envelope)
 requires (`check_id`, `compatibility_verdict`, `policy_gate_decision`,
 `check_evidence_coverage`, ...) — additive, so an existing consumer of the
 plain `verdict`/`severity` fields keeps working unchanged.
@@ -153,6 +153,6 @@ whole answer.
 
 - [Project Integration](index.md) — the scenario-first "which page do I need"
   index this glossary supports.
-- [ADR-047 §1](../development/adr/047-github-actions-integration-model.md#1-domain-model) —
+- [ADR-047 §1](../contribute/adr/047-github-actions-integration-model.md#1-domain-model) —
   the source domain-model table, including the rationale for why these seven
   boundaries matter and are easy to conflate.

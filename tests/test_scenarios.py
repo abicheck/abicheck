@@ -56,7 +56,7 @@ from abicheck.serialization import save_snapshot
 
 _REPO = Path(__file__).parent.parent
 _CATALOG_DIR = Path(__file__).parent / "scenarios"
-_REGISTRY = _REPO / "docs" / "development" / "usecase-registry.yaml"
+_REGISTRY = _REPO / "docs" / "contribute" / "usecase-registry.yaml"
 _ID_RE = re.compile(r"^SC-[A-Z0-9-]+$")
 
 

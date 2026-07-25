@@ -38,7 +38,11 @@ from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .clang_layout_tool import attach_clang_layout
 from .errors import AbicheckError, SnapshotError, ValidationError
-from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
+from .header_utils import (
+    deferred_token_dirs,
+    resolve_inferred_header_roots,
+    split_public_header_inputs,
+)
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 from .serialization import load_snapshot
 from .service_dump_cache import cached_run_dump
@@ -64,7 +68,7 @@ _SNIFF_BYTES = 256
 # are available (``_attach_header_graph`` itself still no-ops without parsed
 # headers, and degrades to a declaration-only graph when clang is
 # unavailable) — no public flag controls this anymore; see
-# ``docs/development/plans/g31-header-graph-default-on-followup.md``.
+# ``docs/contribute/plans/g31-header-graph-default-on-followup.md``.
 # TODO(header-graph-phase-D): ``header_graph_includes`` runs one extra
 # ``clang -M`` pass per top-level header on every dump/compare with no
 # caching of its own (only the aggregate AST pass is disk-cached via
@@ -430,7 +434,7 @@ def resolve_input(
 
     # Static / import libraries (`.a`, `.lib`) are member archives, not single
     # linkable images. abicheck does not analyse archives (by design — see
-    # docs/concepts/limitations.md); fail with actionable guidance rather than a
+    # docs/learn/limitations.md); fail with actionable guidance rather than a
     # generic "unknown format" error.
     from .binary_utils import detect_archive
 
@@ -665,6 +669,8 @@ def run_dump(
             pdb_path=pdb_path,
             header_backend=eff_backend,
             compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
         )
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
@@ -697,6 +703,8 @@ def run_dump(
             header_backend=eff_backend,
             lang=lang,
             compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
         )
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
@@ -1194,6 +1202,8 @@ def _try_header_scoped_dump(
     lang: str,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> tuple[AbiSnapshot | None, str | None]:
     """Attempt a header-scoped dump for a PE/Mach-O binary.
 
@@ -1293,6 +1303,30 @@ def _try_header_scoped_dump(
         )
         return None, "header-backend-unavailable"
 
+    # ADR-050 D1 (Codex review, PR #624 follow-up): this path calls
+    # dumper._dump_pe/_dump_macho directly, bypassing dumper.dump() entirely
+    # -- without this call, every PE/Mach-O header-scoped dump would leave
+    # snap.contract=None regardless of whether headers were genuinely used,
+    # unlike the ELF service path (_dump_elf above), which already routes
+    # through dumper.dump() and gets this for free. public_headers/
+    # public_header_dirs are the same outer provenance inputs run_dump
+    # applies via _apply_native_provenance after this call returns (Codex
+    # review, PR #624 follow-up) -- without threading them in here too, two
+    # saved snapshots differing only in declared public-header provenance
+    # could share the same scope_fingerprint.
+    from .dumper import _attach_extraction_contract
+
+    _attach_extraction_contract(
+        snap,
+        headers=resolved_headers,
+        extra_includes=eff_includes,
+        gcc_options=cc.gcc_options,
+        gcc_option_tokens=eff_tokens,
+        lang=lang_arg,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
+    )
+
     if not _has_matched_public_surface(snap):
         warnings.warn(
             f"None of the provided headers matched exported symbols in "
@@ -1340,6 +1374,8 @@ def _dump_pe(
     pdb_path: Path | None = None,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Dump a PE binary (Windows DLL) to an ABI snapshot.
 
@@ -1381,6 +1417,8 @@ def _dump_pe(
             lang,
             header_backend=header_backend,
             compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
         )
         if scoped is not None:
             # Preserve any PDB debug info alongside the header-scoped surface.
@@ -1436,6 +1474,8 @@ def _dump_macho(
     lang: str = "c++",
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Dump a Mach-O binary (macOS dylib) to an ABI snapshot.
 
@@ -1470,6 +1510,8 @@ def _dump_macho(
             lang,
             header_backend=header_backend,
             compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
         )
         if scoped is not None:
             return scoped
@@ -1590,6 +1632,7 @@ def compare_snapshots(
     public_surface_allowlist: set[str] | None = None,
     reconcile_build_context: bool = False,
     env_matrix: EnvironmentMatrix | None = None,
+    diagnostic_comparison: bool = False,
 ) -> DiffResult:
     """Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 
@@ -1630,6 +1673,7 @@ def compare_snapshots(
         public_surface_allowlist=public_surface_allowlist,
         reconcile_build_context=reconcile_build_context,
         env_matrix=env_matrix,
+        diagnostic_comparison=diagnostic_comparison,
     )
 
 
@@ -1670,7 +1714,21 @@ def run_compare_request(
     # request.{old,new}.headers double as the public-header set for provenance
     # tagging — same rule as the single-pair CLI path (cli_resolve._resolve_compare_snapshots):
     # CompareRequest has no lower-level "parse only, don't classify" mode, so a
-    # header supplied to compare is by definition the public contract.
+    # header supplied to compare is by definition the public contract. Split
+    # into files/directories before tagging (not passed through unsplit): a
+    # directory entry fingerprinted as an individual file identity corrupts
+    # compute_extraction_contract's scope_fingerprint common-root computation
+    # (see split_public_header_inputs's docstring) — this is exactly the
+    # --devel-pkg release-compare path's own header_dir umbrella, which
+    # previously made a byte-identical self-comparison spuriously raise
+    # ScopeMismatchError.
+    old_public_headers, old_public_header_dirs = split_public_header_inputs(
+        request.old.headers
+    )
+    new_public_headers, new_public_header_dirs = split_public_header_inputs(
+        request.new.headers
+    )
+
     def _resolve_old_side() -> AbiSnapshot:
         return resolve_input(
             request.old.path,
@@ -1684,7 +1742,8 @@ def run_compare_request(
             enable_debuginfod=request.enable_debuginfod,
             debuginfod_url=request.debuginfod_url,
             header_backend=header_backend,
-            public_headers=list(request.old.headers),
+            public_headers=old_public_headers,
+            public_header_dirs=old_public_header_dirs,
         )
 
     def _resolve_new_side() -> AbiSnapshot:
@@ -1700,7 +1759,8 @@ def run_compare_request(
             enable_debuginfod=request.enable_debuginfod,
             debuginfod_url=request.debuginfod_url,
             header_backend=header_backend,
-            public_headers=list(request.new.headers),
+            public_headers=new_public_headers,
+            public_header_dirs=new_public_header_dirs,
         )
 
     # Old/new resolution has no data dependency on each other until they're
@@ -1748,6 +1808,7 @@ def run_compare_request(
         pattern_verdicts=request.pattern_verdicts,
         reconcile_build_context=request.reconcile_build_context,
         env_matrix=load_env_matrix(request.env_matrix_path),
+        diagnostic_comparison=request.diagnostic_comparison,
     )
     result.old_metadata = collect_metadata(request.old.path)
     result.new_metadata = collect_metadata(request.new.path)
@@ -1778,6 +1839,7 @@ def run_compare(
     pattern_verdicts: bool = False,
     public_surface_allowlist: set[str] | None = None,
     debuginfod_url: str | None = None,
+    diagnostic_comparison: bool = False,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -1786,10 +1848,11 @@ def run_compare(
     callers keep working while the typed request is the real chokepoint
     (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
 
-    ``debuginfod_url`` is appended after every pre-existing parameter (not
-    inserted alongside ``enable_debuginfod``) so a caller invoking this
-    positionally keeps binding every argument after it to the same parameter
-    it always did (Codex review, PR #551).
+    ``debuginfod_url`` and ``diagnostic_comparison`` are appended after every
+    pre-existing parameter (not inserted alongside their thematically-closer
+    neighbors) so a caller invoking this positionally keeps binding every
+    argument after them to the same parameter it always did (Codex review,
+    PR #551; same rule applied again for ADR-050 D2's escape hatch).
 
     Returns:
         A tuple of (DiffResult, old_snapshot, new_snapshot).
@@ -1832,6 +1895,7 @@ def run_compare(
         pattern_verdicts=pattern_verdicts,
         enable_debuginfod=enable_debuginfod,
         debuginfod_url=debuginfod_url,
+        diagnostic_comparison=diagnostic_comparison,
     )
     return run_compare_request(request)
 

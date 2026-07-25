@@ -3,7 +3,7 @@
 The same library gets checked on more than one
 [build profile](../concepts.md#build-profile) — Linux/GCC and Windows/MSVC
 release, say — and a break on one platform is still a break, even if the
-other platform's binary looks fine. [ADR-047](../../development/adr/047-github-actions-integration-model.md)
+other platform's binary looks fine. [ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
 §8's S17: which lanes are actual ABI contracts (gate CI, get a baseline) vs.
 test-only CI lanes is an explicit `.abicheck.yml` allowlist, never "every CI
 lane that happens to build this library."

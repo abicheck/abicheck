@@ -3,7 +3,7 @@
 You want abicheck to run — surfacing internal-noise checks, cross-source
 findings, a public-surface report — but there is nothing to compare against
 yet: no prior release, no `accepted-main` history, nothing. This is
-[ADR-047](../../development/adr/047-github-actions-integration-model.md)
+[ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
 §8's S5, and it is a **real, distinct** check kind, not a degraded form of
 comparison — advisory by default, since there is no baseline-drift verdict
 to gate CI on in the first place.
@@ -39,7 +39,7 @@ targets:
 
 See the [`check-target` reference](../../reference/check-target.md) for the
 full bypass mechanics, and
-[GitHub Action: Source Scans § Single-release audit](../../user-guide/github-action-source-scans.md#single-release-audit-no-baseline)
+[GitHub Action: Source Scans § Single-release audit](../../use/github-action-source-scans.md#single-release-audit-no-baseline)
 for the equivalent one-step `mode: scan` (no `against:`) wiring.
 
 ## When to move past this scenario
@@ -56,4 +56,4 @@ for the equivalent one-step `mode: scan` (no `against:`) wiring.
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
 - [`check-target` Action Reference](../../reference/check-target.md) — the full bypass mechanics and report shape.
-- [GitHub Action: Source Scans](../../user-guide/github-action-source-scans.md) — the one-step `mode: scan` equivalent.
+- [GitHub Action: Source Scans](../../use/github-action-source-scans.md) — the one-step `mode: scan` equivalent.

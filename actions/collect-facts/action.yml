@@ -33,7 +33,7 @@ inputs:
       you to front your build command); 'clang-plugin' (zero extra parse,
       but ABI-locked to the loading Clang's LLVM major — opt-in only, never
       auto-selected, since owning the toolchain image can't be inferred).
-      See docs/user-guide/producing-source-facts.md for the full decision
+      See docs/use/producing-source-facts.md for the full decision
       tree this mirrors.
     required: false
     default: 'auto'

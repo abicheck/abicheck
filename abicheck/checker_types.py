@@ -23,6 +23,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 from .checker_policy import (
     ChangeKind,
@@ -208,6 +209,18 @@ class Change:
     affected_public_roots: list[str] | None = None
     impact_proof_path: list[dict[str, object]] | None = None
     impact_is_direct: bool | None = None
+    # G29 Phase 3 slice 2 (ADR-052 follow-up) — set on a change moved into
+    # ``DiffResult.suppressed_changes`` (``checker._filter_suppressed_changes``/
+    # ``_filter_pattern_synthetic``, ``post_processing.ApplySuppression``) to
+    # the matching ``Suppression`` rule's ``label`` (falling back to
+    # ``reason`` when the rule has no label — both are free-form and either
+    # may be unset, so this can still be ``None``). Feeds
+    # ``impact.model.FindingDecision.suppression_rule`` — the piece ADR-052
+    # slice 1 deliberately left unwired. Never set for a change that stays
+    # visible, nor for the appcompat.py/cli_compare_helpers.py consumer/
+    # runtime overlays a suppression rule discards outright (those never
+    # reach ``suppressed_changes`` at all).
+    suppression_rule: str | None = None
 
 
 @dataclass
@@ -326,6 +339,21 @@ class DiffResult:
     requested_depth: str | None = None  # one of EVIDENCE_DEPTH_VALUES
     effective_depth: str | None = None  # one of EVIDENCE_DEPTH_VALUES
     baseline_channel: str | None = None  # e.g. "accepted-main", a release tag
+    # ADR-050 D2 — set when exactly one side of the compare carried an
+    # ExtractionContract (a genuinely mixed pair: e.g. a fresh header-AST
+    # dump compared against a pre-ADR-050 stored baseline, or a symbols-only
+    # side against a full L2 side). None on the ordinary case (both or
+    # neither side carries a contract) — this is report-level metadata, not
+    # a ChangeKind/Change finding, so it is structurally unreachable by any
+    # --severity-* promotion. "partial" is currently the only recognized
+    # value.
+    contract_coverage: Literal["partial"] | None = None
+    # ADR-050 D2 — set to "none" only when --diagnostic-comparison forced a
+    # tentative diff through past a genuine contract mismatch that would
+    # otherwise have raised ProfileMismatchError/ScopeMismatchError. Applies
+    # to the whole DiffResult (the gate failed for the pair as a whole
+    # before any diff ran), not per-Change.
+    assurance: Literal["none"] | None = None
 
     def _effective_kind_sets(
         self,

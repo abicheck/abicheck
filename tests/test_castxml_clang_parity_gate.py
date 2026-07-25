@@ -455,7 +455,7 @@ class TestCrossProducerUnmangledIdentityKnownLimitation:
     between two coincidentally-same-signature but genuinely different
     entities). That is exactly the class of problem Phase 3 (hybrid
     multi-producer snapshot with per-fact provenance) in
-    docs/development/plans/g28-castxml-clang-l2-parity-hardening.md is
+    docs/contribute/plans/g28-castxml-clang-l2-parity-hardening.md is
     scoped to solve. This test documents today's known behavior so a
     future Phase-3 fix has a concrete regression to flip (from asserting
     the false pair fires, to asserting it doesn't) rather than this gap
@@ -488,7 +488,15 @@ class TestCrossProducerUnmangledIdentityKnownLimitation:
         from abicheck.checker import ChangeKind, compare
 
         castxml_snap, clang_snap = cpp_snapshots
-        r = compare(castxml_snap, clang_snap)
+        # diagnostic_comparison=True (ADR-050 D2, PR #624 follow-up): castxml_snap
+        # and clang_snap are, by this class's own design, genuinely extracted
+        # under different compile contexts (two different AST frontends) --
+        # exactly what the comparability gate now correctly hard-fails on by
+        # default. This class exists specifically to document a KNOWN
+        # cross-producer divergence, so the diagnostic escape hatch (a
+        # best-effort diff whose assurance is explicitly downgraded) is the
+        # intended way to reach it, not a workaround.
+        r = compare(castxml_snap, clang_snap, diagnostic_comparison=True)
         widget_changes = [c for c in r.changes if c.description.endswith(": Widget")]
         kinds = {c.kind for c in widget_changes}
         assert ChangeKind.FUNC_REMOVED in kinds
@@ -500,7 +508,10 @@ class TestCrossProducerUnmangledIdentityKnownLimitation:
         from abicheck.checker import ChangeKind, compare
 
         castxml_snap, clang_snap = cpp_snapshots
-        r = compare(castxml_snap, clang_snap)
+        # diagnostic_comparison=True: see the sibling ctor test above -- this
+        # class deliberately compares snapshots from two different AST
+        # frontends to document a known divergence.
+        r = compare(castxml_snap, clang_snap, diagnostic_comparison=True)
         dtor_changes = [c for c in r.changes if c.description.endswith(": ~Base1")]
         kinds = {c.kind for c in dtor_changes}
         assert ChangeKind.FUNC_REMOVED in kinds

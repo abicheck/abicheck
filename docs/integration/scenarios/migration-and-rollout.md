@@ -1,7 +1,7 @@
 # Scenarios S26 & S27: Migration and Intentional Breaks
 
 Two situations where the check itself doesn't change, but how it's allowed
-to affect CI does — [ADR-047](../../development/adr/047-github-actions-integration-model.md)
+to affect CI does — [ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
 §8 names them S26 and S27:
 
 - **S26 — shadow rollout / migrating from another ABI tool.** You're
@@ -32,7 +32,7 @@ Keep your old tool (if any) running in parallel and required, exactly as
 before — nothing forces its removal. Once you're confident in abicheck's
 findings for this target (no unexpected findings for a stretch of real PRs),
 flip `gate-mode` to `local`/`deferred` and retire the old tool's own gate.
-See [CI Gating: How the Pieces Fit Together](../../user-guide/ci-gating.md)
+See [CI Gating: How the Pieces Fit Together](../../use/ci-gating.md)
 for the full exit-code/gate-mode interaction model.
 
 ## S27: a scoped, visible relaxation for one PR
@@ -51,11 +51,11 @@ whichever fits:
   naturally picks up the new surface as `accepted-main`'s new baseline — no
   manual step needed for that channel specifically.
 
-See [CI Gating](../../user-guide/ci-gating.md)'s recipes section for
+See [CI Gating](../../use/ci-gating.md)'s recipes section for
 suppression- and severity-based scoping mechanics.
 
 ## See also
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
-- [CI Gating: How the Pieces Fit Together](../../user-guide/ci-gating.md) — the full exit-code/gate-mode/suppression model.
+- [CI Gating: How the Pieces Fit Together](../../use/ci-gating.md) — the full exit-code/gate-mode/suppression model.
 - [`publish-baseline`/`update-main-baseline` Reference](../../reference/publish-baseline.md) — how `accepted-main` picks up a merged change automatically.

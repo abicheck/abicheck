@@ -4,7 +4,7 @@
 library's ABI surface — and `abicheck compare` reads two snapshots (or a live
 binary and a saved snapshot) to produce a verdict. Checking a snapshot into your
 repository as a baseline is the recommended way to detect ABI drift over time
-(see [Baseline Management](../user-guide/baseline-management.md)).
+(see [Baseline Management](../use/baseline-management.md)).
 
 This page documents the snapshot contract: its schema version, its
 compatibility rules, and its top-level structure.
@@ -19,13 +19,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`13`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`14`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 13,
+  "schema_version": 14,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -77,7 +77,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `13`). |
+| `schema_version` | int | Snapshot format version (currently `14`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -144,13 +144,13 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `13`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `14`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no
 `schema_version`; the two version numbers evolve independently. For the report
 contract and its stability policy, see
-[Output Formats](../user-guide/output-formats.md).
+[Output Formats](../use/output-formats.md).
 
 ---
 
@@ -159,7 +159,7 @@ contract and its stability policy, see
 - **Check baselines into version control.** A saved `.abi.json` is the intended
   input to `compare`; storing one per release lets CI diff each build against
   the last shipped ABI. See
-  [Baseline Management](../user-guide/baseline-management.md).
+  [Baseline Management](../use/baseline-management.md).
 - **Older baselines stay readable.** Because loading fills missing newer fields
   with defaults, a baseline written by an earlier abicheck compares correctly
   against a live binary dumped by a newer one — no regeneration required for a
@@ -175,5 +175,5 @@ contract and its stability policy, see
 
 ## See also
 
-- [Baseline Management](../user-guide/baseline-management.md) — producing, storing, and comparing snapshots as ABI baselines.
-- [Output Formats](../user-guide/output-formats.md) — the comparison-report JSON and `report_schema_version`.
+- [Baseline Management](../use/baseline-management.md) — producing, storing, and comparing snapshots as ABI baselines.
+- [Output Formats](../use/output-formats.md) — the comparison-report JSON and `report_schema_version`.

@@ -160,6 +160,13 @@ class CompareRequest:
     # against the declared floors (≤ floor → COMPATIBLE, > floor → BREAKING)
     # instead of the default deployment-RISK verdict.
     env_matrix_path: Path | None = None
+    # ADR-050 D2: force a tentative diff through a genuine comparability-
+    # contract mismatch (scope/profile fingerprint drift) instead of the
+    # default hard ``ProfileMismatchError``/``ScopeMismatchError``. Opt-in;
+    # the resulting ``DiffResult.assurance`` is stamped ``"none"`` so a
+    # caller can still see a result but knows not to trust it. Forwarded
+    # to ``checker.compare``'s own ``diagnostic_comparison`` parameter.
+    diagnostic_comparison: bool = False
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).
@@ -191,7 +198,10 @@ class CompareRequest:
             errors.append("policy profile name must not be empty")
         # D9 pre-flight: a --policy-file path that doesn't exist is a hard error
         # here (Tier 2), so CLI and MCP surface the same message before any work.
-        if self.policy_file_path is not None and not Path(self.policy_file_path).exists():
+        if (
+            self.policy_file_path is not None
+            and not Path(self.policy_file_path).exists()
+        ):
             errors.append(f"policy file not found: {self.policy_file_path}")
         if self.env_matrix_path is not None and not Path(self.env_matrix_path).exists():
             errors.append(f"environment matrix file not found: {self.env_matrix_path}")

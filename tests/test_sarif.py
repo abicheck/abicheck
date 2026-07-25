@@ -695,6 +695,11 @@ class TestScopedGate:
         assert results[0]["properties"]["relevantToGate"] is True
         assert results[0]["properties"]["blocksGate"] is True
         assert "_Z6vanishv" in results[0]["message"]["text"]
+        # G29 Phase 3 slice 1 (ADR-052, Codex review): reachabilityState is
+        # "always present" everywhere else this slice touches -- a missing
+        # contract member has no backing Change, but it still needs the
+        # honest UNKNOWN value rather than silently omitting the field.
+        assert results[0]["properties"]["reachabilityState"] == "unknown"
         # The synthetic rule id must be registered too (Codex review) --
         # otherwise a SARIF consumer resolving annotations from
         # tool.driver.rules has no metadata for this finding.
@@ -849,3 +854,103 @@ class TestScopedGate:
         results = doc["runs"][0]["results"]
         assert len(results) == 1
         assert results[0]["ruleId"] == "used_by_missing_symbol"
+
+
+class TestRootCauseMode:
+    """`--report-mode root-cause` (G29 Phase 3 slice 5, ADR-052): adds
+    properties.rootCauseId/rootCause to every result instead of restructuring
+    SARIF's flat one-result-per-finding shape -- shares the exact grouping
+    decision (_root_cause_key_and_display) JSON/markdown root-cause mode use,
+    so all three formats can never disagree about which findings correlate."""
+
+    def test_full_mode_has_no_root_cause_properties(self) -> None:
+        r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
+        doc = to_sarif(r)
+        assert "rootCauseId" not in doc["runs"][0]["results"][0]["properties"]
+
+    def test_groups_findings_sharing_caused_by_type(self) -> None:
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        overlay = Change(
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
+            "required", caused_by_type="ns::internal::helper",
+        )
+        r = _make_result([root, overlay], verdict=Verdict.BREAKING)
+        doc = to_sarif(r, report_mode="root-cause")
+        results = doc["runs"][0]["results"]
+        ids = {res["properties"]["rootCauseId"] for res in results}
+        assert len(ids) == 1
+        for res in results:
+            assert res["properties"]["rootCause"] == "ns::internal::helper"
+
+    def test_independent_findings_sharing_a_symbol_stay_separate(self) -> None:
+        a = Change(ChangeKind.FUNC_RETURN_CHANGED, "foo", "return type changed")
+        b = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "parameter changed")
+        r = _make_result([a, b], verdict=Verdict.BREAKING)
+        doc = to_sarif(r, report_mode="root-cause")
+        results = doc["runs"][0]["results"]
+        ids = {res["properties"]["rootCauseId"] for res in results}
+        assert len(ids) == 2
+        for res in results:
+            assert res["properties"]["rootCause"] == "foo"
+
+    def test_scoped_only_change_gets_root_cause_properties(self) -> None:
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+        )
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_only_changes = (scoped_only,)  # type: ignore[attr-defined]
+        doc = to_sarif(r, report_mode="root-cause")
+        results = doc["runs"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["properties"]["rootCause"] == "ordinal:5"
+        assert "rootCauseId" in results[0]["properties"]
+
+    def test_missing_contract_label_gets_root_cause_properties(self) -> None:
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv",)  # type: ignore[attr-defined]
+        doc = to_sarif(r, report_mode="root-cause")
+        results = doc["runs"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["properties"]["rootCause"] == "_Z6vanishv"
+        assert "rootCauseId" in results[0]["properties"]
+
+    def test_two_missing_labels_stay_separate(self) -> None:
+        # Regression guard: two unreferenced missing-contract labels must not
+        # collide on the same unique-key fallback (the label itself, not a
+        # shared empty finding_id, disambiguates them).
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv", "_Z7vanish2v")  # type: ignore[attr-defined]
+        doc = to_sarif(r, report_mode="root-cause")
+        ids = {res["properties"]["rootCauseId"] for res in doc["runs"][0]["results"]}
+        assert len(ids) == 2
+
+    def test_hidden_scoped_only_cause_does_not_leak_into_referenced_causes(
+        self,
+    ) -> None:
+        # Regression (Codex review): a scoped-only change filtered out by
+        # --show-only must not still contribute its caused_by_type to
+        # referenced_causes -- otherwise its hidden correlation could wrongly
+        # group two unrelated *visible* findings that merely share its
+        # symbol, disagreeing with JSON/markdown root-cause mode (which
+        # computes referenced_causes from the filtered set only).
+        hidden_scoped_only = Change(
+            kind=ChangeKind.FUNC_ADDED,
+            symbol="unrelated_addition",
+            description="added",
+            caused_by_type="foo",
+        )
+        a = Change(ChangeKind.FUNC_RETURN_CHANGED, "foo", "return type changed")
+        b = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "parameter changed")
+        r = _make_result([a, b], verdict=Verdict.BREAKING)
+        r.scoped_only_changes = (hidden_scoped_only,)  # type: ignore[attr-defined]
+        doc = to_sarif(r, report_mode="root-cause", show_only="breaking")
+        results = doc["runs"][0]["results"]
+        assert all(res["ruleId"] != "func_added" for res in results)
+        ids = {res["properties"]["rootCauseId"] for res in results}
+        assert len(ids) == 2

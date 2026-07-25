@@ -18,7 +18,7 @@ from packaging.requirements import InvalidRequirement, Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_DIR = ROOT / "abicheck" / "schemas"
-PUBLISHED_SCHEMA_DIR = ROOT / "docs" / "schemas" / "v1"
+PUBLISHED_SCHEMA_DIR = ROOT / "docs" / "reference" / "schemas" / "v1"
 SCHEMA_BASE = "https://abicheck.github.io/abicheck/schemas/v1/"
 
 

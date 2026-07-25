@@ -3,7 +3,7 @@
 Three guarantees enforced here:
 
 1. `scripts/gen_examples_docs.py --check` succeeds, so the rendered docs site
-   tree under `docs/examples/` is in sync with `examples/`.
+   tree under `docs/reference/examples/` is in sync with `examples/`.
 2. Every case listed in `ground_truth.json` has a `README.md` whose first line
    is an `# H1`, plus at least three `## H2` sections — enough structure to
    render usefully on the docs site.
@@ -76,7 +76,7 @@ def test_case_readme_has_required_structure(case_name: str) -> None:
 
 
 def test_generator_check_passes() -> None:
-    """Running gen_examples_docs.py --check must succeed, i.e. docs/examples/ is in sync."""
+    """Running gen_examples_docs.py --check must succeed, i.e. docs/reference/examples/ is in sync."""
     result = subprocess.run(
         [sys.executable, str(GEN_SCRIPT), "--check"],
         capture_output=True,
@@ -84,7 +84,7 @@ def test_generator_check_passes() -> None:
         cwd=str(ROOT),
     )
     assert result.returncode == 0, (
-        "docs/examples/ is out of date — run `python scripts/gen_examples_docs.py`.\n"
+        "docs/reference/examples/ is out of date — run `python scripts/gen_examples_docs.py`.\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
 
@@ -93,11 +93,14 @@ def test_generator_rewrites_source_links_without_mkdocs_broken_links() -> None:
     mod = _load_generator_module()
 
     rewritten = mod._rewrite_links(
-        "[v1 header](v1.h) [guide](../docs/concepts/abi-api-handling.md)"
+        "[v1 header](v1.h) [guide](../docs/learn/abi-api-handling.md)"
     )
 
     assert "`v1 header`" in rewritten
-    assert "[guide](../concepts/abi-api-handling.md)" in rewritten
+    # Generated case pages live at docs/reference/examples/<case>.md -- two
+    # levels below docs/ root -- so a docs/-relative target outside
+    # reference/ needs two "../" segments, not the historical one.
+    assert "[guide](../../learn/abi-api-handling.md)" in rewritten
     assert "../../examples/" not in rewritten
 
 

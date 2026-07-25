@@ -3,7 +3,7 @@
 Your library is cross-compiled — the binary that matters doesn't run on the
 CI host that built it, and the toolchain that produced it isn't necessarily
 the toolchain abicheck would auto-detect on that host.
-[ADR-047](../../development/adr/047-github-actions-integration-model.md)
+[ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
 §8's S18: **no host auto-detection of target context** — the build host
 authors the [build output](../../reference/build-output-schema.md), and the
 check can run entirely offline/elsewhere, decoupled as two separate steps.

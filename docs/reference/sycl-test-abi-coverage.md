@@ -3,7 +3,7 @@
 This page maps the upstream **Intel DPC++ / `intel/llvm`** ABI test suite at
 [`sycl/test/abi/`](https://github.com/intel/llvm/tree/sycl/sycl/test/abi) onto
 abicheck's detectors, and records which scenarios abicheck catches, by what
-mechanism, and at what [evidence tier](../concepts/evidence-and-detectability.md).
+mechanism, and at what [evidence tier](../learn/evidence-and-detectability.md).
 
 The two suites are complementary in *form*:
 
@@ -37,7 +37,7 @@ changed vs. the previous release".
 
 The `shared_ptr<device_impl>` → raw-pointer change in
 [intel/llvm#20821](https://github.com/intel/llvm/pull/20821) is captured as
-example [`case126_sycl_device_impl_ptr`](../examples/case126_sycl_device_impl_ptr.md).
+example [`case126_sycl_device_impl_ptr`](examples/case126_sycl_device_impl_ptr.md).
 abicheck reports it as `type_size_changed sycl::device` (16 → 8 bytes) — the
 **root cause**. Note that upstream's `sycl_symbols_*.dump` guard could *not* see
 this directly (no mangled name changed), which is why it only caught the
