@@ -357,6 +357,7 @@ Validate CONFIG's targets:/bundles:/profiles:/baseline: block (ADR-047 §3).
 |---|:--:|---|---|
 | `--format` | no | `text` | Output format for the validation report. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
+| `--toolchain-bindings` | no | — | Path to a trusted toolchain-bindings file (schema abicheck.toolchain-bindings/v1) to additionally check every declared profiles.<id>.compile.binding against. Loaded only from this explicit path — never auto-discovered, per the untrusted-config trust boundary ProfileCompileSpec.binding documents. |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
 ## `run-plan`
