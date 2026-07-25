@@ -125,6 +125,27 @@ step (they were written by `check-target`'s internal finalize step before
 its own exit code was returned), so the always()-conditioned `Upload report`
 step still sees them.
 
+### Pre-check failures (candidate resolution, build-output download)
+
+Before `check-target` ever runs, the matrix job resolves this cell's
+candidate binary/binaries (`binary_pattern`/`member_binary_patterns`, a
+glob against the downloaded `candidate/` artifact) and, when a baseline or a
+wrapper/clang-plugin evidence pack is needed, downloads that cell's
+`build-output.json`. Either can genuinely fail — no candidate matched, an
+ambiguous/escaping pattern, a missing bundle member, or a required
+build-output download error. A **"Synthesize pre-check operational-error
+report"** step catches exactly this: when either fails, it writes a full
+operational-error report envelope (`verdict: "ERROR"`,
+`operational_errors: [{"kind": "ambiguous", ...}]`) by calling
+`actions/check-target/report_envelope.py --mode operational-error` directly
+— the same script `check-target`'s own finalize step drives for a real
+`resolve-baseline` failure — so `aggregate` sees a typed, per-cell failure
+here too, rather than a cell that silently vanished from the report set (as
+if it had never been required at all). `Run check-target` itself is gated
+to skip whenever candidate resolution didn't succeed, and the downstream
+`Sanitize check-id for artifact name`/`Upload report` steps pick up whichever
+of the two report-producing steps actually ran.
+
 ### Required artifact-staging convention
 
 `check-project.yml` never builds anything and never fetches from a baseline

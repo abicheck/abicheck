@@ -111,17 +111,21 @@ _PUBLIC_DEPTHS = frozenset({"binary", "headers", "build", "source"})
 def _validate_public_depth(depth: str | None) -> str | None:
     """Reject any depth spelling outside the public ladder, or ``None``.
 
-    Note this only validates the *spelling* — it does not (yet) enforce that
-    the requested depth was actually *reached*. PR #601 (open as of CLAUDE.md
-    "M1-6") adds a hard-fail ``DumpDepthNotSatisfiedError`` when an explicit
-    ``dump --depth`` isn't satisfied, but that check lives entirely in
-    ``cli.py``/``cli_dump_helpers.py`` at the CLI entry point. Neither this
-    MCP surface nor ``service.py``'s ``ScanRequest``/``run_scan_subprocess``
-    call it — an agent driving abicheck through MCP with an explicit
-    ``depth=`` can silently get a result from a shallower evidence tier than
-    requested, the same way the CLI itself could before PR #601. Tracked as
-    acknowledged remaining work: once PR #601 merges, extend the same
-    requested-vs-achieved check to this module and to ``service.py``.
+    Note this only validates the *spelling*, not that the requested depth
+    was actually *reached* — but that's not a gap on this surface (re-
+    investigated for G30, AGENTS.md "Known gaps"/CLAUDE.md "M1-6", closed as
+    stale). This module's tools that accept ``depth=`` (``abi_scan``,
+    ``abi_estimate``) go through ``service.py``'s ``ScanRequest`` into
+    ``service_scan.run_scan``, which calls the same
+    ``scan_engine.run_scan_core`` the CLI ``scan`` command
+    (``cli_scan.py``) calls directly — both already share one pinned-depth
+    evidence contract (``_check_scan_evidence_contract``'s
+    ``_EvidenceContractError``, ADR-037 D5), so there is no CLI-vs-MCP
+    disparity to close here. ``dump --depth``'s separate, stricter
+    ``DumpDepthNotSatisfiedError`` gate (PR #601, merged) lives in
+    ``cli._write_snapshot_output`` and has no equivalent on this module's
+    ``abi_dump`` tool to extend it to, because ``abi_dump`` never accepted a
+    ``depth``/``sources``/``build-info`` parameter in the first place.
     """
     if depth is not None and depth not in _PUBLIC_DEPTHS:
         raise ValueError(

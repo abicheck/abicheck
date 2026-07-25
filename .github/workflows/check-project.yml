@@ -498,13 +498,25 @@ jobs:
       # workflow's own artifact-staging contract above) -- independent of
       # whether the cell has a baseline to compare against at all (Codex
       # review). Download whenever either consumer might need it.
+      # No continue-on-error here (issue #628, correcting the G30 P1.4 known
+      # gap the plan doc's round-5/round-8/round-9 addenda tracked): this
+      # download is only attempted (per the `if:` above) when this cell
+      # genuinely needs it -- a baseline to compare against, or a wrapper/
+      # clang-plugin evidence pack to verify. Swallowing a failure here used
+      # to silently weaken resolve-baseline's incompatible_evidence check
+      # (candidate-build-output would forward empty) with no report at all
+      # explaining why. Letting it fail loud, caught by the "Synthesize
+      # pre-check operational-error report" step below (mirroring how "Run
+      # check-target" itself is deliberately not continue-on-error'd, per
+      # that step's own comment), makes this a typed, aggregate-visible
+      # operational error instead.
       - name: Download build-output artifact
+        id: download_build_output
         if: matrix.baseline_channel != 'none' || inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin'
         uses: actions/download-artifact@v8
         with:
           name: '${{ inputs.build-output-artifact-prefix }}${{ matrix.profile_id }}'
           path: build-output
-        continue-on-error: true
 
       # Resolves this cell's `new-library` from the downloaded `candidate/`
       # tree: a single glob match for kind: target (the redirected library's
@@ -516,8 +528,18 @@ jobs:
       # `build-output=` (the downloaded build-output.json path, or empty if
       # the download above didn't land one) for the candidate-build-output
       # forward.
+      # continue-on-error (issue #628): this step still fails loud
+      # internally (::error:: + exit 1) on every guard above -- unchanged.
+      # What changes is that the step's own failure no longer silently ends
+      # the job with no report for `aggregate` to see: continue-on-error
+      # lets the job reach the "Synthesize pre-check operational-error
+      # report" step below, which detects this step's real outcome and
+      # writes a typed envelope instead. "Run check-target" immediately
+      # below is explicitly gated on this step having actually succeeded, so
+      # it never runs against a half-resolved candidate.
       - name: Resolve candidate binary/binaries
         id: candidate
+        continue-on-error: true
         shell: bash
         env:
           MATRIX_JSON: ${{ toJSON(matrix) }}
@@ -654,6 +676,80 @@ jobs:
           print(f'build-output={build_output_path}' if os.path.isfile(build_output_path) else 'build-output=')
           " >> "$GITHUB_OUTPUT"
 
+      # Closes the G30 P1.4 known gap tracked by issue #628 (the plan doc's
+      # round-5/round-8/round-9 addenda): a pre-check failure -- the
+      # required "Download build-output artifact" download above, or the
+      # "Resolve candidate binary/binaries" step above -- used to end this
+      # job with no report at all for `aggregate` to see, indistinguishable
+      # from "this optional cell legitimately had nothing to check." Reuses
+      # actions/check-target/report_envelope.py's own `--mode
+      # operational-error` directly -- the same script check-target's own
+      # run.sh drives for a real resolve-baseline failure -- rather than
+      # reimplementing its envelope-construction logic inline here (the
+      # duplication the G30 plan doc's original framing of this gap wanted
+      # to avoid) or restructuring check-target's own interface to accept a
+      # "resolution already failed" case (its other option): this cell's
+      # identity fields (name/profile/baseline_channel/requested_depth/
+      # gate_mode) are already known from the matrix, so no other
+      # check-target input is needed to synthesize the envelope directly.
+      # `--resolve-outcome ambiguous` matches how check-target/run.sh itself
+      # already reuses resolve-baseline's "ambiguous" outcome as the generic
+      # catch-all for other pre-analysis infrastructure failures (a
+      # collect-facts verify/replay failure, a missing analysis report) that
+      # aren't literally a resolve-baseline outcome either.
+      - name: Synthesize pre-check operational-error report
+        id: precheck
+        if: always() && (steps.download_build_output.outcome == 'failure' || steps.candidate.outcome == 'failure')
+        shell: bash
+        env:
+          MATRIX_NAME: ${{ matrix.name }}
+          MATRIX_PROFILE_ID: ${{ matrix.profile_id }}
+          MATRIX_BASELINE_CHANNEL: ${{ matrix.baseline_channel }}
+          MATRIX_REQUESTED_DEPTH: ${{ matrix.requested_depth }}
+          MATRIX_GATE_MODE: ${{ matrix.gate_mode }}
+          PROJECT: ${{ inputs.project != '' && inputs.project || github.repository }}
+          HEAD_SHA: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
+          BASE_REF: ${{ inputs.base-ref }}
+          ACTION_VERSION: ${{ format('{0}@{1}', steps.identity.outputs.repository, steps.identity.outputs.ref) }}
+          BUILD_OUTPUT_FAILED: ${{ steps.download_build_output.outcome == 'failure' }}
+        run: |
+          set -euo pipefail
+          if [[ "$BUILD_OUTPUT_FAILED" == "true" ]]; then
+            MESSAGE="the required build-output artifact download failed for profile '$MATRIX_PROFILE_ID' -- see the 'Download build-output artifact' step's own log for the reason."
+          else
+            MESSAGE="candidate binary resolution failed for '$MATRIX_NAME' -- see the 'Resolve candidate binary/binaries' step's own log for the specific reason."
+          fi
+          set +e
+          ENVELOPE_STDOUT=$(python3 ./.check-project-src/actions/check-target/report_envelope.py \
+            --mode operational-error \
+            --name "$MATRIX_NAME" \
+            --profile-id "$MATRIX_PROFILE_ID" \
+            --baseline-channel "$MATRIX_BASELINE_CHANNEL" \
+            --requested-depth "$MATRIX_REQUESTED_DEPTH" \
+            --gate-mode "$MATRIX_GATE_MODE" \
+            --resolve-outcome "ambiguous" \
+            --resolve-message "$MESSAGE" \
+            --project "$PROJECT" \
+            --head-sha "$HEAD_SHA" \
+            --base-ref "$BASE_REF" \
+            --action-version "$ACTION_VERSION" \
+            --report-out precheck-report.json)
+          ENVELOPE_EXIT=$?
+          set -e
+          echo "$ENVELOPE_STDOUT"
+          if [[ $ENVELOPE_EXIT -ne 0 ]]; then
+            echo "::error::failed to write the pre-check operational-error report envelope (see the output above)."
+            exit 1
+          fi
+          # Same grep -v / || true caution as check-target/run.sh's own
+          # identical pattern: there are always other lines to pass through
+          # (check-id/verdict/... precede exit-code=), but the guard is kept
+          # anyway against `set -o pipefail` above.
+          echo "$ENVELOPE_STDOUT" | grep -v '^exit-code=' >> "$GITHUB_OUTPUT" || true
+          FINAL_EXIT=$(echo "$ENVELOPE_STDOUT" | sed -n 's/^exit-code=//p')
+          echo "pre-check operational-error report: precheck-report.json (exit-code: $FINAL_EXIT)"
+          exit "${FINAL_EXIT:-1}"
+
       # Deliberately no continue-on-error here: check-target's own finalize
       # step (ADR-047 §7) already computes its correct composite exit code
       # per gate-mode before this step's outer conclusion is decided, and
@@ -665,8 +761,17 @@ jobs:
       # this whole matrix job correctly report failure for a real
       # gate-mode: local break or an operational error, which
       # branch-protection-required status checks depend on.
+      #
+      # Gated on steps.candidate.outcome == 'success' (issue #628): a
+      # skipped candidate step (the build-output download above failed
+      # first) or a failed one (continue-on-error'd, so this step would
+      # otherwise still attempt to run by default) must not reach
+      # check-target with a half-resolved/missing new-library -- the
+      # "Synthesize pre-check operational-error report" step above already
+      # covers both cases.
       - name: Run check-target
         id: run
+        if: steps.candidate.outcome == 'success'
         uses: ./.check-project-src/actions/check-target
         with:
           kind: ${{ matrix.kind }}
@@ -753,12 +858,15 @@ jobs:
       # review). Keep the readable `tr` form but append a short content
       # hash of the *original* check_id so two check_ids that collide under
       # `tr` still produce distinct artifact names.
+      # Picks whichever of "Run check-target" / "Synthesize pre-check
+      # operational-error report" actually produced a report this cell --
+      # exactly one of the two ever runs per matrix cell (issue #628).
       - name: Sanitize check-id for artifact name
         id: sanitized
-        if: always() && steps.run.outputs.report-path != ''
+        if: always() && (steps.run.outputs.report-path != '' || steps.precheck.outputs.report-path != '')
         shell: bash
         env:
-          CHECK_ID: ${{ steps.run.outputs.check-id }}
+          CHECK_ID: ${{ steps.run.outputs.check-id || steps.precheck.outputs.check-id }}
         run: |
           python3 -c "
           import hashlib
@@ -780,13 +888,15 @@ jobs:
       # default unless it too is always()-conditioned. Without this, the
       # report artifact for exactly the failing cells `aggregate` most
       # needs to see would never upload. `steps.run.outputs.report-path`
-      # stays populated even for a failed step, per the comment above.
+      # stays populated even for a failed step, per the comment above --
+      # `steps.precheck.outputs.report-path` is this same guarantee's
+      # pre-check-failure counterpart (issue #628).
       - name: Upload report
-        if: always() && steps.run.outputs.report-path != ''
+        if: always() && (steps.run.outputs.report-path != '' || steps.precheck.outputs.report-path != '')
         uses: actions/upload-artifact@v7
         with:
           name: '${{ inputs.report-artifact-prefix }}${{ steps.sanitized.outputs.id }}'
-          path: ${{ steps.run.outputs.report-path }}
+          path: ${{ steps.run.outputs.report-path || steps.precheck.outputs.report-path }}
 
   # ── Job 3: fan-in gate ───────────────────────────────────────────────────
   aggregate:

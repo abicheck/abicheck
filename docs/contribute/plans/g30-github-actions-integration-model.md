@@ -118,7 +118,7 @@ replay (`auto-completed: true`, no warning), wrapper under `phase: auto`
 `phase: prepare` (`auto-completed: true`, no warning — not flagged like
 `auto` is), and `phase: verify` (`auto-completed: true`).
 
-### P0.3 — Report identity envelope (subset of ADR-047 §7) — **done** (schema/model half; CLI-population half still open)
+### P0.3 — Report identity envelope (subset of ADR-047 §7) — **done** (schema/model half; native CLI-population half re-scoped, see status note — not a blocker)
 
 **Problem:** JSON reports don't carry `check_id`/`profile_id`/
 `requested_depth`/`effective_depth`/`baseline_channel` today — a P1
@@ -171,6 +171,49 @@ PR #601 per the note above.
 not null), round-trip + schema validation when set, `--stat` mode carrying
 the fields too, and an invalid `requested_depth` enum value failing schema
 validation.
+
+**Status note, re-investigated for G30 "remaining items" — the blocker is
+gone, but re-checking what it was blocking turned up a re-scope, not a
+straight unblock.** PR #601 (the `DumpDepthNotSatisfiedError` work this
+note was waiting on) merged 2026-07-19. Two things follow from that:
+
+- `check_id`/`profile_id`/`requested_depth`/`effective_depth`/
+  `baseline_channel` on `DiffResult`/`ScanOutcome` themselves are *still*
+  never set by any real code path — confirmed by grepping every `cli*.py`/
+  `checker.py`/`scan_engine.py`/`service*.py` for an assignment to any of
+  the five and finding none. A plain `abicheck compare`/`scan` invocation
+  outside `check-target` still emits a report with none of these fields.
+  That part of the original "CLI-population half" is real and still open,
+  narrowly, for a direct CLI/Python-API caller.
+- It is **not**, however, still blocking anything G30 itself needed: P1.3's
+  `actions/check-target` (below) ships the full ADR-047 §7 identity envelope
+  end-to-end today via a *different* mechanism than the one this item
+  originally imagined — `abicheck/buildsource/check_report.py`'s
+  `augment_report`/`derive_effective_depth` populate `check_id`/
+  `requested_depth`/`effective_depth`/etc. by post-processing the already-
+  emitted JSON *dict* (reading `old_evidence_depth`/`new_evidence_depth`/
+  `level.depth`, which `compare --format json`/`scan` already emit
+  unconditionally), not by threading values through `DiffResult`/
+  `ScanOutcome` fields at all. So the thing this note was gating — "P1's
+  primitives have something to populate" — already has it, via the
+  wrapper, without needing the native CLI wiring this note anticipated.
+  Closing this as "no further G30 work needed here"; a native-CLI
+  `compare`/`scan --format json`-carries-its-own-identity-fields
+  enhancement remains a real, standalone, narrowly-scoped follow-up outside
+  this plan (not currently justified by any G30 user story, since
+  `check-target` is the actual consumer and it's already covered).
+
+Separately, `AGENTS.md`'s own "Depth contract, CLI vs. API/MCP" Known Gaps
+entry — a related but *distinct* claim, about `service.py`'s `ScanRequest`/
+`run_scan_subprocess` and `mcp_server.py`'s MCP tools not enforcing the same
+requested-vs-achieved depth check the CLI's `dump --depth` gate does — was
+also re-investigated on the same pass and closed as stale in `AGENTS.md`
+directly (not a G30 item; `dump --depth`'s strict gate has no service.py/MCP
+surface to extend to since neither exposes a depth-qualified snapshot
+surface, and `scan`'s own pinned-depth contract was already shared
+identically between the CLI and service.py/MCP the whole time, via one
+`scan_engine.run_scan_core`). See that file for the full writeup; not
+duplicated here since it isn't a G30-specific gap.
 
 ### P0.4 — Canonical single-library and multi-DSO doc pages — **done**
 
@@ -2130,6 +2173,96 @@ placements, step ordering, matrix wiring, artifact-naming/sanitization
 conventions, self-checkout pattern) — the same "needs a real runner to exercise
 end-to-end" scoping `tests/test_action_check_target.py` already established
 for `check-target`'s own `action.yml`.
+
+**Issue [#628](https://github.com/abicheck/abicheck/issues/628) — the
+candidate-resolution/build-output-download report-routing gap the round-5/
+round-8/round-9 addenda above tracked as deferred — closed, picking a third
+option neither of the issue's own two listed alternatives:** the issue
+framed the choice as (1) duplicate `report_envelope.py`'s operational-error
+construction inline in `check-project.yml`'s own resolver step, or (2)
+restructure `check-target`'s own interface to still be invocable on an
+already-failed resolution. Neither was needed: `report_envelope.py --mode
+operational-error` is already a thin, self-contained CLI wrapper around
+`abicheck.buildsource.check_report.build_operational_error_report` that
+needs nothing beyond a cell's already-known identity fields (name/profile/
+baseline_channel/requested_depth/gate_mode, all present on the matrix
+`include:` entry) — so a new `check-project.yml` step can call it directly,
+reusing its actual code with zero duplication and zero change to
+`check-target`'s own inputs. Implemented:
+
+- **"Download build-output artifact"** lost its `continue-on-error: true`
+  (only when the download is actually attempted per its existing `if:` —
+  a baseline-backed cell, or a wrapper/clang-plugin evidence-producer cell)
+  and gained `id: download_build_output`, so a required download failure now
+  fails that step instead of silently degrading `resolve-baseline`'s
+  `incompatible_evidence` cross-check (`candidate-build-output` forwarding
+  empty with no signal why).
+- **"Resolve candidate binary/binaries"** gained `continue-on-error: true`
+  — its own internal guards are completely unchanged (still `::error::` +
+  `sys.exit(1)` on every failure mode), only the step-level swallowing is
+  new, so its job-failing behavior is now observed rather than silently
+  ending the job.
+- A new **"Synthesize pre-check operational-error report"** step
+  (`if: always() && (steps.download_build_output.outcome == 'failure' ||
+  steps.candidate.outcome == 'failure')`) calls
+  `report_envelope.py --mode operational-error --resolve-outcome ambiguous`
+  with a message naming which of the two failed, using the already-checked-
+  out `.check-project-src` copy of the repo (no new checkout/install step
+  needed). `--resolve-outcome ambiguous` matches
+  `actions/check-target/run.sh`'s own established precedent of reusing
+  resolve-baseline's `"ambiguous"` outcome as the generic catch-all for
+  other pre-analysis infrastructure failures that aren't literally a
+  resolve-baseline outcome either (a `collect-facts phase: verify`/`replay`
+  failure, a missing analysis report) — this pre-check failure is one more
+  instance of that same class, not a new taxonomy member. Mirrors
+  `run.sh`'s own stdout-capture/`exit-code=`-parsing/`grep -v` pattern
+  exactly, including letting the step's own exit code (always 1 for an
+  operational error, regardless of `gate-mode` — `final_exit_code`'s
+  existing rule) fail the matrix job, matching how a genuine
+  resolve-baseline failure already fails the job today via `check-target`'s
+  own finalize step.
+- **"Run check-target"** gained `if: steps.candidate.outcome == 'success'`
+  — required because `continue-on-error: true` on the resolver step means a
+  later step with no `if:` of its own would otherwise still attempt to run
+  by default even after the resolver's own internal failure (its
+  `conclusion` reads as `success` under `continue-on-error`, only its
+  `outcome` reads `failure`) — without this guard `check-target` would run
+  against a missing/half-resolved `new-library`.
+- **"Sanitize check-id for artifact name"** and **"Upload report"** both
+  widened their `if:`/value expressions to `steps.run.outputs.report-path
+  || steps.precheck.outputs.report-path` (and `steps.run.outputs.check-id
+  || steps.precheck.outputs.check-id` for the sanitizer's `CHECK_ID`) —
+  exactly one of "Run check-target" / the new precheck step ever runs per
+  matrix cell, so exactly one ever has a report to upload.
+
+Verified directly (not only via the updated structural test suite): ran the
+real `report_envelope.py --mode operational-error` invocation by hand
+against representative identity fields, confirming a schema-valid envelope
+(`verdict: "ERROR"`, `operational_errors: [{"kind": "ambiguous", ...}]`,
+`check_id` built correctly) and the documented `exit-code=1` output line;
+separately extracted and ran the new step's own bash script via `bash -c`
+against the real `report_envelope.py` through a symlinked `.check-project-
+src/` layout, confirming the `report-path`/`check-id` `$GITHUB_OUTPUT` lines
+and the step's own exit code match. `tests/test_reusable_workflows.py`
+gained a new `TestPreCheckOperationalErrorReport` class (structural
+assertions plus the bash/`report_envelope.py` end-to-end case above) and
+`test_report_artifact_name_uses_the_checks_own_sanitized_check_id`/
+`test_sanitize_step_runs_before_upload_and_shares_its_always_condition`
+were updated for the widened conditions.
+
+**Left for a follow-up, flagged rather than silently skipped:** the live
+`test-check-project-failure-path.yml` fixture (the real end-to-end GitHub
+Actions coverage for the *existing* resolve-baseline `not_found` operational
+error) was not extended with a second scenario that deliberately triggers a
+candidate-resolution or build-output-download failure — doing so needs a
+second `.abicheck.yml` fixture target/profile combination staged in a real
+CI run to validate, which this session couldn't exercise (no live GitHub
+Actions runner available here, the same constraint the "Pilot validation
+plan" section's minimal generic pilots are blocked on). The unit-level
+end-to-end verification above exercises the real script and the real
+`report_envelope.py` together, but a live-runner fixture proving the
+`aggregate`-visible result for these two specific failure modes (mirroring
+the existing `not_found` fixture's own pattern) remains open.
 
 ### P1.5 — `.abicheck.yml` `targets:`/`profiles:`/`baseline:` block — **done**
 
