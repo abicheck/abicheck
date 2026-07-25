@@ -2213,7 +2213,7 @@ the from_dict structural-error taxonomy, every cross-reference validation
 rule (including the exact ADR-047 §3 PVXS two-target-one-bundle shape as a
 positive case), the loader, and the CLI command.
 
-### P1.6 — `publish-baseline.yml` / `update-main-baseline.yml` — **done**
+### P1.6 — `publish-baseline.yml` / `update-main-baseline.yml` — **done, with one fixture gap open (flagged by review)**
 
 Implements ADR-047 §6/§10. `publish-baseline.yml`: release-triggered,
 `actions/baseline` → atomic archive → release-asset upload.
