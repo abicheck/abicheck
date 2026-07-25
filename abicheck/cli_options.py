@@ -34,6 +34,7 @@ from .cli_params import (
     POLICY_FILE_PARAM,
     SIDED_BUILD_INFO_PARAM,
     SIDED_EXISTING_PATH_PARAM,
+    SIDED_INCLUDE_PATH_PARAM,
     SIDED_PATH_PARAM,
     SIDED_SOURCES_PARAM,
     SIDED_STR_PARAM,
@@ -70,6 +71,32 @@ def split_sided_paths(
     for side, path in pairs:
         {"both": both, "old": old_only, "new": new_only}[side].append(path)
     return tuple(both), tuple(old_only), tuple(new_only)
+
+
+def split_sided_include_paths(
+    triples: Sequence[tuple[str, Path, str | None]],
+) -> tuple[tuple[Path, ...], tuple[Path, ...], tuple[Path, ...], dict[Path, str]]:
+    """Like :func:`split_sided_paths`, but for ``--include``'s own
+    :class:`~abicheck.cli_params.SidedIncludePathParam` triples (ADR-050 D1):
+    also collects each entry's optional label into one ``path -> label`` map
+    spanning all three buckets.
+
+    A single combined map (not per-side) is correct because a label is a
+    *logical identity* the caller pairs across sides deliberately — the same
+    ``support`` label on both ``--include old:support=old/src --include
+    new:support=new/src`` — while the dict *keys* (each side's own resolved
+    ``Path``) stay naturally distinct per side. Downstream, the same map is
+    consulted when building either side's ``IncludeDir`` list.
+    """
+    both: list[Path] = []
+    old_only: list[Path] = []
+    new_only: list[Path] = []
+    labels: dict[Path, str] = {}
+    for side, path, label in triples:
+        {"both": both, "old": old_only, "new": new_only}[side].append(path)
+        if label is not None:
+            labels[path] = label
+    return tuple(both), tuple(old_only), tuple(new_only), labels
 
 
 def _split_sided_single(
@@ -149,10 +176,13 @@ def normalize_sided_options(kwargs: dict[str, object]) -> None:
         kwargs["old_headers_only"] = old
         kwargs["new_headers_only"] = new
     if "include" in kwargs:
-        both, old, new = split_sided_paths(kwargs.pop("include"))  # type: ignore[arg-type]
+        both, old, new, labels = split_sided_include_paths(
+            kwargs.pop("include")  # type: ignore[arg-type]
+        )
         kwargs["includes"] = both
         kwargs["old_includes_only"] = old
         kwargs["new_includes_only"] = new
+        kwargs["include_labels"] = labels
     if "debug_root" in kwargs:
         both, old, new = split_sided_paths(kwargs.pop("debug_root"))  # type: ignore[arg-type]
         kwargs["debug_roots"] = both
@@ -226,10 +256,15 @@ def two_sided_input_options(func: F) -> F:
         "--include",
         "include",
         multiple=True,
-        type=SIDED_PATH_PARAM,
+        type=SIDED_INCLUDE_PATH_PARAM,
         help="Extra include directory for castxml. Applies to both sides; scope "
         "to one side with an 'old='/'new=' prefix, repeating the flag per side "
-        "(e.g. --include old=inc1 --include new=inc2). Repeatable (ADR-040).",
+        "(e.g. --include old=inc1 --include new=inc2). Repeatable (ADR-040). "
+        "A labeled 'old:LABEL=PATH'/'new:LABEL=PATH' form (e.g. --include "
+        "old:support=old/src --include new:support=new/src) names a "
+        "side-specific support root under one shared logical identity, so a "
+        "genuine two-checkout compare doesn't spuriously PROFILE_MISMATCH on "
+        "it (ADR-050 D1).",
     )(func)
     func = click.option(
         "-H",

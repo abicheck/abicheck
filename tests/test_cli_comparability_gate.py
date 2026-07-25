@@ -141,6 +141,56 @@ class TestNotComparableExitCode:
         assert result.exit_code == 0
         assert captured["diagnostic_comparison"] is True
 
+    def test_labeled_include_reaches_snapshot_resolution(self, tmp_path, monkeypatch):
+        """A labeled ``--include old:LABEL=PATH``/``new:LABEL=PATH`` (ADR-050
+        D1, ``SidedIncludePathParam``) must reach
+        ``cli_resolve._resolve_compare_snapshots`` as a real
+        ``include_labels`` keyword — the CLI-parsing glue that was, until
+        this test, the last unverified hop between the Click option and
+        ``dumper_contract._attach_extraction_contract`` (see
+        ``tests/test_dumper_contract.py::TestExtraIncludeLabels`` for the
+        hop below this one)."""
+        old_p, new_p = _write_placeholder_inputs(tmp_path)
+        old_src = tmp_path / "old" / "src"
+        new_src = tmp_path / "new" / "src"
+        old_src.mkdir(parents=True)
+        new_src.mkdir(parents=True)
+
+        captured: dict[str, object] = {}
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
+
+        def _fake_resolve(*_a, **kw):
+            captured["include_labels"] = kw.get("include_labels")
+            return snap, snap
+
+        monkeypatch.setattr(
+            "abicheck.cli_compare_helpers._resolve_compare_snapshots", _fake_resolve
+        )
+        monkeypatch.setattr(
+            "abicheck.service.compare_snapshots",
+            lambda *_a, **_kw: DiffResult(
+                old_version="1", new_version="1", library="libfoo.so.1",
+                verdict=Verdict.NO_CHANGE, assurance="none",
+            ),
+        )
+        monkeypatch.setattr(
+            "abicheck.service_render.to_markdown", lambda _r, **_kw: "REPORT"
+        )
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--include", f"old:support={old_src}",
+                "--include", f"new:support={new_src}",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["include_labels"] == {
+            old_src: "support",
+            new_src: "support",
+        }
+
 
 class TestCompareReleaseNotComparable:
     """ADR-050 D2 wired into the directory/package (release) fan-out

@@ -157,6 +157,125 @@ SIDED_BUILD_INFO_PARAM = SidedPathParam(exists=True)
 SIDED_EXISTING_PATH_PARAM = SidedPathParam(exists=True)
 
 
+class SidedIncludePathParam(click.ParamType):
+    """``--include``'s own type (ADR-050 D1 ``project_include_labels``): layers
+    an optional labeled form on top of :class:`SidedPathParam`'s
+    ``[old=|new=|both=]PATH`` grammar (composed, not subclassed -- the two
+    types' ``convert`` return shapes differ, a 2-tuple vs. this type's
+    3-tuple, so subclassing would violate the Liskov substitution principle a
+    type checker enforces on an overridden method), so a support ``-I`` root
+    that owns no declared header can still be told apart, order-sensitively,
+    from every other declared ``-I`` slot when
+    ``comparability.compute_extraction_contract`` builds
+    ``profile_fingerprint``'s per-slot token (see ``abicheck/comparability.py``'s
+    module docstring and ``IncludeDir.label``).
+
+    The labeled form requires the literal colon prefix -- ``old:``, ``new:``,
+    or ``both:`` -- never a colon-less ``LABEL=PATH``: an ordinary external
+    directory can legitimately contain a literal ``=`` past an
+    ``old=``/``new=``/``both=`` prefix (``--include
+    old=build/config=asan/include`` is a real, valid unlabeled value today),
+    so only the already-reserved colon spelling may additionally carry a
+    label without reinterpreting an existing, unrelated value. Convert
+    returns ``(side, path, label)`` triples -- ``label`` is ``None`` for the
+    ordinary unlabeled form, including every value :class:`SidedPathParam`
+    already accepted::
+
+        --include old:support=old/src -> ("old",  Path("old/src"), "support")
+        --include new:support=new/src -> ("new",  Path("new/src"), "support")
+        --include old=v1/inc          -> ("old",  Path("v1/inc"),  None)
+        --include v1/inc              -> ("both", Path("v1/inc"), None)
+    """
+
+    name = "sided-include-path"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._sided = SidedPathParam()
+
+    def convert(self, value: Any, param: Any, ctx: Any) -> tuple[str, Path, str | None]:
+        s = str(value)
+        for side in _SIDES:
+            prefix = f"{side}:"
+            if s.startswith(prefix):
+                rest = s[len(prefix):]
+                label, sep, raw = rest.partition("=")
+                if not sep or not label:
+                    raise click.BadParameter(
+                        f"{value!r}: a labeled --include requires "
+                        f"'{prefix}LABEL=PATH' (e.g. '{prefix}support=path'), "
+                        "with a non-empty LABEL before '='.",
+                        ctx=ctx, param=param,
+                    )
+                path = cast("Path", self._sided._path.convert(raw, param, ctx))
+                return (side, path, label)
+        side, path = self._sided.convert(value, param, ctx)
+        return (side, path, None)
+
+    def get_metavar(self, param: Any, ctx: Any = None) -> str:
+        return "[old=|new=|old:LABEL=|new:LABEL=]PATH"
+
+
+#: The one ``--include`` registration shared by ``compare`` (via
+#: ``two_sided_input_options``) that needs the labeled form; see
+#: :class:`SidedIncludePathParam`.
+SIDED_INCLUDE_PATH_PARAM = SidedIncludePathParam()
+
+
+class LabeledIncludePathParam(click.ParamType):
+    """``dump``'s own ``--include`` type (ADR-050 D1) -- ``dump`` has a single
+    input, no old/new side concept at all, so it recognizes **only** the
+    colon-terminated ``both:LABEL=PATH`` labeled form, not
+    :class:`SidedIncludePathParam`'s full ``old=``/``new=``/``both=`` side
+    grammar. ``dump``'s ``--include`` is a plain, unlabeled ``click.Path``
+    today (colon was never meaningful to it before), so recognizing
+    ``both:LABEL=PATH`` is purely additive: every other value -- bare, or one
+    that happens to literally start with ``old=``/``new=``/``both=`` -- stays
+    an ordinary, unlabeled path exactly as before, with no equals-form
+    side-prefix stripping at all (switching ``dump`` onto
+    :class:`SidedIncludePathParam` wholesale would newly start stripping an
+    ``old=`` prefix on ``dump`` too -- a real behavior change on a flag that
+    never had that ambiguity).
+
+    Returns ``(path, label)`` pairs -- ``label`` is ``None`` for the ordinary
+    unlabeled form::
+
+        --include both:support=path -> (Path("path"), "support")
+        --include old=foo/          -> (Path("old=foo/"), None)  # literal dir
+        --include path               -> (Path("path"), None)
+    """
+
+    name = "labeled-include-path"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._path = click.Path(path_type=Path)
+
+    def convert(self, value: Any, param: Any, ctx: Any) -> tuple[Path, str | None]:
+        s = str(value)
+        prefix = "both:"
+        if s.startswith(prefix):
+            rest = s[len(prefix):]
+            label, sep, raw = rest.partition("=")
+            if not sep or not label:
+                raise click.BadParameter(
+                    f"{value!r}: a labeled --include requires "
+                    f"'{prefix}LABEL=PATH' (e.g. '{prefix}support=path'), "
+                    "with a non-empty LABEL before '='.",
+                    ctx=ctx, param=param,
+                )
+            path = cast("Path", self._path.convert(raw, param, ctx))
+            return (path, label)
+        return (cast("Path", self._path.convert(s, param, ctx)), None)
+
+    def get_metavar(self, param: Any, ctx: Any = None) -> str:
+        return "[both:LABEL=]PATH"
+
+
+#: Shared instance for ``dump``'s own ``--include``.
+LABELED_INCLUDE_PATH_PARAM = LabeledIncludePathParam()
+
+
 class SidedStrParam(click.ParamType):
     """Side-aware *string* option (ADR-040 Lever 1) — e.g. ``--version``.
 

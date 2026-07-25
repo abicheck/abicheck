@@ -274,6 +274,7 @@ Auto-detect input type and return an ABI snapshot.
 | `header_backend` | `str` | `'auto'` |
 | `compile` | `CompileContext \| None` | `None` |
 | `notify` | `Callable[[str], None] \| None` | `None` |
+| `include_labels` | `dict[Path, str] \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
 
@@ -356,6 +357,7 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `header_backend` | `str` | `'auto'` |
 | `compile` | `CompileContext \| None` | `None` |
 | `notify` | `Callable[[str], None] \| None` | `None` |
+| `include_labels` | `dict[Path, str] \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
 

@@ -49,10 +49,20 @@ among these seven — raw propagation is their documented default contract.
 Not yet wired in — tracked as explicit follow-up work, not silently
 dropped scope:
 
-- The legacy-CLI labeled ``--include old:LABEL=PATH`` grammar
-  (``SidedIncludePathParam``) does not exist yet; this module accepts a
-  resolved ``label`` per :class:`IncludeDir` directly; only the CLI-parsing
-  glue that would populate it from a command line is missing.
+- The legacy-CLI labeled ``--include old:LABEL=PATH``/``new:LABEL=PATH``
+  grammar (``cli_params.SidedIncludePathParam``) is wired end-to-end for the
+  native ``compare`` command only: its ``--include`` option resolves a
+  ``label`` per entry, ``cli_options.split_sided_include_paths`` collects a
+  ``path -> label`` map, and it threads through
+  ``run_compare``/``_resolve_compare_snapshots``/``service.resolve_input``/
+  ``run_dump``/``dumper.dump()`` into :class:`IncludeDir`'s ``label`` field.
+  ``scan --against``'s own separate inline ``--include`` registration and
+  ``dump``'s single-input ``--include`` (which needs the narrower
+  ``both:LABEL=PATH``-only ``cli_params.LabeledIncludePathParam``, already
+  built but not yet wired into ``dump_cmd``) do not thread a label yet — a
+  labeled entry there is parsed as an ordinary unlabeled path, silently.
+  ``compare``'s directory/package (release) fan-out rejects a labeled
+  ``--include`` outright (see below) rather than silently dropping it.
 - The ``sarif.py``/``junit_report.py``/``html_report.py``/``aggregate.py``/
   ``action/run.sh`` surfaces the ADR's D2 section calls for are not part of
   this module either — only ``reporter.py``'s JSON output

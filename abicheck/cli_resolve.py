@@ -267,6 +267,7 @@ def _resolve_input(
     compile: CompileContext | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    include_labels: dict[Path, str] | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an AbiSnapshot.
 
@@ -302,6 +303,11 @@ def _resolve_input(
             treat *headers* as the public contract (e.g. ``compare``'s
             ``--header``, which is documented as "Public header file or
             directory") should pass the same paths here too.
+        include_labels: Resolved ``path -> label`` map from a labeled
+            ``--include old:LABEL=PATH``/``new:LABEL=PATH`` entry (ADR-050
+            D1), consulted when building this side's declared-``-I``
+            ``IncludeDir`` list for ``comparability.compute_extraction_contract``.
+            A path with no entry gets ``label=None``, unchanged.
 
     ``service.resolve_input`` always attempts the L2 header-only semantic
     graph for a binary input (G29 Phase A: no longer flag-gated).
@@ -327,6 +333,7 @@ def _resolve_input(
             compile=compile,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            include_labels=include_labels,
             notify=_click_notify,
         )
     except ValidationError as exc:
@@ -506,6 +513,7 @@ def _resolve_compare_snapshots(
     new_debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
     debuginfod_url: str | None = None,
+    include_labels: dict[Path, str] | None = None,
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -566,6 +574,7 @@ def _resolve_compare_snapshots(
         compile=compile_context,
         public_headers=old_public_headers,
         public_header_dirs=old_public_header_dirs,
+        include_labels=include_labels,
     )
     new = _resolve_input(
         new_input,
@@ -584,6 +593,7 @@ def _resolve_compare_snapshots(
         compile=compile_context,
         public_headers=new_public_headers,
         public_header_dirs=new_public_header_dirs,
+        include_labels=include_labels,
     )
     if follow_deps:
         if old_fmt == "elf":

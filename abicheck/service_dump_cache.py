@@ -48,6 +48,7 @@ def _dump_is_cacheable(
     # cycle back through service.py/scan_engine.py. Only ever compared to
     # `None` below, so no real type-safety is lost.
     compile: object | None,
+    include_labels: dict[Path, str] | None = None,
 ) -> bool:
     """Whether a ``run_dump`` call is safe to serve from the whole-snapshot
     cache (:mod:`abicheck.snapshot_cache`).
@@ -75,6 +76,16 @@ def _dump_is_cacheable(
     ``--gcc-*``/``--sysroot`` reaching the second internal clang AST pass via
     ``compile``) are still excluded from caching by the ``compile is None``
     check above, same as before this change — no new gap introduced.
+
+    A labeled ``--include`` (``include_labels`` non-empty, ADR-050 D1) is
+    likewise excluded: the label rides only into ``AbiSnapshot.contract``
+    (``comparability.compute_extraction_contract``'s ``IncludeDir.label``),
+    not into ``snapshot_cache._cache_key``'s hashed inputs — folding it in
+    there too is real but unbuilt follow-up work, and the labeled form is a
+    narrow escape hatch, not the common path, so falling through to a live
+    dump is the conservative, correct default rather than risk serving a
+    same-key snapshot whose ``contract`` was fingerprinted under a
+    different label.
     """
     return (
         pdb_path is None
@@ -85,6 +96,7 @@ def _dump_is_cacheable(
         and not symbols_only
         and not debug_presence_only
         and compile is None
+        and not include_labels
     )
 
 
@@ -281,6 +293,7 @@ def cached_run_dump(
     header_backend: str = "auto",
     compile: object | None = None,
     notify: Callable[[str], None] | None = None,
+    include_labels: dict[Path, str] | None = None,
 ) -> AbiSnapshot:
     """``run_dump(...)``, transparently served from the whole-snapshot cache
     when the call shape is cacheable (:func:`_dump_is_cacheable`) — avoiding a
@@ -303,6 +316,7 @@ def cached_run_dump(
         symbols_only=symbols_only,
         debug_presence_only=debug_presence_only,
         compile=compile,
+        include_labels=include_labels,
     )
     if not cacheable:
         return run_dump(
@@ -325,6 +339,7 @@ def cached_run_dump(
             header_backend=header_backend,
             compile=compile,
             notify=notify,
+            include_labels=include_labels,
         )
 
     from . import snapshot_cache
@@ -369,6 +384,7 @@ def cached_run_dump(
         header_backend=header_backend,
         compile=compile,
         notify=notify,
+        include_labels=include_labels,
     )
     final_extra = _dump_cache_extra_key(
         binary_fmt,

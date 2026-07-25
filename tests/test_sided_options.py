@@ -9,14 +9,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import click
+import pytest
+
 from abicheck.cli_options import (
     _split_sided_base,
     _split_sided_single,
     _split_sided_version,
     normalize_sided_options,
+    split_sided_include_paths,
     split_sided_paths,
 )
-from abicheck.cli_params import SIDED_PATH_PARAM, SIDED_STR_PARAM
+from abicheck.cli_params import (
+    LABELED_INCLUDE_PATH_PARAM,
+    SIDED_INCLUDE_PATH_PARAM,
+    SIDED_PATH_PARAM,
+    SIDED_STR_PARAM,
+)
 
 
 class TestSidedPathParam:
@@ -35,6 +44,106 @@ class TestSidedPathParam:
 
     def test_metavar(self) -> None:
         assert SIDED_PATH_PARAM.get_metavar(None) == "[old=|new=]PATH"
+
+
+class TestSidedIncludePathParam:
+    """ADR-050 D1 -- ``--include``'s labeled ``[old:|new:|both:]LABEL=PATH``
+    form layered on top of the unlabeled ``[old=|new=|both=]PATH`` grammar."""
+
+    def test_unlabeled_forms_match_sided_path_param(self) -> None:
+        assert SIDED_INCLUDE_PATH_PARAM.convert("inc", None, None) == ("both", Path("inc"), None)
+        assert SIDED_INCLUDE_PATH_PARAM.convert("old=a", None, None) == ("old", Path("a"), None)
+        assert SIDED_INCLUDE_PATH_PARAM.convert("new=b", None, None) == ("new", Path("b"), None)
+
+    def test_an_ordinary_equals_containing_path_is_unaffected(self) -> None:
+        # A real, valid unlabeled --include value today: an '=' past the
+        # 'old='/'new='/'both=' prefix is just part of the path, not a label
+        # marker -- the labeled grammar only ever triggers on the reserved
+        # colon spelling, never a bare '='.
+        assert SIDED_INCLUDE_PATH_PARAM.convert(
+            "old=build/config=asan/include", None, None
+        ) == ("old", Path("build/config=asan/include"), None)
+
+    def test_labeled_forms(self) -> None:
+        assert SIDED_INCLUDE_PATH_PARAM.convert("old:support=old/src", None, None) == (
+            "old", Path("old/src"), "support",
+        )
+        assert SIDED_INCLUDE_PATH_PARAM.convert("new:support=new/src", None, None) == (
+            "new", Path("new/src"), "support",
+        )
+        assert SIDED_INCLUDE_PATH_PARAM.convert("both:generated=old/gen", None, None) == (
+            "both", Path("old/gen"), "generated",
+        )
+
+    def test_labeled_form_requires_equals(self) -> None:
+        with pytest.raises(click.BadParameter):
+            SIDED_INCLUDE_PATH_PARAM.convert("old:supportonly", None, None)
+
+    def test_labeled_form_requires_nonempty_label(self) -> None:
+        with pytest.raises(click.BadParameter):
+            SIDED_INCLUDE_PATH_PARAM.convert("old:=path", None, None)
+
+    def test_metavar(self) -> None:
+        assert (
+            SIDED_INCLUDE_PATH_PARAM.get_metavar(None)
+            == "[old=|new=|old:LABEL=|new:LABEL=]PATH"
+        )
+
+
+class TestLabeledIncludePathParam:
+    """ADR-050 D1 -- ``dump``'s own ``--include`` type: only ``both:LABEL=PATH``
+    is recognized; every other value (including one starting ``old=``) stays a
+    literal, unlabeled path exactly as ``dump``'s plain ``click.Path`` already
+    treated it."""
+
+    def test_bare_value_is_unlabeled(self) -> None:
+        assert LABELED_INCLUDE_PATH_PARAM.convert("inc", None, None) == (Path("inc"), None)
+
+    def test_old_equals_prefix_is_a_literal_directory_not_a_side(self) -> None:
+        # dump has no old/new side concept -- 'old=foo/' is just a directory
+        # literally named that, unchanged from before this type existed.
+        assert LABELED_INCLUDE_PATH_PARAM.convert("old=foo/", None, None) == (
+            Path("old=foo/"), None,
+        )
+
+    def test_labeled_form(self) -> None:
+        assert LABELED_INCLUDE_PATH_PARAM.convert("both:support=path", None, None) == (
+            Path("path"), "support",
+        )
+
+    def test_labeled_form_requires_equals(self) -> None:
+        with pytest.raises(click.BadParameter):
+            LABELED_INCLUDE_PATH_PARAM.convert("both:supportonly", None, None)
+
+    def test_labeled_form_requires_nonempty_label(self) -> None:
+        with pytest.raises(click.BadParameter):
+            LABELED_INCLUDE_PATH_PARAM.convert("both:=path", None, None)
+
+    def test_metavar(self) -> None:
+        assert LABELED_INCLUDE_PATH_PARAM.get_metavar(None) == "[both:LABEL=]PATH"
+
+
+class TestSplitSidedIncludePaths:
+    def test_partitions_and_collects_labels(self) -> None:
+        triples = [
+            ("both", Path("dep"), None),
+            ("old", Path("old/src"), "support"),
+            ("new", Path("new/src"), "support"),
+        ]
+        both, old, new, labels = split_sided_include_paths(triples)
+        assert both == (Path("dep"),)
+        assert old == (Path("old/src"),)
+        assert new == (Path("new/src"),)
+        assert labels == {Path("old/src"): "support", Path("new/src"): "support"}
+
+    def test_empty(self) -> None:
+        assert split_sided_include_paths([]) == ((), (), (), {})
+
+    def test_unlabeled_entries_stay_out_of_the_label_map(self) -> None:
+        _, _, _, labels = split_sided_include_paths(
+            [("both", Path("a"), None), ("old", Path("b"), None)]
+        )
+        assert labels == {}
 
 
 class TestSplitSidedPaths:
@@ -72,7 +181,7 @@ class TestNormalizeSidedOptions:
     def test_header_and_include(self) -> None:
         kw: dict[str, object] = {
             "header": (("both", Path("h")), ("old", Path("oh"))),
-            "include": (("new", Path("ni")),),
+            "include": (("new", Path("ni"), None),),
         }
         normalize_sided_options(kw)
         assert kw["headers"] == (Path("h"),)
@@ -80,7 +189,24 @@ class TestNormalizeSidedOptions:
         assert kw["new_headers_only"] == ()
         assert kw["includes"] == ()
         assert kw["new_includes_only"] == (Path("ni"),)
+        assert kw["include_labels"] == {}
         assert "header" not in kw and "include" not in kw
+
+    def test_include_with_label(self) -> None:
+        kw: dict[str, object] = {
+            "include": (
+                ("old", Path("old/src"), "support"),
+                ("new", Path("new/src"), "support"),
+                ("both", Path("dep"), None),
+            ),
+        }
+        normalize_sided_options(kw)
+        assert kw["old_includes_only"] == (Path("old/src"),)
+        assert kw["new_includes_only"] == (Path("new/src"),)
+        assert kw["includes"] == (Path("dep"),)
+        assert kw["include_labels"] == {
+            Path("old/src"): "support", Path("new/src"): "support",
+        }
 
     def test_sources_and_build_info(self) -> None:
         kw: dict[str, object] = {

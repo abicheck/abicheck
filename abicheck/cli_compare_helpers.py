@@ -195,6 +195,7 @@ def _reject_set_input_flags(
     used_by_apps: tuple[Path, ...] = (),
     required_symbols: tuple[str, ...] = (),
     diagnostic_comparison: bool = False,
+    include_labels: dict[Path, str] | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
 
@@ -246,6 +247,15 @@ def _reject_set_input_flags(
             "(release) comparisons yet: the per-library fan-out does not "
             "wire the ADR-050 D2 comparability gate's diagnostic escape "
             "hatch (a mismatch there still raises unhandled). Compare the "
+            "specific library individually to use it."
+        )
+    if include_labels:
+        raise click.UsageError(
+            "A labeled --include (old:LABEL=PATH/new:LABEL=PATH/"
+            "both:LABEL=PATH) is not supported for directory/package "
+            "(release) comparisons yet: the per-library fan-out does not "
+            "thread ADR-050 D1's project_include_labels into its per-library "
+            "dumps, so the label would be silently dropped. Compare the "
             "specific library individually to use it."
         )
 
@@ -1111,6 +1121,7 @@ def run_compare(
     required_symbols_file: Path | None = None,
     verify_runtime: bool = False,
     diagnostic_comparison: bool = False,
+    include_labels: dict[Path, str] | None = None,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -1220,6 +1231,7 @@ def run_compare(
             exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
+            include_labels=include_labels,
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _reject_evidence_flags_for_set_inputs(ctx)
@@ -1478,6 +1490,7 @@ def run_compare(
         new_debug_roots=resolved_new_debug or None,
         enable_debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
+        include_labels=include_labels,
     )
 
     suppression, pf = _load_suppression_and_policy(

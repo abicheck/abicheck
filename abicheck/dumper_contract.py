@@ -70,6 +70,7 @@ def _attach_extraction_contract(
     lang: str | None,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
+    extra_include_labels: dict[Path, str] | None = None,
 ) -> None:
     """Populate *snapshot*.contract in place from this dump's resolved
     extraction inputs (profile/scope fingerprints), so a later
@@ -88,6 +89,13 @@ def _attach_extraction_contract(
     dump (Codex review, PR #624 follow-up). The ELF equivalent
     (``service._dump_elf``) already routes through ``dumper.dump()``
     itself, so it needs no separate call.
+
+    ``extra_include_labels`` (ADR-050 D1, G32 Phase A): a resolved
+    ``path -> label`` map from a labeled ``--include old:LABEL=PATH``/
+    ``new:LABEL=PATH`` CLI entry (:class:`comparability.IncludeDir`'s
+    ``label`` field), threaded here from both call sites above. A path with
+    no entry gets ``label=None``, identical to before this parameter
+    existed.
     """
     from .comparability import IncludeDir, compute_extraction_contract
     from .dumper_toolchain import _compiler_family_from_toolchain
@@ -123,7 +131,10 @@ def _attach_extraction_contract(
         # scope for a DWARF-derived surface.
         declared_headers=list(headers) if snapshot.from_headers else [],
         declared_includes=(
-            [IncludeDir(path=p) for p in extra_includes]
+            [
+                IncludeDir(path=p, label=(extra_include_labels or {}).get(p))
+                for p in extra_includes
+            ]
             if snapshot.from_headers and extra_includes
             else []
         ),

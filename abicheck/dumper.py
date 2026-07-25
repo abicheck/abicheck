@@ -1122,6 +1122,7 @@ def dump(
     header_backend: str = "auto",
     extra_hash_dirs: tuple[Path, ...] = (),
     debug_info_path: Path | None = None,
+    extra_include_labels: dict[Path, str] | None = None,
 ) -> AbiSnapshot:
     """Create an AbiSnapshot from a shared library + headers.
 
@@ -1166,6 +1167,11 @@ def dump(
             for provenance classification.
         header_backend: "auto"/"castxml"/"clang"/"hybrid" (G28 Phase 3: runs
             both real backends and merges them via dumper_hybrid).
+        extra_include_labels: Resolved ``path -> label`` map from a labeled
+            ``--include old:LABEL=PATH``/``new:LABEL=PATH`` CLI entry
+            (ADR-050 D1), consulted when building the ``IncludeDir`` list
+            :func:`comparability.compute_extraction_contract` fingerprints.
+            A path with no entry gets ``label=None``, unchanged.
 
     Returns:
         AbiSnapshot with functions, variables, and types populated.
@@ -1195,6 +1201,7 @@ def dump(
             public_header_dirs=public_header_dirs,
             extra_hash_dirs=extra_hash_dirs,
             debug_info_path=debug_info_path,
+            extra_include_labels=extra_include_labels,
         )
 
     fmt = _detect_format(so_path)
@@ -1258,6 +1265,7 @@ def dump(
         lang=lang,
         public_headers=public_headers,
         public_header_dirs=public_header_dirs,
+        extra_include_labels=extra_include_labels,
     )
 
     # Tag declaration provenance (source_header + origin). Always derives
