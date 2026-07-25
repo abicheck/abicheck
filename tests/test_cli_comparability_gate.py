@@ -30,9 +30,11 @@ import json
 
 from click.testing import CliRunner
 
+from abicheck.checker import DiffResult, Verdict
 from abicheck.cli import main
 from abicheck.errors import ProfileMismatchError, ScopeMismatchError
 from abicheck.model import AbiSnapshot
+from abicheck.reporter import to_json
 
 
 def _write_placeholder_inputs(tmp_path):
@@ -136,3 +138,32 @@ class TestNotComparableExitCode:
         )
         assert result.exit_code == 0
         assert captured["diagnostic_comparison"] is True
+
+
+class TestJsonReporterContractFields:
+    """reporter.to_json's ADR-050 D2 (schema 2.17) contract_coverage/assurance
+    fields -- a unit test of _add_confidence_evidence directly, since neither
+    field is reachable through the CLI-level tests above (those exercise the
+    hard-fail path, where no DiffResult is ever constructed, not an ordinary
+    completed diff carrying one of these two fields)."""
+
+    def _result(self, **kwargs: object) -> DiffResult:
+        return DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            verdict=Verdict.NO_CHANGE,
+            **kwargs,
+        )
+
+    def test_contract_coverage_and_assurance_present_when_set(self):
+        result = self._result(contract_coverage="partial", assurance="none")
+        doc = json.loads(to_json(result))
+        assert doc["contract_coverage"] == "partial"
+        assert doc["assurance"] == "none"
+
+    def test_contract_coverage_and_assurance_omitted_when_unset(self):
+        result = self._result()
+        doc = json.loads(to_json(result))
+        assert "contract_coverage" not in doc
+        assert "assurance" not in doc
