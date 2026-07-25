@@ -476,53 +476,43 @@ def lang_option(
     return deco if func is None else deco(func)
 
 
-def _enable_ast_fallback_for_command(
-    ctx: click.Context,
-    _param: click.Parameter,
-    value: bool,
-) -> None:
-    """Scope the explicit fallback opt-in to one Click command invocation."""
-    if not value:
-        return None
-    previous = os.environ.get("ABICHECK_ALLOW_AST_FALLBACK")
-    os.environ["ABICHECK_ALLOW_AST_FALLBACK"] = "1"
+def _scoped_env_flag_callback(
+    env_var: str,
+) -> Callable[[click.Context, click.Parameter, bool], None]:
+    """Build a Click callback that sets *env_var* to ``"1"`` for one command
+    invocation, restoring (or unsetting) it via ``ctx.call_on_close``.
 
-    def _restore() -> None:
-        if previous is None:
-            os.environ.pop("ABICHECK_ALLOW_AST_FALLBACK", None)
-        else:
-            os.environ["ABICHECK_ALLOW_AST_FALLBACK"] = previous
-
-    ctx.call_on_close(_restore)
-    return None
-
-
-def _enable_unsupported_castxml_for_command(
-    ctx: click.Context,
-    _param: click.Parameter,
-    value: bool,
-) -> None:
-    """Scope the explicit CastXML version-gate override to one invocation.
-
-    Mirrors :func:`_enable_ast_fallback_for_command` exactly — a real CLI flag
-    for ``castxml_policy``'s ``ABICHECK_ALLOW_UNSUPPORTED_CASTXML`` env var
-    (``dumper_toolchain._allow_unsupported_castxml_enabled``), which previously
-    had no CLI spelling at all despite ``model.py``'s snapshot-provenance
-    docstring documenting one.
+    Shared by ``--allow-ast-frontend-fallback``/``ABICHECK_ALLOW_AST_FALLBACK``
+    and ``--allow-unsupported-castxml``/``ABICHECK_ALLOW_UNSUPPORTED_CASTXML``
+    — both are "explicit, invocation-scoped opt-in past a hard-fail gate" env
+    vars with an identical set/restore shape, so a real CLI flag for either
+    reduces to just naming the env var here.
     """
-    if not value:
+
+    def _callback(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+        if not value:
+            return None
+        previous = os.environ.get(env_var)
+        os.environ[env_var] = "1"
+
+        def _restore() -> None:
+            if previous is None:
+                os.environ.pop(env_var, None)
+            else:
+                os.environ[env_var] = previous
+
+        ctx.call_on_close(_restore)
         return None
-    previous = os.environ.get("ABICHECK_ALLOW_UNSUPPORTED_CASTXML")
-    os.environ["ABICHECK_ALLOW_UNSUPPORTED_CASTXML"] = "1"
 
-    def _restore() -> None:
-        if previous is None:
-            os.environ.pop("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", None)
-        else:
-            os.environ["ABICHECK_ALLOW_UNSUPPORTED_CASTXML"] = previous
+    return _callback
 
-    ctx.call_on_close(_restore)
-    return None
+
+_enable_ast_fallback_for_command = _scoped_env_flag_callback(
+    "ABICHECK_ALLOW_AST_FALLBACK"
+)
+_enable_unsupported_castxml_for_command = _scoped_env_flag_callback(
+    "ABICHECK_ALLOW_UNSUPPORTED_CASTXML"
+)
 
 
 def compile_context_options(func: F) -> F:

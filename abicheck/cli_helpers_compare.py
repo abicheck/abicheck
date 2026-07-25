@@ -36,7 +36,7 @@ import click
 
 from ._compiler_options import has_explicit_std
 from .binary_utils import strip_vendor_hash as strip_vendor_hash
-from .dumper_ast_config_cpp20 import _detect_cpp20_headers
+from .service_scan import pair_wide_cxx20_std_override
 
 if TYPE_CHECKING:
     from .buildsource.inline import BuildConfig
@@ -221,35 +221,43 @@ def _pair_wide_dialect_override(
 ) -> tuple[CompileContext, CompileContext]:
     """Pin ``-std=gnu++20`` for BOTH compare sides at once, or neither (P0 fix).
 
-    ``dumper.py``'s C++20 ``requires``/``concept`` heuristic only ever sees ONE
-    side's headers at a time (each side is dumped independently), so an old/new
-    pair could silently disagree on the language standard whenever neither side
-    pins an explicit one — e.g. only the *new* side picks up a ``concept`` and
-    gets auto-upgraded to C++20 while *old* stays on the toolchain default. That
-    lets a real dialect-floor change masquerade as an ordinary ABI diff (or, the
-    inverse historical bug: a header containing ``#error Foo requires Base``
-    tripped the heuristic on whichever side had that text).
+    Thin wrapper around the shared core
+    (:func:`~abicheck.service_scan.pair_wide_cxx20_std_override`, also used by
+    ``service.run_compare_request``'s Python-API/MCP path, so the policy can't
+    drift between the two front-ends) that applies the decision to this CLI
+    path's two ``CompileContext`` objects: ``compile_context`` (used by the
+    inline-source-embed path) and ``side_compile_context`` (used by
+    ``_resolve_compare_snapshots``) — the sole call site derives the latter
+    from the former via ``dataclasses.replace(compile_context, frontend="auto")``,
+    so today they always carry identical ``gcc_options``/``gcc_option_tokens``;
+    the explicit-std guard below checks both anyway rather than relying on
+    that invariant holding for every future caller.
 
-    Decide the heuristic once, over the union of both sides' headers, and pin
-    the result identically onto both contexts so the two ``_resolve_input``
-    calls parse under one shared, explicit dialect. An explicit
-    ``-std=``/``--std=``/``/std:`` from the user always wins (``has_explicit_std``
-    short-circuits first) and this is then a no-op — auto-detection never
-    overrides an explicit choice.
+    An explicit ``-std=``/``--std=``/``/std:`` from the user always wins and
+    this is then a no-op — auto-detection never overrides an explicit choice.
     """
-    if lang.lower() != "c++" or not (old_h or new_h):
+    if has_explicit_std(
+        compile_context.gcc_options, compile_context.gcc_option_tokens
+    ) or has_explicit_std(
+        side_compile_context.gcc_options, side_compile_context.gcc_option_tokens
+    ):
         return compile_context, side_compile_context
-    if has_explicit_std(compile_context.gcc_options, compile_context.gcc_option_tokens):
-        return compile_context, side_compile_context
-    if not _detect_cpp20_headers(list(old_h) + list(new_h)):
+    override = pair_wide_cxx20_std_override(
+        lang,
+        old_h,
+        new_h,
+        compile_context.gcc_options,
+        compile_context.gcc_option_tokens,
+    )
+    if override is None:
         return compile_context, side_compile_context
     compile_context = dataclasses.replace(
         compile_context,
-        gcc_option_tokens=(*compile_context.gcc_option_tokens, "-std=gnu++20"),
+        gcc_option_tokens=(*compile_context.gcc_option_tokens, *override),
     )
     side_compile_context = dataclasses.replace(
         side_compile_context,
-        gcc_option_tokens=(*side_compile_context.gcc_option_tokens, "-std=gnu++20"),
+        gcc_option_tokens=(*side_compile_context.gcc_option_tokens, *override),
     )
     return compile_context, side_compile_context
 

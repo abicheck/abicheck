@@ -90,6 +90,22 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 | `created_at` | string \| null | ISO 8601 timestamp set at dump time. |
 | `build_id` | string \| null | Opaque CI identifier (run ID, build number). |
 
+### Compile-context provenance (schema v14, header-AST parses only)
+
+Populated only when the snapshot came from a header-AST parse (`from_headers`
+true); `null`/empty on a DWARF/symbols-only or binary-only snapshot, and on
+any pre-v14 snapshot. `ast_compile_args` and `ast_sysroot` are redacted via
+the same `RedactionPolicy` every L3 build-evidence adapter applies (secret-
+looking `-D` values and absolute home-prefixed paths are stripped/normalized
+before persistence — see `abicheck/buildsource/redaction.py`).
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `ast_resolved_standard` | string \| null | `null` | The C/C++ standard actually used for the header parse: an explicit `-std=`/`--std=`/`/std:` value verbatim, or `"gnu++20"` when the requires/concept heuristic forced it. `null` means the frontend's own unpinned default was used (never guessed at). |
+| `ast_cplusplus_macro` | string \| null | `null` | The standard-mandated `__cplusplus` literal for `ast_resolved_standard` (e.g. `"201703L"` for `"gnu++17"`), looked up from a static ISO-standard table. `null` when `ast_resolved_standard` is unset or not a recognized C++ edition. |
+| `ast_compile_args` | array of strings | `[]` | The ordered extra compiler arguments passed to the header frontend (`--gcc-option` tokens, then a shlex-split `--gcc-options`), redacted. |
+| `ast_sysroot` | string \| null | `null` | The `--sysroot` passed to the header frontend, if any, redacted. |
+
 ### ABI surface
 
 | Key | Type | Meaning |

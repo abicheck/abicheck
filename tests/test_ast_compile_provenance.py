@@ -25,6 +25,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from abicheck.dumper import (
     _ast_compile_provenance,
     _cplusplus_macro_for_standard,
@@ -125,6 +127,29 @@ class TestAstCompileProvenance:
             "ast_compile_args": (),
             "ast_sysroot": None,
         }
+
+    def test_secret_looking_define_is_redacted(self):
+        """A --gcc-options define whose name looks like a credential (TOKEN/
+        SECRET/API_KEY/...) must never reach a persisted snapshot verbatim --
+        same RedactionPolicy convention every L3 build-evidence adapter
+        (compile_db.py, make.py, bazel.py, ninja.py) already applies."""
+        prov = _ast_compile_provenance(
+            [], "-DAPI_TOKEN=supersecret123 -DFOO=1", (), None
+        )
+        assert prov["ast_compile_args"] == ("-DAPI_TOKEN=<redacted>", "-DFOO=1")
+
+    def test_home_prefixed_sysroot_is_redacted(self):
+        """A --sysroot under $HOME is normalized to '~/...' by the module-level
+        DEFAULT_REDACTION policy (already initialized against the real home),
+        same as every L3 adapter's sysroot handling."""
+        import os
+
+        home = os.path.expanduser("~")
+        if home == "~":
+            pytest.skip("no home directory resolvable in this environment")
+        sysroot = Path(home) / "sdk" / "sysroot"
+        prov = _ast_compile_provenance([], None, (), sysroot)
+        assert prov["ast_sysroot"] == str(Path("~") / "sdk" / "sysroot")
 
 
 class TestSnapshotSerializationRoundTrip:

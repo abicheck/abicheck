@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from ._compiler_options import has_explicit_std
+from .buildsource.redaction import DEFAULT_REDACTION
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 
 
@@ -301,14 +302,25 @@ def _cplusplus_macro_for_standard(standard: str | None) -> str | None:
     return _CPLUSPLUS_MACRO_BY_EDITION.get(edition)
 
 
+def _combined_option_tokens(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...]
+) -> list[str]:
+    """``gcc_option_tokens`` followed by a shlex-split ``gcc_options`` string
+    (snapshot provenance, schema v14) — the one place both forwarded-option
+    spellings are merged into a single ordered token list, shared by every
+    caller below so the Windows ``posix=`` heuristic can't drift between them."""
+    tokens = list(gcc_option_tokens)
+    if gcc_options:
+        tokens.extend(shlex.split(gcc_options, posix=os.name != "nt"))
+    return tokens
+
+
 def _extract_explicit_std_value(
     gcc_options: str | None, gcc_option_tokens: tuple[str, ...]
 ) -> str | None:
     """Pull the literal value out of an explicit ``-std=``/``--std=``/``/std:``
     token, or ``None`` if none is present (snapshot provenance, schema v14)."""
-    tokens = list(gcc_option_tokens)
-    if gcc_options:
-        tokens.extend(shlex.split(gcc_options, posix=os.name != "nt"))
+    tokens = _combined_option_tokens(gcc_options, gcc_option_tokens)
     for token in tokens:
         t = token[1:] if token.startswith("--") else token
         if t.startswith("-std="):
@@ -358,16 +370,24 @@ def _ast_compile_provenance(
     """Structured compile-context provenance kwargs for an ``AbiSnapshot``
     built from a header-AST parse (schema v14). A single call site shared by
     ``dumper.py``'s ELF/PE/Mach-O snapshot constructors so the four fields
-    can never drift between them."""
+    can never drift between them.
+
+    ``ast_compile_args``/``ast_sysroot`` are redacted via the same
+    :class:`~abicheck.buildsource.redaction.RedactionPolicy` every L3
+    build-evidence adapter (``compile_db.py``, ``make.py``, ``bazel.py``,
+    ``ninja.py``, ``cmake_file_api.py``) already applies before persisting a
+    command line or path — a raw ``--gcc-option``/``--gcc-options`` token can
+    carry a secret-looking ``-DTOKEN=...`` define or an absolute home-prefixed
+    path, and this is the one place such tokens reach a persisted snapshot
+    without going through that established convention.
+    """
     resolved_standard = _resolve_standard_provenance(
         headers, gcc_options, gcc_option_tokens
     )
-    args = list(gcc_option_tokens)
-    if gcc_options:
-        args.extend(shlex.split(gcc_options, posix=os.name != "nt"))
+    args = _combined_option_tokens(gcc_options, gcc_option_tokens)
     return {
         "ast_resolved_standard": resolved_standard,
         "ast_cplusplus_macro": _cplusplus_macro_for_standard(resolved_standard),
-        "ast_compile_args": tuple(args),
-        "ast_sysroot": str(sysroot) if sysroot else None,
+        "ast_compile_args": tuple(DEFAULT_REDACTION.argv(args)),
+        "ast_sysroot": DEFAULT_REDACTION.path(str(sysroot)) if sysroot else None,
     }

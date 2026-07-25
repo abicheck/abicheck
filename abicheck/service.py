@@ -37,7 +37,6 @@ from .api_types import CompareRequest, InputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .clang_layout_tool import attach_clang_layout
-from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import (
     deferred_token_dirs,
@@ -1712,20 +1711,17 @@ def run_compare_request(
     old_fmt = detect_binary_format(request.old.path)
     new_fmt = detect_binary_format(request.new.path)
 
-    # Pair-wide C++20 dialect resolution (P0 fix, mirrors the CLI compare path
-    # in cli_compare_helpers.py): CompareRequest has no explicit --gcc-options
-    # equivalent today, so this is the *only* lever available here — without
-    # it, each side's dumper.py invocation independently heuristically decides
-    # whether it needs -std=gnu++20 from its own headers alone, and old/new
-    # could silently disagree. Decide it once over the union of both sides'
-    # headers and pin it onto both resolve calls.
+    # Pair-wide C++20 dialect resolution (P0 fix): CompareRequest has no
+    # explicit --gcc-options equivalent today, so this is the only lever
+    # available here. Shared core (service_scan.pair_wide_cxx20_std_override)
+    # also drives the CLI compare path (cli_helpers_compare._pair_wide_dialect_override)
+    # so the policy can't drift between front-ends.
     pair_compile: CompileContext | None = None
-    if (
-        lang == "c++"
-        and (request.old.headers or request.new.headers)
-        and _detect_cpp20_headers(list(request.old.headers) + list(request.new.headers))
-    ):
-        pair_compile = CompileContext(gcc_option_tokens=("-std=gnu++20",))
+    override = pair_wide_cxx20_std_override(
+        lang, request.old.headers, request.new.headers, None, ()
+    )
+    if override is not None:
+        pair_compile = CompileContext(gcc_option_tokens=override)
 
     # request.{old,new}.headers double as the public-header set for provenance
     # tagging — same rule as the single-pair CLI path (cli_resolve._resolve_compare_snapshots):
@@ -1960,6 +1956,7 @@ from .service_scan import (  # noqa: E402,F401
     _scan_subprocess_worker,
     estimate_scan,
     expand_header_inputs,
+    pair_wide_cxx20_std_override,
     run_audit,
     run_scan,
     run_scan_subprocess,
