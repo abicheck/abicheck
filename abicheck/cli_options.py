@@ -1685,4 +1685,6 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
     # plugin-check commands into compare).
     "used_by": "--used-by",
     "required_symbols": "--required-symbol",
+    # ADR-050 D2: the comparability gate's diagnostic escape hatch.
+    "diagnostic_comparison": "--diagnostic-comparison",
 }

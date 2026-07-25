@@ -65,7 +65,12 @@ Add to `.cursor/mcp.json` or VS Code MCP settings:
 The MCP server exposes seven tools. All return JSON-encoded strings.
 
 **Response envelopes.** On failure, every tool returns the same error
-envelope: `{"status": "error", "error": "<message>"}`. On success the
+envelope: `{"status": "error", "error": "<message>"}`. `abi_compare` has one
+more envelope, `{"status": "not_comparable", "reason": "<message>"}` (ADR-050
+D2) — `old_input`/`new_input` were not extracted under a comparable
+profile/scope contract, so no verdict was produced; see
+[`diagnostic_comparison`](#abi_compare--compare-two-abi-surfaces) below to
+downgrade this into a tentative result instead. On success the
 shape differs by tool:
 
 | Tool | Success envelope |
@@ -111,6 +116,7 @@ ABICC Perl dump (`.pl` / `.dump`).
 | `stat` | boolean | no | If `true`, emit a one-line summary instead of the full report |
 | `used_by` | string[] | no | Application binary paths — scope the comparison to what each app actually imports/requires instead of the full library surface (folds the old `appcompat` command). `old_input`/`new_input` may be real library binaries or JSON snapshots carrying binary evidence (a dump of a real library, not headers-only). Mutually exclusive with `required_symbols`. Adds a `used_by` list to the response and floors `exit_code` on the worst-scoped app's verdict |
 | `required_symbols` | string[] | no | An explicit plugin/host required-entrypoint contract — scope the comparison to only these exported symbols (folds the old `plugin-check` command). Mutually exclusive with `used_by`. Adds a `required_symbol_contract` object to the response and floors `exit_code` on its verdict |
+| `diagnostic_comparison` | boolean | no | ADR-050 D2's sanctioned escape hatch. By default, a genuine `ExtractionContract` mismatch between `old_input`/`new_input` returns `{"status": "not_comparable", "reason": ...}` instead of a verdict. Setting this `true` downgrades that into a tentative diff whose `report` is stamped `"assurance": "none"`, so the caller sees *a* result but knows not to fully trust it. No effect on a comparable pair |
 
 **Response fields:**
 
