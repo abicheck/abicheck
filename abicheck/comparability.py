@@ -98,6 +98,17 @@ SCOPE_FIELD_KEYS = (
 # difference on that same axis (see check_contracts_comparable).
 _PLATFORM_IDENTITY_FIELDS = frozenset({"target_triple", "pointer_width", "endianness"})
 
+# The only profile_fields keys the build-context carve-out (PR #624
+# follow-up: examples/case98_cxx_standard_floor_raised's real CI failure)
+# is allowed to treat as non-fatal, and only when both snapshots were
+# actually parsed against real build-system evidence (see
+# check_contracts_comparable / _build_context_corroborated below) -- a
+# raised C++-standard floor or a build-derived macro delta between two
+# genuine build configurations is exactly the fact
+# CXX_STANDARD_FLOOR_RAISED/ABI_RELEVANT_BUILD_FLAG_CHANGED exist to
+# surface as a RISK finding, not a reason to refuse a verdict outright.
+_BUILD_CONTEXT_FIELDS = frozenset({"language_standard", "macro_ops"})
+
 
 @dataclass(frozen=True)
 class IncludeDir:
@@ -214,7 +225,23 @@ def _slot_token_for_ancestor(
     inc: IncludeDir,
     declared_headers: Sequence[Path],
     header_identities: dict[Path, str],
+    single_header_mode: bool,
 ) -> str:
+    # A single declared header's own name is not load-bearing here either
+    # (Codex review, PR #624 follow-up -- CI went red at scale once real
+    # dumps started populating contract): P3's auto-added include root
+    # (`resolve_inferred_header_roots`, cli_dump_helpers.py) makes a lone
+    # `-H v1.h` umbrella's own parent directory project-owned, and without
+    # this short-circuit the owned-slot token below would embed `v1.h`'s own
+    # basename via the dir-relative component -- so a legitimate single-
+    # header rename (`v1.h` -> `v2.h`, examples/case189's exact CI failure)
+    # would spuriously flip `include_sequence` even though `header_sequence`
+    # and the scope `headers` field both already correctly collapse to the
+    # same "<single-header>" placeholder for this case. With only one
+    # declared header there is nothing to disambiguate a name against
+    # anyway, same reasoning as those two fields.
+    if single_header_mode:
+        return "hdrs:<single-header>"
     # Codex review (PR #624): pair each owned header's GLOBAL root-relative
     # identity (disambiguates the same-basename-under-two-separate-roots case
     # already fixed once -- e.g. `include/foo.h` vs. `generated/foo.h`) with
@@ -419,6 +446,31 @@ def compute_extraction_contract(
     if l2_frontend_ran:
         ownership = _classify_include_dirs(declared_headers, declared_includes)
         header_identities = _header_identities(declared_headers)
+        # Whether the owned-slot token below is safe to collapse to a
+        # constant placeholder instead of encoding the (rename-prone)
+        # declared header's own name: true only when the WHOLE declared
+        # surface is one logical header (by identity, not raw list length --
+        # the same header supplied twice is still "one distinct header") AND
+        # there is at most one owned, unlabeled include-dir slot for it.
+        # Both conditions matter -- gating on single-header alone regressed
+        # test_13c (Codex review, PR #624 follow-up): two NESTED project-
+        # owned roots (`-I work` and `-I work/include`) that both own the
+        # SAME single declared header must still tokenize distinctly per
+        # slot to preserve order-sensitivity (which nested root search comes
+        # first is a genuine compile-context fact) -- collapsing both to one
+        # constant would silently lose that. It is only the single-owner
+        # case (P3's `resolve_inferred_header_roots` auto-adding exactly one
+        # owned root for a lone `-H v1.h`/`-H old=<dir>` umbrella, examples/
+        # case189's exact CI failure) where there is nothing left to
+        # disambiguate and the header's own name is pure rename-noise.
+        single_header_mode = len({header_identities[h] for h in declared_headers}) <= 1
+        if single_header_mode:
+            _owned_unlabeled_count = sum(
+                1
+                for idx, inc in enumerate(declared_includes)
+                if ownership[idx] and inc.label is None
+            )
+            single_header_mode = _owned_unlabeled_count <= 1
 
         # Deduplicated by resolved identity, not just filtered (Codex
         # review, PR #624): depfile_resolved_paths can realistically list
@@ -457,7 +509,7 @@ def compute_extraction_contract(
                     token = f"label:{inc.label}"
                 else:
                     token = _slot_token_for_ancestor(
-                        inc, declared_headers, header_identities
+                        inc, declared_headers, header_identities, single_header_mode
                     )
             else:
                 pairs = sorted(
@@ -637,12 +689,26 @@ def compute_extraction_contract(
         if len(_scope_header_identities) == 1:
             _scope_header_identities = ["<single-header>"]
 
+        # A single declared public-header directory's own name is not
+        # load-bearing scope identity either (Codex review, PR #624
+        # follow-up -- same reasoning as "headers" above, same CI incident:
+        # a lone `-H old=<dir>`/`-H new=<dir>` umbrella, e.g.
+        # test_perf_binary_scan.py's old-include/new-include fixture dirs,
+        # is exactly as legitimate a rename as a single header file, and
+        # with only one directory declared there is nothing to disambiguate
+        # a name against anyway. Two co-located declared dirs still need
+        # real per-directory identity (a genuine declared-surface
+        # difference), so this only collapses the single-entry case.
+        _scope_public_header_dirs = _normalize(public_header_dirs)
+        if len(_scope_public_header_dirs) == 1:
+            _scope_public_header_dirs = ["<single-header-dir>"]
+
         # json.dumps, not a raw "|" join (Codex review, PR #624, same class
         # of bug already fixed for macro_ops/include_sequence above): a
         # normalized path is not guaranteed pipe-free.
         scope_fields = {
             "headers": json.dumps(_scope_header_identities),
-            "public_header_dirs": json.dumps(_normalize(public_header_dirs)),
+            "public_header_dirs": json.dumps(_scope_public_header_dirs),
         }
         scope_fingerprint = _sha256_of(*[scope_fields[k] for k in SCOPE_FIELD_KEYS])
 
@@ -688,6 +754,29 @@ def _binary_platform_components(snap: AbiSnapshot) -> dict[str, str] | None:
         if macho_cpu_type:
             return {"target_triple": macho_cpu_type}
     return None
+
+
+def _build_context_corroborated(old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    """Whether both *old* and *new* were actually parsed against real
+    build-system evidence -- ``-p``/``--compile-db``/``--build-info``
+    resolving the active ``-D`` defines and (via the same reconciliation)
+    the real ``-std=`` flag, rather than a bare CLI invocation with no
+    build context at all (ADR-020a/039; see ``snap.parsed_with_build_context``'s
+    own docstring in ``cli_dump_helpers.py``).
+
+    This is the build-context carve-out's one corroborating signal,
+    deliberately coarser than the platform carve-out's per-field binary
+    check above: there is no snapshot-level "this side's real language
+    standard was X" fact to verify a *specific* field against (unlike
+    ``elf_machine``/``elf_class``), only whether the resolved
+    ``language_standard``/``macro_ops`` facts came from a genuine build
+    system at all on both sides. A one-sided real build (only one snapshot
+    has ``parsed_with_build_context``) is still exactly the "manifest/CLI-
+    flag drift" mistake the gate exists to catch -- e.g. a stale cached dump
+    compared against a freshly build-reconciled one -- so this only waives
+    the mismatch when BOTH sides carry that evidence.
+    """
+    return old.parsed_with_build_context and new.parsed_with_build_context
 
 
 @dataclass(frozen=True)
@@ -808,6 +897,22 @@ def check_contracts_comparable(
 
                 if all(_field_verified(field) for field in differing):
                     return None  # genuine cross-architecture compare; diff_platform.py handles it
+        if (
+            differing
+            and differing <= _BUILD_CONTEXT_FIELDS
+            and _build_context_corroborated(old, new)
+        ):
+            # Build-context carve-out (Codex review, PR #624 follow-up --
+            # examples/case98_cxx_standard_floor_raised's real CI failure):
+            # a raised C++-standard floor or a build-derived macro delta
+            # between two snapshots BOTH actually reconciled against real
+            # build-system evidence is exactly the fact
+            # CXX_STANDARD_FLOOR_RAISED/ABI_RELEVANT_BUILD_FLAG_CHANGED
+            # (diff_build_config.py) exist to surface as a RISK finding --
+            # gating it into a generic not_comparable first would only
+            # discard that finding instead of letting the more specific
+            # detector classify it correctly.
+            return None
         reason = (
             "old and new snapshots were extracted under different compile "
             f"contexts (profile_fingerprint mismatch; differing fields: "

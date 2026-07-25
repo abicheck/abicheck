@@ -176,12 +176,39 @@ def test_baseline_header_overrides_old_side_and_silences_warning(
     # Old side parsed with ITS OWN headers, not the new ones.
     assert _patched["headers"] == [old_inc]
     assert _patched["includes"] == [old_inc]
-    assert _patched["public_headers"] == [old_inc]
+    # `old_inc` is a directory, so it belongs in public_header_dirs ONLY --
+    # not also in public_headers as a raw directory "path" (Codex review,
+    # PR #624 follow-up: the file-vs-dir split now mirrors the candidate
+    # side's `_public_provenance_set`, which never double-counts a directory
+    # this way; the old, asymmetric `bl_public_headers = bl_headers` fed the
+    # ADR-050 comparability gate an old side whose declared scope was
+    # represented differently from the new side's, a false
+    # scope_fingerprint mismatch on an ordinary --against comparison).
+    assert _patched["public_headers"] == []
     # The old-side public boundary is derived ONLY from -H old= dirs;
     # the candidate's new/include must NOT leak in (Codex review). A relative
     # dir like `include/` would otherwise re-mark old private headers PUBLIC.
     assert _patched["public_header_dirs"] == [old_inc]
     assert new_inc not in _patched["public_header_dirs"]
+
+
+def test_baseline_header_file_entry_still_counts_as_public_header(
+    _patched: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    # Mirrors the candidate side's `_public_provenance_set` file-vs-dir split
+    # exactly: a `-H old=<file>` FILE entry (unlike the dir case above) is a
+    # real public header path in its own right and must still reach
+    # public_headers -- the fix must not degenerate into dropping every
+    # baseline_headers entry from public_headers.
+    old_file = tmp_path / "old" / "api.h"
+    old_file.parent.mkdir(parents=True)
+    old_file.write_text("int f(void);\n", encoding="utf-8")
+    old_dir = tmp_path / "old" / "detail"
+    old_dir.mkdir()
+    _run(baseline_headers=[old_file, old_dir], baseline_includes=[old_dir])
+    assert _patched["public_headers"] == [old_file]
+    assert _patched["public_header_dirs"] == [old_dir]
 
 
 def test_snapshot_baseline_does_not_warn(

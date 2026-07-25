@@ -841,6 +841,41 @@ def test_13c_nested_project_owned_slots_owning_same_header_swapped_order_differs
     assert order_a.profile_fingerprint != order_b.profile_fingerprint
 
 
+def test_13d_single_owned_slot_for_single_header_rename_does_not_flip_profile(
+    tmp_path,
+):
+    # Real CI incident (PR #624 follow-up, examples/case189 and every other
+    # single-`-H` example case): P3's auto-added include root
+    # (`resolve_inferred_header_roots`, cli_dump_helpers.py) makes a lone
+    # declared header's own parent directory an owned `-I` slot even with no
+    # explicit --include at all. Before this fix, that owned slot's token
+    # embedded the header's own basename via `_slot_token_for_ancestor`'s
+    # dir-relative-path component -- so a legitimate single-header rename
+    # (v1.h -> v2.h) flipped `include_sequence` and therefore
+    # `profile_fingerprint`, even though `header_sequence` and scope's
+    # "headers" field both already correctly collapsed to
+    # "<single-header>". Distinct from test_13c: there the SAME header is
+    # owned by two NESTED slots (order-sensitivity must survive), whereas
+    # here there is exactly one owned slot for one header -- nothing to
+    # disambiguate, so the header's name must not be load-bearing.
+    old_header = _write(tmp_path / "old" / "v1.h", "int f(void);\n")
+    new_header = _write(tmp_path / "new" / "v2.h", "int f(void);\n")
+    old = compute_extraction_contract(
+        declared_headers=[old_header],
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(old_header.parent)],
+        depfile_resolved_paths=[old_header],
+    )
+    new = compute_extraction_contract(
+        declared_headers=[new_header],
+        l2_frontend_ran=True,
+        declared_includes=[IncludeDir(new_header.parent)],
+        depfile_resolved_paths=[new_header],
+    )
+    assert old.profile_fields["include_sequence"] == '["0:hdrs:<single-header>"]'
+    assert old.profile_fingerprint == new.profile_fingerprint
+
+
 # ---------------------------------------------------------------------------
 # labeled sibling support root (test 14 -- semantic core only; the CLI
 # grammar itself is not implemented yet, see this module's own docstring)
@@ -959,6 +994,45 @@ def test_symbols_only_public_header_dirs_are_root_relative_not_absolute(tmp_path
         public_header_dirs=[tmp_path / "checkout-new" / "api" / "include"]
     )
     assert old_contract.scope_fingerprint == new_contract.scope_fingerprint
+
+
+def test_single_public_header_dir_rename_does_not_flip_scope_fingerprint(tmp_path):
+    # Real CI incident (PR #624 follow-up, test_perf_binary_scan.py's
+    # `test_headers_depth_matrix_args_stays_l2_only_and_fast`): a lone
+    # `-H old=<dir>`/`-H new=<dir>` umbrella directory feeds its OWN name
+    # into `public_header_dirs`, not just a checkout-root prefix -- unlike
+    # test_symbols_only_public_header_dirs_are_root_relative_not_absolute
+    # above (same final "include" component both sides), here the
+    # directory's own basename genuinely differs ("old-include" vs
+    # "new-include", the exact fixture names that CI test uses). With only
+    # one directory declared there is nothing to disambiguate a name
+    # against, same reasoning as a single declared header's own filename.
+    old_contract = compute_extraction_contract(
+        public_header_dirs=[tmp_path / "old-include"]
+    )
+    new_contract = compute_extraction_contract(
+        public_header_dirs=[tmp_path / "new-include"]
+    )
+    assert old_contract.scope_fields["public_header_dirs"] == '["<single-header-dir>"]'
+    assert old_contract.scope_fingerprint == new_contract.scope_fingerprint
+
+
+def test_two_public_header_dirs_with_different_names_still_distinguishes(tmp_path):
+    # The multi-directory case still needs real per-directory identity
+    # (Codex review, PR #624 follow-up, symmetric with test_2b's multi-header
+    # case): two co-located declared public-header dirs must not collapse to
+    # the same token -- ["a", "b"] vs. ["a", "c"] is a genuine
+    # declared-surface difference the single-entry collapse above must not
+    # hide.
+    a = tmp_path / "old" / "a"
+    a.mkdir(parents=True)
+    old_b = tmp_path / "old" / "b"
+    old_b.mkdir()
+    new_c = tmp_path / "new" / "c"
+    new_c.mkdir(parents=True)
+    old_contract = compute_extraction_contract(public_header_dirs=[a, old_b])
+    new_contract = compute_extraction_contract(public_header_dirs=[a, new_c])
+    assert old_contract.scope_fingerprint != new_contract.scope_fingerprint
 
 
 def test_declared_headers_and_public_header_paths_share_one_scope_identity(tmp_path):
@@ -1175,6 +1249,60 @@ def test_gate_carve_out_does_not_apply_without_any_binary_platform_metadata():
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(_snap(old_contract), _snap(new_contract))
+
+
+def test_gate_build_context_carve_out_allows_corroborated_std_raise():
+    # Real CI incident (PR #624 follow-up, examples/case98_cxx_standard_floor_raised):
+    # both sides were actually reconciled against real build-system evidence
+    # (parsed_with_build_context=True), so a genuine language_standard raise
+    # is exactly what CXX_STANDARD_FLOOR_RAISED/ABI_RELEVANT_BUILD_FLAG_CHANGED
+    # exist to surface as a RISK finding, not a reason to refuse a verdict.
+    old_contract = compute_extraction_contract(
+        l2_frontend_ran=True, language_standard="gnu++17"
+    )
+    new_contract = compute_extraction_contract(
+        l2_frontend_ran=True, language_standard="c++20"
+    )
+    old = _snap(old_contract, parsed_with_build_context=True)
+    new = _snap(new_contract, parsed_with_build_context=True)
+    check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_build_context_carve_out_requires_both_sides_corroborated():
+    # Only one side actually went through build-context reconciliation --
+    # exactly the "manifest/CLI-flag drift" mistake the gate exists to
+    # catch (e.g. a stale cached dump compared against a freshly
+    # build-reconciled one), so this must still raise.
+    old_contract = compute_extraction_contract(
+        l2_frontend_ran=True, language_standard="gnu++17"
+    )
+    new_contract = compute_extraction_contract(
+        l2_frontend_ran=True, language_standard="c++20"
+    )
+    old = _snap(old_contract, parsed_with_build_context=False)
+    new = _snap(new_contract, parsed_with_build_context=True)
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_build_context_carve_out_does_not_cover_a_co_occurring_other_field():
+    # Scoped to language_standard/macro_ops alone: a std-floor raise
+    # alongside a genuinely different compiler_family must still raise even
+    # when both sides are build-context corroborated.
+    old_contract = compute_extraction_contract(
+        l2_frontend_ran=True,
+        language_standard="gnu++17",
+        compiler_family="gcc",
+    )
+    new_contract = compute_extraction_contract(
+        l2_frontend_ran=True,
+        language_standard="c++20",
+        compiler_family="clang",
+    )
+    old = _snap(old_contract, parsed_with_build_context=True)
+    new = _snap(new_contract, parsed_with_build_context=True)
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
 
 
 def test_gate_carve_out_does_not_waive_pointer_width_via_unrelated_machine_change():

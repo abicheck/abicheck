@@ -296,12 +296,22 @@ def _run_baseline_compare(
     if baseline_headers:
         bl_headers = list(baseline_headers)
         bl_includes = list(baseline_includes) if baseline_includes else includes
-        bl_public_headers = bl_headers
         # The old-side public boundary comes ONLY from `-H old=`: dirs in
         # it are public-header dirs, files opt in just themselves. Do NOT fall back
         # to the new side's public dirs — a relative dir like `include/` would
         # (segment-based provenance) re-mark old private headers as PUBLIC and skew
         # the public-surface scoping (Codex review).
+        #
+        # Split by file-vs-dir the same way the candidate side's
+        # `_public_provenance_set` already does (Codex review, PR #624
+        # follow-up): a lone `-H old=<dir>` umbrella must feed its directory
+        # into `bl_public_dirs` ONLY, not also into `bl_public_headers` as a
+        # raw directory "path" -- doing both fed the ADR-050 comparability
+        # gate an old side whose declared scope was represented differently
+        # from the new side's (a directory counted twice vs. once), a false
+        # scope_fingerprint mismatch on an ordinary --against comparison
+        # that never touched the actual public surface.
+        bl_public_headers = [p for p in bl_headers if not p.is_dir()]
         bl_public_dirs = [p for p in bl_headers if p.is_dir()]
     else:
         bl_headers, bl_includes = headers, includes

@@ -62,11 +62,13 @@ which is used as the base via ``dataclasses.replace``.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from .comparability import PROFILE_FIELD_KEYS, _sha256_of
 from .diff_cxx_rules import _skip_template_args, itanium_scope_components
 from .dumper_castxml import (
     SYNTHETIC_CTOR_KEY_PREFIX,
@@ -581,7 +583,7 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         v for v in clang_variables if v.mangled not in castxml_var_mangled
     )
 
-    return replace(
+    merged = replace(
         castxml_snap,
         functions=merged_functions,
         variables=merged_variables,
@@ -605,6 +607,46 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         _var_by_mangled=None,
         _type_by_name=None,
     )
+
+    # ADR-050 D1 (Codex review, PR #624 follow-up): without this, the merged
+    # "hybrid" snapshot's contract stays castxml_snap's alone, silently
+    # dropping the clang leg's own compiler identity -- two hybrid dumps
+    # differing only in which clang binary/version parsed the clang leg
+    # (the castxml leg identical) would then share a profile_fingerprint
+    # despite a genuinely different extraction context on that leg. Both
+    # sub-contracts are already correctly computed (each dump_fn call in
+    # run_hybrid_dump gets its own via dumper._attach_extraction_contract);
+    # fold the clang leg's compiler identity into the merged contract's
+    # existing compiler_version field and recompute just that one
+    # dependent hash, rather than re-deriving identity from the raw,
+    # prefix-merged ast_toolchain dict above.
+    if merged.contract is not None and clang_snap.contract is not None:
+        # json.dumps, not a raw join (same class of bug already fixed for
+        # macro_ops/slot tokens in comparability.py): neither identity
+        # string is guaranteed delimiter-free.
+        combined_compiler_version = json.dumps(
+            [
+                merged.contract.profile_fields.get("compiler_version", ""),
+                clang_snap.contract.profile_fields.get("compiler_version", ""),
+            ]
+        )
+        new_profile_fields = {
+            **merged.contract.profile_fields,
+            "compiler_version": combined_compiler_version,
+        }
+        new_fingerprint = _sha256_of(
+            *[new_profile_fields[k] for k in PROFILE_FIELD_KEYS]
+        )
+        merged = replace(
+            merged,
+            contract=replace(
+                merged.contract,
+                profile_fields=new_profile_fields,
+                profile_fingerprint=new_fingerprint,
+            ),
+        )
+
+    return merged
 
 
 def run_hybrid_dump(
