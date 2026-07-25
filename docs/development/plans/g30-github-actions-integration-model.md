@@ -2488,6 +2488,33 @@ links or nav-coverage gaps) and `scripts/check_docs_contract.py` (0 errors) —
 no new `docs/_meta/topics.yaml` topic was registered, per `docs/AGENTS.md`'s
 "rollout is deliberately incremental" note for that registry.
 
+**Batch 2 (scenarios/ — S1/S3/S6/S7) also implemented, following the exact
+sequencing this plan's own PR-boundary suggestion names first.**
+`docs/integration/scenarios/single-library.md` (S1),
+`existing-build-artifact.md` (S3), `header-aware-check.md` (S6), and
+`source-replay.md` (S7) each got a new, focused walkthrough page, and
+`index.md`'s corresponding four rows were repointed at them (the two-part
+job the batch-1 status note above flagged). **Written as task/how-to pages
+that link to the existing canonical deep-dive rather than duplicate it — the
+"absorbs X" phrasing in this section's own file-tree comment turned out to
+conflict with the very next paragraph's "`scan-levels.md` ... kept as-is ...
+`docs/integration/` pages link to them rather than duplicating," so the
+more specific, later paragraph was treated as authoritative:** no existing
+page (`github-action.md`, `github-action-source-scans.md`, `scan-levels.md`,
+`build-output-schema.md`) was edited, trimmed, or retired in this batch —
+each new scenario page is additive, and the "retire and redirect" migration
+work the file tree implies for e.g. `github-action.md` becoming
+"input/output reference only" is deliberately deferred to its own future
+pass rather than risking a rushed edit to a heavily-established,
+heavily-cross-linked page in the same batch that also touches four other
+things. Two forward-references in the S7 page (to a not-yet-existing S8/S9
+scenario page) point at `producing-source-facts.md` instead, with an inline
+note that a dedicated page is a future batch — the same temporary-link
+convention `index.md` itself already uses for every not-yet-split-out row.
+Verified the same way as batch 1: `mkdocs build --strict` (clean) and
+`scripts/check_docs_contract.py` (0 errors, no new duplication warnings from
+the four new pages).
+
 ---
 
 ## P2 — Deeper architecture (not started here)
