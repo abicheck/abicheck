@@ -44,6 +44,8 @@ from abicheck.buildsource.run_plan import (
 )
 from abicheck.cli import main
 
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
 
 def _bo(*target_ids: str) -> BuildOutput:
     return BuildOutput(
@@ -739,6 +741,84 @@ class TestProfileCompileOverlayProjection:
         [check] = plan.checks
         assert check.compile_gcc_path == "/opt/gcc14/bin/g++"
         assert check.compile_gcc_options == "-std=gnu++20"
+
+
+class TestToolchainMatrixFixtureExample:
+    """Loads the committed toolchain-matrix reference example
+    (``tests/fixtures/run_plan/toolchain_matrix/``, task #9) — not an inline
+    dict like the tests above, the actual checked-in `.abicheck.yml`/
+    `toolchain-bindings.yml` pair its own README walks through — and asserts
+    the exact `run-plan generate` output the README documents, so the two
+    can't silently drift apart."""
+
+    _DIR = FIXTURES_DIR / "run_plan" / "toolchain_matrix"
+
+    def test_fixture_files_exist(self) -> None:
+        assert (self._DIR / ".abicheck.yml").is_file()
+        assert (self._DIR / "toolchain-bindings.yml").is_file()
+        assert (self._DIR / "README.md").is_file()
+
+    def test_two_profiles_resolve_to_documented_compile_context(self) -> None:
+        import yaml
+
+        from abicheck.buildsource.toolchain_bindings import load_bindings_file
+
+        config = ProjectTargetsConfig.from_dict(
+            yaml.safe_load((self._DIR / ".abicheck.yml").read_text(encoding="utf-8"))
+        )
+        bindings_file = load_bindings_file(self._DIR / "toolchain-bindings.yml")
+        plan, report = generate_run_plan(
+            config,
+            {
+                "linux-gcc14": _bo("libmatrixdemo"),
+                "linux-clang20": _bo("libmatrixdemo"),
+            },
+            resolved_bindings=bindings_file.bindings,
+        )
+        assert report.ok
+        by_profile = {c.profile_id: c for c in plan.checks}
+        assert by_profile.keys() == {"linux-gcc14", "linux-clang20"}
+
+        gcc = by_profile["linux-gcc14"]
+        assert gcc.compile_gcc_path == "/opt/gcc-14.2.0/bin/g++"
+        assert gcc.compile_gcc_options == "-std=gnu++17 -stdlib=libstdc++"
+
+        clang = by_profile["linux-clang20"]
+        assert clang.compile_gcc_path == "/opt/llvm-20/bin/clang++"
+        assert clang.compile_gcc_options == (
+            "-std=gnu++20 -stdlib=libc++ -DMATRIXDEMO_ABI_V2=1 -fno-rtti"
+        )
+
+    def test_cli_end_to_end_matches_readme(self, tmp_path: Path) -> None:
+        """The exact CLI invocation README.md's "Reproduce it yourself"
+        section documents, run against the committed fixture files."""
+        bo_gcc14 = _write_build_output(tmp_path, "linux-gcc14", ["libmatrixdemo"])
+        bo_clang20 = _write_build_output(tmp_path, "linux-clang20", ["libmatrixdemo"])
+        result = CliRunner().invoke(
+            main,
+            [
+                "run-plan",
+                "generate",
+                str(self._DIR / ".abicheck.yml"),
+                "--build-output",
+                f"linux-gcc14={bo_gcc14}",
+                "--build-output",
+                f"linux-clang20={bo_clang20}",
+                "--toolchain-bindings",
+                str(self._DIR / "toolchain-bindings.yml"),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        by_profile = {c["profile_id"]: c for c in data["checks"]}
+        assert (
+            by_profile["linux-gcc14"]["compile_gcc_options"]
+            == "-std=gnu++17 -stdlib=libstdc++"
+        )
+        assert (
+            by_profile["linux-clang20"]["compile_gcc_options"]
+            == "-std=gnu++20 -stdlib=libc++ -DMATRIXDEMO_ABI_V2=1 -fno-rtti"
+        )
 
 
 def _write_config(tmp_path: Path, raw: dict) -> Path:

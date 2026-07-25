@@ -173,3 +173,7 @@ in `aggregate`'s duplicate-target-id check.
   ]
 }
 ```
+
+**Full worked example with two toolchain profiles** (`compile_gcc_path`/
+`compile_gcc_options` populated, `--toolchain-bindings` in use):
+[`tests/fixtures/run_plan/toolchain_matrix/README.md`](https://github.com/abicheck/abicheck/blob/main/tests/fixtures/run_plan/toolchain_matrix/README.md).
