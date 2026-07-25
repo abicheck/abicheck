@@ -386,3 +386,6 @@ default = { features = ["dev", "mcp", "docs", "dist"], solve-group = "default" }
 integration = { features = ["dev", "mcp", "native-toolchain", "integration"], solve-group = "default" }
 parity = { features = ["dev", "mcp", "native-toolchain", "parity"], solve-group = "parity" }
 docs = { features = ["docs"], solve-group = "docs" }
+# EXPERIMENTAL, pending Python-shadow check — see note near
+# [tool.pixi.pypi-dependencies] above.
+scanner = { features = ["native-toolchain"], solve-group = "scanner" }

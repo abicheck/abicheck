@@ -43,6 +43,7 @@ environments layer on the system tools for the heavier marker lanes:
 | `integration` | `test-integration` | `castxml`, C/C++ compiler, `cmake` (linux-64/osx-64/osx-arm64 only — no MSVC via conda-forge; see `integration` marker below) |
 | `parity` | `test-libabigail`, `test-abicc` | `libabigail` (`abidiff`) + `abi-compliance-checker` (linux-64 only, conda-forge doesn't ship these elsewhere) |
 | `docs` | `docs-build`, `docs-serve` | `mkdocs` + plugins (standalone subset of `default`, for a docs-only environment) |
+| `scanner` | *(no dedicated tasks — just `castxml`/gcc/g++ on `PATH`)* | Same `castxml` + C/C++ compiler as `integration`, without the dev-tool/`cmake` weight — this is what `action.yml`'s `dependency-source: conda-forge` uses (`action/install-deps-conda-forge.sh`), linux-64/osx-64/osx-arm64 only |
 
 Note: the `integration`/`parity` environments pull `castxml`/`libabigail`/
 `abi-compliance-checker` from conda-forge at whatever version is current,

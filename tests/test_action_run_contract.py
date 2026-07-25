@@ -148,7 +148,12 @@ _ENV_TO_INPUT_RE = re.compile(
 # Declared inputs consumed by a step other than "Run abicheck" (setup-python,
 # the conditional install-deps.sh step, the conditional upload-sarif step) —
 # these have no INPUT_* counterpart in run.sh by design.
-_NON_RUN_SH_INPUTS = {"python-version", "install-deps", "upload-sarif"}
+_NON_RUN_SH_INPUTS = {
+    "python-version",
+    "install-deps",
+    "dependency-source",
+    "upload-sarif",
+}
 
 
 def _action_yml_inputs() -> set[str]:

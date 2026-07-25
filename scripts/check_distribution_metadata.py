@@ -54,6 +54,21 @@ def main() -> int:
     for field, expected in checks.items():
         if metadata.get(field) != expected:
             fail(f"wheel {field} is {metadata.get(field)!r}, expected {expected!r}")
+    # PyPI/pip-installed abicheck is the lightweight/core distribution: it must
+    # never pull in CastXML transitively, on any extra. `pip install abicheck`
+    # (or `abicheck[mcp]`/`[dev]`/`[docs]`/`[dist]`/`[validation]`) installing
+    # CastXML would silently promote the legacy, unsupported PyPI `castxml`
+    # distribution (last released 0.4.5 in 2018 — see castxml_policy.py) into
+    # abicheck's default install path, contradicting the documented contract
+    # that a real L2 scanner setup comes from conda-forge or an explicitly
+    # managed CastXML/compiler install.
+    requires_dist = metadata.get_all("Requires-Dist", [])
+    castxml_requires = [r for r in requires_dist if "castxml" in r.lower()]
+    if castxml_requires:
+        fail(
+            "wheel Requires-Dist pulls in castxml, which must never be a "
+            f"pip-installed abicheck dependency: {castxml_requires!r}"
+        )
     project_urls: dict[str, str] = {}
     for value in metadata.get_all("Project-URL", []):
         try:

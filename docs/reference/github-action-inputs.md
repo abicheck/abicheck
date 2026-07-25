@@ -4,7 +4,7 @@
 
 Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../use/github-action.md), generated directly from `action.yml` — see that page for setup, mode/input compatibility, and usage recipes; this page is the exhaustive field list only.
 
-## Inputs (72)
+## Inputs (73)
 
 | Input | Required | Default | Description |
 |---|:--:|---|---|
@@ -66,7 +66,8 @@ Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../us
 | `suppress` | no | — | Path to a YAML suppression file to filter known/intentional changes. |
 | `verbose` | no | false | Enable verbose/debug output from abicheck. |
 | `python-version` | no | 3.13 | Python version for setup-python. |
-| `install-deps` | no | true | Install system dependencies (castxml, gcc). Set to false if pre-installed. |
+| `install-deps` | no | true | Deprecated — use `dependency-source` instead (kept for one release cycle). Ignored if `dependency-source` is set. true maps to dependency-source=system (the previous, and current, default); false maps to dependency-source=none. |
+| `dependency-source` | no | — | How to install system dependencies (castxml, gcc/g++, clang, bear): 'system' (apt/Homebrew + the pinned CastXML Superbuild — current default, unchanged behavior), 'conda-forge' (installs this repo's pixi-managed `scanner` conda-forge environment — castxml 0.7.x + a matching gcc/g++; Linux/macOS only, no clang/bear yet), or 'none' (skip; dependencies must already be on PATH). Leave unset to fall back to `install-deps` for backward compatibility. |
 | `upload-sarif` | no | false | Upload SARIF results to GitHub Code Scanning (requires security-events: write permission). Requires format=sarif and mode=compare — setting this with any other mode or format is a hard error raised before any dependency install (mode=scan/dump/deps-tree/deps-compare never produce a SARIF report). |
 | `fail-on-breaking` | no | true | Fail the step when a binary ABI break is detected (exit code 4). |
 | `fail-on-api-break` | no | false | Fail the step when a source-level API break is detected (exit code 2). |

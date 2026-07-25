@@ -19,10 +19,29 @@ sequence that invokes these scripts in order:
    from `run.sh` — so this step has zero dependency on `run.sh`'s internal
    layout. `tests/test_action_validate_inputs.py` runs both copies against
    the same fixtures to catch drift between them.
-2. `action/install-deps.sh` — installs gcc/g++/clang/bear and invokes the
-   checksum-pinned `action/install-castxml.sh` Superbuild installer on Linux,
-   or installs castxml via Homebrew on macOS, when `install-deps: true`.
-   Windows install is not automated (warns only).
+2. System dependencies, dispatched by the resolved `dependency-source`
+   (`system` — the default, backward-compat-resolved from the deprecated
+   `install-deps` boolean when `dependency-source` is unset — or
+   `conda-forge`, or `none` to skip):
+   - `action/install-deps.sh` (`dependency-source: system`) — installs
+     gcc/g++/clang/bear and invokes the checksum-pinned
+     `action/install-castxml.sh` Superbuild installer on Linux, or installs
+     castxml via Homebrew on macOS. Windows install is not automated (warns
+     only).
+   - `action/install-deps-conda-forge.sh` (`dependency-source: conda-forge`,
+     Linux/macOS only) — installs the pixi-managed `scanner` conda-forge
+     environment (root `pyproject.toml`'s `[tool.pixi.feature.native-toolchain]`,
+     `pixi.lock`-frozen: castxml 0.7.x + a matching gcc/g++) via the
+     `prefix-dev/setup-pixi` step in `action.yml`, then symlinks *only* the
+     scanner tools (`castxml`/`gcc`/`g++`/`cc`/`c++`/`gcc-ar`/`gcc-nm`/
+     `gcc-ranlib`) into a dedicated shim directory and prepends that to
+     `PATH` — deliberately not the whole pixi environment `bin/`, which also
+     carries its own `python`/`pip` (a transitive dependency of the
+     workspace-level `abicheck = {path=".", editable=true}` pypi-dependency)
+     that would otherwise shadow whatever `actions/setup-python` configured
+     for the rest of the calling workflow's job. No clang/bear yet on this
+     path — L4/L5 source scanning degrades gracefully, same as when they're
+     absent on the system path.
 3. `action/run.sh` — assembles the `abicheck` CLI invocation from `INPUT_*`
    environment variables (one per `action.yml` input), runs it, and sets the
    Action's declared outputs from the exit code / report contents.

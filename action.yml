@@ -401,9 +401,24 @@ inputs:
     required: false
     default: '3.13'
   install-deps:
-    description: 'Install system dependencies (castxml, gcc). Set to false if pre-installed.'
+    description: >
+      Deprecated — use `dependency-source` instead (kept for one release
+      cycle). Ignored if `dependency-source` is set. true maps to
+      dependency-source=system (the previous, and current, default);
+      false maps to dependency-source=none.
     required: false
     default: 'true'
+  dependency-source:
+    description: >
+      How to install system dependencies (castxml, gcc/g++, clang, bear):
+      'system' (apt/Homebrew + the pinned CastXML Superbuild — current
+      default, unchanged behavior), 'conda-forge' (installs this repo's
+      pixi-managed `scanner` conda-forge environment — castxml 0.7.x + a
+      matching gcc/g++; Linux/macOS only, no clang/bear yet), or 'none'
+      (skip; dependencies must already be on PATH). Leave unset to fall back
+      to `install-deps` for backward compatibility.
+    required: false
+    default: ''
   upload-sarif:
     description: >
       Upload SARIF results to GitHub Code Scanning (requires security-events: write permission).
@@ -557,10 +572,65 @@ runs:
         python-version: ${{ inputs.python-version }}
 
     # ── 2. System dependencies ────────────────────────────────────────────────
-    - name: Install system dependencies
-      if: inputs.install-deps == 'true'
+    # `dependency-source` (new) takes priority; an unset `dependency-source`
+    # falls back to the legacy `install-deps` boolean for one release cycle
+    # (true→system, false→none) so an existing caller's workflow keeps its
+    # current behavior unchanged either way.
+    - name: Resolve dependency-source
+      id: resolve-deps
+      shell: bash
+      env:
+        INPUT_DEPENDENCY_SOURCE: ${{ inputs.dependency-source }}
+        INPUT_INSTALL_DEPS: ${{ inputs.install-deps }}
+      run: |
+        if [ -n "$INPUT_DEPENDENCY_SOURCE" ]; then
+          resolved="$INPUT_DEPENDENCY_SOURCE"
+        elif [ "$INPUT_INSTALL_DEPS" = "false" ]; then
+          resolved="none"
+        else
+          resolved="system"
+        fi
+        case "$resolved" in
+          system|conda-forge|none) ;;
+          *)
+            echo "::error::dependency-source must be 'system', 'conda-forge', or 'none' (got '${resolved}')"
+            exit 1
+            ;;
+        esac
+        echo "value=${resolved}" >> "$GITHUB_OUTPUT"
+
+    - name: Install system dependencies (system)
+      if: steps.resolve-deps.outputs.value == 'system'
       shell: bash
       run: bash "${{ github.action_path }}/action/install-deps.sh"
+
+    - name: dependency-source=conda-forge is not yet supported on Windows
+      if: steps.resolve-deps.outputs.value == 'conda-forge' && runner.os == 'Windows'
+      shell: bash
+      run: |
+        echo "::error::dependency-source=conda-forge is not yet supported on Windows" \
+          "(pyproject.toml's native-toolchain pixi feature doesn't cover win-64)." \
+          "Use dependency-source=system (the default) or install castxml/a compiler manually."
+        exit 1
+
+    # conda-forge path: pixi resolves this repo's own pyproject.toml `scanner`
+    # environment ([tool.pixi.feature.native-toolchain] — castxml 0.7.x + a
+    # matching gcc/g++, `pixi.lock`-frozen) instead of the checksum-pinned
+    # Superbuild installer. Linux/macOS only (matches native-toolchain's own
+    # platform list); no clang/bear yet (L4/L5 source scanning degrades
+    # gracefully, same as when they're absent on the system path).
+    - name: Set up pixi (conda-forge)
+      if: steps.resolve-deps.outputs.value == 'conda-forge' && runner.os != 'Windows'
+      uses: prefix-dev/setup-pixi@v0.9.6
+      with:
+        manifest-path: ${{ github.action_path }}/pyproject.toml
+        environments: scanner
+        frozen: true
+
+    - name: Install system dependencies (conda-forge)
+      if: steps.resolve-deps.outputs.value == 'conda-forge' && runner.os != 'Windows'
+      shell: bash
+      run: bash "${{ github.action_path }}/action/install-deps-conda-forge.sh"
 
     # ── 3. Install abicheck ──────────────────────────────────────────────────
     - name: Install abicheck
