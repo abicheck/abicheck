@@ -770,7 +770,9 @@ class TraversalPolicy:
     allowed_edges: frozenset[str]
     stop_conditions: Callable[[str, dict[str, GraphNode]], bool]
     minimum_confidence: str = CONF_UNKNOWN
-    effect_transitions: dict[str, str] = field(default_factory=dict)
+    effect_transitions: dict[str, str] = field(
+        default_factory=dict, hash=False, compare=False
+    )
 
 
 #: The call-graph leak walk's own rules (ADR-044 P1 item 1), reified as a
@@ -1011,7 +1013,9 @@ def compute_call_graph_leak_paths(
     )
     result: dict[str, list[str]] = collections.defaultdict(list)
     for entry in entries:
-        targets, came_from, degraded = reachability.get(entry, (frozenset(), {}, frozenset()))
+        targets, came_from, degraded = reachability.get(
+            entry, (frozenset(), {}, frozenset())
+        )
         for target in targets:
             node = node_by_id.get(target)
             if node is None:

@@ -265,7 +265,11 @@ def _root_cause_lookup(
             hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
             root_display,
         )
-    rule_id = "used_by_missing_symbol" if gate_scope == "used_by" else "required_symbol_missing"
+    rule_id = (
+        "used_by_missing_symbol"
+        if gate_scope == "used_by"
+        else "required_symbol_missing"
+    )
     for label in missing_labels:
         # A missing-contract label has no caused_by_type; its own name only
         # becomes a *grouping* key when some other finding's caused_by_type
