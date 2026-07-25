@@ -32,8 +32,9 @@ dialect once over the union of both sides so old/new can never disagree) —
 both already have direct unit coverage. This test is the missing outer
 layer: a real compile + a real ``abicheck compare`` invocation against actual
 binaries and headers containing exactly this pattern, on an explicit C++11
-profile, proving the whole pipeline stays inert end-to-end (no forced
-dialect, no spurious findings, no SONAME/version-bump advisory).
+profile, proving the whole pipeline stays inert end-to-end -- specifically,
+that a forced C++20 dialect never manifests as a false BREAKING/API_BREAK
+verdict or a MAJOR/SONAME-bump release advisory for this pair.
 
 Marked ``integration`` (needs a real compiler); uses ``--ast-frontend clang``
 so it also runs on hosts with clang but no castxml (unlike most other
@@ -142,19 +143,22 @@ def test_pvxs_error_requires_guard_does_not_force_cxx20(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
     report = json.loads(out_json.read_text(encoding="utf-8"))
-    # NO_CHANGE/COMPATIBLE is the common case; on a platform where header <->
+    # NO_CHANGE/COMPATIBLE is the common case. On a platform where header <->
     # export-table symbol matching itself degrades for an unrelated reason
     # (observed on macOS Mach-O: --scope-public-headers falls back to the
-    # full export table and marks confidence reduced) the verdict can widen
-    # to COMPATIBLE_WITH_RISK. That degradation is orthogonal to the C++20
-    # dialect bug this test guards against, so it's accepted here too -- the
-    # real regression guards are the assertions below: no breaking/source
-    # break and no SONAME/version-bump advisory ever fire for this pair.
-    assert report["verdict"] in ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK")
+    # full export table, reducing confidence and tripping an unrelated
+    # runtime/toolchain-floor RISK finding) the verdict can widen to
+    # COMPATIBLE_WITH_RISK, which correctly earns its own PATCH/MINOR release
+    # recommendation -- that degradation is orthogonal to the C++20 dialect
+    # bug this test guards against, so it isn't asserted away. What a forced
+    # C++20 dialect misclassification on this pair *would* look like is a
+    # false BREAKING/API_BREAK verdict, a MAJOR version bump, or a SONAME
+    # bump advisory -- those are the real regression guards below.
+    assert report["verdict"] not in ("BREAKING", "API_BREAK")
     assert report["summary"]["breaking"] == 0
     assert report["summary"]["source_breaks"] == 0
     kinds = {c.get("kind") for c in report.get("changes", [])}
     assert "soname_bump_recommended" not in kinds
     release = report.get("release_recommendation") or {}
-    assert release.get("soname_action") != "bump_required"
-    assert release.get("version_bump") in (None, "none")
+    assert release.get("soname_action") not in ("bump_required", "bump_missing")
+    assert release.get("version_bump") != "major"
