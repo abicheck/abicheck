@@ -37,7 +37,7 @@ consumer today can see `public_reachable: false` for two changes — one the
 graph walk *proved* unreachable, one it never examined at all (`UNKNOWN`,
 e.g. because the relevant `extractor_passes` family was narrowed/degraded) —
 with no way to tell them apart. That is exactly the "no evidence ≠ proof of
-absence" distinction `docs/concepts/graph-coverage.md` already documents for
+absence" distinction `docs/learn/graph-coverage.md` already documents for
 suppression's own `reachability: proven-unreachable-only` gate; it was never
 extended to the report output.
 
@@ -175,7 +175,7 @@ existing key removed or reshaped). `abicheck/schemas/compare_report.schema.json`
 gains `reachability_state` (enum, matching `ReachabilityState`'s three
 values) and `impact_assessment` (object, matching `ImpactAssessment.to_dict()`'s
 shape) on each `changes[]` entry; `scripts/publish_schemas.py` republishes
-the synced copy under `docs/schemas/v1/`.
+the synced copy under `docs/reference/schemas/v1/`.
 
 ## Follow-up fixes (Codex review)
 
@@ -239,7 +239,7 @@ the same PR and fixed before merge:
   existed and was tested directly, but no production call site ever passed
   it — `_add_suppression` still emitted `kind`/`symbol`/`description` only,
   so `decision.state: "suppressed"` was advertised (in this ADR's own D1
-  text and in `docs/concepts/impact-analysis.md`) but unreachable from any
+  text and in `docs/learn/impact-analysis.md`) but unreachable from any
   real report. Fixed by routing each suppressed change through
   `assess_change(c, suppressed=True)` (new `reporter._suppressed_change_entry`)
   and adding `reachability_state`/`impact_assessment` to each
@@ -600,9 +600,9 @@ remaining four tiers):
   populate them from yet (the first two need ADR-046 D1's undone
   `occurrence_id` half and Phase 6's correlator respectively).
 - **`docs/reference/source-graph-schema.md`,
-  `docs/development/detector-impact-contract.md`** — reference docs for the
+  `docs/contribute/detector-impact-contract.md`** — reference docs for the
   full edge/detector surface Phases 2/5/6 will add; premature while those
-  surfaces don't exist yet. This ADR adds `docs/concepts/impact-analysis.md`
+  surfaces don't exist yet. This ADR adds `docs/learn/impact-analysis.md`
   instead, scoped to what this slice actually ships.
 
 ## Non-goals
@@ -629,7 +629,7 @@ remaining four tiers):
 **Positive:** `reachability_state` is finally visible to any JSON/SARIF
 consumer — a `PROVEN_UNREACHABLE` finding and an `UNKNOWN` one (narrowed or
 degraded coverage) are now distinguishable without re-running abicheck with
-`-v` or reading `docs/concepts/graph-coverage.md`'s prose description of the
+`-v` or reading `docs/learn/graph-coverage.md`'s prose description of the
 gap. `impact_assessment` gives a consumer building tooling on top of
 abicheck one object to query for "was this reachable, how, and what's the
 proof" instead of five separately-named, independently-nullable keys.
@@ -655,7 +655,7 @@ in this slice being done differently.
 - `abicheck/checker.py`, `abicheck/post_processing.py` — `Change.suppression_rule` set at suppression time (`_filter_suppressed_changes`, `_filter_pattern_synthetic`, `ApplySuppression.run`, `_merge_findings_respecting_suppression`)
 - `abicheck/schemas/compare_report.schema.json`, `abicheck/schemas/__init__.py`
 - `tests/test_impact_model.py`, `tests/test_suppression.py`, `tests/test_sarif.py`, `tests/test_cov95_cli.py`, `tests/test_reporter.py`, `tests/test_reachability_aware_suppression.py`
-- `docs/concepts/impact-analysis.md`, `docs/user-guide/output-formats.md`
+- `docs/learn/impact-analysis.md`, `docs/use/output-formats.md`
 - [G29](../plans/g29-impact-analysis-layer.md) — Phase 3
 - [ADR-044](044-reachability-aware-suppression.md),
   [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md),

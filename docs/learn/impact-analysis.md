@@ -7,8 +7,8 @@ documents `impact_assessment` — the unified, queryable view over those
 fields — and `reachability_state`, the tri-state reachability signal it made
 visible in JSON/SARIF output for the first time.
 
-This is slice 1 of [G29 Phase 3](../development/plans/g29-impact-analysis-layer.md)
-([ADR-052](../development/adr/052-unified-impact-assessment-model.md)). It
+This is slice 1 of [G29 Phase 3](../contribute/plans/g29-impact-analysis-layer.md)
+([ADR-052](../contribute/adr/052-unified-impact-assessment-model.md)). It
 adds a report-level read view; it does not change which findings are
 produced, which are suppressed, or any verdict.
 
@@ -63,11 +63,11 @@ independently-nullable keys:
 - `proof_path` mirrors `affected_public_roots`/`impact_proof_path`/
   `impact_is_direct`/`reachability_proof_path`, when the finding has any of
   them — `root` and `steps` come from the structured L5 graph walk
-  ([ADR-048](../development/adr/048-canonical-entity-identity-and-graph-reconciliation.md)),
+  ([ADR-048](../contribute/adr/048-canonical-entity-identity-and-graph-reconciliation.md)),
   `prose` is the human-readable rendering. `steps` is empty when only the
   prose rendering is available.
 - `decision` records whether the finding was kept or suppressed, and (when a
-  [pattern-aware modulation](../user-guide/api-surface-intelligence.md) or
+  [pattern-aware modulation](../use/api-surface-intelligence.md) or
   other classification override fired) the reason code and
   `verdict_override` — the overridden verdict, which can be a downgrade
   *or* an escalation (e.g. a `std::`-embedding proof promoting
@@ -106,5 +106,5 @@ through the impact layer, and the root-cause correlator (G29 Phase 6),
 none of which exist yet. Adding empty placeholder fields for data no
 producer can populate would misrepresent what abicheck actually knows, so
 they are left out of the schema entirely rather than always-`null`. See
-[ADR-052](../development/adr/052-unified-impact-assessment-model.md) for the
+[ADR-052](../contribute/adr/052-unified-impact-assessment-model.md) for the
 full list of what this slice deliberately does not implement.

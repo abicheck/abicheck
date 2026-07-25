@@ -127,7 +127,7 @@ Compare two ABI surfaces and report changes.
 | `--probe-matrix` | no | — | Build-configuration matrix snapshot, scoped per side with an 'old='/'new=' prefix (e.g. --probe-matrix old=m1 --probe-matrix new=m2). With both sides given, build-config findings (CXX\_STANDARD\_FLOOR\_RAISED, API\_DEPENDS\_ON\_CONSUMER\_ENV, BEHAVIOURAL\_DEFAULT\_CHANGED) are folded into this comparison's verdict and report (G2: probe -> compare; ADR-040). |
 | `--show-only` | no | — | Comma-separated filter tokens to limit displayed changes. Severity: breaking, api-break, risk, compatible. Element: functions, variables, types, enums, elf. Action: added, removed, changed. AND across dimensions, OR within. Does not affect exit codes. |
 | `--stat` | no | `False` | One-line summary output for CI gates. With --format json, emits only the summary object. |
-| `--report-mode` | no | `full` | Report mode: 'full' lists all changes individually (default), 'leaf' groups by root type changes with impact lists, 'impact' behaves as 'full' with the impact summary table enabled (equivalent to --report-mode full --show-impact). Choices: `full`, `leaf`, `impact`. |
+| `--report-mode` | no | `full` | Report mode: 'full' lists all changes individually (default), 'leaf' groups by root type changes with impact lists, 'impact' behaves as 'full' with the impact summary table enabled (equivalent to --report-mode full --show-impact), 'root-cause' groups findings sharing a root cause (Change.caused\_by\_type) under one entry for --format json/markdown (the default rendered text output); --format sarif keeps its normal one-result-per-finding shape but adds properties.rootCauseId/rootCause to each result; --format junit still renders as 'full'. Choices: `full`, `leaf`, `impact`, `root-cause`. |
 | `--show-impact` | no | `False` | Append an impact summary table showing root changes and affected interfaces. |
 | `--recommend` | no | `False` | Append a release recommendation (semver bump + SONAME action) to the report. Always present in --format json under 'release\_recommendation'. |
 | `--annotate` | no | `False` | Emit GitHub Actions workflow command annotations to stderr. Annotations appear as inline comments on PR diffs. Only effective when GITHUB\_ACTIONS=true. |
@@ -356,6 +356,49 @@ Validate CONFIG's targets:/bundles:/profiles:/baseline: block (ADR-047 §3).
 | `--format` | no | `text` | Output format for the validation report. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
+
+## `run-plan`
+
+Generate and project the multi-target CI run-plan (ADR-047 §4/§5).
+
+### `run-plan generate`
+
+Generate run-plan.json from CONFIG's targets:/bundles:/profiles: block.
+
+**Arguments**
+
+| Name | Required | Description |
+|---|:--:|---|
+| `config` | no |  |
+
+**Options**
+
+| Option | Required | Default | Description |
+|---|:--:|---|---|
+| `--build-output` | no | — | One contract profile's abicheck-build/ directory (containing build-output.json), as profile\_id=path/to/dir. Repeatable — pass one per profile referenced by CONFIG's checks:. |
+| `--project` | no | `` | Project identifier recorded in run-plan.json, e.g. owner/repo. |
+| `--head-sha` | no | `` | Candidate commit SHA recorded in run-plan.json. |
+| `--format` | no | `json` | Output format for the generated run-plan. Choices: `json`, `text`. |
+| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
+
+### `run-plan to-aggregate-manifest`
+
+Project RUN_PLAN_JSON to `abicheck aggregate --manifest`'s wire shape.
+
+**Arguments**
+
+| Name | Required | Description |
+|---|:--:|---|
+| `run_plan_json` | yes |  |
+
+**Options**
+
+| Option | Required | Default | Description |
+|---|:--:|---|---|
+| `--head-sha` | no | — | Override run-plan.json's own head\_sha in the emitted manifest. |
+| `--format` | no | `json` | Output format for the emitted manifest. Choices: `json`. |
+| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
 
 ## `scan`
 

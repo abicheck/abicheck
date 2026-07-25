@@ -40,6 +40,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `debuginfod_url` | `str \| None` | `None` |
 | `reconcile_build_context` | `bool` | `False` |
 | `env_matrix_path` | `Path \| None` | `None` |
+| `diagnostic_comparison` | `bool` | `False` |
 
 ## `CompileContext`
 
@@ -176,6 +177,7 @@ Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 | `public_surface_allowlist` | `set[str] \| None` | `None` |
 | `reconcile_build_context` | `bool` | `False` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
+| `diagnostic_comparison` | `bool` | `False` |
 
 **Returns:** `DiffResult`
 
@@ -314,6 +316,7 @@ Compare two ABI inputs and return the classified diff result.
 | `pattern_verdicts` | `bool` | `False` |
 | `public_surface_allowlist` | `set[str] \| None` | `None` |
 | `debuginfod_url` | `str \| None` | `None` |
+| `diagnostic_comparison` | `bool` | `False` |
 
 **Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`
 
