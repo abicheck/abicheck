@@ -413,6 +413,38 @@ def test_budget_checked_during_baseline_compare_not_only_at_end(
     assert elapsed < 2.0
 
 
+def test_against_not_comparable_exits_6(
+    monkeypatch, runner, new_snap_compatible, baseline_snap
+):
+    # ADR-050 D2: a genuine ProfileMismatchError/ScopeMismatchError from the
+    # --against baseline compare must not propagate unhandled -- it becomes a
+    # NOT_COMPARABLE verdict/exit 6, and the report still gets written (not a
+    # bare crash that skips _emit_scan_report entirely).
+    import abicheck.scan_engine as cs
+    from abicheck.errors import ScopeMismatchError
+
+    def _raise(*_a, **_kw):
+        raise ScopeMismatchError("scope drift")
+
+    monkeypatch.setattr(cs, "_run_baseline_compare", _raise)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 6, res.output
+    payload = _payload(res)
+    assert payload["verdict"] == "NOT_COMPARABLE"
+    assert payload["diff"]["reason"] == "scope drift"
+    assert payload["scan_schema_version"] == "1.3"
+
+
 def test_invalid_crosscheck_key_is_usage_error(runner, new_snap_compatible):
     res = runner.invoke(
         main,

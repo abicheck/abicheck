@@ -184,6 +184,7 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 | `2` | Source-level / API break (incl. `API_BREAK` cross-source findings) |
 | `4` | ABI break (from the `--against` comparison) |
 | `5` | `--budget` overflow — the time guard tripped (scope is never silently shrunk) |
+| `6` | `NOT_COMPARABLE` (ADR-050 D2) — `ARTIFACT` and `--against` were not extracted under a comparable profile/scope contract, so the comparison never ran (`diff.reason` in `--format json`). Distinct from `compat check`'s `9` and native `compare`'s `16` — every command maintains an independent exit-code scheme. |
 | `64` | Invalid invocation (bad arguments/options) |
 
 > Exit `5` is unique to `scan`: `--budget 15m` **fails** the run rather than

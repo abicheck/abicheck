@@ -221,7 +221,15 @@ REPORT_SCHEMA_VERSION = "2.17"
 #:       ``action_version``, ``tool_version``), populated the same way by
 #:       ``actions/check-target`` (G30 P1.3) for a ``scan``-mode audit
 #:       check (ADR-047 S5).
-SCAN_SCHEMA_VERSION = "1.2"
+#: 1.3 — added the ``NOT_COMPARABLE`` ``verdict``/exit code ``6`` (ADR-050
+#:       D2): ``scan --against`` (via ``run_scan_core``'s
+#:       ``_run_baseline_compare`` call) now catches a genuine
+#:       ``ProfileMismatchError``/``ScopeMismatchError`` instead of letting
+#:       it propagate unhandled, setting ``diff.reason`` to the exception
+#:       message. Mirrors compare's 2.17 ``verdict: null``/``reason`` bump —
+#:       a new possible value a pre-1.3 ``scan`` consumer could never have
+#:       received before.
+SCAN_SCHEMA_VERSION = "1.3"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"
