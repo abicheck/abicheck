@@ -17,27 +17,33 @@ Scope: pure-Python tests over abicheck.dumper_manifest's TuFragment/merge
 logic (fake entities, no compiler) and the run_tu_fragment/run_tu_loop
 orchestration (a stub header_ast_parser, so the per-TU wiring -- which
 includes get which headers, which public_header_paths, optional-TU-skip --
-is verified without needing castxml/clang. dumper.py itself does not call
-into this module yet (that's a later G32 task); nothing here exercises
-dumper.dump()'s real manifest-driven path.
+is verified without needing castxml/clang.
 
-One real, unmocked end-to-end test (``test_run_tu_loop_real_clang_backend_*``)
-injects ``dumper._header_ast_parser`` itself with ``backend="clang"`` over two
-real header TUs -- deliberately *not* marked ``integration`` (that marker's
-Linux gate requires castxml; the point here is proving the loop works with
-just clang, the same castxml-absent-host reasoning
-``test_clang_header_backend_integration.py`` documents for itself). Each such
-test self-skips when clang is unavailable.
+Two classes of real, unmocked end-to-end tests -- deliberately *not* marked
+``integration`` (that marker's Linux gate requires castxml; the point here is
+proving the loop works with just clang, the same castxml-absent-host
+reasoning ``test_clang_header_backend_integration.py`` documents for itself),
+each self-skipping when clang/g++ are unavailable:
+
+- ``test_run_tu_loop_real_clang_backend_*`` inject ``dumper._header_ast_parser``
+  itself with ``backend="clang"`` over real header TUs, at the
+  ``dumper_manifest.run_tu_loop`` layer directly.
+- ``TestDumpWithManifest`` goes one layer up, through ``dumper.dump()``
+  itself with a real compiled ELF ``.so`` and a real ``DumpManifest`` --
+  proving the ELF format handler's manifest-driven branch (wired in
+  ``_dump_elf``) end to end, not just ``run_tu_loop`` in isolation.
 """
 
 from __future__ import annotations
 
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from abicheck.dump_manifest import IncludeEntry, TranslationUnit
+from abicheck.dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
+from abicheck.dumper import dump
 from abicheck.dumper_manifest import (
     MergedTuFragments,
     TuFragment,
@@ -46,7 +52,7 @@ from abicheck.dumper_manifest import (
     run_tu_fragment,
     run_tu_loop,
 )
-from abicheck.errors import SnapshotError
+from abicheck.errors import SnapshotError, ValidationError
 from abicheck.model import EnumType, Function, RecordType, Variable
 
 
@@ -403,3 +409,142 @@ def test_run_tu_loop_real_clang_backend_raises_on_duplicate_across_tus(tmp_path)
             exported_dynamic={"shared_fn"},
             exported_static=set(),
         )
+
+
+# ---------------------------------------------------------------------------
+# dumper.dump() itself, through the ELF format handler's manifest branch
+# ---------------------------------------------------------------------------
+
+
+def _have(tool: str) -> bool:
+    return shutil.which(tool) is not None
+
+
+class TestDumpWithManifest:
+    """dumper.dump(so_path, [], dump_manifest=...) -- the real ELF entry
+    point, not just run_tu_loop in isolation. Requires clang + g++ (real
+    compile, real clang -ast-dump=json; no castxml needed)."""
+
+    def _build_two_tu_lib(self, tmp_path: Path) -> Path:
+        header_a = tmp_path / "a.h"
+        header_a.write_text("int add_a(int a, int b);\n")
+        header_b = tmp_path / "b.h"
+        header_b.write_text("int add_b(int a, int b);\n")
+        src = tmp_path / "lib.c"
+        src.write_text(
+            "int add_a(int a, int b) { return a + b; }\n"
+            "int add_b(int a, int b) { return a - b; }\n"
+        )
+        so = tmp_path / "liblib.so"
+        subprocess.run(
+            ["gcc", "-shared", "-fPIC", "-o", str(so), str(src)],
+            check=True,
+            capture_output=True,
+        )
+        return so
+
+    def _manifest(self, tmp_path: Path) -> DumpManifest:
+        return DumpManifest(
+            base_dir=tmp_path,
+            compiler="cc",
+            roots=(tmp_path / "a.h", tmp_path / "b.h"),
+            translation_units=(
+                TranslationUnit(name="tu_a", forced_includes=(tmp_path / "a.h",)),
+                TranslationUnit(name="tu_b", forced_includes=(tmp_path / "b.h",)),
+            ),
+        )
+
+    def test_dump_merges_two_tus_into_one_snapshot(self, tmp_path: Path):
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        so = self._build_two_tu_lib(tmp_path)
+        snap = dump(
+            so,
+            [],
+            version="1.0",
+            compiler="cc",
+            header_backend="clang",
+            dump_manifest=self._manifest(tmp_path),
+        )
+        assert snap.from_headers is True
+        assert {f.name for f in snap.functions} == {"add_a", "add_b"}
+        assert snap.ast_producer == "clang"
+        assert snap.contract is not None
+        assert snap.contract.scope_fingerprint is not None
+
+    def test_dump_rejects_headers_with_manifest(self, tmp_path: Path):
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        so = self._build_two_tu_lib(tmp_path)
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            dump(
+                so,
+                [tmp_path / "a.h"],
+                version="1.0",
+                compiler="cc",
+                header_backend="clang",
+                dump_manifest=self._manifest(tmp_path),
+            )
+
+    def test_dump_rejects_public_headers_with_manifest(self, tmp_path: Path):
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        so = self._build_two_tu_lib(tmp_path)
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            dump(
+                so,
+                [],
+                version="1.0",
+                compiler="cc",
+                header_backend="clang",
+                public_headers=[tmp_path / "a.h"],
+                dump_manifest=self._manifest(tmp_path),
+            )
+
+    def test_dump_rejects_manifest_for_hybrid_frontend(self, tmp_path: Path):
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        so = self._build_two_tu_lib(tmp_path)
+        with pytest.raises(ValidationError, match="hybrid"):
+            dump(
+                so,
+                [],
+                version="1.0",
+                compiler="cc",
+                header_backend="hybrid",
+                dump_manifest=self._manifest(tmp_path),
+            )
+
+    def test_dump_manifest_duplicate_across_tus_raises(self, tmp_path: Path):
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        header_a = tmp_path / "a.h"
+        header_a.write_text("int shared_fn(int a, int b);\n")
+        header_b = tmp_path / "b.h"
+        header_b.write_text("int shared_fn(int a, int b);\n")
+        src = tmp_path / "lib.c"
+        src.write_text("int shared_fn(int a, int b) { return a + b; }\n")
+        so = tmp_path / "liblib.so"
+        subprocess.run(
+            ["gcc", "-shared", "-fPIC", "-o", str(so), str(src)],
+            check=True,
+            capture_output=True,
+        )
+        manifest = DumpManifest(
+            base_dir=tmp_path,
+            compiler="cc",
+            roots=(header_a, header_b),
+            translation_units=(
+                TranslationUnit(name="tu_a", forced_includes=(header_a,)),
+                TranslationUnit(name="tu_b", forced_includes=(header_b,)),
+            ),
+        )
+        with pytest.raises(SnapshotError, match="redeclares function"):
+            dump(
+                so,
+                [],
+                version="1.0",
+                compiler="cc",
+                header_backend="clang",
+                dump_manifest=manifest,
+            )

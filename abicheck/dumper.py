@@ -33,6 +33,7 @@ from xml.etree.ElementTree import (
 )
 
 if TYPE_CHECKING:
+    from .dump_manifest import DumpManifest
     from .dwarf_advanced import AdvancedDwarfMetadata
     from .dwarf_metadata import DwarfMetadata
     from .dwarf_unified import DwarfSession
@@ -1123,6 +1124,7 @@ def dump(
     extra_hash_dirs: tuple[Path, ...] = (),
     debug_info_path: Path | None = None,
     extra_include_labels: dict[Path, str] | None = None,
+    dump_manifest: DumpManifest | None = None,
 ) -> AbiSnapshot:
     """Create an AbiSnapshot from a shared library + headers.
 
@@ -1172,11 +1174,31 @@ def dump(
             (ADR-050 D1), consulted when building the ``IncludeDir`` list
             :func:`comparability.compute_extraction_contract` fingerprints.
             A path with no entry gets ``label=None``, unchanged.
+        dump_manifest: A parsed ``--dump-manifest`` document (ADR-050 D3) for
+            a real multi-TU dump; mutually exclusive with *headers* and
+            *public_headers*/*public_header_dirs*. ELF only so far.
 
     Returns:
         AbiSnapshot with functions, variables, and types populated.
     """
+    if dump_manifest is not None and headers:
+        raise ValidationError(
+            "dump_manifest and headers are mutually exclusive -- the "
+            "manifest's own 'roots' field declares the public surface instead."
+        )
+    if dump_manifest is not None and (public_headers or public_header_dirs):
+        raise ValidationError(
+            "dump_manifest and public_headers/public_header_dirs are "
+            "mutually exclusive -- declare them in the manifest's own base "
+            "profile instead."
+        )
+
     if _resolve_header_backend(header_backend) == "hybrid":
+        if dump_manifest is not None:
+            raise ValidationError(
+                "dump_manifest is not yet supported with the 'hybrid' AST "
+                "frontend; pass an explicit --ast-frontend castxml/clang."
+            )
         from .dumper_hybrid import run_hybrid_dump
 
         return run_hybrid_dump(
@@ -1230,6 +1252,19 @@ def dump(
         extra["symbols_only"] = symbols_only
         extra["debug_presence_only"] = debug_presence_only
         extra["debug_info_path"] = debug_info_path
+    # dump_manifest's own public_header_paths/public_header_dirs replace the
+    # CLI-flag-derived ones for provenance/contract below (mutual exclusivity
+    # already validated above).
+    effective_public_headers = (
+        list(dump_manifest.public_header_paths)
+        if dump_manifest is not None
+        else public_headers
+    )
+    effective_public_header_dirs = (
+        list(dump_manifest.public_header_dirs)
+        if dump_manifest is not None
+        else public_header_dirs
+    )
     snapshot = handler.builder(
         so_path,
         headers,
@@ -1243,10 +1278,11 @@ def dump(
         sysroot=sysroot,
         nostdinc=nostdinc,
         lang=lang,
-        public_headers=public_headers,
-        public_header_dirs=public_header_dirs,
+        public_headers=effective_public_headers,
+        public_header_dirs=effective_public_header_dirs,
         header_backend=header_backend,
         extra_hash_dirs=extra_hash_dirs,
+        dump_manifest=dump_manifest,
         **extra,
     )
 
@@ -1258,13 +1294,13 @@ def dump(
     # correctly. DWARF-only and symbols-only builds leave it False.
     _attach_extraction_contract(
         snapshot,
-        headers=headers,
+        headers=list(dump_manifest.roots) if dump_manifest is not None else headers,
         extra_includes=extra_includes,
         gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         lang=lang,
-        public_headers=public_headers,
-        public_header_dirs=public_header_dirs,
+        public_headers=effective_public_headers,
+        public_header_dirs=effective_public_header_dirs,
         extra_include_labels=extra_include_labels,
     )
 
@@ -1273,7 +1309,7 @@ def dump(
     # classified when a public-header set is supplied (ADR-015, D4).
     from .provenance import apply_provenance
 
-    return apply_provenance(snapshot, public_headers, public_header_dirs)
+    return apply_provenance(snapshot, effective_public_headers, effective_public_header_dirs)
 
 
 def _lang_to_profile(lang: str | None) -> str | None:
@@ -1462,8 +1498,16 @@ def _dump_elf(
     header_backend: str = "auto",
     extra_hash_dirs: tuple[Path, ...] = (),
     debug_info_path: Path | None = None,
+    dump_manifest: DumpManifest | None = None,
 ) -> AbiSnapshot:
-    """ELF-specific dump: pyelftools + debug info (DWARF/BTF/CTF) + header AST."""
+    """ELF-specific dump: pyelftools + debug info (DWARF/BTF/CTF) + header AST.
+
+    *dump_manifest* (ADR-050 D3, Phase B): a real multi-TU dump via
+    :func:`abicheck.dumper_manifest.resolve_header_ast_result`, replacing
+    the single flat *headers*/*extra_includes* parse. *headers* must be
+    empty in this case (enforced by :func:`dump`). PE/Mach-O reject a
+    non-``None`` value outright (not yet supported there).
+    """
     exported_dynamic, exported_static = _pyelftools_exported_symbols(so_path)
     from .elf_metadata import parse_elf_metadata
 
@@ -1517,10 +1561,11 @@ def _dump_elf(
                 UserWarning,
                 stacklevel=2,
             )
+        no_headers = not headers and dump_manifest is None
         if (
             not (symbols_only or debug_presence_only)
             and resolved_debug_format == "dwarf"
-            and (dwarf_only or (not headers and dwarf_meta.has_dwarf))
+            and (dwarf_only or (no_headers and dwarf_meta.has_dwarf))
         ):
             snap, dwarf_only_types = _try_dwarf_snapshot(
                 so_path,
@@ -1535,7 +1580,7 @@ def _dump_elf(
             )
             if snap is not None:
                 return snap
-        if symbols_only or not headers:
+        if symbols_only or no_headers:
             return _build_symbol_only_snapshot(
                 so_path,
                 version,
@@ -1548,10 +1593,16 @@ def _dump_elf(
                 dwarf_only_types,
                 profile_hint,
             )
-        # Built here (session still open): the "auto" frontend can fall back to clang internally (G16) even when _resolve_header_backend guesses castxml, so the actual parser type is the only reliable signal below (Codex review).
-        parser = _header_ast_parser(
-            headers,
-            extra_includes,
+        # Built here (session still open): "auto" can fall back to clang internally
+        # (G16), so ast_result.is_clang is the only reliable signal (Codex review).
+        # N per-TU invocations for a dump_manifest, one flat parse otherwise (ADR-050 D3).
+        from .dumper_manifest import resolve_header_ast_result
+
+        ast_result = resolve_header_ast_result(
+            dump_manifest=dump_manifest,
+            headers=headers,
+            extra_includes=extra_includes,
+            header_ast_parser=_header_ast_parser,
             backend=header_backend,
             compiler=compiler,
             gcc_path=gcc_path,
@@ -1563,9 +1614,8 @@ def _dump_elf(
             lang=lang,
             exported_dynamic=exported_dynamic,
             exported_static=exported_static,
-            public_header_paths=[str(h) for h in headers]
-            + [str(h) for h in (public_headers or [])],
-            public_dir_paths=[str(d) for d in (public_header_dirs or [])],
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
             extra_hash_dirs=extra_hash_dirs,
         )
         dwarf_layout_types = dwarf_layout_types_or_empty(
@@ -1573,7 +1623,7 @@ def _dump_elf(
             elf_meta,
             dwarf_meta,
             dwarf_adv,
-            isinstance(parser, _ClangAstParser),
+            ast_result.is_clang,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
             debug_format=resolved_debug_format,
@@ -1593,26 +1643,30 @@ def _dump_elf(
         source_mtime=_so_mtime,
         source_mtime_epoch=_so_mtime_epoch,
         source_size=_safe_size(so_path),
-        functions=parser.parse_functions(),
-        variables=parser.parse_variables(),
-        types=backfill_dwarf_layout(parser.parse_types(), dwarf_layout_types),
-        enums=parser.parse_enums(),
-        typedefs=parser.parse_typedefs(),
-        constants=parser.parse_constants(),
+        functions=list(ast_result.functions),
+        variables=list(ast_result.variables),
+        types=backfill_dwarf_layout(list(ast_result.types), dwarf_layout_types),
+        enums=list(ast_result.enums),
+        typedefs=ast_result.typedefs,
+        constants=ast_result.constants,
         elf=elf_meta,
         dwarf=dwarf_meta,
         dwarf_advanced=dwarf_adv,
         # Reached only when headers were supplied and castxml ran (the no-header
         # and DWARF-only branches return earlier): this surface is header-parsed.
         from_headers=True,
-        ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
-        ast_toolchain=_parser_ast_toolchain(parser),
-        ast_fallback_reason=_parser_ast_fallback_reason(parser),
-        ast_toolchain_supported=_parser_ast_supported(parser),
-        ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
+        ast_producer=ast_result.ast_producer,
+        ast_toolchain=ast_result.ast_toolchain,
+        ast_fallback_reason=ast_result.ast_fallback_reason,
+        ast_toolchain_supported=ast_result.ast_toolchain_supported,
+        ast_toolchain_unsupported_reasons=list(
+            ast_result.ast_toolchain_unsupported_reasons
+        ),
         platform="elf",
         language_profile=profile_hint,
-        **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot),
+        **_ast_compile_provenance(
+            list(ast_result.provenance_headers), gcc_options, gcc_option_tokens, sysroot
+        ),
     )
     _populate_elf_visibility(snapshot)
     return snapshot
@@ -1637,8 +1691,18 @@ def _dump_macho(
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
     extra_hash_dirs: tuple[Path, ...] = (),
+    dump_manifest: DumpManifest | None = None,
 ) -> AbiSnapshot:
-    """Mach-O dump: export table from macholib + header-AST analysis."""
+    """Mach-O dump: export table from macholib + header-AST analysis.
+
+    *dump_manifest* is not yet supported here (ADR-050 D3 is ELF-scoped) --
+    rejected explicitly rather than silently ignored.
+    """
+    if dump_manifest is not None:
+        raise ValidationError(
+            "--dump-manifest is not yet supported for Mach-O binaries "
+            "(ADR-050 D3); use a single-header dump for this format."
+        )
     if dwarf_only:
         warnings.warn(
             "dwarf_only=True is not supported for Mach-O; "
@@ -1795,8 +1859,18 @@ def _dump_pe(
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
     extra_hash_dirs: tuple[Path, ...] = (),
+    dump_manifest: DumpManifest | None = None,
 ) -> AbiSnapshot:
-    """PE dump: export table from pefile + header-AST analysis."""
+    """PE dump: export table from pefile + header-AST analysis.
+
+    *dump_manifest* is not yet supported here (ADR-050 D3 is ELF-scoped) --
+    rejected explicitly rather than silently ignored.
+    """
+    if dump_manifest is not None:
+        raise ValidationError(
+            "--dump-manifest is not yet supported for PE binaries "
+            "(ADR-050 D3); use a single-header dump for this format."
+        )
     from .pe_metadata import parse_pe_metadata
 
     pe_meta = parse_pe_metadata(dll_path)

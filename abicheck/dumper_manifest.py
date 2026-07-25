@@ -52,9 +52,9 @@ import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from .dump_manifest import TranslationUnit
+from .dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from .dumper_clang import _ClangAstParser
 from .dumper_toolchain import (
     _parser_ast_fallback_reason,
@@ -99,7 +99,7 @@ class TuFragment:
     typedefs: dict[str, str] = field(default_factory=dict)
     constants: dict[str, str] = field(default_factory=dict)
     ast_producer: str = "castxml"
-    ast_toolchain: dict[str, Any] | None = None
+    ast_toolchain: dict[str, str] = field(default_factory=dict)
     ast_fallback_reason: str | None = None
     ast_toolchain_supported: bool | None = None
     ast_toolchain_unsupported_reasons: tuple[str, ...] = ()
@@ -121,7 +121,7 @@ class MergedTuFragments:
     typedefs: dict[str, str]
     constants: dict[str, str]
     ast_producer: str
-    ast_toolchain: dict[str, Any] | None
+    ast_toolchain: dict[str, str]
     ast_fallback_reason: str | None
     ast_toolchain_supported: bool | None
     ast_toolchain_unsupported_reasons: tuple[str, ...]
@@ -214,7 +214,7 @@ def merge_tu_fragments(fragments: Sequence[TuFragment]) -> MergedTuFragments:
             typedefs={},
             constants={},
             ast_producer="castxml",
-            ast_toolchain=None,
+            ast_toolchain={},
             ast_fallback_reason=None,
             ast_toolchain_supported=None,
             ast_toolchain_unsupported_reasons=(),
@@ -388,3 +388,145 @@ def run_tu_loop(
             )
 
     return merge_tu_fragments(fragments)
+
+
+@dataclass(frozen=True)
+class ElfHeaderAstResult:
+    """The single result shape :func:`resolve_header_ast_result` returns for
+    both the legacy single-header path and a real manifest -- everything a
+    format handler's snapshot-assembly step needs, so it never has to know
+    which of the two actually ran.
+    """
+
+    functions: tuple[Function, ...]
+    variables: tuple[Variable, ...]
+    types: tuple[RecordType, ...]
+    enums: tuple[EnumType, ...]
+    typedefs: dict[str, str]
+    constants: dict[str, str]
+    ast_producer: str
+    ast_toolchain: dict[str, str]
+    ast_fallback_reason: str | None
+    ast_toolchain_supported: bool | None
+    ast_toolchain_unsupported_reasons: tuple[str, ...]
+    is_clang: bool
+    provenance_headers: tuple[Path, ...]
+
+
+def resolve_header_ast_result(
+    *,
+    dump_manifest: DumpManifest | None,
+    headers: list[Path],
+    extra_includes: list[Path],
+    header_ast_parser: HeaderAstParserFn,
+    backend: str,
+    compiler: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+    nostdinc: bool,
+    lang: str | None,
+    exported_dynamic: set[str],
+    exported_static: set[str],
+    public_headers: list[Path] | None,
+    public_header_dirs: list[Path] | None,
+    extra_hash_dirs: tuple[Path, ...] = (),
+) -> ElfHeaderAstResult:
+    """Run the header-AST parse for one dump -- manifest-driven (one
+    invocation per TU, merged) when *dump_manifest* is given, otherwise the
+    legacy single-TU path -- and return one common result shape either way.
+
+    The legacy branch is a real, one-TU call into :func:`run_tu_fragment`
+    (a synthetic ``legacy-main`` :class:`~abicheck.dump_manifest.TranslationUnit`
+    built from *headers*/*extra_includes*), not a second, parallel
+    implementation of the parse-and-normalize step -- ADR-050 D3's "the
+    existing single-TU code path becomes the manifest path's one-TU special
+    case". Its *public_header_paths* input is *headers* itself plus
+    *public_headers* (matching the legacy CLI's own "the headers you pass
+    are always public" rule) since there is no manifest ``roots`` field to
+    read it from instead.
+
+    This function -- not the per-format ``dumper.py`` builders -- is where
+    the legacy-vs-manifest branch lives, so each builder (``_dump_elf``
+    today; ``_dump_pe``/``_dump_macho`` once they support manifests) needs
+    only one call site instead of duplicating the branch inline (``dumper.py``
+    has no line-count headroom for that -- see this module's own docstring).
+    """
+    if dump_manifest is not None:
+        merged = run_tu_loop(
+            dump_manifest.translation_units,
+            header_ast_parser=header_ast_parser,
+            roots=dump_manifest.roots,
+            public_header_paths=dump_manifest.public_header_paths,
+            public_header_dirs=dump_manifest.public_header_dirs,
+            backend=backend,
+            compiler=compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+            exported_dynamic=exported_dynamic,
+            exported_static=exported_static,
+            extra_hash_dirs=extra_hash_dirs,
+        )
+        provenance_headers = tuple(dump_manifest.roots)
+    else:
+        legacy_tu = TranslationUnit(
+            name="legacy-main",
+            forced_includes=tuple(headers),
+            includes=tuple(IncludeEntry(path=p) for p in extra_includes),
+        )
+        fragment = run_tu_fragment(
+            legacy_tu,
+            header_ast_parser=header_ast_parser,
+            backend=backend,
+            compiler=compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+            exported_dynamic=exported_dynamic,
+            exported_static=exported_static,
+            public_header_paths=[str(h) for h in headers]
+            + [str(h) for h in (public_headers or [])],
+            public_dir_paths=[str(d) for d in (public_header_dirs or [])],
+            extra_hash_dirs=extra_hash_dirs,
+        )
+        merged = MergedTuFragments(
+            functions=fragment.functions,
+            variables=fragment.variables,
+            types=fragment.types,
+            enums=fragment.enums,
+            typedefs=fragment.typedefs,
+            constants=fragment.constants,
+            ast_producer=fragment.ast_producer,
+            ast_toolchain=fragment.ast_toolchain,
+            ast_fallback_reason=fragment.ast_fallback_reason,
+            ast_toolchain_supported=fragment.ast_toolchain_supported,
+            ast_toolchain_unsupported_reasons=fragment.ast_toolchain_unsupported_reasons,
+        )
+        provenance_headers = tuple(headers)
+
+    return ElfHeaderAstResult(
+        functions=merged.functions,
+        variables=merged.variables,
+        types=merged.types,
+        enums=merged.enums,
+        typedefs=merged.typedefs,
+        constants=merged.constants,
+        ast_producer=merged.ast_producer,
+        ast_toolchain=merged.ast_toolchain,
+        ast_fallback_reason=merged.ast_fallback_reason,
+        ast_toolchain_supported=merged.ast_toolchain_supported,
+        ast_toolchain_unsupported_reasons=merged.ast_toolchain_unsupported_reasons,
+        is_clang=merged.ast_producer == "clang",
+        provenance_headers=provenance_headers,
+    )
