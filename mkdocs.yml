@@ -77,6 +77,12 @@ nav:
       - Upgrading to 0.5.0: user-guide/migration-0.5.md
       - Migrating from ABICC: user-guide/from-abicc.md
       - Migrating from libabigail: user-guide/from-libabigail.md
+  # G30/ADR-047's scenario-first GitHub Actions integration model -- "which
+  # project-lifecycle scenario am I", distinct from User Guide's
+  # CLI-command-level "what flags do I need" framing.
+  - Project Integration:
+    - Which Scenario Am I?: integration/index.md
+    - Concepts: integration/concepts.md
   # How the tool works, simplest mental model first: what a verdict means →
   # what each data source can see → how the pipeline is built → deep internals.
   - Concepts:

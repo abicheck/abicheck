@@ -2393,7 +2393,7 @@ false-negative `check-project.yml`/`check-single.yml` already carry and
 document, confirmed by running `actionlint` against those pre-existing files
 too for comparison) before relying on the structural assertions alone.
 
-### P1.7 — Scenario-first documentation IA
+### P1.7 — Scenario-first documentation IA — **batch 1 of ~5 done**
 
 Implements ADR-047 §8's scenario catalog and the task's requested
 `docs/integration/` tree. **File tree and migration map:**
@@ -2457,6 +2457,36 @@ scenarios/ batch 2 — S8/S9/S13/S14/S15; scenarios/ batch 3 — remainder;
 baselines/ + reference/), each verified independently against
 `mkdocs build --strict` and the AI-readiness `mkdocs-nav-coverage` /
 `adr-index-nav-sync` (n/a here, doc-count-sync applies) checks.
+
+**Status: batch 1 (index+concepts) implemented; scenarios/baselines/
+reference batches not started.** `docs/integration/index.md` and
+`docs/integration/concepts.md` exist, linked from a new "Project
+Integration" `mkdocs.yml` nav tab. **Deliberate sequencing choice, not
+anticipated by this plan's own file-tree listing:** `index.md`'s per-scenario
+rows do **not** yet point at the `scenarios/*.md`/`baselines/*.md` pages the
+file tree above lists — those pages don't exist yet, and `mkdocs build
+--strict` fails the build on a dangling link, so `index.md` instead points
+each scenario at whichever *existing* page currently answers that question
+(per the migration map above — e.g. S1/S2 point at `github-action.md`, S19/S20
+at the new `reference/publish-baseline.md`), with an explicit status callout
+at the top of the page explaining this is temporary. Each later scenario
+batch's job is therefore two-part: land the new page, *and* repoint
+`index.md`'s corresponding row(s) at it — not just add the new page in
+isolation. No existing page was retired, migrated, or edited in this batch
+(the migration map's retirement/content-redistribution steps are scenario-
+batch work, not index/concepts work) — `choose-your-workflow.md` gained no
+link back to `docs/integration/index.md` yet either, deferred to whichever
+scenario batch actually starts absorbing its content, so that page's own
+"stays as the CLI-command-level decision tool" edit happens once, with real
+content moving alongside it, rather than as a premature cross-link to a
+still-mostly-stub section. `concepts.md` covers every ADR-047 §1 term
+(project, build profile, target, release bundle, build output, source
+evidence, baseline channel, baseline set, check, run plan, report, fan-in) in
+prose, cross-linked to each term's existing schema/reference page rather than
+duplicating any table. Verified via `mkdocs build --strict` (no new broken
+links or nav-coverage gaps) and `scripts/check_docs_contract.py` (0 errors) —
+no new `docs/_meta/topics.yaml` topic was registered, per `docs/AGENTS.md`'s
+"rollout is deliberately incremental" note for that registry.
 
 ---
 
