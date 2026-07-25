@@ -9,8 +9,7 @@ translation units; on a release/nightly run, replay the whole target.
 
 This is the **replay** evidence producer — abicheck derives source facts
 itself from your existing compile database, with no build-time integration
-step. Compare with S8/S9 (a future scenario-page batch —
-[Producing Source Facts](../../user-guide/producing-source-facts.md) for now),
+step. Compare with [S8/S9: Source Facts From the Build Itself](build-integrated-facts.md),
 where the *build* emits source facts as it compiles instead.
 
 ## What you need
@@ -65,9 +64,8 @@ full `evidence-producer` contract and how it composes with `collect-facts`.
 ## When to move past this scenario
 
 - **Your build can emit source facts itself, avoiding a second replay pass**
-  → S8/S9 (a future scenario-page batch) — for now, see
-  [Producing Source Facts](../../user-guide/producing-source-facts.md) (the
-  `abicheck-cc` wrapper or the Clang plugin).
+  → [S8/S9: Source Facts From the Build Itself](build-integrated-facts.md)
+  (the `abicheck-cc` wrapper or the Clang plugin).
 - **You have several DSOs sharing one facts pack** → S16,
   [Build Info & Sources](../../concepts/build-source-data.md).
 

@@ -2515,6 +2515,34 @@ Verified the same way as batch 1: `mkdocs build --strict` (clean) and
 `scripts/check_docs_contract.py` (0 errors, no new duplication warnings from
 the four new pages).
 
+**Batch 3 (scenarios/ — S8/S9/S13/S14/S15) also implemented, matching this
+plan's own suggested second scenario batch exactly.**
+`docs/integration/scenarios/build-integrated-facts.md` covers S8 (the
+`abicheck-cc` wrapper) and S9 (the Clang plugin) as one page — the plan's
+own file tree already lists them as one page ("absorbs
+producing-source-facts.md (S8, S9)"), since both are "producer" choices
+sharing the identical two-step `collect-facts prepare`/`verify` choreography
+and downstream `check-target` composition, differing only in
+`evidence-producer: wrapper` vs. `clang-plugin`. `packages-and-sdks.md` (S13)
+covers both the plain-CLI package-compare case and the build-output.json
+path (folding into S3's existing flow, per ADR-047's own D5/D7 note that S13
+needs no separate primitive). `release-bundle.md` (S14) and
+`multi-dso-project.md` (S15) cover the bundle-vs-independent-targets
+distinction §1's "why these seven boundaries matter" note flags as easy to
+conflate, each linking to `multi-binary.md`/`reusable-workflows.md` rather
+than duplicating (both pages are on this plan's "kept as-is" list). Same
+scope discipline as batch 2: no existing page retired or edited; `index.md`'s
+five corresponding rows (S8, S9, S10's neighbor entries untouched, S11, S13,
+S14, S15) repointed at the new pages. `docs/reference/publish-baseline.md`
+gained no new content — `release-bundle.md` links to its existing "Bundle
+members" section by name rather than a guessed heading-slug anchor, after
+confirming that section is prose within a heading, not its own heading (an
+anchor to a non-existent heading slug would have been a silent dead link
+`mkdocs build --strict` does catch, but only by actually trying it — checked
+directly instead of guessing). Verified identically to batches 1-2:
+`mkdocs build --strict` (clean) and `scripts/check_docs_contract.py`
+(0 errors).
+
 ---
 
 ## P2 — Deeper architecture (not started here)

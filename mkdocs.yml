@@ -88,6 +88,10 @@ nav:
       - 'S3: Reuse an Existing Build': integration/scenarios/existing-build-artifact.md
       - 'S6: Header-Aware Compatibility': integration/scenarios/header-aware-check.md
       - 'S7: Source Scan via Compile-DB Replay': integration/scenarios/source-replay.md
+      - 'S8/S9: Source Facts From the Build Itself': integration/scenarios/build-integrated-facts.md
+      - 'S13: Packages & Prebuilt Artifacts': integration/scenarios/packages-and-sdks.md
+      - 'S14: Multi-DSO Release Bundle': integration/scenarios/release-bundle.md
+      - 'S15: Multiple Independent Targets': integration/scenarios/multi-dso-project.md
   # How the tool works, simplest mental model first: what a verdict means →
   # what each data source can see → how the pipeline is built → deep internals.
   - Concepts:
