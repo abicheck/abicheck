@@ -314,6 +314,7 @@ renamed from the old `--baseline`/`--candidate`).
 | `0` | `PASS` | Binary loads and no harmful ABI changes |
 | `1` | `WARN` | Binary loads but ABI risk detected in dependencies |
 | `4` | `FAIL` | Load failure or binary ABI break in dependencies |
+| `5` | — | `not_comparable` (ADR-050 D2) — at least one dependency's before/after DSOs were not extracted under a comparable profile/scope contract, so its per-library ABI diff never ran. Dominates `0`/`1`/`4`, the same "couldn't establish what changed" precedence the gate uses elsewhere. |
 | `64` | — | Invalid invocation (bad arguments/options) |
 
 `--dry-run` shows the old/new roots, resolved binary paths, and search order
@@ -351,7 +352,7 @@ Matches `abi-compliance-checker` exit codes (ABICC drop-in):
 | `1` | `BREAKING` (mirrors ABICC) |
 | `2` | `API_BREAK` (source-level break; non-verdict failures use extended codes below) |
 
-> Non-verdict/tool failures are classified via **Extended compat error codes (ABICC-style)** below (`3`, `4`, `5`, `6`, `7`, `8`, `10`, `11`).
+> Non-verdict/tool failures are classified via **Extended compat error codes (ABICC-style)** below (`3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`).
 
 ---
 
@@ -368,6 +369,7 @@ In `abicheck compat`, non-verdict failures are further classified where possible
 | `6` | Invalid compat configuration/input (descriptor, suppression, regex flags) |
 | `7` | Failed to write report/output artifact |
 | `8` | Dump/analysis pipeline failure |
+| `9` | `not_comparable` (ADR-050 D2) — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced. Distinct from native `compare`'s own `16` — the two commands maintain independent exit-code schemes. |
 | `10` | Generic internal/tool failure fallback |
 | `11` | Interrupted run |
 

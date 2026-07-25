@@ -26,6 +26,8 @@ from typing import NoReturn
 
 import click
 
+from ..errors import ProfileMismatchError, ScopeMismatchError
+
 
 def _looks_like_tool_missing(msg: str, ctx: str) -> bool:
     """Return True when the error indicates missing external tooling."""
@@ -68,11 +70,19 @@ def _classify_compat_error_exit_code(exc: BaseException, *, context: str = "") -
       6  - invalid descriptor/config/suppression inputs
       7  - failed to write report/output artifacts
       8  - dump/analysis pipeline failure
+      9  - not_comparable (ADR-050 D2): OLD/NEW were not extracted under a
+          comparable profile/scope contract, so no verdict was produced. The
+          one code the 3-11 range documented no meaning for before this.
+          Deliberately distinct from native ``compare``'s own ``16`` — the
+          two commands maintain independent, non-overlapping exit-code
+          schemes.
       10 - generic internal/tool error fallback
       11 - interrupted run
     """
     if isinstance(exc, KeyboardInterrupt):
         return 11
+    if isinstance(exc, (ProfileMismatchError, ScopeMismatchError)):
+        return 9
 
     msg = str(exc).lower()
     ctx = context.lower()
