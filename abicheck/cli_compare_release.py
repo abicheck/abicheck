@@ -77,6 +77,7 @@ from .cli_options import (
     verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
+from .errors import ProfileMismatchError, ScopeMismatchError
 from .model import AbiSnapshot
 from .reporter import to_json
 
@@ -259,6 +260,30 @@ def _compare_one_library(
             lib_report_path = output_dir / f"{old_path.stem}.json"
             _safe_write_output(lib_report_path, to_json(result))
         return entry
+    except (ProfileMismatchError, ScopeMismatchError) as exc:
+        # ADR-050 D2 — ordered before the generic except Exception below.
+        # This library's old/new DSOs were not extracted under a comparable
+        # profile/scope contract: a distinct, expected outcome (not an
+        # abicheck bug), so it gets its own "not_comparable" verdict string
+        # instead of falling into the same "ERROR"/exit-4 bucket a genuine
+        # crash uses — see _RELEASE_VERDICT_ORDER's dedicated rank for it.
+        kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
+        if output_dir:
+            from .schemas import REPORT_SCHEMA_VERSION
+
+            lib_report_path = output_dir / f"{old_path.stem}.json"
+            doc = {
+                "report_schema_version": REPORT_SCHEMA_VERSION,
+                "library": old_path.name,
+                "verdict": None,
+                "reason": {"kind": kind, "message": str(exc)},
+            }
+            _safe_write_output(lib_report_path, json.dumps(doc, indent=2))
+        return {
+            "library": old_path.name,
+            "verdict": "not_comparable",
+            "reason": str(exc),
+        }
     except (click.ClickException, click.UsageError) as exc:
         return {
             "library": old_path.name,
@@ -420,6 +445,11 @@ def _compare_release_libraries(
             if "error" in entry:
                 click.echo(
                     f"Error comparing {entry['library']}: {entry['error']}", err=True
+                )
+        elif v == "not_comparable":
+            if "reason" in entry:
+                click.echo(
+                    f"Not comparable: {entry['library']}: {entry['reason']}", err=True
                 )
         if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(
             worst_verdict, 0

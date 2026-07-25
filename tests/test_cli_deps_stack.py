@@ -70,7 +70,7 @@ def _make_result(
     risk_score: str = "low",
     baseline_env: str = "",
     candidate_env: str = "",
-    stack_changes: list | None = None,
+    stack_changes: list[StackChange] | None = None,
 ) -> StackCheckResult:
     graph = _make_graph(binary)
     bindings = _make_bindings(binary)

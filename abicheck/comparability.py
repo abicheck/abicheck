@@ -17,7 +17,7 @@ and the gate that proves two snapshots were extracted comparably before
 ``compare`` is allowed to produce a verdict.
 
 **Scope of this module today (ADR-050 Phase A — see
-``docs/development/plans/g32-comparability-contract-and-multi-tu-manifest.md``
+``docs/contribute/plans/g32-comparability-contract-and-multi-tu-manifest.md``
 Phase A): the fingerprint algorithm and the gate are real, and both are wired
 into real production dumps, not just ``checker.compare``'s call site.**
 ``dumper.py`` calls :func:`compute_extraction_contract` unconditionally on
@@ -28,40 +28,43 @@ public-header provenance was given) now carries a real ``contract`` — not
 dumps. A dump with neither (plain binary/symbols-only, no headers) still
 gets ``contract=None``, exactly as documented on
 :func:`compute_extraction_contract` itself ("nothing to fingerprint at
-all"). :func:`check_contracts_comparable` is reachable
-from ``checker.compare`` (the Tier-1 core), from ``service.py``'s
-``CompareRequest``/``run_compare_request``/legacy ``run_compare`` keyword
-shim (which thread a ``diagnostic_comparison`` keyword all the way through,
-though without their own exception→outcome handling — a raised mismatch
-propagates to their caller), and from the native ``compare`` CLI command
-(``cli_compare_helpers.run_compare``, which does have its own handling: a
-``--diagnostic-comparison`` flag and a dedicated
-``except (ProfileMismatchError, ScopeMismatchError)`` branch that renders a
-schema-conformant ``verdict: null`` JSON report and exits 16). Not yet wired
-in — tracked as explicit follow-up work, not silently dropped scope:
+all"). :func:`check_contracts_comparable` is reachable — and has its own
+exception→outcome handling — from all seven ADR-050 D2 entry points: the
+native ``compare`` CLI command (``cli_compare_helpers.run_compare`` — a
+``--diagnostic-comparison`` flag, a schema-conformant ``verdict: null`` JSON
+report, exit ``16``), ``cli_compare_release.py``'s directory/package fan-out
+(a per-library ``"not_comparable"`` verdict string, dominating the release
+rollup, exit ``16``), ``compat/cli.py``'s ``compat check`` (exit ``9``),
+``cli_scan.py``'s ``scan --against`` via ``scan_engine.run_scan_core`` (a
+``NOT_COMPARABLE`` verdict, exit ``6``), ``stack_checker.py``'s
+``deps compare`` (``StackChange.not_comparable_reason``, exit ``5``), the
+``abi_compare`` MCP tool (a dedicated ``{"status": "not_comparable", ...}``
+envelope, plus its own ``diagnostic_comparison`` parameter), and
+``service.py``'s ``CompareRequest``/``run_compare_request``/legacy
+``run_compare`` keyword shim (threads ``diagnostic_comparison``; a raised
+mismatch propagates to whichever of the above front-ends called it — no
+handling of its own, since it isn't itself a front-end). ``appcompat.py``'s
+``check_appcompat``/``check_plugin_host_contract`` are deliberately *not*
+among these seven — raw propagation is their documented default contract.
+Not yet wired in — tracked as explicit follow-up work, not silently
+dropped scope:
 
-- The other five ADR-050 D2 entry points don't have their own
-  exception→outcome handling or ``diagnostic_comparison`` parameter yet:
-  ``mcp_server.py``'s ``abi_compare``, ``cli_compare_release.py``'s
-  directory/package fan-out, ``compat/cli.py``'s ``compat check``,
-  ``cli_scan.py``'s ``scan --against`` (via ``scan_engine.run_scan_core``),
-  and ``stack_checker.py``'s ``deps compare``. A mismatch reaching
-  ``compare_snapshots``/``checker.compare`` through any of these today still
-  surfaces as an unhandled ``ProfileMismatchError``/``ScopeMismatchError``,
-  not a clean ``not_comparable`` outcome. ``appcompat.py``'s
-  ``check_appcompat``/``check_plugin_host_contract`` are deliberately *not*
-  among these — raw propagation is their documented default contract.
 - The legacy-CLI labeled ``--include old:LABEL=PATH`` grammar
   (``SidedIncludePathParam``) does not exist yet; this module accepts a
   resolved ``label`` per :class:`IncludeDir` directly; only the CLI-parsing
   glue that would populate it from a command line is missing.
-- ``snapshot_cache.py``'s cache-key order-sensitivity fix, ``scan``/
-  ``compat``/``deps compare``/release exit codes, and the ``sarif.py``/
-  ``junit_report.py``/``html_report.py``/``aggregate.py``/``action/run.sh``
-  surfaces the ADR's D2 section calls for are not part of this module
-  either — only ``reporter.py``'s JSON output (``contract_coverage``/
-  ``assurance`` on an ordinary completed diff, plus the ``verdict: null``
-  document on a hard-fail) has been updated so far.
+- ``snapshot_cache.py``'s cache-key order-sensitivity fix, and the
+  ``sarif.py``/``junit_report.py``/``html_report.py``/``aggregate.py``/
+  ``action/run.sh`` surfaces the ADR's D2 section calls for, are not part of
+  this module either — only ``reporter.py``'s JSON output
+  (``contract_coverage``/``assurance`` on an ordinary completed diff, plus
+  the ``verdict: null`` document on a hard-fail) and each front-end's own
+  plain-text/JSON rendering have been updated so far.
+- ``cli_compare_release.py``'s fan-out does not accept
+  ``--diagnostic-comparison`` at all (rejected up front by
+  ``_reject_set_input_flags``, alongside every other single-pair-only flag)
+  — it only closes the *default hard-fail* half of D2 (a mismatch reported
+  cleanly instead of crashing), not the escape-hatch half.
 
 These are tracked as explicit follow-up work, not silently dropped scope.
 

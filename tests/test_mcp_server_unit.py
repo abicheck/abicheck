@@ -999,7 +999,7 @@ class TestAbiCompare:
             assert "new_value" in c
             assert "source_location" in c
 
-    def _make_mismatched_scope_pair(self, tmp_path: Path):
+    def _make_mismatched_scope_pair(self, tmp_path: Path) -> tuple[Path, Path]:
         """Two snapshots carrying real, deliberately-mismatched ExtractionContract
         scope_fingerprints (ADR-050 D1/D2) -- old declares a.h/foo.h, new
         declares a.h/bar.h, a genuine scope drift compute_extraction_contract

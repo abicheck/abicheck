@@ -1,7 +1,7 @@
 # G32 Phase 0 fixtures
 
-Regression fixtures for [ADR-050](../../../docs/development/adr/050-comparability-contract-and-multi-tu-manifest.md)
-/ [G32](../../../docs/development/plans/g32-comparability-contract-and-multi-tu-manifest.md)
+Regression fixtures for [ADR-050](../../../docs/contribute/adr/050-comparability-contract-and-multi-tu-manifest.md)
+/ [G32](../../../docs/contribute/plans/g32-comparability-contract-and-multi-tu-manifest.md)
 Phase 0. These are raw inputs (headers, and one real AST capture) for later
 phases to load — not generated `.abi.json` snapshots, and (per Phase 0's own
 "Out of scope") no production code reads any of this yet. `tests/test_g32_fixtures.py`
@@ -66,13 +66,19 @@ and `checker.compare` itself now calls the gate — comparing `old/` against
 given, or an L2 frontend ran) carries a real `contract`, not `contract=None`
 — a plain binary/symbols-only dump with no headers still gets
 `contract=None`, per `compute_extraction_contract`'s own "nothing to
-fingerprint" rule. **Reachable today from the native `abicheck compare` CLI command**
-(`--diagnostic-comparison` flag, `verdict: null` JSON report, exit code
-`16`) and from `service.py`'s `CompareRequest`/`run_compare_request`/legacy
-`run_compare` shim (parameter threaded through, no dedicated exception
-handling of their own yet). **Not yet wired** into the other five ADR-050 D2
-entry points (`mcp_server.py`, `cli_compare_release.py`'s release fan-out,
-`compat/cli.py`, `cli_scan.py`'s `scan --against`, `stack_checker.py`'s
-`deps compare`) or into `snapshot_cache.py`'s cache-key fix. See
-`abicheck/comparability.py`'s own module docstring for the exact remaining
-scope.
+fingerprint" rule. **Reachable today from all seven ADR-050 D2 entry
+points**: the native `abicheck compare` CLI command (`--diagnostic-comparison`
+flag, `verdict: null` JSON report, exit `16`), `cli_compare_release.py`'s
+release fan-out (a per-library `"not_comparable"` verdict dominating the
+rollup, exit `16`, though it does not itself accept
+`--diagnostic-comparison`), `compat/cli.py`'s `compat check` (exit `9`),
+`cli_scan.py`'s `scan --against` (`NOT_COMPARABLE` verdict, exit `6`),
+`stack_checker.py`'s `deps compare` (`not_comparable_reason`, exit `5`), the
+`abi_compare` MCP tool (`{"status": "not_comparable", ...}`, plus its own
+`diagnostic_comparison` parameter), and `service.py`'s
+`CompareRequest`/`run_compare_request`/legacy `run_compare` shim (threads
+`diagnostic_comparison` through to whichever front-end called it). **Still
+not wired**: `snapshot_cache.py`'s cache-key order-sensitivity fix, and
+SARIF/JUnit/HTML/`aggregate.py`/`action/run.sh` rendering of a
+`not_comparable` outcome. See `abicheck/comparability.py`'s own module
+docstring for the exact remaining scope.
