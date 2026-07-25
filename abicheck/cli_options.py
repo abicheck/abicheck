@@ -33,6 +33,7 @@ from .cli_params import (
     DEPTH_PARAM,
     POLICY_FILE_PARAM,
     SIDED_BUILD_INFO_PARAM,
+    SIDED_DUMP_MANIFEST_PARAM,
     SIDED_EXISTING_PATH_PARAM,
     SIDED_INCLUDE_PATH_PARAM,
     SIDED_PATH_PARAM,
@@ -175,6 +176,10 @@ def normalize_sided_options(kwargs: dict[str, object]) -> None:
         kwargs["headers"] = both
         kwargs["old_headers_only"] = old
         kwargs["new_headers_only"] = new
+    if "dump_manifest" in kwargs:
+        old_dm, new_dm = _split_sided_single(kwargs.pop("dump_manifest"))  # type: ignore[arg-type]
+        kwargs["old_dump_manifest"] = old_dm
+        kwargs["new_dump_manifest"] = new_dm
     if "include" in kwargs:
         both, old, new, labels = split_sided_include_paths(
             kwargs.pop("include")  # type: ignore[arg-type]
@@ -241,6 +246,20 @@ def two_sided_input_options(func: F) -> F:
     a per-side version label. (``--lang`` and the ``--ast-frontend`` family stay
     inline.)
     """
+    func = click.option(
+        "--dump-manifest",
+        "dump_manifest",
+        multiple=True,
+        type=SIDED_DUMP_MANIFEST_PARAM,
+        help="A strict YAML document describing multiple translation units to "
+        "compile and merge into one side's snapshot, instead of a single "
+        "-H/--header list (ADR-050 D3). Side-scoped: repeat the flag with an "
+        "'old='/'new=' prefix per side (e.g. --dump-manifest old=v1/abi.yml "
+        "--dump-manifest new=v2/abi.yml); a bare value applies to both. "
+        "Mutually exclusive with -H/--header for that side (declare the "
+        "public surface in the manifest's own base profile instead). ELF "
+        "only so far.",
+    )(func)
     func = click.option(
         "--version",
         "version",
@@ -1569,6 +1588,12 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "--allow-ast-frontend-fallback: an invocation-specific risk decision "
         "(exploratory-mode reproduction of a legacy toolchain), not a stable "
         "project default."
+    ),
+    "--dump-manifest": (
+        "ADR-050 D3: a real multi-translation-unit dump for one side, in "
+        "place of a single -H/--header list. Which side(s) need a manifest "
+        "(and which manifest) varies per comparison, not a stable project "
+        "setting."
     ),
 }
 

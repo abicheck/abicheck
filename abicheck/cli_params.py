@@ -155,6 +155,10 @@ SIDED_SOURCES_PARAM = SidedPathParam(exists=True, file_okay=False)
 SIDED_BUILD_INFO_PARAM = SidedPathParam(exists=True)
 #: Sided path requiring an existing file/dir (e.g. ``--probe-matrix`` snapshots).
 SIDED_EXISTING_PATH_PARAM = SidedPathParam(exists=True)
+#: Sided path for ``compare --dump-manifest`` — an existing YAML file (ADR-050
+#: D3), mirroring ``dump --dump-manifest``'s own ``click.Path(exists=True,
+#: dir_okay=False)`` constraint.
+SIDED_DUMP_MANIFEST_PARAM = SidedPathParam(exists=True, dir_okay=False)
 
 
 class SidedIncludePathParam(click.ParamType):

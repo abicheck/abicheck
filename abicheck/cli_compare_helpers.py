@@ -76,6 +76,7 @@ from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
+    from .dump_manifest import DumpManifest
     from .model import AbiSnapshot
     from .policy_file import PolicyFile
 
@@ -1140,6 +1141,8 @@ def run_compare(
     verify_runtime: bool = False,
     diagnostic_comparison: bool = False,
     include_labels: dict[Path, str] | None = None,
+    old_dump_manifest: Path | None = None,
+    new_dump_manifest: Path | None = None,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -1152,6 +1155,20 @@ def run_compare(
             "secondary report to produce."
         )
     _setup_verbosity(verbose)
+
+    old_manifest_obj: DumpManifest | None = None
+    new_manifest_obj: DumpManifest | None = None
+    if old_dump_manifest is not None or new_dump_manifest is not None:
+        from .dump_manifest import load_manifest
+        from .errors import ManifestValidationError
+
+        try:
+            if old_dump_manifest is not None:
+                old_manifest_obj = load_manifest(old_dump_manifest)
+            if new_dump_manifest is not None:
+                new_manifest_obj = load_manifest(new_dump_manifest)
+        except ManifestValidationError as exc:
+            raise click.UsageError(str(exc)) from exc
 
     if secondary_fmt is not None and secondary_output is None:
         raise click.UsageError(
@@ -1367,6 +1384,18 @@ def run_compare(
         headers, includes, old_headers_only, new_headers_only,
         old_includes_only, new_includes_only,
     )
+    if old_manifest_obj is not None and old_h:
+        raise click.UsageError(
+            "--dump-manifest old=... and a header for the old side "
+            "(-H/--header) are mutually exclusive -- declare the old side's "
+            "public surface in the manifest's own base profile instead."
+        )
+    if new_manifest_obj is not None and new_h:
+        raise click.UsageError(
+            "--dump-manifest new=... and a header for the new side "
+            "(-H/--header) are mutually exclusive -- declare the new side's "
+            "public surface in the manifest's own base profile instead."
+        )
     if config_includes:
         old_inc = list(old_inc) + list(config_includes)
         new_inc = list(new_inc) + list(config_includes)
@@ -1479,6 +1508,16 @@ def run_compare(
     # new_input (which, in that case, no longer point at the original library).
     used_by_old_input, _ = cli._normalize_binary_input(used_by_old_input)
     used_by_new_input, _ = cli._normalize_binary_input(used_by_new_input)
+    if old_manifest_obj is not None and old_fmt != "elf":
+        raise click.UsageError(
+            "--dump-manifest old=... requires the old input to be an ELF "
+            f"binary (ADR-050 D3); got {old_fmt or 'a non-binary input'}."
+        )
+    if new_manifest_obj is not None and new_fmt != "elf":
+        raise click.UsageError(
+            "--dump-manifest new=... requires the new input to be an ELF "
+            f"binary (ADR-050 D3); got {new_fmt or 'a non-binary input'}."
+        )
     _reject_debug_format_for_non_elf(effective_debug_format, old_fmt, new_fmt)
     _warn_ignored_flags(
         old_fmt is not None, new_fmt is not None,
@@ -1509,6 +1548,8 @@ def run_compare(
         enable_debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
         include_labels=include_labels,
+        old_dump_manifest=old_manifest_obj,
+        new_dump_manifest=new_manifest_obj,
     )
 
     suppression, pf = _load_suppression_and_policy(

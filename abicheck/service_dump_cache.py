@@ -49,6 +49,7 @@ def _dump_is_cacheable(
     # `None` below, so no real type-safety is lost.
     compile: object | None,
     include_labels: dict[Path, str] | None = None,
+    dump_manifest: object | None = None,
 ) -> bool:
     """Whether a ``run_dump`` call is safe to serve from the whole-snapshot
     cache (:mod:`abicheck.snapshot_cache`).
@@ -86,6 +87,13 @@ def _dump_is_cacheable(
     dump is the conservative, correct default rather than risk serving a
     same-key snapshot whose ``contract`` was fingerprinted under a
     different label.
+
+    A ``dump_manifest`` (ADR-050 D3) is excluded the same way: its per-TU
+    fragments and any support-root ``project_owned`` markers are not folded
+    into the cache key below, so a manifest-driven dump always falls through
+    to a live dump rather than risk serving a snapshot keyed only on the
+    manifest file's own path/headers/includes (which the whole-snapshot cache
+    never even sees — a manifest dump passes no ``headers``).
     """
     return (
         pdb_path is None
@@ -97,6 +105,7 @@ def _dump_is_cacheable(
         and not debug_presence_only
         and compile is None
         and not include_labels
+        and dump_manifest is None
     )
 
 
@@ -294,6 +303,7 @@ def cached_run_dump(
     compile: object | None = None,
     notify: Callable[[str], None] | None = None,
     include_labels: dict[Path, str] | None = None,
+    dump_manifest: object | None = None,
 ) -> AbiSnapshot:
     """``run_dump(...)``, transparently served from the whole-snapshot cache
     when the call shape is cacheable (:func:`_dump_is_cacheable`) — avoiding a
@@ -317,6 +327,7 @@ def cached_run_dump(
         debug_presence_only=debug_presence_only,
         compile=compile,
         include_labels=include_labels,
+        dump_manifest=dump_manifest,
     )
     if not cacheable:
         return run_dump(
@@ -340,6 +351,7 @@ def cached_run_dump(
             compile=compile,
             notify=notify,
             include_labels=include_labels,
+            dump_manifest=dump_manifest,
         )
 
     from . import snapshot_cache

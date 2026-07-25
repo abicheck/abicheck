@@ -275,6 +275,7 @@ Auto-detect input type and return an ABI snapshot.
 | `compile` | `CompileContext \| None` | `None` |
 | `notify` | `Callable[[str], None] \| None` | `None` |
 | `include_labels` | `dict[Path, str] \| None` | `None` |
+| `dump_manifest` | `DumpManifest \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
 
@@ -358,6 +359,7 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `compile` | `CompileContext \| None` | `None` |
 | `notify` | `Callable[[str], None] \| None` | `None` |
 | `include_labels` | `dict[Path, str] \| None` | `None` |
+| `dump_manifest` | `DumpManifest \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
 

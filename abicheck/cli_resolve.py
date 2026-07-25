@@ -42,6 +42,7 @@ from .header_utils import iter_directory_headers, split_public_header_inputs
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from .dump_manifest import DumpManifest
     from .model import AbiSnapshot
     from .service_scan import CompileContext
 
@@ -268,6 +269,7 @@ def _resolve_input(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     include_labels: dict[Path, str] | None = None,
+    dump_manifest: DumpManifest | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an AbiSnapshot.
 
@@ -308,6 +310,10 @@ def _resolve_input(
             D1), consulted when building this side's declared-``-I``
             ``IncludeDir`` list for ``comparability.compute_extraction_contract``.
             A path with no entry gets ``label=None``, unchanged.
+        dump_manifest: A parsed ``--dump-manifest`` document for this side
+            (ADR-050 D3, side-scoped on ``compare`` via ``old=``/``new=``),
+            for a real multi-TU dump in place of a single header list. ELF
+            only so far.
 
     ``service.resolve_input`` always attempts the L2 header-only semantic
     graph for a binary input (G29 Phase A: no longer flag-gated).
@@ -334,6 +340,7 @@ def _resolve_input(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             include_labels=include_labels,
+            dump_manifest=dump_manifest,
             notify=_click_notify,
         )
     except ValidationError as exc:
@@ -514,6 +521,8 @@ def _resolve_compare_snapshots(
     enable_debuginfod: bool = False,
     debuginfod_url: str | None = None,
     include_labels: dict[Path, str] | None = None,
+    old_dump_manifest: DumpManifest | None = None,
+    new_dump_manifest: DumpManifest | None = None,
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -528,6 +537,11 @@ def _resolve_compare_snapshots(
     ``compile:`` block; it applies to both sides. Its ``frontend`` field is unused
     here — the frontend is driven by the explicit ``header_backend`` so the per-side
     override above still wins.
+
+    ``old_dump_manifest`` / ``new_dump_manifest`` (ADR-050 D3): a parsed
+    ``--dump-manifest`` document for that side only, in place of a single
+    header list — side-scoped since old/new commonly live under different
+    roots.
 
     ``old_debug_roots`` / ``new_debug_roots`` / ``enable_debuginfod`` /
     ``debuginfod_url`` (P1.1, ADR-021a): per-side detached-debug-artifact
@@ -575,6 +589,7 @@ def _resolve_compare_snapshots(
         public_headers=old_public_headers,
         public_header_dirs=old_public_header_dirs,
         include_labels=include_labels,
+        dump_manifest=old_dump_manifest,
     )
     new = _resolve_input(
         new_input,
@@ -594,6 +609,7 @@ def _resolve_compare_snapshots(
         public_headers=new_public_headers,
         public_header_dirs=new_public_header_dirs,
         include_labels=include_labels,
+        dump_manifest=new_dump_manifest,
     )
     if follow_deps:
         if old_fmt == "elf":
@@ -639,6 +655,7 @@ _EVIDENCE_SET_INPUT_FLAGS: dict[str, str] = {
     "depth": "--depth",
     "sources": "--sources",
     "build_info": "--build-info",
+    "dump_manifest": "--dump-manifest",
 }
 
 

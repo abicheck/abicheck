@@ -77,6 +77,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from .checker_types import Change
+    from .dump_manifest import DumpManifest
     from .dwarf_advanced import AdvancedDwarfMetadata
     from .dwarf_metadata import DwarfMetadata
     from .environment_matrix import EnvironmentMatrix
@@ -285,6 +286,7 @@ def resolve_input(
     compile: CompileContext | None = None,
     notify: Callable[[str], None] | None = None,
     include_labels: dict[Path, str] | None = None,
+    dump_manifest: DumpManifest | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.
 
@@ -317,6 +319,9 @@ def resolve_input(
         include_labels: Resolved ``path -> label`` map from a labeled
             ``--include old:LABEL=PATH`` CLI entry (ADR-050 D1); forces the
             whole-snapshot cache off when non-empty.
+        dump_manifest: A parsed ``--dump-manifest`` document (ADR-050 D3) for
+            a real multi-TU dump instead of a single header list. ELF only;
+            forces the whole-snapshot cache off when set.
         follow_linker_scripts: When True (default), a GNU ld linker script is
             followed to the shared library named in its ``INPUT()``/``GROUP()``
             directive.
@@ -355,6 +360,7 @@ def resolve_input(
             compile=compile,
             notify=notify,
             include_labels=include_labels,
+            dump_manifest=dump_manifest,
         )
 
     # Detect binary format from magic bytes
@@ -382,6 +388,7 @@ def resolve_input(
             compile=compile,
             notify=notify,
             include_labels=include_labels,
+            dump_manifest=dump_manifest,
         )
 
     # Raw kernel type-info blobs (a bare `.BTF` / CTF section extracted with
@@ -458,6 +465,7 @@ def resolve_input(
                     compile=compile,
                     notify=notify,
                     include_labels=include_labels,
+                    dump_manifest=dump_manifest,
                 )
             raise ValidationError(
                 f"'{path}' is a GNU ld linker script (INPUT/GROUP), not a binary, "
@@ -511,6 +519,7 @@ def run_dump(
     notify: Callable[[str], None] | None = None,
     _skip_header_graph_attach: bool = False,
     include_labels: dict[Path, str] | None = None,
+    dump_manifest: DumpManifest | None = None,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
@@ -543,8 +552,14 @@ def run_dump(
 
     Raises:
         SnapshotError: If the binary cannot be parsed.
-        ValidationError: For invalid arguments (missing exports, bad include dirs).
+        ValidationError: For invalid arguments (missing exports, bad include dirs,
+            or a non-``None`` ``dump_manifest`` for a non-ELF binary).
     """
+    if dump_manifest is not None and binary_fmt != "elf":
+        raise ValidationError(
+            f"dump_manifest is not yet supported for {binary_fmt.upper()} "
+            "binaries (ADR-050 D3); use a single-header dump for this format."
+        )
     _headers = headers or []
     _includes = includes or []
     # An explicit --ast-frontend on the compile context wins over the bare
@@ -605,6 +620,7 @@ def run_dump(
             notify=notify,
             _skip_header_graph_attach=True,
             include_labels=include_labels,
+            dump_manifest=dump_manifest,
         )
         castxml_snap = run_dump(
             path,
@@ -661,6 +677,7 @@ def run_dump(
             public_header_dirs=public_header_dirs,
             notify=notify,
             include_labels=include_labels,
+            dump_manifest=dump_manifest,
         )
         _try_attach_sycl_metadata(snap, path)
         _try_attach_python_ext_metadata(snap)
@@ -1099,6 +1116,7 @@ def _dump_elf(
     public_header_dirs: list[Path] | None = None,
     notify: Callable[[str], None] | None = None,
     include_labels: dict[Path, str] | None = None,
+    dump_manifest: DumpManifest | None = None,
 ) -> AbiSnapshot:
     """Dump an ELF binary to an ABI snapshot.
 
@@ -1108,6 +1126,11 @@ def _dump_elf(
     makes (``cli_dump_helpers._run_elf_dump``). Without this thread-through the
     ELF service path leaves every origin ``UNKNOWN``, silently disabling the
     provenance-gated cross-checks on the ``scan`` entry point.
+
+    ``dump_manifest`` (ADR-050 D3) is a parsed multi-TU manifest replacing
+    *headers* for this dump; threaded straight into :func:`dumper.dump`,
+    which enforces the mutual-exclusivity rule against *headers*/
+    *public_headers*/*public_header_dirs*.
     """
     from .dumper import dump
 
@@ -1145,13 +1168,13 @@ def _dump_elf(
 
     cc = compile if compile is not None else CompileContext()
     resolved_headers = expand_header_inputs(headers) if headers else []
-    if not resolved_headers and symbols_only:
+    if not resolved_headers and symbols_only and dump_manifest is None:
         _emit(
             notify,
             f"Warning: '{path}' — no headers provided. "
             "Using exported symbols only for binary-depth scan.",
         )
-    elif not resolved_headers and not dwarf_only:
+    elif not resolved_headers and not dwarf_only and dump_manifest is None:
         _emit(
             notify,
             f"Warning: '{path}' — no headers provided. "
@@ -1163,7 +1186,7 @@ def _dump_elf(
                 raise ValidationError(
                     f"Include directory not found or not a directory: {inc}"
                 )
-    elif includes and not dwarf_only:
+    elif includes and not dwarf_only and dump_manifest is None:
         _emit(notify, "Warning: --include paths are ignored without headers.")
 
     # P3: auto-add the public-header roots to the search path. Same bucket
@@ -1214,6 +1237,7 @@ def _dump_elf(
             extra_hash_dirs=deferred_dirs,
             debug_info_path=debug_info_path,
             extra_include_labels=include_labels,
+            dump_manifest=dump_manifest,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc

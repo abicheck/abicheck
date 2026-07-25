@@ -545,6 +545,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--diagnostic-comparison",
         "--dry-run",
         "--dso-only",
+        "--dump-manifest",
         "--dwarf",
         "--dwarf-only",
         "--env-matrix",
