@@ -77,8 +77,21 @@ rollup, exit `16`, though it does not itself accept
 `abi_compare` MCP tool (`{"status": "not_comparable", ...}`, plus its own
 `diagnostic_comparison` parameter), and `service.py`'s
 `CompareRequest`/`run_compare_request`/legacy `run_compare` shim (threads
-`diagnostic_comparison` through to whichever front-end called it). **Still
-not wired**: `snapshot_cache.py`'s cache-key order-sensitivity fix, and
-SARIF/JUnit/HTML/`aggregate.py`/`action/run.sh` rendering of a
-`not_comparable` outcome. See `abicheck/comparability.py`'s own module
-docstring for the exact remaining scope.
+`diagnostic_comparison` through to whichever front-end called it).
+`snapshot_cache.py`'s cache-key order-sensitivity, and SARIF/JUnit
+rendering of a `not_comparable` outcome (native `compare` and
+`compare-release`'s own JUnit report), and `aggregate.py`'s multi-target
+fan-in gate (a `not_comparable` per-target report now blocks unconditionally
+instead of decaying into a plain "unavailable" coverage gap) are also done
+(G32 Phase A, complete). **Still not wired**: the legacy-CLI labeled
+`--include old:LABEL=PATH` grammar is wired for native `compare` only (not
+`scan --against`'s own separate `--include` registration, nor `dump`'s),
+`compare-release`'s fan-out doesn't accept `--diagnostic-comparison`, and
+`html_report.py`/`action/run.sh` render nothing for `not_comparable`
+(a deliberate, documented gap — see below). See
+`abicheck/comparability.py`'s own module docstring for the exact remaining
+scope.
+
+G32 Phase B (ADR-050 D3 — the manifest schema and real multi-TU dump) is
+next; these Phase 0 fixtures (especially Fixture 3, external STL noise) are
+what Phase B's own tests wire through the manifest path end to end.
