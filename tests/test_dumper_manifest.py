@@ -513,6 +513,21 @@ class TestDumpWithManifest:
                 dump_manifest=self._manifest(tmp_path),
             )
 
+    def test_dump_rejects_extra_includes_with_manifest(self, tmp_path: Path):
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        so = self._build_two_tu_lib(tmp_path)
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            dump(
+                so,
+                [],
+                [tmp_path],
+                version="1.0",
+                compiler="cc",
+                header_backend="clang",
+                dump_manifest=self._manifest(tmp_path),
+            )
+
     def test_dump_rejects_manifest_for_hybrid_frontend(self, tmp_path: Path):
         if not (_have("clang") and _have("gcc")):
             pytest.skip("clang and gcc are required for this end-to-end test")

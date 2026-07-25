@@ -1175,23 +1175,23 @@ def dump(
             :func:`comparability.compute_extraction_contract` fingerprints.
             A path with no entry gets ``label=None``, unchanged.
         dump_manifest: A parsed ``--dump-manifest`` document (ADR-050 D3) for
-            a real multi-TU dump; mutually exclusive with *headers* and
-            *public_headers*/*public_header_dirs*. ELF only so far.
+            a real multi-TU dump; mutually exclusive with *headers*,
+            *extra_includes*, *public_headers*/*public_header_dirs*. ELF only.
 
     Returns:
         AbiSnapshot with functions, variables, and types populated.
     """
-    if dump_manifest is not None and headers:
-        raise ValidationError(
-            "dump_manifest and headers are mutually exclusive -- the "
-            "manifest's own 'roots' field declares the public surface instead."
-        )
-    if dump_manifest is not None and (public_headers or public_header_dirs):
-        raise ValidationError(
-            "dump_manifest and public_headers/public_header_dirs are "
-            "mutually exclusive -- declare them in the manifest's own base "
-            "profile instead."
-        )
+    if dump_manifest is not None:
+        # Each has its own manifest-field equivalent (roots / per-TU includes /
+        # public_header_paths+dirs); a flat value here would be silently
+        # unused by the manifest-driven parse or ambiguous.
+        _conflicts = {"headers": headers, "extra_includes": extra_includes,
+                       "public_headers": public_headers, "public_header_dirs": public_header_dirs}
+        if _given := [name for name, value in _conflicts.items() if value]:
+            raise ValidationError(
+                f"dump_manifest and {', '.join(_given)} are mutually exclusive "
+                "-- declare the equivalent in the manifest itself."
+            )
 
     if _resolve_header_backend(header_backend) == "hybrid":
         if dump_manifest is not None:

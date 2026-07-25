@@ -16,11 +16,13 @@
 budget -- ``service.py`` sits at the AI-readiness file-size hard cap, so any
 net-positive addition there needs an equal-or-greater reduction elsewhere
 first (the same "relocate a self-contained chunk first" playbook
-``dumper_contract.py`` already used for ``dumper.py``, CLAUDE.md). Pure
-relocation: both functions are unchanged except for their module home,
-re-exported from ``service.py`` so ``service._try_header_scoped_dump`` /
-``service._has_matched_public_surface`` (the bare names ``service._dump_pe``/
-``_dump_macho`` call, and what every test monkeypatches via
+``dumper_contract.py`` already used for ``dumper.py``, CLAUDE.md). Mostly a
+relocation -- both functions keep their prior behavior for every existing
+caller -- plus ADR-050 D1's own ``include_labels`` parameter/threading added
+in the same commit, re-exported from ``service.py`` so
+``service._try_header_scoped_dump`` / ``service._has_matched_public_surface``
+(the bare names ``service._dump_pe``/``_dump_macho`` call, and what every
+test monkeypatches via
 ``monkeypatch.setattr(service, "_try_header_scoped_dump", ...)``) keep
 working unchanged.
 

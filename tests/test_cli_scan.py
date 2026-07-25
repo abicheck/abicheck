@@ -445,6 +445,30 @@ def test_against_not_comparable_exits_6(
     assert payload["scan_schema_version"] == "1.3"
 
 
+def test_against_not_comparable_text_format_does_not_crash(
+    monkeypatch, runner, new_snap_compatible, baseline_snap
+):
+    # Regression: diff_summary is {"reason": ...} on this path, not the
+    # normal breaking/api_break/risk/compatible shape -- the default text
+    # renderer (render_baseline_lines) must not KeyError indexing counts
+    # that don't exist on this shape. --format json's own test above only
+    # exercises payload["diff"] via to_dict(), never this renderer.
+    import abicheck.scan_engine as cs
+    from abicheck.errors import ScopeMismatchError
+
+    def _raise(*_a, **_kw):
+        raise ScopeMismatchError("scope drift")
+
+    monkeypatch.setattr(cs, "_run_baseline_compare", _raise)
+    res = runner.invoke(
+        main,
+        ["scan", str(new_snap_compatible), "--against", str(baseline_snap)],
+    )
+    assert res.exit_code == 6, res.output
+    assert "not comparable: scope drift" in res.output
+    assert "Verdict: NOT_COMPARABLE" in res.output
+
+
 def test_invalid_crosscheck_key_is_usage_error(runner, new_snap_compatible):
     res = runner.invoke(
         main,
