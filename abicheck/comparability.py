@@ -63,12 +63,24 @@ dropped scope:
   labeled entry there is parsed as an ordinary unlabeled path, silently.
   ``compare``'s directory/package (release) fan-out rejects a labeled
   ``--include`` outright (see below) rather than silently dropping it.
-- The ``sarif.py``/``junit_report.py``/``html_report.py``/``aggregate.py``/
-  ``action/run.sh`` surfaces the ADR's D2 section calls for are not part of
-  this module either — only ``reporter.py``'s JSON output
-  (``contract_coverage``/``assurance`` on an ordinary completed diff, plus
-  the ``verdict: null`` document on a hard-fail) and each front-end's own
-  plain-text/JSON rendering have been updated so far.
+- ``sarif.py``/``junit_report.py`` now render a not_comparable outcome as a
+  real, spec-conformant document of their own — a failed-invocation SARIF
+  run (``executionSuccessful: False`` + a ``toolExecutionNotification``,
+  never a synthetic finding-shaped ``result``) via
+  :func:`sarif.to_sarif_not_comparable`, and an errored JUnit testcase via
+  :func:`junit_report.to_junit_xml_not_comparable` — wired into native
+  ``compare``'s ``_report_not_comparable`` for ``--format sarif``/``junit``,
+  and into ``compare-release``'s own ``_format_release_junit`` (a
+  ``"not_comparable"`` per-library entry was previously excluded from
+  ``error_libs`` entirely, silently producing zero testsuites for it).
+  ``html_report.py``/``aggregate.py``/``action/run.sh`` are not part of this
+  module either — ``markdown``/``html``/``review`` still get only the clear
+  stderr message (see ``_report_not_comparable``'s own docstring for why:
+  those are human-facing formats already reading that stderr output, with
+  no equivalent "run failed" document convention worth fabricating one
+  for). ``reporter.py``'s JSON output (``contract_coverage``/``assurance``
+  on an ordinary completed diff, plus the ``verdict: null`` document on a
+  hard-fail) is unaffected — already covered.
   (``snapshot_cache.py``'s cache-key order-sensitivity — headers/includes
   order is real, load-bearing input, the same rule ``profile_fingerprint``
   below already enforces — is fixed, cache version ``4``.)

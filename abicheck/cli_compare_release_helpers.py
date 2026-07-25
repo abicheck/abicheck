@@ -617,6 +617,15 @@ def _format_release_junit(
     contributes to the release's severity-aware exit code — otherwise a CI
     dashboard reading this JUnit file could show zero failures for a release
     that just exited non-zero on that exact finding.
+
+    A ``"not_comparable"`` library (ADR-050 D2 — its own dedicated verdict
+    string, not folded into ``"ERROR"``, see ``_RELEASE_VERDICT_ORDER``) gets
+    the same treatment as a genuine ``"ERROR"``: without this, it would
+    contribute zero testsuites here, so a CI dashboard reading only this
+    JUnit file would show no failures for a release that just exited 16 on
+    exactly this library. ``entry["reason"]`` (not the ``"error"`` key
+    ``_build_error_testsuite`` defaults to) carries the message for this
+    verdict.
     """
     from .junit_report import to_junit_xml_multi
 
@@ -625,7 +634,13 @@ def _format_release_junit(
     # testsuite so CI dashboards reading the JUnit report see the failure.
     if matrix_result is not None:
         pairs.append((matrix_result, None))
-    error_libs = [entry for entry in library_results if entry.get("verdict") == "ERROR"]
+    error_libs = [
+        {**entry, "error": entry.get("reason", "not comparable")}
+        if entry.get("verdict") == "not_comparable"
+        else entry
+        for entry in library_results
+        if entry.get("verdict") in ("ERROR", "not_comparable")
+    ]
     return to_junit_xml_multi(
         pairs,
         severity_config=severity_config,

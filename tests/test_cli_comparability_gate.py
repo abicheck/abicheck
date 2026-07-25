@@ -102,6 +102,50 @@ class TestNotComparableExitCode:
         assert doc["library"] == "libfoo.so.1"
         assert "report_schema_version" in doc
 
+    def test_sarif_format_emits_failed_invocation(self, tmp_path, monkeypatch):
+        old_p, new_p = _write_placeholder_inputs(tmp_path)
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
+        monkeypatch.setattr("abicheck.service.load_snapshot", lambda _: snap)
+
+        def _raise(*_a, **_kw):
+            raise ScopeMismatchError("scope drift")
+
+        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+
+        out_p = tmp_path / "report.sarif"
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--format", "sarif", "-o", str(out_p)],
+        )
+        assert result.exit_code == 16
+        doc = json.loads(out_p.read_text(encoding="utf-8"))
+        run = doc["runs"][0]
+        assert run["invocations"][0]["executionSuccessful"] is False
+        assert run["invocations"][0]["exitCode"] == 16
+        assert run["results"] == []
+        assert "scope drift" in run["invocations"][0]["toolExecutionNotifications"][0]["message"]["text"]
+
+    def test_junit_format_emits_errored_testcase(self, tmp_path, monkeypatch):
+        old_p, new_p = _write_placeholder_inputs(tmp_path)
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
+        monkeypatch.setattr("abicheck.service.load_snapshot", lambda _: snap)
+
+        def _raise(*_a, **_kw):
+            raise ProfileMismatchError("dep.h changed")
+
+        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+
+        out_p = tmp_path / "report.xml"
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--format", "junit", "-o", str(out_p)],
+        )
+        assert result.exit_code == 16
+        xml = out_p.read_text(encoding="utf-8")
+        assert 'errors="1"' in xml
+        assert "profile_mismatch" in xml
+        assert "dep.h changed" in xml
+
     def test_diagnostic_comparison_flag_forwarded_and_bypasses_hard_fail(
         self, tmp_path, monkeypatch
     ):

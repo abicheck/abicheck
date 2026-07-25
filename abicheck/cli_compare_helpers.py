@@ -1023,12 +1023,20 @@ def _report_not_comparable(
 
     ``checker.compare``'s gate raises before any ``diff_*`` module runs, so
     there is no ``DiffResult`` for any renderer to work with — unlike an
-    ordinary verdict, this cannot be formatted as markdown/sarif/junit/html.
-    ``--format json`` gets the schema-conformant ``{"verdict": null,
-    "reason": {...}}`` document (schema 2.17, ``compare_report.schema.json``);
-    every other format gets the same clear stderr message a ``click.UsageError``
-    would produce, since fabricating a fake sarif/junit/html document that
-    doesn't conform to those formats would be worse than writing nothing.
+    ordinary verdict, this cannot be formatted the way a completed comparison
+    would be. ``--format json`` gets the schema-conformant ``{"verdict":
+    null, "reason": {...}}`` document (schema 2.17,
+    ``compare_report.schema.json``); ``sarif``/``junit`` get a real,
+    spec-conformant document of their own (a failed-invocation SARIF run /
+    an errored JUnit testcase — both formats have a genuine, standard way to
+    represent "the run didn't complete", distinct from "zero findings") via
+    :func:`sarif.to_sarif_not_comparable`/
+    :func:`junit_report.to_junit_xml_not_comparable`, so CI tooling
+    consuming those artifacts sees the failure instead of a missing file.
+    ``markdown``/``html``/``review`` get the same clear stderr message a
+    ``click.UsageError`` would produce and no output file — those are
+    human-facing formats already reading this stderr output, and neither has
+    an equivalent "run failed" document convention worth fabricating one for.
     """
     kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
     message = str(exc)
@@ -1053,6 +1061,16 @@ def _report_not_comparable(
             "reason": {"kind": kind, "message": message},
         }
         _write_or_echo(output, json.dumps(doc, indent=2))
+    elif fmt == "sarif":
+        from .sarif import to_sarif_not_comparable
+
+        doc = to_sarif_not_comparable(old.library, old.version, new.version, kind, message)
+        _write_or_echo(output, json.dumps(doc, indent=2))
+    elif fmt == "junit":
+        from .junit_report import to_junit_xml_not_comparable
+
+        xml = to_junit_xml_not_comparable(old.library, old.version, new.version, kind, message)
+        _write_or_echo(output, xml)
 
 
 def run_compare(
