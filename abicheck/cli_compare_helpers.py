@@ -1157,20 +1157,6 @@ def run_compare(
         )
     _setup_verbosity(verbose)
 
-    old_manifest_obj: DumpManifest | None = None
-    new_manifest_obj: DumpManifest | None = None
-    if old_dump_manifest is not None or new_dump_manifest is not None:
-        from .dump_manifest import load_manifest
-        from .errors import ManifestValidationError
-
-        try:
-            if old_dump_manifest is not None:
-                old_manifest_obj = load_manifest(old_dump_manifest)
-            if new_dump_manifest is not None:
-                new_manifest_obj = load_manifest(new_dump_manifest)
-        except ManifestValidationError as exc:
-            raise click.UsageError(str(exc)) from exc
-
     if secondary_fmt is not None and secondary_output is None:
         raise click.UsageError(
             "--secondary-format requires --secondary-output: writing two "
@@ -1271,6 +1257,26 @@ def run_compare(
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _reject_evidence_flags_for_set_inputs(ctx)
+
+    # Parsed after the directory/package rejection above (not before, like an
+    # earlier revision of this function did): a malformed --dump-manifest on
+    # a directory/package compare must fail with that block's clear "not
+    # supported for directory/package" message, not a confusing "invalid
+    # YAML" one for a flag combination that was never going to work anyway
+    # (Codex review).
+    old_manifest_obj: DumpManifest | None = None
+    new_manifest_obj: DumpManifest | None = None
+    if old_dump_manifest is not None or new_dump_manifest is not None:
+        from .dump_manifest import load_manifest
+        from .errors import ManifestValidationError
+
+        try:
+            if old_dump_manifest is not None:
+                old_manifest_obj = load_manifest(old_dump_manifest)
+            if new_dump_manifest is not None:
+                new_manifest_obj = load_manifest(new_dump_manifest)
+        except ManifestValidationError as exc:
+            raise click.UsageError(str(exc)) from exc
 
     if dry_run:
         from .dry_run import emit_dry_run

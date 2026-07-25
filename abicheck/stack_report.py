@@ -221,7 +221,12 @@ def _render_stack_changes_section(lines: list[str], stack_changes: list[StackCha
             emoji = "❌" if verdict == "BREAKING" else ("⚠️" if verdict in ("API_BREAK", "COMPATIBLE_WITH_RISK", "not_comparable") else "✅")
             lines.append(f"- {emoji} **{sc.library}** — content changed (ABI: `{verdict}`)")
             if sc.not_comparable_reason:
-                lines.append(f"  - Reason: {sc.not_comparable_reason}")
+                # Backtick-wrapped, matching this function's own convention
+                # for other embedded free-text (e.g. the missing-symbols
+                # section above) -- the reason can embed a filesystem path,
+                # and an unwrapped path containing '*'/'_'/'`' would
+                # otherwise corrupt this line's Markdown formatting.
+                lines.append(f"  - Reason: `{sc.not_comparable_reason}`")
             if sc.abi_diff:
                 conf = getattr(sc.abi_diff, "confidence", None)
                 tiers = getattr(sc.abi_diff, "evidence_tiers", []) or []

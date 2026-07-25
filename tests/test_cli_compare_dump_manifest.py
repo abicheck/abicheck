@@ -114,6 +114,32 @@ def test_compare_dump_manifest_rejected_for_directory_inputs(tmp_path, runner):
     assert "not supported for directory/package" in result.output
 
 
+def test_compare_dump_manifest_directory_rejection_wins_over_malformed_yaml(
+    tmp_path, runner
+):
+    """A malformed manifest on a directory/package compare must fail with
+    the clear "not supported for directory/package" message, not a
+    confusing "invalid YAML" one for a flag combination that was never
+    going to work anyway -- the manifest is parsed only after the
+    directory/package rejection runs, not before it."""
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    bad_manifest = tmp_path / "bad.yaml"
+    bad_manifest.write_text("roots: [unterminated\n")
+    result = runner.invoke(
+        main,
+        [
+            "compare", str(old_dir), str(new_dir),
+            "--dump-manifest", "old=" + str(bad_manifest),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "not supported for directory/package" in result.output
+    assert "invalid YAML" not in result.output
+
+
 def test_compare_dump_manifest_malformed_yaml_rejected(tmp_path, runner):
     old_so = _elf_stub(tmp_path / "old.so")
     new_so = _elf_stub(tmp_path / "new.so")

@@ -227,19 +227,23 @@ SIDED_INCLUDE_PATH_PARAM = SidedIncludePathParam()
 
 
 class LabeledIncludePathParam(click.ParamType):
-    """``dump``'s own ``--include`` type (ADR-050 D1) -- ``dump`` has a single
-    input, no old/new side concept at all, so it recognizes **only** the
+    """The ``both:LABEL=PATH`` labeled-include grammar meant for ``dump``'s
+    own ``--include`` (ADR-050 D1) -- built and unit-tested here, but **not
+    yet wired into ``dump_cmd``'s actual ``--include`` option**, which still
+    uses a plain ``click.Path`` (see ``comparability.py``'s module
+    docstring for the tracked gap: a labeled entry passed to ``dump
+    --include`` today is silently parsed as an ordinary unlabeled path, not
+    rejected and not honored). This type recognizes **only** the
     colon-terminated ``both:LABEL=PATH`` labeled form, not
     :class:`SidedIncludePathParam`'s full ``old=``/``new=``/``both=`` side
-    grammar. ``dump``'s ``--include`` is a plain, unlabeled ``click.Path``
-    today (colon was never meaningful to it before), so recognizing
-    ``both:LABEL=PATH`` is purely additive: every other value -- bare, or one
-    that happens to literally start with ``old=``/``new=``/``both=`` -- stays
-    an ordinary, unlabeled path exactly as before, with no equals-form
-    side-prefix stripping at all (switching ``dump`` onto
-    :class:`SidedIncludePathParam` wholesale would newly start stripping an
-    ``old=`` prefix on ``dump`` too -- a real behavior change on a flag that
-    never had that ambiguity).
+    grammar -- ``dump`` has a single input, no old/new side concept at all.
+    Designed so that, once wired in, recognizing ``both:LABEL=PATH`` is
+    purely additive: every other value -- bare, or one that happens to
+    literally start with ``old=``/``new=``/``both=`` -- stays an ordinary,
+    unlabeled path exactly as before, with no equals-form side-prefix
+    stripping at all (switching ``dump`` onto :class:`SidedIncludePathParam`
+    wholesale would newly start stripping an ``old=`` prefix on ``dump`` too
+    -- a real behavior change on a flag that never had that ambiguity).
 
     Returns ``(path, label)`` pairs -- ``label`` is ``None`` for the ordinary
     unlabeled form::
@@ -276,7 +280,8 @@ class LabeledIncludePathParam(click.ParamType):
         return "[both:LABEL=]PATH"
 
 
-#: Shared instance for ``dump``'s own ``--include``.
+#: Shared instance intended for ``dump``'s own ``--include`` -- not yet
+#: wired into ``dump_cmd`` (see the class docstring above).
 LABELED_INCLUDE_PATH_PARAM = LabeledIncludePathParam()
 
 

@@ -754,3 +754,81 @@ class TestManifestIncludeOwnershipAndScopeFingerprint:
             base_snap.contract.scope_fingerprint
             != with_pub_dir_snap.contract.scope_fingerprint
         )
+
+    def _build_lib_with_outside_base_dir_include(
+        self, root: Path, *, priv_content: str
+    ) -> tuple[Path, DumpManifest]:
+        # `checkout/` is the manifest's own base_dir; `src/` is a SIBLING of
+        # `checkout/` (one level up, ../src relative to base_dir) -- the
+        # exact layout dump_manifest.py's own schema docstring uses as its
+        # primary `project_owned` example, and the one case where
+        # `Path.relative_to(base_dir)` cannot succeed (the include resolves
+        # OUTSIDE base_dir, not under it).
+        checkout = root / "checkout"
+        checkout.mkdir()
+        src_dir = root / "src"
+        src_dir.mkdir()
+        header = checkout / "foo.h"
+        header.write_text('#include "priv.h"\nint f(int a, int b);\n')
+        (src_dir / "priv.h").write_text(priv_content)
+        c_src = checkout / "lib.c"
+        c_src.write_text("int f(int a, int b) { return a + b; }\n")
+        so = checkout / "liblib.so"
+        subprocess.run(
+            ["gcc", "-shared", "-fPIC", "-o", str(so), str(c_src)],
+            check=True,
+            capture_output=True,
+        )
+        manifest = DumpManifest(
+            base_dir=checkout,
+            compiler="cc",
+            roots=(header,),
+            translation_units=(
+                TranslationUnit(
+                    name="main",
+                    forced_includes=(header,),
+                    includes=(IncludeEntry(path=src_dir, project_owned=True),),
+                ),
+            ),
+        )
+        return so, manifest
+
+    def test_project_owned_include_outside_base_dir_stable_across_mount_points(
+        self, tmp_path: Path
+    ):
+        """The documented ``../src`` sibling-of-checkout case (a project_owned
+        include resolving OUTSIDE the manifest's own base_dir, not under it)
+        must still produce a stable, mount-point-independent token -- not the
+        raw absolute resolved path, which would differ between two checkouts
+        of the identical relative layout at different filesystem locations.
+        """
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        # Two ENTIRELY SEPARATE roots (distinct temp trees), simulating two
+        # different absolute mount points/checkouts, each with the identical
+        # relative layout (checkout/ + sibling src/).
+        old_root = tmp_path / "mount_a"
+        new_root = tmp_path / "mount_b" / "nested"
+        old_root.mkdir(parents=True)
+        new_root.mkdir(parents=True)
+        old_so, old_manifest = self._build_lib_with_outside_base_dir_include(
+            old_root, priv_content="#define PRIV_V1 1\n"
+        )
+        new_so, new_manifest = self._build_lib_with_outside_base_dir_include(
+            new_root, priv_content="#define PRIV_V2 2\n"
+        )
+        old_snap = dump(
+            old_so, [], version="old", compiler="cc", header_backend="clang",
+            dump_manifest=old_manifest,
+        )
+        new_snap = dump(
+            new_so, [], version="new", compiler="cc", header_backend="clang",
+            dump_manifest=new_manifest,
+        )
+        assert old_snap.contract is not None and new_snap.contract is not None
+        assert old_snap.contract.profile_fields["include_sequence"] == '["0:label:../src"]'
+        assert new_snap.contract.profile_fields["include_sequence"] == '["0:label:../src"]'
+        assert (
+            old_snap.contract.profile_fingerprint
+            == new_snap.contract.profile_fingerprint
+        )

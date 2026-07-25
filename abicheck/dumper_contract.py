@@ -81,6 +81,18 @@ def _manifest_declared_includes(dump_manifest: DumpManifest) -> list[IncludeDir]
     docstring). A non-``project_owned`` entry gets ``label=None``, leaving
     the ordinary ancestor rule (``_classify_include_dirs``) to decide
     ownership, unchanged.
+
+    Uses :func:`os.path.relpath`, not ``Path.relative_to`` — the primary
+    documented use case (``dump_manifest.py``'s own schema example,
+    ``path: ../src``) resolves *outside* ``base_dir``, where
+    ``relative_to`` raises ``ValueError``. ``relpath`` instead climbs back
+    up (``"../src"``), preserving the mount-point-independent property for
+    a sibling of the manifest's own directory: two checkouts at different
+    absolute paths that each have the identical `<checkout>/../src`
+    relative layout still produce the same token. Only a genuinely
+    cross-drive path on Windows (``ValueError`` from ``relpath`` itself)
+    falls back to the absolute resolved path, since no relative form
+    exists there at all.
     """
     from .comparability import IncludeDir
 
@@ -96,7 +108,7 @@ def _manifest_declared_includes(dump_manifest: DumpManifest) -> list[IncludeDir]
             label = None
             if entry.project_owned:
                 try:
-                    label = str(resolved.relative_to(base))
+                    label = os.path.relpath(resolved, base)
                 except ValueError:
                     label = str(resolved)
             result.append(IncludeDir(path=entry.path, label=label))
