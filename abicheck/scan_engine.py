@@ -897,10 +897,13 @@ def run_scan_core(
                 exit_code = sev_exit
                 # Keep the reported verdict in sync with the promoted exit code so a
                 # consumer keying off the verdict string isn't misled (Codex review).
-                # Only a non-breaking verdict is promoted — never downgrade a real
+                # `_run_baseline_compare` ties exit_code to verdict exactly
+                # (BREAKING->4, API_BREAK->2, else->0), and `sev_exit` is at
+                # most 2, so `sev_exit > exit_code` only holds when
+                # exit_code was 0 -- i.e. verdict is already one of these
+                # three non-breaking values. Never downgrades a real
                 # BREAKING/API_BREAK from the artifact diff.
-                if verdict in ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"):
-                    verdict = "API_BREAK"
+                verdict = "API_BREAK"
         _record_stage("baseline_compare", _stage)
     else:
         if baseline is not None:

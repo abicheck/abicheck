@@ -36,6 +36,7 @@ from abicheck.cli import main
 from abicheck.errors import ProfileMismatchError, ScopeMismatchError
 from abicheck.model import AbiSnapshot
 from abicheck.reporter import to_json
+from abicheck.serialization import snapshot_to_json
 
 
 def _write_placeholder_inputs(tmp_path: Path) -> tuple[Path, Path]:
@@ -139,6 +140,67 @@ class TestNotComparableExitCode:
         )
         assert result.exit_code == 0
         assert captured["diagnostic_comparison"] is True
+
+
+class TestCompareReleaseNotComparable:
+    """ADR-050 D2 wired into the directory/package (release) fan-out
+    (``cli_compare_release._compare_one_library`` /
+    ``_compare_release_libraries``) — a real, on-disk mismatched-contract
+    snapshot pair (mirrors ``test_mcp_server_unit.py``'s
+    ``_make_mismatched_scope_pair``) drives the *entire* release pipeline,
+    not just ``_compare_one_library`` in isolation, so the post-processing
+    loop's ``elif v == "not_comparable":`` echo branch actually executes."""
+
+    def _make_release(self, tmp_path: Path) -> tuple[Path, Path]:
+        from abicheck.comparability import compute_extraction_contract
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        a = tmp_path / "v1" / "a.h"
+        old_h = tmp_path / "v1" / "foo.h"
+        new_h = tmp_path / "v2" / "bar.h"
+        old_h.parent.mkdir(parents=True)
+        new_h.parent.mkdir(parents=True)
+        a.write_text("int g(void);\n")
+        old_h.write_text("int f(void);\n")
+        new_h.write_text("int f(void);\n")
+        old = AbiSnapshot(
+            library="libtest.so",
+            version="1.0",
+            contract=compute_extraction_contract(declared_headers=[a, old_h]),
+        )
+        new = AbiSnapshot(
+            library="libtest.so",
+            version="2.0",
+            contract=compute_extraction_contract(declared_headers=[a, new_h]),
+        )
+        (old_dir / "libtest.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libtest.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        return old_dir, new_dir
+
+    def test_release_fanout_exits_16_and_echoes_reason(self, tmp_path):
+        old_dir, new_dir = self._make_release(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_dir), str(new_dir)],
+        )
+        assert result.exit_code == 16
+        assert "Not comparable: libtest.json" in result.output
+
+    def test_release_fanout_writes_verdict_null_report(self, tmp_path):
+        old_dir, new_dir = self._make_release(tmp_path)
+        out_dir = tmp_path / "reports"
+        out_dir.mkdir()
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_dir), str(new_dir), "--output-dir", str(out_dir)],
+        )
+        assert result.exit_code == 16
+        doc = json.loads((out_dir / "libtest.json").read_text(encoding="utf-8"))
+        assert doc["verdict"] is None
+        assert doc["reason"]["kind"] == "scope_mismatch"
 
 
 class TestJsonReporterContractFields:
