@@ -37,7 +37,7 @@ import click
 
 from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .compat.abicc_dump_import import looks_like_perl_dump
-from .header_utils import iter_directory_headers
+from .header_utils import iter_directory_headers, split_public_header_inputs
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -540,7 +540,15 @@ def _resolve_compare_snapshots(
     # compare's --header is documented as "Public header file or directory"
     # (unlike dump's split -H/--public-header, compare has no lower-level
     # "parse only, don't classify" mode) — so the same paths given via
-    # --header double as the public-header set for provenance tagging.
+    # --header double as the public-header set for provenance tagging. Split
+    # into files/directories first (not passed through unsplit): a directory
+    # entry fingerprinted as an individual file identity corrupts
+    # compute_extraction_contract's scope_fingerprint common-root computation
+    # (see split_public_header_inputs's docstring) — a single `-H <dir>`
+    # umbrella otherwise made a byte-identical self-comparison spuriously
+    # raise ScopeMismatchError.
+    old_public_headers, old_public_header_dirs = split_public_header_inputs(old_h)
+    new_public_headers, new_public_header_dirs = split_public_header_inputs(new_h)
     old = _resolve_input(
         old_input,
         old_h,
@@ -556,7 +564,8 @@ def _resolve_compare_snapshots(
         debuginfod_url=debuginfod_url,
         header_backend=old_backend,
         compile=compile_context,
-        public_headers=old_h,
+        public_headers=old_public_headers,
+        public_header_dirs=old_public_header_dirs,
     )
     new = _resolve_input(
         new_input,
@@ -573,7 +582,8 @@ def _resolve_compare_snapshots(
         debuginfod_url=debuginfod_url,
         header_backend=new_backend,
         compile=compile_context,
-        public_headers=new_h,
+        public_headers=new_public_headers,
+        public_header_dirs=new_public_header_dirs,
     )
     if follow_deps:
         if old_fmt == "elf":
@@ -636,7 +646,7 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
     (set-input) compares instead, since the per-library fan-out never calls
     ``resolve_input``/``run_dump`` with a graph-attaching single-pair path in
     the first place (unchanged from before this change); see
-    ``docs/development/plans/g31-header-graph-default-on-followup.md`` for
+    ``docs/contribute/plans/g31-header-graph-default-on-followup.md`` for
     the Phase B+ plan to extend graph coverage to set inputs.
     """
     used = [

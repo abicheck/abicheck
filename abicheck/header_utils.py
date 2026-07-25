@@ -101,6 +101,41 @@ def iter_directory_headers(
     return sorted(found)
 
 
+def split_public_header_inputs(
+    paths: Sequence[Path],
+) -> tuple[list[Path], list[Path]]:
+    """Partition ``-H``/``--header`` *paths* into (files, directories) for
+    public-header provenance tagging.
+
+    A ``-H``/``--header`` input may name an individual header file or a
+    whole directory (documented as "Public header file or directory"), and
+    both ``compare``'s single-pair path (``cli_resolve._resolve_compare_
+    snapshots``) and ``compare-release``'s package path
+    (``service.run_compare_request``) reuse that same list, unsplit, as the
+    public-header provenance set (``resolve_input``'s ``public_headers``
+    argument). ``comparability.compute_extraction_contract`` fingerprints
+    every ``public_headers`` entry as an individual *file* identity — a
+    directory entry's own parent sits one level above the intended
+    normalization root, pulling ``scope_fingerprint``'s common-root
+    computation up with it and leaking that directory's name (often
+    per-run-random, e.g. a tempfile-extracted devel package) into every
+    sibling header's identity. Two extractions of byte-identical headers
+    then spuriously fingerprint as a scope mismatch (``ScopeMismatchError``)
+    even though nothing about the declared surface differs.
+
+    Routing directory entries through ``public_header_dirs`` instead avoids
+    this: that field already collapses a lone directory to a constant token
+    before hashing (comparability.py's single-entry collapse), exactly the
+    "declare everything under this directory public" semantics a ``-H
+    <dir>`` umbrella has.
+    """
+    files: list[Path] = []
+    dirs: list[Path] = []
+    for p in paths:
+        (dirs if p.is_dir() else files).append(p)
+    return files, dirs
+
+
 def _implicit_header_includes(headers: list[Path]) -> list[Path]:
     """Include directories implied by the ``-H`` inputs themselves.
 

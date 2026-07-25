@@ -14,7 +14,7 @@
 
 """Per-fact producer provenance for hybrid (castxml+clang merged) snapshots.
 
-G28 Phase 3 (docs/development/plans/g28-castxml-clang-l2-parity-hardening.md).
+G28 Phase 3 (docs/contribute/plans/g28-castxml-clang-l2-parity-hardening.md).
 A single-backend snapshot's ``ast_producer`` ("castxml"/"clang") already tells
 a detector everything it needs: every fact on that snapshot came from that one
 backend. A ``--ast-frontend hybrid`` snapshot (``dumper_hybrid.merge_snapshots``)

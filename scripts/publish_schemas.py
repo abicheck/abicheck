@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Synchronize public JSON Schema assets from the package into MkDocs docs.
 
-The package copy is the source of truth.  MkDocs publishes ``docs/schemas/v1``
+The package copy is the source of truth.  MkDocs publishes ``docs/reference/schemas/v1``
 verbatim at stable, versioned URLs matching each schema's ``$id``.
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "abicheck" / "schemas"
-DESTINATION = ROOT / "docs" / "schemas" / "v1"
+DESTINATION = ROOT / "docs" / "reference" / "schemas" / "v1"
 
 
 def schema_files() -> list[Path]:

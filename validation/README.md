@@ -7,8 +7,8 @@ libraries (not synthetic fixtures), used to drive planning and improvement.
   a `scan` stack run across source-scan levels on oneTBB (C++) and UMF (C),
   reduced to actionable datapoints + a problems/testing list (P1 castxml-only L2,
   P2 pointer-reachability over-detection, …). The distilled **timing guide** lives
-  in [`docs/user-guide/scan-levels.md`](../docs/user-guide/scan-levels.md) and
-  [`docs/development/performance.md`](../docs/development/performance.md#scan-level-cost-model-one-cliff-at-l4).
+  in [`docs/use/scan-levels.md`](../docs/use/scan-levels.md) and
+  [`docs/contribute/performance.md`](../docs/contribute/performance.md#scan-level-cost-model-one-cliff-at-l4).
   Raw per-level data: `data/uxl_scan_results_2026-06.json`.
 - `realworld-tracker-parity-2026-06.md` — **latest parity** run: abicheck scored
   live against the ABICC abi-laboratory oracle across 60 libraries / 185

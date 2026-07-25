@@ -176,7 +176,7 @@ scenarios:
     validates: UC-WF-bundle
     automated: false
     status: planned
-    plan: docs/development/plans/g2-build-config-and-bundle.md
+    plan: docs/contribute/plans/g2-build-config-and-bundle.md
     note: >
       The scoping rollup (scope.manual_review_required / public_additions /
       filtered_internal_changes) and changed_libraries that this gate keys off
@@ -212,7 +212,7 @@ scenarios:
     validates: UC-WF-bundle
     automated: false
     status: planned
-    plan: docs/development/plans/g3-workflow-examples-and-reporting.md
+    plan: docs/contribute/plans/g3-workflow-examples-and-reporting.md
     note: >
       changed_libraries and the scope.public_additions / filtered_internal_changes
       rollup are emitted today and unit-tested in tests/test_compare_release.py.

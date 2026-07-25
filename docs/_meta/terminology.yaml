@@ -32,7 +32,7 @@ schema_version: 1
 
 terms:
   ABI:
-    canonical_page: concepts/abi-api-handling.md
+    canonical_page: learn/abi-api-handling.md
     short_definition: >-
       Application Binary Interface — the binary-level contract between a
       compiled library and its consumers: symbol names, calling
@@ -41,7 +41,7 @@ terms:
       - Application Binary Interface
 
   API:
-    canonical_page: concepts/abi-api-handling.md
+    canonical_page: learn/abi-api-handling.md
     short_definition: >-
       Application Programming Interface — the source-level contract
       (declarations, signatures, semantics) a caller compiles against.
@@ -55,13 +55,13 @@ terms:
       change abicheck detects (e.g. func_removed, type_size_changed).
 
   Verdict:
-    canonical_page: concepts/verdicts.md
+    canonical_page: learn/verdicts.md
     short_definition: >-
       The overall compatibility result of a compare run (e.g. NO_CHANGE,
       COMPATIBLE, API_BREAK, BREAKING), derived from the detected changes.
 
   Severity:
-    canonical_page: user-guide/severity.md
+    canonical_page: use/severity.md
     short_definition: >-
       The configurable error/warning/info level assigned to each of the
       four issue categories (abi_breaking, potential_breaking,
@@ -69,20 +69,20 @@ terms:
       the verdict.
 
   Baseline:
-    canonical_page: user-guide/baseline-management.md
+    canonical_page: use/baseline-management.md
     short_definition: >-
       The prior snapshot or library a `compare` run diffs the new build
       against — a plain JSON snapshot or binary, not a CLI-managed registry.
 
   Suppression:
-    canonical_page: user-guide/suppressions.md
+    canonical_page: use/suppressions.md
     short_definition: >-
       A rule that waives a specific matching change before verdict and
       severity are computed, tallied separately rather than silently
       dropped.
 
   Policy Profile:
-    canonical_page: user-guide/policies.md
+    canonical_page: use/policies.md
     short_definition: >-
       A named (or custom YAML) mapping from change kind to impact
       (COMPATIBLE/API_BREAK/BREAKING) that can reclassify the same change
@@ -92,7 +92,7 @@ terms:
       - Policy
 
   Evidence Tier:
-    canonical_page: concepts/evidence-and-detectability.md
+    canonical_page: learn/evidence-and-detectability.md
     short_definition: >-
       One of the L0-L4 (binary / +debug-info / +headers / +build /
       +source) input-quality levels that determine what a comparison can
@@ -102,13 +102,13 @@ terms:
       - Evidence Level
 
   Public Surface:
-    canonical_page: concepts/abi-surface.md
+    canonical_page: learn/abi-surface.md
     short_definition: >-
       The subset of a library's symbols and types reachable by an external
       consumer — what scoping rules decide counts as public vs. internal.
 
   PIMPL:
-    canonical_page: user-guide/api-surface-intelligence.md
+    canonical_page: use/api-surface-intelligence.md
     short_definition: >-
       "Pointer to implementation" — a complete public wrapper type whose
       only data member is a pointer to a hidden implementation type; the
@@ -118,7 +118,7 @@ terms:
       - Pointer to Implementation
 
   Opaque Pointer:
-    canonical_page: user-guide/api-surface-intelligence.md
+    canonical_page: use/api-surface-intelligence.md
     short_definition: >-
       A type whose complete definition is never visible in the public
       include closure and that public functions only ever cross by

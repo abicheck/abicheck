@@ -15,7 +15,7 @@
 """Validate that `compare` JSON output conforms to the published schema.
 
 The schema (`abicheck/schemas/compare_report.schema.json`) is the stable
-machine-readable contract documented in docs/user-guide/output-formats.md.
+machine-readable contract documented in docs/use/output-formats.md.
 These tests pin three things:
 
 1. The schema file itself is well-formed JSON Schema and ships in the package.
@@ -126,14 +126,15 @@ class TestSchemaFile:
         assert "report_schema_version" in schema["required"]
 
     def test_docs_mirror_matches_packaged_schema(self):
-        # Regression guard (code review, PR #611): the docs/schemas/v1 copy
-        # previously drifted from the packaged schema (PR #595) without any
+        # Regression guard (code review, PR #611): the docs/reference/schemas/v1
+        # copy previously drifted from the packaged schema (PR #595) without any
         # test catching it, since jsonschema.validate's additionalProperties
         # tolerance doesn't flag a stale docs copy. scripts/publish_schemas.py
         # keeps the two byte-identical; assert that invariant directly.
         docs_copy = (
             COMPARE_REPORT_SCHEMA_PATH.parent.parent.parent
             / "docs"
+            / "reference"
             / "schemas"
             / "v1"
             / "compare_report.schema.json"

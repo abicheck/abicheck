@@ -1,7 +1,7 @@
 # `run-plan.json` Schema Reference
 
 `run-plan.json` is the ordered list of concrete checks
-[ADR-047](../development/adr/047-github-actions-integration-model.md) §4/§5
+[ADR-047](../contribute/adr/047-github-actions-integration-model.md) §4/§5
 describes: one cell per `(target-or-bundle, profile, checks[] entry)`, each
 already carrying its own `check_id`. `abicheck run-plan generate` derives it
 from a project's [`.abicheck.yml` `targets:`/`bundles:`/`profiles:`/

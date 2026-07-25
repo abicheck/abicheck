@@ -5,7 +5,7 @@ description: >-
   per-library content digests), instead of a single `*.abicheck.json` that
   a multi-library release has no honest way to fit into. Read-only: this
   Action never commits or pushes -- publishing the result is the calling
-  workflow's job (see docs/user-guide/baseline-management.md).
+  workflow's job (see docs/use/baseline-management.md).
 
 branding:
   icon: 'archive'

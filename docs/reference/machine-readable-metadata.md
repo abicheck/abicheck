@@ -24,9 +24,9 @@ records in that release.
 The package source is authoritative. Identical copies are published with the
 documentation at stable, versioned URLs:
 
-- [Build evidence](../schemas/v1/build_evidence.schema.json)
-- [BuildSourcePack manifest](../schemas/v1/build_source_pack.schema.json)
-- [Compare JSON report](../schemas/v1/compare_report.schema.json)
+- [Build evidence](schemas/v1/build_evidence.schema.json)
+- [BuildSourcePack manifest](schemas/v1/build_source_pack.schema.json)
+- [Compare JSON report](schemas/v1/compare_report.schema.json)
 
 Every file declares its own canonical HTTPS `$id` at the linked URL. Versioned
 paths are immutable contracts: a breaking schema revision receives a new major

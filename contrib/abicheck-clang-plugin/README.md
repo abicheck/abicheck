@@ -8,7 +8,7 @@
 > Full source scan (`abicheck dump --sources`/`--build-info` +
 > `compile_commands.json` replay) and Wrapper injection (the `abicheck-cc`
 > compiler wrapper, `abicheck/cc_wrapper.py`). See
-> `docs/development/adr/038-build-integrated-fact-collection-variants.md`.
+> `docs/contribute/adr/038-build-integrated-fact-collection-variants.md`.
 
 A Clang plugin that, **during a normal compile**, emits abicheck's normalized
 source facts (`source_facts/*.jsonl`) directly from the AST Clang already
@@ -214,7 +214,7 @@ cmake -S . -B build -DCMAKE_CXX_FLAGS="$ABICHECK_PLUGIN_FLAGS" && cmake --build 
 ```
 
 The user-guide page
-[Build Evidence Setup](../../docs/user-guide/build-evidence-setup.md) has the
+[Build Evidence Setup](../../docs/use/build-evidence-setup.md) has the
 per-build-system snippets in full.
 
 > **Compiler caches skip the plugin.** `ccache`/`sccache` replay a cached

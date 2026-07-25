@@ -33,7 +33,7 @@ REPO_DIR = Path(__file__).resolve().parent.parent
 MD_PATH = REPO_DIR / "docs" / "reference" / "detector-spec.md"
 JSON_PATH = REPO_DIR / "docs" / "reference" / "detector-spec.json"
 GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
-EXAMPLES_DOC_DIR = REPO_DIR / "docs" / "examples"
+EXAMPLES_DOC_DIR = REPO_DIR / "docs" / "reference" / "examples"
 
 # Cap the number of example links rendered per kind so common kinds don't blow
 # up the row width; the full mapping is always available in the JSON.
@@ -76,7 +76,7 @@ def _examples_by_kind() -> dict[str, list[str]]:
     The canonical expected verdict and kinds never vary by evidence depth.
     A lane below min_evidence may miss them, but that is an XFAIL/FAIL against
     the same truth rather than a second, shallower expectation.
-    Only cases with a generated docs page (docs/examples/<case>.md) are included,
+    Only cases with a generated docs page (docs/reference/examples/<case>.md) are included,
     so the rendered links can't dangle under `mkdocs build --strict` (bundle
     cases have no single-library doc page)."""
     try:
@@ -141,7 +141,7 @@ def render_markdown(rows: list[dict[str, str]]) -> str:
     for r in rows:
         cases = [c for c in r["examples"].split(",") if c]
         shown = cases[:_MAX_EXAMPLE_LINKS]
-        links = ", ".join(f"[{c.split('_')[0]}](../examples/{c}.md)" for c in shown)
+        links = ", ".join(f"[{c.split('_')[0]}](examples/{c}.md)" for c in shown)
         if len(cases) > _MAX_EXAMPLE_LINKS:
             links += f", +{len(cases) - _MAX_EXAMPLE_LINKS}"
         lines.append(

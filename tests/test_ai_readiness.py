@@ -103,7 +103,7 @@ def test_adr_index_and_nav_sync_catches_missing_index_nav_entry(
     every ADR is reachable only through it."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | Accepted |\n", encoding="utf-8"
@@ -129,13 +129,13 @@ def test_adr_index_and_nav_sync_ignores_commented_out_index_nav_entry(
     car, tmp_path, monkeypatch
 ):
     """A nav entry commented out of mkdocs.yml (`# - ADR Index:
-    development/adr/index.md`) is not published navigation -- a raw
+    contribute/adr/index.md`) is not published navigation -- a raw
     whole-file regex scan for `.md` paths would still find it, incorrectly
     satisfying the "ADR index must be in nav" requirement (regression test
     for the gap flagged in PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | Accepted |\n", encoding="utf-8"
@@ -144,7 +144,7 @@ def test_adr_index_and_nav_sync_ignores_commented_out_index_nav_entry(
         "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - Home: index.md\n  # - ADR Index: development/adr/index.md\n",
+        "nav:\n  - Home: index.md\n  # - ADR Index: contribute/adr/index.md\n",
         encoding="utf-8",
     )
 
@@ -181,7 +181,7 @@ def test_adr_index_nav_sync_ignores_link_hidden_in_html_comment(
     would (regression test for the gap flagged in PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "<!-- [001](001-example.md) -->\n", encoding="utf-8"
@@ -190,7 +190,7 @@ def test_adr_index_nav_sync_ignores_link_hidden_in_html_comment(
         "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        "nav:\n  - Home: index.md\n  - ADR Index: contribute/adr/index.md\n",
         encoding="utf-8",
     )
 
@@ -214,7 +214,7 @@ def test_adr_index_nav_sync_rejects_replacement_link_hidden_in_inline_code(
     PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | Superseded |\n"
@@ -229,7 +229,7 @@ def test_adr_index_nav_sync_rejects_replacement_link_hidden_in_inline_code(
         "# ADR-002\n\n**Status:** Accepted\n", encoding="utf-8"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        "nav:\n  - Home: index.md\n  - ADR Index: contribute/adr/index.md\n",
         encoding="utf-8",
     )
 
@@ -250,7 +250,7 @@ def test_adr_index_nav_sync_rejects_replacement_link_hidden_in_comment(
     instead of inline code."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | Superseded |\n"
@@ -265,7 +265,7 @@ def test_adr_index_nav_sync_rejects_replacement_link_hidden_in_comment(
         "# ADR-002\n\n**Status:** Accepted\n", encoding="utf-8"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        "nav:\n  - Home: index.md\n  - ADR Index: contribute/adr/index.md\n",
         encoding="utf-8",
     )
 
@@ -289,7 +289,7 @@ def test_adr_index_nav_sync_rejects_bare_filename_mention_as_link(
     though its filename appears somewhere in the file."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "See `001-example.md` for details on this decision.\n", encoding="utf-8"
@@ -298,7 +298,7 @@ def test_adr_index_nav_sync_rejects_bare_filename_mention_as_link(
         "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        "nav:\n  - Home: index.md\n  - ADR Index: contribute/adr/index.md\n",
         encoding="utf-8",
     )
 
@@ -321,7 +321,7 @@ def test_adr_index_nav_sync_accepts_reference_style_index_link(
     the "linked from index.md" requirement."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001][adr-001] | Example | Accepted |\n\n[adr-001]: 001-example.md\n",
@@ -331,7 +331,7 @@ def test_adr_index_nav_sync_accepts_reference_style_index_link(
         "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        "nav:\n  - Home: index.md\n  - ADR Index: contribute/adr/index.md\n",
         encoding="utf-8",
     )
 
@@ -352,7 +352,7 @@ def test_adr_index_nav_sync_accepts_indented_reference_definition(
     for the gap flagged in PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001][adr-001] | Example | Accepted |\n\n  [adr-001]: 001-example.md\n",
@@ -362,7 +362,7 @@ def test_adr_index_nav_sync_accepts_indented_reference_definition(
         "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        "nav:\n  - Home: index.md\n  - ADR Index: contribute/adr/index.md\n",
         encoding="utf-8",
     )
 
@@ -385,7 +385,7 @@ def test_adr_index_nav_sync_ignores_link_syntax_inside_fenced_code(
     flagged in PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "Add a new row like this:\n\n"
@@ -396,7 +396,7 @@ def test_adr_index_nav_sync_ignores_link_syntax_inside_fenced_code(
         "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        "nav:\n  - Home: index.md\n  - ADR Index: contribute/adr/index.md\n",
         encoding="utf-8",
     )
 
@@ -417,7 +417,7 @@ def test_adr_index_nav_sync_ignores_link_syntax_inside_inline_code(
     code span instead of a ``` block."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "Example row: `[001](001-example.md)`\n", encoding="utf-8"
@@ -426,7 +426,7 @@ def test_adr_index_nav_sync_ignores_link_syntax_inside_inline_code(
         "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        "nav:\n  - Home: index.md\n  - ADR Index: contribute/adr/index.md\n",
         encoding="utf-8",
     )
 
@@ -447,7 +447,7 @@ def test_adr_index_nav_sync_does_not_require_individual_adr_in_nav(
     itself is in nav -- an individual ADR entry is no longer required."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | Accepted |\n", encoding="utf-8"
@@ -456,7 +456,7 @@ def test_adr_index_nav_sync_does_not_require_individual_adr_in_nav(
         "# ADR-001\n\n**Status:** Accepted\n", encoding="utf-8"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - Home: index.md\n  - ADR Index: development/adr/index.md\n",
+        "nav:\n  - Home: index.md\n  - ADR Index: contribute/adr/index.md\n",
         encoding="utf-8",
     )
 
@@ -471,14 +471,14 @@ def test_adr_index_nav_sync_does_not_require_individual_adr_in_nav(
 def test_adr_index_nav_sync_catches_missing_status(car, tmp_path, monkeypatch):
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n", encoding="utf-8"
     )
     (adr_dir / "001-example.md").write_text("# ADR-001\n\nNo status here.\n")
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -492,7 +492,7 @@ def test_adr_index_nav_sync_catches_missing_status(car, tmp_path, monkeypatch):
 def test_adr_index_nav_sync_accepts_heading_style_status(car, tmp_path, monkeypatch):
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n", encoding="utf-8"
@@ -501,7 +501,7 @@ def test_adr_index_nav_sync_accepts_heading_style_status(car, tmp_path, monkeypa
         "# ADR-001\n\n## Status\n\nAccepted — implemented.\n", encoding="utf-8"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -521,7 +521,7 @@ def test_adr_index_nav_sync_finds_replacement_link_on_wrapped_status_line(
     (regression test for the gap flagged in PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n"
@@ -534,7 +534,7 @@ def test_adr_index_nav_sync_finds_replacement_link_on_wrapped_status_line(
     )
     (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -550,7 +550,7 @@ def test_adr_index_nav_sync_catches_superseded_without_replacement_link(
 ):
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n", encoding="utf-8"
@@ -559,7 +559,7 @@ def test_adr_index_nav_sync_catches_superseded_without_replacement_link(
         "# ADR-001\n\n**Status:** Superseded, no pointer to what replaced it.\n"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -581,7 +581,7 @@ def test_adr_index_nav_sync_catches_superseded_colon_without_replacement_link(
     (regression test for the gap flagged in PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n", encoding="utf-8"
@@ -590,7 +590,7 @@ def test_adr_index_nav_sync_catches_superseded_colon_without_replacement_link(
         "# ADR-001\n\n**Status:** Superseded: no pointer to what replaced it.\n"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -611,7 +611,7 @@ def test_adr_index_nav_sync_catches_bold_superseded_without_replacement_link(
     PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n", encoding="utf-8"
@@ -620,7 +620,7 @@ def test_adr_index_nav_sync_catches_bold_superseded_without_replacement_link(
         "# ADR-001\n\n**Status:** **Superseded** by nothing in particular.\n"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -636,7 +636,7 @@ def test_adr_index_nav_sync_accepts_superseded_with_replacement_link(
 ):
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n"
@@ -648,7 +648,7 @@ def test_adr_index_nav_sync_accepts_superseded_with_replacement_link(
     )
     (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -669,7 +669,7 @@ def test_adr_index_nav_sync_accepts_angle_bracket_replacement_link(
     review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n"
@@ -681,7 +681,7 @@ def test_adr_index_nav_sync_accepts_angle_bracket_replacement_link(
     )
     (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -701,7 +701,7 @@ def test_adr_index_nav_sync_accepts_replacement_link_with_title(
     (regression test for the gap flagged in PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n"
@@ -713,7 +713,7 @@ def test_adr_index_nav_sync_accepts_replacement_link_with_title(
     )
     (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -733,7 +733,7 @@ def test_adr_index_nav_sync_accepts_reference_style_replacement_link(
     it entirely (regression test for the gap flagged in PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n"
@@ -746,7 +746,7 @@ def test_adr_index_nav_sync_accepts_reference_style_replacement_link(
     )
     (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -766,7 +766,7 @@ def test_adr_index_nav_sync_rejects_image_syntax_as_replacement(
     (regression test for the gap flagged in PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n"
@@ -778,7 +778,7 @@ def test_adr_index_nav_sync_rejects_image_syntax_as_replacement(
     )
     (adr_dir / "002-example.md").write_text("# ADR-002\n\n**Status:** Accepted.\n")
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -798,7 +798,7 @@ def test_adr_index_nav_sync_rejects_unrelated_link_as_replacement(
     (regression test for the gap flagged in PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n", encoding="utf-8"
@@ -808,7 +808,7 @@ def test_adr_index_nav_sync_rejects_unrelated_link_as_replacement(
         "[the plan doc](../plans/some-plan.md) for context.\n"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -823,13 +823,13 @@ def test_adr_index_nav_sync_rejects_adr_shaped_link_outside_adr_dir(
     car, tmp_path, monkeypatch
 ):
     """A link whose *basename* matches the ADR filename pattern but whose
-    target resolves outside docs/development/adr/ (e.g. a coincidentally
+    target resolves outside docs/contribute/adr/ (e.g. a coincidentally
     numbered file in a notes/ directory) must not satisfy the
     replacement-link requirement -- basename-only matching previously
     accepted it (regression test for the gap flagged in PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     notes_dir = fake_docs / "notes"
     notes_dir.mkdir(parents=True)
@@ -842,7 +842,7 @@ def test_adr_index_nav_sync_rejects_adr_shaped_link_outside_adr_dir(
         "[the plan](../../notes/002-plan.md) for context.\n"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -863,7 +863,7 @@ def test_adr_index_nav_sync_rejects_self_link_as_replacement(
     flagged in PR #619 review)."""
     fake_root = tmp_path
     fake_docs = fake_root / "docs"
-    adr_dir = fake_docs / "development" / "adr"
+    adr_dir = fake_docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "index.md").write_text(
         "| [001](001-example.md) | Example | |\n", encoding="utf-8"
@@ -872,7 +872,7 @@ def test_adr_index_nav_sync_rejects_self_link_as_replacement(
         "# ADR-001\n\n**Status:** Superseded by [this ADR](001-example.md).\n"
     )
     (fake_root / "mkdocs.yml").write_text(
-        "nav:\n  - ADR Index: development/adr/index.md\n", encoding="utf-8"
+        "nav:\n  - ADR Index: contribute/adr/index.md\n", encoding="utf-8"
     )
 
     monkeypatch.setattr(car, "ROOT", fake_root)
@@ -1241,7 +1241,7 @@ def test_action_version_freshness_exempts_adr_dir(car, tmp_path, monkeypatch):
         json.dumps({"latest_release": "0.5.0"}), encoding="utf-8"
     )
     docs = tmp_path / "docs"
-    adr_dir = docs / "development" / "adr"
+    adr_dir = docs / "contribute" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "001-historical.md").write_text(
         "uses: abicheck/abicheck@v0.3.0\n", encoding="utf-8"

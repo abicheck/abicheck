@@ -5,7 +5,7 @@ Real libraries can be large: ``libonedal_core.so`` exports ~10,550 functions.
 The snapshot/``dump`` step scales fine (~5 s for that library); ``compare`` used
 to blow up super-linearly on the post-processing detectors (surface scoping,
 affected-symbol enrichment, namespace demangling, fingerprint rename matching).
-Those paths are now fixed (see ``docs/development/performance.md``), and this
+Those paths are now fixed (see ``docs/contribute/performance.md``), and this
 harness guards against regressions *without* needing a real binary, castxml, or
 a compiler: it synthesises ``AbiSnapshot`` pairs of increasing size that
 exercise each formerly-expensive path, times :func:`abicheck.checker.compare`,
@@ -32,7 +32,7 @@ this catches *gradual* drift that the per-run scaling exponent misses.
 Beyond ``compare()``, scenarios also cover PE/Mach-O diff arms, typedef/union/
 wide-struct/vtable churn, the opaque-handle size filter, suppression audit,
 severity categorization, serialization round-trip, and the HTML/SARIF/JUnit
-reporters. See ``docs/development/performance.md`` for the full scenario table,
+reporters. See ``docs/contribute/performance.md`` for the full scenario table,
 the coverage gap analysis, and the paths still not benchmarked.
 
 Scenarios
@@ -967,7 +967,7 @@ def _build_serialize(n: int) -> AbiSnapshot:
 # none of the above stress: a huge *unchanged* public surface, a mass binary-
 # export removal that is entirely bundled/non-public (packaging noise — must
 # stay non-breaking once scoped), and a mass removal that *is* genuinely public
-# (must stay breaking). See docs/development/performance.md.
+# (must stay breaking). See docs/contribute/performance.md.
 def _build_onedal_large_surface(n: int) -> tuple[AbiSnapshot, AbiSnapshot]:
     """A large, almost entirely unchanged public surface: ``n`` functions,
     ``n // 20`` records, ``n // 100`` enums, with exactly one function's

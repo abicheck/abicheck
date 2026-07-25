@@ -16,11 +16,11 @@
 
 """Catch drift between usecase-registry.yaml and its human-readable docs.
 
-docs/development/usecase-registry.yaml is the machine-checked source of truth
+docs/contribute/usecase-registry.yaml is the machine-checked source of truth
 for gap status (tests/test_usecase_registry.py enforces its internal
 consistency). But the *human* narrative that summarizes it —
-docs/development/usecase-coverage-evaluation.md's "Gaps that matter" table and
-the "Proposed next steps" backlog, plus docs/development/plans/index.md's
+docs/contribute/usecase-coverage-evaluation.md's "Gaps that matter" table and
+the "Proposed next steps" backlog, plus docs/contribute/plans/index.md's
 remaining-vs-completed tables — is hand-maintained prose, so it can silently
 drift once a registry entry's status changes underneath it (this happened for
 real: G14 was marked `complete` in the registry while the eval doc still said
@@ -49,9 +49,9 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-REGISTRY = ROOT / "docs" / "development" / "usecase-registry.yaml"
-EVAL_DOC = ROOT / "docs" / "development" / "usecase-coverage-evaluation.md"
-PLANS_INDEX = ROOT / "docs" / "development" / "plans" / "index.md"
+REGISTRY = ROOT / "docs" / "contribute" / "usecase-registry.yaml"
+EVAL_DOC = ROOT / "docs" / "contribute" / "usecase-coverage-evaluation.md"
+PLANS_INDEX = ROOT / "docs" / "contribute" / "plans" / "index.md"
 
 #: statuses that mean "nothing left to do" for the purposes of this check.
 _DONE_STATUSES = {"complete", "by_design_excluded"}
@@ -271,7 +271,7 @@ def main() -> int:
             print(f"  - {f}")
         print(
             f"\n{len(findings)} drift finding(s). Update the human docs to match "
-            f"docs/development/usecase-registry.yaml (the source of truth), or "
+            f"docs/contribute/usecase-registry.yaml (the source of truth), or "
             f"fix the registry if it's the one that's stale."
         )
         return 1

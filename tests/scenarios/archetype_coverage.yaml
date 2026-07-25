@@ -24,7 +24,7 @@ scenarios:
     validates: UC-ARCH-kernel-btf
     automated: false
     status: planned
-    plan: docs/development/plans/g6-kernel-btf-and-accelerator.md
+    plan: docs/contribute/plans/g6-kernel-btf-and-accelerator.md
     note: >
       BTF/CTF parsing is unit-tested (tests/test_btf_metadata.py). Full
       automation needs real BTF blob fixtures and a documented "module vs
@@ -46,7 +46,7 @@ scenarios:
     validates: UC-ARCH-sycl
     automated: false
     status: planned
-    plan: docs/development/plans/g6-kernel-btf-and-accelerator.md
+    plan: docs/contribute/plans/g6-kernel-btf-and-accelerator.md
     note: >
       SYCL metadata + diff is unit-tested (tests/test_diff_sycl.py) and there is
       a change-type example (examples/case82_sycl_overload_set_removed). Full
@@ -69,7 +69,7 @@ scenarios:
     validates: UC-ARCH-static-lib
     automated: false
     status: planned
-    plan: docs/development/plans/g8-static-libraries.md
+    plan: docs/contribute/plans/g8-static-libraries.md
     note: >
       Scope is still open (iterate `ar` members vs. document as a non-goal —
       see the G8 plan). Defined here so the decision and its workflow are tracked.
@@ -90,7 +90,7 @@ scenarios:
     validates: UC-ARCH-header-only
     automated: false
     status: planned
-    plan: docs/development/plans/g4-header-ast-extractor.md
+    plan: docs/contribute/plans/g4-header-ast-extractor.md
     note: >
       castxml-based extraction exists (abicheck/dumper_castxml.py) but cannot
       resolve concept tightening / hidden friends / user-ctor mangled names

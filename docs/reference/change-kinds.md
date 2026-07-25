@@ -22,9 +22,9 @@ or neither.
 > **Scope:** this is a curated reference, not the exhaustive list — specialised
 > kinds (multi-library bundle skew, SYCL plugin-interface, build-context and
 > source-evidence findings) are documented on their feature pages
-> ([Multi-Binary Releases](../user-guide/multi-binary.md),
-> [Plugin Systems](../user-guide/plugin-systems.md),
-> [Build & Source Packs](../concepts/build-source-data.md)). The authoritative,
+> ([Multi-Binary Releases](../use/multi-binary.md),
+> [Plugin Systems](../use/plugin-systems.md),
+> [Build & Source Packs](../learn/build-source-data.md)). The authoritative,
 > always-complete list is the `ChangeKind` enum in
 > [`abicheck/checker_policy.py`](https://github.com/abicheck/abicheck/blob/main/abicheck/checker_policy.py),
 > and CI enforces that every kind is classified, produced by a detector, and
@@ -254,7 +254,7 @@ Recovered by passing two `Module.symvers` manifests to `compare` (recognized by 
 
 ### API-surface intelligence transitions (ADR-027)
 
-These breaks are recognised from the declaration *graph* (idioms), not a single per-symbol diff. They fire when an opacity or handle guarantee that callers relied on is lost between versions. See the [API Surface Intelligence](../user-guide/api-surface-intelligence.md) guide.
+These breaks are recognised from the declaration *graph* (idioms), not a single per-symbol diff. They fire when an opacity or handle guarantee that callers relied on is lost between versions. See the [API Surface Intelligence](../use/api-surface-intelligence.md) guide.
 
 | Kind | Description |
 |------|-------------|
@@ -386,7 +386,7 @@ library from loading in some deployment environments. Manual review is required.
 | `ctor_explicit_removed` | A constructor or conversion operator lost its `explicit` specifier. Existing code keeps compiling and the mangled name is unchanged, but implicit-conversion paths that previously excluded this function now consider it, which can silently select a different overload. The dual of `ctor_explicit_added`. |
 | `api_depends_on_consumer_env` | A public declaration is present under some consumer build configurations (compiler, language standard, macro set) and absent under others, so source that compiled for the library author may not compile for the consumer. Detected only when abicheck is given a probe matrix of snapshots taken under multiple configurations. |
 
-See the [Security-hardening drift](../user-guide/security-hardening.md) guide for how to scan for these across releases.
+See the [Security-hardening drift](../use/security-hardening.md) guide for how to scan for these across releases.
 
 ---
 
@@ -473,7 +473,7 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 
 ### Surface-metric drift (ADR-027, opt-in `--surface-metrics`)
 
-Aggregate roll-up signals computed from the [API surface metrics](../user-guide/api-surface-intelligence.md). Informational only — the individual additions/removals are reported per-symbol; these never drive a verdict on their own and are emitted only with `--surface-metrics`.
+Aggregate roll-up signals computed from the [API surface metrics](../use/api-surface-intelligence.md). Informational only — the individual additions/removals are reported per-symbol; these never drive a verdict on their own and are emitted only with `--surface-metrics`.
 
 | Kind | Description |
 |------|-------------|
@@ -562,7 +562,7 @@ retargeted — rather than a single library's own declaration diff.
 | `elf_endianness_changed` | The ELF `EI_DATA` byte order flipped (LSB ↔ MSB) — a different binary contract entirely (`BREAKING`). |
 | `x86_isa_baseline_raised` | `GNU_PROPERTY_X86_ISA_1_NEEDED` gained a micro-architecture level (e.g. x86-64-v2 → v3): older CPUs can no longer run the library (`COMPATIBLE_WITH_RISK`). |
 | `os_deployment_floor_raised` | The minimum OS/kernel floor was raised — Mach-O `LC_BUILD_VERSION` minos, PE `MajorSubsystemVersion`, or the ELF `NT_GNU_ABI_TAG` kernel floor (`COMPATIBLE_WITH_RISK`). |
-| `pe_hardening_weakened` / `pe_hardening_improved` | PE `DllCharacteristics` exploit mitigations (DEP, ASLR, HIGH_ENTROPY_VA, Control Flow Guard) lost or gained — see [Security Hardening](../user-guide/security-hardening.md). |
+| `pe_hardening_weakened` / `pe_hardening_improved` | PE `DllCharacteristics` exploit mitigations (DEP, ASLR, HIGH_ENTROPY_VA, Control Flow Guard) lost or gained — see [Security Hardening](../use/security-hardening.md). |
 | `library_version_downgraded` | The embedded version regressed (PE `VS_FIXEDFILEINFO` or Mach-O `LC_ID_DYLIB` current_version) (`COMPATIBLE_WITH_RISK`). |
 | `macho_filetype_changed` | The Mach-O filetype changed (e.g. `MH_DYLIB` → `MH_BUNDLE`): a bundle cannot be linked against at build time (`BREAKING`). |
 | `macho_linkage_flags_changed` | Mach-O two-level-namespace / weak-definition linkage flags flipped (`COMPATIBLE_WITH_RISK`). |

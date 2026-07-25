@@ -18,7 +18,7 @@ scenarios:
     validates: UC-WF-bundle
     automated: false
     status: planned
-    plan: docs/development/plans/g2-build-config-and-bundle.md
+    plan: docs/contribute/plans/g2-build-config-and-bundle.md
 
   - id: SC-APP-IMPACT
     title: "Answer: will my application break with the new library?"
@@ -33,7 +33,7 @@ scenarios:
     validates: UC-WF-appcompat
     automated: false
     status: planned
-    plan: docs/development/plans/g3-workflow-examples-and-reporting.md
+    plan: docs/contribute/plans/g3-workflow-examples-and-reporting.md
 
   - id: SC-SYSROOT-MIGRATION
     title: Validate a binary still loads after a full-stack sysroot bump
@@ -48,7 +48,7 @@ scenarios:
     validates: UC-WF-stack-deps
     automated: false
     status: planned
-    plan: docs/development/plans/g3-workflow-examples-and-reporting.md
+    plan: docs/contribute/plans/g3-workflow-examples-and-reporting.md
 
   - id: SC-AGENT-MCP
     title: An AI agent inspects ABI changes through the MCP server
