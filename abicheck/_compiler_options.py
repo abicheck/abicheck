@@ -55,9 +55,18 @@ def explicit_language_standard(
     ``dumper_ast_config.py``'s ``_build_castxml_cmd``); only what the
     caller actually asked for.
     """
-    tokens = (
-        list(shlex.split(gcc_options, posix=os.name != "nt")) if gcc_options else []
-    )
+    tokens: list[str] = []
+    if gcc_options:
+        try:
+            tokens = shlex.split(gcc_options, posix=os.name != "nt")
+        except ValueError:
+            # Malformed --gcc-options (e.g. an unbalanced quote) must not
+            # abort the dump (Codex review, PR #624 follow-up, same rule
+            # already applied to dumper_contract.py's own shlex.split call):
+            # this is the ADR-050 profile-fingerprint path, invoked
+            # unconditionally on every header-based dump, so a crash here
+            # would be a new failure mode a pre-ADR-050 dump never had.
+            pass
     tokens.extend(gcc_option_tokens)
     value: str | None = None
     for token in tokens:

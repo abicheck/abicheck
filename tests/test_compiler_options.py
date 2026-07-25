@@ -63,6 +63,20 @@ class TestExplicitLanguageStandard:
             "-std=c++17", ()
         ) != explicit_language_standard("-std=c++20", ())
 
+    def test_malformed_gcc_options_does_not_raise(self) -> None:
+        # An unbalanced quote makes shlex.split raise ValueError -- this is
+        # the ADR-050 profile-fingerprint path, invoked unconditionally on
+        # every header-based dump, so a malformed --gcc-options value must
+        # degrade gracefully (no explicit standard detected from the
+        # unparseable string) rather than abort the dump, matching the same
+        # "must not abort the dump" rule already applied to
+        # dumper_contract.py's own shlex.split call.
+        assert explicit_language_standard('-DFOO="unterminated', ()) is None
+        assert (
+            explicit_language_standard('-DFOO="unterminated', ("-std=c++20",))
+            == "c++20"
+        )
+
 
 class TestLanguageStandardField:
     """ADR-050 D1's combined language_standard profile field (Codex review,

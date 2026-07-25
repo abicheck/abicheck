@@ -20,7 +20,13 @@ compiler_version is also present."""
 
 from __future__ import annotations
 
-from abicheck.dumper_contract import _profile_compiler_version
+from pathlib import Path
+
+from abicheck.dumper_contract import (
+    _attach_extraction_contract,
+    _profile_compiler_version,
+)
+from abicheck.model import AbiSnapshot
 
 
 def test_none_when_toolchain_empty() -> None:
@@ -84,3 +90,24 @@ def test_missing_frontend_version_falls_back_to_host_only() -> None:
     result = _profile_compiler_version({"compiler_version": "gcc 13.2.0"})
     assert result is not None
     assert "gcc 13.2.0" in result
+
+
+def test_attach_extraction_contract_with_malformed_gcc_options_does_not_raise(
+    tmp_path: Path,
+) -> None:
+    """A malformed ``--gcc-options`` value (e.g. an unbalanced quote) must
+    not abort the dump: ``shlex.split`` raising ``ValueError`` is caught and
+    the contract is still computed from ``gcc_option_tokens`` alone."""
+    header = tmp_path / "api.h"
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    _attach_extraction_contract(
+        snap,
+        headers=[header],
+        extra_includes=None,
+        gcc_options='-DFOO="unterminated',
+        gcc_option_tokens=(),
+        lang=None,
+        public_headers=None,
+        public_header_dirs=None,
+    )
+    assert snap.contract is not None
