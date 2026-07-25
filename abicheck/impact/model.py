@@ -191,6 +191,26 @@ class ImpactAssessment:
     is already independently populated by one of the producer modules named
     in this module's docstring — this dataclass adds no new signal, only a
     shared shape to query it through (ADR-052 D1).
+
+    ``root_cause_id``/``root_cause_display``/``impact_group_id`` (G29 Phase 3
+    follow-up) are the report-level root-cause grouping key
+    (``reporter_markdown.root_cause_for_change``, the same
+    ``_root_cause_key_and_display`` computation ``--report-mode root-cause``
+    uses) surfaced as a per-finding identifier, independent of report mode —
+    unlike ``--report-mode root-cause``'s own grouping (which buckets *every*
+    finding, including singletons), these three fields are deliberately
+    ``None`` for a finding with no real correlation signal (no
+    ``caused_by_type``, and not itself referenced by another finding's
+    ``caused_by_type``) — the trivial self-referencing
+    ``f"finding:{finding_id}"`` case — so a plain, uncorrelated finding's
+    ``impact_assessment`` doesn't balloon with a rootCauseId that names
+    nothing but itself. ``impact_group_id`` is currently always identical to
+    ``root_cause_id`` — a placeholder alias, not yet a distinct concept
+    (Phase 6's ``RootCauseCorrelator`` is what would ever make them diverge,
+    e.g. bucketing several distinct root causes that share one broader
+    consumer-visible event under one group while keeping their own
+    individual root-cause identities); see ADR-052's "Deliberately not
+    implemented" section.
     """
 
     reachability_state: ReachabilityState = ReachabilityState.UNKNOWN
@@ -201,6 +221,9 @@ class ImpactAssessment:
     decision: FindingDecision = field(default_factory=FindingDecision)
     evidence_category: str | None = None
     correlated_change_kind: str | None = None
+    root_cause_id: str | None = None
+    root_cause_display: str | None = None
+    impact_group_id: str | None = None
 
     def has_signal(self) -> bool:
         """True when this assessment carries information beyond the
@@ -217,6 +240,7 @@ class ImpactAssessment:
             or self.decision.verdict_override is not None
             or self.correlated_change_kind is not None
             or self.evidence_category is not None
+            or self.root_cause_id is not None
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -234,4 +258,8 @@ class ImpactAssessment:
             d["evidence_category"] = self.evidence_category
         if self.correlated_change_kind is not None:
             d["correlated_change_kind"] = self.correlated_change_kind
+        if self.root_cause_id is not None:
+            d["root_cause_id"] = self.root_cause_id
+            d["root_cause_display"] = self.root_cause_display
+            d["impact_group_id"] = self.impact_group_id
         return d

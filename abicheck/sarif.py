@@ -44,7 +44,11 @@ from abicheck.checker_policy import (
 from abicheck.impact import assess_change
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import _finding_id, apply_show_only
-from abicheck.reporter_markdown import ShowOnlyFilter, _root_cause_key_and_display
+from abicheck.reporter_markdown import (
+    ShowOnlyFilter,
+    _root_cause_key_and_display,
+    root_cause_lookup_for_changes,
+)
 from abicheck.severity import missing_contract_exit_code
 
 if TYPE_CHECKING:
@@ -218,6 +222,7 @@ def _result_for(
     relevant_ids: frozenset[str] | None = None,
     evidence_status_override: EvidenceStatus | None = None,
     root_cause: tuple[str, str] | None = None,
+    impact_root_cause: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Produce a SARIF result object for a Change.
 
@@ -226,6 +231,15 @@ def _result_for(
     pair -- added as ``properties.rootCauseId``/``properties.rootCause`` so
     a SARIF consumer can group results the same way JSON/markdown root-cause
     mode does, without restructuring SARIF's one-result-per-finding shape.
+
+    *impact_root_cause* (G29 Phase 3 follow-up) is the same kind of pair but
+    feeds ``impactAssessment.root_cause_id``/``root_cause_display``/
+    ``impact_group_id`` instead -- computed unconditionally (any
+    *report_mode*), unlike *root_cause* above which stays exclusive to
+    ``--report-mode root-cause``'s own top-level ``properties.rootCauseId``/
+    ``rootCause`` fields. Kept as a separate parameter rather than reusing
+    *root_cause* so that existing, tested behavior of those top-level
+    properties can't shift when this field was added.
 
     *relevant_ids*, when not ``None``, means a ``--used-by``/``--required-symbol``
     gate is active: a change whose :func:`_finding_id` is absent from the set is
@@ -312,7 +326,7 @@ def _result_for(
     # JSON output gained -- reachabilityState always present (the tri-state
     # signal from PR #607, never surfaced in SARIF before this), and the
     # unified impactAssessment object when it carries more than the defaults.
-    assessment = assess_change(change)
+    assessment = assess_change(change, root_cause=impact_root_cause)
     properties["reachabilityState"] = assessment.reachability_state.value
     if assessment.has_signal():
         properties["impactAssessment"] = assessment.to_dict()
@@ -353,7 +367,8 @@ def _result_for(
 
 
 def _severity_gate_properties(
-    result: DiffResult, severity_config: SeverityConfig,
+    result: DiffResult,
+    severity_config: SeverityConfig,
 ) -> dict[str, Any]:
     """Build a compact, auditable ``severityGate`` block for SARIF ``properties``.
 
@@ -416,12 +431,11 @@ def _missing_contract_result(
     (Codex review).
     """
     rule_id = (
-        "used_by_missing_symbol" if gate_scope == "used_by" else "required_symbol_missing"
+        "used_by_missing_symbol"
+        if gate_scope == "used_by"
+        else "required_symbol_missing"
     )
-    blocks = (
-        severity_config is None
-        or missing_contract_exit_code(severity_config) != 0
-    )
+    blocks = severity_config is None or missing_contract_exit_code(severity_config) != 0
     properties: dict[str, Any] = {
         "relevantToGate": True,
         "blocksGate": blocks,
@@ -474,7 +488,9 @@ def _scoped_gate_properties(result: DiffResult) -> dict[str, Any] | None:
     scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
     gate_scope = getattr(result, "gate_scope", None)
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
-    relevant_in_changes = sum(1 for c in result.changes if _finding_id(c) in relevant_ids)
+    relevant_in_changes = sum(
+        1 for c in result.changes if _finding_id(c) in relevant_ids
+    )
     # scoped-only changes (e.g. PE_ORDINAL_RETARGETED) and missing-contract
     # members are relevant by construction -- they exist only because
     # scope_diff_to_app/scope_diff_to_required_symbols found them relevant --
@@ -596,6 +612,14 @@ def to_sarif(
             c.caused_by_type for c in changes if c.caused_by_type
         ) | frozenset(c.caused_by_type for c in scoped_only_changes if c.caused_by_type)
 
+    # G29 Phase 3 follow-up: impactAssessment.root_cause_id/impact_group_id
+    # (unlike properties.rootCauseId/rootCause above) are computed
+    # unconditionally -- independent of report_mode -- mirroring
+    # reporter.py's JSON output. Spans `changes` and `scoped_only_changes`
+    # together so a scoped-only change's caused_by_type can still correlate
+    # with a regular change, same as referenced_causes above.
+    _impact_rc_lookup = root_cause_lookup_for_changes(changes + scoped_only_changes)
+
     def _root_cause_for(
         caused_by_type: str | None,
         symbol: str | None,
@@ -634,6 +658,7 @@ def to_sarif(
                     change.kind.value,
                     _finding_id(change),
                 ),
+                impact_root_cause=_impact_rc_lookup.get(_finding_id(change)),
             )
         )
 
@@ -658,6 +683,7 @@ def to_sarif(
                     change.kind.value,
                     _finding_id(change),
                 ),
+                impact_root_cause=_impact_rc_lookup.get(_finding_id(change)),
             )
         )
 
@@ -674,7 +700,8 @@ def to_sarif(
         # absent", so only the severity dimension is checked here.
         missing_severity = (
             "breaking"
-            if severity_config is None or missing_contract_exit_code(severity_config) != 0
+            if severity_config is None
+            or missing_contract_exit_code(severity_config) != 0
             else "compatible"
         )
         show_only_severities = (
@@ -683,14 +710,17 @@ def to_sarif(
         if not show_only_severities or missing_severity in show_only_severities:
             for label in getattr(result, "scoped_missing_labels", ()) or ():
                 rule_id = (
-                    "used_by_missing_symbol" if gate_scope == "used_by"
+                    "used_by_missing_symbol"
+                    if gate_scope == "used_by"
                     else "required_symbol_missing"
                 )
                 if rule_id not in rules_seen:
                     rules_seen[rule_id] = _missing_contract_rule(rule_id)
                 sarif_results.append(
                     _missing_contract_result(
-                        label, gate_scope, severity_config,
+                        label,
+                        gate_scope,
+                        severity_config,
                         # A missing-contract label has no caused_by_type; its
                         # `symbol` (the label) only becomes a *grouping* key
                         # when some other finding's caused_by_type names it
@@ -785,11 +815,7 @@ def to_sarif(
                         if severity_gate is not None
                         else {}
                     ),
-                    **(
-                        {"scopedGate": scoped_gate}
-                        if scoped_gate is not None
-                        else {}
-                    ),
+                    **({"scopedGate": scoped_gate} if scoped_gate is not None else {}),
                     **(
                         {"redundantCount": result.redundant_count}
                         if result.redundant_count > 0

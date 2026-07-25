@@ -110,15 +110,18 @@ A new detector should:
   a real `--used-by` consumer graph): doesn't exist until
   [G29 Phase 4](plans/g29-impact-analysis-layer.md#phase-4-consumer-use-case-join).
   A detector can't claim this tier — don't invent a proxy for it.
-- **`root_cause_id`/`impact_group_id`** on `ImpactAssessment`: correctly
-  computing either needs whole-`DiffResult` context (which findings
-  elsewhere reference this one) a single `Change`'s read view can't see —
-  see [ADR-052](adr/052-unified-impact-assessment-model.md)'s "Deliberately
-  not implemented" section and
-  [Phase 6](plans/g29-impact-analysis-layer.md#phase-6-new-detectors-examples-fp-gates)'s
-  `RootCauseCorrelator`. Group findings via the existing `caused_by_type`
-  field and `--report-mode root-cause` instead of adding a parallel
-  correlation mechanism.
+- **Computing your own `root_cause_id`/`impact_group_id`.** These *do* exist
+  on `ImpactAssessment` (ADR-052 Slice 7), but correctly computing either
+  needs whole-`DiffResult` context (which findings elsewhere reference this
+  one) a single `Change`'s read view can't see — the report-level caller
+  (`reporter_markdown.root_cause_lookup_for_changes`) resolves them and
+  passes the value into `assess_change`, not the detector. A new detector
+  should participate by setting the existing `caused_by_type` field where
+  it applies (the same signal `--report-mode root-cause` groups on) rather
+  than inventing a parallel correlation mechanism; the full
+  `RootCauseCorrelator` correlating findings with no `caused_by_type` link
+  at all is still
+  [Phase 6](plans/g29-impact-analysis-layer.md#phase-6-new-detectors-examples-fp-gates).
 - **A new report format restructuring.** Every new field this contract asks
   for is additive to the existing JSON/SARIF/JUnit shapes (mirrors how
   [`--report-mode root-cause` reached JUnit](../learn/impact-analysis.md)

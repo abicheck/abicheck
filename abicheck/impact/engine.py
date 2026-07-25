@@ -94,7 +94,12 @@ def _build_proof_path(change: Any) -> GraphProofPath | None:
     )
 
 
-def assess_change(change: Any, *, suppressed: bool = False) -> ImpactAssessment:
+def assess_change(
+    change: Any,
+    *,
+    suppressed: bool = False,
+    root_cause: tuple[str, str] | None = None,
+) -> ImpactAssessment:
     """Derive an ``ImpactAssessment`` from *change*'s existing fields.
 
     *suppressed* is caller-supplied: whether *this* call site is rendering
@@ -106,6 +111,17 @@ def assess_change(change: Any, *, suppressed: bool = False) -> ImpactAssessment:
     ``post_processing.ApplySuppression``), so it is read unconditionally
     here rather than gated on *suppressed* — reading it for a *kept* change
     is harmless (it is never set on one).
+
+    *root_cause*, when given, is *change*'s ``(root_cause_id, root_display)``
+    pair (G29 Phase 3 follow-up) — computed by the caller, not derived here,
+    because correctly computing it needs whole-``DiffResult`` context (which
+    findings elsewhere reference this one via ``caused_by_type`` —
+    ``reporter_markdown.root_cause_lookup_for_changes``) that a single
+    *change* alone can't see; this function stays a pure, single-``Change``
+    read view. ``None`` (the default) leaves
+    ``root_cause_id``/``root_cause_display``/``impact_group_id`` unset, same
+    as any caller that doesn't have whole-result context to offer (e.g. a
+    unit test constructing one bare ``Change``).
     """
     effective_verdict = getattr(change, "effective_verdict", None)
     decision = FindingDecision(
@@ -115,6 +131,9 @@ def assess_change(change: Any, *, suppressed: bool = False) -> ImpactAssessment:
         verdict_override=(
             effective_verdict.value if effective_verdict is not None else None
         ),
+    )
+    root_cause_id, root_cause_display = (
+        root_cause if root_cause is not None else (None, None)
     )
     return ImpactAssessment(
         reachability_state=getattr(
@@ -127,4 +146,7 @@ def assess_change(change: Any, *, suppressed: bool = False) -> ImpactAssessment:
         decision=decision,
         evidence_category=getattr(change, "evidence_category", None),
         correlated_change_kind=getattr(change, "correlated_change_kind", None),
+        root_cause_id=root_cause_id,
+        root_cause_display=root_cause_display,
+        impact_group_id=root_cause_id,
     )

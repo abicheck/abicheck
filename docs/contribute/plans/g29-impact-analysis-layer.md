@@ -115,14 +115,16 @@ model:
   shared checklist reasoning and ADR-052's "Deliberately not implemented"
   section for why changing that would be a breaking change to an
   already-published field). `occurrence_id` — **done** (ADR-046 D1 +
-  ADR-052 Slice 6). `root_cause_id`/`impact_group_id` as *per-finding*
-  identifiers independent of `description` — **not implemented and not
-  planned this way**: both need whole-`DiffResult` context a single
-  finding's read view can't see, so they stay report-level concepts
-  (`--report-mode root-cause`'s grouping key; Phase 6's
-  `RootCauseCorrelator`) rather than fields on `ImpactAssessment`/
-  `GraphProofPath` — see the
+  ADR-052 Slice 6). `root_cause_id`/`root_cause_display`/`impact_group_id`
+  as *per-finding* `ImpactAssessment` fields — **done** (ADR-052 Slice 7):
+  the report-level caller (`reporter_markdown.root_cause_lookup_for_changes`)
+  resolves the value from whole-`DiffResult` context and passes it into
+  `assess_change`, so `ImpactAssessment` itself stays a pure single-`Change`
+  read view — see the
   [Detector Impact Contract](../detector-impact-contract.md).
+  `impact_group_id` is currently always an alias of `root_cause_id`;
+  making it independently meaningful still needs Phase 6's
+  `RootCauseCorrelator`.
 - **G29.5** — A consumer graph (`CONSUMER_REQUIRES_SYMBOL`, `CONSUMER_COMPILED_FROM_HEADER`,
   …) that joins with the source graph so a `CONSUMER_REQUIRED_SYMBOL_REMOVED`
   finding can name the public entry point that produced the dependency, plus
@@ -290,14 +292,14 @@ current per-decision status (D1/D2/D3/D5/D6 implemented, D4 deliberately
 deferred); this paragraph originally described the pre-implementation
 "needs a recorded decision" gate (ADR-044's own bar) before the ADR existed.
 
-### Phase 3 — Reporting & root causes — **slices 1-6 implemented (ADR-052)**
+### Phase 3 — Reporting & root causes — **slices 1-7 implemented (ADR-052)**
 
 [ADR-052](../adr/052-unified-impact-assessment-model.md) records the slice 1
 decisions: `abicheck/impact/model.py`'s `ImpactAssessment`/`GraphProofPath`/
 `FindingDecision` dataclasses (a narrower field set than originally planned
 below — `changed_entities`/`affected_consumers`/`affected_use_cases`/
-`coverage`/`root_cause_id` have no data source yet and are deliberately
-absent rather than added as permanently-`None` placeholders) and
+`coverage` have no data source yet and are deliberately absent rather than
+added as permanently-`None` placeholders) and
 `abicheck/impact/engine.py`'s `assess_change`, a **pure read view** built
 from the `Change` fields `source_graph_findings.py`/`internal_leak.py`/
 `post_processing.py`/`suppression.py`/`appcompat.py` already independently
@@ -339,24 +341,28 @@ now exists on `GraphProofPath`, built directly on ADR-046 D1's
 `occurrence_id` half (`buildsource.graph_impact._path_occurrence_id` folds a
 path's edges' own `GraphEdge.occurrences` into one hash; `None` whenever no
 edge on the path carries occurrence-level attrs, still every finding today
-since D1's `occurrence_id` stays opt-in with no current producer).
+since D1's `occurrence_id` stays opt-in with no current producer). Slice 7
+(G29 Phase 3 follow-up) closed the remaining per-finding-identifier item:
+`root_cause_id`/`root_cause_display`/`impact_group_id` now exist on
+`ImpactAssessment` — computed report-wide by
+`reporter_markdown.root_cause_lookup_for_changes` (the same
+`_root_cause_key_and_display` grouping decision `--report-mode root-cause`
+uses) and passed into `assess_change` as a plain parameter, so
+`ImpactAssessment` itself stays a pure single-`Change` read view rather than
+gaining the ability to see whole-`DiffResult` context on its own.
+`impact_group_id` is currently always identical to `root_cause_id` — an
+alias, not yet a distinct concept. `REPORT_SCHEMA_VERSION` 2.16 → 2.17.
 **Still open under this same ADR**: the D2 direction flip (deliberately not
 attempted — touches five producer modules' core control flow at once,
 several of them performance-sensitive graph walks under active
 suppression-safety guarantees; see ADR-052's "Deliberately not implemented"
 section) and the full `RootCauseCorrelator`-based correlation across
-consumer-overlay findings with no `caused_by_type` link (Phase 6).
-`root_cause_id`/`impact_group_id` are **not** planned as `ImpactAssessment`/
-`GraphProofPath` fields at all, unlike `occurrence_id` — correctly computing
-either needs whole-`DiffResult` context (which findings elsewhere reference
-this one) a single `Change`'s pure read view can't see, so both stay
-report-level concepts (`--report-mode root-cause`'s grouping key; Phase 6's
-correlator) rather than per-finding fields — see the
-[Detector Impact Contract](../detector-impact-contract.md) for the same
-reasoning applied to future detectors. The two reference docs below now
-exist (Slice 6 gave them enough real surface to be worth writing, closing
-what ADR-052 originally called premature) — the rest of this list is the
-original Phase 3 scope this section describes, most of it still open:
+consumer-overlay findings with no `caused_by_type` link (Phase 6) — which is
+also what would ever make `impact_group_id` diverge from `root_cause_id`.
+The two reference docs below now exist (Slice 6 gave them enough real
+surface to be worth writing, closing what ADR-052 originally called
+premature) — the rest of this list is the original Phase 3 scope this
+section describes, most of it still open:
 
 - `abicheck/impact/model.py`: `ImpactAssessment` (`reachability_state`,
   `contract_effect`, `changed_entities`, `public_entries`, `proof_paths`,
@@ -367,11 +373,11 @@ original Phase 3 scope this section describes, most of it still open:
   **Implemented, narrower than this original list**: `reachability_state`,
   `confidence`, `decision`, `proof_path` (singular — `root`/`target`/
   `is_direct`/`steps`/`prose`, plus Slice 6's `occurrence_id`, ADR-046 D6's
-  `alternative_paths`/`discarded_path_count`). **Still absent**:
+  `alternative_paths`/`discarded_path_count`), and — Slice 7 —
+  `root_cause_id`/`root_cause_display`/`impact_group_id`. **Still absent**:
   `contract_effect`/`changed_entities`/`public_entries`/`affected_consumers`/
-  `affected_use_cases`/`coverage`/`root_cause_id` — no data source yet
-  (Phase 4/5/6), left out entirely rather than added as permanently-`None`
-  placeholders.
+  `affected_use_cases`/`coverage` — no data source yet (Phase 4/5), left out
+  entirely rather than added as permanently-`None` placeholders.
 - `source_graph_findings.py`, `internal_leak.py`, `suppression.py`,
   `appcompat.py` populate `ImpactAssessment` instead of independently setting
   overlapping `Change` fields; the existing `public_reachable`/
@@ -396,7 +402,9 @@ original Phase 3 scope this section describes, most of it still open:
   2.3) and is stable across runs, but deliberately keeps `description` as a
   discriminator (changing that would break an already-published field's
   values). `occurrence_id`: **done** (Slice 6, above). `root_cause_id`/
-  `impact_group_id`: **not planned as per-finding fields** — see above.
+  `root_cause_display`/`impact_group_id`: **done** (Slice 7, above) — as
+  report-level-resolved fields passed into `assess_change`, not computed by
+  `ImpactAssessment` from a single `Change` in isolation.
 - `docs/reference/source-graph-schema.md` (new): the ADR-046 D1-D6 identity/
   merge/traversal-policy/proof-path-preference schema — **done**.
   `docs/contribute/detector-impact-contract.md` (new): the required-evidence
@@ -515,13 +523,13 @@ abicheck/buildsource/graph_facts.py  # GraphFact/FactConflict/merge, relation_ke
 abicheck/buildsource/graph_impact.py  # select_preferred_graph_path, attach_impact_metadata, _path_occurrence_id (Phase 2 D6/ADR-052 Slice 6, DONE — landed here, not under impact/)
 abicheck/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, DONE — landed here, not a separate impact/traversal.py)
 abicheck/impact/
-    model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slice 1, DONE — ADR-052)
-    engine.py           # assess_change(...) (Phase 3 slice 1, DONE — ADR-052)
+    model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slices 1/7, DONE — ADR-052)
+    engine.py           # assess_change(...) (Phase 3 slices 1/7, DONE — ADR-052)
     correlation.py       # RootCauseCorrelator (Phase 6, not started)
     root_causes.py
     consumer_graph.py    # Phase 4
     use_cases.py         # Phase 4
-docs/learn/impact-analysis.md          # Phase 3 slices 1+6, DONE (Phase 4 join still open)
+docs/learn/impact-analysis.md          # Phase 3 slices 1/6/7, DONE (Phase 4 join still open)
 docs/reference/source-graph-schema.md     # Phase 2 D1-D6 identity/merge/traversal-policy schema, DONE
 docs/learn/graph-coverage.md           # Phase 1, DONE
 docs/use/use-case-impact.md        # Phase 4
@@ -549,6 +557,9 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
 - `tests/test_impact_model.py` — Phase 3 slice 1, done.
 - `tests/test_junit_report_root_cause.py` — Phase 3 Slice 6's JUnit
   root-cause rendering, done (split out from `test_junit_report.py`).
+- `tests/test_reporter.py::TestImpactAssessmentRootCause` /
+  `tests/test_sarif.py::TestImpactAssessmentRootCause` — Phase 3 Slice 7's
+  per-finding `root_cause_id`/`root_cause_display`/`impact_group_id`, done.
 - New per remaining phase: `tests/test_entity_resolver.py` (Phase 2 D4, not
   planned — see D4's deliberate-deferral note above),
   `tests/test_consumer_graph.py` / `tests/test_use_cases.py` (Phase 4), one

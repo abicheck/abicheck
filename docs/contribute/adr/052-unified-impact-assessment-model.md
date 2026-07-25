@@ -1,7 +1,7 @@
 # ADR-052: Unified Impact Assessment Model (G29 Phase 3, slices 1-6)
 
 **Date:** 2026-07-22
-**Status:** Accepted — slices 1-6 implemented. Slice 6 (G29 Phase 3
+**Status:** Accepted — slices 1-7 implemented. Slice 6 (G29 Phase 3
 follow-up) closed two items this ADR originally left open: `--format junit`
 now renders `--report-mode root-cause` (additive `rootCauseId`/`rootCause`
 attributes on each `<failure>`, not a restructured `<testcase>` tree — see
@@ -9,8 +9,12 @@ attributes on each `<failure>`, not a restructured `<testcase>` tree — see
 `occurrence_id` now exists on `GraphProofPath` (built on
 [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md) D1's
 `occurrence_id` half, itself implemented after this ADR was first accepted).
-`root_cause_id`/`impact_group_id` remain out of `ImpactAssessment` — see
-"Deliberately not implemented" below for why that one stays open.
+Slice 7 (G29 Phase 3 follow-up) closed the remaining item: `root_cause_id`/
+`root_cause_display`/`impact_group_id` now exist on `ImpactAssessment`,
+computed report-wide and passed into `assess_change` as a plain parameter —
+see "Slice 7" below. The D2 direction flip (producer modules constructing
+`ImpactAssessment` directly) remains deliberately deferred — see
+"Deliberately not implemented" below.
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 3's own
 "needs its own ADR" gate — [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s
@@ -614,6 +618,76 @@ for the `render_output` forwarding gap. `tests/test_graph_impact.py`
 (`TestPathOccurrenceId`) covers `_path_occurrence_id` directly and its
 propagation through `attach_impact_metadata`/`assess_change`.
 
+## Slice 7 — `root_cause_id`/`root_cause_display`/`impact_group_id` on `ImpactAssessment` (G29 Phase 3 follow-up)
+
+Closes the third item Slices 1-6 left open ("Deliberately not implemented
+this slice," below originally argued these "cannot see" whole-`DiffResult`
+context and so "do not belong on `ImpactAssessment`/`GraphProofPath` at
+all" — that reasoning was about what a *single `Change`'s own read view*
+can compute, not about whether the field could exist on the dataclass at
+all. This slice adds the fields without contradicting it: `ImpactAssessment`
+itself stays a pure, single-`Change` read view (`assess_change` still
+doesn't traverse `result.changes`) — the report-level caller resolves the
+value and passes it in as a plain parameter, the same pattern `occurrence_id`
+(Slice 6) established for a different reason (needing D1's edge-occurrence
+data, not whole-report context).
+
+`assess_change(change, *, root_cause: tuple[str, str] | None = None)` gained
+the parameter; when given, it fans out to `root_cause_id`/
+`root_cause_display`/`impact_group_id` (`impact_group_id` is always set
+equal to `root_cause_id` — see "Deliberately not implemented" below for why
+they aren't yet distinct concepts). `reporter_markdown.py` gained two
+sibling helpers next to `_group_changes_by_root_cause`: `root_cause_for_change`
+(one change's `(root_cause_id, root_display)`, or `None` for the trivial
+self-referencing singleton case — a finding with no `caused_by_type` that
+also isn't named by any other finding's `caused_by_type`) and
+`root_cause_lookup_for_changes` (builds a `finding_id -> (id, display)` dict
+once per report/scope, the same amortization pattern Slice 6's
+`_root_cause_lookup` used for JUnit). Every JSON/SARIF call site that builds
+an `ImpactAssessment` now resolves its own lookup, scoped to whichever list
+of changes is actually in play for that call site, and threads the result
+through:
+
+- `reporter.py`: `_to_json_leaf`'s leaf/non-type entries, the root-cause JSON
+  builder's `entry_by_id`, `_add_suppression` (scoped to
+  `result.suppressed_changes` itself — a suppressed finding's root cause is
+  resolved relative to other suppressed findings, not folded into the kept
+  `changes[]` list's own grouping), and `_add_changes_block`/appcompat's
+  `relevant_changes` block.
+- `cli_compare_fold.py`: the scoped-only-changes JSON fold-in, reusing the
+  same `referenced_causes` that fold-in already computes for its own
+  complete root-cause-mode grouping (`root_cause_entries`, which
+  deliberately still includes singletons — that list feeds `--report-mode
+  root-cause`'s exhaustive grouping, a different contract than this
+  per-finding field's singleton-omission rule).
+- `sarif.py`: `_result_for` gained a second, independent `impact_root_cause`
+  parameter (distinct from its existing `root_cause` parameter, which stays
+  exclusive to `--report-mode root-cause`'s own `properties.rootCauseId`/
+  `rootCause`) — computed unconditionally in `to_sarif` via
+  `root_cause_lookup_for_changes(changes + scoped_only_changes)`, regardless
+  of `report_mode`, so `properties.impactAssessment.root_cause_id` is always
+  populated when a real correlation exists, the same as JSON. Kept as a
+  separate parameter specifically so the existing, tested `root_cause_mode`
+  gating on the top-level properties couldn't shift.
+
+Every one of these lookups reuses the exact same
+`_root_cause_key_and_display` grouping decision `--report-mode root-cause`
+computes, so a finding's `impact_assessment.root_cause_id` is always
+identical to its `root_causes[].root_cause_id` in JSON root-cause mode or
+its `properties.rootCauseId` in SARIF root-cause mode, for the same report —
+no format can disagree.
+
+`tests/test_impact_model.py`/`abicheck/impact/engine.py`'s own tests cover
+`assess_change`'s new parameter directly;
+`tests/test_reporter.py::TestImpactAssessmentRootCause` and
+`tests/test_sarif.py::TestImpactAssessmentRootCause` cover the end-to-end
+JSON/SARIF behavior — an uncorrelated singleton finding has no
+`impact_assessment.root_cause_id` (or, when it has no other signal either,
+no `impact_assessment` key at all), correlated findings share one id and
+`impact_group_id == root_cause_id`, two independent findings sharing only a
+symbol stay separate, and the unconditional id matches
+`--report-mode root-cause`'s own id for the same finding.
+
 ## Deliberately not implemented this slice
 
 Per the "ship each phase independently" mitigation this initiative committed
@@ -621,17 +695,17 @@ to from the start, and matching exactly how ADR-046 documented its own
 partial slices (D1's `occurrence_id` half, D4, D5's `effect_transitions`, D6's
 remaining four tiers):
 
-- **`changed_entities`/`affected_consumers`/`affected_use_cases`/`coverage`/
-  `root_cause_id`** — the plan's full `ImpactAssessment` field list. None of
-  these have a data source yet: `affected_consumers`/`affected_use_cases`
-  need Phase 4's consumer/use-case graph (unbuilt), `coverage` needs the
-  per-(kind,role) matrix wired all the way through the impact layer, and
-  `root_cause_id` needs Phase 6's `RootCauseCorrelator`. Adding empty
-  placeholder fields for data no producer can populate yet would be exactly
-  the speculative-surface pattern ADR-046 D5 explicitly declined
-  (`effect_transitions`, "no current walk needs it") — so they are left out
-  of `ImpactAssessment` entirely rather than added as permanently-`None`
-  fields.
+- **`changed_entities`/`affected_consumers`/`affected_use_cases`/`coverage`**
+  — the remainder of the plan's full `ImpactAssessment` field list
+  (`root_cause_id`/`root_cause_display`/`impact_group_id` shipped in Slice 7
+  above). None of these four have a data source yet:
+  `affected_consumers`/`affected_use_cases` need Phase 4's consumer/use-case
+  graph (unbuilt), and `coverage` needs the per-(kind,role) matrix wired all
+  the way through the impact layer. Adding empty placeholder fields for data
+  no producer can populate yet would be exactly the speculative-surface
+  pattern ADR-046 D5 explicitly declined (`effect_transitions`, "no current
+  walk needs it") — so they are left out of `ImpactAssessment` entirely
+  rather than added as permanently-`None` fields.
 - **The D2 direction flip** (`Change` fields becoming derived from
   `ImpactAssessment` rather than the reverse) — deliberately not attempted.
   This touches the core control flow of five producer modules at once
@@ -653,27 +727,26 @@ remaining four tiers):
   `RootCauseCorrelator` is still the fuller job that adds correlation for
   findings with no `caused_by_type` link at all — none of Slices 1-6 attempt
   it.
-- **Stable `finding_id`/`root_cause_id`/`impact_group_id` identifiers
-  independent of `description` text** — `reporter._finding_id` already
-  exists (schema 2.3) and is stable across repeated runs, but (unlike the
-  plan's stated goal) it *does* include `description` text as a
-  discriminator by design — disambiguating same-kind/same-symbol findings
-  that would otherwise collide (e.g. two parameters of one function both
-  changing pointer depth). Changing that derivation to drop `description`
-  would itself be a breaking change to an already-published, schema-2.3
-  field's values — out of scope for an additive slice, and not attempted
-  here. `occurrence_id` **is** now populated (Slice 6, above) — it needed
-  only ADR-046 D1's `occurrence_id` half, which has since landed, and it is
-  computable from a single `Change`'s own path. `root_cause_id`/
-  `impact_group_id` are different in kind, not just in what data exists:
-  correctly computing either needs whole-`DiffResult` context (which
-  findings elsewhere reference this one, via `referenced_causes` — see
-  `_root_cause_key_and_display`) that a single `Change`'s pure read view
-  cannot see, so neither belongs on `ImpactAssessment`/`GraphProofPath` at
-  all — see the [Detector Impact Contract](../detector-impact-contract.md)
-  for the same reasoning applied to future detectors. Both stay
-  report-level concepts (`--report-mode root-cause`'s grouping key, Phase
-  6's correlator), not per-finding fields.
+- **Stable `finding_id` independent of `description` text** —
+  `reporter._finding_id` already exists (schema 2.3) and is stable across
+  repeated runs, but (unlike the plan's stated goal) it *does* include
+  `description` text as a discriminator by design — disambiguating
+  same-kind/same-symbol findings that would otherwise collide (e.g. two
+  parameters of one function both changing pointer depth). Changing that
+  derivation to drop `description` would itself be a breaking change to an
+  already-published, schema-2.3 field's values — out of scope for an
+  additive slice, and not attempted here. `occurrence_id` **is** now
+  populated (Slice 6, above) — it needed only ADR-046 D1's `occurrence_id`
+  half, which has since landed, and it is computable from a single
+  `Change`'s own path. `root_cause_id`/`root_cause_display`/
+  `impact_group_id` **are** now populated too (Slice 7, above) — but note
+  they stay report-level concepts computed relative to whole-`DiffResult`
+  context (`referenced_causes` — see `_root_cause_key_and_display`) and
+  passed into `assess_change` as a plain parameter; `ImpactAssessment`
+  itself never gained the ability to compute them from a single `Change` in
+  isolation, matching the [Detector Impact Contract](../detector-impact-contract.md)'s
+  reasoning for future detectors. `impact_group_id` diverging from
+  `root_cause_id` still needs Phase 6's `RootCauseCorrelator`.
 - **`docs/reference/source-graph-schema.md`,
   `docs/contribute/detector-impact-contract.md`** — both now exist (G29
   Phase 2/3 follow-up), once D1/D5/D6/Slice 6 gave them enough real surface
@@ -693,8 +766,9 @@ remaining four tiers):
   `affected_public_roots`/`impact_proof_path`/`impact_is_direct`/
   `correlated_change_kind` all stay exactly as they are; `impact_assessment`,
   `impact_alternative_paths`/`impact_discarded_path_count`/
-  `impact_occurrence_id`, and JUnit's `rootCauseId`/`rootCause` are all
-  additive.
+  `impact_occurrence_id`, JUnit's `rootCauseId`/`rootCause`, and
+  `impact_assessment.root_cause_id`/`root_cause_display`/`impact_group_id`
+  (Slice 7) are all additive.
 - **Not** the fuller `RootCauseCorrelator` (Phase 6) — Slices 3-6 ship the
   `caused_by_type`-based first cut for every format including JUnit (Slice
   6); correlating findings with no `caused_by_type` link at all is still

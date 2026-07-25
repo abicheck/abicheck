@@ -105,6 +105,17 @@ independently-nullable keys:
   set either field.
 - `evidence_category`/`correlated_change_kind` mirror the finding's own
   top-level fields when set.
+- `root_cause_id`/`root_cause_display`/`impact_group_id` (G29 Phase 3
+  follow-up) are this finding's root-cause grouping key/display root — the
+  same computation [root-cause grouping](#root-cause-grouping) below uses,
+  surfaced per-finding independent of `report_mode`. Present only when the
+  finding has a real correlation signal (a `caused_by_type`, or its own
+  symbol is referenced by another finding's `caused_by_type`); absent for
+  an uncorrelated singleton finding, so a plain finding's
+  `impact_assessment` doesn't balloon with a root cause naming nothing but
+  itself. `impact_group_id` is currently always identical to
+  `root_cause_id` — a placeholder alias until Phase 6's
+  `RootCauseCorrelator` gives it independent meaning.
 
 `impact_assessment` intentionally duplicates data already published at the
 top level — it exists so a consumer can query one object instead of several
@@ -156,17 +167,22 @@ causes.
 ## What this does not cover yet
 
 `impact_assessment` does not (yet) include which consumers or use cases are
-affected, a coverage summary, or a `root_cause_id`/`impact_group_id` on the
-assessment itself — those need the consumer/use-case graph (G29 Phase 4),
-the per-role coverage matrix wired through the impact layer, and the
-root-cause correlator (G29 Phase 6). Correctly computing a per-finding
-`root_cause_id` also needs whole-`DiffResult` context (which findings
-elsewhere reference this one) that a single finding's read view can't see —
-see the [Detector Impact Contract](../contribute/detector-impact-contract.md)
-for why this stays a report-level grouping (`--report-mode root-cause`
-above) rather than an `impact_assessment.proof_path` field. Adding empty
-placeholder fields for data no producer can populate would misrepresent what
-abicheck actually knows, so they are left out of the schema entirely rather
-than always-`null`. See
+affected, or a coverage summary — those need the consumer/use-case graph
+(G29 Phase 4) and the per-role coverage matrix wired through the impact
+layer. `root_cause_id`/`impact_group_id` (documented above) are implemented,
+but `impact_group_id` is currently only ever an alias of `root_cause_id` —
+distinguishing them (e.g. bucketing several distinct root causes that share
+one broader consumer-visible event under one group while keeping their own
+individual root-cause identities) needs the full root-cause correlator (G29
+Phase 6). Computing `root_cause_id` needs whole-`DiffResult` context (which
+findings elsewhere reference this one) that a single finding's read view
+can't see on its own — the caller resolves it per report/scope
+(`reporter_markdown.root_cause_lookup_for_changes`) and passes it in; see
+the [Detector Impact Contract](../contribute/detector-impact-contract.md)
+for why the underlying grouping stays a report-level decision
+(`--report-mode root-cause` above) rather than something a detector sets
+directly. Adding empty placeholder fields for data no producer can populate
+would misrepresent what abicheck actually knows, so unimplemented fields are
+left out of the schema entirely rather than always-`null`. See
 [ADR-052](../contribute/adr/052-unified-impact-assessment-model.md) for the
 full list of what this slice deliberately does not implement.

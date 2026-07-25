@@ -80,6 +80,8 @@ from .reporter_markdown import (
     _to_markdown_root_cause as _to_markdown_root_cause,
     apply_show_only as apply_show_only,
     operation_for_kind as operation_for_kind,
+    root_cause_for_change as root_cause_for_change,
+    root_cause_lookup_for_changes as root_cause_lookup_for_changes,
     to_markdown as to_markdown,
     to_review_digest as to_review_digest,
     to_stat as to_stat,
@@ -280,6 +282,12 @@ def _to_json_leaf(
         )
     type_changes = [c for c in changes if c.kind in _ROOT_TYPE_CHANGE_KINDS]
     non_type_changes = [c for c in changes if c.kind not in _ROOT_TYPE_CHANGE_KINDS]
+    # G29 Phase 3 follow-up (ADR-052): computed once over the full filtered
+    # `changes` (not type_changes/non_type_changes separately) so a
+    # TYPE_* change and a non-type change sharing a root cause still get
+    # the same root_cause_id, matching --report-mode root-cause's own
+    # whole-`changes`-scoped grouping.
+    _rc_lookup = root_cause_lookup_for_changes(changes)
 
     effective_policy = result.policy or "strict_abi"
     eff_sets = result._effective_kind_sets()
@@ -353,7 +361,7 @@ def _to_json_leaf(
         # impact_assessment follow the same precedent so a root TYPE_*
         # change (exactly the category the layout-reachability walk tags
         # most often) doesn't lose them in --report-mode leaf.
-        assessment = assess_change(c)
+        assessment = assess_change(c, root_cause=_rc_lookup.get(_finding_id(c)))
         entry["reachability_state"] = assessment.reachability_state.value
         if assessment.has_signal():
             entry["impact_assessment"] = assessment.to_dict()
@@ -365,6 +373,7 @@ def _to_json_leaf(
             c,
             policy=effective_policy,
             kind_sets=eff_sets,
+            root_cause=_rc_lookup.get(_finding_id(c)),
             policy_file=result.policy_file,
         )
         for c in non_type_changes
@@ -515,9 +524,14 @@ def _to_json_root_cause(
     # key so `changes` (flat, backward-compatible -- every existing report
     # mode provides it, `_to_json_leaf` included) and `root_causes[].findings`
     # never drift from each other.
+    _rc_lookup = root_cause_lookup_for_changes(changes, extra_causes=extra_causes)
     entry_by_id = {
         id(c): _change_to_dict(
-            c, policy=effective_policy, kind_sets=eff_sets, policy_file=result.policy_file
+            c,
+            policy=effective_policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+            root_cause=_rc_lookup.get(_finding_id(c)),
         )
         for c in changes
     }
@@ -723,19 +737,27 @@ def _add_show_only_filter(
     }
 
 
-def _suppressed_change_entry(c: Change) -> dict[str, object]:
+def _suppressed_change_entry(
+    c: Change, *, root_cause: tuple[str, str] | None = None
+) -> dict[str, object]:
     """Minimal audit-trail entry for one suppressed change, plus the
     impact-assessment decision it was actually suppressed with (G29 Phase 3
     slice 1, ADR-052 follow-up, Codex review: this is the one call site that
     passes ``suppressed=True`` -- without it, ``decision.state:
     "suppressed"`` was advertised but never actually reachable from
-    production reporting)."""
+    production reporting).
+
+    ``root_cause`` (G29 Phase 3 follow-up): the caller resolves this from a
+    lookup scoped to ``result.suppressed_changes`` itself -- a suppressed
+    finding's root cause is computed relative to other *suppressed* findings,
+    not folded together with the kept ``changes[]`` list's own grouping.
+    """
     entry: dict[str, object] = {
         "kind": c.kind.value,
         "symbol": c.symbol,
         "description": c.description,
     }
-    assessment = assess_change(c, suppressed=True)
+    assessment = assess_change(c, suppressed=True, root_cause=root_cause)
     entry["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
         entry["impact_assessment"] = assessment.to_dict()
@@ -744,11 +766,13 @@ def _suppressed_change_entry(c: Change) -> dict[str, object]:
 
 def _add_suppression(d: dict[str, object], result: DiffResult) -> None:
     """Add suppression block (file flag, count, suppressed change list)."""
+    _rc_lookup = root_cause_lookup_for_changes(result.suppressed_changes)
     d["suppression"] = {
         "file_provided": result.suppression_file_provided,
         "suppressed_count": result.suppressed_count,
         "suppressed_changes": [
-            _suppressed_change_entry(c) for c in result.suppressed_changes
+            _suppressed_change_entry(c, root_cause=_rc_lookup.get(_finding_id(c)))
+            for c in result.suppressed_changes
         ],
     }
 
@@ -796,12 +820,14 @@ def _add_changes_block(
     eff_sets: KindSets | None,
 ) -> None:
     """Add changes list and optional redundant-count / pattern-modulations fields."""
+    _rc_lookup = root_cause_lookup_for_changes(changes)
     d["changes"] = [
         _change_to_dict(
             c,
             policy=effective_policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
+            root_cause=_rc_lookup.get(_finding_id(c)),
         )
         for c in changes
     ]
@@ -1016,6 +1042,7 @@ def _change_to_dict(
     | None = None,
     policy_file: object | None = None,
     evidence_status_override: EvidenceStatus | None = None,
+    root_cause: tuple[str, str] | None = None,
 ) -> dict[str, object]:
     """Convert a Change to a JSON-serializable dict with impact and metadata.
 
@@ -1024,6 +1051,14 @@ def _change_to_dict(
     ``appcompat_to_json`` marks every finding it already proved a specific
     consumer depends on as ``EvidenceStatus.CONSUMER_PROVEN``, regardless of
     the finding's own kind.
+
+    ``root_cause`` (G29 Phase 3 follow-up, ADR-052), when given, is *c*'s
+    ``(root_cause_id, root_display)`` pair — forwarded to
+    :func:`~abicheck.impact.engine.assess_change` so
+    ``impact_assessment.root_cause_id`` is populated. Callers resolve this
+    once per report via
+    :func:`~abicheck.reporter_markdown.root_cause_lookup_for_changes` rather
+    than recomputing it per change.
     """
     kind = getattr(c, "kind", None)
     if isinstance(kind, ChangeKind) and kind_sets:
@@ -1139,7 +1174,7 @@ def _change_to_dict(
     # reachability/impact fields above; only emitted when it carries
     # information beyond the all-defaults case, matching this function's own
     # convention of not padding every plain finding with an empty object.
-    assessment = assess_change(c)
+    assessment = assess_change(c, root_cause=root_cause)
     d["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
         d["impact_assessment"] = assessment.to_dict()
@@ -1281,6 +1316,7 @@ def appcompat_to_json(result: object, indent: int = 2) -> str:
     _kind_sets_fn = getattr(full_diff, "_effective_kind_sets", None)
     appcompat_kind_sets = _kind_sets_fn() if callable(_kind_sets_fn) else None
     appcompat_policy_file = getattr(full_diff, "policy_file", None)
+    _rc_lookup = root_cause_lookup_for_changes(breaking)
     d["relevant_changes"] = [
         _change_to_dict(
             c,
@@ -1288,6 +1324,7 @@ def appcompat_to_json(result: object, indent: int = 2) -> str:
             kind_sets=appcompat_kind_sets,
             policy_file=appcompat_policy_file,
             evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
+            root_cause=_rc_lookup.get(_finding_id(c)),
         )
         for c in breaking
     ]

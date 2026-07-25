@@ -954,3 +954,67 @@ class TestRootCauseMode:
         assert all(res["ruleId"] != "func_added" for res in results)
         ids = {res["properties"]["rootCauseId"] for res in results}
         assert len(ids) == 2
+
+
+class TestImpactAssessmentRootCause:
+    """``impactAssessment.root_cause_id``/``root_cause_display``/
+    ``impact_group_id`` (G29 Phase 3 follow-up): computed unconditionally --
+    independent of ``report_mode`` -- unlike ``properties.rootCauseId``/
+    ``rootCause`` above, which stay exclusive to ``--report-mode
+    root-cause``. Uses the same grouping decision, so the two never
+    disagree about which findings correlate."""
+
+    def test_uncorrelated_finding_has_no_impact_assessment_root_cause(self) -> None:
+        r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
+        doc = to_sarif(r)
+        props = doc["runs"][0]["results"][0]["properties"]
+        assessment = props.get("impactAssessment", {})
+        assert "root_cause_id" not in assessment
+
+    def test_correlated_findings_get_shared_impact_group_id_in_full_mode(
+        self,
+    ) -> None:
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        overlay = Change(
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
+            "required", caused_by_type="ns::internal::helper",
+        )
+        r = _make_result([root, overlay], verdict=Verdict.BREAKING)
+        # report_mode defaults to "full" -- properties.rootCauseId/rootCause
+        # stay absent, but impactAssessment.root_cause_id is still populated.
+        doc = to_sarif(r)
+        results = doc["runs"][0]["results"]
+        for res in results:
+            assert "rootCauseId" not in res["properties"]
+        assessments = [res["properties"]["impactAssessment"] for res in results]
+        ids = {a["root_cause_id"] for a in assessments}
+        assert len(ids) == 1
+        for a in assessments:
+            assert a["root_cause_display"] == "ns::internal::helper"
+            assert a["impact_group_id"] == a["root_cause_id"]
+
+    def test_matches_sarif_root_cause_mode_id(self) -> None:
+        # Cross-check: the unconditional impactAssessment id must equal the
+        # report_mode="root-cause" properties.rootCauseId for the same
+        # finding -- both are the same underlying computation.
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        overlay = Change(
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
+            "required", caused_by_type="ns::internal::helper",
+        )
+        r = _make_result([root, overlay], verdict=Verdict.BREAKING)
+        full_doc = to_sarif(r)
+        rc_doc = to_sarif(r, report_mode="root-cause")
+        full_ids = {
+            res["properties"]["impactAssessment"]["root_cause_id"]
+            for res in full_doc["runs"][0]["results"]
+        }
+        rc_ids = {
+            res["properties"]["rootCauseId"]
+            for res in rc_doc["runs"][0]["results"]
+        }
+        assert full_ids == rc_ids

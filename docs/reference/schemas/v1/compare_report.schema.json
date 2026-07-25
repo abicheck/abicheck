@@ -503,7 +503,7 @@
         },
         "impact_assessment": {
           "type": "object",
-          "description": "G29 Phase 3 slice 1 (ADR-052, schema 2.15): a unified read view over this finding's reachability/impact fields above (reachability_state, public_reachable, reachability_kind, the proof path, decision state, evidence_category, correlated_change_kind) -- a single object a consumer can query instead of stitching several independently-nullable keys together. Intentionally duplicates data already published at the top level (see the fields above); present only when it carries information beyond the all-defaults case (a proof path exists, reachability_state is not 'unknown', public_reachable is true, confidence is not 'high', the decision state is not 'kept', a modulation/verdict-override fired, or correlated_change_kind/evidence_category is set).",
+          "description": "G29 Phase 3 slice 1 (ADR-052, schema 2.15): a unified read view over this finding's reachability/impact fields above (reachability_state, public_reachable, reachability_kind, the proof path, decision state, evidence_category, correlated_change_kind) -- a single object a consumer can query instead of stitching several independently-nullable keys together. Intentionally duplicates data already published at the top level (see the fields above); present only when it carries information beyond the all-defaults case (a proof path exists, reachability_state is not 'unknown', public_reachable is true, confidence is not 'high', the decision state is not 'kept', a modulation/verdict-override fired, correlated_change_kind/evidence_category is set, or root_cause_id is set).",
           "properties": {
             "reachability_state": {
               "type": "string",
@@ -514,6 +514,18 @@
             "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
             "evidence_category": { "type": "string" },
             "correlated_change_kind": { "type": "string" },
+            "root_cause_id": {
+              "type": "string",
+              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.17): a stable hash of this finding's root-cause grouping key -- the same computation `--report-mode root-cause`'s own `root_causes[].root_cause_id` uses, surfaced per-finding regardless of report_mode. Present only when this finding has a real correlation signal (a `caused_by_type`, or its own symbol is referenced by another finding's `caused_by_type`); absent for an uncorrelated singleton finding."
+            },
+            "root_cause_display": {
+              "type": "string",
+              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.17): the human-readable root paired with root_cause_id. Present iff root_cause_id is."
+            },
+            "impact_group_id": {
+              "type": "string",
+              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.17): currently always identical to root_cause_id -- a placeholder alias until Phase 6's RootCauseCorrelator gives it independent meaning (e.g. bucketing several distinct root causes under one broader consumer-visible event). Present iff root_cause_id is."
+            },
             "proof_path": {
               "type": "object",
               "description": "The dataclass counterpart of impact_proof_path/reachability_proof_path above, packaged as one object.",

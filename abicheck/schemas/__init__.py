@@ -185,7 +185,18 @@ from typing import Any
 #:       ``root_cause_id`` is a stable hash of the grouping key, not the
 #:       eventual G29 Phase 6 ``RootCauseCorrelator``'s own identifier
 #:       scheme.
-REPORT_SCHEMA_VERSION = "2.16"
+#:   2.17: ``impact_assessment`` gained three additive optional keys --
+#:       ``root_cause_id``, ``root_cause_display``, ``impact_group_id``
+#:       (G29 Phase 3 follow-up, ADR-052) -- the same 2.16 root-cause
+#:       grouping surfaced per-finding, independent of ``report_mode``
+#:       (unlike 2.16's ``root_causes`` array, which is root-cause-mode
+#:       only). Deliberately absent for a singleton finding with no real
+#:       correlation signal, so ``impact_assessment`` doesn't balloon with a
+#:       root cause that names nothing but itself. ``impact_group_id`` is
+#:       currently always identical to ``root_cause_id`` -- a placeholder
+#:       alias until Phase 6's ``RootCauseCorrelator`` gives it independent
+#:       meaning.
+REPORT_SCHEMA_VERSION = "2.17"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
