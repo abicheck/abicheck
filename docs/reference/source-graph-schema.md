@@ -9,6 +9,7 @@ depends_on:
   - abicheck/buildsource/source_graph.py
   - abicheck/internal_leak.py
   - abicheck/buildsource/graph_impact.py
+  - abicheck/buildsource/entity_resolver.py
 lifecycle: active
 generated: false
 ---
@@ -182,3 +183,42 @@ return/parameter types but not variable/typedef-underlying types can
 honestly report partial coverage per role instead of one blanket family
 flag. See [Graph Coverage & Negative Evidence](../learn/graph-coverage.md)
 for why an absent edge is never proof of an absent dependency.
+
+## `EntityResolver` (ADR-046 D4, scoped implementation)
+
+`abicheck/buildsource/entity_resolver.py`'s `EntityResolver` computes a
+USR-preferring canonical identity for a `GraphNode` — reusing
+`entity_identity.resolve_identity_for_node`
+([ADR-048](../contribute/adr/048-canonical-entity-identity-and-graph-reconciliation.md))
+as its resolution source — and records the result as an alias:
+
+```json
+{
+  "aliases": {"decl://ns::foo": "usr:c:@F@foo#"},
+  "conflicts": [
+    {"canonical_id": "usr:c:@F@bar#", "node_ids": ["decl://bar_v1", "decl://bar_header_variant"]}
+  ]
+}
+```
+
+`aliases` maps each resolved v1 `GraphNode.id` to its canonical identity;
+`conflicts` records the identity-fragmentation case — two *different* v1 ids
+resolving to the *same* canonical identity — with the first-seen v1 id
+staying that identity's representative. `GraphNode.id` generation itself is
+unchanged: `EntityResolver` computes this identity *alongside* the existing
+v1 id, never in place of it.
+
+`SourceGraphSummary.entity_resolver: EntityResolver` is populated only when
+a caller explicitly calls `resolve_entities()` — opt-in, the same "no cost
+until asked for" discipline `occurrence_id`/`effect_transitions` follow — so
+`to_dict()` omits the `entity_resolver` key entirely unless it has been
+called. `SOURCE_GRAPH_VERSION` bumped 1 → 2 marks this capability's
+availability as a signal, not a breaking schema change: a v1 pack
+(`schema_version: 1`, no `entity_resolver` key) still loads and compares
+correctly through its existing `GraphNode.id` values, with no forced
+re-collection.
+
+**What this does not do:** change `GraphNode.id` generation itself across
+every graph-producing module, or provide an on-disk v2 pack format keyed by
+canonical identity — see [ADR-046](../contribute/adr/046-source-graph-identity-v2-and-evidence-merge.md)'s
+"D4 implementation" section for the full scoping rationale.

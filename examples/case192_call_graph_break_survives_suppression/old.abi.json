@@ -1,5 +1,13 @@
 {
+  "ast_compile_args": [],
+  "ast_cplusplus_macro": null,
+  "ast_fallback_reason": null,
   "ast_producer": null,
+  "ast_resolved_standard": null,
+  "ast_sysroot": null,
+  "ast_toolchain": {},
+  "ast_toolchain_supported": null,
+  "ast_toolchain_unsupported_reasons": [],
   "build_context_defines": [],
   "build_id": null,
   "build_mode": null,
@@ -25,23 +33,43 @@
         {
           "attrs": {},
           "confidence": "unknown",
+          "conflicts": [],
           "dst": "decl://compute_avx2",
           "edge": "DECL_CALLS_DECL",
+          "facts": [
+            {
+              "attrs": {},
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
+          "occurrences": [],
           "provenance": "",
+          "resolved": {},
           "src": "decl://compute"
         },
         {
           "attrs": {},
           "confidence": "unknown",
+          "conflicts": [],
           "dst": "binary_symbol://_ZN4demo6detail13compute_avx2ERKNS_10DescriptorE",
           "edge": "SOURCE_DECL_MAPS_TO_SYMBOL",
+          "facts": [
+            {
+              "attrs": {},
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
+          "occurrences": [],
           "provenance": "",
+          "resolved": {},
           "src": "decl://compute_avx2"
         }
       ],
       "external_graph_refs": [],
       "extractor_passes": {},
-      "graph_id": "sha256:82934bd2253f1f770fbe97202eb08bebd522952a117fd735335c09c672a145c8",
+      "graph_id": "sha256:577ae2e50c4ec439f2a6e101255451c5d60d62a82ade13119157bebc6e649ed3",
       "indexes": {
         "by_binary_symbol": {},
         "by_file": {},
@@ -63,28 +91,59 @@
             "visibility": "public_header"
           },
           "confidence": "unknown",
+          "conflicts": [],
+          "facts": [
+            {
+              "attrs": {
+                "consumer_compiled_body": true,
+                "decl_kind": "inline",
+                "visibility": "public_header"
+              },
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "id": "decl://compute",
           "kind": "source_decl",
           "label": "demo::compute",
-          "provenance": ""
+          "provenance": "",
+          "resolved": {
+            "consumer_compiled_body": true,
+            "decl_kind": "inline",
+            "visibility": "public_header"
+          }
         },
         {
           "attrs": {
             "visibility": "source"
           },
           "confidence": "unknown",
+          "conflicts": [],
+          "facts": [
+            {
+              "attrs": {
+                "visibility": "source"
+              },
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "id": "decl://compute_avx2",
           "kind": "source_decl",
           "label": "demo::detail::compute_avx2",
-          "provenance": ""
+          "provenance": "",
+          "resolved": {
+            "visibility": "source"
+          }
         }
       ],
-      "schema_version": 1
+      "schema_version": 2
     }
   },
   "build_source_pack": null,
   "conditional_fields": {},
   "constants": {},
+  "contract": null,
   "created_at": null,
   "dependency_info": null,
   "dwarf": null,
@@ -92,6 +151,7 @@
   "elf": null,
   "elf_only_mode": false,
   "enums": [],
+  "fact_provenance": {},
   "from_headers": false,
   "functions": [
     {
@@ -101,6 +161,7 @@
       "deprecated": null,
       "elf_visibility": null,
       "exception_spec": null,
+      "hidden_friend_owner": null,
       "is_const": false,
       "is_deleted": false,
       "is_explicit": null,
@@ -133,6 +194,7 @@
       "deprecated": null,
       "elf_visibility": null,
       "exception_spec": null,
+      "hidden_friend_owner": null,
       "is_const": false,
       "is_deleted": false,
       "is_explicit": null,
@@ -172,7 +234,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 9,
+  "schema_version": 15,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

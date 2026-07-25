@@ -89,16 +89,18 @@ model:
   four modules populate `ImpactAssessment`, and the flat `Change` fields
   become derived views over it) remains open follow-up work under the same
   ADR.
-- **G29.3** (Phase 2, **D1/D2/D3/D5 done, D4 deliberately deferred,
-  ADR-046**) — Graph core v2: relation/occurrence identity split (**done**),
-  an evidence-preserving (order-independent) node/edge merge (**done**), a
-  per-kind/per-role coverage matrix (**done**, extending `extractor_passes`
-  beyond the two families Phase 1 already consults), and a USR-based
-  canonical `EntityResolver` with `SOURCE_GRAPH_VERSION = 2` (v1 IDs kept as
-  aliases — no forced re-collection) — **deliberately deferred**;
-  [ADR-048](../adr/048-canonical-entity-identity-and-graph-reconciliation.md)
-  already delivers its practical value without the identity-generation
-  rewrite a full `EntityResolver` would need.
+- **G29.3** (Phase 2, **D1-D6 all done, ADR-046**) — Graph core v2:
+  relation/occurrence identity split (**done**), an evidence-preserving
+  (order-independent) node/edge merge (**done**), a per-kind/per-role
+  coverage matrix (**done**, extending `extractor_passes` beyond the two
+  families Phase 1 already consults), and a USR-based canonical
+  `EntityResolver` with `SOURCE_GRAPH_VERSION = 2` (v1 IDs kept as aliases —
+  no forced re-collection) — **done, as a deliberately scoped subset**:
+  [ADR-048](../adr/048-canonical-entity-identity-and-graph-reconciliation.md)'s
+  `entity_identity.CanonicalIdentity` is the resolution source
+  `EntityResolver.resolve` reuses; changing `GraphNode.id` generation itself
+  across every graph producer stays out of scope (still the "materially
+  larger" rewrite that would need its own design pass).
 - **G29.4** (Phase 2/3, **mostly done**) — Structured, machine-walkable proof
   paths (JSON node/edge sequence, not a formatted string) surfaced in JSON —
   **done** (`impact_proof_path`, `impact_assessment.proof_path.steps`); SARIF
@@ -187,7 +189,7 @@ field alongside `public_reachable`/`reachability_kind`/`reachability_proof_path`
 each producer still sets it independently, and the proof path is still one
 formatted string.
 
-### Phase 2 — Graph core v2 — **ADR accepted; D1/D2/D3/D5/D6 implemented, D4 deliberately deferred**
+### Phase 2 — Graph core v2 — **ADR accepted; D1-D6 all implemented (D4 scoped)**
 
 [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) records
 the D1-D6 decisions below — the "needs its own ADR" gate this phase set for
@@ -206,21 +208,28 @@ implementation"/"D5 implementation"/"D6 implementation" sections,
 `tests/test_internal_leak.py`'s `TestTraversalPolicy`/
 `TestSelectPreferredPath`, `tests/test_internal_leak_effect_transitions.py`,
 and `tests/test_graph_impact.py`. **D4 (`EntityResolver`/
-`SOURCE_GRAPH_VERSION = 2`) is deliberately deferred, not just unstarted** —
-see ADR-046's "D4: deliberately deferred" section:
-[ADR-048](../adr/048-canonical-entity-identity-and-graph-reconciliation.md)
-(G31 Phase B, shipped after ADR-046 was written) already delivers D4's
-practical value — safe old/new reconciliation and impact-path linking — via
-`entity_identity.CanonicalIdentity`, without touching `GraphNode.id` or
-bumping `SOURCE_GRAPH_VERSION`. A full D4 would still mean changing
-`GraphNode.id` generation across every graph producer plus a v1/v2 pack
-compatibility matrix — categorically larger and riskier than any slice
-landed in this phase, and deserving its own scoped design pass rather than
-being folded in here. D4, and two narrower items D5/D6 explicitly still
-leave open (adopting `TraversalPolicy` on the layout walk's non-graph data
-model; a "consumer-proven" tier and a genuinely finer
+`SOURCE_GRAPH_VERSION = 2`) is now implemented too, as a deliberately
+*scoped* subset of the originally sketched decision** — see ADR-046's "D4
+implementation" section: `abicheck/buildsource/entity_resolver.py`'s
+`EntityResolver` reuses `entity_identity.CanonicalIdentity`
+([ADR-048](../adr/048-canonical-entity-identity-and-graph-reconciliation.md),
+G31 Phase B, shipped after ADR-046 was written) as its resolution source,
+recording `aliases[v1_id] = canonical_id` rather than replacing
+`GraphNode.id` generation itself. `SOURCE_GRAPH_VERSION` bumped 1 → 2 as a
+signal (nothing branches on it), populated only when a caller opts in via
+`SourceGraphSummary.resolve_entities()` — a v1 pack with no
+`entity_resolver` key still loads and compares correctly with no forced
+re-collection. What stays out of scope, and why, is exactly what the
+original deferral flagged as the risky part: changing `GraphNode.id`
+generation itself across every graph producer plus a v1/v2
+*identity-level* compatibility matrix (not just the pack-loading
+compatibility this implementation already provides) — categorically larger
+and riskier than any slice landed in this phase, still deserving its own
+scoped design pass if ever attempted. Two narrower items D5/D6 explicitly
+still leave open too (adopting `TraversalPolicy` on the layout walk's
+non-graph data model; a "consumer-proven" tier and a genuinely finer
 "reduced-confidence name resolution" axis, both needing evidence that
-doesn't exist yet), remain open follow-up work under the same accepted ADR.
+doesn't exist yet) — open follow-up work under the same accepted ADR.
 See [Source Graph Schema Reference](../../reference/source-graph-schema.md)
 for the exhaustive schema this phase produced.
 
@@ -250,8 +259,16 @@ for the exhaustive schema this phase produced.
   source_location]` — resolves binary symbol / header declaration / source
   definition / debug type / consumer import / template instantiation to one
   entity. `SOURCE_GRAPH_VERSION = 2`; a v2 reader accepts v1 IDs as aliases so
-  existing collected packs keep working. **Deliberately deferred** — see
-  above.
+  existing collected packs keep working. **Implemented, scoped** — see
+  above: `entity_resolver.EntityResolver.resolve(node) -> canonical_id`,
+  `aliases`/`conflicts`, opt-in via `resolve_entities()`. The originally
+  listed richer alias tuple (mangled symbol/qualified name/signature hash/
+  source location as *separate* alias entries, not just the one canonical
+  id) is narrower in the shipped version — `EntityResolver.aliases` maps
+  `v1_id -> canonical_id` only; the finer-grained alias set is what
+  `entity_identity.CanonicalIdentity.aliases` (which `EntityResolver.resolve`
+  already reads from) itself carries, one level down, for a caller that
+  needs it.
 - A common `TraversalPolicy` (`allowed_edges`, `stop_conditions`,
   `effect_transitions`, `minimum_confidence`) formalizes the five traversal
   shapes the review distinguishes (layout/symbol-availability/source-contract/
@@ -288,8 +305,8 @@ for the exhaustive schema this phase produced.
   reduced-confidence-name-resolution axis beyond the residual case.
 
 **ADR-046 accepted and implemented** — see the Phase 2 heading above for the
-current per-decision status (D1/D2/D3/D5/D6 implemented, D4 deliberately
-deferred); this paragraph originally described the pre-implementation
+current per-decision status (D1-D6 all implemented, D4 as a deliberately
+scoped subset); this paragraph originally described the pre-implementation
 "needs a recorded decision" gate (ADR-044's own bar) before the ADR existed.
 
 ### Phase 3 — Reporting & root causes — **slices 1-7 implemented (ADR-052)**
@@ -521,6 +538,7 @@ New:
 ```text
 abicheck/buildsource/graph_facts.py  # GraphFact/FactConflict/merge, relation_key/occurrence_id (Phase 2 D1/D2, DONE)
 abicheck/buildsource/graph_impact.py  # select_preferred_graph_path, attach_impact_metadata, _path_occurrence_id (Phase 2 D6/ADR-052 Slice 6, DONE — landed here, not under impact/)
+abicheck/buildsource/entity_resolver.py  # EntityResolver/EntityConflict (Phase 2 D4, DONE — scoped implementation)
 abicheck/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, DONE — landed here, not a separate impact/traversal.py)
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3 slices 1/7, DONE — ADR-052)
@@ -560,11 +578,16 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
 - `tests/test_reporter.py::TestImpactAssessmentRootCause` /
   `tests/test_sarif.py::TestImpactAssessmentRootCause` — Phase 3 Slice 7's
   per-finding `root_cause_id`/`root_cause_display`/`impact_group_id`, done.
-- New per remaining phase: `tests/test_entity_resolver.py` (Phase 2 D4, not
-  planned — see D4's deliberate-deferral note above),
-  `tests/test_consumer_graph.py` / `tests/test_use_cases.py` (Phase 4), one
-  `test_diff_<family>.py` per Phase 5 graph family,
-  `tests/test_root_cause_correlator.py` (Phase 6).
+- `tests/test_entity_resolver.py` — Phase 2 D4 (scoped implementation),
+  done: `EntityResolver.resolve`'s USR/mangled/qualified-signature fallback
+  chain, idempotence, alias sharing + conflict recording for two v1 ids
+  resolving to one canonical identity, `to_dict`/`from_dict` round-trip,
+  `SourceGraphSummary.resolve_entities()` being opt-in and safe to call
+  again, sparse `to_dict()` output, and v1-pack (`schema_version: 1`, no
+  `entity_resolver` key) load compatibility.
+- New per remaining phase: `tests/test_consumer_graph.py` /
+  `tests/test_use_cases.py` (Phase 4), one `test_diff_<family>.py` per
+  Phase 5 graph family, `tests/test_root_cause_correlator.py` (Phase 6).
 - `tests/test_abi_examples.py` picks up `case194`-`case205` automatically once
   `ground_truth.json` is updated (existing harness, no new test file needed).
 

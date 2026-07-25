@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from .build_evidence import BuildEvidence, Confidence
+from .entity_resolver import EntityResolver
 
 # GraphNode/GraphEdge live in graph_facts.py now (ADR-046 D1/D2/D3 schema
 # additions pushed this module to its AI-readiness line-count cap) and are
@@ -76,7 +77,17 @@ EVIDENCE_TIER_L5 = "L5_SOURCE_GRAPH"
 #: Source-graph schema version, independent of the pack/build/source/snapshot
 #: versions (ADR-028 D8 versioning). Bump on any breaking change to
 #: ``SourceGraphSummary``, :class:`GraphNode`, or :class:`GraphEdge`.
-SOURCE_GRAPH_VERSION: int = 1
+#:
+#: 2 — ADR-046 D4 (scoped implementation): :class:`EntityResolver` is
+#:     available on :class:`SourceGraphSummary`. This is a *signal* bump, not
+#:     a breaking schema change — nothing reads/branches on ``schema_version``
+#:     today, ``entity_resolver`` is an additive optional field
+#:     (``from_dict`` defaults it to an empty, unresolved
+#:     :class:`EntityResolver`), and ``GraphNode.id`` generation itself is
+#:     unchanged, so a v1 pack (``schema_version: 1``, no ``entity_resolver``
+#:     key) still loads and compares correctly with no forced re-collection —
+#:     see ADR-046's "D4 implementation" section.
+SOURCE_GRAPH_VERSION: int = 2
 
 #: Node kinds the graph schema understands (ADR-031 D2). Unknown kinds from a
 #: newer/hand-edited summary are preserved on load, never rejected.
@@ -269,6 +280,15 @@ class SourceGraphSummary:
     #: diagnostics lands here too, on top of never confirming
     #: ``narrowed_passes``, since it is even less trustworthy than either).
     degraded_passes: dict[str, bool] = field(default_factory=dict)
+    #: USR-based canonical identity aliasing (ADR-046 D4, scoped
+    #: implementation) — ``v1_id -> canonical_id`` for every node
+    #: :meth:`resolve_entities` has resolved, plus any cross-producer
+    #: identity conflicts it found. Empty/unresolved until a caller
+    #: explicitly calls :meth:`resolve_entities` (opt-in, same "no cost until
+    #: asked for" discipline as D1's ``occurrence_id`` and D5's
+    #: ``effect_transitions``) — nothing in the default graph-build path
+    #: computes it automatically.
+    entity_resolver: EntityResolver = field(default_factory=EntityResolver)
 
     def __post_init__(self) -> None:
         # ADR-046 D2: backfill/re-derive facts/resolved for anything
@@ -416,6 +436,23 @@ class SourceGraphSummary:
         )
         return "sha256:" + hashlib.sha256(blob).hexdigest()
 
+    def resolve_entities(self) -> SourceGraphSummary:
+        """Populate :attr:`entity_resolver` from the current node set
+        (ADR-046 D4, scoped implementation).
+
+        Opt-in: not called automatically by :meth:`add_node`/
+        :meth:`__post_init__`/:meth:`finalize` — computing a USR-preferring
+        canonical identity for every node is extra work no current graph
+        consumer needs by default (same discipline as D1's ``occurrence_id``
+        staying a no-op until a producer populates its opt-in attrs). Safe to
+        call more than once: :meth:`EntityResolver.resolve` is idempotent per
+        node id, so re-running after ``add_node`` calls only resolves the
+        newly-added nodes.
+        """
+        for n in self.nodes:
+            self.entity_resolver.resolve(n)
+        return self
+
     def finalize(self) -> SourceGraphSummary:
         """Fill ``graph_id`` and the structural ``coverage`` counts; return self."""
         self.graph_id = self.compute_graph_id()
@@ -509,7 +546,7 @@ class SourceGraphSummary:
     # -- (de)serialization --------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "schema_version": self.schema_version,
             "graph_id": self.graph_id or self.compute_graph_id(),
             "coverage": dict(self.coverage),
@@ -522,6 +559,12 @@ class SourceGraphSummary:
             "narrowed_scope": {k: sorted(v) for k, v in self.narrowed_scope.items()},
             "degraded_passes": dict(self.degraded_passes),
         }
+        # Sparse: omitted entirely (never an empty {"aliases": {}, ...})
+        # unless resolve_entities() was actually called (ADR-046 D4) — same
+        # opt-in-cost convention as occurrence_id/effect_transitions.
+        if self.entity_resolver.aliases or self.entity_resolver.conflicts:
+            d["entity_resolver"] = self.entity_resolver.to_dict()
+        return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SourceGraphSummary:
@@ -551,6 +594,7 @@ class SourceGraphSummary:
             degraded_passes={
                 str(k): bool(v) for k, v in dict(d.get("degraded_passes", {})).items()
             },
+            entity_resolver=EntityResolver.from_dict(dict(d.get("entity_resolver", {}))),
         )
 
 

@@ -32,7 +32,7 @@
       "edges": [],
       "external_graph_refs": [],
       "extractor_passes": {},
-      "graph_id": "sha256:4c6004183768c52af9180b110fceb92f0be9efee1c26027d01ce27591d907c49",
+      "graph_id": "sha256:1bcac20ebb6364a828d5278c2484ff22ad0d28158859b80e1437501d167544da",
       "indexes": {
         "by_binary_symbol": {},
         "by_file": {},
@@ -89,7 +89,7 @@
           }
         }
       ],
-      "schema_version": 1
+      "schema_version": 2
     }
   },
   "build_source_pack": null,

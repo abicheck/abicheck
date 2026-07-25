@@ -62,7 +62,12 @@ from typing import TYPE_CHECKING
 from .. import demangle
 
 if TYPE_CHECKING:
-    from .source_graph import GraphNode
+    # GraphNode's real home is graph_facts.py (source_graph.py only
+    # re-exports it) -- importing the leaf module directly here, rather than
+    # source_graph.py, avoids a source_graph -> entity_resolver ->
+    # entity_identity -> source_graph import cycle (entity_resolver.py, added
+    # for ADR-046 D4, imports this module at runtime).
+    from .graph_facts import GraphNode
 
 #: Identity-confidence tiers (ADR-048), deliberately matching the
 #: ``canonical``/``normalized``/``reduced`` vocabulary requested by the
