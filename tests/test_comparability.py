@@ -14,6 +14,7 @@ comparability.IncludeDir(label=...) directly.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -1075,10 +1076,16 @@ def test_public_header_dir_shallower_than_declared_headers_does_not_leak_its_nam
         declared_headers=new_headers, public_header_dirs=[new_root]
     )
     assert old_contract.scope_fields["headers"] == new_contract.scope_fields["headers"]
-    assert (
-        old_contract.scope_fields["headers"]
-        == '["include/zlib.h", "share/doc/examples/gzlog.h"]'
+    # Built via Path, not hard-coded "/" literals: _side_local_identity
+    # stringifies relative_to()'s result, which joins with the platform's
+    # own separator (backslash on Windows).
+    expected_headers = sorted(
+        [
+            str(Path("include", "zlib.h")),
+            str(Path("share", "doc", "examples", "gzlog.h")),
+        ]
     )
+    assert old_contract.scope_fields["headers"] == json.dumps(expected_headers)
     assert old_contract.scope_fingerprint == new_contract.scope_fingerprint
 
 
