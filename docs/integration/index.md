@@ -15,16 +15,23 @@ requirement` — not as one implicit `aggregate` report. See
 [Concepts](concepts.md) for the full vocabulary (target, profile, baseline
 channel, check, run plan, ...).
 
-> **Status.** This page and [Concepts](concepts.md) are the first two slices
-> of G30 P1.7's scenario-first documentation IA
-> (`docs/development/plans/g30-github-actions-integration-model.md` §P1.7).
-> The full `scenarios/`/`baselines/`/`reference/` page tree ADR-047 §8
-> anticipates is landing incrementally, batch by batch — S1/S3/S6/S7 already
-> have dedicated scenario pages (below); every other row still links to the
-> *current* page that already answers that scenario's question, and gets
-> repointed at a purpose-built scenario page as its own batch lands. The
-> scenario ID (`S`-number) is the stable cross-reference either way: it names
-> a row in
+> **Status.** This page, [Concepts](concepts.md), and every `scenarios/*.md`
+> page below are G30 P1.7's scenario-first documentation IA
+> (`docs/development/plans/g30-github-actions-integration-model.md` §P1.7) —
+> all 15 scenario pages the plan's own file tree names are now in place.
+> Rows without a dedicated `scenarios/*.md` page (S2, S4, S10, S12, S16,
+> S19-S21, S28) were never meant to have one — the plan's file tree only
+> lists a scenario page where the question needs a distinct walkthrough;
+> everywhere else the existing reference/concept page already answers it
+> directly, and duplicating it into a thin wrapper page would violate this
+> repo's own "one fact, one place" documentation rule. The `baselines/`/
+> `reference/` sub-trees the plan's original file tree also names are largely
+> superseded by `docs/reference/{publish-baseline,resolve-baseline,
+> check-target,build-output-schema,run-plan-schema,project-targets-schema,
+> reusable-workflows}.md`, all of which shipped in G30 P1.1-P1.6 — concurrent
+> with/after this plan was written — and already cover that ground; see the
+> plan's own P1.7 status note for the corrected scope. The scenario ID
+> (`S`-number) is the stable cross-reference either way: it names a row in
 > [ADR-047 §8](../development/adr/047-github-actions-integration-model.md#8-condensed-scenario-catalog-s1s28)'s
 > full catalog, independent of which page currently hosts the answer.
 
@@ -34,7 +41,7 @@ channel, check, run plan, ...).
 |---|---|---|
 | S1 | One library, baseline is a file committed in the repo | [Scenario: Single Library](scenarios/single-library.md) |
 | S2 | One library, baseline is "the last release" | [GitHub Action](../user-guide/github-action.md), [Baseline Management](../user-guide/baseline-management.md) |
-| S5 | I just want an audit — no baseline to compare against yet | [`check-target` Action Reference](../reference/check-target.md) (`baseline-channel: none`) |
+| S5 | I just want an audit — no baseline to compare against yet | [Scenario: Single-Build Audit](scenarios/single-build-audit.md) |
 | S6 | I have public headers, not just a binary | [Scenario: Header-Aware Compatibility](scenarios/header-aware-check.md) |
 
 ## Reusing an existing build
@@ -44,7 +51,7 @@ channel, check, run plan, ...).
 | S3 | My build is expensive — build once, check many times | [Scenario: Reuse an Existing Build](scenarios/existing-build-artifact.md) |
 | S4 | I want to build and check in the same CI job | [`check-target` Action Reference](../reference/check-target.md) |
 | S13 | I only have prebuilt packages, no source checkout | [Scenario: Packages & Prebuilt Artifacts](scenarios/packages-and-sdks.md) |
-| S18 | I cross-compile; the check can't run on the build host | [Build Output Schema](../reference/build-output-schema.md) |
+| S18 | I cross-compile; the check can't run on the build host | [Scenario: Cross Compilation](scenarios/cross-compilation.md) |
 | S12 | My build is Bazel/sandboxed | [Build Output Schema](../reference/build-output-schema.md) |
 
 ## Deeper source/build evidence
@@ -63,9 +70,9 @@ channel, check, run plan, ...).
 |---|---|---|
 | S14 | My libraries ship together and depend on each other (a release bundle) | [Scenario: Multi-DSO Release Bundle](scenarios/release-bundle.md) |
 | S15 | I have several independent libraries built together | [Scenario: Multiple Independent Targets](scenarios/multi-dso-project.md) |
-| S17 | I need to check the same library across several build profiles | [Reusable Workflows](../reference/reusable-workflows.md), [Project Targets Schema](../reference/project-targets-schema.md) |
+| S17 | I need to check the same library across several build profiles | [Scenario: Multiple Build Profiles](scenarios/multi-platform.md) |
 | S21 | I want to gate on two different baselines at once (e.g. last release *and* main) | [`check-target` Action Reference](../reference/check-target.md) |
-| S25 | I have a monorepo with several independently-versioned components | [Run Plan Schema](../reference/run-plan-schema.md) |
+| S25 | I have a monorepo with several independently-versioned components | [Scenario: Monorepo / Multiple Components](scenarios/monorepo.md) |
 | S28 | I need one CI status from several checks | [Reusable Workflows](../reference/reusable-workflows.md) (`check-project.yml`'s trailing `aggregate` job) |
 
 ## Baselines
@@ -79,16 +86,16 @@ channel, check, run plan, ...).
 
 | Scenario | Question | Where to look |
 |---|---|---|
-| S22 | Will this library change break a specific application that links it? | [Application Compatibility](../user-guide/appcompat.md) |
-| S23 | I have a plugin/`dlopen`/`dlsym` contract, not a public-header ABI | [Plugin Systems](../user-guide/plugin-systems.md) |
-| S24 | Will this binary resolve its dependencies in a given rootfs/container? | [Companion Commands](../user-guide/companion-commands.md) |
+| S22 | Will this library change break a specific application that links it? | [Scenario: Application & Plugin Contracts](scenarios/application-and-plugin-contracts.md) |
+| S23 | I have a plugin/`dlopen`/`dlsym` contract, not a public-header ABI | [Scenario: Application & Plugin Contracts](scenarios/application-and-plugin-contracts.md) |
+| S24 | Will this binary resolve its dependencies in a given rootfs/container? | [Scenario: Dependency & Container Checks](scenarios/dependency-and-container-checks.md) |
 
 ## Rollout and process
 
 | Scenario | Question | Where to look |
 |---|---|---|
-| S26 | I'm migrating from another ABI tool and want a shadow/advisory rollout first | [CI Gating Pipeline](../user-guide/ci-gating.md) |
-| S27 | This PR contains an intentional breaking change | [CI Gating Pipeline](../user-guide/ci-gating.md) |
+| S26 | I'm migrating from another ABI tool and want a shadow/advisory rollout first | [Scenario: Migration & Rollout](scenarios/migration-and-rollout.md) |
+| S27 | This PR contains an intentional breaking change | [Scenario: Migration & Rollout](scenarios/migration-and-rollout.md) |
 
 ## See also
 

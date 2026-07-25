@@ -2393,7 +2393,7 @@ false-negative `check-project.yml`/`check-single.yml` already carry and
 document, confirmed by running `actionlint` against those pre-existing files
 too for comparison) before relying on the structural assertions alone.
 
-### P1.7 — Scenario-first documentation IA — **batch 1 of ~5 done**
+### P1.7 — Scenario-first documentation IA — **scenario catalog done; retirement pass open**
 
 Implements ADR-047 §8's scenario catalog and the task's requested
 `docs/integration/` tree. **File tree and migration map:**
@@ -2540,6 +2540,69 @@ confirming that section is prose within a heading, not its own heading (an
 anchor to a non-existent heading slug would have been a silent dead link
 `mkdocs build --strict` does catch, but only by actually trying it — checked
 directly instead of guessing). Verified identically to batches 1-2:
+`mkdocs build --strict` (clean) and `scripts/check_docs_contract.py`
+(0 errors).
+
+**Batch 4 — the remaining seven scenario pages (S5, S17, S18, S22/S23, S24,
+S25, S26/S27) — also implemented, completing every `scenarios/*.md` page
+this section's own file tree names.** `single-build-audit.md` (S5) covers
+the `baseline-channel: none` bypass and the `target-kind: library`-only
+restriction; `multi-platform.md` (S17) covers `profiles:`/`contract:
+true|false` and the implicit-sweep-vs-explicit-selector distinction;
+`cross-compilation.md` (S18) covers the build-host/check-host decoupling and
+`gcc-prefix`/`sysroot` forwarding; `application-and-plugin-contracts.md`
+(S22, S23) covers both `target-kind`s' library-redirect and forwarded
+inputs; `dependency-and-container-checks.md` (S24) covers `deps tree`/`deps
+compare`, explicitly distinct from an ABI/API comparison; `monorepo.md`
+(S25) covers the S15 foundation plus an **honest gap, verified by reading
+`abicheck/cli_run_plan.py` directly rather than assuming**: `abicheck
+run-plan generate` has no `--changed-path`/`--since` selector to filter
+`checks[]` by what a diff touched — every declared target's checks are
+always in the generated plan, so a monorepo PR wanting to skip untouched
+components must compute and apply that scoping in its own CI step today, not
+rely on a filter that doesn't exist yet; `migration-and-rollout.md` (S26,
+S27) covers `gate-mode: advisory` for a shadow rollout and the two
+independent per-PR/post-merge relaxation levers for an intentional break.
+
+**Scope correction, made explicit in `index.md`'s own status callout rather
+than left implicit: the `baselines/`/`reference/` sub-trees this section's
+original file tree also names are not being built as separately-planned,
+since they are now largely superseded.** `docs/reference/{publish-baseline,
+resolve-baseline,check-target,build-output-schema,run-plan-schema,
+project-targets-schema,reusable-workflows}.md` — all real pages, all shipped
+in G30 P1.1 through P1.6, concurrent with or after this P1.7 file-tree
+listing was originally written — already cover essentially everything the
+listed `baselines/lifecycle.md`/`release-contract.md`/`accepted-main.md`/
+`baseline-sets.md`/`storage.md` and `reference/actions.md`/
+`reusable-workflows.md`/`project-config.md`/`report-schema.md`/
+`failure-semantics.md` pages would have contained. Building a second,
+`docs/integration/`-rooted copy of the same content would violate this
+repo's own "one fact, one place" documentation rule
+(`docs/AGENTS.md`) — `check_docs_contract.py`'s duplication warning exists
+specifically to catch exactly this. **This is a real scope correction, not a
+skipped task:** every scenario page above already links to the real
+`docs/reference/*.md` page for its baseline-lifecycle/schema questions
+instead of a `docs/integration/baselines/`-or-`reference/`-rooted stand-in,
+so no reader-facing gap exists — only the file tree's literal page count
+went unbuilt. If a genuine narrative gap in the *baseline lifecycle as a
+whole* (as opposed to any one Action's own mechanics) turns up later, it
+belongs on one new page, not five, and should be added against the
+`docs/reference/publish-baseline.md`/`resolve-baseline.md` pair that already
+exists, not as a parallel `docs/integration/baselines/` tree.
+
+**G30 P1.7 is therefore functionally complete for its scenario-catalog
+scope** — every scenario in ADR-047 §8's table now resolves to either a
+dedicated `scenarios/*.md` walkthrough or a directly-linked existing
+reference/concept page, with no scenario left unanswered. What remains
+genuinely open, not yet attempted in any batch: the page-retirement/content-
+redistribution pass this section's own migration map describes for
+`github-action.md` (trim to input/output reference only),
+`github-action-recipes.md` (retire, redistribute), `github-action-source-
+scans.md`/`baseline-management.md`/`producing-source-facts.md`/
+`build-evidence-setup.md` (retire, redistribute) — deliberately deferred
+across every batch above as a distinct, higher-risk pass touching
+heavily-established, heavily-cross-linked pages, not something to fold into
+a batch that also lands N new pages. Verified identically to batches 1-3:
 `mkdocs build --strict` (clean) and `scripts/check_docs_contract.py`
 (0 errors).
 
