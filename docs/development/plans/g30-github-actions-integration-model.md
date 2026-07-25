@@ -2213,7 +2213,7 @@ the from_dict structural-error taxonomy, every cross-reference validation
 rule (including the exact ADR-047 §3 PVXS two-target-one-bundle shape as a
 positive case), the loader, and the CLI command.
 
-### P1.6 — `publish-baseline.yml` / `update-main-baseline.yml`
+### P1.6 — `publish-baseline.yml` / `update-main-baseline.yml` — **done**
 
 Implements ADR-047 §6/§10. `publish-baseline.yml`: release-triggered,
 `actions/baseline` → atomic archive → release-asset upload.
@@ -2263,6 +2263,135 @@ by `resolve-baseline`), not an assumption.
 cache-refresh test requires `resolve-baseline` to be available to verify
 consecutive `update-main-baseline.yml` runs produce distinct, resolvable
 baselines.
+
+**Status:** implemented. **`actions/baseline` code change — done as
+specified, via the narrower of the two designs the ADR's own component-
+surface row left open (a per-entry flag, not a second `.abicheck.yml`
+read).** `actions/baseline`'s `libraries[]` entries gain an optional
+`stage_binary: true` boolean; `run.sh` copies that entry's `artifact` into
+`<output-dir>/binaries/<name>` immediately after a successful dump (clearing
+any stale `binaries/` directory from an earlier run at the same output-dir
+first, mirroring the existing stale-`*.abicheck.json` cleanup), and
+`build_manifest.py` records `binary`/`binary_sha256` (a plain whole-file
+digest, read back from the staged file itself rather than trusted from the
+input) in the corresponding `artifacts[]` row — exactly the two fields
+`abicheck/buildsource/baseline_set.py`'s `BaselineArtifact`/
+`resolve_bundle()` (G30 P1.2) already defined the contract for and were
+waiting on a producer to populate. The calling workflow decides *which*
+libraries need `stage_binary: true` (never `actions/baseline` re-reading
+`.abicheck.yml` itself): a new pure module,
+`abicheck/buildsource/baseline_publish.py`, and its
+`abicheck build-output baseline-libraries DIRECTORY` CLI wrapper
+(`abicheck/cli_build_output.py`, a new subcommand alongside P1.1's
+`validate`) derive the full `libraries` JSON array straight from a contract
+profile's already-produced `build-output.json` — every `BuildOutputTarget`
+already records its own `binary`/`public_header_roots`/
+`generated_header_roots`/`bundle` (G30 P1.1), so no second config read is
+needed, and `stage_binary` is set automatically for exactly the targets
+whose `bundle` field is non-empty (a release-bundle member), never for a
+standalone target.
+
+**Open design gap (`binaries/`-only vs. a per-member `headers/` directory)
+— resolved, not by this item, but already closed by P1.5's own scoping
+before this item started:** re-reading `abicheck/buildsource/
+project_targets.py`'s `BUNDLE_CHECK_DEPTHS` (landed in P1.5, before P1.6)
+shows a bundle-scoped check is *already* restricted to `requested-depth:
+binary` only — `headers`/`build`/`source` are rejected for `kind: bundle`
+at config-validation time, with that module's own docstring citing exactly
+this ADR gap as the reason ("Until per-bundle-member baseline header
+staging exists, only binary-level (L0/L1) evidence is safe for a bundle
+check"). Since a bundle check can therefore never *request* header/build/
+source depth in the first place, the archive never needs old-side headers
+per member — `binaries/` alone is sufficient for every depth a bundle check
+can actually reach today. This item does not revisit that restriction; if a
+future item lifts `BUNDLE_CHECK_DEPTHS`, staging per-member headers becomes
+that item's job, not a rediscovered gap.
+
+**Cache-key rotation — implemented exactly as specified.**
+`update-main-baseline.yml` computes `<key-prefix>-<profile-id>-<head-sha>`
+once per run (`abicheck.buildsource.baseline_publish.accepted_main_cache_key`
+is this format's pure-Python mirror, cross-checked against the workflow's
+own literal bash template by `tests/test_publish_baseline_workflows.py`),
+restores the newest previous entry via `restore-keys:
+<key-prefix>-<profile-id>-` (`accepted_main_cache_restore_prefix`) into a
+freshness-comparison staging directory, feeds its `manifest.json` (when one
+was found) to `actions/baseline` as `--previous-manifest`, and saves the
+fresh baseline-set under the new, always-unique key — never the stable
+prefix. The required fixture ("two consecutive `update-main-baseline.yml`
+runs produce two distinct baselines resolvable by `resolve-baseline`") is
+covered as a structural-plus-semantic pairing rather than a live two-run
+GitHub Actions fixture (this session had no way to execute one, the same
+limitation P1.4's own reusable-workflow items already documented): one test
+pins the workflow's literal key-computation template against the
+pure-Python mirror's exact string output for representative inputs, and a
+second confirms two different `head_sha`s the mirror produces two distinct
+keys sharing one `resolve-baseline`-discoverable prefix — reviewed and
+passing, but not yet confirmed against a real two-push run the way P1.3/P1.4's
+own end-to-end fixtures were confirmed against real CI. Treat this the same
+"reviewed but unverified until a real run confirms it" caveat this plan
+already gives other producer-side items.
+
+**Files delivered:** `actions/baseline/run.sh`, `actions/baseline/
+build_manifest.py`, `actions/baseline/action.yml` (`stage_binary` documented
+on the `libraries` input); `abicheck/buildsource/baseline_publish.py` (new),
+`abicheck/cli_build_output.py` (`baseline-libraries` subcommand);
+`.github/workflows/publish-baseline.yml` (new — `release-contract`, GitHub
+Release asset via `gh release upload --clobber`, `contents: write` scoped to
+its one `publish` job), `.github/workflows/update-main-baseline.yml` (new —
+`accepted-main`, Actions cache). Both new workflows follow P1.4's own
+established reusable-workflow conventions verbatim: `workflow_call`-only
+(never `pull_request`/`pull_request_target`, per ADR-047 §12), a
+`job.workflow_ref`/`job.workflow_sha` self-checkout before any nested
+`uses: ./x` step (not `github.workflow_ref`/`github.workflow_sha` — see
+`check-project.yml`'s own hard-won writeup of that exact mistake), and a
+`discover` → (`no-profiles` fail-loud guard | `publish`/`refresh`) job shape
+mirroring `check-project.yml`'s own `plan` → (`no-checks` | `check` →
+`aggregate`) shape, including reading each contract profile's `profile.id`
+from its own `build-output.json` rather than reconstructing it from a
+download-artifact directory name (the same `download-artifact` nesting
+ambiguity `check-project.yml`'s `plan` job already works around). Every
+third-party Action reference in both new workflows is pinned to the exact
+same commit SHAs `publish.yml`/`security.yml` already use for
+`actions/checkout@v6`/`actions/setup-python@v6`/`actions/
+download-artifact@v8` (not independently re-resolved from each tag's
+current HEAD — confirmed by hand that a tag can move: `actions/checkout@v6`
+resolves to a *different* commit today than the one already pinned
+elsewhere in this repository), per AGENTS.md's pinning-bar note for a
+workflow that writes releases/caches; `actions/cache@v4`'s pin
+(`0057852bfaa89a56745cba8c7296529d2fc39830`, new to this item, no prior
+in-repo usage to reuse) was resolved via `git ls-remote` against the real
+upstream tag rather than guessed. `docs/reference/publish-baseline.md` (new,
+linked from mkdocs nav) documents both workflows' contracts, including the
+one real remaining gap this item does not close: `check-project.yml`'s own
+baseline-set staging (P1.4) only ever downloads a
+`<baseline-artifact-prefix><profile-id>-<channel>` artifact — it has no
+built-in Actions-cache restore step, so a project wiring `accepted-main`
+today must add its own `actions/cache/restore` step (using the key contract
+this item documents) before calling `check-project.yml`. Wiring cache-based
+staging directly into `check-project.yml` is deferred, not attempted here,
+the same "defines the producer, a later item wires up direct consumption"
+scoping `build-output.json`/`resolve-baseline`'s bundle path already used
+before their own producers shipped.
+
+`tests/test_baseline_publish.py` (18 cases) covers `derive_baseline_libraries`
+(bundle-member `stage_binary`, missing/escaping binary and header paths,
+declaration-order preservation, the no-targets case) and the cache-key
+helpers' format/uniqueness properties directly; `tests/test_baseline_manifest.py`'s
+new `TestStageBinary` class and `tests/test_action_baseline.py`'s new cases
+cover `build_manifest.py`'s digest-recording and `run.sh`'s bash-level
+staging/cleanup/input-validation end to end (including one
+`integration`-marked real-compiled-library test asserting the staged binary
+byte-for-byte matches the source artifact); `tests/test_build_output.py`'s
+new `TestBuildOutputBaselineLibrariesCLI` covers the CLI wrapper's exit
+codes (`0`/`1`/`64`); `tests/test_publish_baseline_workflows.py` (26 cases)
+covers both new workflow files structurally, the same "a real GitHub Actions
+runner is needed for true end-to-end verification" scoping
+`test_reusable_workflows.py` already established for `check-single.yml`/
+`check-project.yml` — including running `actionlint` against both files by
+hand (zero findings beyond the same `job.workflow_ref`/`job.workflow_sha`
+false-negative `check-project.yml`/`check-single.yml` already carry and
+document, confirmed by running `actionlint` against those pre-existing files
+too for comparison) before relying on the structural assertions alone.
 
 ### P1.7 — Scenario-first documentation IA
 

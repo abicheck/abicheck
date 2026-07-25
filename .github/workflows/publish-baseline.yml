@@ -1,0 +1,261 @@
+name: 'abicheck publish-baseline'
+
+# G30 P1.6 (ADR-047 section 6/section 10): publishes a `release-contract`
+# baseline-set as one atomic GitHub Release asset per contract profile.
+# Reusable workflow (workflow_call) -- the calling repository's own release
+# workflow decides WHEN this runs (a `release: types: [published]` trigger
+# is the intended one; ADR-047 section 12 requires baseline-publishing
+# workflows to be push/workflow_dispatch/release-triggered only, never
+# `pull_request`/`pull_request_target`, so a fork PR can never mint a
+# release-contract baseline). This workflow never builds anything itself
+# ("build once, scan many", the same boundary check-project.yml draws): it
+# expects the caller's own build job(s) to have already uploaded one
+# `<build-output-artifact-prefix><profile-id>` artifact per contract profile
+# -- build-output.json plus the binaries/headers it references (G30 P1.1) --
+# earlier in the same workflow run.
+#
+# Every third-party Action reference below is pinned to a full commit SHA,
+# not a floating tag -- this workflow writes a GitHub Release asset, which
+# needs the same SHA-pinning bar AGENTS.md already applies to security.yml/
+# publish.yml (a re-pointed tag here is a real supply-chain risk), unlike
+# check-target/resolve-baseline's tag-pinning (those carry no elevated
+# permissions). Pins are the SAME commits already used elsewhere in this
+# repository for the same major version (publish.yml/security.yml), not
+# independently re-resolved from each tag's current HEAD -- a floating major
+# tag (e.g. actions/checkout@v6) can move to a newer commit over time, so
+# reusing this repository's own existing pin keeps every elevated-permission
+# workflow pointed at the identical, already-reviewed commit.
+
+on:
+  workflow_call:
+    inputs:
+      build-output-artifact-prefix:
+        description: 'Each contract profile''s build-output.json is downloaded from an artifact named <this><profile-id>.'
+        type: string
+        default: 'abicheck-build-'
+      release-tag:
+        description: 'Release tag this run publishes assets to, and records as each baseline-set''s project-ref. Defaults to github.ref_name (the tag that triggered the calling release workflow).'
+        type: string
+        default: ''
+      asset-name-template:
+        description: 'GitHub Release asset filename template; "{profile}" is replaced with each contract profile''s id.'
+        type: string
+        default: 'abicheck-baseline-{profile}.tar.zst'
+      build-info:
+        description: >-
+          Path to a shared build/source facts pack, relative to each
+          profile's downloaded build-output artifact directory -- passed as
+          --build-info to every library's dump call. Omit for a
+          binary/header-only (L0-L2) baseline-set.
+        type: string
+        default: ''
+      depth:
+        description: 'Evidence depth passed to every dump call (binary, headers, build, or source). Omit for the CLI default.'
+        type: string
+        default: ''
+      validation:
+        description: 'Forwarded to actions/baseline''s validation input (strict or none).'
+        type: string
+        default: 'strict'
+      python-version:
+        description: 'Python version for setup-python, every job.'
+        type: string
+        default: '3.13'
+      install-deps:
+        description: 'Install system dependencies (castxml, gcc) before dumping. Set to false if pre-installed.'
+        type: boolean
+        default: true
+
+    secrets:
+      github-token:
+        description: 'Token with permission to upload assets to release-tag''s release. Defaults to this job''s own GITHUB_TOKEN (requires contents: write) when omitted.'
+        required: false
+
+jobs:
+  # ── Job 1: discover which contract profiles have a build-output artifact ──
+  discover:
+    name: 'Discover contract profiles'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+      has-profiles: ${{ steps.discover.outputs.has-profiles }}
+    steps:
+      - name: Download build-output artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          path: build-outputs
+          pattern: '${{ inputs.build-output-artifact-prefix }}*'
+          merge-multiple: false
+
+      # Reads each build-output.json's OWN profile.id field (ADR-047 section
+      # 2: "one build-output.json = one build profile, always") rather than
+      # reconstructing it from the download directory name -- download-
+      # artifact only nests a downloaded artifact under path/<artifact-name>/
+      # when its pattern matches TWO OR MORE artifacts; matching exactly one
+      # (a single-contract-profile project) extracts flat into path instead,
+      # making a name-derived profile id ambiguous by construction (the same
+      # gap check-project.yml's own plan job already works around).
+      - name: Discover profile ids
+        id: discover
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import glob, json, sys
+
+          profiles = []
+          for bo_file in sorted(glob.glob('build-outputs/**/build-output.json', recursive=True)):
+              profile_id = json.load(open(bo_file)).get('profile', {}).get('id', '')
+              if not profile_id:
+                  print(f'::error::{bo_file} has no profile.id set -- cannot determine which contract profile it belongs to', file=sys.stderr)
+                  sys.exit(1)
+              profiles.append(profile_id)
+          print('matrix=' + json.dumps({'include': [{'profile_id': p} for p in profiles]}))
+          print('has-profiles=' + ('true' if profiles else 'false'))
+          " >> "$GITHUB_OUTPUT"
+
+  no-profiles:
+    name: 'Fail: no contract-profile build-output artifacts found'
+    needs: discover
+    if: needs.discover.outputs.has-profiles != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail
+        run: |
+          echo "::error::no '${{ inputs.build-output-artifact-prefix }}*' build-output artifacts were found -- this run would otherwise report success having published nothing. Make sure the calling workflow's build job(s) upload one such artifact per contract profile before calling this reusable workflow." >&2
+          exit 1
+
+  # ── Job 2: dump + stage + publish one baseline-set per contract profile ──
+  publish:
+    name: 'Publish ${{ matrix.profile_id }}'
+    needs: discover
+    if: needs.discover.outputs.has-profiles == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      # This job needs the real abicheck CLI + actions/baseline's own files,
+      # not whatever happens to be at the calling repository's root -- the
+      # same self-checkout technique check-project.yml/check-target already
+      # establish (see check-project.yml's "plan" job for the fuller
+      # writeup of why github.workflow_ref/github.workflow_sha, not
+      # job.workflow_ref/job.workflow_sha, would be wrong for a reusable
+      # workflow's own self-identification).
+      - name: Capture this reusable workflow's identity
+        id: identity
+        shell: bash
+        env:
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          FALLBACK_REPOSITORY: ${{ github.repository }}
+          FALLBACK_REF: ${{ github.sha }}
+        run: |
+          repository="${WORKFLOW_REF%%/.github/workflows/*}"
+          echo "repository=${repository:-$FALLBACK_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "ref=${WORKFLOW_SHA:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout abicheck (for installing the CLI and nested Action composition)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          repository: ${{ steps.identity.outputs.repository }}
+          ref: ${{ steps.identity.outputs.ref }}
+          path: .publish-baseline-src
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install abicheck
+        shell: bash
+        run: pip install ./.publish-baseline-src
+
+      - name: Download build-output artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: '${{ inputs.build-output-artifact-prefix }}${{ matrix.profile_id }}'
+          path: 'build-output/${{ matrix.profile_id }}'
+
+      # Derives actions/baseline's `libraries` JSON input straight from this
+      # profile's build-output.json (abicheck/buildsource/baseline_publish.py)
+      # -- no separate .abicheck.yml read here: every target this build
+      # produced, and whether it's a release-bundle member (which needs its
+      # real ELF binary staged, not just a snapshot -- ADR-047 section 8 S14
+      # correction), is already recorded in build-output.json itself.
+      - name: Derive baseline libraries from build-output.json
+        id: libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Deliberately not `set -e`-fatal on this one call: a report with
+          # errors (exit 1) still writes baseline-libraries.json, and the
+          # Python block below reads report['errors'] to print each one as
+          # its own ::error:: annotation -- a bare `set -e` failure here
+          # would only surface a generic non-zero exit with no detail.
+          abicheck build-output baseline-libraries "build-output/${{ matrix.profile_id }}" -o baseline-libraries.json || true
+          python3 -c "
+          import json, sys
+
+          try:
+              report = json.load(open('baseline-libraries.json'))
+          except OSError as exc:
+              print(f'::error::baseline-libraries.json was not produced: {exc}', file=sys.stderr)
+              sys.exit(1)
+          if not report['ok']:
+              for e in report['errors']:
+                  print(f'::error::{e}', file=sys.stderr)
+              sys.exit(1)
+          with open('libraries.json', 'w', encoding='utf-8') as fh:
+              json.dump(report['entries'], fh)
+          "
+          {
+            echo "libraries<<ABICHECK_LIBRARIES_EOF"
+            cat libraries.json
+            echo
+            echo "ABICHECK_LIBRARIES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Dump baseline-set
+        id: baseline
+        uses: ./.publish-baseline-src/actions/baseline
+        with:
+          libraries: ${{ steps.libraries.outputs.libraries }}
+          output-dir: '.abicheck-baseline'
+          project-ref: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
+          profile: ${{ matrix.profile_id }}
+          build-info: ${{ inputs.build-info != '' && format('build-output/{0}/{1}', matrix.profile_id, inputs.build-info) || '' }}
+          depth: ${{ inputs.depth }}
+          validation: ${{ inputs.validation }}
+          python-version: ${{ inputs.python-version }}
+          install-deps: ${{ inputs.install-deps }}
+
+      - name: Package baseline-set
+        id: package
+        shell: bash
+        env:
+          ASSET_NAME_TEMPLATE: ${{ inputs.asset-name-template }}
+          PROFILE_ID: ${{ matrix.profile_id }}
+        run: |
+          set -euo pipefail
+          asset_name="${ASSET_NAME_TEMPLATE//\{profile\}/$PROFILE_ID}"
+          tar --zstd -cf "$asset_name" -C "${{ steps.baseline.outputs.baseline-path }}" .
+          echo "asset-name=$asset_name" >> "$GITHUB_OUTPUT"
+
+      # --clobber lets a re-run overwrite this profile's own previously
+      # uploaded asset (e.g. retrying after a transient failure) without
+      # first deleting it by hand -- scoped to this one release's own
+      # assets, not a rewrite of a published archive's history.
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ secrets.github-token != '' && secrets.github-token || secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" "${{ steps.package.outputs.asset-name }}" --clobber --repo "${{ github.repository }}"

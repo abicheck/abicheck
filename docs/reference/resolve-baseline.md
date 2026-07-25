@@ -11,11 +11,10 @@ baseline is never silently treated as "compatible."
 > primitive that composes this Action with the root `action.yml` and
 > `collect-facts` into one check, is documented separately — see the
 > [check-target Action reference](check-target.md). `actions/baseline`
-> does not yet stage bundle-member ELF binaries into a `binaries/`
-> directory (G30 P1.6) — bundle-scoped resolution (below) is defined and
-> tested against a hand-authored fixture in the meantime, the same "defines
-> the contract, no producer yet" scoping G30 P1.1 used for
-> `build-output.json`.
+> now stages bundle-member ELF binaries into a `binaries/` directory (G30
+> P1.6) — see the [`publish-baseline`/`update-main-baseline` reference](publish-baseline.md)
+> for the two reusable workflows that produce a baseline-set this Action
+> resolves against.
 
 ## Why a separate primitive
 

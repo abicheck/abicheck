@@ -100,6 +100,7 @@ nav:
     - check-target Action: reference/check-target.md
     - Run Plan Schema: reference/run-plan-schema.md
     - Reusable Workflows: reference/reusable-workflows.md
+    - publish-baseline / update-main-baseline: reference/publish-baseline.md
     - Configuration File: reference/config-file.md
     - Environment Variables: reference/environment.md
     - Platforms: reference/platforms.md

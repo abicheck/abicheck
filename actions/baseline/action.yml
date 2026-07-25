@@ -16,10 +16,18 @@ inputs:
     description: >
       JSON array of libraries to dump, one object per library:
       `[{"name": "libfoo", "artifact": "build/libfoo.so", "header":
-      "include/foo.h", "include": "include"}, ...]`. `name` and `artifact`
-      are required per entry; `header`/`include` are optional (space-
-      separated for multiple paths, matching the main Action's `header`/
-      `include` inputs).
+      "include/foo.h", "include": "include", "stage_binary": true}, ...]`.
+      `name` and `artifact` are required per entry; `header`/`include` are
+      optional (space-separated for multiple paths, matching the main
+      Action's `header`/`include` inputs). `stage_binary` is an optional
+      boolean (default false): when true, this library's real ELF binary is
+      additionally copied into `<output-dir>/binaries/<name>` and recorded
+      in the manifest (`binary`/`binary_sha256`) -- set it for any library
+      that is a member of a release bundle (ADR-047 section 6/section 8 S14
+      correction), since bundle-scoped analysis
+      (`abicheck/bundle.py`'s `build_bundle_snapshot()`) reads real ELF
+      binaries and skips non-ELF inputs, including this Action's own
+      `.abicheck.json` snapshots.
     required: true
   output-dir:
     description: 'Directory to write the per-library snapshots and manifest.json into.'
