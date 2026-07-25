@@ -182,8 +182,16 @@ constraint string), `target` (a target triple), `standard`, `stdlib`,
 (a list of normalized extra compiler-flag atoms). Every string value must
 be a single whitespace-free atom — a `.abicheck.yml` found by auto-discovery
 is untrusted, and whitespace would let one YAML scalar smuggle multiple
-argv tokens. This is config-schema/validation groundwork: no run-plan
-consumer resolves `compile:` into an actual `dump`/`compare` invocation yet.
+argv tokens. `standard`/`stdlib`/`target`/`abi_macros`/`args` reach `abicheck
+run-plan generate` (P1 toolchain-profile audit, closing this gap) as each
+resolved cell's composed `compile_gcc_options`; `binding` additionally
+reaches `compile_gcc_path`, but only when `run-plan generate
+--toolchain-bindings <path>` resolves it (see below) — see
+[`run-plan-schema.md`'s `RunPlanCheck` fields](run-plan-schema.md#runplancheck-fields)
+for the exact composition rule and `reusable-workflows.md`'s "Shared
+analysis options" for how `check-project.yml` forwards them per cell.
+`compiler_family`/`compiler_version` are validated here but not yet
+projected into any invocation — see that same section for why.
 
 ```yaml
 profiles:

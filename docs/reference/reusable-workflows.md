@@ -194,6 +194,26 @@ different policy/suppression files, run them through separate
 `check-project.yml` calls (one per differing option set) until a later
 iteration extends `run-plan.json`'s schema to carry per-cell overrides.
 
+**Exception: `gcc-path`/`gcc-options` do get a per-cell override**, from
+that cell's `.abicheck.yml` `profiles.<id>.compile` overlay (P1
+toolchain-profile audit — [`project-targets-schema.md`](project-targets-schema.md#profiles)),
+when `toolchain-bindings-path` is set. `abicheck run-plan generate
+--toolchain-bindings <path>` (run by the `plan` job) resolves each
+profile's declared `compile.binding` logical id (e.g. `"gcc14"`) against
+that trusted, separately-managed mapping file into an exact executable
+path, and composes `compile.standard`/`stdlib`/`target`/`abi_macros`/`args`
+into one extra-flags string — both land on the generated cell as
+`compile_gcc_path`/`compile_gcc_options`
+([`run-plan-schema.md`](run-plan-schema.md#runplancheck-fields)) and are
+forwarded ahead of this workflow's own global `gcc-path`/`gcc-options`
+inputs for that cell only. A profile with no `compile:` overlay (or a run
+with `toolchain-bindings-path` left empty, the default) falls back to the
+global inputs unchanged — no behavior change for a project that doesn't use
+this. `compiler_family`/`compiler_version` are validated shape-wise but not
+yet projected into any forwarded flag (see `run-plan-schema.md`'s field
+table for why); every *other* analysis option above stays global-only,
+unaffected by this exception.
+
 **Give each parallel call its own artifact names.** `actions/upload-artifact`
 requires unique names within one workflow *run* — two `check-project.yml`
 calls in the same run that both leave `run-plan-artifact-name` /

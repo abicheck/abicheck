@@ -535,6 +535,34 @@ class TestRunPlanRoundTrip:
         restored = RunPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
         assert restored == plan
 
+    def test_compile_overlay_fields_round_trip(self) -> None:
+        """P1 toolchain-profile audit: compile_gcc_path/compile_gcc_options
+        both serialize/deserialize, independently of each other."""
+        check = RunPlanCheck(
+            check_id="libfoo@gcc14#release@headers",
+            kind=RUN_PLAN_KIND_TARGET,
+            target_kind="library",
+            name="libfoo",
+            profile_id="gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            binary_pattern="build/libfoo*.so",
+            compile_gcc_path="/opt/gcc14/bin/g++",
+            compile_gcc_options="-std=gnu++20 -DFOO_ABI=2",
+        )
+        plan = RunPlan(checks=[check])
+        d = check.to_dict()
+        assert d["compile_gcc_path"] == "/opt/gcc14/bin/g++"
+        assert d["compile_gcc_options"] == "-std=gnu++20 -DFOO_ABI=2"
+        restored = RunPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
+        assert restored == plan
+
+    def test_compile_overlay_fields_omitted_from_dict_when_empty(self) -> None:
+        check = RunPlanCheck(check_id="libfoo@linux#release@headers")
+        d = check.to_dict()
+        assert "compile_gcc_path" not in d
+        assert "compile_gcc_options" not in d
+
 
 class TestToAggregateManifest:
     def test_uses_check_id_not_bare_name(self) -> None:
@@ -579,6 +607,138 @@ class TestToAggregateManifest:
         )
         expected = ExpectedTargets.from_manifest_data(to_aggregate_manifest(plan))
         assert expected.targets == {"libfoo@linux#release@headers": True}
+
+
+class TestProfileCompileOverlayProjection:
+    """P1 toolchain-profile audit: profiles.<id>.compile reaches the
+    generated cell as compile_gcc_path/compile_gcc_options."""
+
+    _RAW = {
+        "targets": {
+            "libfoo": {
+                "kind": "library",
+                "binary_pattern": "build/libfoo*.so",
+                "checks": [
+                    {"channel": "release", "depth": "headers", "required": True},
+                ],
+            },
+        },
+        "profiles": {
+            "gcc14": {
+                "contract": True,
+                "compile": {
+                    "binding": "gcc14",
+                    "standard": "gnu++20",
+                    "stdlib": "libstdc++",
+                    "target": "x86_64-linux-gnu",
+                    "abi_macros": {"FOO_ABI": "2", "BAR_FLAG": ""},
+                    "args": ["-fno-rtti"],
+                },
+            },
+            "plain": {"contract": True},
+        },
+        "baseline": {
+            "channels": {
+                "release": {"source": "github-release", "asset_pattern": "libfoo-*"},
+            },
+        },
+    }
+
+    def test_no_compile_overlay_leaves_both_fields_empty(self) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config, {"gcc14": _bo("libfoo"), "plain": _bo("libfoo")}
+        )
+        assert report.ok
+        [check] = [c for c in plan.checks if c.profile_id == "plain"]
+        assert check.compile_gcc_path == ""
+        assert check.compile_gcc_options == ""
+        assert "compile_gcc_path" not in check.to_dict()
+        assert "compile_gcc_options" not in check.to_dict()
+
+    def test_compile_overlay_composes_gcc_options_without_bindings(self) -> None:
+        """standard/stdlib/target/abi_macros/args compose regardless of
+        whether a resolved_bindings mapping was supplied -- only the
+        binding -> path resolution needs one."""
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config, {"gcc14": _bo("libfoo"), "plain": _bo("libfoo")}
+        )
+        assert report.ok
+        [check] = [c for c in plan.checks if c.profile_id == "gcc14"]
+        assert check.compile_gcc_path == ""
+        assert check.compile_gcc_options == (
+            "-std=gnu++20 -stdlib=libstdc++ --target=x86_64-linux-gnu "
+            "-DBAR_FLAG -DFOO_ABI=2 -fno-rtti"
+        )
+
+    def test_resolved_bindings_populates_gcc_path(self) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14": _bo("libfoo"), "plain": _bo("libfoo")},
+            resolved_bindings={"gcc14": "/opt/gcc14/bin/g++"},
+        )
+        assert report.ok
+        [check] = [c for c in plan.checks if c.profile_id == "gcc14"]
+        assert check.compile_gcc_path == "/opt/gcc14/bin/g++"
+
+    def test_binding_absent_from_resolved_bindings_leaves_gcc_path_empty(self) -> None:
+        """generate_run_plan itself never errors on an unresolved binding --
+        that's the CLI layer's check_profile_bindings_resolve step, kept
+        separate so this module stays pure/never-raises for a valid config."""
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14": _bo("libfoo"), "plain": _bo("libfoo")},
+            resolved_bindings={"some-other-id": "/opt/other/bin/cc"},
+        )
+        assert report.ok
+        [check] = [c for c in plan.checks if c.profile_id == "gcc14"]
+        assert check.compile_gcc_path == ""
+
+    def test_bundle_check_also_gets_compile_fields(self) -> None:
+        raw = {
+            "targets": {
+                "libpvxs": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libpvxs.so*",
+                    "bundle": "pvxs-release",
+                },
+            },
+            "bundles": {
+                "pvxs-release": {
+                    "targets": ["libpvxs"],
+                    "checks": [
+                        {"channel": "release", "depth": "binary", "required": True},
+                    ],
+                },
+            },
+            "profiles": {
+                "gcc14": {
+                    "contract": True,
+                    "compile": {"binding": "gcc14", "standard": "gnu++20"},
+                },
+            },
+            "baseline": {
+                "channels": {
+                    "release": {
+                        "source": "github-release",
+                        "asset_pattern": "pvxs-*",
+                    },
+                },
+            },
+        }
+        config = _parsed(raw)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14": _bo("libpvxs")},
+            resolved_bindings={"gcc14": "/opt/gcc14/bin/g++"},
+        )
+        assert report.ok
+        [check] = plan.checks
+        assert check.compile_gcc_path == "/opt/gcc14/bin/g++"
+        assert check.compile_gcc_options == "-std=gnu++20"
 
 
 def _write_config(tmp_path: Path, raw: dict) -> Path:
@@ -765,6 +925,122 @@ class TestRunPlanGenerateCli:
         config = tmp_path / ".abicheck.yml"
         config.write_text("- just\n- a\n- list\n", encoding="utf-8")
         result = CliRunner().invoke(main, ["run-plan", "generate", str(config)])
+        assert result.exit_code == 64
+
+
+def _write_bindings_file(tmp_path: Path, bindings: dict) -> Path:
+    import yaml
+
+    path = tmp_path / "toolchain-bindings.yml"
+    path.write_text(
+        yaml.safe_dump(
+            {"schema": "abicheck.toolchain-bindings/v1", "bindings": bindings}
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+class TestRunPlanGenerateCliToolchainBindings:
+    """P1 toolchain-profile audit: `run-plan generate --toolchain-bindings`."""
+
+    _RAW = {
+        "targets": {
+            "libfoo": {
+                "kind": "library",
+                "binary_pattern": "build/libfoo*.so",
+                "checks": [
+                    {"channel": "release", "depth": "headers", "required": True},
+                ],
+            },
+        },
+        "profiles": {
+            "gcc14": {"contract": True, "compile": {"binding": "gcc14"}},
+        },
+        "baseline": {
+            "channels": {
+                "release": {"source": "github-release", "asset_pattern": "libfoo-*"},
+            },
+        },
+    }
+
+    def test_without_the_flag_compile_gcc_path_stays_absent(
+        self, tmp_path: Path
+    ) -> None:
+        config = _write_config(tmp_path, self._RAW)
+        build_dir = _write_build_output(tmp_path, "gcc14", ["libfoo"])
+        result = CliRunner().invoke(
+            main,
+            [
+                "run-plan",
+                "generate",
+                str(config),
+                "--build-output",
+                f"gcc14={build_dir}",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert "compile_gcc_path" not in data["checks"][0]
+
+    def test_resolvable_binding_populates_compile_gcc_path(
+        self, tmp_path: Path
+    ) -> None:
+        config = _write_config(tmp_path, self._RAW)
+        build_dir = _write_build_output(tmp_path, "gcc14", ["libfoo"])
+        bindings = _write_bindings_file(tmp_path, {"gcc14": "/opt/gcc14/bin/g++"})
+        result = CliRunner().invoke(
+            main,
+            [
+                "run-plan",
+                "generate",
+                str(config),
+                "--build-output",
+                f"gcc14={build_dir}",
+                "--toolchain-bindings",
+                str(bindings),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert data["checks"][0]["compile_gcc_path"] == "/opt/gcc14/bin/g++"
+
+    def test_unresolvable_binding_exits_one(self, tmp_path: Path) -> None:
+        config = _write_config(tmp_path, self._RAW)
+        build_dir = _write_build_output(tmp_path, "gcc14", ["libfoo"])
+        bindings = _write_bindings_file(tmp_path, {"clang20": "/opt/clang/bin/clang++"})
+        result = CliRunner().invoke(
+            main,
+            [
+                "run-plan",
+                "generate",
+                str(config),
+                "--build-output",
+                f"gcc14={build_dir}",
+                "--toolchain-bindings",
+                str(bindings),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "gcc14" in result.output
+
+    def test_malformed_bindings_file_exits_64(self, tmp_path: Path) -> None:
+        config = _write_config(tmp_path, self._RAW)
+        build_dir = _write_build_output(tmp_path, "gcc14", ["libfoo"])
+        bindings = tmp_path / "bad-bindings.yml"
+        bindings.write_text("schema: wrong-schema\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "run-plan",
+                "generate",
+                str(config),
+                "--build-output",
+                f"gcc14={build_dir}",
+                "--toolchain-bindings",
+                str(bindings),
+            ],
+        )
         assert result.exit_code == 64
 
 
