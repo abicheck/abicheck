@@ -44,6 +44,7 @@ from abicheck.buildsource.baseline_publish import (
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 PUBLISH_BASELINE = WORKFLOWS_DIR / "publish-baseline.yml"
 UPDATE_MAIN_BASELINE = WORKFLOWS_DIR / "update-main-baseline.yml"
+TEST_BASELINE_ROTATION = WORKFLOWS_DIR / "test-baseline-rotation.yml"
 
 #: The full commit SHA every elevated-permission workflow in this repository
 #: pins actions/checkout@v6/actions/setup-python@v6/actions/
@@ -388,3 +389,92 @@ class TestBaselineLibrariesDerivation:
                 dump_step["with"]["libraries"]
                 == "${{ steps.libraries.outputs.libraries }}"
             )
+
+
+class TestBaselineRotationFixture:
+    """The plan's own P1.6 item requires a fixture asserting two consecutive
+    update-main-baseline.yml runs produce two distinct, resolve-baseline-
+    resolvable baselines -- something only a real GitHub Actions run can
+    exercise (TestAcceptedMainCacheKeyRotation above only proves the
+    key-FORMAT contract in pure Python). test-baseline-rotation.yml is that
+    live fixture; these tests assert its structure so the wiring can't
+    silently drift (e.g. the two reusable-workflow calls sharing a
+    key-prefix, or the needs: chain enforcing run #1 completes before run
+    #2 starts) without a real run being needed to catch it."""
+
+    def test_both_runs_call_the_real_reusable_workflow(self) -> None:
+        data = _load(TEST_BASELINE_ROTATION)
+        for job_name in ("run-1", "run-2"):
+            assert (
+                data["jobs"][job_name]["uses"]
+                == "./.github/workflows/update-main-baseline.yml"
+            )
+
+    def test_run_2_depends_on_run_1_completing_first(self) -> None:
+        # Sequential, not parallel -- run #2 must only start after run #1's
+        # cache write has actually landed, or this proves nothing about
+        # rotation ordering.
+        data = _load(TEST_BASELINE_ROTATION)
+        assert "run-1" in data["jobs"]["run-2"]["needs"]
+
+    def test_verify_depends_on_both_runs(self) -> None:
+        data = _load(TEST_BASELINE_ROTATION)
+        needs = data["jobs"]["verify"]["needs"]
+        assert "run-1" in needs
+        assert "run-2" in needs
+
+    def test_both_runs_share_the_same_key_prefix_and_differ_only_by_head_sha(
+        self,
+    ) -> None:
+        data = _load(TEST_BASELINE_ROTATION)
+        run_1_with = data["jobs"]["run-1"]["with"]
+        run_2_with = data["jobs"]["run-2"]["with"]
+        assert run_1_with["key-prefix"] == run_2_with["key-prefix"]
+        assert run_1_with["head-sha"] != run_2_with["head-sha"]
+
+    def test_runs_use_distinct_build_output_artifact_prefixes(self) -> None:
+        # Each run must resolve its own, distinct library build -- sharing
+        # one artifact prefix would make the two dumps identical and the
+        # fixture would prove nothing about distinctness.
+        data = _load(TEST_BASELINE_ROTATION)
+        run_1_prefix = data["jobs"]["run-1"]["with"]["build-output-artifact-prefix"]
+        run_2_prefix = data["jobs"]["run-2"]["with"]["build-output-artifact-prefix"]
+        assert run_1_prefix != run_2_prefix
+
+    def test_verify_job_checks_both_exact_keys_before_the_prefix_restore(self) -> None:
+        data = _load(TEST_BASELINE_ROTATION)
+        steps = _steps(data["jobs"]["verify"])
+        names = [s.get("name") for s in steps]
+        assert "Restore run #1's exact cache entry" in names
+        assert "Restore run #2's exact cache entry" in names
+        assert (
+            "Restore via restore-keys prefix only (the documented consumer contract)"
+            in names
+        )
+
+    def test_prefix_restore_step_never_uses_an_exact_hit_key(self) -> None:
+        # The whole point of this step is to prove the documented
+        # restore-keys-prefix consumer contract -- its own `key:` must be
+        # one that can never hit, or the test wouldn't be exercising
+        # restore-keys fallback at all.
+        data = _load(TEST_BASELINE_ROTATION)
+        steps = _steps(data["jobs"]["verify"])
+        step = next(
+            s
+            for s in steps
+            if s.get("name")
+            == "Restore via restore-keys prefix only (the documented consumer contract)"
+        )
+        assert "this-key-must-never-hit" in step["with"]["key"]
+        assert "restore-keys" in step["with"]
+
+    def test_final_verification_step_asserts_run_2_won(self) -> None:
+        data = _load(TEST_BASELINE_ROTATION)
+        steps = _steps(data["jobs"]["verify"])
+        step = next(
+            s
+            for s in steps
+            if s.get("name")
+            == "Verify resolve-baseline resolved run #2 -- the newest write, via prefix restore alone"
+        )
+        assert "rotation-test-sha-2" in step["run"]

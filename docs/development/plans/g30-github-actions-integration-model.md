@@ -2213,7 +2213,7 @@ the from_dict structural-error taxonomy, every cross-reference validation
 rule (including the exact ADR-047 §3 PVXS two-target-one-bundle shape as a
 positive case), the loader, and the CLI command.
 
-### P1.6 — `publish-baseline.yml` / `update-main-baseline.yml` — **done, with one fixture gap open (flagged by review)**
+### P1.6 — `publish-baseline.yml` / `update-main-baseline.yml` — **done, live rotation fixture added and pending its first CI confirmation**
 
 Implements ADR-047 §6/§10. `publish-baseline.yml`: release-triggered,
 `actions/baseline` → atomic archive → release-asset upload.
@@ -2326,19 +2326,32 @@ key on every invocation.
 This item's own stated requirement — "a fixture asserting two consecutive
 `update-main-baseline.yml` runs produce two distinct baselines resolvable
 by `resolve-baseline`" — is an executable, real two-run GitHub Actions
-fixture, and that is **not** what exists today. What exists instead is a
-structural-plus-semantic pairing of pure-Python tests (this session had no
-way to execute a live two-push run, the same limitation P1.4's own
-reusable-workflow items already documented): one test pins the workflow's
-literal key-computation template against the pure-Python mirror's exact
-string output for representative inputs, and a second confirms that two
-different `head_sha`s produce two distinct keys sharing one
-`resolve-baseline`-discoverable prefix. That is meaningfully weaker than
-the stated requirement — it verifies the key-format contract, not that a
-real second run actually produces a second, distinct, resolvable
-baseline-set. Treat the two-consecutive-run fixture as still open, not
-satisfied; closing it needs a live CI run (e.g. two pushes to a scratch
-branch with this workflow wired up) that this session could not perform.
+fixture, not just a pure-Python check of the key-format contract (what
+`TestAcceptedMainCacheKeyRotation` above already covered, and all this
+subsection originally claimed as coverage — a real gap, flagged by review).
+**Addressed via `.github/workflows/test-baseline-rotation.yml`**
+(structural coverage: `tests/test_publish_baseline_workflows.py`'s
+`TestBaselineRotationFixture`): a live, path-triggered CI workflow that
+builds two genuinely different versions of a toy library (the same
+`examples/case01_symbol_removal` v1/v2 pair `test-action.yml`'s own
+appcompat tests already use), calls the real `update-main-baseline.yml`
+twice in sequence (`head-sha: rotation-test-sha-1` then `-sha-2`, `run-2`
+gated on `run-1` via `needs:`), then asserts in a trailing `verify` job that
+(a) both runs' exact cache keys hit independently with genuinely distinct
+manifests (different `project_ref`, different per-library digests) —
+rotation, not one run silently overwriting or reusing the other's entry —
+and (b) restoring by the documented `restore-keys:`-prefix-only contract
+(never the exact key, since a real consumer doesn't know in advance which
+`head-sha` wrote the entry it wants) and feeding that into
+`actions/resolve-baseline` resolves run #2, the newest write, not run #1's
+stale one. This is the missing live half; the pure-Python tests above are
+the format-contract half. **Caveat honestly: this workflow has not yet
+completed a real CI run as of this writing** (it is path-triggered by this
+same change, so its first real execution is this change's own CI run) —
+treat it as "implemented, awaiting first live confirmation," not yet
+"confirmed passing," until that run is observed green. If it fails on
+first run, fix forward on this same item rather than treating the fixture
+itself as done.
 
 **Files delivered:** `actions/baseline/run.sh`, `actions/baseline/
 build_manifest.py`, `actions/baseline/action.yml` (`stage_binary` documented

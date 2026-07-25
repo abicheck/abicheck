@@ -1,0 +1,236 @@
+name: 'Test: accepted-main cache rotation (G30 P1.6 fixture)'
+
+# G30 P1.6's own plan item (docs/development/plans/g30-github-actions-
+# integration-model.md) states a required fixture this repo's unit tests
+# alone can't satisfy: "a fixture asserting two consecutive
+# update-main-baseline.yml runs produce two distinct baselines resolvable
+# by resolve-baseline." tests/test_publish_baseline_workflows.py's
+# TestAcceptedMainCacheKeyRotation only proves the key-FORMAT contract in
+# pure Python -- it never actually calls update-main-baseline.yml. This
+# workflow is the missing live half: it calls the real reusable workflow
+# twice, against two genuinely different library builds, then proves (a)
+# both runs' Actions-cache entries survive independently under the
+# documented rotating-key contract (docs/reference/publish-baseline.md
+# "Cache key contract"), and (b) a consumer following that contract's
+# restore-keys-prefix-only pattern -- never the exact key, which a real
+# consumer doesn't know in advance -- resolves the newest one via
+# actions/resolve-baseline, exactly ADR-047 §10's intended consumption
+# path.
+#
+# Every cache key/artifact name below is namespaced by github.run_id so
+# concurrent runs of this workflow (e.g. two PRs touching P1.6 at once)
+# can never collide with each other or with a real accepted-main channel.
+#
+# Not an elevated-permission workflow (contents: read only -- it writes
+# only test-namespaced cache entries, no release asset, no repository
+# write), so it follows this repository's floating-tag convention for
+# non-elevated workflows (test-action.yml, examples-validation.yml), not
+# publish-baseline.yml/update-main-baseline.yml's own stricter SHA-pinning
+# bar (see AGENTS.md's "Action pinning is deliberately partial" note).
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - 'actions/baseline/**'
+      - 'actions/resolve-baseline/**'
+      - 'abicheck/buildsource/baseline_publish.py'
+      - 'abicheck/cli_build_output.py'
+      - '.github/workflows/update-main-baseline.yml'
+      - '.github/workflows/test-baseline-rotation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'actions/baseline/**'
+      - 'actions/resolve-baseline/**'
+      - 'abicheck/buildsource/baseline_publish.py'
+      - 'abicheck/cli_build_output.py'
+      - '.github/workflows/update-main-baseline.yml'
+      - '.github/workflows/test-baseline-rotation.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Build two genuinely different library versions + their build-output.json ──
+  build-fixture:
+    name: 'Build two library versions'
+    runs-on: ubuntu-latest
+    outputs:
+      profile-id: ${{ steps.profile.outputs.id }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # run_id-namespaced so this fixture's cache entries/artifacts can
+      # never collide across concurrent runs of this same workflow.
+      - name: Compute a per-run profile id
+        id: profile
+        shell: bash
+        run: echo "id=rotation-test-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+
+      # v1.c/v2.c are the same pair test-action.yml's own appcompat tests
+      # already prove is a real BREAKING change (v2 removes helper()) --
+      # reused here so the two dumped snapshots are genuinely, verifiably
+      # distinct, not just two copies of one build.
+      - name: Build two distinct library versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p run1 run2
+          cd examples/case01_symbol_removal
+          gcc -shared -fPIC v1.c -o "${GITHUB_WORKSPACE}/run1/libexample.so"
+          gcc -shared -fPIC v2.c -o "${GITHUB_WORKSPACE}/run2/libexample.so"
+
+      - name: Write a minimal build-output.json for each version
+        shell: bash
+        env:
+          PROFILE_ID: ${{ steps.profile.outputs.id }}
+        run: |
+          set -euo pipefail
+          for n in 1 2; do
+            python3 -c "
+          import json, os
+          out = {
+              'schema': 'abicheck.build-output/v1',
+              'profile': {'id': os.environ['PROFILE_ID']},
+              'targets': [{'id': 'libexample', 'binary': 'libexample.so'}],
+          }
+          with open('run$n/build-output.json', 'w', encoding='utf-8') as f:
+              json.dump(out, f)
+          "
+          done
+
+      - name: Upload version 1's build-output artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: 'rotation-test-build-1-${{ steps.profile.outputs.id }}'
+          path: run1
+
+      - name: Upload version 2's build-output artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: 'rotation-test-build-2-${{ steps.profile.outputs.id }}'
+          path: run2
+
+  # ── Two real, sequential update-main-baseline.yml invocations ────────────
+  run-1:
+    name: 'update-main-baseline.yml run #1 (head-sha rotation-test-sha-1)'
+    needs: build-fixture
+    uses: ./.github/workflows/update-main-baseline.yml
+    with:
+      build-output-artifact-prefix: 'rotation-test-build-1-'
+      key-prefix: 'rotation-test-baseline-main-${{ github.run_id }}'
+      head-sha: 'rotation-test-sha-1'
+      install-deps: false
+
+  run-2:
+    name: 'update-main-baseline.yml run #2 (head-sha rotation-test-sha-2, must not silently reuse run #1''s entry)'
+    needs: [build-fixture, run-1]
+    uses: ./.github/workflows/update-main-baseline.yml
+    with:
+      build-output-artifact-prefix: 'rotation-test-build-2-'
+      key-prefix: 'rotation-test-baseline-main-${{ github.run_id }}'
+      head-sha: 'rotation-test-sha-2'
+      install-deps: false
+
+  # ── Prove rotation: both entries survive independently, and the
+  #    documented restore-keys-prefix consumer contract finds the newest ──
+  verify:
+    name: 'Verify: two distinct baselines, resolve-baseline finds the newest'
+    needs: [build-fixture, run-1, run-2]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Exact-key restores: prove BOTH runs' entries survived independently
+      # -- rotation, not "run #2 silently reused/overwrote run #1's entry",
+      # the exact failure mode ADR-047 §10 warns a stable key would cause.
+      - name: "Restore run #1's exact cache entry"
+        id: restore-1
+        uses: actions/cache/restore@v4
+        with:
+          path: exact-1
+          key: 'rotation-test-baseline-main-${{ github.run_id }}-${{ needs.build-fixture.outputs.profile-id }}-rotation-test-sha-1'
+
+      - name: "Restore run #2's exact cache entry"
+        id: restore-2
+        uses: actions/cache/restore@v4
+        with:
+          path: exact-2
+          key: 'rotation-test-baseline-main-${{ github.run_id }}-${{ needs.build-fixture.outputs.profile-id }}-rotation-test-sha-2'
+
+      - name: Assert both exact keys hit and the two baseline-sets are genuinely distinct
+        shell: bash
+        env:
+          CACHE_HIT_1: ${{ steps.restore-1.outputs.cache-hit }}
+          CACHE_HIT_2: ${{ steps.restore-2.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          if [[ "$CACHE_HIT_1" != "true" ]]; then
+            echo "::error::run #1's exact cache key did not hit -- update-main-baseline.yml run #1 did not write it"
+            exit 1
+          fi
+          if [[ "$CACHE_HIT_2" != "true" ]]; then
+            echo "::error::run #2's exact cache key did not hit -- update-main-baseline.yml run #2 did not write it"
+            exit 1
+          fi
+          python3 -c "
+          import json
+          m1 = json.load(open('exact-1/manifest.json'))
+          m2 = json.load(open('exact-2/manifest.json'))
+          assert m1['project_ref'] == 'rotation-test-sha-1', m1
+          assert m2['project_ref'] == 'rotation-test-sha-2', m2
+          a1 = {a['artifact']: a['sha256'] for a in m1['artifacts']}
+          a2 = {a['artifact']: a['sha256'] for a in m2['artifacts']}
+          assert a1 != a2, f'expected the two dumped snapshots to differ (v1.c vs v2.c), got identical digests {a1!r}'
+          print('two distinct, independently resolvable baseline-set cache entries confirmed')
+          "
+
+      # The real consumer contract (docs/reference/publish-baseline.md):
+      # restore by PREFIX ONLY -- a real consumer does not know the head-sha
+      # that wrote the entry it wants -- and confirm it resolves to the
+      # NEWEST entry (run #2), never run #1's stale one.
+      - name: Restore via restore-keys prefix only (the documented consumer contract)
+        id: restore-latest
+        uses: actions/cache/restore@v4
+        with:
+          path: latest
+          key: 'rotation-test-baseline-main-${{ github.run_id }}-${{ needs.build-fixture.outputs.profile-id }}-this-key-must-never-hit'
+          restore-keys: |
+            rotation-test-baseline-main-${{ github.run_id }}-${{ needs.build-fixture.outputs.profile-id }}-
+
+      - name: Resolve the restored baseline-set via resolve-baseline
+        id: resolve
+        uses: ./actions/resolve-baseline
+        with:
+          baseline-path: latest
+          channel: accepted-main
+          target: libexample
+          profile: ${{ needs.build-fixture.outputs.profile-id }}
+
+      - name: "Verify resolve-baseline resolved run #2 -- the newest write, via prefix restore alone"
+        shell: bash
+        env:
+          RESOLVE_OUTCOME: ${{ steps.resolve.outputs.outcome }}
+          RESOLVE_MESSAGE: ${{ steps.resolve.outputs.message }}
+          RESOLVE_MANIFEST_PATH: ${{ steps.resolve.outputs.manifest-path }}
+        run: |
+          set -euo pipefail
+          echo "outcome=$RESOLVE_OUTCOME"
+          if [[ "$RESOLVE_OUTCOME" != "resolved" ]]; then
+            echo "::error::expected outcome=resolved, got $RESOLVE_OUTCOME: $RESOLVE_MESSAGE"
+            exit 1
+          fi
+          python3 -c "
+          import json, os
+          m = json.load(open(os.environ['RESOLVE_MANIFEST_PATH']))
+          assert m['project_ref'] == 'rotation-test-sha-2', (
+              f'expected run #2 (the newest write) via restore-keys-prefix resolution, '
+              f'resolve-baseline returned {m[\"project_ref\"]!r} instead -- cache rotation is broken'
+          )
+          print('resolve-baseline correctly resolved the newest baseline-set via restore-keys prefix restore -- the exact documented consumer contract')
+          "
