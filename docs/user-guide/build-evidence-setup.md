@@ -7,6 +7,12 @@ example, and external CLI extractors. For the concept
 and the [authority rule](../concepts/build-source-data.md#the-authority-rule-the-one-rule-that-matters),
 see [Build Info & Sources](../concepts/build-source-data.md).
 
+> **See also.** For how this setup fits into a project's overall CI
+> integration (which targets/profiles it feeds, how it composes with
+> `check-target`), see
+> [S8/S9: Source Facts From the Build Itself](../integration/scenarios/build-integrated-facts.md)
+> and [Which Scenario Am I?](../integration/index.md).
+
 ## Producing a pack — `abicheck-cc` (the supported producer)
 
 Prefix any compile with **`abicheck-cc`** to capture each TU's source ABI *during
