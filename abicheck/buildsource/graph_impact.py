@@ -125,7 +125,17 @@ def _edge_is_overapprox(edge: GraphEdge) -> bool:
 
 
 def _node_is_public(node: GraphNode | None) -> bool:
-    return node is not None and node.attrs.get("visibility") in PUBLIC_VISIBILITIES
+    """Mirrors :func:`_edge_is_overapprox`'s ``resolved or attrs`` read order
+    (CodeRabbit review): a fully-processed node always has ``attrs`` synced
+    to ``resolved`` (``ensure_facts_and_resolve``), but a bare ``GraphNode``
+    constructed directly without going through that step could have
+    visibility only in ``resolved`` — preferring it keeps this in step with
+    every other tier check in this module.
+    """
+    if node is None:
+        return False
+    resolved = node.resolved or node.attrs
+    return resolved.get("visibility") in PUBLIC_VISIBILITIES
 
 
 def _path_node_ids(path: list[GraphEdge]) -> list[str]:

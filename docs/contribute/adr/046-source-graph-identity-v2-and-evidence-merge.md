@@ -186,6 +186,17 @@ weakest-covered role's honesty.
 
 ### D4. `EntityResolver` — USR-based canonical identity, `SOURCE_GRAPH_VERSION = 2`
 
+> **Historical sketch — superseded by the shipped API.** The
+> `EntityResolver`/`aliases: list[str]` shape below is the *original decision
+> proposal*, written before this ADR was implemented. What actually shipped
+> (see "D4 implementation" below, the authoritative API description) is a
+> **graph-level** resolver — `EntityResolver.aliases: dict[str, str]` (v1
+> node id → canonical id, not a per-entity `list[str]`), no `kind` field, and
+> `resolve(node: GraphNode) -> str` instead of `resolve(any_alias)`. Kept
+> here unmodified as the historical record of what D4 originally proposed,
+> not as a second description of the real API — don't implement against
+> this sketch.
+
 New `abicheck/buildsource/entity_resolver.py`:
 
 ```python
@@ -694,6 +705,24 @@ single change.
   and the explicit v1-pack-compat case — a `schema_version: 1` dict with no
   `entity_resolver` key loads with an empty, unresolved `EntityResolver`,
   and `resolve_entities()` still works on it on demand afterward.
+
+**Follow-up fixes (CodeRabbit review), same PR:**
+
+- `SourceGraphSummary.from_dict` crashed on a hand-edited pack with an
+  explicit `"entity_resolver": null` (as opposed to the key being absent
+  entirely) — `dict(None)` raised before `EntityResolver.from_dict`'s own
+  defensive `.get()` parsing ever ran. Fixed by narrowing to a dict (or
+  `{}`) before the call, matching every other optional-object field on this
+  same `from_dict`.
+- `resolve_entities()` reused the existing `entity_resolver` across calls,
+  so a node that gained *stronger* identity evidence via a later `add_node`
+  merge (e.g. a USR contributed by a second registration after an earlier
+  one lacked it) kept serving the canonical id resolved from its earlier,
+  weaker attrs — `EntityResolver.resolve`'s per-node-id idempotence, correct
+  within one resolver instance, silently became staleness across repeated
+  `resolve_entities()` calls. Fixed by starting from a fresh `EntityResolver`
+  on every call, trading re-resolving every node (not just new ones) for
+  guaranteed freshness.
 
 ## D5 implementation (G29 Phase 2, slices 5 and 7)
 

@@ -34,6 +34,7 @@ from .checker_policy import (
     policy_kind_sets as _policy_kind_sets,
 )
 from .detectors import DetectorResult
+from .impact.model import ImpactAssessment
 from .model import AbiSnapshot
 from .policy_file import PolicyFile
 
@@ -242,6 +243,24 @@ class Change:
     # runtime overlays a suppression rule discards outright (those never
     # reach ``suppressed_changes`` at all).
     suppression_rule: str | None = None
+    # ADR-052 D2 follow-up (G29 Phase 3, scoped implementation) — a
+    # producer's own directly-constructed ``ImpactAssessment``, when the
+    # producer builds one itself instead of leaving ``impact.engine.
+    # assess_change`` to derive it later from the flat fields above. Only
+    # ``internal_leak._build_leak_change``/``_build_call_graph_leak_change``
+    # set this today (see those functions' docstrings for why they are safe
+    # to cache: nothing later in ``post_processing.DEFAULT_PIPELINE``
+    # mutates a leak finding's own reachability/evidence fields after
+    # construction). ``impact.engine.assess_change`` reuses this object's
+    # *evidence* fields (reachability/proof-path/confidence/
+    # evidence_category/correlated_change_kind) when present, but always
+    # recomputes ``decision``/``root_cause_id`` fresh from this ``Change``'s
+    # current flat-field state — those can still change after construction
+    # (suppression, pattern modulation), so a cached ``decision`` would risk
+    # going stale. ``None`` (the default) for every producer that has not
+    # yet been migrated — the flat fields above remain the sole source of
+    # truth for those, exactly as before this field existed.
+    impact_assessment: ImpactAssessment | None = None
 
 
 @dataclass

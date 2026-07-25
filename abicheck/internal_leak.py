@@ -52,6 +52,7 @@ from .buildsource.entity_identity import candidate_lookup_keys
 from .buildsource.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
+from .impact.engine import assess_change
 
 if TYPE_CHECKING:
     from .buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
@@ -840,25 +841,52 @@ def _consumer_compiled_reachability(
             adjacency.setdefault(e.src, []).append(e)
     out: dict[str, tuple[frozenset[str], dict[str, GraphEdge], frozenset[str]]] = {}
     for entry in entries:
-        seen: set[str] = {entry}
+        # 0-1 BFS (Codex review, CodeRabbit review): a plain BFS that marks a
+        # node "seen" (and therefore degraded, if first reached via a
+        # virtual/function-pointer edge) permanently on first discovery would
+        # keep that degraded label even when a later, equal-or-longer *exact*
+        # route to the same node exists elsewhere in the graph -- an
+        # ordering artifact of which edge happens to be visited first, not a
+        # real precision limit. Treat a degrading edge as weight 1 and an
+        # exact edge as weight 0: pushing exact-edge targets to the front of
+        # the deque and degraded-edge targets to the back keeps the deque in
+        # non-decreasing weight order, so a node is only finalized (its
+        # `came_from`/`degraded` state locked in) once its true minimum
+        # degradation is known -- the standard two-weight-class shortest-path
+        # algorithm, not a heuristic.
+        finalized: set[str] = set()
         came_from: dict[str, GraphEdge] = {}
-        degraded: set[str] = set()
-        queue: collections.deque[str] = collections.deque([entry])
-        while queue:
-            node = queue.popleft()
+        best_degraded: dict[str, bool] = {entry: False}
+        dq: collections.deque[str] = collections.deque([entry])
+        while dq:
+            node = dq.popleft()
+            if node in finalized:
+                continue
+            finalized.add(node)
             if node != entry and policy.stop_conditions(node, node_by_id):
                 continue
+            node_degraded = best_degraded[node]
             for e in adjacency.get(node, []):
-                if e.dst in seen:
+                edge_degraded = (
+                    node_degraded or _edge_effect_transition(policy, e) is not None
+                )
+                prior = best_degraded.get(e.dst)
+                # Relax only on first discovery, or when this route improves
+                # an already-seen-but-not-yet-finalized node from degraded to
+                # exact -- an already-finalized node's minimum is final by
+                # the 0-1 BFS invariant above, so it is never revisited.
+                if prior is not None and not (prior and not edge_degraded):
                     continue
-                seen.add(e.dst)
+                best_degraded[e.dst] = edge_degraded
                 came_from[e.dst] = e
-                if node in degraded or _edge_effect_transition(policy, e) is not None:
-                    degraded.add(e.dst)
-                queue.append(e.dst)
-        seen.discard(entry)
-        degraded &= seen
-        out[entry] = (frozenset(seen), came_from, frozenset(degraded))
+                if edge_degraded:
+                    dq.append(e.dst)
+                else:
+                    dq.appendleft(e.dst)
+        del best_degraded[entry]
+        seen = frozenset(best_degraded)
+        degraded = frozenset(n for n, d in best_degraded.items() if d)
+        out[entry] = (seen, came_from, degraded)
     return out
 
 
@@ -1292,7 +1320,7 @@ def _build_leak_change(
         else "reachable via pointer / template — identity/vtable changes "
         "propagate to consumers"
     )
-    return Change(
+    change = Change(
         kind=ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
         symbol=tname,
         description=(
@@ -1314,6 +1342,17 @@ def _build_leak_change(
         else "pointer_or_signature",
         reachability_proof_path=path_strs[0] if path_strs else None,
     )
+    # ADR-052 D2 follow-up (G29 Phase 3, scoped implementation): construct
+    # this finding's own ImpactAssessment directly rather than leaving
+    # impact.engine.assess_change to derive it later. Safe to cache here --
+    # nothing downstream in post_processing.DEFAULT_PIPELINE (DetectInternalLeaks
+    # runs after MarkReachability, the only step that mutates these
+    # reachability/evidence fields) touches them again after this point.
+    # assess_change() itself performs the derivation, guaranteeing this is
+    # byte-identical to what an on-demand call would have produced -- not a
+    # second, independently-maintained computation.
+    change.impact_assessment = assess_change(change)
+    return change
 
 
 def detect_internal_leaks(
@@ -1411,7 +1450,7 @@ def _build_call_graph_leak_change(
     kinds_seen = sorted({c.kind.value for c in triggers})
     path_strs = proof_paths[:3]
     more = "" if len(proof_paths) <= 3 else f" (+{len(proof_paths) - 3} more paths)"
-    return Change(
+    change = Change(
         kind=ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
         symbol=dname,
         description=(
@@ -1431,6 +1470,9 @@ def _build_call_graph_leak_change(
         reachability_kind="symbol_availability",
         reachability_proof_path=path_strs[0] if path_strs else None,
     )
+    # ADR-052 D2 follow-up — see _build_leak_change's identical comment above.
+    change.impact_assessment = assess_change(change)
+    return change
 
 
 def detect_call_graph_leaks(

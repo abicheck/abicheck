@@ -136,6 +136,28 @@ class TestSourceGraphSummaryEntityResolution:
         g.resolve_entities()
         assert set(g.entity_resolver.aliases) == {"decl://foo", "decl://bar"}
 
+    def test_resolve_entities_refreshes_a_stale_alias_after_a_stronger_merge(
+        self,
+    ) -> None:
+        """CodeRabbit review: add_node can merge a *stronger* identity fact
+        into an already-registered node (e.g. a later registration
+        contributes a USR an earlier one lacked). A second resolve_entities()
+        pass must reflect the improved evidence, not keep serving the
+        canonical id computed from the node's earlier, weaker attrs."""
+        g = SourceGraphSummary()
+        g.add_node(_node("decl://foo", name="foo"))
+        g.resolve_entities()
+        before = g.entity_resolver.canonical_id_for("decl://foo")
+        assert not before.startswith("usr:")
+
+        # A second producer registers the same node id with a USR now
+        # available -- add_node merges this into the existing node's attrs.
+        g.add_node(_node("decl://foo", usr="c:@F@foo#", name="foo"))
+        g.resolve_entities()
+        after = g.entity_resolver.canonical_id_for("decl://foo")
+        assert after == "usr:c:@F@foo#"
+        assert after != before
+
     def test_to_dict_omits_entity_resolver_when_unresolved(self) -> None:
         g = SourceGraphSummary()
         g.add_node(_node("decl://foo", usr="c:@F@foo#", name="foo"))
@@ -175,3 +197,16 @@ class TestSourceGraphSummaryEntityResolution:
         # still works on demand, same as any other summary.
         restored.resolve_entities()
         assert restored.entity_resolver.canonical_id_for("decl://foo") == "usr:c:@F@foo#"
+
+    def test_hand_edited_null_entity_resolver_loads(self) -> None:
+        """CodeRabbit review: a hand-edited pack with an explicit
+        `"entity_resolver": null` (as opposed to the key being absent
+        entirely) must not crash -- dict(None) raises before
+        EntityResolver.from_dict's own defensive .get() parsing ever runs."""
+        g = SourceGraphSummary()
+        g.add_node(_node("decl://foo", usr="c:@F@foo#", name="foo"))
+        d = g.to_dict()
+        d["entity_resolver"] = None
+
+        restored = SourceGraphSummary.from_dict(d)
+        assert restored.entity_resolver.aliases == {}

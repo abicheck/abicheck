@@ -1,7 +1,7 @@
-# ADR-052: Unified Impact Assessment Model (G29 Phase 3, slices 1-6)
+# ADR-052: Unified Impact Assessment Model (G29 Phase 3, slices 1-8)
 
 **Date:** 2026-07-22
-**Status:** Accepted — slices 1-7 implemented. Slice 6 (G29 Phase 3
+**Status:** Accepted — slices 1-8 implemented. Slice 6 (G29 Phase 3
 follow-up) closed two items this ADR originally left open: `--format junit`
 now renders `--report-mode root-cause` (additive `rootCauseId`/`rootCause`
 attributes on each `<failure>`, not a restructured `<testcase>` tree — see
@@ -12,9 +12,14 @@ attributes on each `<failure>`, not a restructured `<testcase>` tree — see
 Slice 7 (G29 Phase 3 follow-up) closed the remaining item: `root_cause_id`/
 `root_cause_display`/`impact_group_id` now exist on `ImpactAssessment`,
 computed report-wide and passed into `assess_change` as a plain parameter —
-see "Slice 7" below. The D2 direction flip (producer modules constructing
-`ImpactAssessment` directly) remains deliberately deferred — see
-"Deliberately not implemented" below.
+see "Slice 7" below. Slice 8 (G29 Phase 3 follow-up) delivers the D2
+direction flip as a deliberately *scoped* subset — one producer
+(`internal_leak.py`'s two leak-finding builders) constructs `ImpactAssessment`
+directly and `assess_change` reuses its evidence fields, verified safe by a
+pipeline-ordering audit; the remaining four producer modules named in D2's
+original decision (`post_processing.MarkReachability` especially, the
+suppression-safety-critical one) are **not** migrated — see "Slice 8" below
+for the full scoping rationale.
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 3's own
 "needs its own ADR" gate — [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s
@@ -688,6 +693,79 @@ no `impact_assessment` key at all), correlated findings share one id and
 symbol stay separate, and the unconditional id matches
 `--report-mode root-cause`'s own id for the same finding.
 
+## Slice 8 — D2 direction flip, scoped to one producer (G29 Phase 3 follow-up)
+
+D2's original decision text called for five producer modules
+(`post_processing.MarkReachability`, `source_graph_findings.py`,
+`internal_leak.py`, `suppression.py`, `appcompat.py`) to construct
+`ImpactAssessment` directly, with the flat `Change` fields becoming derived
+views over it. This slice does **not** attempt that in full — the
+"Deliberately not implemented" section below (unchanged reasoning, carried
+forward from Slices 1-7) explains why forcing the whole flip through in one
+pass would be exactly the rushed, high-blast-radius change this ADR's own
+"needs its own ADR/scoped design pass" bar exists to prevent, particularly
+for `MarkReachability`'s suppression-safety-critical walk (ADR-044).
+
+Instead, this slice delivers a **verifiably safe, narrower** version:
+
+- **`Change.impact_assessment: ImpactAssessment | None = None`** (new field,
+  `checker_types.py`) — purely additive, defaults to `None`, so every
+  existing `Change(...)` call site (hundreds, across every detector and
+  test) is unaffected.
+- **One producer wired**: `internal_leak.py`'s `_build_leak_change`/
+  `_build_call_graph_leak_change` (the two `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`/
+  `INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API` synthetic-finding builders) now
+  call `impact.engine.assess_change(change)` on the just-constructed
+  `Change` and attach the result to `change.impact_assessment` — reusing
+  the existing, tested derivation logic itself (not a second,
+  independently-maintained computation), so the cached object is
+  byte-identical to what an on-demand call would have produced.
+- **Verified safe to cache, not assumed**: a pipeline-ordering audit of
+  `post_processing.DEFAULT_PIPELINE` confirmed `MarkReachability` — the
+  *only* step anywhere in the codebase that mutates
+  `public_reachable`/`reachability_state`/`reachability_kind`/
+  `reachability_proof_path` on an existing `Change` — runs **before**
+  `DetectInternalLeaks`, which *appends new* `Change` objects to
+  `ctx.changes` after `MarkReachability` has already finished. A leak
+  finding's own reachability/evidence fields are therefore self-contained
+  and provably never mutated after construction by anything later in the
+  pipeline (`DemoteUnreachableInternalChurn`, `DetectCppPatterns`,
+  `DetectNamespacePatterns`, `DetectTemplatePatterns`,
+  `DetectVersionedSymbolScheme`, `EscalateFrozenNamespaceViolations` — none
+  of them touch these fields at all, confirmed by a repo-wide grep, not
+  read from this ADR's own claim alone).
+- **`decision`/`root_cause_id` are never cached** — `impact.engine.
+  assess_change` reuses a cached `impact_assessment`'s *evidence* fields
+  only (`reachability_state`/`public_reachable`/`reachability_kind`/
+  `confidence`/`proof_path`/`evidence_category`/`correlated_change_kind`);
+  `decision` (which depends on `suppression_rule`/`modulation_reason`/
+  `effective_verdict` — fields suppression/pattern-modulation passes *do*
+  set after construction) and `root_cause_id`/`root_cause_display`/
+  `impact_group_id` (whole-`DiffResult` context) are always recomputed
+  fresh from the `Change`'s *current* state on every call, exactly as
+  before this slice — so a finding suppressed after construction still
+  reports `decision.state == "suppressed"` correctly, even though its
+  evidence came from a cache built before suppression ran.
+- **The other four producer modules are untouched** — `source_graph_findings.py`,
+  `post_processing.py`, `suppression.py`, `appcompat.py` still
+  independently set the overlapping flat `Change` fields exactly as
+  before, and `impact.engine.assess_change` still derives their
+  `ImpactAssessment` on demand from those flat fields (the Slice 1 path,
+  unchanged). `Change.impact_assessment` stays `None` for every finding
+  those modules produce.
+- `tests/test_impact_model.py::TestAssessChangeWithCachedImpactAssessment`:
+  cached evidence is reused verbatim; `decision`/`root_cause_id` are always
+  recomputed, never read from the cache (including when flat fields were
+  mutated *after* the cached object was built); a cached assessment built
+  from the same flat fields an on-demand derivation would use produces an
+  identical result; `impact_assessment=None` falls back to the unchanged
+  derivation path. `tests/test_internal_leak.py::TestBuildChangeAttachesImpactAssessment`:
+  both builders attach a correct `impact_assessment`;
+  `assess_change(change) == change.impact_assessment` for both (proving
+  the two code paths never disagree); the cached evidence survives a
+  simulated later suppression pass untouched while `decision` correctly
+  reflects it.
+
 ## Deliberately not implemented this slice
 
 Per the "ship each phase independently" mitigation this initiative committed
@@ -706,19 +784,24 @@ remaining four tiers):
   pattern ADR-046 D5 explicitly declined (`effect_transitions`, "no current
   walk needs it") — so they are left out of `ImpactAssessment` entirely
   rather than added as permanently-`None` fields.
-- **The D2 direction flip** (`Change` fields becoming derived from
-  `ImpactAssessment` rather than the reverse) — deliberately not attempted.
-  This touches the core control flow of five producer modules at once
-  (`post_processing.MarkReachability`, `source_graph_findings.py`,
-  `internal_leak.py`, `suppression.py`, `appcompat.py`), several of them
-  performance-sensitive graph walks under active suppression-safety
-  guarantees (ADR-044) — the same risk class this ADR's own D2 section
-  already flagged. Forcing it through in the same pass as slices 1-2 would
-  be exactly the kind of rushed, high-blast-radius change the "needs its
-  own ADR/scoped design pass" bar (this ADR's own header, ADR-046 D4, and
-  CLAUDE.md "M1-3") exists to prevent — a real regression here would be to
-  suppression correctness, not just to this reporting layer. Left for a
-  dedicated slice.
+- **The full D2 direction flip** (every flat `Change` field becoming a
+  derived view over `ImpactAssessment`, across all five producer modules
+  D2's decision text names) — still not attempted in full; Slice 8 (above)
+  delivers a verifiably safe, single-producer subset instead of forcing the
+  whole flip through in one pass. `post_processing.MarkReachability`
+  specifically — several performance-sensitive graph walks under active
+  suppression-safety guarantees (ADR-044) — remains untouched, the same
+  risk class this ADR's own D2 section originally flagged.
+  `source_graph_findings.py`/`suppression.py`/`appcompat.py` are likewise
+  unmigrated. Attempting all five in one pass would still be exactly the
+  kind of rushed, high-blast-radius change the "needs its own ADR/scoped
+  design pass" bar (this ADR's own header, ADR-046 D4, and CLAUDE.md "M1-3")
+  exists to prevent — a real regression to any of the remaining four would
+  risk suppression correctness, not just this reporting layer. Each
+  remaining producer is its own follow-up slice, migrated only once the
+  same kind of pipeline-ordering safety audit Slice 8 did for
+  `internal_leak.py` has been done for it specifically — a real audit, not
+  an assumption carried over from a different module's safety proof.
 - **The full `RootCauseCorrelator` correlation across consumer-overlay
   findings that don't share a `caused_by_type` today** — Slices 3-5 shipped
   the `caused_by_type`-based first cut (JSON, markdown/text, and SARIF

@@ -437,18 +437,29 @@ class SourceGraphSummary:
         return "sha256:" + hashlib.sha256(blob).hexdigest()
 
     def resolve_entities(self) -> SourceGraphSummary:
-        """Populate :attr:`entity_resolver` from the current node set
+        """(Re)populate :attr:`entity_resolver` from the current node set
         (ADR-046 D4, scoped implementation).
 
         Opt-in: not called automatically by :meth:`add_node`/
         :meth:`__post_init__`/:meth:`finalize` — computing a USR-preferring
         canonical identity for every node is extra work no current graph
         consumer needs by default (same discipline as D1's ``occurrence_id``
-        staying a no-op until a producer populates its opt-in attrs). Safe to
-        call more than once: :meth:`EntityResolver.resolve` is idempotent per
-        node id, so re-running after ``add_node`` calls only resolves the
-        newly-added nodes.
+        staying a no-op until a producer populates its opt-in attrs).
+
+        Always starts from a fresh :class:`EntityResolver` rather than
+        reusing the existing one (CodeRabbit review): :meth:`add_node` can
+        merge a *stronger* identity fact into an already-registered node
+        (e.g. a later registration contributes a USR that an earlier one
+        lacked) — :meth:`EntityResolver.resolve` is idempotent per node id,
+        so reusing a resolver that already resolved that node from its
+        earlier, weaker attrs would silently keep serving the stale
+        canonical id and never see the improved evidence. Recomputing from
+        scratch is the only way to guarantee ``entity_resolver`` reflects
+        each node's *current* merged attrs; safe to call repeatedly (e.g.
+        after further ``add_node`` calls) at the cost of re-resolving every
+        node each time, not just the new ones.
         """
+        self.entity_resolver = EntityResolver()
         for n in self.nodes:
             self.entity_resolver.resolve(n)
         return self
@@ -574,6 +585,10 @@ class SourceGraphSummary:
         # ``extractor_passes`` defaults to {} for a pre-slice-2 pack (additive
         # field, no schema_version bump needed — same "unknown edge kinds/
         # fields are ignored/defaulted" forward-compat rule as ADR-041 P0 slice 1).
+        raw_entity_resolver = d.get("entity_resolver")
+        _raw_entity_resolver: dict[str, Any] = (
+            raw_entity_resolver if isinstance(raw_entity_resolver, dict) else {}
+        )
         return cls(
             schema_version=int(d.get("schema_version", SOURCE_GRAPH_VERSION)),
             graph_id=str(d.get("graph_id", "")),
@@ -594,7 +609,7 @@ class SourceGraphSummary:
             degraded_passes={
                 str(k): bool(v) for k, v in dict(d.get("degraded_passes", {})).items()
             },
-            entity_resolver=EntityResolver.from_dict(dict(d.get("entity_resolver", {}))),
+            entity_resolver=EntityResolver.from_dict(_raw_entity_resolver),
         )
 
 

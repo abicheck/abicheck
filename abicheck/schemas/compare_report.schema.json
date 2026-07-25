@@ -537,7 +537,34 @@
                   "type": "array",
                   "items": { "type": "object" }
                 },
-                "prose": { "type": "string" }
+                "prose": { "type": "string" },
+                "alternative_paths": {
+                  "type": "array",
+                  "description": "ADR-046 D6 (schema 2.11 follow-up): up to 3 runner-up candidate paths not selected as primary, each shaped like this same proof_path object minus alternative_paths/discarded_path_count itself (an alternative never nests its own alternatives). Absent for the common single-candidate case.",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "target": { "type": "string" },
+                      "root": { "type": "string" },
+                      "is_direct": { "type": "boolean" },
+                      "steps": {
+                        "type": "array",
+                        "items": { "type": "object" }
+                      },
+                      "prose": { "type": "string" },
+                      "occurrence_id": { "type": "string" }
+                    },
+                    "required": ["target"]
+                  }
+                },
+                "discarded_path_count": {
+                  "type": "integer",
+                  "description": "ADR-046 D6 (schema 2.11 follow-up): count of further candidate paths beyond alternative_paths' cap. 0 (and therefore omitted) when every candidate fit."
+                },
+                "occurrence_id": {
+                  "type": "string",
+                  "description": "ADR-052's stable occurrence_id follow-up (schema 2.15, built on ADR-046 D1): a hash over this path's edges' own graph occurrences, independent of description text. Absent whenever no edge on the path carries occurrence-level attrs -- still the common case, since no producer populates them by default."
+                }
               },
               "required": ["target"]
             },

@@ -75,20 +75,24 @@ model:
   `UNKNOWN` unless `allow_unknown_reachability: true` is set explicitly. See
   [PR #607](https://github.com/abicheck/abicheck/pull/607) and
   `docs/learn/graph-coverage.md`.
-- **G29.2** (Phase 3, **slices 1-6 done, ADR-052**) — A single
+- **G29.2** (Phase 3, **slices 1-8 done, ADR-052**) — A single
   `abicheck/impact/` package with `ImpactAssessment`, `GraphProofPath`, and
-  `FindingDecision` dataclasses. **Slices 1-6 implement the read-view
+  `FindingDecision` dataclasses. **Slices 1-7 implement the read-view
   direction only**: the dataclasses exist and `reporter.py`/`sarif.py`/
   `junit_report.py` (Slice 6) surface them (including the suppression audit
   trail, slice 2, and `--report-mode root-cause` grouping in JSON,
   markdown/text, SARIF properties, and — Slice 6 — additive JUnit `<failure>`
-  attributes), but `source_graph_findings.py`/`internal_leak.py`/
-  `suppression.py`/`appcompat.py` do not yet populate `ImpactAssessment`
-  directly — they still independently set the overlapping `Change` fields
-  it derives from (see ADR-052 D2). The originally-stated direction (those
-  four modules populate `ImpactAssessment`, and the flat `Change` fields
-  become derived views over it) remains open follow-up work under the same
-  ADR.
+  attributes). **Slice 8 delivers the D2 direction flip for one producer**:
+  `internal_leak.py` now populates `Change.impact_assessment` directly for
+  its two leak-finding builders (verified safe by a pipeline-ordering
+  audit), with `assess_change` reusing that cached evidence while always
+  recomputing `decision`/`root_cause_id` fresh. `source_graph_findings.py`/
+  `post_processing.py`/`suppression.py`/`appcompat.py` still independently
+  set the overlapping `Change` fields (see ADR-052 D2) — the originally-stated
+  full direction (every producer populates `ImpactAssessment`, and the flat
+  `Change` fields become derived views over it, not just an additional
+  cached field) remains open follow-up work under the same ADR, one
+  producer at a time, gated on the same kind of safety audit Slice 8 did.
 - **G29.3** (Phase 2, **D1-D6 all done, ADR-046**) — Graph core v2:
   relation/occurrence identity split (**done**), an evidence-preserving
   (order-independent) node/edge merge (**done**), a per-kind/per-role
@@ -309,7 +313,7 @@ current per-decision status (D1-D6 all implemented, D4 as a deliberately
 scoped subset); this paragraph originally described the pre-implementation
 "needs a recorded decision" gate (ADR-044's own bar) before the ADR existed.
 
-### Phase 3 — Reporting & root causes — **slices 1-7 implemented (ADR-052)**
+### Phase 3 — Reporting & root causes — **slices 1-8 implemented (ADR-052)**
 
 [ADR-052](../adr/052-unified-impact-assessment-model.md) records the slice 1
 decisions: `abicheck/impact/model.py`'s `ImpactAssessment`/`GraphProofPath`/
@@ -369,17 +373,26 @@ uses) and passed into `assess_change` as a plain parameter, so
 gaining the ability to see whole-`DiffResult` context on its own.
 `impact_group_id` is currently always identical to `root_cause_id` — an
 alias, not yet a distinct concept. `REPORT_SCHEMA_VERSION` 2.16 → 2.17.
-**Still open under this same ADR**: the D2 direction flip (deliberately not
-attempted — touches five producer modules' core control flow at once,
-several of them performance-sensitive graph walks under active
-suppression-safety guarantees; see ADR-052's "Deliberately not implemented"
-section) and the full `RootCauseCorrelator`-based correlation across
-consumer-overlay findings with no `caused_by_type` link (Phase 6) — which is
-also what would ever make `impact_group_id` diverge from `root_cause_id`.
-The two reference docs below now exist (Slice 6 gave them enough real
-surface to be worth writing, closing what ADR-052 originally called
-premature) — the rest of this list is the original Phase 3 scope this
-section describes, most of it still open:
+Slice 8 (G29 Phase 3 follow-up) then delivered the D2 direction flip as a
+deliberately *scoped* subset: `Change.impact_assessment` (new, additive
+field) is populated directly by one producer —
+`internal_leak.py`'s two leak-finding builders — verified safe by an
+explicit pipeline-ordering audit (`post_processing.MarkReachability` is the
+only step that mutates a `Change`'s reachability/evidence fields, and it
+runs *before* these findings are even constructed), with
+`impact.engine.assess_change` reusing the cached evidence while always
+recomputing `decision`/`root_cause_id` fresh. **Still open under this same
+ADR**: the other four producer modules D2's decision text names
+(`post_processing.MarkReachability` especially — several
+performance-sensitive graph walks under active suppression-safety
+guarantees; see ADR-052's "Deliberately not implemented" section) and the
+full `RootCauseCorrelator`-based correlation across consumer-overlay
+findings with no `caused_by_type` link (Phase 6) — which is also what would
+ever make `impact_group_id` diverge from `root_cause_id`. The two reference
+docs below now exist (Slice 6 gave them enough real surface to be worth
+writing, closing what ADR-052 originally called premature) — the rest of
+this list is the original Phase 3 scope this section describes, most of it
+still open:
 
 - `abicheck/impact/model.py`: `ImpactAssessment` (`reachability_state`,
   `contract_effect`, `changed_entities`, `public_entries`, `proof_paths`,
@@ -400,8 +413,14 @@ section describes, most of it still open:
   overlapping `Change` fields; the existing `public_reachable`/
   `reachability_kind`/`reachability_proof_path`/`reachability_state` fields
   become **derived, backward-compatible views** over it (no JSON/SARIF
-  breaking change). **Still open** — this is the D2 direction flip above;
-  none of Slices 1-6 attempt it.
+  breaking change). **Partially done (Slice 8)**: `internal_leak.py`
+  constructs `Change.impact_assessment` directly for its two leak-finding
+  builders; the flat fields stay as real fields (not converted to derived
+  properties) rather than the originally-described full flip, since that
+  conversion touches every existing `Change(...)` construction site
+  repo-wide and was judged out of scope for a verifiably-safe slice. **Still
+  open**: `source_graph_findings.py`/`suppression.py`/`appcompat.py`, and
+  especially `post_processing.MarkReachability`.
 - `reporter.py`/`sarif.py`: structured `impact` object in JSON (**done**,
   `impact_assessment`), `codeFlows`/`threadFlows` in SARIF (**not done** —
   SARIF's root-cause mode is additive `properties.rootCauseId`/`rootCause`

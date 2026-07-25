@@ -17,10 +17,15 @@ not a different subsystem: it exercises the same ``CALL_GRAPH_TRAVERSAL_POLICY``
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from abicheck.model import AbiSnapshot
 
+if TYPE_CHECKING:
+    from abicheck.buildsource.source_graph import GraphEdge, GraphNode
 
-def _decl_node(node_id: str, label: str, visibility: str):
+
+def _decl_node(node_id: str, label: str, visibility: str) -> GraphNode:
     from abicheck.buildsource.source_graph import GraphNode
 
     return GraphNode(
@@ -28,7 +33,7 @@ def _decl_node(node_id: str, label: str, visibility: str):
     )
 
 
-def _graph_snap(nodes: list, edges: list) -> AbiSnapshot:
+def _graph_snap(nodes: list[GraphNode], edges: list[GraphEdge]) -> AbiSnapshot:
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_graph import SourceGraphSummary
 
@@ -146,6 +151,59 @@ class TestEffectTransitions:
             graph, CALL_GRAPH_TRAVERSAL_POLICY, ["decl://pub"], node_by_id
         )["decl://pub"]
         assert degraded == frozenset({"decl://mid", "decl://leaf"})
+
+    def test_exact_route_overrides_an_earlier_discovered_degraded_route(
+        self,
+    ) -> None:
+        """CodeRabbit review: a plain "first discovery wins" BFS would mark
+        `target` permanently degraded because the direct pub->target virtual
+        edge is visited before the longer pub->mid->target exact route --
+        an ordering artifact, not a real precision limit. An exact route to
+        a node must always win over a degraded one, regardless of which was
+        discovered first or which is shorter (matches D6's own exact-beats-
+        overapprox proof-path preference)."""
+        from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
+        from abicheck.internal_leak import (
+            CALL_GRAPH_TRAVERSAL_POLICY,
+            _consumer_compiled_reachability,
+        )
+
+        graph = SourceGraphSummary(
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://mid", "ns::detail::mid", "source"),
+                _decl_node("decl://target", "ns::detail::target", "source"),
+            ],
+            edges=[
+                # Registered first, so a naive BFS visits it before the
+                # pub->mid edge and marks `target` seen+degraded immediately.
+                GraphEdge(
+                    src="decl://pub",
+                    dst="decl://target",
+                    kind="DECL_CALLS_DECL",
+                    attrs={"call_kind": "virtual", "resolution": "overapprox"},
+                ),
+                GraphEdge(
+                    src="decl://pub",
+                    dst="decl://mid",
+                    kind="DECL_CALLS_DECL",
+                    attrs={"call_kind": "direct", "resolution": "exact"},
+                ),
+                GraphEdge(
+                    src="decl://mid",
+                    dst="decl://target",
+                    kind="DECL_CALLS_DECL",
+                    attrs={"call_kind": "direct", "resolution": "exact"},
+                ),
+            ],
+        )
+        node_by_id = {n.id: n for n in graph.nodes}
+        seen, came_from, degraded = _consumer_compiled_reachability(
+            graph, CALL_GRAPH_TRAVERSAL_POLICY, ["decl://pub"], node_by_id
+        )["decl://pub"]
+        assert seen == frozenset({"decl://mid", "decl://target"})
+        assert degraded == frozenset()
+        assert came_from["decl://target"].src == "decl://mid"
 
     def test_default_policy_has_no_effect_transitions(self) -> None:
         from abicheck.internal_leak import TraversalPolicy

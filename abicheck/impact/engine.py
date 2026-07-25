@@ -61,10 +61,16 @@ def _build_alternative_path(
     """
     steps = tuple(ProofStep.from_dict(raw) for raw in raw_steps)
     last_node = next((s for s in reversed(steps) if s.step_type == "node"), None)
+    # CodeRabbit review: structured_proof_path's shape is
+    # node, edge, node, edge, ... -- a single-hop (direct) path already has
+    # 3 raw_steps entries (one edge, two nodes), so counting *all* entries
+    # would mark every direct path as transitive. Count edge-type steps
+    # only (the actual hop count).
+    edge_hops = sum(1 for s in steps if s.step_type == "edge")
     return GraphProofPath(
         target=last_node.label if last_node is not None else (root or ""),
         root=root,
-        is_direct=len(raw_steps) <= 1 if raw_steps else None,
+        is_direct=edge_hops <= 1 if raw_steps else None,
         steps=steps,
     )
 
@@ -122,6 +128,23 @@ def assess_change(
     ``root_cause_id``/``root_cause_display``/``impact_group_id`` unset, same
     as any caller that doesn't have whole-result context to offer (e.g. a
     unit test constructing one bare ``Change``).
+
+    ``Change.impact_assessment`` (ADR-052 D2 follow-up, scoped
+    implementation), when a producer set it directly, supplies this
+    assessment's *evidence* fields (``reachability_state``/
+    ``public_reachable``/``reachability_kind``/``confidence``/``proof_path``/
+    ``evidence_category``/``correlated_change_kind``) instead of re-deriving
+    them from the flat fields below — both are equivalent by construction
+    for a producer that built both from the same data, but reusing the
+    cached object avoids recomputing ``proof_path`` from scratch.
+    ``decision``/``root_cause_id``/``root_cause_display``/``impact_group_id``
+    are **always** recomputed fresh here regardless, never read from a
+    cached ``impact_assessment`` — those depend on *this call's*
+    ``suppressed``/``root_cause`` arguments and on flat fields
+    (``suppression_rule``/``modulation_reason``/``effective_verdict``) that
+    can change after a producer constructs its `Change` (suppression,
+    pattern modulation), so trusting a cached ``decision`` would risk
+    serving a stale one.
     """
     effective_verdict = getattr(change, "effective_verdict", None)
     decision = FindingDecision(
@@ -135,6 +158,21 @@ def assess_change(
     root_cause_id, root_cause_display = (
         root_cause if root_cause is not None else (None, None)
     )
+    cached = getattr(change, "impact_assessment", None)
+    if cached is not None:
+        return ImpactAssessment(
+            reachability_state=cached.reachability_state,
+            public_reachable=cached.public_reachable,
+            reachability_kind=cached.reachability_kind,
+            confidence=cached.confidence,
+            proof_path=cached.proof_path,
+            decision=decision,
+            evidence_category=cached.evidence_category,
+            correlated_change_kind=cached.correlated_change_kind,
+            root_cause_id=root_cause_id,
+            root_cause_display=root_cause_display,
+            impact_group_id=root_cause_id,
+        )
     return ImpactAssessment(
         reachability_state=getattr(
             change, "reachability_state", ReachabilityState.UNKNOWN

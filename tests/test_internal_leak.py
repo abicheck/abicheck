@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker import compare
-from abicheck.checker_policy import ChangeKind
+from abicheck.checker_policy import ChangeKind, ReachabilityState
 from abicheck.checker_types import Change
 from abicheck.internal_leak import (
     _build_suffix_index,
@@ -1754,6 +1754,93 @@ class TestBuildLeakChangePreferredPath:
             embedded_by_value=True,
         )
         assert "+1 more paths" in (change.description or "")
+
+
+class TestBuildChangeAttachesImpactAssessment:
+    """ADR-052 D2 follow-up (G29 Phase 3, scoped implementation):
+    _build_leak_change/_build_call_graph_leak_change construct their own
+    ImpactAssessment directly rather than leaving assess_change to derive
+    one later on demand."""
+
+    def test_leak_change_carries_impact_assessment(self) -> None:
+        from abicheck.impact.engine import assess_change
+        from abicheck.internal_leak import _build_leak_change
+
+        change = _build_leak_change(
+            "ns::detail::Internal",
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Internal",
+                    description="size changed",
+                )
+            ],
+            [["Public", "field:x", "Internal"]],
+            _snap(),
+            embedded_by_value=True,
+        )
+        assert change.impact_assessment is not None
+        assert change.impact_assessment.public_reachable is True
+        assert (
+            change.impact_assessment.reachability_state
+            == ReachabilityState.PROVEN_REACHABLE
+        )
+        assert change.impact_assessment.reachability_kind == "value_embedding"
+        # assess_change() must reuse the cached evidence unchanged, not
+        # produce a different result by re-deriving it.
+        assert assess_change(change) == change.impact_assessment
+
+    def test_call_graph_leak_change_carries_impact_assessment(self) -> None:
+        from abicheck.impact.engine import assess_change
+        from abicheck.internal_leak import _build_call_graph_leak_change
+
+        change = _build_call_graph_leak_change(
+            "ns::detail::helper",
+            [
+                Change(
+                    kind=ChangeKind.FUNC_REMOVED,
+                    symbol="ns::detail::helper",
+                    description="removed",
+                )
+            ],
+            ["pub_entry -> ns::detail::helper"],
+        )
+        assert change.impact_assessment is not None
+        assert change.impact_assessment.public_reachable is True
+        assert (
+            change.impact_assessment.reachability_state
+            == ReachabilityState.PROVEN_REACHABLE
+        )
+        assert change.impact_assessment.reachability_kind == "symbol_availability"
+        assert assess_change(change) == change.impact_assessment
+
+    def test_leak_change_impact_assessment_survives_later_suppression(self) -> None:
+        """The cached evidence must still be correct after this finding goes
+        through a later pipeline stage that mutates unrelated flat fields
+        (e.g. suppression) -- assess_change recomputes decision fresh, so
+        the evidence half must not silently go stale alongside it."""
+        from abicheck.impact.engine import assess_change
+        from abicheck.internal_leak import _build_leak_change
+
+        change = _build_leak_change(
+            "ns::detail::Internal",
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Internal",
+                    description="size changed",
+                )
+            ],
+            [["Public", "field:x", "Internal"]],
+            _snap(),
+            embedded_by_value=True,
+        )
+        # Simulate a later ApplySuppression call site stamping these fields.
+        change.suppression_rule = "workaround-123"
+        assessment = assess_change(change, suppressed=True)
+        assert assessment.decision.state == "suppressed"
+        assert assessment.decision.suppression_rule == "workaround-123"
+        assert assessment.public_reachable is True  # evidence still intact
 
 
 class TestSelectPreferredPath:
