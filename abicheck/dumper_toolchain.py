@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
 import shutil
 import signal
 import stat as stat_module
@@ -25,7 +26,10 @@ import subprocess
 import threading
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
+
+from ._compiler_options import has_explicit_std
+from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 
 
 def _safe_mtime(path: Path) -> tuple[float | None, bool]:
@@ -261,3 +265,109 @@ def _parser_ast_supported(parser: Any) -> bool | None:
 
 def _parser_ast_unsupported_reasons(parser: Any) -> list[str]:
     return list(getattr(parser, "_abicheck_ast_unsupported_reasons", []) or [])
+
+
+#: Standard-mandated ``__cplusplus`` literal for every C++ edition this
+#: project's own force_cpp20 path or a user's explicit ``-std=`` can name.
+#: Keyed on the edition token alone (the part after the final ``+``/``c++``),
+#: so "c++17", "gnu++17", and "/std:c++17" all resolve the same way. Not
+#: exhaustive of every -std= spelling a user could pass — an unrecognized
+#: edition leaves the macro value unset (None) rather than guessing.
+_CPLUSPLUS_MACRO_BY_EDITION: dict[str, str] = {
+    "98": "199711L",
+    "03": "199711L",
+    "11": "201103L",
+    "0x": "201103L",
+    "14": "201402L",
+    "1y": "201402L",
+    "17": "201703L",
+    "1z": "201703L",
+    "20": "202002L",
+    "2a": "202002L",
+    "23": "202302L",
+    "2b": "202302L",
+}
+
+
+def _cplusplus_macro_for_standard(standard: str | None) -> str | None:
+    """Map a resolved ``-std=``/``/std:`` value to its standard-mandated
+    ``__cplusplus`` literal, or ``None`` when unrecognized (snapshot
+    provenance, schema v14)."""
+    if not standard:
+        return None
+    edition = (
+        standard.rsplit("+", 1)[-1].lower() if "+" in standard else standard.lower()
+    )
+    return _CPLUSPLUS_MACRO_BY_EDITION.get(edition)
+
+
+def _extract_explicit_std_value(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...]
+) -> str | None:
+    """Pull the literal value out of an explicit ``-std=``/``--std=``/``/std:``
+    token, or ``None`` if none is present (snapshot provenance, schema v14)."""
+    tokens = list(gcc_option_tokens)
+    if gcc_options:
+        tokens.extend(shlex.split(gcc_options, posix=os.name != "nt"))
+    for token in tokens:
+        t = token[1:] if token.startswith("--") else token
+        if t.startswith("-std="):
+            return t[len("-std=") :]
+        if t.lower().startswith("/std:"):
+            return t[len("/std:") :]
+    return None
+
+
+def _resolve_standard_provenance(
+    headers: list[Path],
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+) -> str | None:
+    """Best-effort resolved C/C++ standard for snapshot provenance (schema
+    v14, P1 toolchain-profile audit).
+
+    Mirrors the exact decision ``dumper.py``'s castxml/clang command builders
+    already make (``has_explicit_std`` gates the requires/concept heuristic)
+    without needing a second return value threaded through them, since it is
+    a pure function of the same inputs: an explicit ``-std=``/``--std=``/
+    ``/std:`` value is recorded verbatim; otherwise, if
+    ``_detect_cpp20_headers`` would force C++20, ``"gnu++20"`` is recorded
+    (the exact flag ``force_cpp20`` adds); otherwise ``None`` — the
+    frontend's own unpinned default was used and is not guessed at here.
+    """
+    if has_explicit_std(gcc_options, gcc_option_tokens):
+        return _extract_explicit_std_value(gcc_options, gcc_option_tokens)
+    if headers and _detect_cpp20_headers(headers):
+        return "gnu++20"
+    return None
+
+
+class _AstCompileProvenance(TypedDict):
+    ast_resolved_standard: str | None
+    ast_cplusplus_macro: str | None
+    ast_compile_args: tuple[str, ...]
+    ast_sysroot: str | None
+
+
+def _ast_compile_provenance(
+    headers: list[Path],
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+) -> _AstCompileProvenance:
+    """Structured compile-context provenance kwargs for an ``AbiSnapshot``
+    built from a header-AST parse (schema v14). A single call site shared by
+    ``dumper.py``'s ELF/PE/Mach-O snapshot constructors so the four fields
+    can never drift between them."""
+    resolved_standard = _resolve_standard_provenance(
+        headers, gcc_options, gcc_option_tokens
+    )
+    args = list(gcc_option_tokens)
+    if gcc_options:
+        args.extend(shlex.split(gcc_options, posix=os.name != "nt"))
+    return {
+        "ast_resolved_standard": resolved_standard,
+        "ast_cplusplus_macro": _cplusplus_macro_for_standard(resolved_standard),
+        "ast_compile_args": tuple(args),
+        "ast_sysroot": str(sysroot) if sysroot else None,
+    }

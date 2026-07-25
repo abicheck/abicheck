@@ -1411,6 +1411,136 @@ def test_profile_os_arch_wrong_type_raises(key: str) -> None:
         ProjectTargetsConfig.from_dict({"profiles": {"linux": {key: 1}}})
 
 
+# ── ProfileSpec.compile overlay (P1 toolchain-profile audit) ───────────────
+
+
+def test_profile_compile_overlay_parses_full_shape() -> None:
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "profiles": {
+                "linux-x86_64-gcc14-libstdcxx-gnu11-default": {
+                    "os": "linux",
+                    "arch": "x86_64",
+                    "compile": {
+                        "compiler_family": "gcc",
+                        "compiler_version": ">=14.2,<15",
+                        "target": "x86_64-linux-gnu",
+                        "standard": "gnu++11",
+                        "stdlib": "libstdc++",
+                        "binding": "gcc14",
+                        "abi_macros": {"_GLIBCXX_USE_CXX11_ABI": "1"},
+                        "args": ["-m64", "-fabi-version=19"],
+                    },
+                }
+            }
+        }
+    )
+    profile = config.profiles["linux-x86_64-gcc14-libstdcxx-gnu11-default"]
+    assert profile.compile is not None
+    assert profile.compile.compiler_family == "gcc"
+    assert profile.compile.compiler_version == ">=14.2,<15"
+    assert profile.compile.target == "x86_64-linux-gnu"
+    assert profile.compile.standard == "gnu++11"
+    assert profile.compile.stdlib == "libstdc++"
+    assert profile.compile.binding == "gcc14"
+    assert profile.compile.abi_macros == {"_GLIBCXX_USE_CXX11_ABI": "1"}
+    assert profile.compile.args == ["-m64", "-fabi-version=19"]
+    # Round-trips through to_dict/from_dict.
+    round_tripped = ProfileSpec.from_dict(
+        "linux-x86_64-gcc14-libstdcxx-gnu11-default", profile.to_dict()
+    )
+    assert round_tripped.to_dict() == profile.to_dict()
+
+
+def test_profile_without_compile_overlay_is_none() -> None:
+    config = ProjectTargetsConfig.from_dict({"profiles": {"linux": {"os": "linux"}}})
+    assert config.profiles["linux"].compile is None
+
+
+def test_profile_compile_overlay_unknown_key_raises() -> None:
+    with pytest.raises(ValueError, match="unknown key"):
+        ProjectTargetsConfig.from_dict(
+            {"profiles": {"linux": {"compile": {"bogus": "x"}}}}
+        )
+
+
+def test_profile_compile_overlay_not_a_mapping_raises() -> None:
+    with pytest.raises(ValueError, match="must be a mapping"):
+        ProjectTargetsConfig.from_dict(
+            {"profiles": {"linux": {"compile": "not-a-mapping"}}}
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["compiler_family", "compiler_version", "target", "standard", "stdlib", "binding"],
+)
+def test_profile_compile_overlay_field_wrong_type_raises(field_name: str) -> None:
+    with pytest.raises(ValueError, match=f"{field_name} must be a string"):
+        ProjectTargetsConfig.from_dict(
+            {"profiles": {"linux": {"compile": {field_name: 1}}}}
+        )
+
+
+def test_profile_compile_overlay_rejects_whitespace_injection_in_standard() -> None:
+    """A profile is untrusted, auto-discoverable config (trust boundary,
+    CLAUDE.md M1) -- a single scalar must never become multiple compiler
+    argv tokens once a consumer resolves this into a real invocation."""
+    with pytest.raises(ValueError, match="single option atom"):
+        ProjectTargetsConfig.from_dict(
+            {
+                "profiles": {
+                    "linux": {"compile": {"standard": "gnu++17 -Xclang -load evil.so"}}
+                }
+            }
+        )
+
+
+def test_profile_compile_overlay_rejects_whitespace_injection_in_args() -> None:
+    with pytest.raises(ValueError, match="single option atom"):
+        ProjectTargetsConfig.from_dict(
+            {"profiles": {"linux": {"compile": {"args": ["-m64 -evil"]}}}}
+        )
+
+
+def test_profile_compile_overlay_rejects_whitespace_injection_in_abi_macros() -> None:
+    with pytest.raises(ValueError, match="single option atom"):
+        ProjectTargetsConfig.from_dict(
+            {
+                "profiles": {
+                    "linux": {
+                        "compile": {"abi_macros": {"FOO": "1 -Xclang -load evil.so"}}
+                    }
+                }
+            }
+        )
+
+
+def test_profile_compile_overlay_args_wrong_type_raises() -> None:
+    with pytest.raises(ValueError, match="args must be a list of strings"):
+        ProjectTargetsConfig.from_dict(
+            {"profiles": {"linux": {"compile": {"args": [1, 2]}}}}
+        )
+
+
+def test_profile_compile_overlay_abi_macros_wrong_type_raises() -> None:
+    with pytest.raises(ValueError, match="abi_macros must be a mapping"):
+        ProjectTargetsConfig.from_dict(
+            {"profiles": {"linux": {"compile": {"abi_macros": ["not-a-mapping"]}}}}
+        )
+
+
+def test_profile_compile_overlay_empty_dict_round_trips_to_none() -> None:
+    """An empty compile: {} block round-trips to an empty (not None) overlay
+    on load, but to_dict omits it entirely (is_empty), same convention as an
+    absent block -- never a spurious empty {} in a re-serialized config."""
+    config = ProjectTargetsConfig.from_dict({"profiles": {"linux": {"compile": {}}}})
+    profile = config.profiles["linux"]
+    assert profile.compile is not None
+    assert profile.compile.is_empty is True
+    assert "compile" not in profile.to_dict()
+
+
 def test_baseline_channel_not_a_mapping_raises() -> None:
     with pytest.raises(ValueError, match="must be a mapping"):
         ProjectTargetsConfig.from_dict(

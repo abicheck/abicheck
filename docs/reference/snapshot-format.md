@@ -37,9 +37,11 @@ changing the meaning of existing ones — provenance metadata, PE/Mach-O
 support, build-mode capture, declaration provenance (`source_header`/`origin`),
 embedded build/source evidence, CastXML CV-qualifier reliability, the hybrid
 AST frontend's per-fact producer map, the resolved AST toolchain identity,
-(v12) the owner class of a hidden friend (`Function.hidden_friend_owner`), and
+(v12) the owner class of a hidden friend (`Function.hidden_friend_owner`),
 (v13) the CastXML version-gate outcome (`ast_toolchain_supported` /
-`ast_toolchain_unsupported_reasons`).
+`ast_toolchain_unsupported_reasons`), and (v14) structured compile-context
+provenance for the header-AST parse (`ast_resolved_standard`,
+`ast_cplusplus_macro`, `ast_compile_args`, `ast_sysroot`).
 
 ### Forward / backward compatibility
 
@@ -50,8 +52,8 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 13`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
-| **Newer** than this build (`> 13`) | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
+| **Older or equal** to this build (`<= 14`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Newer** than this build (`> 14`) | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 
 Two consequences worth internalising:
 

@@ -1,6 +1,10 @@
 {
+  "ast_compile_args": [],
+  "ast_cplusplus_macro": null,
   "ast_fallback_reason": null,
   "ast_producer": null,
+  "ast_resolved_standard": null,
+  "ast_sysroot": null,
   "ast_toolchain": {},
   "ast_toolchain_supported": null,
   "ast_toolchain_unsupported_reasons": [],

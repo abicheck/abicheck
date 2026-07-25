@@ -112,14 +112,17 @@ from .dumper_sysinc import (
 )
 from .dumper_toolchain import (
     _allow_unsupported_castxml_enabled as _allow_unsupported_castxml_enabled,
+    _ast_compile_provenance as _ast_compile_provenance,
     _ast_fallback_enabled as _ast_fallback_enabled,
     _auto_ast_fallback_eligible as _auto_ast_fallback_eligible,
     _castxml_available as _castxml_available,
+    _cplusplus_macro_for_standard as _cplusplus_macro_for_standard,
     _parser_ast_fallback_reason as _parser_ast_fallback_reason,
     _parser_ast_supported as _parser_ast_supported,
     _parser_ast_toolchain as _parser_ast_toolchain,
     _parser_ast_unsupported_reasons as _parser_ast_unsupported_reasons,
     _resolve_selected_tool as _resolve_selected_tool,
+    _resolve_standard_provenance as _resolve_standard_provenance,
     _safe_mtime as _safe_mtime,
     _safe_size as _safe_size,
     _tool_identity as _tool_identity,
@@ -1601,6 +1604,7 @@ def _dump_elf(
         ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
         platform="elf",
         language_profile=profile_hint,
+        **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot),
     )
     _populate_elf_visibility(snapshot)
     return snapshot
@@ -1761,6 +1765,7 @@ def _dump_macho(
         ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
         platform="macho",
         language_profile=profile_hint,
+        **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot),
     )
 
 
@@ -1869,6 +1874,7 @@ def _dump_pe(
         ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
         platform="pe",
         language_profile=profile_hint,
+        **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot),
     )
 
 

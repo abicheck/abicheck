@@ -37,6 +37,7 @@ from .api_types import CompareRequest, InputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .clang_layout_tool import attach_clang_layout
+from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import (
     deferred_token_dirs,
@@ -1711,6 +1712,21 @@ def run_compare_request(
     old_fmt = detect_binary_format(request.old.path)
     new_fmt = detect_binary_format(request.new.path)
 
+    # Pair-wide C++20 dialect resolution (P0 fix, mirrors the CLI compare path
+    # in cli_compare_helpers.py): CompareRequest has no explicit --gcc-options
+    # equivalent today, so this is the *only* lever available here — without
+    # it, each side's dumper.py invocation independently heuristically decides
+    # whether it needs -std=gnu++20 from its own headers alone, and old/new
+    # could silently disagree. Decide it once over the union of both sides'
+    # headers and pin it onto both resolve calls.
+    pair_compile: CompileContext | None = None
+    if (
+        lang == "c++"
+        and (request.old.headers or request.new.headers)
+        and _detect_cpp20_headers(list(request.old.headers) + list(request.new.headers))
+    ):
+        pair_compile = CompileContext(gcc_option_tokens=("-std=gnu++20",))
+
     # request.{old,new}.headers double as the public-header set for provenance
     # tagging — same rule as the single-pair CLI path (cli_resolve._resolve_compare_snapshots):
     # CompareRequest has no lower-level "parse only, don't classify" mode, so a
@@ -1742,6 +1758,7 @@ def run_compare_request(
             enable_debuginfod=request.enable_debuginfod,
             debuginfod_url=request.debuginfod_url,
             header_backend=header_backend,
+            compile=pair_compile,
             public_headers=old_public_headers,
             public_header_dirs=old_public_header_dirs,
         )
@@ -1759,6 +1776,7 @@ def run_compare_request(
             enable_debuginfod=request.enable_debuginfod,
             debuginfod_url=request.debuginfod_url,
             header_backend=header_backend,
+            compile=pair_compile,
             public_headers=new_public_headers,
             public_header_dirs=new_public_header_dirs,
         )

@@ -26,6 +26,7 @@ re-exported from ``abicheck.cli`` to keep existing import sites (sibling
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,12 +34,15 @@ from typing import TYPE_CHECKING
 
 import click
 
+from ._compiler_options import has_explicit_std
 from .binary_utils import strip_vendor_hash as strip_vendor_hash
+from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 
 if TYPE_CHECKING:
     from .buildsource.inline import BuildConfig
     from .checker_types import Change, DiffResult
     from .model import AbiSnapshot
+    from .service_scan import CompileContext
     from .severity import SeverityConfig
 
 
@@ -206,6 +210,48 @@ def _resolve_per_side_options(
     old_inc = list(old_includes_only) if old_includes_only else list(includes)
     new_inc = list(new_includes_only) if new_includes_only else list(includes)
     return old_h, new_h, old_inc, new_inc
+
+
+def _pair_wide_dialect_override(
+    lang: str,
+    old_h: list[Path],
+    new_h: list[Path],
+    compile_context: CompileContext,
+    side_compile_context: CompileContext,
+) -> tuple[CompileContext, CompileContext]:
+    """Pin ``-std=gnu++20`` for BOTH compare sides at once, or neither (P0 fix).
+
+    ``dumper.py``'s C++20 ``requires``/``concept`` heuristic only ever sees ONE
+    side's headers at a time (each side is dumped independently), so an old/new
+    pair could silently disagree on the language standard whenever neither side
+    pins an explicit one — e.g. only the *new* side picks up a ``concept`` and
+    gets auto-upgraded to C++20 while *old* stays on the toolchain default. That
+    lets a real dialect-floor change masquerade as an ordinary ABI diff (or, the
+    inverse historical bug: a header containing ``#error Foo requires Base``
+    tripped the heuristic on whichever side had that text).
+
+    Decide the heuristic once, over the union of both sides' headers, and pin
+    the result identically onto both contexts so the two ``_resolve_input``
+    calls parse under one shared, explicit dialect. An explicit
+    ``-std=``/``--std=``/``/std:`` from the user always wins (``has_explicit_std``
+    short-circuits first) and this is then a no-op — auto-detection never
+    overrides an explicit choice.
+    """
+    if lang.lower() != "c++" or not (old_h or new_h):
+        return compile_context, side_compile_context
+    if has_explicit_std(compile_context.gcc_options, compile_context.gcc_option_tokens):
+        return compile_context, side_compile_context
+    if not _detect_cpp20_headers(list(old_h) + list(new_h)):
+        return compile_context, side_compile_context
+    compile_context = dataclasses.replace(
+        compile_context,
+        gcc_option_tokens=(*compile_context.gcc_option_tokens, "-std=gnu++20"),
+    )
+    side_compile_context = dataclasses.replace(
+        side_compile_context,
+        gcc_option_tokens=(*side_compile_context.gcc_option_tokens, "-std=gnu++20"),
+    )
+    return compile_context, side_compile_context
 
 
 def _warn_ignored_flags(

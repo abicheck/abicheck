@@ -16,6 +16,7 @@ import pytest
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
 from abicheck.cli_helpers_compare import (
+    _pair_wide_dialect_override,
     _resolve_build_context_flags,
     _resolve_severity,
     discover_project_config,
@@ -24,6 +25,7 @@ from abicheck.cli_helpers_compare import (
 )
 from abicheck.errors import AbicheckError
 from abicheck.model import AbiSnapshot
+from abicheck.service_scan import CompileContext
 
 
 def _write_compile_db(directory, entries):
@@ -97,7 +99,13 @@ def test_resolve_build_context_flags_matched_but_no_flags_still_reports_matched(
 
     db = _write_compile_db(
         tmp_path,
-        [{"directory": str(tmp_path), "file": "foo.c", "arguments": ["cc", "-c", "foo.c"]}],
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "foo.c",
+                "arguments": ["cc", "-c", "foo.c"],
+            }
+        ],
     )
 
     flags, matched = _resolve_build_context_flags(db, (header,), None)
@@ -184,7 +192,13 @@ def test_dry_run_compile_db_matched_true_for_matching_header(tmp_path, capsys):
     header.write_text("int f();\n", encoding="utf-8")
     db = _write_compile_db(
         tmp_path,
-        [{"directory": str(tmp_path), "file": "foo.cpp", "arguments": ["c++", "-c", "foo.cpp"]}],
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "foo.cpp",
+                "arguments": ["c++", "-c", "foo.cpp"],
+            }
+        ],
     )
 
     assert dry_run_compile_db_matched(db, None, (header,), None) is True
@@ -198,7 +212,13 @@ def test_dry_run_compile_db_matched_alias_path_used_when_primary_absent(tmp_path
     header.write_text("int f(void);\n", encoding="utf-8")
     db = _write_compile_db(
         tmp_path,
-        [{"directory": str(tmp_path), "file": "foo.c", "arguments": ["cc", "-c", "foo.c"]}],
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "foo.c",
+                "arguments": ["cc", "-c", "foo.c"],
+            }
+        ],
     )
     assert dry_run_compile_db_matched(None, db, (header,), None) is True
 
@@ -208,7 +228,13 @@ def test_dry_run_compile_db_matched_union_fallback_without_headers(tmp_path):
     _resolve_build_context_flags's identical no-headers path)."""
     db = _write_compile_db(
         tmp_path,
-        [{"directory": str(tmp_path), "file": "a.cpp", "arguments": ["c++", "-c", "a.cpp"]}],
+        [
+            {
+                "directory": str(tmp_path),
+                "file": "a.cpp",
+                "arguments": ["c++", "-c", "a.cpp"],
+            }
+        ],
     )
     assert dry_run_compile_db_matched(db, None, (), None) is True
 
@@ -227,7 +253,9 @@ def test_dry_run_compile_db_matched_false_for_missing_db():
     click.ClickException for this, but a dry run must never raise -- it's a
     definite False (the invocation cannot succeed), not a crash."""
     assert (
-        dry_run_compile_db_matched(Path("/nonexistent/compile_commands.json"), None, (), None)
+        dry_run_compile_db_matched(
+            Path("/nonexistent/compile_commands.json"), None, (), None
+        )
         is False
     )
 
@@ -643,3 +671,121 @@ def test_fold_l0_hard_removals_none_extra_changes_defaults_to_empty(
         _snap(str(tmp_path / "old.so")), _snap(str(tmp_path / "new.so")), "c++", None
     )
     assert result == [removal]
+
+
+def _write_header(directory, name, content):
+    """Write a header file under *directory* and return its path."""
+    path = directory / name
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def test_pair_wide_dialect_override_noop_when_neither_side_needs_cxx20(tmp_path):
+    """Plain headers on both sides: contexts pass through unchanged (identity)."""
+    old_h = [_write_header(tmp_path, "old.h", "int f(int x);\n")]
+    new_h = [_write_header(tmp_path, "new.h", "int f(int x, int y);\n")]
+    compile_ctx = CompileContext()
+    side_ctx = CompileContext()
+    result_compile, result_side = _pair_wide_dialect_override(
+        "c++", old_h, new_h, compile_ctx, side_ctx
+    )
+    assert result_compile is compile_ctx
+    assert result_side is side_ctx
+    assert result_compile.gcc_option_tokens == ()
+
+
+def test_pair_wide_dialect_override_pins_both_sides_when_only_new_needs_cxx20(
+    tmp_path,
+):
+    """Only `new` uses a real concept — both sides still get -std=gnu++20 pinned.
+
+    This is the core P0 fix: without pair-wide resolution, dumper.py's own
+    per-side heuristic would parse `old` under the toolchain default (often
+    C++17) and `new` under C++20, silently comparing two different dialects.
+    """
+    old_h = [_write_header(tmp_path, "old.h", "int f(int x);\n")]
+    new_h = [
+        _write_header(
+            tmp_path, "new.h", "template<class T> concept C = true;\nint f(int x);\n"
+        )
+    ]
+    compile_ctx = CompileContext()
+    side_ctx = CompileContext(frontend="auto")
+    result_compile, result_side = _pair_wide_dialect_override(
+        "c++", old_h, new_h, compile_ctx, side_ctx
+    )
+    assert result_compile.gcc_option_tokens == ("-std=gnu++20",)
+    assert result_side.gcc_option_tokens == ("-std=gnu++20",)
+
+
+def test_pair_wide_dialect_override_skipped_with_explicit_std(tmp_path):
+    """An explicit -std= always wins — auto-detection never overrides it."""
+    old_h = [_write_header(tmp_path, "old.h", "int f(int x);\n")]
+    new_h = [
+        _write_header(
+            tmp_path, "new.h", "template<class T> concept C = true;\nint f(int x);\n"
+        )
+    ]
+    compile_ctx = CompileContext(gcc_option_tokens=("-std=gnu++11",))
+    side_ctx = CompileContext(gcc_option_tokens=("-std=gnu++11",))
+    result_compile, result_side = _pair_wide_dialect_override(
+        "c++", old_h, new_h, compile_ctx, side_ctx
+    )
+    assert result_compile is compile_ctx
+    assert result_side is side_ctx
+    assert result_compile.gcc_option_tokens == ("-std=gnu++11",)
+
+
+def test_pair_wide_dialect_override_ignores_error_directive_requires(tmp_path):
+    """`#error Foo requires Base` must never trigger a C++20 upgrade (PVXS bug).
+
+    Regression for the false-positive C++20 auto-detection bug: a plain
+    English "requires" inside a preprocessor diagnostic is not a C++20
+    requires-clause, so this pair must stay on the default dialect.
+    """
+    old_h = [
+        _write_header(
+            tmp_path,
+            "old.h",
+            "#ifndef HAVE_BASE\n#error Foo requires Base\n#endif\nint f(int x);\n",
+        )
+    ]
+    new_h = [
+        _write_header(
+            tmp_path,
+            "new.h",
+            "#ifndef HAVE_BASE\n#error Foo requires Base\n#endif\nint f(int x, int y);\n",
+        )
+    ]
+    compile_ctx = CompileContext()
+    side_ctx = CompileContext()
+    result_compile, result_side = _pair_wide_dialect_override(
+        "c++", old_h, new_h, compile_ctx, side_ctx
+    )
+    assert result_compile is compile_ctx
+    assert result_side is side_ctx
+    assert result_compile.gcc_option_tokens == ()
+
+
+def test_pair_wide_dialect_override_skipped_for_c_lang(tmp_path):
+    """Only applies to C++ — a `c` compare is left untouched even with headers."""
+    old_h = [_write_header(tmp_path, "old.h", "int f(int x);\n")]
+    new_h = [_write_header(tmp_path, "new.h", "int f(int x, int y);\n")]
+    compile_ctx = CompileContext()
+    side_ctx = CompileContext()
+    result_compile, result_side = _pair_wide_dialect_override(
+        "c", old_h, new_h, compile_ctx, side_ctx
+    )
+    assert result_compile is compile_ctx
+    assert result_side is side_ctx
+
+
+def test_pair_wide_dialect_override_skipped_with_no_headers():
+    """No headers on either side: nothing to scan, contexts pass through."""
+    compile_ctx = CompileContext()
+    side_ctx = CompileContext()
+    result_compile, result_side = _pair_wide_dialect_override(
+        "c++", [], [], compile_ctx, side_ctx
+    )
+    assert result_compile is compile_ctx
+    assert result_side is side_ctx
