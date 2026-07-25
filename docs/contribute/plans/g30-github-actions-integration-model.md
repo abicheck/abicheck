@@ -2858,10 +2858,22 @@ dangling "not yet attempted" item this plan carries forward by default.
 
 ## P2 — Deeper architecture (not started here)
 
-- **Full TU→link-unit→DSO source-evidence attribution** (ADR-047 §9/D8) —
-  needs linker-invocation capture, extending
-  `abicheck/buildsource/build_query.py`'s existing partial zero-config
-  compile-DB inference. Its own follow-up ADR when undertaken.
+- ~~**Full TU→link-unit→DSO source-evidence attribution** (ADR-047 §9/D8)~~
+  — **done, see [ADR-053](../adr/053-tu-link-unit-dso-attribution.md).**
+  `abicheck/buildsource/link_attribution.py` implements the two-channel
+  attribution algorithm (target-graph, link-unit-graph, transitive
+  static-library folding on both); `adapters/make.py` gained real
+  link/archive-line capture; `inputs_pack.ingest_inputs_pack()` can now
+  filter a build-wide pack down to one target's own TUs;
+  `build_output.py`'s validator accepts and genuinely validates
+  `evidence.projection: "inferred"` by re-deriving the attribution, instead
+  of hard-rejecting it. ADR-053 D5 explicitly scopes what's *not* done here:
+  wiring `attribution_path` production through the `compare`/`dump` CLI's
+  actual `--build-info` pipeline end-to-end (so a real CI run produces one
+  automatically) — the core mechanism is real, tested, and independently
+  usable, but nothing in the `compare`/`dump`/`check-target` pipeline
+  produces an `attribution_path` for it to consume yet. That plumbing is the
+  next slice, not re-opened as a fresh unscoped gap.
 - **Monorepo changed-component planning** at scale (S25's `run-plan.json`
   filtering beyond a simple path-prefix diff).
 - **Richer cross-platform baseline storage** (external object store backend,

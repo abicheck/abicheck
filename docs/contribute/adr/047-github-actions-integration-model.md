@@ -1380,9 +1380,12 @@ Three new validation points, all hard failures (not warnings) when tripped:
 1. **`build-output.json` validator** — every declared `headers/`/
    `generated-headers/` root is non-empty; every `targets[].binary` exists
    and its digest matches `digests{}`; `evidence.projection` must be
-   `"declared"` (any other value, including `"inferred"`, is a hard
-   validation failure until P2's TU→DSO attribution exists — §2's
-   correction above); for `"declared"`, a **non-empty TU count is
+   `"declared"` (any other value was a hard validation failure until P2's
+   TU→DSO attribution existed — §2's correction above; **as of
+   [ADR-053](053-tu-link-unit-dso-attribution.md), `"inferred"` is now a
+   real, validated third option** alongside `"declared"`, re-deriving the
+   attribution rather than trusting the claim); for `"declared"`, a
+   **non-empty TU count is
    necessary but not sufficient, and — a further correction from a
    follow-up review round — invoking `validate_inputs_pack` as-is is
    *also* not sufficient.** A multi-DSO `build-output.json` could point two
@@ -1593,8 +1596,14 @@ still open.
   toolchain / multiple DSO / multiple baseline channels" claims in §8
   (S9/S15/S17/S21) still need a pilot in PVXS's format before they stop
   being design-only.
-- **Full source-evidence TU→DSO attribution** (§9, D8) is P2, not built
-  here; S16's "required full model" is a documented target state only.
+- ~~**Full source-evidence TU→DSO attribution** (§9, D8) is P2, not built
+  here; S16's "required full model" is a documented target state only.~~
+  **Superseded — see [ADR-053](053-tu-link-unit-dso-attribution.md).** The
+  attribution algorithm, `build-output.json`'s `evidence.projection:
+  "inferred"` validator, and the ingest-time filtering mechanism are now
+  real and tested; what remains open is wiring `attribution_path`
+  production through the `compare`/`dump` CLI pipeline end-to-end (ADR-053
+  D5), a narrower, separately-tracked follow-up than "P2 not started."
 - **`build-output.json` producer tooling** (a real `abicheck build-output
   emit` helper, or documented hand-authoring path for CMake/Meson/Bazel/Make)
   does not exist yet — this ADR specifies the schema and consumer contract;

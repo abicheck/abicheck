@@ -37,7 +37,10 @@ def test_make_dry_run_extracts_compile_units():
     ev = MakeAdapter(dry_run=DRY_RUN).collect()
     assert ev.generators[0].kind == "make"
     units = {c.source: c for c in ev.compile_units}
-    # Only the two `-c` compile recipes become units; link/ar/info lines are skipped.
+    # Only the two `-c` compile recipes become compile_units; the link/ar/info
+    # lines are recognized separately as link_units (ADR-053 D2, see
+    # test_make_adapter_link_units.py) or genuinely skipped ("Entering
+    # directory").
     assert set(units) == {"src/a.c", "src/b.cpp"}
     assert units["src/a.c"].standard == "c11"
     assert units["src/b.cpp"].standard == "c++20"
@@ -49,6 +52,68 @@ def test_make_reduced_confidence_diagnostic_and_options():
     opts = {(o.key, o.value) for o in ev.build_options}
     assert ("std:C", "c11") in opts
     assert ("define:_GLIBCXX_USE_CXX11_ABI", "0") in opts
+
+
+# -- link-unit capture (ADR-053 D2) ------------------------------------------
+
+
+def test_make_dry_run_extracts_shared_and_static_link_units():
+    ev = MakeAdapter(dry_run=DRY_RUN).collect()
+    by_output = {lu.output: lu for lu in ev.link_units}
+    assert set(by_output) == {"libfoo.so", "libbar.a"}
+    assert by_output["libfoo.so"].kind == "shared_library"
+    assert set(by_output["libfoo.so"].inputs) == {"build/a.o", "build/b.o"}
+    assert by_output["libbar.a"].kind == "static_library"
+    assert by_output["libbar.a"].inputs == ["build/a.o"]
+    assert any("link/archive units" in d for d in ev.diagnostics)
+
+
+def test_make_executable_link_unit_recognized():
+    ev = MakeAdapter(
+        dry_run="gcc -o build/app build/main.o build/lib.a -lm"
+    ).collect()
+    assert len(ev.link_units) == 1
+    lu = ev.link_units[0]
+    assert lu.kind == "executable"
+    assert lu.output == "build/app"
+    assert lu.inputs == ["build/main.o", "build/lib.a"]
+
+
+def test_make_shared_link_unit_recognized_via_dash_shared_flag():
+    # No .so-shaped output extension -- -shared alone must still classify it.
+    ev = MakeAdapter(dry_run="gcc -shared -o build/plugin.node build/a.o").collect()
+    assert len(ev.link_units) == 1
+    assert ev.link_units[0].kind == "shared_library"
+
+
+def test_make_ar_with_toolchain_prefix_recognized():
+    ev = MakeAdapter(
+        dry_run="x86_64-linux-gnu-ar rcs build/libx.a build/x.o build/y.o"
+    ).collect()
+    assert len(ev.link_units) == 1
+    assert ev.link_units[0].kind == "static_library"
+    assert ev.link_units[0].output == "build/libx.a"
+
+
+def test_make_partial_relink_is_not_a_terminal_link_unit():
+    # `ld -r` (incremental/partial link) produces another .o, not a real
+    # DSO/executable output -- must not be treated as an attribution target.
+    ev = MakeAdapter(dry_run="ld -r -o build/combined.o build/a.o build/b.o").collect()
+    assert ev.link_units == []
+
+
+def test_make_unrelated_recipe_lines_produce_no_link_unit():
+    ev = MakeAdapter(
+        dry_run="\n".join(
+            [
+                "mkdir -p build",
+                "echo done",
+                "ranlib build/libfoo.a",
+            ]
+        )
+    ).collect()
+    assert ev.compile_units == []
+    assert ev.link_units == []
 
 
 def test_make_forced_include_not_mistaken_for_source():

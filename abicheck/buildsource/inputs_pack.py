@@ -49,7 +49,7 @@ import datetime as _dt
 import gzip
 import json
 import zlib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -583,10 +583,38 @@ def _load_build_evidence(
         return None
 
 
+def _filter_tus_by_attribution(
+    tus: list[SourceAbiTu],
+    attribution: Mapping[str, frozenset[str]],
+    expected_target_id: str,
+) -> tuple[list[SourceAbiTu], int]:
+    """ADR-053 D3: keep only TUs the attribution mapping ties to *expected_target_id*.
+
+    Matches on the normalized ``.source`` path (the same normalization
+    :func:`~.link_attribution.attribute_sources_to_targets` applies to every
+    key it produces, so the two sides agree on shape) — fail-safe: a source
+    absent from ``attribution`` entirely (unknown to both channels) is
+    dropped, exactly like one attributed to a different target only.
+    """
+    from .link_attribution import normalize_source_path
+
+    kept: list[SourceAbiTu] = []
+    dropped = 0
+    for tu in tus:
+        identities = attribution.get(normalize_source_path(tu.source), frozenset())
+        if expected_target_id in identities:
+            kept.append(tu)
+        else:
+            dropped += 1
+    return kept, dropped
+
+
 def ingest_inputs_pack(
     root: Path | str,
     *,
     exported_symbols: Iterable[str] = (),
+    attribution: Mapping[str, frozenset[str]] | None = None,
+    expected_target_id: str | None = None,
 ) -> IngestedInputs:
     """Fold a Flow-2 ``abicheck_inputs/`` pack into an embeddable pack.
 
@@ -597,6 +625,17 @@ def ingest_inputs_pack(
     the caller's) seed the L4 decl→symbol linking; when empty the surface is
     relinked against the artifact side's exports during ``merge`` (the existing
     A1 path). Pure parsing — never invokes a compiler.
+
+    ``attribution``/``expected_target_id`` (ADR-053 D3) opt into safely
+    projecting a build-wide pack onto one target: when both are given, a TU
+    is kept only when :func:`~.link_attribution.attribute_sources_to_targets`
+    (the caller-supplied ``attribution`` mapping) attributes its ``.source``
+    to a set containing ``expected_target_id`` — a TU attributed to some
+    *other* target is dropped, and — fail-safe — a TU with no attribution at
+    all (unknown to both of the attribution module's channels) is dropped
+    too, never silently kept on the assumption that "no signal" means "safe."
+    Omitting either parameter (the default) ingests every TU exactly as
+    before — this is purely additive, no existing caller's behavior changes.
     """
     root = Path(root)
     manifest = load_inputs_manifest(root)
@@ -605,6 +644,15 @@ def ingest_inputs_pack(
     # Thread the diagnostics sink so skipped/malformed source-fact records are
     # surfaced in the extractor ledger + IngestedInputs, not silently dropped.
     tus = read_source_facts(root, manifest, diagnostics=diagnostics)
+    if attribution is not None and expected_target_id is not None:
+        tus, dropped = _filter_tus_by_attribution(tus, attribution, expected_target_id)
+        if dropped:
+            diagnostics.append(
+                f"abicheck_inputs: {dropped} TU(s) excluded — "
+                f"attribution (ADR-053) did not tie them to {expected_target_id!r} "
+                "(either attributed to a different target, or unknown to both "
+                "attribution channels)."
+            )
     exports = sorted(set(manifest.exported_symbols) | set(exported_symbols))
 
     surface = None

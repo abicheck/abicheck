@@ -44,7 +44,7 @@ import stat as stat_module
 from pathlib import Path
 
 from ...build_context import _extract_flags
-from ..build_evidence import BuildEvidence, CompileUnit, Generator
+from ..build_evidence import BuildEvidence, CompileUnit, Generator, LinkUnit
 from ..redaction import DEFAULT_REDACTION, RedactionPolicy
 from .base import (
     compile_unit_id,
@@ -53,6 +53,19 @@ from .base import (
     extract_abi_relevant_flags,
     source_from_argv,
 )
+
+#: Object/archive extensions a link/archive line's inputs are expected to
+#: carry — the presence of at least one is what tells a plain "-o X ..." line
+#: (which could just as easily be a compile, a codegen step, or an unrelated
+#: recipe command) apart from a genuine link/archive invocation (ADR-053 D2).
+_LINK_INPUT_EXTENSIONS = (".o", ".obj", ".a", ".lib")
+
+#: Recognized shared-library output extensions (POSIX + Windows + macOS).
+_SHARED_LIB_EXTENSIONS = (".so", ".dylib", ".dll")
+
+#: Matches ``ar`` / a cross-toolchain-prefixed ``ar`` (e.g. ``x86_64-linux-
+#: gnu-ar``), optionally with a path prefix and/or ``.exe`` suffix.
+_AR_PROG_RE = re.compile(r"^(?:[\w.+-]*-)?ar(?:\.exe)?$", re.IGNORECASE)
 
 
 class MakeAdapter:
@@ -95,6 +108,10 @@ class MakeAdapter:
             cu = self._compile_unit(line, directory)
             if cu is not None:
                 ev.compile_units.append(cu)
+                continue
+            lu = self._link_unit(line, directory)
+            if lu is not None:
+                ev.link_units.append(lu)
 
         if ev.compile_units:
             ev.build_options = derive_build_options(ev.compile_units)
@@ -107,6 +124,14 @@ class MakeAdapter:
             ev.diagnostics.append(
                 f"make: {existing_sources}/{len(ev.compile_units)} compile-unit "
                 "source paths exist relative to their recorded directories"
+            )
+        if ev.link_units:
+            ev.diagnostics.append(
+                f"make: {len(ev.link_units)} link/archive units derived from a "
+                "make dry-run transcript — reduced confidence (heuristic argv "
+                "recognition, not an authoritative target graph); feeds "
+                "abicheck.buildsource.link_attribution's TU-to-output "
+                "attribution (ADR-053), not build_diff directly."
             )
         return ev
 
@@ -165,6 +190,97 @@ class MakeAdapter:
             sysroot=self.redaction.path(str(ctx.sysroot)) if ctx.sysroot else None,
             target_triple=ctx.target_triple or "",
             abi_relevant_flags=[self.redaction.arg(f) for f in extract_abi_relevant_flags(argv)],
+        )
+
+    def _link_unit(self, line: str, directory: Path) -> LinkUnit | None:
+        """Recognize an ``ar`` archive-creation or compiler-frontend link line.
+
+        ADR-053 D2: Make has no semantic target graph to lean on the way
+        CMake/Bazel do, so this is the one build system where TU->DSO
+        attribution genuinely needs real linker/archiver argv recognition,
+        not just a target-source-list join. Same reduced-confidence,
+        heuristic-scraping posture as :meth:`_compile_unit` — a dry-run
+        transcript is not an authoritative target graph, and a line this
+        doesn't recognize is simply skipped, never an error.
+        """
+        argv = _split_recipe(line)
+        argv, directory = _consume_cd_prefix(argv, directory)
+        argv = _truncate_shell_pipeline(argv)
+        if not argv:
+            return None
+        argv, _expanded_rsp = _expand_response_files(argv, directory, self.build_dir)
+        prog = Path(argv[0]).name
+        if _AR_PROG_RE.match(prog):
+            return self._archive_link_unit(argv)
+        # A compile line was already ruled out by the caller (it tried
+        # _compile_unit first); anything left with an -o/-shared-shaped
+        # output and at least one object/archive input is treated as a
+        # link line.
+        return self._compiler_link_unit(argv)
+
+    def _archive_link_unit(self, argv: list[str]) -> LinkUnit | None:
+        # `ar <flags> output.a input1.o input2.o ...` -- ar's traditional
+        # (BSD-style) flag syntax has no leading '-' at all ("ar rcs a.a
+        # b.o"), unlike every other tool this module recognizes, so a plain
+        # "no leading '-'" filter would wrongly keep the flags token itself
+        # as an operand. Drop argv[1] too when it looks like a flag-letters
+        # token (all-alpha, no '.'/'/': a real archive/object path always
+        # has one of those) rather than a real path.
+        rest = argv[1:]
+        if rest and rest[0].isalpha() and "." not in rest[0] and "/" not in rest[0]:
+            rest = rest[1:]
+        operands = [a for a in rest if not a.startswith("-")]
+        if len(operands) < 2:
+            return None
+        output, inputs = operands[0], operands[1:]
+        if not output.lower().endswith((".a", ".lib")):
+            return None
+        inputs = [i for i in inputs if i.lower().endswith(_LINK_INPUT_EXTENSIONS)]
+        if not inputs:
+            return None
+        # No directory-joining on output/inputs, matching _compile_unit's own
+        # convention for CompileUnit.output (kept exactly as written in the
+        # recipe) -- link_attribution.py matches LinkUnit.inputs against
+        # CompileUnit.output verbatim, so both sides must use the identical
+        # convention or nothing would ever match.
+        red_output = self.redaction.path(output)
+        return LinkUnit(
+            id=f"link://{red_output}",
+            output=red_output,
+            kind="static_library",
+            inputs=[self.redaction.path(i) for i in inputs],
+            linker_argv=self.redaction.argv(argv),
+        )
+
+    def _compiler_link_unit(self, argv: list[str]) -> LinkUnit | None:
+        output = _output_from_argv(argv)
+        if not output:
+            return None
+        inputs = [
+            a
+            for a in argv[1:]
+            if not a.startswith(("-", "/")) and a.lower().endswith(_LINK_INPUT_EXTENSIONS)
+        ]
+        if not inputs:
+            return None
+        lower_output = output.lower()
+        if lower_output.endswith(_SHARED_LIB_EXTENSIONS) or "-shared" in argv:
+            kind = "shared_library"
+        elif lower_output.endswith((".o", ".obj")):
+            # A multi-object partial/incremental link ("ld -r"), not a real
+            # DSO/executable output -- not a link_attribution terminal kind.
+            return None
+        else:
+            kind = "executable"
+        # See _archive_link_unit's comment: no directory-joining, matching
+        # _compile_unit's own CompileUnit.output convention.
+        red_output = self.redaction.path(output)
+        return LinkUnit(
+            id=f"link://{red_output}",
+            output=red_output,
+            kind=kind,
+            inputs=[self.redaction.path(i) for i in inputs],
+            linker_argv=self.redaction.argv(argv),
         )
 
 
