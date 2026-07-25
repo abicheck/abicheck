@@ -85,6 +85,28 @@ nav:
       - Upgrading to 0.5.0: use/migration-0.5.md
       - Migrating from ABICC: use/from-abicc.md
       - Migrating from libabigail: use/from-libabigail.md
+  # G30/ADR-047's scenario-first GitHub Actions integration model -- "which
+  # project-lifecycle scenario am I", distinct from User Guide's
+  # CLI-command-level "what flags do I need" framing.
+  - Project Integration:
+    - Which Scenario Am I?: integration/index.md
+    - Concepts: integration/concepts.md
+    - Scenarios:
+      - 'S1: Single Library': integration/scenarios/single-library.md
+      - 'S3: Reuse an Existing Build': integration/scenarios/existing-build-artifact.md
+      - 'S5: Single-Build Audit': integration/scenarios/single-build-audit.md
+      - 'S6: Header-Aware Compatibility': integration/scenarios/header-aware-check.md
+      - 'S7: Source Scan via Compile-DB Replay': integration/scenarios/source-replay.md
+      - 'S8/S9: Source Facts From the Build Itself': integration/scenarios/build-integrated-facts.md
+      - 'S13: Packages & Prebuilt Artifacts': integration/scenarios/packages-and-sdks.md
+      - 'S14: Multi-DSO Release Bundle': integration/scenarios/release-bundle.md
+      - 'S15: Multiple Independent Targets': integration/scenarios/multi-dso-project.md
+      - 'S17: Multiple Build Profiles': integration/scenarios/multi-platform.md
+      - 'S18: Cross Compilation': integration/scenarios/cross-compilation.md
+      - 'S22/S23: Application & Plugin Contracts': integration/scenarios/application-and-plugin-contracts.md
+      - 'S24: Dependency & Container Checks': integration/scenarios/dependency-and-container-checks.md
+      - 'S25: Monorepo / Multiple Components': integration/scenarios/monorepo.md
+      - 'S26/S27: Migration & Rollout': integration/scenarios/migration-and-rollout.md
   # How the tool works, simplest mental model first: what a verdict means →
   # what each data source can see → how the pipeline is built → deep internals.
   - Concepts:
@@ -110,6 +132,7 @@ nav:
     - check-target Action: reference/check-target.md
     - Run Plan Schema: reference/run-plan-schema.md
     - Reusable Workflows: reference/reusable-workflows.md
+    - publish-baseline / update-main-baseline: reference/publish-baseline.md
     - Configuration File: reference/config-file.md
     - Config Keys Reference: reference/config-keys-reference.md
     - Environment Variables: reference/environment.md

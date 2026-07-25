@@ -333,6 +333,34 @@ castxml = "*"
 c-compiler = "*"
 cxx-compiler = "*"
 
+# Explicit-major-version toolchain features for action.yml's
+# dependency-source=conda-forge-gcc14/conda-forge-clang20 (G30 toolchain-profile
+# audit §5 "environment split" — gcc14/clang20 pin an exact compiler family and
+# major version, unlike `native-toolchain`'s unbound c-compiler/cxx-compiler
+# metapackages, which resolve to "whatever conda-forge's default toolchain
+# generation currently is" and can roll forward silently between `pixi lock`
+# refreshes. Same castxml + platform restriction as native-toolchain, standalone
+# (not derived from it) so each has its own solve-group and doesn't couple an
+# explicit-version pin's resolution to the floating one's.
+[tool.pixi.feature.native-toolchain-gcc14]
+# linux-64 only: conda-forge's gcc/gxx packages don't build for macOS (macOS
+# conda-forge environments use clang as the system compiler instead — see
+# native-toolchain-clang20 below).
+platforms = ["linux-64"]
+
+[tool.pixi.feature.native-toolchain-gcc14.dependencies]
+castxml = "*"
+gcc = "14.*"
+gxx = "14.*"
+
+[tool.pixi.feature.native-toolchain-clang20]
+platforms = ["linux-64", "osx-64", "osx-arm64"]
+
+[tool.pixi.feature.native-toolchain-clang20.dependencies]
+castxml = "*"
+clang = "20.*"
+clangxx = "20.*"
+
 # `integration` marker (DWARF/header parsing tests) — adds cmake on top of
 # the shared native-toolchain feature.
 [tool.pixi.feature.integration.dependencies]
@@ -386,3 +414,11 @@ default = { features = ["dev", "mcp", "docs", "dist"], solve-group = "default" }
 integration = { features = ["dev", "mcp", "native-toolchain", "integration"], solve-group = "default" }
 parity = { features = ["dev", "mcp", "native-toolchain", "parity"], solve-group = "parity" }
 docs = { features = ["docs"], solve-group = "docs" }
+# Used by action.yml's dependency-source=conda-forge (action/install-deps-conda-forge.sh)
+# — deliberately excludes "dev"/"mcp" (no test/lint/type tooling weight) and gets
+# its own bin/-shim treatment there rather than a raw PATH prepend, since a
+# Python interpreter still gets pulled in transitively by the workspace-level
+# pypi-dependencies section above (see that script's own docstring for why).
+scanner = { features = ["native-toolchain"], solve-group = "scanner" }
+gcc14 = { features = ["native-toolchain-gcc14"], solve-group = "gcc14" }
+clang20 = { features = ["native-toolchain-clang20"], solve-group = "clang20" }

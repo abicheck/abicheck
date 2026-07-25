@@ -1711,6 +1711,18 @@ def run_compare_request(
     old_fmt = detect_binary_format(request.old.path)
     new_fmt = detect_binary_format(request.new.path)
 
+    # Pair-wide C++20 dialect resolution (P0 fix): CompareRequest has no
+    # explicit --gcc-options equivalent today, so this is the only lever
+    # available here. Shared core (service_scan.pair_wide_cxx20_std_override)
+    # also drives the CLI compare path (cli_helpers_compare._pair_wide_dialect_override)
+    # so the policy can't drift between front-ends.
+    pair_compile: CompileContext | None = None
+    override = pair_wide_cxx20_std_override(
+        lang, request.old.headers, request.new.headers, None, ()
+    )
+    if override is not None:
+        pair_compile = CompileContext(gcc_option_tokens=override)
+
     # request.{old,new}.headers double as the public-header set for provenance
     # tagging — same rule as the single-pair CLI path (cli_resolve._resolve_compare_snapshots):
     # CompareRequest has no lower-level "parse only, don't classify" mode, so a
@@ -1742,6 +1754,7 @@ def run_compare_request(
             enable_debuginfod=request.enable_debuginfod,
             debuginfod_url=request.debuginfod_url,
             header_backend=header_backend,
+            compile=pair_compile,
             public_headers=old_public_headers,
             public_header_dirs=old_public_header_dirs,
         )
@@ -1759,6 +1772,7 @@ def run_compare_request(
             enable_debuginfod=request.enable_debuginfod,
             debuginfod_url=request.debuginfod_url,
             header_backend=header_backend,
+            compile=pair_compile,
             public_headers=new_public_headers,
             public_header_dirs=new_public_header_dirs,
         )
@@ -1942,6 +1956,7 @@ from .service_scan import (  # noqa: E402,F401
     _scan_subprocess_worker,
     estimate_scan,
     expand_header_inputs,
+    pair_wide_cxx20_std_override,
     run_audit,
     run_scan,
     run_scan_subprocess,

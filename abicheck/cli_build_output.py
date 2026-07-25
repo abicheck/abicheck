@@ -33,7 +33,8 @@ from pathlib import Path
 
 import click
 
-from .buildsource.build_output import validate_build_output
+from .buildsource.baseline_publish import derive_baseline_libraries
+from .buildsource.build_output import load_build_output, validate_build_output
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_options import output_options, verbose_option
 
@@ -44,7 +45,8 @@ def build_output_group() -> None:
 
     \b
     Subcommands:
-      validate  Check build-output.json + its referenced artifacts.
+      validate            Check build-output.json + its referenced artifacts.
+      baseline-libraries  Derive actions/baseline's libraries JSON input.
     """
 
 
@@ -101,6 +103,59 @@ def build_output_validate_cmd(
             lines.append(f"{len(report.warnings)} warning(s):")
             lines.extend(f"  - {w}" for w in report.warnings)
         text = "\n".join(lines)
+
+    if output is not None:
+        _safe_write_output(output, text)
+    else:
+        click.echo(text)
+
+    sys.exit(0 if report.ok else 1)
+
+
+@build_output_group.command("baseline-libraries")
+@click.argument(
+    "directory",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+)
+@output_options(
+    ["json"],
+    default="json",
+    format_help="Output format (json only today).",
+)
+@verbose_option
+def build_output_baseline_libraries_cmd(
+    directory: Path,
+    fmt: str,
+    output: Path | None,
+    verbose: bool,
+) -> None:
+    """Derive actions/baseline's ``libraries`` JSON input from DIRECTORY's
+    build-output.json (G30 P1.6, ADR-047 §6/§8 S14 correction).
+
+    One entry per build-output.json target, with ``stage_binary: true`` for
+    any target that is a release-bundle member (``target.bundle`` set) --
+    bundle-scoped analysis reads real ELF binaries and skips a bundle
+    baseline's ``.abicheck.json`` snapshots outright, so a bundle member's
+    binary must be staged too. Prints ``{"ok", "entries", "errors"}``
+    (:class:`~abicheck.buildsource.baseline_publish.BaselineLibrariesReport`);
+    ``entries`` alone is the array to pass as ``actions/baseline``'s
+    ``libraries`` input.
+
+    \b
+    Exit codes:
+      0   Every target resolved -- no errors.
+      1   One or more targets could not be resolved (see "errors").
+      64  Usage error (DIRECTORY is not a readable build-output.json).
+    """
+    _setup_verbosity(verbose)
+
+    try:
+        build_output = load_build_output(directory)
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    report = derive_baseline_libraries(build_output, directory)
+    text = json.dumps(report.to_dict(), indent=2)
 
     if output is not None:
         _safe_write_output(output, text)

@@ -41,6 +41,24 @@ Aggregate per-target ABI reports in REPORTS_DIR into one CI gate verdict.
 
 Validate a project-produced ``abicheck-build/`` directory.
 
+### `build-output baseline-libraries`
+
+Derive actions/baseline's ``libraries`` JSON input from DIRECTORY's build-output.json (G30 P1.6, ADR-047 §6/§8 S14 correction).
+
+**Arguments**
+
+| Name | Required | Description |
+|---|:--:|---|
+| `directory` | yes |  |
+
+**Options**
+
+| Option | Required | Default | Description |
+|---|:--:|---|---|
+| `--format` | no | `json` | Output format (json only today). Choices: `json`. |
+| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
+
 ### `build-output validate`
 
 Validate DIRECTORY's build-output.json (ADR-047 §11.1).
@@ -93,6 +111,7 @@ Compare two ABI surfaces and report changes.
 | `--version` | no | — | Version label used when an input is a bare .so file. Scope to one side with an 'old='/'new=' prefix, repeating the flag per side (e.g. --version old=1.0 --version new=2.0); a bare value applies to both. Defaults: old side 'old', new side 'new' (ADR-040). |
 | `--ast-frontend` | no | `auto` | C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) or clang (-ast-dump=json; for hosts where castxml is absent or its bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges them (dumper\_hybrid.merge\_snapshots) — needs both tools installed and costs roughly 2x a single-backend dump; never selected by auto. auto resolves to castxml (or the ABICHECK\_AST\_FRONTEND pin) and never changes producer unless --allow-ast-frontend-fallback (or ABICHECK\_ALLOW\_AST\_FALLBACK=1) is explicitly set. Env: ABICHECK\_AST\_FRONTEND. Choices: `auto`, `castxml`, `clang`, `hybrid`. |
 | `--allow-ast-frontend-fallback` | no | `False` | Allow auto-selected CastXML to fall back to Clang for a recognized toolchain mismatch or direct-include guard. Disabled by default because the frontends can produce materially different findings. |
+| `--allow-unsupported-castxml` | no | `False` | Proceed with a CastXML build outside the supported version range (castxml\_policy.MIN\_CASTXML/MAX\_CASTXML/MIN\_CASTXML\_CLANG\_MAJOR) instead of aborting the scan before headers are parsed. Exploratory-mode-only: the resulting snapshot's ast\_toolchain\_supported is recorded as false with ast\_toolchain\_unsupported\_reasons, so it is never mistaken for a normal supported scan and cannot become a new strict baseline without a further explicit acknowledgment. |
 | `--gcc-path` | no | — | Path to a GCC/G++ (or clang) cross-compiler binary. |
 | `--gcc-prefix` | no | — | Cross-toolchain prefix (e.g. aarch64-linux-gnu-). |
 | `--gcc-options` | no | — | Extra compiler flags passed through to the header frontend (split on whitespace). For a flag whose value contains spaces use --gcc-option. |
@@ -329,6 +348,7 @@ Dump ABI snapshot of a shared library to JSON.
 | `--depth` | no | — | Evidence-depth dial (same vocabulary as `compare`/`scan --depth`): binary=symbols only, headers=+header AST (default), build=+build context, source=+source replay & call graph. |
 | `--ast-frontend` | no | `auto` | C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) or clang (-ast-dump=json; for hosts where castxml is absent or its bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges them (dumper\_hybrid.merge\_snapshots) — needs both tools installed and costs roughly 2x a single-backend dump; never selected by auto. auto resolves to castxml (or the ABICHECK\_AST\_FRONTEND pin) and never changes producer unless --allow-ast-frontend-fallback (or ABICHECK\_ALLOW\_AST\_FALLBACK=1) is explicitly set. Env: ABICHECK\_AST\_FRONTEND. Choices: `auto`, `castxml`, `clang`, `hybrid`. |
 | `--allow-ast-frontend-fallback` | no | `False` | Allow auto-selected CastXML to fall back to Clang for a recognized toolchain mismatch or direct-include guard. Disabled by default because the frontends can produce materially different findings. |
+| `--allow-unsupported-castxml` | no | `False` | Proceed with a CastXML build outside the supported version range (castxml\_policy.MIN\_CASTXML/MAX\_CASTXML/MIN\_CASTXML\_CLANG\_MAJOR) instead of aborting the scan before headers are parsed. Exploratory-mode-only: the resulting snapshot's ast\_toolchain\_supported is recorded as false with ast\_toolchain\_unsupported\_reasons, so it is never mistaken for a normal supported scan and cannot become a new strict baseline without a further explicit acknowledgment. |
 | `--gcc-path` | no | — | Path to a GCC/G++ (or clang) cross-compiler binary. |
 | `--gcc-prefix` | no | — | Cross-toolchain prefix (e.g. aarch64-linux-gnu-). |
 | `--gcc-options` | no | — | Extra compiler flags passed through to the header frontend (split on whitespace). For a flag whose value contains spaces use --gcc-option. |
@@ -437,6 +457,7 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 | `--ast-frontend` | no | `auto` | C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) or clang (-ast-dump=json; for hosts where castxml is absent or its bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges them (dumper\_hybrid.merge\_snapshots) — needs both tools installed and costs roughly 2x a single-backend dump; never selected by auto. auto resolves to castxml (or the ABICHECK\_AST\_FRONTEND pin) and never changes producer unless --allow-ast-frontend-fallback (or ABICHECK\_ALLOW\_AST\_FALLBACK=1) is explicitly set. Env: ABICHECK\_AST\_FRONTEND. Choices: `auto`, `castxml`, `clang`, `hybrid`. |
 | `--allow-ast-frontend-fallback` | no | `False` | Allow auto-selected CastXML to fall back to Clang for a recognized toolchain mismatch or direct-include guard. Disabled by default because the frontends can produce materially different findings. |
+| `--allow-unsupported-castxml` | no | `False` | Proceed with a CastXML build outside the supported version range (castxml\_policy.MIN\_CASTXML/MAX\_CASTXML/MIN\_CASTXML\_CLANG\_MAJOR) instead of aborting the scan before headers are parsed. Exploratory-mode-only: the resulting snapshot's ast\_toolchain\_supported is recorded as false with ast\_toolchain\_unsupported\_reasons, so it is never mistaken for a normal supported scan and cannot become a new strict baseline without a further explicit acknowledgment. |
 | `--gcc-path` | no | — | Path to a GCC/G++ (or clang) cross-compiler binary. |
 | `--gcc-prefix` | no | — | Cross-toolchain prefix (e.g. aarch64-linux-gnu-). |
 | `--gcc-options` | no | — | Extra compiler flags passed through to the header frontend (split on whitespace). For a flag whose value contains spaces use --gcc-option. |

@@ -52,13 +52,22 @@ With less input, abicheck degrades gracefully *down the staircase* rather than f
 
 ## Installation
 
+**Full installation (recommended)** — conda-forge bundles `abicheck` with `castxml` and a compiler, so header AST analysis (L2) works out of the box:
+
 ```bash
-pip install abicheck
-# or
-conda install -c conda-forge abicheck
+conda create -n abicheck -c conda-forge python=3.12 abicheck
+conda activate abicheck
 ```
 
-`abicheck` also needs `castxml` and a C++ compiler for header AST analysis (the conda-forge package pulls these in automatically). Without them, abicheck still works in binary-only mode. See [Getting Started](https://abicheck.github.io/abicheck/getting-started/) for per-platform setup and cross-compilation.
+**Lightweight/core installation** — the PyPI package is pure Python with no native scanner dependency:
+
+```bash
+pip install abicheck
+```
+
+`pip install abicheck` does **not** install `castxml` or a compiler. Without them, abicheck still works in binary-only (L0) and, where the Python DWARF/PDB parsers apply, debug-info (L1) mode — it can also load and compare pre-built snapshots, and run every report format. For header AST analysis (L2) on a pip install, point `abicheck` at a separately managed, modern `castxml`/direct-Clang toolchain — **don't** `pip install castxml`: that installs the unmaintained legacy PyPI distribution (last released 0.4.5 in 2018), which abicheck's version gate rejects by default for an authoritative L2 scan.
+
+See [Getting Started](https://abicheck.github.io/abicheck/getting-started/) for per-platform setup and cross-compilation.
 
 > **Naming note:** the PyPI/conda-forge package (`abicheck`) is distinct from the older SourceForge `abicheck` that is still packaged by some Linux distributions, and from similarly named ABI tools such as `abi-compliance-checker` wrappers or Fedora's `libabigail-tools`. Run `abicheck --version` to confirm — it should print `abicheck X.Y.Z (abicheck/abicheck)`. If there is a conflict, invoke via `python -m abicheck`.
 

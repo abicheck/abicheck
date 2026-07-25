@@ -128,7 +128,21 @@ from .model import (
 #     PR no real producer populates ``contract`` yet (``dumper.py`` wiring
 #     is separate, later work), so there is no snapshot in the wild today
 #     for an old reader to mis-handle.
-SCHEMA_VERSION: int = 14
+# v15: `AbiSnapshot.ast_resolved_standard` / `ast_cplusplus_macro` /
+#     `ast_compile_args` / `ast_sysroot` — structured compile-context
+#     provenance for the header-AST parse (P1 toolchain-profile audit):
+#     the resolved C/C++ standard actually used (explicit or heuristic-forced
+#     "gnu++20"), its standard-mandated `__cplusplus` literal, the ordered
+#     extra compiler arguments, and the sysroot. Purely additive (not
+#     verdict-blocking like v14's `contract`): a pre-v15 reader loads all
+#     four as their defaults (None / None / () / None), i.e. "not recorded"
+#     — never mistaken for "the frontend's bare default was explicitly
+#     confirmed". Bumped to v15 rather than folded into v14 because v14
+#     (ADR-050 D1's `contract`) had already shipped on `main` independently
+#     of this work; reusing the same integer for two unrelated additions
+#     would make "schema_version 14" ambiguous about which fields a given
+#     snapshot actually carries.
+SCHEMA_VERSION: int = 15
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -925,6 +939,22 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         if isinstance(raw_ast_unsupported_reasons, list)
         else []
     )
+    raw_resolved_standard = d.get("ast_resolved_standard")
+    ast_resolved_standard = (
+        raw_resolved_standard if isinstance(raw_resolved_standard, str) else None
+    )
+    raw_cplusplus_macro = d.get("ast_cplusplus_macro")
+    ast_cplusplus_macro = (
+        raw_cplusplus_macro if isinstance(raw_cplusplus_macro, str) else None
+    )
+    raw_compile_args = d.get("ast_compile_args")
+    ast_compile_args = (
+        tuple(str(a) for a in raw_compile_args)
+        if isinstance(raw_compile_args, (list, tuple))
+        else ()
+    )
+    raw_ast_sysroot = d.get("ast_sysroot")
+    ast_sysroot = raw_ast_sysroot if isinstance(raw_ast_sysroot, str) else None
     if "header_cv_facts_reliable" in d:
         # Trust an explicit marker over re-deriving from schema_version: a
         # load -> snapshot_to_dict -> (save) -> load round-trip always
@@ -985,6 +1015,10 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         ast_fallback_reason=ast_fallback_reason,
         ast_toolchain_supported=ast_toolchain_supported,
         ast_toolchain_unsupported_reasons=ast_toolchain_unsupported_reasons,
+        ast_resolved_standard=ast_resolved_standard,
+        ast_cplusplus_macro=ast_cplusplus_macro,
+        ast_compile_args=ast_compile_args,
+        ast_sysroot=ast_sysroot,
         # See header_cv_facts_reliable_value's computation above: prefers an
         # explicit dict key (round-trip stability) and otherwise derives
         # from schema_version scoped to the CastXML header path specifically

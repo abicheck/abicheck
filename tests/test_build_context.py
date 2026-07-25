@@ -48,10 +48,14 @@ def compile_db_dir(tmp_path: Path) -> Path:
             "directory": str(tmp_path / "build"),
             "file": "src/foo.cpp",
             "arguments": [
-                "c++", "-std=c++17", "-DFOO_ENABLE_SSL=1",
-                "-I/usr/include/openssl", "-Iinclude",
+                "c++",
+                "-std=c++17",
+                "-DFOO_ENABLE_SSL=1",
+                "-I/usr/include/openssl",
+                "-Iinclude",
                 "-fvisibility=hidden",
-                "-c", "src/foo.cpp",
+                "-c",
+                "src/foo.cpp",
             ],
         },
         {
@@ -120,7 +124,11 @@ class TestLoadCompileDb:
     def test_malformed_entry_skipped(self, tmp_path: Path) -> None:
         """Malformed entries are skipped with a warning."""
         db = [
-            {"directory": str(tmp_path), "file": "ok.c", "arguments": ["cc", "-c", "ok.c"]},
+            {
+                "directory": str(tmp_path),
+                "file": "ok.c",
+                "arguments": ["cc", "-c", "ok.c"],
+            },
             "not a dict",  # malformed
         ]
         f = tmp_path / "compile_commands.json"
@@ -235,15 +243,25 @@ class TestExtractFlags:
 
     def test_isysroot(self) -> None:
         """macOS -isysroot is captured as sysroot."""
-        ctx = _extract_flags(["-isysroot", "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"], Path("/"))
-        assert ctx.sysroot == Path("/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
+        ctx = _extract_flags(
+            [
+                "-isysroot",
+                "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+            ],
+            Path("/"),
+        )
+        assert ctx.sysroot == Path(
+            "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+        )
 
     def test_visibility(self) -> None:
         ctx = _extract_flags(["-fvisibility=hidden"], Path("/"))
         assert "-fvisibility=hidden" in ctx.extra_flags
 
     def test_abi_flags(self) -> None:
-        ctx = _extract_flags(["-fabi-version=14", "-fno-exceptions", "-fno-rtti"], Path("/"))
+        ctx = _extract_flags(
+            ["-fabi-version=14", "-fno-exceptions", "-fno-rtti"], Path("/")
+        )
         assert "-fabi-version=14" in ctx.extra_flags
         assert "-fno-exceptions" in ctx.extra_flags
         assert "-fno-rtti" in ctx.extra_flags
@@ -255,6 +273,36 @@ class TestExtractFlags:
     def test_ms_extensions(self) -> None:
         ctx = _extract_flags(["-fms-extensions"], Path("/"))
         assert "-fms-extensions" in ctx.extra_flags
+
+    def test_stdlib(self) -> None:
+        ctx = _extract_flags(["-stdlib=libc++"], Path("/"))
+        assert "-stdlib=libc++" in ctx.extra_flags
+
+    def test_data_model_flags(self) -> None:
+        """-m32/-m64 (target data model) reach the real header parse, not just
+        the separate build-evidence-drift diff (P0/P1 toolchain-profile fix)."""
+        ctx = _extract_flags(["-m32"], Path("/"))
+        assert "-m32" in ctx.extra_flags
+        ctx = _extract_flags(["-m64"], Path("/"))
+        assert "-m64" in ctx.extra_flags
+
+    def test_march_mtune_mabi_mfloat_abi(self) -> None:
+        ctx = _extract_flags(
+            ["-march=armv8-a", "-mtune=cortex-a72", "-mabi=lp64", "-mfloat-abi=hard"],
+            Path("/"),
+        )
+        assert "-march=armv8-a" in ctx.extra_flags
+        assert "-mtune=cortex-a72" in ctx.extra_flags
+        assert "-mabi=lp64" in ctx.extra_flags
+        assert "-mfloat-abi=hard" in ctx.extra_flags
+
+    def test_enum_and_char_layout_flags(self) -> None:
+        ctx = _extract_flags(
+            ["-fshort-enums", "-fsigned-char", "-fshort-wchar"], Path("/")
+        )
+        assert "-fshort-enums" in ctx.extra_flags
+        assert "-fsigned-char" in ctx.extra_flags
+        assert "-fshort-wchar" in ctx.extra_flags
 
     def test_skip_flags_with_arg(self) -> None:
         """Flags in _FLAGS_WITH_ARG that we don't care about are skipped."""
@@ -409,21 +457,33 @@ class TestUnionFallback:
         assert not ctx.defines
 
     def test_conflicting_defines(self) -> None:
-        e1 = CompileEntry(file=Path("/a.cpp"), directory=Path("/"), arguments=["-DFOO=1"])
-        e2 = CompileEntry(file=Path("/b.cpp"), directory=Path("/"), arguments=["-DFOO=2"])
+        e1 = CompileEntry(
+            file=Path("/a.cpp"), directory=Path("/"), arguments=["-DFOO=1"]
+        )
+        e2 = CompileEntry(
+            file=Path("/b.cpp"), directory=Path("/"), arguments=["-DFOO=2"]
+        )
         ctx = build_context_union_fallback([e1, e2])
         assert "FOO" in ctx.defines
         assert ctx.define_conflicts  # conflict tracked
 
     def test_dedup_include_paths(self) -> None:
-        e1 = CompileEntry(file=Path("/a.cpp"), directory=Path("/"), arguments=["-I/inc"])
-        e2 = CompileEntry(file=Path("/b.cpp"), directory=Path("/"), arguments=["-I/inc"])
+        e1 = CompileEntry(
+            file=Path("/a.cpp"), directory=Path("/"), arguments=["-I/inc"]
+        )
+        e2 = CompileEntry(
+            file=Path("/b.cpp"), directory=Path("/"), arguments=["-I/inc"]
+        )
         ctx = build_context_union_fallback([e1, e2])
         assert len(ctx.include_paths) == 1
 
     def test_dedup_system_includes(self) -> None:
-        e1 = CompileEntry(file=Path("/a.cpp"), directory=Path("/"), arguments=["-isystem/sys"])
-        e2 = CompileEntry(file=Path("/b.cpp"), directory=Path("/"), arguments=["-isystem/sys"])
+        e1 = CompileEntry(
+            file=Path("/a.cpp"), directory=Path("/"), arguments=["-isystem/sys"]
+        )
+        e2 = CompileEntry(
+            file=Path("/b.cpp"), directory=Path("/"), arguments=["-isystem/sys"]
+        )
         ctx = build_context_union_fallback([e1, e2])
         assert len(ctx.system_includes) == 1
 
@@ -435,21 +495,33 @@ class TestUnionFallback:
         assert "BAR" in ctx.undefines
 
     def test_conflicting_targets(self) -> None:
-        e1 = CompileEntry(file=Path("/a.cpp"), directory=Path("/"), arguments=["--target=x86_64"])
-        e2 = CompileEntry(file=Path("/b.cpp"), directory=Path("/"), arguments=["--target=aarch64"])
+        e1 = CompileEntry(
+            file=Path("/a.cpp"), directory=Path("/"), arguments=["--target=x86_64"]
+        )
+        e2 = CompileEntry(
+            file=Path("/b.cpp"), directory=Path("/"), arguments=["--target=aarch64"]
+        )
         ctx = build_context_union_fallback([e1, e2])
         # Conflict: target is None
         assert ctx.target_triple is None
 
     def test_conflicting_sysroots(self) -> None:
-        e1 = CompileEntry(file=Path("/a.cpp"), directory=Path("/"), arguments=["--sysroot=/a"])
-        e2 = CompileEntry(file=Path("/b.cpp"), directory=Path("/"), arguments=["--sysroot=/b"])
+        e1 = CompileEntry(
+            file=Path("/a.cpp"), directory=Path("/"), arguments=["--sysroot=/a"]
+        )
+        e2 = CompileEntry(
+            file=Path("/b.cpp"), directory=Path("/"), arguments=["--sysroot=/b"]
+        )
         ctx = build_context_union_fallback([e1, e2])
         assert ctx.sysroot is None
 
     def test_dedup_extra_flags(self) -> None:
-        e1 = CompileEntry(file=Path("/a.cpp"), directory=Path("/"), arguments=["-fvisibility=hidden"])
-        e2 = CompileEntry(file=Path("/b.cpp"), directory=Path("/"), arguments=["-fvisibility=hidden"])
+        e1 = CompileEntry(
+            file=Path("/a.cpp"), directory=Path("/"), arguments=["-fvisibility=hidden"]
+        )
+        e2 = CompileEntry(
+            file=Path("/b.cpp"), directory=Path("/"), arguments=["-fvisibility=hidden"]
+        )
         ctx = build_context_union_fallback([e1, e2])
         assert ctx.extra_flags.count("-fvisibility=hidden") == 1
 
@@ -467,8 +539,12 @@ class TestUnionFallback:
         assert "FOO_ENABLE_SSL" in ctx.defines
 
     def test_standard_variants_tracked(self) -> None:
-        e1 = CompileEntry(file=Path("/a.cpp"), directory=Path("/"), arguments=["-std=c++17"])
-        e2 = CompileEntry(file=Path("/b.cpp"), directory=Path("/"), arguments=["-std=c++20"])
+        e1 = CompileEntry(
+            file=Path("/a.cpp"), directory=Path("/"), arguments=["-std=c++17"]
+        )
+        e2 = CompileEntry(
+            file=Path("/b.cpp"), directory=Path("/"), arguments=["-std=c++20"]
+        )
         ctx = build_context_union_fallback([e1, e2])
         assert len(ctx.standard_variants) == 2
 
@@ -577,7 +653,9 @@ class TestSysrootRelativeResolution:
         """_try_consume_sysroot helper resolves relative paths against directory."""
         directory = Path("/build")
         ctx = BuildContext()
-        new_i = _try_consume_sysroot("--sysroot=sdk", ["--sysroot=sdk"], 0, directory, ctx)
+        new_i = _try_consume_sysroot(
+            "--sysroot=sdk", ["--sysroot=sdk"], 0, directory, ctx
+        )
         assert new_i == 1
         assert ctx.sysroot == Path("/build/sdk")
 
@@ -585,7 +663,9 @@ class TestSysrootRelativeResolution:
         """_try_consume_sysroot split form resolves relative paths against directory."""
         directory = Path("/build")
         ctx = BuildContext()
-        new_i = _try_consume_sysroot("--sysroot", ["--sysroot", "sdk"], 0, directory, ctx)
+        new_i = _try_consume_sysroot(
+            "--sysroot", ["--sysroot", "sdk"], 0, directory, ctx
+        )
         assert new_i == 2
         assert ctx.sysroot == Path("/build/sdk")
 

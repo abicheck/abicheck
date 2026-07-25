@@ -569,6 +569,28 @@ class AbiSnapshot:
         default_factory=list, kw_only=True
     )
 
+    # Structured compile-context provenance (schema v15, P1 toolchain-profile
+    # audit). None/() on a pre-v15 snapshot and on any snapshot not built from
+    # a header-AST parse (DWARF/symbols-only, PE/Mach-O without headers) — the
+    # same conservative "unknown, don't guess" default every other tri-state
+    # provenance field here uses.
+    #
+    # The resolved C/C++ standard actually used for the header parse: an
+    # explicit -std=/--std=/std: value verbatim, or "gnu++20" when the
+    # requires/concept heuristic forced it (dumper.py's force_cpp20 path) —
+    # never a guess at the frontend's own unpinned default.
+    ast_resolved_standard: str | None = field(default=None, kw_only=True)
+    # The __cplusplus literal mandated by ast_resolved_standard (e.g.
+    # "201703L" for "gnu++17"), looked up from a static ISO-standard table —
+    # None when ast_resolved_standard is unset or not a recognized C++ edition.
+    ast_cplusplus_macro: str | None = field(default=None, kw_only=True)
+    # The ordered extra compiler arguments passed to the header frontend
+    # (--gcc-option tokens, then a shlex-split --gcc-options) — the exact
+    # argv tail, for reproducibility and fingerprinting.
+    ast_compile_args: tuple[str, ...] = field(default_factory=tuple, kw_only=True)
+    # The --sysroot passed to the header frontend, if any.
+    ast_sysroot: str | None = field(default=None, kw_only=True)
+
     # G28 Phase 3 — per-fact producer provenance for a "hybrid" snapshot only
     # (empty for every ordinary single-backend snapshot; ``ast_producer`` alone
     # already answers the question there). Keyed by the stable strings built by
@@ -722,7 +744,7 @@ class AbiSnapshot:
         default_factory=dict, kw_only=True
     )
 
-    # ADR-050 D1 (schema v12) — profile/scope fingerprints proving this
+    # ADR-050 D1 (schema v14) — profile/scope fingerprints proving this
     # snapshot's extraction contract, checked by
     # ``comparability.check_contracts_comparable`` before a compare is
     # allowed to produce a verdict. None on every snapshot predating this

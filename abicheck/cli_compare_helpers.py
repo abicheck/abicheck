@@ -59,6 +59,7 @@ from .cli_compare_fold import (
 from .cli_dump_helpers import resolve_dump_depth
 from .cli_helpers_compare import (
     _collect_force_public_symbols,
+    _pair_wide_dialect_override,
     _resolve_per_side_options,
     _warn_ignored_flags,
     fold_l0_hard_removals,
@@ -1339,6 +1340,14 @@ def run_compare(
     if config_includes:
         old_inc = list(old_inc) + list(config_includes)
         new_inc = list(new_inc) + list(config_includes)
+
+    # Pair-wide C++20 dialect resolution (P0 fix) — see
+    # cli_helpers_compare._pair_wide_dialect_override's docstring. Applied to
+    # both `compile_context` (used by the inline-source-embed path below) and
+    # `side_compile_context` (used by `_resolve_compare_snapshots`).
+    compile_context, side_compile_context = _pair_wide_dialect_override(
+        lang, old_h, new_h, compile_context, side_compile_context
+    )
 
     # Preserve the original library paths from before any inline-embed rewrite
     # below, for --used-by/--required-symbol scoping (which needs the real

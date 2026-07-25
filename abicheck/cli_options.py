@@ -261,40 +261,60 @@ def release_input_options(func: F) -> F:
     count against any flag budget or option-set snapshot.
     """
     func = click.option(
-        "--new-version", "new_version", default="new", show_default=True,
+        "--new-version",
+        "new_version",
+        default="new",
+        show_default=True,
         help="Version label for new side (used when input is a .so file).",
     )(func)
     func = click.option(
-        "--old-version", "old_version", default="old", show_default=True,
+        "--old-version",
+        "old_version",
+        default="old",
+        show_default=True,
         help="Version label for old side (used when input is a .so file).",
     )(func)
     func = click.option(
-        "--new-include", "new_includes_only", multiple=True,
+        "--new-include",
+        "new_includes_only",
+        multiple=True,
         type=click.Path(path_type=Path),
         help="Include dir for new side only.",
     )(func)
     func = click.option(
-        "--old-include", "old_includes_only", multiple=True,
+        "--old-include",
+        "old_includes_only",
+        multiple=True,
         type=click.Path(path_type=Path),
         help="Include dir for old side only.",
     )(func)
     func = click.option(
-        "--new-header", "new_headers_only", multiple=True,
+        "--new-header",
+        "new_headers_only",
+        multiple=True,
         type=click.Path(path_type=Path),
         help="Public header for new side only.",
     )(func)
     func = click.option(
-        "--old-header", "old_headers_only", multiple=True,
+        "--old-header",
+        "old_headers_only",
+        multiple=True,
         type=click.Path(path_type=Path),
         help="Public header for old side only.",
     )(func)
     func = click.option(
-        "-I", "--include", "includes", multiple=True,
+        "-I",
+        "--include",
+        "includes",
+        multiple=True,
         type=click.Path(path_type=Path),
         help="Extra include directory (both sides).",
     )(func)
     func = click.option(
-        "-H", "--header", "headers", multiple=True,
+        "-H",
+        "--header",
+        "headers",
+        multiple=True,
         type=click.Path(path_type=Path),
         help="Public header file or directory (both sides).",
     )(func)
@@ -456,23 +476,43 @@ def lang_option(
     return deco if func is None else deco(func)
 
 
-def _enable_ast_fallback_for_command(
-    ctx: click.Context, _param: click.Parameter, value: bool,
-) -> None:
-    """Scope the explicit fallback opt-in to one Click command invocation."""
-    if not value:
+def _scoped_env_flag_callback(
+    env_var: str,
+) -> Callable[[click.Context, click.Parameter, bool], None]:
+    """Build a Click callback that sets *env_var* to ``"1"`` for one command
+    invocation, restoring (or unsetting) it via ``ctx.call_on_close``.
+
+    Shared by ``--allow-ast-frontend-fallback``/``ABICHECK_ALLOW_AST_FALLBACK``
+    and ``--allow-unsupported-castxml``/``ABICHECK_ALLOW_UNSUPPORTED_CASTXML``
+    — both are "explicit, invocation-scoped opt-in past a hard-fail gate" env
+    vars with an identical set/restore shape, so a real CLI flag for either
+    reduces to just naming the env var here.
+    """
+
+    def _callback(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+        if not value:
+            return None
+        previous = os.environ.get(env_var)
+        os.environ[env_var] = "1"
+
+        def _restore() -> None:
+            if previous is None:
+                os.environ.pop(env_var, None)
+            else:
+                os.environ[env_var] = previous
+
+        ctx.call_on_close(_restore)
         return None
-    previous = os.environ.get("ABICHECK_ALLOW_AST_FALLBACK")
-    os.environ["ABICHECK_ALLOW_AST_FALLBACK"] = "1"
 
-    def _restore() -> None:
-        if previous is None:
-            os.environ.pop("ABICHECK_ALLOW_AST_FALLBACK", None)
-        else:
-            os.environ["ABICHECK_ALLOW_AST_FALLBACK"] = previous
+    return _callback
 
-    ctx.call_on_close(_restore)
-    return None
+
+_enable_ast_fallback_for_command = _scoped_env_flag_callback(
+    "ABICHECK_ALLOW_AST_FALLBACK"
+)
+_enable_unsupported_castxml_for_command = _scoped_env_flag_callback(
+    "ABICHECK_ALLOW_UNSUPPORTED_CASTXML"
+)
 
 
 def compile_context_options(func: F) -> F:
@@ -530,6 +570,20 @@ def compile_context_options(func: F) -> F:
         "gcc_path",
         default=None,
         help="Path to a GCC/G++ (or clang) cross-compiler binary.",
+    )(func)
+    func = click.option(
+        "--allow-unsupported-castxml",
+        is_flag=True,
+        expose_value=False,
+        envvar="ABICHECK_ALLOW_UNSUPPORTED_CASTXML",
+        callback=_enable_unsupported_castxml_for_command,
+        help="Proceed with a CastXML build outside the supported version range "
+        "(castxml_policy.MIN_CASTXML/MAX_CASTXML/MIN_CASTXML_CLANG_MAJOR) instead "
+        "of aborting the scan before headers are parsed. Exploratory-mode-only: "
+        "the resulting snapshot's ast_toolchain_supported is recorded as false "
+        "with ast_toolchain_unsupported_reasons, so it is never mistaken for a "
+        "normal supported scan and cannot become a new strict baseline without a "
+        "further explicit acknowledgment.",
     )(func)
     func = click.option(
         "--allow-ast-frontend-fallback",
@@ -1473,6 +1527,14 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "for this one invocation. Whether a given OLD/NEW pair happens to be "
         "incomparable varies per run, not a stable project setting."
     ),
+    "--allow-unsupported-castxml": (
+        "Explicitly permits proceeding with a CastXML build outside "
+        "castxml_policy's supported version range for this one invocation "
+        "instead of aborting before headers are parsed. Same category as "
+        "--allow-ast-frontend-fallback: an invocation-specific risk decision "
+        "(exploratory-mode reproduction of a legacy toolchain), not a stable "
+        "project default."
+    ),
 }
 
 #: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.
@@ -1539,6 +1601,7 @@ COMPARE_PROFILES: dict[str, dict[str, object]] = {
         "stat": True,
     },
 }
+
 
 def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
     """True when the ``compare`` operands are a directory/package (set) input.
