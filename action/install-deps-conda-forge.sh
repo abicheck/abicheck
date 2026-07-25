@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Install system dependencies for abicheck via the conda-forge `scanner` pixi
-# environment (pyproject.toml's [tool.pixi.feature.native-toolchain]) instead
-# of the system/checksum-pinned-Superbuild path (install-deps.sh). Called by
-# the composite action when dependency-source=conda-forge.
+# Install system dependencies for abicheck via one of the conda-forge pixi
+# environments in pyproject.toml (scanner / gcc14 / clang20 -- selected by
+# $ABICHECK_PIXI_ENV, set by action.yml from the resolved dependency-source)
+# instead of the system/checksum-pinned-Superbuild path (install-deps.sh).
+# Called by the composite action when dependency-source starts with
+# "conda-forge".
 #
 # Prepending the whole pixi environment's bin/ directory to PATH would also
 # put its own `python`/`python3` ahead of whatever actions/setup-python
@@ -16,13 +18,15 @@
 # unaffected.
 set -euo pipefail
 
-echo "::group::Install system dependencies for abicheck (conda-forge)"
+pixi_env="${ABICHECK_PIXI_ENV:-scanner}"
+
+echo "::group::Install system dependencies for abicheck (conda-forge, pixi env: ${pixi_env})"
 
 action_dir="$(cd "$(dirname "$0")/.." && pwd)"
-pixi_env_bin="${action_dir}/.pixi/envs/scanner/bin"
+pixi_env_bin="${action_dir}/.pixi/envs/${pixi_env}/bin"
 
 if [ ! -d "$pixi_env_bin" ]; then
-  echo "::error::pixi 'scanner' environment not found at ${pixi_env_bin}." \
+  echo "::error::pixi '${pixi_env}' environment not found at ${pixi_env_bin}." \
     "The 'Set up pixi (conda-forge)' step must run before this script."
   exit 1
 fi
@@ -30,9 +34,20 @@ fi
 shim_dir="${RUNNER_TEMP:-/tmp}/abicheck-conda-forge-bin"
 mkdir -p "$shim_dir"
 
-# Only the tools the conda-forge native-toolchain feature actually
-# provisions (castxml + a C/C++ compiler) -- deliberately not python/pip/etc.
-for tool in castxml gcc g++ cc c++ gcc-ar gcc-nm gcc-ranlib; do
+# Only the compiler/scanner tools each environment's pixi feature actually
+# provisions -- deliberately not python/pip/etc. gcc14 and the default
+# scanner environment (native-toolchain's unbound c-compiler/cxx-compiler)
+# both resolve to the same gcc-family binary names today; clang20 is a
+# distinct clang-family tool list.
+case "$pixi_env" in
+  clang20)
+    tools=(castxml clang clang++)
+    ;;
+  *)
+    tools=(castxml gcc g++ cc c++ gcc-ar gcc-nm gcc-ranlib)
+    ;;
+esac
+for tool in "${tools[@]}"; do
   if [ -x "${pixi_env_bin}/${tool}" ]; then
     ln -sf "${pixi_env_bin}/${tool}" "${shim_dir}/${tool}"
   fi
@@ -47,16 +62,16 @@ echo "::endgroup::"
 if command -v castxml &> /dev/null; then
   echo "castxml version: $(castxml --version 2>&1 | head -1)"
 else
-  echo "::warning::castxml not found in the conda-forge scanner environment. Header analysis will not be available."
+  echo "::warning::castxml not found in the conda-forge ${pixi_env} environment. Header analysis will not be available."
   echo "Binary-only mode (exports/imports) will still work."
 fi
 
 if command -v clang &> /dev/null; then
   echo "clang version: $(clang --version 2>&1 | head -1)"
 else
-  echo "::notice::clang not found in the conda-forge scanner environment. Source-ABI replay (L4) and source graphs (L5)"
+  echo "::notice::clang not found in the conda-forge ${pixi_env} environment. Source-ABI replay (L4) and source graphs (L5)"
   echo "used by 'scan --sources' will be skipped; abicheck degrades gracefully (L0-L2 stay authoritative)."
-  echo "Use dependency-source=system (or install clang manually) to enable source scanning."
+  echo "Use dependency-source=conda-forge-clang20 (or =system, or install clang manually) to enable source scanning."
 fi
 
 if command -v bear &> /dev/null; then

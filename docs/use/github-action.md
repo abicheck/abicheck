@@ -155,9 +155,9 @@ Reference](../reference/github-action-inputs.md) for the exact wording.
 These inputs drive [source intelligence](../learn/build-source-data.md) —
 L3 build context, L4 source-ABI replay, and L5 source graphs — through the
 `scan` orchestrator, or fold the same evidence into a `dump` snapshot. L4/L5
-need `clang` (installed automatically by `dependency-source: system`, the
-default — the `conda-forge` dependency source doesn't provision clang yet);
-without it the scan degrades gracefully and L0–L2 stay authoritative.
+need `clang` (installed automatically by `dependency-source: system` or
+`conda-forge-clang20` — plain `conda-forge`, the default, doesn't provision
+clang); without it the scan degrades gracefully and L0–L2 stay authoritative.
 
 | Input | Modes | Description |
 |-------|-------|-------------|
@@ -215,8 +215,8 @@ extra-args: '--strict-suppressions --require-justification'
 | Input | Default | Description |
 |-------|---------|-------------|
 | `python-version` | `3.13` | Python version for setup-python |
-| `dependency-source` | *(unset — falls back to `install-deps`)* | How to install system dependencies: `system` (apt/Homebrew + the pinned CastXML Superbuild — current default), `conda-forge` (pixi-managed `scanner` conda-forge environment, castxml 0.7.x + a matching gcc/g++; Linux/macOS only, no clang/bear yet), or `none` (skip; dependencies must already be on `PATH`). |
-| `install-deps` | `true` | **Deprecated** — use `dependency-source` instead (kept for one release cycle; ignored if `dependency-source` is set). `true` maps to `dependency-source: system`, `false` maps to `dependency-source: none`. |
+| `dependency-source` | *(unset — falls back to `install-deps`)* | How to install system dependencies: `conda-forge` (**default**; pixi-managed `scanner` conda-forge environment — castxml 0.7.x + whichever gcc/g++ conda-forge currently resolves as default; Linux/macOS only, no clang/bear yet), `conda-forge-gcc14` / `conda-forge-clang20` (same, pinned to an exact compiler family and major version instead of whatever's currently default — `gcc14` is Linux-only, `clang20` covers both; no clang/bear on either), `system` (apt/Homebrew + the pinned CastXML Superbuild — the previous default, still available), or `none` (skip; dependencies must already be on `PATH`). |
+| `install-deps` | `true` | **Deprecated** — use `dependency-source` instead (kept for one release cycle; ignored if `dependency-source` is set). `true` (its own default too) maps to `dependency-source: conda-forge`, `false` maps to `dependency-source: none`. |
 | `upload-sarif` | `false` | Upload SARIF to GitHub Code Scanning. Requires `format: sarif` and `mode: compare`; any other combination is a hard error raised before any dependency install. |
 | `fail-on-breaking` | `true` | Fail step on binary ABI break |
 | `fail-on-api-break` | `false` | Fail step on source-level API break |
