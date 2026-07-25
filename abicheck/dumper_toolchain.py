@@ -293,7 +293,7 @@ _CPLUSPLUS_MACRO_BY_EDITION: dict[str, str] = {
 def _cplusplus_macro_for_standard(standard: str | None) -> str | None:
     """Map a resolved ``-std=``/``/std:`` value to its standard-mandated
     ``__cplusplus`` literal, or ``None`` when unrecognized (snapshot
-    provenance, schema v14)."""
+    provenance, schema v15)."""
     if not standard:
         return None
     edition = (
@@ -306,7 +306,7 @@ def _combined_option_tokens(
     gcc_options: str | None, gcc_option_tokens: tuple[str, ...]
 ) -> list[str]:
     """``gcc_option_tokens`` followed by a shlex-split ``gcc_options`` string
-    (snapshot provenance, schema v14) — the one place both forwarded-option
+    (snapshot provenance, schema v15) — the one place both forwarded-option
     spellings are merged into a single ordered token list, shared by every
     caller below so the Windows ``posix=`` heuristic can't drift between them."""
     tokens = list(gcc_option_tokens)
@@ -319,7 +319,7 @@ def _extract_explicit_std_value(
     gcc_options: str | None, gcc_option_tokens: tuple[str, ...]
 ) -> str | None:
     """Pull the literal value out of an explicit ``-std=``/``--std=``/``/std:``
-    token, or ``None`` if none is present (snapshot provenance, schema v14)."""
+    token, or ``None`` if none is present (snapshot provenance, schema v15)."""
     tokens = _combined_option_tokens(gcc_options, gcc_option_tokens)
     for token in tokens:
         t = token[1:] if token.startswith("--") else token
@@ -336,7 +336,7 @@ def _resolve_standard_provenance(
     gcc_option_tokens: tuple[str, ...],
 ) -> str | None:
     """Best-effort resolved C/C++ standard for snapshot provenance (schema
-    v14, P1 toolchain-profile audit).
+    v15, P1 toolchain-profile audit).
 
     Mirrors the exact decision ``dumper.py``'s castxml/clang command builders
     already make (``has_explicit_std`` gates the requires/concept heuristic)
@@ -368,7 +368,7 @@ def _ast_compile_provenance(
     sysroot: Path | None,
 ) -> _AstCompileProvenance:
     """Structured compile-context provenance kwargs for an ``AbiSnapshot``
-    built from a header-AST parse (schema v14). A single call site shared by
+    built from a header-AST parse (schema v15). A single call site shared by
     ``dumper.py``'s ELF/PE/Mach-O snapshot constructors so the four fields
     can never drift between them.
 

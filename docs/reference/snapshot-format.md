@@ -19,13 +19,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`14`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`15`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 14,
+  "schema_version": 15,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -39,9 +39,12 @@ embedded build/source evidence, CastXML CV-qualifier reliability, the hybrid
 AST frontend's per-fact producer map, the resolved AST toolchain identity,
 (v12) the owner class of a hidden friend (`Function.hidden_friend_owner`),
 (v13) the CastXML version-gate outcome (`ast_toolchain_supported` /
-`ast_toolchain_unsupported_reasons`), and (v14) structured compile-context
-provenance for the header-AST parse (`ast_resolved_standard`,
-`ast_cplusplus_macro`, `ast_compile_args`, `ast_sysroot`).
+`ast_toolchain_unsupported_reasons`), (v14) extraction-contract fingerprints
+proving two snapshots were compared under a comparable profile/scope
+(`AbiSnapshot.contract`, ADR-050 D1 — *verdict-blocking*: see the
+compatibility table below), and (v15) structured compile-context provenance
+for the header-AST parse (`ast_resolved_standard`, `ast_cplusplus_macro`,
+`ast_compile_args`, `ast_sysroot`).
 
 ### Forward / backward compatibility
 
@@ -52,8 +55,9 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 14`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
-| **Newer** than this build (`> 14`) | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
+| **Older or equal** to this build (`<= 15`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
+| **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
 Two consequences worth internalising:
 
@@ -61,10 +65,20 @@ Two consequences worth internalising:
   produced by an earlier abicheck loads without error against a newer abicheck;
   missing fields simply take defaults. This is what makes checked-in baselines
   durable across tool upgrades.
-- **A newer snapshot warns rather than fails.** If a teammate's newer abicheck
-  wrote a `schema_version` your build does not know, your build still loads it,
-  but emits a warning because renamed or newly-required provenance may be
-  silently dropped. Upgrade abicheck to read it faithfully.
+- **A newer snapshot usually warns rather than fails — but not once a
+  verdict-blocking field exists.** Prior to v14 every bump was purely
+  additive, so an older reader can safely ignore a field it doesn't
+  recognise. Starting at v14, `AbiSnapshot.contract` (ADR-050 D1) makes a
+  bump *verdict-blocking*: a reader that silently dropped it could compare
+  two possibly-incomparable snapshots and produce an ordinary, wrong
+  verdict. `snapshot_from_dict` therefore hard-rejects (rather than
+  warns-and-loads) any file `schema_version` that is both newer than the
+  running build's `SCHEMA_VERSION` and `>= 14`
+  (`_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION` in
+  `abicheck/serialization.py`) — this only protects readers built from that
+  guard's introduction onward; see the `SCHEMA_VERSION` history comment for
+  the full explanation of what it can and cannot retroactively protect.
+  Upgrade abicheck to read a newer snapshot faithfully.
 
 ---
 
@@ -79,7 +93,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `14`). |
+| `schema_version` | int | Snapshot format version (currently `15`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -89,12 +103,13 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 | `git_tag` | string \| null | Git tag (e.g. `v2.0.0`), supplied or auto-detected. |
 | `created_at` | string \| null | ISO 8601 timestamp set at dump time. |
 | `build_id` | string \| null | Opaque CI identifier (run ID, build number). |
+| `contract` | object \| null | ADR-050 D1 extraction-contract fingerprints (schema v14, *verdict-blocking* — see "Forward / backward compatibility" above): `profile_fingerprint`/`scope_fingerprint` plus their named resolved sub-inputs, proving two snapshots were extracted under a comparable profile/scope. `null` when no producer populated it yet. |
 
-### Compile-context provenance (schema v14, header-AST parses only)
+### Compile-context provenance (schema v15, header-AST parses only)
 
 Populated only when the snapshot came from a header-AST parse (`from_headers`
 true); `null`/empty on a DWARF/symbols-only or binary-only snapshot, and on
-any pre-v14 snapshot. `ast_compile_args` and `ast_sysroot` are redacted via
+any pre-v15 snapshot. `ast_compile_args` and `ast_sysroot` are redacted via
 the same `RedactionPolicy` every L3 build-evidence adapter applies (secret-
 looking `-D` values and absolute home-prefixed paths are stripped/normalized
 before persistence — see `abicheck/buildsource/redaction.py`).
@@ -162,7 +177,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `14`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `15`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

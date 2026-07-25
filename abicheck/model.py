@@ -569,8 +569,8 @@ class AbiSnapshot:
         default_factory=list, kw_only=True
     )
 
-    # Structured compile-context provenance (schema v14, P1 toolchain-profile
-    # audit). None/() on a pre-v14 snapshot and on any snapshot not built from
+    # Structured compile-context provenance (schema v15, P1 toolchain-profile
+    # audit). None/() on a pre-v15 snapshot and on any snapshot not built from
     # a header-AST parse (DWARF/symbols-only, PE/Mach-O without headers) — the
     # same conservative "unknown, don't guess" default every other tri-state
     # provenance field here uses.
@@ -744,7 +744,7 @@ class AbiSnapshot:
         default_factory=dict, kw_only=True
     )
 
-    # ADR-050 D1 (schema v12) — profile/scope fingerprints proving this
+    # ADR-050 D1 (schema v14) — profile/scope fingerprints proving this
     # snapshot's extraction contract, checked by
     # ``comparability.check_contracts_comparable`` before a compare is
     # allowed to produce a verdict. None on every snapshot predating this

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """Tests for the structured compile-context snapshot provenance fields
-(schema v14, P1 toolchain-profile audit): ``AbiSnapshot.ast_resolved_standard``
+(schema v15, P1 toolchain-profile audit): ``AbiSnapshot.ast_resolved_standard``
 / ``ast_cplusplus_macro`` / ``ast_compile_args`` / ``ast_sysroot``, and the
 ``dumper.py`` helpers that compute them.
 
@@ -164,18 +164,18 @@ class TestSnapshotSerializationRoundTrip:
             ast_sysroot="/opt/sysroot",
         )
         d = snapshot_to_dict(snap)
-        assert d["schema_version"] == 14
+        assert d["schema_version"] == 15
         back = snapshot_from_dict(d)
         assert back.ast_resolved_standard == "gnu++17"
         assert back.ast_cplusplus_macro == "201703L"
         assert back.ast_compile_args == ("-std=gnu++17", "-DFOO=1")
         assert back.ast_sysroot == "/opt/sysroot"
 
-    def test_pre_v14_snapshot_loads_new_fields_as_defaults(self):
-        """Backward compatibility: a pre-v14 snapshot dict has none of the
+    def test_pre_v15_snapshot_loads_new_fields_as_defaults(self):
+        """Backward compatibility: a pre-v15 snapshot dict has none of the
         four new keys at all — loading it must default them, never crash."""
         d = {
-            "schema_version": 13,
+            "schema_version": 14,
             "library": "legacy.so",
             "version": "1.0",
         }
@@ -190,7 +190,7 @@ class TestSnapshotSerializationRoundTrip:
         new fields must not raise -- defensive .get() parsing, same
         convention as every other provenance field here."""
         d = {
-            "schema_version": 14,
+            "schema_version": 15,
             "library": "weird.so",
             "version": "1.0",
             "ast_resolved_standard": 123,
