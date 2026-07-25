@@ -424,3 +424,102 @@ def test_cpp20_heuristic_forced_standard_flows_into_profile_fingerprint(
     assert result.assurance == "none"
     assert result.coverage_warnings
     assert any("profile_fingerprint" in w for w in result.coverage_warnings)
+
+
+def _build_lib_in_dir(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Build a tiny ELF .so with its public header inside a subdirectory,
+    returning (so_path, header_path, header_dir)."""
+    include_dir = tmp_path / "include"
+    include_dir.mkdir()
+    header = include_dir / "api.h"
+    header.write_text(_HEADER)
+    src = tmp_path / "api.c"
+    src.write_text(_SOURCE)
+    so = tmp_path / "libapi.so"
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-o", str(so), str(src), f"-I{include_dir}"],
+        check=True,
+        capture_output=True,
+    )
+    return so, header, include_dir
+
+
+def test_scope_header_dirs_matches_compare_style_public_header_dir_scope(
+    tmp_path: Path,
+) -> None:
+    """Regression pin (G30 pilot validation, ``validation/
+    g30-pilot-validation-2026-07.md``): a snapshot ``dump``-produced from a
+    bare ``-H <dir>`` directory argument (the CLI now folds that raw
+    directory into ``scope_header_dirs``, ``cli_dump_helpers.
+    perform_elf_dump``) must agree on ``scope_fingerprint`` with a live
+    extraction of the identical header set where the directory feeds
+    ``public_header_dirs`` directly (``compare``'s own ``--header`` handling,
+    ``cli_resolve._resolve_compare_snapshots`` via ``split_public_header_
+    inputs``) -- comparing the two must not raise ``ScopeMismatchError`` even
+    though nothing about the declared surface differs."""
+    if not (_have("clang") and _have("gcc")):
+        pytest.skip(
+            "clang and gcc are required for the contract-wiring integration test"
+        )
+    so, header, include_dir = _build_lib_in_dir(tmp_path)
+
+    # Simulates `dump --header <dir>` (no --public-header-dir given): the
+    # CLI folds the raw directory argument into scope_header_dirs only.
+    dump_style = dump(
+        so,
+        [header],
+        compiler="cc",
+        header_backend="clang",
+        scope_header_dirs=[include_dir],
+    )
+    # Simulates `compare --header <dir>` (compare has no separate opt-in
+    # flag, so its own --header directly feeds public_header_dirs).
+    compare_style = dump(
+        so,
+        [header],
+        compiler="cc",
+        header_backend="clang",
+        public_header_dirs=[include_dir],
+    )
+
+    assert dump_style.contract is not None
+    assert compare_style.contract is not None
+    assert (
+        dump_style.contract.scope_fields["public_header_dirs"]
+        == compare_style.contract.scope_fields["public_header_dirs"]
+    )
+    assert (
+        dump_style.contract.scope_fingerprint
+        == compare_style.contract.scope_fingerprint
+    )
+
+    result = compare(dump_style, compare_style)
+    assert result.verdict == Verdict.NO_CHANGE
+
+
+def test_scope_header_dirs_does_not_enable_provenance_tagging(
+    tmp_path: Path,
+) -> None:
+    """``scope_header_dirs`` feeds only the extraction contract's scope
+    fingerprint (ADR-050 D1) -- it must never silently opt a plain ``dump
+    --header <dir>`` invocation into declaration-provenance tagging (ADR-015
+    stays opt-in via the separate ``--public-header``/``--public-header-dir``
+    flags, unchanged)."""
+    if not (_have("clang") and _have("gcc")):
+        pytest.skip(
+            "clang and gcc are required for the contract-wiring integration test"
+        )
+    so, header, include_dir = _build_lib_in_dir(tmp_path)
+
+    snap = dump(
+        so,
+        [header],
+        compiler="cc",
+        header_backend="clang",
+        scope_header_dirs=[include_dir],
+    )
+
+    from abicheck.model import ScopeOrigin
+
+    assert snap.functions
+    assert all(fn.origin == ScopeOrigin.UNKNOWN for fn in snap.functions)

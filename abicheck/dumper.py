@@ -1136,6 +1136,7 @@ def dump(
     debug_info_path: Path | None = None,
     extra_include_labels: dict[Path, str] | None = None,
     dump_manifest: DumpManifest | None = None,
+    scope_header_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Create an AbiSnapshot from a shared library + headers.
 
@@ -1188,6 +1189,23 @@ def dump(
         dump_manifest: A parsed ``--dump-manifest`` document (ADR-050 D3) for
             a real multi-TU dump; mutually exclusive with *headers*,
             *extra_includes*, *public_headers*/*public_header_dirs*. ELF only.
+        scope_header_dirs: Directories folded into the extraction contract's
+            ``public_header_dirs`` scope-fingerprint field (ADR-050 D1)
+            *in addition to* ``public_header_dirs``, without affecting
+            declaration-provenance tagging (ADR-015 stays driven by
+            ``public_header_dirs`` alone, unchanged). ``compare``'s own
+            ``--header <dir>`` already feeds its directory argument into the
+            live side's scope contract this way (``cli_resolve.
+            _resolve_compare_snapshots``); without an equivalent here, a
+            snapshot `dump`-produced from a bare ``-H <dir>`` (with no
+            ``--public-header-dir``) always carries an empty
+            ``public_header_dirs`` scope field, so comparing it against a
+            live `compare`-side extraction of the identical header set
+            spuriously raises ``ScopeMismatchError`` (found during the G30
+            pilot validation, ``validation/g30-pilot-validation-2026-07.md``).
+            The CLI's ``dump`` command passes its own raw ``-H``/``--header``
+            directory arguments here (``cli_dump_helpers.perform_elf_dump``).
+            Mutually exclusive with *dump_manifest*, same as *headers*.
 
     Returns:
         AbiSnapshot with functions, variables, and types populated.
@@ -1201,6 +1219,7 @@ def dump(
             "extra_includes": extra_includes,
             "public_headers": public_headers,
             "public_header_dirs": public_header_dirs,
+            "scope_header_dirs": scope_header_dirs,
         }
         if _given := [name for name, value in _conflicts.items() if value]:
             raise ValidationError(
@@ -1239,6 +1258,7 @@ def dump(
             extra_hash_dirs=extra_hash_dirs,
             debug_info_path=debug_info_path,
             extra_include_labels=extra_include_labels,
+            scope_header_dirs=scope_header_dirs,
         )
 
     fmt = _detect_format(so_path)
@@ -1307,6 +1327,13 @@ def dump(
     # and service native-binary paths that call those builders directly (e.g.
     # service._try_header_scoped_dump), bypassing this function — records it
     # correctly. DWARF-only and symbols-only builds leave it False.
+    #
+    # scope_header_dirs is folded into the CONTRACT's public_header_dirs only
+    # -- never into apply_provenance's call below -- so a bare `-H <dir>`
+    # gains the same scope-comparability identity `compare`'s own `--header
+    # <dir>` already has, without silently opting a `dump`-only invocation
+    # into declaration-provenance tagging (ADR-015 stays opt-in via the
+    # separate --public-header/--public-header-dir flags, unchanged).
     _attach_extraction_contract(
         snapshot,
         headers=list(dump_manifest.roots) if dump_manifest is not None else headers,
@@ -1315,7 +1342,11 @@ def dump(
         gcc_option_tokens=gcc_option_tokens,
         lang=lang,
         public_headers=effective_public_headers,
-        public_header_dirs=effective_public_header_dirs,
+        public_header_dirs=list(
+            dict.fromkeys(
+                [*(effective_public_header_dirs or []), *(scope_header_dirs or [])]
+            )
+        ),
         extra_include_labels=extra_include_labels,
         dump_manifest=dump_manifest,
     )

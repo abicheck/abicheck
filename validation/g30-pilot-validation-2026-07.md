@@ -8,12 +8,15 @@ below comes from an actual build and an actual `abicheck` invocation in this
 environment; nothing is inferred from reading the code. **Scope is mixed,
 and deliberately labeled as such below**: the PVXS/Make pilot is a real
 *upstream* open-source project (`epics-base/pvxs`, cloned from GitHub) built
-from source; the CMake/package/cross-compiled pilots exercise a synthetic
-in-repo two-version `libdemo` fixture (a real build/compile/link/compare
-each time, just not a real upstream codebase) — sufficient to validate the
-build-system integration and ABI-break detection path itself, but not a
-substitute for a second real-upstream project (see "Blocked" sections below
-for that gap).
+from source; the CMake/Bazel/package/cross-compiled/icpx pilots exercise a
+synthetic in-repo two-version `libdemo` fixture (a real build/compile/
+link/compare each time, just not a real upstream codebase) — sufficient to
+validate the build-system integration and ABI-break detection path itself,
+but not a substitute for a second real-upstream project. The icpx pilot
+additionally reaches real, vendor-shipped SYCL runtime binaries (Intel's
+own Unified Runtime adapter plugins) beyond the synthetic fixture, since
+those ship with the compiler install itself — see that pilot's section for
+what that did and didn't cover, and "Still blocked" for MSVC/PDB.
 
 ## Summary
 
@@ -22,13 +25,18 @@ for that gap).
 | PVXS (recommended pilot, check-project.yml flow) | Real upstream (`epics-base/pvxs`) | Done | Yes — 1.4.0→1.5.0 `API_BREAK`, 1.5.1→1.5.2 `BREAKING` |
 | Make (minimal generic) | Real upstream (EPICS Base + PVXS themselves) | Done | Yes |
 | CMake (minimal generic) | Synthetic (`libdemo` fixture) | Done | Yes |
+| Bazel (minimal generic) | Synthetic (`libdemo` fixture) | Done | Yes |
 | Package-only, `.deb` (minimal generic) | Synthetic (`libdemo` fixture) | Done | Yes |
 | Cross-compiled target (aarch64) | Synthetic (`libdemo` fixture) | Done | Yes |
-| Bazel (minimal generic) | — | Blocked — see below | n/a |
-| Second complex/vendor-toolchain project | — | Blocked — see below | n/a |
+| Second vendor-toolchain project: Intel `icpx`/oneAPI | Synthetic (`libdemo` fixture) + real DPC++ runtime plugins | Partially done — see below | Yes (C++); real SYCL-plugin detection gap found, not fixed |
+| Second vendor-toolchain project: MSVC/PDB | — | Still blocked — see below | n/a |
 
-One real, reproducible product bug was found along the way (not fixed in
-this pass — out of scope for ADR-053/G30 P2, see "Finding" below).
+One real, reproducible product bug was found and fixed in this same PR
+after initial triage as an out-of-scope follow-up (see "Finding" below); a
+second, real, currently-unfixed gap (`sycl_metadata.py`'s UR-adapter
+detection is stale relative to a real, current Intel oneAPI 2026.1 runtime)
+was found by the vendor-toolchain pilot below and left for its own
+follow-up.
 
 ## PVXS pilot (the confirmed/recommended pilot)
 
@@ -115,36 +123,114 @@ invocation) correctly parsed the ARM64 ELF/DWARF and reported the same real
 `soname_bump_recommended`) as the native x86_64 build — confirming
 cross-target ELF/DWARF parsing is not host-architecture-dependent.
 
-## Blocked: Bazel pilot
+## Bazel pilot
 
-No `bazel`/`bazelisk` package is directly installable in this environment.
-The only apt-available package is `bazel-bootstrap`, which does not ship a
-working `bazel` binary — it pulls a full JDK + gRPC/protobuf Java dependency
-chain to *build* bazel from source, disproportionate cost for a pilot
-validation pass. The Bazel adapter (`adapters/bazel.py`) already has unit
-coverage against captured/mocked `bazel aquery`/`cquery` JSON in
-`tests/`; this pilot could not add a real end-to-end `bazel`-driven build on
-top of that in this environment. Genuinely deferred, not attempted further.
+**Initially marked blocked, then unblocked**: no `bazel`/`bazelisk` `apt`
+package is directly installable in this environment (the only apt-available
+package, `bazel-bootstrap`, doesn't ship a working `bazel` binary — it pulls
+a full JDK + gRPC/protobuf Java chain to *build* bazel from source). Bazel
+itself, however, is a real, network-downloadable static binary: `bazelisk`
+(the official version-managing launcher) fetched cleanly from its GitHub
+releases (`bazelisk-linux-amd64`), and on first invocation transparently
+downloaded and ran real Bazel 9.2.0.
 
-## Blocked: second complex/vendor-toolchain pilot
+Built the same two-version `libdemo` fixture as the CMake pilot (identical
+`src/demo.cpp`/`internal.cpp`/`demo.h`, reused verbatim) under a minimal
+Bazel `MODULE.bazel`/`BUILD.bazel` (`cc_binary` with `linkshared = True`,
+via `rules_cc` — Bazel 9's bzlmod migration removed the native `cc_binary`
+rule, so this needed a `load("@rules_cc//cc:defs.bzl", "cc_binary")`, not
+just a bare `BUILD.bazel`). `bazel build //:libdemo.so` produced real
+`bazel-bin/libdemo.so` outputs for both versions.
 
-No Intel oneAPI (`icpx`)/SYCL toolchain or MSVC/`cl.exe` is available in
-this Linux container, and neither can be installed without external
-licensed-installer access this environment does not have. Consistent with
-this repo's own prior assessment (referenced in the G30 backlog survey),
-this pilot remains genuinely blocked rather than attempted with a
-substitute — a substitute toolchain would not exercise the vendor-specific
-code paths (`sycl_metadata.py`, `pdb_parser.py`/PDB-based MSVC ABI) this
-pilot exists to validate.
+`abicheck dump ... --sources <bazel-project-dir> --allow-build-query`
+correctly auto-detected the Bazel project (`build_query.detect_build_system`
+finding `MODULE.bazel`) and ran a real `bazel aquery` itself (zero-config,
+no manual `bazel aquery` invocation needed on the user's part) — the
+resulting snapshot's `build_source.build_evidence.generators` records
+`kind: "bazel"`, with 2 real `compile_units` and 1 real `link_unit`
+(`libdemo.so`, `kind: shared_library`, both objects as inputs) captured from
+the actual `aquery` action graph. `abicheck compare` on the two dumps
+correctly reported `BREAKING` with the same real findings as every other
+`libdemo` pilot (`type_field_added`, `func_removed`/`func_added`), plus a
+real `header_parse_context_drift` finding surfaced *because* real Bazel
+build-context data was now feeding the compile-flag comparison
+("Build-flag & toolchain drift ... from build-system data (compile DB /
+CMake / Ninja / Bazel)" showed `[on]` in the evidence-coverage banner,
+unlike the header-only CMake/cross-compiled pilots where that check is
+`[off]`).
 
-## Finding: `dump`/`compare` disagree on whether `--header <dir>` implies public-header-dir provenance
+As a bonus check of this PR's own ADR-053 work against a **third** real
+build-system evidence source (previously only unit-tested with
+captured/mocked `aquery` JSON, never a live `bazel` invocation):
+`link_attribution.attribute_sources_to_targets()` run directly over the real
+captured `BuildEvidence` correctly attributed both `src/demo.cpp` and
+`src/internal.cpp` to `target:////:libdemo.so` via the link-unit-graph
+channel (Bazel's own compile-unit → link-unit → terminal-DSO graph), exactly
+as ADR-053 D2 documents.
 
-**Not fixed in this pass** — a distinct ADR-050 (comparability contract)
-issue, out of scope for ADR-053/G30 P2's TU→DSO attribution work this PR
-otherwise covers. Recorded here as a real pilot finding for follow-up.
+## Second vendor-toolchain pilot: Intel oneAPI (`icpx`) — partially unblocked; MSVC/PDB remains blocked
+
+**Initially marked fully blocked, then partially unblocked**: contrary to
+the initial assessment, Intel's oneAPI compiler is a real, freely
+installable `apt` package (`apt.repos.intel.com`, public GPG-signed repo,
+no license key needed for the compiler component) — `intel-oneapi-compiler-dpcpp-cpp`
+installed cleanly and produced a real, working `icpx` (Intel(R) oneAPI
+DPC++/C++ Compiler 2026.1.0).
+
+- **Real vendor-compiled C++ `.so`**: built the same two-version `libdemo`
+  fixture with `icpx -shared -fPIC -std=c++17` instead of gcc/clang. The
+  binary's `.comment` section (`readelf -p .comment`) confirms genuine
+  vendor-toolchain provenance: `Intel(R) oneAPI DPC++/C++ Compiler 2026.1.0
+  (2026.1.0.20260617)`, not a substitute. `abicheck compare` (clang L2
+  frontend for headers, real icpx-produced DWARF for L1) correctly parsed
+  both real icpx-built binaries and reported the same real `BREAKING`
+  verdict (`type_field_added`, `func_removed`/`func_added`) as every other
+  `libdemo` pilot — confirming ELF/DWARF parsing is toolchain-producer-
+  agnostic, not just compiler-family-agnostic (gcc/clang) as the other
+  pilots already showed.
+- **Real SYCL device-code compilation**: `icpx -fsycl -shared -fPIC` on a
+  genuine `sycl::queue`/`parallel_for` kernel compiled and linked cleanly
+  (`sycl/sycl.hpp` from the installed DPC++ runtime, no GPU/OpenCL runtime
+  needed just to *compile*), producing a real ELF `.so` `abicheck dump`
+  parses without error (binary/symbols-level; 4 functions extracted).
+- **Real SYCL runtime plugin metadata (`sycl_metadata.py`) — a genuine
+  finding, not fixed here.** The installed DPC++ runtime ships real Intel
+  Unified Runtime (UR) adapter plugins
+  (`/opt/intel/oneapi/compiler/2026.1/lib/libur_adapter_{opencl,level_zero}.so.*`).
+  Running `abicheck.sycl_metadata.parse_sycl_plugin()` directly against
+  these real, current (oneAPI 2026.1) adapters returns `None` for both —
+  "missing urAdapterGet — not a valid UR adapter". Root cause: `nm -D`
+  confirms neither real adapter exports a symbol named `urAdapterGet` at
+  all; both instead export the newer `urGetAdapterProcAddrTable`/
+  `urGet<Category>ProcAddrTable` entry-point family (`urGetPlatformProcAddrTable`,
+  `urGetDeviceProcAddrTable`, …). `sycl_metadata.py`'s UR-plugin validity
+  check (`parse_sycl_plugin`, `_UR_SYMBOL_RE`) still hard-requires the
+  older `urAdapterGet` symbol, so it silently rejects a real, valid,
+  current-generation UR adapter as "not a valid UR adapter" — a genuine
+  staleness gap relative to the real Unified Runtime ABI's evolution,
+  surfaced only by running against a real, currently-shipping vendor
+  runtime (a synthetic/mocked plugin fixture would not have caught this,
+  since it would be built to match whatever symbol set the detector
+  already expects). **Not fixed in this pass** — understanding UR's actual
+  current versioned entry-point contract well enough to fix the detector
+  correctly (not just pattern-match today's one observed symbol set) is
+  its own scoped task, not a drive-by alongside this PR's other work.
+- **MSVC/`cl.exe` — still genuinely blocked.** No amount of `apt`/network
+  access changes this: MSVC requires a licensed Windows installation and
+  is not redistributable for a Linux container the way Intel's compiler
+  is. `pdb_parser.py`/PDB-based MSVC ABI parsing remains unvalidated by
+  this pilot pass.
+
+## Finding (fixed): `dump`/`compare` disagreed on whether `--header <dir>` implies public-header-dir scope
+
+**Fixed in this PR**, after initially being recorded as a deferred ADR-050
+follow-up — the user asked for it to be closed here rather than left as a
+documented gap, and the fix turned out to be small and cleanly scoped once
+root-caused precisely (see below), so it landed alongside the ADR-053 work
+rather than needing its own follow-up PR.
 
 **Symptom.** `abicheck dump lib.so --header include/` followed later by
-`abicheck compare that-dump.json lib2.so --header new=include2/` raises
+`abicheck compare that-dump.json lib2.so --header new=include2/` raised
 `ScopeMismatchError` ("old and new snapshots do not cover the same declared
 surface") even when `include/` and `include2/` name the identical logical
 header set — i.e. the exact "resolve a baseline once, then compare it
@@ -158,37 +244,67 @@ _resolve_compare_snapshots` runs `split_public_header_inputs()` on every
 `--header` value and forwards directory entries as `public_header_dirs`.
 `dump`'s `--header`/`-H` is a *different*, narrower flag (`dump` has a
 separate, explicit `--public-header`/`--public-header-dir` pair for
-provenance tagging) — plain `dump --header <dir>` never populates
+provenance tagging) — plain `dump --header <dir>` never populated
 `public_header_dirs` at all. So a snapshot produced by `dump --header X`
-always carries `public_header_dirs=[]`, while the equivalent live side of a
-`compare ... --header new=X` call always carries `public_header_dirs=[X]`
+always carried `public_header_dirs=[]`, while the equivalent live side of a
+`compare ... --header new=X` call always carried `public_header_dirs=[X]`
 — two extractions of the byte-identical header set, fingerprinting as a
 scope mismatch purely from which of the two commands produced them.
 
-**Workaround used for this pilot's PVXS second-run analysis step**: dump
-both sides independently via `abicheck dump` (never `compare`'s live-dump
-path) and then `abicheck compare old.json new.json` on the two pre-dumped
-files — both sides then go through the same `public_header_dirs=[]`
-convention and compare cleanly.
+**The fix (surgical, decoupled from declaration-provenance tagging).**
+`dumper.dump()` gained a new `scope_header_dirs` parameter that is folded
+into the extraction contract's `public_header_dirs` scope field *only* —
+`apply_provenance()`'s call (ADR-015's origin/public-API tagging) still
+reads the original, unmodified `public_header_dirs`, so this does **not**
+silently start tagging declarations `public_header`/`private_header` for
+existing `dump --header`-only callers; that stays exactly as opt-in as
+before, via the separate `--public-header`/`--public-header-dir` flags.
+`cli_dump_helpers.perform_elf_dump` now computes `scope_header_dirs` from
+the raw `-H`/`--header` CLI arguments via the same `split_public_header_
+inputs()` helper `compare` already uses, so a directory argument feeds the
+scope contract identically regardless of which command produced the
+snapshot. Verified against this pilot's own real PVXS 1.5.1/1.5.2 binaries
+(re-running the exact previously-failing command below now succeeds and
+reproduces the correct `BREAKING` verdict directly, without the two-step
+workaround) plus new regression tests
+(`tests/test_dumper_contract_wiring.py`,
+`tests/test_cli_dump_helpers_coverage.py`) pinning both the scope-agreement
+fix and the provenance-tagging non-regression.
 
-**Suggested follow-up** (not designed or implemented here): reconcile
-`dump`'s and `compare`'s `--header`-to-public-header-dir semantics — either
-make `dump --header <dir>` also populate `public_header_dirs` to match
-`compare`, or stop `compare` from implicitly deriving public-header
-provenance from `--header` at all (requiring an explicit
-`--public-header-dir` the way `dump` does) — needs a real product decision
-plus its own ADR-050 follow-up, not a drive-by fix.
+```
+abicheck dump libpvxs.so.1.5 --header include/          # 1.5.1, no --public-header-dir
+  -o baseline-set/libpvxs.abicheck.json
+abicheck compare baseline-set/libpvxs.abicheck.json libpvxs.so.1.5 \
+  --header new=include/                                  # 1.5.2, live compare-side dump
+# before the fix: ScopeMismatchError; after: real BREAKING verdict
+```
+
+**Scope note.** This fix covers the ELF `dump`/`compare` CLI path (the one
+this pilot's real PVXS scenario exercises and the G30 pipeline's Linux CI
+use case). The PE/Mach-O header-scoped dump path
+(`service._try_header_scoped_dump`) calls `_attach_extraction_contract`
+directly rather than through `dumper.dump()` and was not touched — it
+already threads its own `public_header_dirs` straight from that path's
+caller, a different (and, for that path, already-consistent) wiring; if a
+comparable dump-vs-compare asymmetry is ever found there, it needs its own
+targeted look, not an assumption that this fix already covers it.
 
 ## What this validates about ADR-053 specifically
 
-None of the five completed pilots above exercised a build system wired
-into the new `attribution_path`/`"inferred"` build-output projection
-end-to-end (that wiring is explicitly deferred — ADR-053 D5, "CLI/Action
-pipeline wiring" — the algorithm, Make link-unit capture, ingest filtering,
-and `build_output.py` validator are unit-tested directly, not through a
-pilot's CLI surface, since no CLI/Action entry point produces or consumes
-`attribution_path` yet). The pilots above validate the surrounding G30
-pipeline (config validation, build-output validation, run-plan generation,
-baseline resolution, real-project scan/compare correctness across four
-build-system shapes and a cross-compiled target) that ADR-053's future
+None of the pilots above exercised a build system wired into the new
+`attribution_path`/`"inferred"` build-output projection end-to-end (that
+wiring is explicitly deferred — ADR-053 D5, "CLI/Action pipeline wiring" —
+the algorithm, Make link-unit capture, ingest filtering, and
+`build_output.py` validator are unit-tested directly, not through a pilot's
+CLI surface, since no CLI/Action entry point produces or consumes
+`attribution_path` yet). The Bazel pilot does, however, exercise the
+underlying `link_attribution.attribute_sources_to_targets()` algorithm
+directly against a real, live-captured `bazel aquery` `BuildEvidence` for
+the first time (previously only unit-tested against captured/mocked
+`aquery` JSON) — a genuine, if narrower, ADR-053 validation beyond CMake and
+Make. The pilots above otherwise validate the surrounding G30 pipeline
+(config validation, build-output validation, run-plan generation, baseline
+resolution, real-project scan/compare correctness across five build-system
+shapes and a cross-compiled target, plus a real `dump`/`compare`
+comparability-contract bug found and fixed) that ADR-053's future
 CLI/Action wiring will sit on top of.

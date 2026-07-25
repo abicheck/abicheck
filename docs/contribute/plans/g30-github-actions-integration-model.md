@@ -2892,17 +2892,26 @@ for the full real-run report (real builds, real `abicheck` scans, not
 simulated — mixed scope, see below). Summary: PVXS (real-upstream
 `epics-base/pvxs`) re-run via the check-project.yml flow and Make (via that
 same real EPICS Base/PVXS build) both completed with real ABI breaks
-correctly detected; CMake, package-only (`.deb`), and cross-compiled
+correctly detected; CMake, Bazel, package-only (`.deb`), and cross-compiled
 (aarch64) pilots also completed with real ABI breaks correctly detected but
 against a synthetic in-repo `libdemo` fixture, not a second real-upstream
-project; Bazel and the second vendor-toolchain pilot remain genuinely
-blocked by this environment's available tooling (see that report for why);
-one real, reproducible product bug (`dump`/`compare` disagreeing
-on `--header`-derived `public_header_dirs` provenance, causing a spurious
+project (the Bazel pilot additionally re-validated ADR-053's TU→DSO
+attribution against a real, live `bazel aquery` capture, not just
+CMake/Make); the Intel `icpx`/oneAPI vendor-toolchain pilot installed
+cleanly and validated real icpx-compiled binaries plus real SYCL
+device-code compilation, additionally finding (not fixed) a real
+`sycl_metadata.py` detection gap against Intel's current Unified Runtime
+adapter ABI; MSVC/PDB remains genuinely blocked (no redistributable Linux
+path to `cl.exe`) — see that report for the full detail on both; one real,
+reproducible product bug (`dump`/`compare` disagreeing
+on `--header`-derived `public_header_dirs` scope, causing a spurious
 `ScopeMismatchError` in the exact baseline-then-live-candidate pattern this
-pipeline relies on) was found and documented there, not fixed in this pass
-— it is an ADR-050 (comparability contract) issue, not an ADR-053/G30 P2
-one. The per-pilot plan below is kept as the original acceptance-criteria
+pipeline relies on) was found and, after initial triage as an ADR-050 (not
+ADR-053/G30 P2) follow-up, fixed in this same PR
+(`dumper.dump(scope_header_dirs=...)`, decoupled from ADR-015's
+declaration-provenance tagging) — see that report's "Finding" section for
+the full root-cause and fix detail. The per-pilot plan below is kept as the
+original acceptance-criteria
 reference the executed report was checked against.
 
 ### PVXS (confirmed pilot — extend, don't re-validate from scratch)
@@ -2971,8 +2980,9 @@ not just correctness:
 - Make/custom-build repository — can reuse PVXS's own build if a second,
   simpler EPICS module or a synthetic Make fixture is used instead
   (S11 acceptance, distinct from the full PVXS pilot above).
-- Bazel repository (S12 acceptance) — no existing pilot found for this;
-  needs a fixture or a real small Bazel C++ project.
+- Bazel repository (S12 acceptance) — **done, 2026-07-25** (real `bazelisk`/
+  Bazel 9.2.0 + a minimal `cc_binary` fixture, see
+  `validation/g30-pilot-validation-2026-07.md`'s "Bazel pilot" section).
 - Package-only RPM/Deb/tar comparison (S13 acceptance).
 - Linux/macOS/Windows matrix (S17 acceptance) — the existing CI matrix
   (ADR-047-unrelated, `.github/workflows/ci.yml`) already exercises

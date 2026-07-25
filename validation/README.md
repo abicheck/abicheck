@@ -24,13 +24,20 @@ libraries (not synthetic fixtures), used to drive planning and improvement.
   (real-upstream `epics-base/pvxs`) re-run through the full check-project.yml
   flow (config validate → build-output validate → run-plan → baseline
   resolve → analysis compare), and the Make pilot via that same real
-  EPICS/PVXS build; the CMake, package(`.deb`), and cross-compiled(aarch64)
-  minimal pilots exercise a synthetic in-repo `libdemo` fixture instead of a
-  second real-upstream project. Bazel and a second vendor-toolchain pilot
-  were genuinely blocked by environment tooling. Found (not fixed here) a
-  real `dump`-vs-`compare` `public_header_dirs` provenance mismatch that
-  spuriously raises `ScopeMismatchError` for the baseline-then-live-candidate
-  pattern the G30 pipeline relies on.
+  EPICS/PVXS build; the CMake, Bazel, package(`.deb`), and
+  cross-compiled(aarch64) minimal pilots exercise a synthetic in-repo
+  `libdemo` fixture instead of a second real-upstream project (the Bazel
+  pilot additionally re-validates this PR's own ADR-053 TU→DSO attribution
+  against a real, live `bazel aquery` capture). The Intel `icpx`/oneAPI
+  vendor-toolchain pilot installed cleanly and validated real icpx-compiled
+  binaries + real SYCL device-code compilation, but also found (not fixed
+  here) a real `sycl_metadata.py` detection gap against Intel's current
+  Unified Runtime adapter ABI; MSVC/PDB remains genuinely blocked (no
+  redistributable Linux path to `cl.exe`). Found and fixed a real
+  `dump`-vs-`compare` `public_header_dirs` scope-fingerprint mismatch that
+  spuriously raised `ScopeMismatchError` for the baseline-then-live-candidate
+  pattern the G30 pipeline relies on (`dumper.dump()`'s new
+  `scope_header_dirs` parameter, decoupled from ADR-015 provenance tagging).
 - `REPORT.md` — earlier curated-matrix validation report (false-positive catalog)
 - `DESIGN_ANALYSIS.md` — code-level root cause + architectural fix per false
   positive. FP-1/FP-2 are fixed in `abicheck/model.py` + `abicheck/diff_types.py`;
