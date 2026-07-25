@@ -143,8 +143,45 @@ jobs:
     name: 'Verify: two distinct baselines, resolve-baseline finds the newest'
     needs: [build-fixture, run-1, run-2]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v6
+
+      # Observed in this workflow's own first live run: a cache saved by one
+      # job is not always immediately visible to actions/cache/restore in a
+      # DIFFERENT job within the same run -- even update-main-baseline.yml's
+      # own internal freshness-check restore (run-2's "Restore previous
+      # accepted-main baseline-set" step, running ~2 minutes after run-1's
+      # save) missed run-1's just-written entry. This is a platform
+      # propagation-delay characteristic, not a key-format bug (the exact
+      # same key string was used to save and to restore both times). Poll
+      # the List Actions Caches API for both keys' existence before
+      # attempting the real restore, instead of letting that transient delay
+      # fail this fixture.
+      - name: Wait for both runs' cache entries to become visible
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEY_1: 'rotation-test-baseline-main-${{ github.run_id }}-${{ needs.build-fixture.outputs.profile-id }}-rotation-test-sha-1'
+          KEY_2: 'rotation-test-baseline-main-${{ github.run_id }}-${{ needs.build-fixture.outputs.profile-id }}-rotation-test-sha-2'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            visible="$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" --paginate --jq '.actions_caches[].key' 2>/dev/null | sort -u || true)"
+            have_1=no; have_2=no
+            grep -Fxq "$KEY_1" <<<"$visible" && have_1=yes
+            grep -Fxq "$KEY_2" <<<"$visible" && have_2=yes
+            echo "attempt $attempt/20: key1=$have_1 key2=$have_2"
+            if [[ "$have_1" == "yes" && "$have_2" == "yes" ]]; then
+              echo "both cache entries are now visible"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::timed out after 5 minutes waiting for both rotation-test cache entries to become visible via the List Actions Caches API -- either run-1/run-2 never actually wrote them, or the platform propagation delay exceeded this fixture's patience"
+          exit 1
 
       # Exact-key restores: prove BOTH runs' entries survived independently
       # -- rotation, not "run #2 silently reused/overwrote run #1's entry",
