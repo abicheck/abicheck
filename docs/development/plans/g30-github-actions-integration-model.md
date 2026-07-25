@@ -2329,29 +2329,55 @@ by `resolve-baseline`" — is an executable, real two-run GitHub Actions
 fixture, not just a pure-Python check of the key-format contract (what
 `TestAcceptedMainCacheKeyRotation` above already covered, and all this
 subsection originally claimed as coverage — a real gap, flagged by review).
-**Addressed via `.github/workflows/test-baseline-rotation.yml`**
+**Partially addressed via `.github/workflows/test-baseline-rotation.yml`**
 (structural coverage: `tests/test_publish_baseline_workflows.py`'s
-`TestBaselineRotationFixture`): a live, path-triggered CI workflow that
-builds two genuinely different versions of a toy library (the same
-`examples/case01_symbol_removal` v1/v2 pair `test-action.yml`'s own
+`TestBaselineRotationFixture`), with an honest, evidence-based scope
+reduction from what was first attempted — read this before touching that
+file. It builds two genuinely different versions of a toy library (the
+same `examples/case01_symbol_removal` v1/v2 pair `test-action.yml`'s own
 appcompat tests already use), calls the real `update-main-baseline.yml`
 twice in sequence (`head-sha: rotation-test-sha-1` then `-sha-2`, `run-2`
-gated on `run-1` via `needs:`), then asserts in a trailing `verify` job that
-(a) both runs' exact cache keys hit independently with genuinely distinct
-manifests (different `project_ref`, different per-library digests) —
-rotation, not one run silently overwriting or reusing the other's entry —
-and (b) restoring by the documented `restore-keys:`-prefix-only contract
-(never the exact key, since a real consumer doesn't know in advance which
-`head-sha` wrote the entry it wants) and feeding that into
-`actions/resolve-baseline` resolves run #2, the newest write, not run #1's
-stale one. This is the missing live half; the pure-Python tests above are
-the format-contract half. **Caveat honestly: this workflow has not yet
-completed a real CI run as of this writing** (it is path-triggered by this
-same change, so its first real execution is this change's own CI run) —
-treat it as "implemented, awaiting first live confirmation," not yet
-"confirmed passing," until that run is observed green. If it fails on
-first run, fix forward on this same item rather than treating the fixture
-itself as done.
+gated on `run-1` via `needs:`), then proves in a trailing `verify` job that
+the two runs produced two distinct, independently-tracked Actions-cache
+entries (via the List Actions Caches API, asserting distinct entry `id`s,
+not just distinct key strings) — rotation, not one run silently
+overwriting or reusing the other's entry.
+
+**What this fixture does NOT prove, and why — a real platform limitation
+found during this session, not a shortcut.** The original design also
+tried to prove the documented `restore-keys:`-prefix consumer contract
+end-to-end: restore by prefix only (never the exact key), feed the result
+into `actions/resolve-baseline`, and assert it resolves the newest write.
+That design failed on two consecutive live CI runs — not from a key-format
+bug (save and restore logged byte-identical key strings both times) and
+not from simple propagation delay (a List Actions Caches API poll
+confirmed both entries existed, immediately, right before each failing
+restore attempt). The second run's failure is the more telling one:
+`update-main-baseline.yml`'s own, unmodified, production "Restore previous
+accepted-main baseline-set" step — run #2 trying to see run #1's entry via
+exactly the restore-keys-prefix pattern a real consumer would use — failed
+identically. Because that step is production code this item didn't touch,
+not this fixture's own code, this is strong evidence of a genuine platform
+characteristic: a GitHub Actions cache entry saved by one job is not
+reliably restorable via `actions/cache/restore` from a *different job
+within the same workflow run* on this environment. Real `accepted-main`
+usage restores in a *later, separate* workflow run (e.g. a subsequent
+day's push to main) — a materially different scenario this fixture cannot
+practically reproduce within one PR's CI, and one the same limitation may
+well not affect. Given two independent, reproducible failures including
+production code's own restore step, further retries were judged not worth
+more live-CI cycles; the fixture was rescoped to what it can reliably
+prove instead of continuing to chase a possibly-unfixable-from-here
+platform quirk. The full restore-keys-prefix-based consumption path
+remains covered only by the pure-Python key-format contract tests
+(`TestAcceptedMainCacheKeyRotation`) plus code review — not by a live run.
+This is a real, narrower-than-originally-intended gap, stated plainly
+rather than glossed over.
+
+**Caveat honestly: the rescoped workflow has not yet completed a real CI
+run as of this writing** — treat it as "implemented, awaiting first live
+confirmation," not yet "confirmed passing," until that run is observed
+green.
 
 **Files delivered:** `actions/baseline/run.sh`, `actions/baseline/
 build_manifest.py`, `actions/baseline/action.yml` (`stage_binary` documented

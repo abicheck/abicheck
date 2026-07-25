@@ -441,40 +441,42 @@ class TestBaselineRotationFixture:
         run_2_prefix = data["jobs"]["run-2"]["with"]["build-output-artifact-prefix"]
         assert run_1_prefix != run_2_prefix
 
-    def test_verify_job_checks_both_exact_keys_before_the_prefix_restore(self) -> None:
+    def test_verify_job_checks_cache_entry_existence_via_the_list_api(self) -> None:
+        # This fixture's own first two live runs established that
+        # actions/cache/restore is not reliably usable cross-job within the
+        # same workflow run on this platform (see the workflow file's own
+        # header comment for the evidence) -- verify checks existence via
+        # the List Actions Caches REST API instead.
         data = _load(TEST_BASELINE_ROTATION)
         steps = _steps(data["jobs"]["verify"])
         names = [s.get("name") for s in steps]
-        assert "Restore run #1's exact cache entry" in names
-        assert "Restore run #2's exact cache entry" in names
         assert (
-            "Restore via restore-keys prefix only (the documented consumer contract)"
+            "Confirm both rotation-test cache entries exist as separate GitHub Actions cache entries"
             in names
         )
+        step = next(
+            s
+            for s in steps
+            if s.get("name")
+            == "Confirm both rotation-test cache entries exist as separate GitHub Actions cache entries"
+        )
+        assert "actions/caches" in step["run"]
 
-    def test_prefix_restore_step_never_uses_an_exact_hit_key(self) -> None:
-        # The whole point of this step is to prove the documented
-        # restore-keys-prefix consumer contract -- its own `key:` must be
-        # one that can never hit, or the test wouldn't be exercising
-        # restore-keys fallback at all.
+    def test_verify_job_declares_actions_read_permission(self) -> None:
+        # Required for the List Actions Caches API call -- the top-level
+        # `permissions: contents: read` alone can't call it.
+        data = _load(TEST_BASELINE_ROTATION)
+        assert data["jobs"]["verify"]["permissions"]["actions"] == "read"
+
+    def test_verify_asserts_the_two_cache_entries_have_distinct_ids(self) -> None:
+        # The actual rotation assertion: two DIFFERENT cache entry ids, not
+        # just two key strings that differ by construction.
         data = _load(TEST_BASELINE_ROTATION)
         steps = _steps(data["jobs"]["verify"])
         step = next(
             s
             for s in steps
             if s.get("name")
-            == "Restore via restore-keys prefix only (the documented consumer contract)"
+            == "Confirm both rotation-test cache entries exist as separate GitHub Actions cache entries"
         )
-        assert "this-key-must-never-hit" in step["with"]["key"]
-        assert "restore-keys" in step["with"]
-
-    def test_final_verification_step_asserts_run_2_won(self) -> None:
-        data = _load(TEST_BASELINE_ROTATION)
-        steps = _steps(data["jobs"]["verify"])
-        step = next(
-            s
-            for s in steps
-            if s.get("name")
-            == "Verify resolve-baseline resolved run #2 -- the newest write, via prefix restore alone"
-        )
-        assert "rotation-test-sha-2" in step["run"]
+        assert "c1['id'] == c2['id']" in step["run"]
