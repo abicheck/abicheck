@@ -12,7 +12,7 @@ downstream tooling then validates and consumes.
 > baseline or run a check — `resolve-baseline`/`check-target` (G30
 > P1.2/P1.3) and `abicheck run-plan generate`/[`check-project.yml`](reusable-workflows.md)
 > (G30 P1.4) — are all shipped; see the
-> [G30 plan](../development/plans/g30-github-actions-integration-model.md).
+> [G30 plan](../contribute/plans/g30-github-actions-integration-model.md).
 > There is still no `abicheck build-output emit` producer helper; author
 > `build-output.json` by hand or from your build's own `install` step.
 
@@ -123,7 +123,7 @@ set. Set it explicitly if your build-output producer targets
 | Field | Type | Meaning |
 |-------|------|---------|
 | `kind` | string | Evidence kind, e.g. `"source-facts"`. |
-| `path` | string | Path (relative to the `build-output.json` root) to the evidence — typically an `abicheck_inputs/` pack (see [Producing Source Facts](../user-guide/producing-source-facts.md)). |
+| `path` | string | Path (relative to the `build-output.json` root) to the evidence — typically an `abicheck_inputs/` pack (see [Producing Source Facts](../use/producing-source-facts.md)). |
 | `projection` | string | `"declared"` or `"inferred"` — see below. **Only `"declared"` validates today.** |
 
 **`projection` is the field the P1.1 validator gates on.** `"declared"`
@@ -137,7 +137,7 @@ validation failure**, not a lower-confidence warning. Until P2 ships, a
 build-wide evidence pack may only feed a build-wide source audit or a
 per-target header-depth check — never a per-target `effective_depth: source`
 claim (see the [multi-DSO recipe's scope
-caveat](../user-guide/github-action-source-scans.md#recommended-flow-a-multi-library-release-with-one-shared-facts-pack)
+caveat](../use/github-action-source-scans.md#recommended-flow-a-multi-library-release-with-one-shared-facts-pack)
 for the practical consequence of this rule).
 
 ## Validation rules
@@ -170,7 +170,7 @@ for the practical consequence of this rule).
    single-target pack whose translation units carry **no** `target_id` tags
    at all still passes — that's the ordinary output of a legacy Flow-2
    producer, not an integrity gap (see
-   [Producing Source Facts](../user-guide/producing-source-facts.md)).
+   [Producing Source Facts](../use/producing-source-facts.md)).
 
 None of these ever *downgrade* to a warning — every one is a hard,
 non-zero-exit failure, matching the "fail-loud, no silent shallow success"

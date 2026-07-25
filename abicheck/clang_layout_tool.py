@@ -21,7 +21,7 @@ computes a record's actual compiled layout (``RecordType.size_bits``/
 ``TypeField.offset_bits`` all stay ``None``/empty), which is exactly why
 CastXML — which runs its own bundled Clang internally and exports the layout
 it already computed — remains the layout-authoritative L2 backend today. See
-``docs/development/plans/g28-castxml-clang-l2-parity-hardening.md``, "Phase 4
+``docs/contribute/plans/g28-castxml-clang-l2-parity-hardening.md``, "Phase 4
 — a Clang ASTRecordLayout plugin".
 
 This module bridges that gap with a small, OPTIONAL, out-of-process

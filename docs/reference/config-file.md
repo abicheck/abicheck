@@ -97,8 +97,8 @@ Recognized keys and defaults live in `BuildConfig` (`buildsource/inline.py`).
 ### `build:`
 
 Drives inline build/source collection. See
-[Producing source facts](../user-guide/producing-source-facts.md) and
-[Build & source data](../concepts/build-source-data.md).
+[Producing source facts](../use/producing-source-facts.md) and
+[Build & source data](../learn/build-source-data.md).
 
 | Sub-key | Type | Default | Purpose |
 |---------|------|---------|---------|
@@ -121,7 +121,7 @@ Drives inline build/source collection. See
 ### `severity:`
 
 Per-category severity map consumed by `compare`. See
-[Severity](../user-guide/severity.md) and [Exit codes](exit-codes.md).
+[Severity](../use/severity.md) and [Exit codes](exit-codes.md).
 
 | Sub-key | Type | Default | Purpose |
 |---------|------|---------|---------|
@@ -140,7 +140,7 @@ Per-category levels override the preset. When any severity value is in effect,
 ### `scope:`
 
 Public-surface scoping — the main false-positive control. See
-[API-surface intelligence](../user-guide/api-surface-intelligence.md).
+[API-surface intelligence](../use/api-surface-intelligence.md).
 
 | Sub-key | Type | Default (effective) | Purpose |
 |---------|------|---------------------|---------|
@@ -155,7 +155,7 @@ Public-surface scoping — the main false-positive control. See
 
 Suppression **hygiene policy** (a project rule, distinct from the suppression
 *rules file* — see [Related files](#related-files-not-abicheckyml-keys)). See
-[Suppressions](../user-guide/suppressions.md).
+[Suppressions](../use/suppressions.md).
 
 | Sub-key | Type | Default (effective) | Purpose |
 |---------|------|---------------------|---------|
@@ -177,8 +177,8 @@ Suppression **hygiene policy** (a project rule, distinct from the suppression
 > (`binary`/`headers`/`build`/`source` — `--max` and the old `full` depth no
 > longer exist) drive the collection depth per run.
 
-See [Scan levels](../user-guide/scan-levels.md) and the
-[`--depth` dial](../concepts/evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect).
+See [Scan levels](../use/scan-levels.md) and the
+[`--depth` dial](../learn/evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect).
 (`graph` is not a valid `source:` sub-key — a config with `source: {graph:
 ...}` now fails with an unknown-key error. The L5 graph-detail knob is
 `sources.graph`, in the plural [`sources:`](#sources) block above.)
@@ -249,7 +249,7 @@ error), but they are handled outside the `compare` config merge:
   path-glob risk profile. It is loaded by `scan`'s `--risk-rules <file>` option
   (which reads a `risk_rules:` block from the given YAML file); it is **not**
   auto-loaded from a discovered `.abicheck.yml`. Parsed by `RiskRules.from_dict`
-  in `buildsource/risk.py`. See [Scan levels](../user-guide/scan-levels.md).
+  in `buildsource/risk.py`. See [Scan levels](../use/scan-levels.md).
 - **`crosschecks:`** — reserved. The active mechanism for tuning cross-checks is
   `scan`'s repeatable `--crosscheck KEY=LEVEL` flag; the current code does not
   read a `crosschecks:` block from the file.
@@ -277,8 +277,8 @@ files**, not in `.abicheck.yml`:
 
 | Concept | File / flag | Top-level schema | Docs |
 |---------|-------------|------------------|------|
-| Policy profile | `--policy-file <file>` (`PolicyFile.load`, `policy_file.py`) — note `--policy` only takes the built-in names `strict_abi`/`sdk_vendor`/`plugin_abi` | `base_policy`, `overrides`, `frozen_namespaces`, `evidence_policy` | [Policies](../user-guide/policies.md) |
-| Suppression rules | `--suppress <file>` (`suppression.py`) | Suppression rule entries (YAML or ABICC format) | [Suppressions](../user-guide/suppressions.md) |
+| Policy profile | `--policy-file <file>` (`PolicyFile.load`, `policy_file.py`) — note `--policy` only takes the built-in names `strict_abi`/`sdk_vendor`/`plugin_abi` | `base_policy`, `overrides`, `frozen_namespaces`, `evidence_policy` | [Policies](../use/policies.md) |
+| Suppression rules | `--suppress <file>` (`suppression.py`) | Suppression rule entries (YAML or ABICC format) | [Suppressions](../use/suppressions.md) |
 
 The `evidence_policy` block is part of the **policy file**, not `.abicheck.yml`.
 

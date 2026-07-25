@@ -42,7 +42,7 @@ scenarios:
     validates: UC-PLAT-windows-pe
     automated: false
     status: planned
-    plan: docs/development/plans/g1-cross-platform-e2e.md
+    plan: docs/contribute/plans/g1-cross-platform-e2e.md
     note: >
       PE/COFF + PDB parsing is unit-tested (tests/test_pe_metadata_unit.py,
       tests/test_pdb_metadata.py) and a smoke e2e lane exists
@@ -66,7 +66,7 @@ scenarios:
     validates: UC-PLAT-macos-macho
     automated: false
     status: planned
-    plan: docs/development/plans/g1-cross-platform-e2e.md
+    plan: docs/contribute/plans/g1-cross-platform-e2e.md
     note: >
       Mach-O parsing is unit-tested (tests/test_macho_metadata_unit.py,
       tests/test_macos_arm64_abi.py). Full automation needs a macOS CI lane with
@@ -89,7 +89,7 @@ scenarios:
     validates: UC-ARCH-plugin
     automated: false
     status: planned
-    plan: docs/development/plans/g5-plugin-bidirectional-contract.md
+    plan: docs/contribute/plans/g5-plugin-bidirectional-contract.md
     note: >
       The plugin_abi policy and consumer-scoped appcompat are unit-tested
       (tests/test_appcompat.py, tests/test_workflow_scenarios.py). Full automation

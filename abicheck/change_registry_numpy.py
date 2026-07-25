@@ -20,7 +20,7 @@ exists). These entries are spliced into the single ``REGISTRY`` at import
 time — declaring a kind here is exactly equivalent to declaring it in
 ``change_registry.py``. See ``abicheck/numpy_capi.py`` and
 ``abicheck/diff_numpy_capi.py`` for the evidence extraction and detectors
-that emit these kinds, and ``docs/development/plans/g26-numpy-capi-envelope.md``
+that emit these kinds, and ``docs/contribute/plans/g26-numpy-capi-envelope.md``
 for the full design.
 """
 

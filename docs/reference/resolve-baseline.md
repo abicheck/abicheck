@@ -2,7 +2,7 @@
 
 `actions/resolve-baseline` resolves one check's baseline — `channel × target
 (or bundle) × profile` — against an already-staged baseline-set, returning
-one of [ADR-047](../development/adr/047-github-actions-integration-model.md)
+one of [ADR-047](../contribute/adr/047-github-actions-integration-model.md)
 §6's typed outcomes. It never produces a compatibility verdict, and a missing
 baseline is never silently treated as "compatible."
 
@@ -21,7 +21,7 @@ baseline is never silently treated as "compatible."
 
 Baseline resolution used to be inlined once, inside the root Action's
 `abi-baseline` handling. Every one of `not_found`/`ambiguous`/`wrong_profile`
-in [ADR-047](../development/adr/047-github-actions-integration-model.md)'s
+in [ADR-047](../contribute/adr/047-github-actions-integration-model.md)'s
 scenario catalog is really a baseline-resolution failure — separating it out
 lets a caller treat "baseline not found" as a distinct, typed condition
 instead of falling through to whatever `compare`'s own missing-file error
@@ -32,7 +32,7 @@ text happens to be.
 `resolve-baseline` does not fetch anything from GitHub. Downloading a
 `release-contract` archive from a GitHub Release, or restoring an
 `accepted-main` entry from Actions cache, is the **calling workflow's** job
-(see [ADR-047 §10](../development/adr/047-github-actions-integration-model.md#10-baseline-storage-backends-compared)'s
+(see [ADR-047 §10](../contribute/adr/047-github-actions-integration-model.md#10-baseline-storage-backends-compared)'s
 storage-backend table) — `actions/cache`, `actions/download-artifact`, or
 `gh release download`. `resolve-baseline` only resolves *within* whatever
 `baseline-path` the caller already staged.

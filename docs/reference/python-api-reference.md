@@ -2,7 +2,7 @@
 
 # Python API Reference
 
-Every name in `abicheck.service.__all__` — the supported Tier-2 public entry point — with its full signature or dataclass field list, generated directly from the live objects. See [Python API](../user-guide/python-api.md) for the narrative walkthrough (comparing libraries, working with snapshots, rendering results); this page is the exhaustive signature list only.
+Every name in `abicheck.service.__all__` — the supported Tier-2 public entry point — with its full signature or dataclass field list, generated directly from the live objects. See [Python API](../use/python-api.md) for the narrative walkthrough (comparing libraries, working with snapshots, rendering results); this page is the exhaustive signature list only.
 
 ## `Budget`
 

@@ -7,7 +7,7 @@ authoritative count is the number of entries in `ground_truth.json` — never
 trust a hard-coded count over that file.
 
 Before reporting catalog status, read
-`../docs/development/examples-validation-runbook.md`. `validate_examples.py`
+`../docs/contribute/examples-validation-runbook.md`. `validate_examples.py`
 alone and ad-hoc pair scans are not full-catalog proof. Only collector output
 with every row `COVERED` and no `UNRESOLVED`/`FAILED` cases supports that claim.
 For trusted repository fixtures, preserve CI's explicit
@@ -79,7 +79,7 @@ top of this directory. **If a per-case README disagrees with
 - Don't add a new case without:
   1. A per-case `README.md`.
   2. An entry in `ground_truth.json`.
-  3. Regenerating `docs/examples/` via `scripts/gen_examples_docs.py`.
+  3. Regenerating `docs/reference/examples/` via `scripts/gen_examples_docs.py`.
 - Don't rely on `examples/<case>/README.md` alone — always cross-check
   against `ground_truth.json`.
 
@@ -89,7 +89,7 @@ top of this directory. **If a per-case README disagrees with
 2. Write `v1/`, `v2/`, `app.c|cpp`, and a README.
 3. Add the expected verdict to `ground_truth.json`.
 4. Run `python scripts/gen_examples_docs.py` and commit the regenerated
-   `docs/examples/caseNN_*.md` **and** the refreshed `README.md` catalog
+   `docs/reference/examples/caseNN_*.md` **and** the refreshed `README.md` catalog
    (its headline/distribution/case-index regions are generated from
    `ground_truth.json`; don't hand-edit them).
 5. Validate with `pytest tests/test_abi_examples.py -k caseNN -m integration`.

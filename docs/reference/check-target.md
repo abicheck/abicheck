@@ -2,7 +2,7 @@
 
 `actions/check-target` composes [`resolve-baseline`](resolve-baseline.md) +
 `collect-facts` + the root `abicheck/abicheck` Action into **one resolved
-check** — [ADR-047](../development/adr/047-github-actions-integration-model.md)
+check** — [ADR-047](../contribute/adr/047-github-actions-integration-model.md)
 §4's single high-level primitive — and, once its own input validation
 passes, always emits the [report envelope](#report-envelope-adr-047-7)
 (§7), regardless of whether the baseline resolved, was a bootstrap "no

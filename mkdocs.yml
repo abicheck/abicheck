@@ -35,68 +35,68 @@ nav:
   # day-to-day use, CI gating, specialised checks, then integrations/migration.
   - User Guide:
     - Start Here:
-      - Getting Started: getting-started.md
-      - Choose Your Workflow: user-guide/choose-your-workflow.md
-      - 'Worked Example: Real Library': user-guide/real-world-example.md
-      - 'Scanning a Conda-Forge Package': user-guide/scanning-conda-packages.md
+      - Getting Started: start/getting-started.md
+      - Choose Your Workflow: start/choose-your-workflow.md
+      - 'Worked Example: Real Library': start/real-world-example.md
+      - 'Scanning a Conda-Forge Package': start/scanning-conda-packages.md
     - Everyday Use:
-      - CLI Usage: user-guide/cli-usage.md
-      - Evidence, Build-Context & Debug Flags: user-guide/dump-compare-flags.md
-      - Companion Commands: user-guide/companion-commands.md
-      - Source-Scan Depth: user-guide/scan-levels.md
-      - Producing Source Facts: user-guide/producing-source-facts.md
-      - Output Formats: user-guide/output-formats.md
-      - Baseline Management: user-guide/baseline-management.md
-      - Creating and Comparing a Baseline: user-guide/create-baseline.md
-      - Storing Baselines: user-guide/baseline-storage.md
+      - CLI Usage: use/cli-usage.md
+      - Evidence, Build-Context & Debug Flags: use/dump-compare-flags.md
+      - Companion Commands: use/companion-commands.md
+      - Source-Scan Depth: use/scan-levels.md
+      - Producing Source Facts: use/producing-source-facts.md
+      - Output Formats: use/output-formats.md
+      - Baseline Management: use/baseline-management.md
+      - Creating and Comparing a Baseline: use/create-baseline.md
+      - Storing Baselines: use/baseline-storage.md
     - CI & Gating:
-      - CI Gating Pipeline: user-guide/ci-gating.md
+      - CI Gating Pipeline: use/ci-gating.md
       - GitHub Action:
-        - Overview & Setup: user-guide/github-action.md
-        - More Recipes: user-guide/github-action-recipes.md
-        - Source Scans: user-guide/github-action-source-scans.md
-        - PR Annotations: user-guide/annotations.md
-      - Severity Configuration: user-guide/severity.md
-      - Policy Profiles: user-guide/policies.md
-      - Suppressions: user-guide/suppressions.md
+        - Overview & Setup: use/github-action.md
+        - More Recipes: use/github-action-recipes.md
+        - Source Scans: use/github-action-source-scans.md
+        - PR Annotations: use/annotations.md
+      - Severity Configuration: use/severity.md
+      - Policy Profiles: use/policies.md
+      - Suppressions: use/suppressions.md
     - Specialised Checks:
       - Packages & Multi-Library Products:
-        - Debian Symbols Files: user-guide/debian-symbols.md
-        - Multi-Binary Releases: user-guide/multi-binary.md
+        - Debian Symbols Files: use/debian-symbols.md
+        - Multi-Binary Releases: use/multi-binary.md
       - Applications & Consumers:
-        - Application Compatibility: user-guide/appcompat.md
-        - API Surface Intelligence: user-guide/api-surface-intelligence.md
+        - Application Compatibility: use/appcompat.md
+        - API Surface Intelligence: use/api-surface-intelligence.md
       - Plugins & Dynamic Loading:
-        - Plugin Systems: user-guide/plugin-systems.md
+        - Plugin Systems: use/plugin-systems.md
       - Python Extensions:
-        - Python Extensions (abi3): user-guide/python-extensions.md
-        - POST Python Manifests: user-guide/post-python.md
+        - Python Extensions (abi3): use/python-extensions.md
+        - POST Python Manifests: use/post-python.md
       - Kernel & eBPF:
-        - Kernel & eBPF (BTF): user-guide/kernel-btf.md
+        - Kernel & eBPF (BTF): use/kernel-btf.md
       - Build & Toolchain Contracts:
-        - Build Evidence Setup: user-guide/build-evidence-setup.md
-        - Probe Harness: user-guide/probe-harness.md
+        - Build Evidence Setup: use/build-evidence-setup.md
+        - Probe Harness: use/probe-harness.md
       - Security & Deployment:
-        - Security Hardening: user-guide/security-hardening.md
+        - Security Hardening: use/security-hardening.md
     - Integrations & Migration:
-      - Tool Modes: user-guide/tool-modes.md
-      - Python API: user-guide/python-api.md
-      - MCP Integration: user-guide/mcp-integration.md
-      - Upgrading to 0.5.0: user-guide/migration-0.5.md
-      - Migrating from ABICC: user-guide/from-abicc.md
-      - Migrating from libabigail: user-guide/from-libabigail.md
+      - Tool Modes: use/tool-modes.md
+      - Python API: use/python-api.md
+      - MCP Integration: use/mcp-integration.md
+      - Upgrading to 0.5.0: use/migration-0.5.md
+      - Migrating from ABICC: use/from-abicc.md
+      - Migrating from libabigail: use/from-libabigail.md
   # How the tool works, simplest mental model first: what a verdict means →
   # what each data source can see → how the pipeline is built → deep internals.
   - Concepts:
-    - Verdicts: concepts/verdicts.md
-    - Evidence & Detectability: concepts/evidence-and-detectability.md
-    - What Each Level Sees: concepts/what-each-level-sees.md
-    - Architecture: concepts/architecture.md
-    - Build Info & Sources (build-source data): concepts/build-source-data.md
-    - Graph Coverage & Negative Evidence: concepts/graph-coverage.md
-    - Unified Impact Assessment: concepts/impact-analysis.md
-    - Environment & Toolchain Drift: concepts/environment-drift.md
-    - Limitations: concepts/limitations.md
+    - Verdicts: learn/verdicts.md
+    - Evidence & Detectability: learn/evidence-and-detectability.md
+    - What Each Level Sees: learn/what-each-level-sees.md
+    - Architecture: learn/architecture.md
+    - Build Info & Sources (build-source data): learn/build-source-data.md
+    - Graph Coverage & Negative Evidence: learn/graph-coverage.md
+    - Unified Impact Assessment: learn/impact-analysis.md
+    - Environment & Toolchain Drift: learn/environment-drift.md
+    - Limitations: learn/limitations.md
   # Lookup tables — precise, exhaustive, no narrative.
   - Reference:
     - CLI Reference: reference/cli-reference.md
@@ -122,65 +122,65 @@ nav:
   # Track 1 (educational): what ABI/API compatibility is and how to manage it,
   # from first principles (series part 0) to expert-level design guidance.
   - ABI/API Handling & Recommendations:
-    - Overview: concepts/abi-api-handling.md
-    - ABI Cheat Sheet: concepts/abi-cheat-sheet.md
+    - Overview: learn/abi-api-handling.md
+    - ABI Cheat Sheet: learn/abi-cheat-sheet.md
     - Deep Dives:
-      - Your ABI Surface: concepts/abi-surface.md
-      - Class Layout ABI & API: concepts/class-layout-abi.md
-      - Dependency & Runtime Floors: concepts/dependency-floors.md
+      - Your ABI Surface: learn/abi-surface.md
+      - Class Layout ABI & API: learn/class-layout-abi.md
+      - Dependency & Runtime Floors: learn/dependency-floors.md
     - Learning Series:
-      - "ABI in Five Minutes": concepts/abi-series/abi-in-5-minutes.md
-      - "0. Compatibility as a Product Contract": concepts/abi-series/00-product-contract.md
-      - "1. Foundations": concepts/abi-series/01-foundations.md
-      - "2. Symbol Contracts": concepts/abi-series/02-symbol-contracts.md
-      - "3. Type Layout": concepts/abi-series/03-type-layout.md
-      - "4. C++ ABI": concepts/abi-series/04-cpp-abi.md
-      - "5. Linker & ELF": concepts/abi-series/05-linker-elf.md
-      - "6. Transitive Breaks": concepts/abi-series/06-transitive-breaks.md
-      - "7. Designing for Stability": concepts/abi-series/07-designing-for-stability.md
-      - "8. Detecting Breaks": concepts/abi-series/08-detection.md
-      - "Glossary": concepts/abi-series/glossary.md
+      - "ABI in Five Minutes": learn/abi-series/abi-in-5-minutes.md
+      - "0. Compatibility as a Product Contract": learn/abi-series/00-product-contract.md
+      - "1. Foundations": learn/abi-series/01-foundations.md
+      - "2. Symbol Contracts": learn/abi-series/02-symbol-contracts.md
+      - "3. Type Layout": learn/abi-series/03-type-layout.md
+      - "4. C++ ABI": learn/abi-series/04-cpp-abi.md
+      - "5. Linker & ELF": learn/abi-series/05-linker-elf.md
+      - "6. Transitive Breaks": learn/abi-series/06-transitive-breaks.md
+      - "7. Designing for Stability": learn/abi-series/07-designing-for-stability.md
+      - "8. Detecting Breaks": learn/abi-series/08-detection.md
+      - "Glossary": learn/abi-series/glossary.md
   # The case catalog: every break scenario as a compilable fixture, browsable
   # by verdict (what abicheck reports) or by category (what kind of change).
   - Examples:
-    - All Cases: examples/index.md
+    - All Cases: reference/examples/index.md
     - By Verdict:
-      - "BREAKING": examples/by-verdict/breaking.md
-      - "API_BREAK": examples/by-verdict/api-break.md
-      - "COMPATIBLE_WITH_RISK": examples/by-verdict/compatible-risk.md
-      - "COMPATIBLE": examples/by-verdict/compatible.md
-      - "NO_CHANGE": examples/by-verdict/no-change.md
+      - "BREAKING": reference/examples/by-verdict/breaking.md
+      - "API_BREAK": reference/examples/by-verdict/api-break.md
+      - "COMPATIBLE_WITH_RISK": reference/examples/by-verdict/compatible-risk.md
+      - "COMPATIBLE": reference/examples/by-verdict/compatible.md
+      - "NO_CHANGE": reference/examples/by-verdict/no-change.md
     - By Category:
-      - Breaking: examples/by-category/breaking.md
-      - API Break: examples/by-category/api_break.md
-      - Risk: examples/by-category/risk.md
-      - Addition: examples/by-category/addition.md
-      - Quality: examples/by-category/quality.md
-      - No Change: examples/by-category/no_change.md
+      - Breaking: reference/examples/by-category/breaking.md
+      - API Break: reference/examples/by-category/api_break.md
+      - Risk: reference/examples/by-category/risk.md
+      - Addition: reference/examples/by-category/addition.md
+      - Quality: reference/examples/by-category/quality.md
+      - No Change: reference/examples/by-category/no_change.md
   # Contributor-facing docs. Internal planning artifacts (implementation plans,
   # backlog, roadmap audits, archived status notes) stay in the repo under
-  # docs/development/ but are intentionally kept out of the published nav — see
+  # docs/contribute/ but are intentionally kept out of the published nav — see
   # the "Working documents" note in the Codebase Overview.
   - Development:
     - Contributing:
-      - Codebase Overview: development/codebase-overview.md
-      - Writing Documentation: development/documentation.md
-      - Testing: development/testing.md
-      - Performance: development/performance.md
-      - Troubleshooting: troubleshooting.md
+      - Codebase Overview: contribute/codebase-overview.md
+      - Writing Documentation: contribute/documentation.md
+      - Testing: contribute/testing.md
+      - Performance: contribute/performance.md
+      - Troubleshooting: contribute/troubleshooting.md
     - Roadmap & Status:
-      - Goals: development/goals.md
-      - SciPy / Scientific-Python Roadmap: development/scipy-scientific-python-roadmap.md
-      - Python Build Ecosystem Positioning: development/python-build-ecosystem-positioning.md
+      - Goals: contribute/goals.md
+      - SciPy / Scientific-Python Roadmap: contribute/scipy-scientific-python-roadmap.md
+      - Python Build Ecosystem Positioning: contribute/python-build-ecosystem-positioning.md
     - Parity & Reports:
-      - ABICC Parity Status: development/abicc-parity-status.md
-      - ABICC Test Coverage Comparison: development/abicc-test-coverage-comparison.md
+      - ABICC Parity Status: contribute/abicc-parity-status.md
+      - ABICC Test Coverage Comparison: contribute/abicc-test-coverage-comparison.md
       - ABICC Format Compliance: reference/abicc-format-compliance.md
-      - libabigail Parity Matrix: development/libabigail-parity.md
-      - Report Comparison: development/report-comparison.md
+      - libabigail Parity Matrix: contribute/libabigail-parity.md
+      - Report Comparison: contribute/report-comparison.md
       - SYCL test/abi Coverage: reference/sycl-test-abi-coverage.md
     - ADR:
-      - Overview: development/adr/index.md
+      - Overview: contribute/adr/index.md
 
 # Agent instructions are repo-internal context, not published documentation.
 exclude_docs: |
@@ -193,9 +193,379 @@ plugins:
   # working via client-side redirect stubs (external bookmarks, search hits).
   - redirects:
       redirect_maps:
-        concepts/scan-and-evidence-levels.md: concepts/evidence-and-detectability.md
-        concepts/verdicts-and-exit-codes.md: concepts/verdicts.md
-        concepts/api-surface-intelligence.md: user-guide/api-surface-intelligence.md
+        concepts/scan-and-evidence-levels.md: learn/evidence-and-detectability.md
+        concepts/verdicts-and-exit-codes.md: learn/verdicts.md
+        concepts/api-surface-intelligence.md: use/api-surface-intelligence.md
+        concepts/abi-api-handling.md: learn/abi-api-handling.md
+        concepts/abi-cheat-sheet.md: learn/abi-cheat-sheet.md
+        concepts/abi-series/00-product-contract.md: learn/abi-series/00-product-contract.md
+        concepts/abi-series/01-foundations.md: learn/abi-series/01-foundations.md
+        concepts/abi-series/02-symbol-contracts.md: learn/abi-series/02-symbol-contracts.md
+        concepts/abi-series/03-type-layout.md: learn/abi-series/03-type-layout.md
+        concepts/abi-series/04-cpp-abi.md: learn/abi-series/04-cpp-abi.md
+        concepts/abi-series/05-linker-elf.md: learn/abi-series/05-linker-elf.md
+        concepts/abi-series/06-transitive-breaks.md: learn/abi-series/06-transitive-breaks.md
+        concepts/abi-series/07-designing-for-stability.md: learn/abi-series/07-designing-for-stability.md
+        concepts/abi-series/08-detection.md: learn/abi-series/08-detection.md
+        concepts/abi-series/abi-in-5-minutes.md: learn/abi-series/abi-in-5-minutes.md
+        concepts/abi-series/glossary.md: learn/abi-series/glossary.md
+        concepts/abi-surface.md: learn/abi-surface.md
+        concepts/architecture.md: learn/architecture.md
+        concepts/build-source-data.md: learn/build-source-data.md
+        concepts/class-layout-abi.md: learn/class-layout-abi.md
+        concepts/dependency-floors.md: learn/dependency-floors.md
+        concepts/environment-drift.md: learn/environment-drift.md
+        concepts/evidence-and-detectability.md: learn/evidence-and-detectability.md
+        concepts/graph-coverage.md: learn/graph-coverage.md
+        concepts/limitations.md: learn/limitations.md
+        concepts/verdicts.md: learn/verdicts.md
+        concepts/what-each-level-sees.md: learn/what-each-level-sees.md
+        development/abicc-parity-status.md: contribute/abicc-parity-status.md
+        development/abicc-test-coverage-comparison.md: contribute/abicc-test-coverage-comparison.md
+        development/adr/001-technology-stack.md: contribute/adr/001-technology-stack.md
+        development/adr/002-multi-binary-release-compare.md: contribute/adr/002-multi-binary-release-compare.md
+        development/adr/003-data-source-architecture.md: contribute/adr/003-data-source-architecture.md
+        development/adr/004-report-filtering-and-deduplication.md: contribute/adr/004-report-filtering-and-deduplication.md
+        development/adr/005-application-compat-check.md: contribute/adr/005-application-compat-check.md
+        development/adr/006-package-level-comparison.md: contribute/adr/006-package-level-comparison.md
+        development/adr/007-btf-ctf-debug-formats.md: contribute/adr/007-btf-ctf-debug-formats.md
+        development/adr/008-full-stack-dependency-validation.md: contribute/adr/008-full-stack-dependency-validation.md
+        development/adr/009-verdict-system-and-exit-codes.md: contribute/adr/009-verdict-system-and-exit-codes.md
+        development/adr/010-policy-profile-system.md: contribute/adr/010-policy-profile-system.md
+        development/adr/011-change-classification-taxonomy.md: contribute/adr/011-change-classification-taxonomy.md
+        development/adr/012-abicc-compatibility-layer.md: contribute/adr/012-abicc-compatibility-layer.md
+        development/adr/013-suppression-system.md: contribute/adr/013-suppression-system.md
+        development/adr/014-output-format-strategy.md: contribute/adr/014-output-format-strategy.md
+        development/adr/015-snapshot-serialization.md: contribute/adr/015-snapshot-serialization.md
+        development/adr/016-visibility-model.md: contribute/adr/016-visibility-model.md
+        development/adr/017-github-action.md: contribute/adr/017-github-action.md
+        development/adr/018-cross-platform-support.md: contribute/adr/018-cross-platform-support.md
+        development/adr/019-testing-strategy.md: contribute/adr/019-testing-strategy.md
+        development/adr/020-build-context-capture.md: contribute/adr/020-build-context-capture.md
+        development/adr/020-sycl-and-heterogeneous-stack-support.md: contribute/adr/020-sycl-and-heterogeneous-stack-support.md
+        development/adr/021-debug-artifact-resolution.md: contribute/adr/021-debug-artifact-resolution.md
+        development/adr/021-mcp-security-model.md: contribute/adr/021-mcp-security-model.md
+        development/adr/022-baseline-registry.md: contribute/adr/022-baseline-registry.md
+        development/adr/023-bundle-aware-multi-binary-analysis.md: contribute/adr/023-bundle-aware-multi-binary-analysis.md
+        development/adr/024-public-abi-surface-resolution.md: contribute/adr/024-public-abi-surface-resolution.md
+        development/adr/025-pr-diff-source-evaluation.md: contribute/adr/025-pr-diff-source-evaluation.md
+        development/adr/026-source-only-undetectable-changes.md: contribute/adr/026-source-only-undetectable-changes.md
+        development/adr/027-api-surface-intelligence.md: contribute/adr/027-api-surface-intelligence.md
+        development/adr/028-source-build-evidence-pack.md: contribute/adr/028-source-build-evidence-pack.md
+        development/adr/029-build-graph-toolchain-context-capture.md: contribute/adr/029-build-graph-toolchain-context-capture.md
+        development/adr/030-source-abi-replay-and-linked-source-surface.md: contribute/adr/030-source-abi-replay-and-linked-source-surface.md
+        development/adr/031-source-implementation-graph-augmentation.md: contribute/adr/031-source-implementation-graph-augmentation.md
+        development/adr/032-evidence-extractor-plugin-interface.md: contribute/adr/032-evidence-extractor-plugin-interface.md
+        development/adr/033-ci-rollout-performance-and-validation.md: contribute/adr/033-ci-rollout-performance-and-validation.md
+        development/adr/034-managed-runtime-and-non-c-abi-frontends.md: contribute/adr/034-managed-runtime-and-non-c-abi-frontends.md
+        development/adr/035-pr-tier-source-intelligence-and-crosscheck.md: contribute/adr/035-pr-tier-source-intelligence-and-crosscheck.md
+        development/adr/036-report-view-model.md: contribute/adr/036-report-view-model.md
+        development/adr/037-cli-interface-contract.md: contribute/adr/037-cli-interface-contract.md
+        development/adr/038-build-integrated-fact-collection-variants.md: contribute/adr/038-build-integrated-fact-collection-variants.md
+        development/adr/039-build-context-reconciliation.md: contribute/adr/039-build-context-reconciliation.md
+        development/adr/040-compare-surface-reduction.md: contribute/adr/040-compare-surface-reduction.md
+        development/adr/041-compiler-facts-semantic-impact-graph.md: contribute/adr/041-compiler-facts-semantic-impact-graph.md
+        development/adr/042-compatibility-and-gate-decision-separation.md: contribute/adr/042-compatibility-and-gate-decision-separation.md
+        development/adr/043-cli-pre-1.0-surface-reset.md: contribute/adr/043-cli-pre-1.0-surface-reset.md
+        development/adr/044-reachability-aware-suppression.md: contribute/adr/044-reachability-aware-suppression.md
+        development/adr/045-identity-based-old-new-entity-matching.md: contribute/adr/045-identity-based-old-new-entity-matching.md
+        development/adr/046-source-graph-identity-v2-and-evidence-merge.md: contribute/adr/046-source-graph-identity-v2-and-evidence-merge.md
+        development/adr/047-github-actions-integration-model.md: contribute/adr/047-github-actions-integration-model.md
+        development/adr/048-canonical-entity-identity-and-graph-reconciliation.md: contribute/adr/048-canonical-entity-identity-and-graph-reconciliation.md
+        development/adr/049-contract-relevance-and-compatibility-configuration.md: contribute/adr/049-contract-relevance-and-compatibility-configuration.md
+        development/adr/050-comparability-contract-and-multi-tu-manifest.md: contribute/adr/050-comparability-contract-and-multi-tu-manifest.md
+        development/adr/051-documentation-operational-model.md: contribute/adr/051-documentation-operational-model.md
+        development/adr/index.md: contribute/adr/index.md
+        development/architecture-deepening-plan.md: contribute/architecture-deepening-plan.md
+        development/archive/data-source-process-remediation-plan.md: contribute/archive/data-source-process-remediation-plan.md
+        development/backlog.md: contribute/backlog.md
+        development/codebase-overview.md: contribute/codebase-overview.md
+        development/config-key-review.md: contribute/config-key-review.md
+        development/documentation.md: contribute/documentation.md
+        development/examples-validation-runbook.md: contribute/examples-validation-runbook.md
+        development/goals.md: contribute/goals.md
+        development/libabigail-parity.md: contribute/libabigail-parity.md
+        development/performance.md: contribute/performance.md
+        development/plans/g1-cross-platform-e2e.md: contribute/plans/g1-cross-platform-e2e.md
+        development/plans/g10-glibc-floor-check.md: contribute/plans/g10-glibc-floor-check.md
+        development/plans/g11-single-binary-audit.md: contribute/plans/g11-single-binary-audit.md
+        development/plans/g12-security-hardening.md: contribute/plans/g12-security-hardening.md
+        development/plans/g13-arch-mismatch-guard.md: contribute/plans/g13-arch-mismatch-guard.md
+        development/plans/g14-stable-abi-subset.md: contribute/plans/g14-stable-abi-subset.md
+        development/plans/g15-inline-namespace-version.md: contribute/plans/g15-inline-namespace-version.md
+        development/plans/g16-header-scope-toolchain-robustness.md: contribute/plans/g16-header-scope-toolchain-robustness.md
+        development/plans/g17-real-world-corpus.md: contribute/plans/g17-real-world-corpus.md
+        development/plans/g18-bazel-build-evidence.md: contribute/plans/g18-bazel-build-evidence.md
+        development/plans/g19-pr-source-intelligence.md: contribute/plans/g19-pr-source-intelligence.md
+        development/plans/g2-build-config-and-bundle.md: contribute/plans/g2-build-config-and-bundle.md
+        development/plans/g20-source-scan-example-catalog.md: contribute/plans/g20-source-scan-example-catalog.md
+        development/plans/g21-oneshot-deep-compare.md: contribute/plans/g21-oneshot-deep-compare.md
+        development/plans/g22-cli-consolidation.md: contribute/plans/g22-cli-consolidation.md
+        development/plans/g23-python-level-api-diff.md: contribute/plans/g23-python-level-api-diff.md
+        development/plans/g24-linux-abi-gap-closure.md: contribute/plans/g24-linux-abi-gap-closure.md
+        development/plans/g25-cython-api-abi-frontend.md: contribute/plans/g25-cython-api-abi-frontend.md
+        development/plans/g26-numpy-capi-envelope.md: contribute/plans/g26-numpy-capi-envelope.md
+        development/plans/g27-wheel-deployment-verification.md: contribute/plans/g27-wheel-deployment-verification.md
+        development/plans/g28-castxml-clang-l2-parity-hardening.md: contribute/plans/g28-castxml-clang-l2-parity-hardening.md
+        development/plans/g29-impact-analysis-layer.md: contribute/plans/g29-impact-analysis-layer.md
+        development/plans/g3-workflow-examples-and-reporting.md: contribute/plans/g3-workflow-examples-and-reporting.md
+        development/plans/g30-github-actions-integration-model.md: contribute/plans/g30-github-actions-integration-model.md
+        development/plans/g31-header-graph-default-on-followup.md: contribute/plans/g31-header-graph-default-on-followup.md
+        development/plans/g32-comparability-contract-and-multi-tu-manifest.md: contribute/plans/g32-comparability-contract-and-multi-tu-manifest.md
+        development/plans/g4-header-ast-extractor.md: contribute/plans/g4-header-ast-extractor.md
+        development/plans/g5-plugin-bidirectional-contract.md: contribute/plans/g5-plugin-bidirectional-contract.md
+        development/plans/g6-kernel-btf-and-accelerator.md: contribute/plans/g6-kernel-btf-and-accelerator.md
+        development/plans/g8-static-libraries.md: contribute/plans/g8-static-libraries.md
+        development/plans/g9-wheel-vendored-matching.md: contribute/plans/g9-wheel-vendored-matching.md
+        development/plans/index.md: contribute/plans/index.md
+        development/plans/public-contract-default.md: contribute/plans/public-contract-default.md
+        development/python-build-ecosystem-positioning.md: contribute/python-build-ecosystem-positioning.md
+        development/report-comparison.md: contribute/report-comparison.md
+        development/scipy-scientific-python-roadmap.md: contribute/scipy-scientific-python-roadmap.md
+        development/testing.md: contribute/testing.md
+        development/usecase-coverage-evaluation.md: contribute/usecase-coverage-evaluation.md
+        development/user-scenarios.md: contribute/user-scenarios.md
+        examples/by-category/addition.md: reference/examples/by-category/addition.md
+        examples/by-category/api_break.md: reference/examples/by-category/api_break.md
+        examples/by-category/breaking.md: reference/examples/by-category/breaking.md
+        examples/by-category/no_change.md: reference/examples/by-category/no_change.md
+        examples/by-category/quality.md: reference/examples/by-category/quality.md
+        examples/by-category/risk.md: reference/examples/by-category/risk.md
+        examples/by-verdict/api-break.md: reference/examples/by-verdict/api-break.md
+        examples/by-verdict/breaking.md: reference/examples/by-verdict/breaking.md
+        examples/by-verdict/compatible-risk.md: reference/examples/by-verdict/compatible-risk.md
+        examples/by-verdict/compatible.md: reference/examples/by-verdict/compatible.md
+        examples/by-verdict/no-change.md: reference/examples/by-verdict/no-change.md
+        examples/case01_symbol_removal.md: reference/examples/case01_symbol_removal.md
+        examples/case02_param_type_change.md: reference/examples/case02_param_type_change.md
+        examples/case03_compat_addition.md: reference/examples/case03_compat_addition.md
+        examples/case04_no_change.md: reference/examples/case04_no_change.md
+        examples/case05_soname.md: reference/examples/case05_soname.md
+        examples/case06_visibility.md: reference/examples/case06_visibility.md
+        examples/case07_struct_layout.md: reference/examples/case07_struct_layout.md
+        examples/case08_enum_value_change.md: reference/examples/case08_enum_value_change.md
+        examples/case09_cpp_vtable.md: reference/examples/case09_cpp_vtable.md
+        examples/case100_experimental_removed_without_replacement.md: reference/examples/case100_experimental_removed_without_replacement.md
+        examples/case101_inline_namespace_version_bumped.md: reference/examples/case101_inline_namespace_version_bumped.md
+        examples/case102_frozen_runtime_signature_changed.md: reference/examples/case102_frozen_runtime_signature_changed.md
+        examples/case103_toolchain_flag_drift.md: reference/examples/case103_toolchain_flag_drift.md
+        examples/case104_glibcxx_dual_abi_flip.md: reference/examples/case104_glibcxx_dual_abi_flip.md
+        examples/case105_concept_tightening.md: reference/examples/case105_concept_tightening.md
+        examples/case106_ctor_became_explicit.md: reference/examples/case106_ctor_became_explicit.md
+        examples/case107_task_scheduler_init_removed.md: reference/examples/case107_task_scheduler_init_removed.md
+        examples/case108_task_class_removed.md: reference/examples/case108_task_class_removed.md
+        examples/case109_flow_graph_policy_renames.md: reference/examples/case109_flow_graph_policy_renames.md
+        examples/case10_return_type.md: reference/examples/case10_return_type.md
+        examples/case110_concurrent_unordered_map_api_drift.md: reference/examples/case110_concurrent_unordered_map_api_drift.md
+        examples/case111_enumerable_thread_specific_lambda_ambiguity.md: reference/examples/case111_enumerable_thread_specific_lambda_ambiguity.md
+        examples/case112_lp64_ilp64.md: reference/examples/case112_lp64_ilp64.md
+        examples/case113_abi_tag_changed.md: reference/examples/case113_abi_tag_changed.md
+        examples/case114_char8t_migration.md: reference/examples/case114_char8t_migration.md
+        examples/case115_bit_int_width_changed.md: reference/examples/case115_bit_int_width_changed.md
+        examples/case116_atomic_qualifier_changed.md: reference/examples/case116_atomic_qualifier_changed.md
+        examples/case117_no_unique_address.md: reference/examples/case117_no_unique_address.md
+        examples/case118_internal_struct_field_added_scoped.md: reference/examples/case118_internal_struct_field_added_scoped.md
+        examples/case119_internal_struct_field_removed_scoped.md: reference/examples/case119_internal_struct_field_removed_scoped.md
+        examples/case11_global_var_type.md: reference/examples/case11_global_var_type.md
+        examples/case120_internal_struct_reordered_scoped.md: reference/examples/case120_internal_struct_reordered_scoped.md
+        examples/case121_kernel_btf_struct_field_added.md: reference/examples/case121_kernel_btf_struct_field_added.md
+        examples/case122_template_signature_uninstantiated.md: reference/examples/case122_template_signature_uninstantiated.md
+        examples/case123_default_argument_removed.md: reference/examples/case123_default_argument_removed.md
+        examples/case124_header_constant_value_changed.md: reference/examples/case124_header_constant_value_changed.md
+        examples/case125_class_became_final.md: reference/examples/case125_class_became_final.md
+        examples/case126_sycl_device_impl_ptr.md: reference/examples/case126_sycl_device_impl_ptr.md
+        examples/case127_data_object_size_changed.md: reference/examples/case127_data_object_size_changed.md
+        examples/case128_symbol_binding_strengthened.md: reference/examples/case128_symbol_binding_strengthened.md
+        examples/case129_struct_return_convention.md: reference/examples/case129_struct_return_convention.md
+        examples/case12_function_removed.md: reference/examples/case12_function_removed.md
+        examples/case130_exceptions_mode_flip.md: reference/examples/case130_exceptions_mode_flip.md
+        examples/case131_rtti_mode_flip.md: reference/examples/case131_rtti_mode_flip.md
+        examples/case132_threadsafe_statics_flip.md: reference/examples/case132_threadsafe_statics_flip.md
+        examples/case133_tls_model_flip.md: reference/examples/case133_tls_model_flip.md
+        examples/case134_relro_weakened.md: reference/examples/case134_relro_weakened.md
+        examples/case135_stack_canary_removed.md: reference/examples/case135_stack_canary_removed.md
+        examples/case136_executable_stack_removed.md: reference/examples/case136_executable_stack_removed.md
+        examples/case137_runpath_changed.md: reference/examples/case137_runpath_changed.md
+        examples/case138_needed_added.md: reference/examples/case138_needed_added.md
+        examples/case139_symbol_version_node_removed.md: reference/examples/case139_symbol_version_node_removed.md
+        examples/case13_symbol_versioning.md: reference/examples/case13_symbol_versioning.md
+        examples/case140_empty_base_optimization_lost.md: reference/examples/case140_empty_base_optimization_lost.md
+        examples/case141_versioned_symbol_scheme.md: reference/examples/case141_versioned_symbol_scheme.md
+        examples/case142_vtable_slot_count_binary_only.md: reference/examples/case142_vtable_slot_count_binary_only.md
+        examples/case143_audit_accidental_export.md: reference/examples/case143_audit_accidental_export.md
+        examples/case144_audit_private_header_leak.md: reference/examples/case144_audit_private_header_leak.md
+        examples/case145_audit_unversioned_export.md: reference/examples/case145_audit_unversioned_export.md
+        examples/case146_audit_rtti_for_internal.md: reference/examples/case146_audit_rtti_for_internal.md
+        examples/case147_scan_depth_ladder.md: reference/examples/case147_scan_depth_ladder.md
+        examples/case148_xcheck_header_build_mismatch.md: reference/examples/case148_xcheck_header_build_mismatch.md
+        examples/case149_xcheck_odr_variant.md: reference/examples/case149_xcheck_odr_variant.md
+        examples/case14_cpp_class_size.md: reference/examples/case14_cpp_class_size.md
+        examples/case150_xcheck_export_public_pair.md: reference/examples/case150_xcheck_export_public_pair.md
+        examples/case151_xcheck_provider_matrix.md: reference/examples/case151_xcheck_provider_matrix.md
+        examples/case152_enum_size_flag_flip.md: reference/examples/case152_enum_size_flag_flip.md
+        examples/case153_struct_packing_flip.md: reference/examples/case153_struct_packing_flip.md
+        examples/case154_lto_mode_flip.md: reference/examples/case154_lto_mode_flip.md
+        examples/case155_char_signedness_flip.md: reference/examples/case155_char_signedness_flip.md
+        examples/case156_public_macro_removed.md: reference/examples/case156_public_macro_removed.md
+        examples/case157_inline_function_removed.md: reference/examples/case157_inline_function_removed.md
+        examples/case158_public_typedef_removed.md: reference/examples/case158_public_typedef_removed.md
+        examples/case15_noexcept_change.md: reference/examples/case15_noexcept_change.md
+        examples/case160_public_api_internal_dep_added.md: reference/examples/case160_public_api_internal_dep_added.md
+        examples/case161_target_dependency_added.md: reference/examples/case161_target_dependency_added.md
+        examples/case162_symbol_source_owner_changed.md: reference/examples/case162_symbol_source_owner_changed.md
+        examples/case163_python_kwarg_renamed.md: reference/examples/case163_python_kwarg_renamed.md
+        examples/case164_preproc_conditional_field.md: reference/examples/case164_preproc_conditional_field.md
+        examples/case165_polymorphic_nonvirtual_dtor.md: reference/examples/case165_polymorphic_nonvirtual_dtor.md
+        examples/case166_ref_qualifier_added.md: reference/examples/case166_ref_qualifier_added.md
+        examples/case167_base_became_virtual.md: reference/examples/case167_base_became_virtual.md
+        examples/case168_virtual_method_devirtualized.md: reference/examples/case168_virtual_method_devirtualized.md
+        examples/case169_overload_added.md: reference/examples/case169_overload_added.md
+        examples/case16_inline_to_non_inline.md: reference/examples/case16_inline_to_non_inline.md
+        examples/case170_env_runtime_floor_raised.md: reference/examples/case170_env_runtime_floor_raised.md
+        examples/case171_static_tls_introduced.md: reference/examples/case171_static_tls_introduced.md
+        examples/case172_vtable_thunk_offset_changed.md: reference/examples/case172_vtable_thunk_offset_changed.md
+        examples/case173_vtt_slot_count_changed.md: reference/examples/case173_vtt_slot_count_changed.md
+        examples/case174_secondary_vtable_group_changed.md: reference/examples/case174_secondary_vtable_group_changed.md
+        examples/case175_kabi_crc_changed.md: reference/examples/case175_kabi_crc_changed.md
+        examples/case176_kabi_symbol_namespace_changed.md: reference/examples/case176_kabi_symbol_namespace_changed.md
+        examples/case177_long_double_abi_changed.md: reference/examples/case177_long_double_abi_changed.md
+        examples/case178_unnamed_type_in_public_abi.md: reference/examples/case178_unnamed_type_in_public_abi.md
+        examples/case179_cet_protection_weakened.md: reference/examples/case179_cet_protection_weakened.md
+        examples/case17_template_abi.md: reference/examples/case17_template_abi.md
+        examples/case180_symbol_binding_lost_unique.md: reference/examples/case180_symbol_binding_lost_unique.md
+        examples/case181_xcheck_public_to_internal_dependency.md: reference/examples/case181_xcheck_public_to_internal_dependency.md
+        examples/case182_accidental_export_removed_still_breaking.md: reference/examples/case182_accidental_export_removed_still_breaking.md
+        examples/case183_internal_version_node_churn.md: reference/examples/case183_internal_version_node_churn.md
+        examples/case184_internal_enum_churn_scoped.md: reference/examples/case184_internal_enum_churn_scoped.md
+        examples/case185_inherited_override_reuses_slot.md: reference/examples/case185_inherited_override_reuses_slot.md
+        examples/case186_c_api_pointee_const_abi_neutral.md: reference/examples/case186_c_api_pointee_const_abi_neutral.md
+        examples/case187_public_struct_private_field_type.md: reference/examples/case187_public_struct_private_field_type.md
+        examples/case188_public_class_private_base_class.md: reference/examples/case188_public_class_private_base_class.md
+        examples/case189_public_function_private_parameter_type.md: reference/examples/case189_public_function_private_parameter_type.md
+        examples/case18_dependency_leak.md: reference/examples/case18_dependency_leak.md
+        examples/case190_public_inline_function_references_internal_constant.md: reference/examples/case190_public_inline_function_references_internal_constant.md
+        examples/case191_header_only_graph_field_type.md: reference/examples/case191_header_only_graph_field_type.md
+        examples/case192_call_graph_break_survives_suppression.md: reference/examples/case192_call_graph_break_survives_suppression.md
+        examples/case193_ordinary_exported_fn_call_not_reachable.md: reference/examples/case193_ordinary_exported_fn_call_not_reachable.md
+        examples/case194_header_graph_rename_reconciled.md: reference/examples/case194_header_graph_rename_reconciled.md
+        examples/case195_header_graph_ambiguous_rename_not_reconciled.md: reference/examples/case195_header_graph_ambiguous_rename_not_reconciled.md
+        examples/case19_enum_member_removed.md: reference/examples/case19_enum_member_removed.md
+        examples/case20_enum_member_value_changed.md: reference/examples/case20_enum_member_value_changed.md
+        examples/case21_method_became_static.md: reference/examples/case21_method_became_static.md
+        examples/case22_method_const_changed.md: reference/examples/case22_method_const_changed.md
+        examples/case23_pure_virtual_added.md: reference/examples/case23_pure_virtual_added.md
+        examples/case24_union_field_removed.md: reference/examples/case24_union_field_removed.md
+        examples/case25_enum_member_added.md: reference/examples/case25_enum_member_added.md
+        examples/case26_union_field_added.md: reference/examples/case26_union_field_added.md
+        examples/case26b_union_field_added_compatible.md: reference/examples/case26b_union_field_added_compatible.md
+        examples/case27_symbol_binding_weakened.md: reference/examples/case27_symbol_binding_weakened.md
+        examples/case28_typedef_opaque.md: reference/examples/case28_typedef_opaque.md
+        examples/case29_ifunc_transition.md: reference/examples/case29_ifunc_transition.md
+        examples/case30_field_qualifiers.md: reference/examples/case30_field_qualifiers.md
+        examples/case31_enum_rename.md: reference/examples/case31_enum_rename.md
+        examples/case32_param_defaults.md: reference/examples/case32_param_defaults.md
+        examples/case33_pointer_level.md: reference/examples/case33_pointer_level.md
+        examples/case34_access_level.md: reference/examples/case34_access_level.md
+        examples/case35_field_rename.md: reference/examples/case35_field_rename.md
+        examples/case36_anon_struct.md: reference/examples/case36_anon_struct.md
+        examples/case37_base_class.md: reference/examples/case37_base_class.md
+        examples/case38_virtual_methods.md: reference/examples/case38_virtual_methods.md
+        examples/case39_var_const.md: reference/examples/case39_var_const.md
+        examples/case40_field_layout.md: reference/examples/case40_field_layout.md
+        examples/case41_type_changes.md: reference/examples/case41_type_changes.md
+        examples/case42_type_alignment_changed.md: reference/examples/case42_type_alignment_changed.md
+        examples/case43_base_class_member_added.md: reference/examples/case43_base_class_member_added.md
+        examples/case44_cyclic_type_member_added.md: reference/examples/case44_cyclic_type_member_added.md
+        examples/case45_multi_dim_array_change.md: reference/examples/case45_multi_dim_array_change.md
+        examples/case46_pointer_chain_type_change.md: reference/examples/case46_pointer_chain_type_change.md
+        examples/case47_inline_to_outlined.md: reference/examples/case47_inline_to_outlined.md
+        examples/case48_leaf_struct_through_pointer.md: reference/examples/case48_leaf_struct_through_pointer.md
+        examples/case49_executable_stack.md: reference/examples/case49_executable_stack.md
+        examples/case50_soname_inconsistent.md: reference/examples/case50_soname_inconsistent.md
+        examples/case51_protected_visibility.md: reference/examples/case51_protected_visibility.md
+        examples/case52_rpath_leak.md: reference/examples/case52_rpath_leak.md
+        examples/case53_namespace_pollution.md: reference/examples/case53_namespace_pollution.md
+        examples/case54_used_reserved_field.md: reference/examples/case54_used_reserved_field.md
+        examples/case55_type_kind_changed.md: reference/examples/case55_type_kind_changed.md
+        examples/case56_struct_packing_changed.md: reference/examples/case56_struct_packing_changed.md
+        examples/case57_enum_underlying_size_changed.md: reference/examples/case57_enum_underlying_size_changed.md
+        examples/case58_var_removed.md: reference/examples/case58_var_removed.md
+        examples/case59_func_became_inline.md: reference/examples/case59_func_became_inline.md
+        examples/case60_base_class_position_changed.md: reference/examples/case60_base_class_position_changed.md
+        examples/case61_var_added.md: reference/examples/case61_var_added.md
+        examples/case62_type_field_added_compatible.md: reference/examples/case62_type_field_added_compatible.md
+        examples/case63_bitfield_changed.md: reference/examples/case63_bitfield_changed.md
+        examples/case64_calling_convention_changed.md: reference/examples/case64_calling_convention_changed.md
+        examples/case65_symbol_version_removed.md: reference/examples/case65_symbol_version_removed.md
+        examples/case66_language_linkage_changed.md: reference/examples/case66_language_linkage_changed.md
+        examples/case67_tls_var_size_changed.md: reference/examples/case67_tls_var_size_changed.md
+        examples/case68_virtual_method_added.md: reference/examples/case68_virtual_method_added.md
+        examples/case69_trivial_to_nontrivial.md: reference/examples/case69_trivial_to_nontrivial.md
+        examples/case70_flexible_array_member_changed.md: reference/examples/case70_flexible_array_member_changed.md
+        examples/case71_inline_namespace_moved.md: reference/examples/case71_inline_namespace_moved.md
+        examples/case72_covariant_return_changed.md: reference/examples/case72_covariant_return_changed.md
+        examples/case73_typedef_underlying_changed.md: reference/examples/case73_typedef_underlying_changed.md
+        examples/case74_detail_base_class_changed.md: reference/examples/case74_detail_base_class_changed.md
+        examples/case75_detail_embedded_by_value.md: reference/examples/case75_detail_embedded_by_value.md
+        examples/case76_detail_pimpl_vtable_changed.md: reference/examples/case76_detail_pimpl_vtable_changed.md
+        examples/case77_detail_templated_base_changed.md: reference/examples/case77_detail_templated_base_changed.md
+        examples/case78_task_arena_attach_tag.md: reference/examples/case78_task_arena_attach_tag.md
+        examples/case79_missing_template_instantiation.md: reference/examples/case79_missing_template_instantiation.md
+        examples/case80_pimpl_shared_to_unique.md: reference/examples/case80_pimpl_shared_to_unique.md
+        examples/case81_serialization_tag_reassigned.md: reference/examples/case81_serialization_tag_reassigned.md
+        examples/case82_sycl_overload_set_removed.md: reference/examples/case82_sycl_overload_set_removed.md
+        examples/case83_cpu_dispatch_isa_dropped.md: reference/examples/case83_cpu_dispatch_isa_dropped.md
+        examples/case85_internal_template_signature_changed.md: reference/examples/case85_internal_template_signature_changed.md
+        examples/case86_tag_struct_renamed.md: reference/examples/case86_tag_struct_renamed.md
+        examples/case87_default_template_arg_changed.md: reference/examples/case87_default_template_arg_changed.md
+        examples/case88_cpo_kind_changed.md: reference/examples/case88_cpo_kind_changed.md
+        examples/case89_inline_accessor_renamed_pimpl_member.md: reference/examples/case89_inline_accessor_renamed_pimpl_member.md
+        examples/case94_empty_tag_gained_state.md: reference/examples/case94_empty_tag_gained_state.md
+        examples/case95_allocator_nested_typedef_removed.md: reference/examples/case95_allocator_nested_typedef_removed.md
+        examples/case96_hidden_friend_removed.md: reference/examples/case96_hidden_friend_removed.md
+        examples/case97_api_depends_on_consumer_env.md: reference/examples/case97_api_depends_on_consumer_env.md
+        examples/case98_cxx_standard_floor_raised.md: reference/examples/case98_cxx_standard_floor_raised.md
+        examples/case99_experimental_graduated.md: reference/examples/case99_experimental_graduated.md
+        examples/index.md: reference/examples/index.md
+        getting-started.md: start/getting-started.md
+        troubleshooting.md: contribute/troubleshooting.md
+        user-guide/annotations.md: use/annotations.md
+        user-guide/api-surface-intelligence.md: use/api-surface-intelligence.md
+        user-guide/appcompat.md: use/appcompat.md
+        user-guide/baseline-management.md: use/baseline-management.md
+        user-guide/baseline-storage.md: use/baseline-storage.md
+        user-guide/build-evidence-setup.md: use/build-evidence-setup.md
+        user-guide/choose-your-workflow.md: start/choose-your-workflow.md
+        user-guide/ci-gating.md: use/ci-gating.md
+        user-guide/cli-usage.md: use/cli-usage.md
+        user-guide/companion-commands.md: use/companion-commands.md
+        user-guide/create-baseline.md: use/create-baseline.md
+        user-guide/debian-symbols.md: use/debian-symbols.md
+        user-guide/dump-compare-flags.md: use/dump-compare-flags.md
+        user-guide/from-abicc.md: use/from-abicc.md
+        user-guide/from-libabigail.md: use/from-libabigail.md
+        user-guide/github-action-recipes.md: use/github-action-recipes.md
+        user-guide/github-action-source-scans.md: use/github-action-source-scans.md
+        user-guide/github-action.md: use/github-action.md
+        user-guide/kernel-btf.md: use/kernel-btf.md
+        user-guide/mcp-integration.md: use/mcp-integration.md
+        user-guide/migration-0.5.md: use/migration-0.5.md
+        user-guide/multi-binary.md: use/multi-binary.md
+        user-guide/output-formats.md: use/output-formats.md
+        user-guide/plugin-systems.md: use/plugin-systems.md
+        user-guide/policies.md: use/policies.md
+        user-guide/post-python.md: use/post-python.md
+        user-guide/probe-harness.md: use/probe-harness.md
+        user-guide/producing-source-facts.md: use/producing-source-facts.md
+        user-guide/python-api.md: use/python-api.md
+        user-guide/python-extensions.md: use/python-extensions.md
+        user-guide/real-world-example.md: start/real-world-example.md
+        user-guide/scan-levels.md: use/scan-levels.md
+        user-guide/scanning-conda-packages.md: start/scanning-conda-packages.md
+        user-guide/security-hardening.md: use/security-hardening.md
+        user-guide/severity.md: use/severity.md
+        user-guide/suppressions.md: use/suppressions.md
+        user-guide/tool-modes.md: use/tool-modes.md
 
 markdown_extensions:
   - admonition

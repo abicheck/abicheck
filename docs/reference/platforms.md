@@ -57,7 +57,7 @@ is validated on Linux, and a `platforms` tag of `macos`/`windows` expresses
 explicit `known_gap` describing where the non-Linux path diverges. This
 invariant (Linux = universal baseline; macOS/Windows = strict subset) is guarded
 by `tests/test_platform_coverage_honesty.py`. See
-[Use-Case Coverage Evaluation](../development/usecase-coverage-evaluation.md)
+[Use-Case Coverage Evaluation](../contribute/usecase-coverage-evaluation.md)
 (gap **G1**) for context.
 
 ### Castxml-free validation (no external tools)

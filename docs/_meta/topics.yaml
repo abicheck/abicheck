@@ -37,47 +37,47 @@ schema_version: 1
 
 topics:
   evidence-model:
-    canonical_page: concepts/evidence-and-detectability.md
+    canonical_page: learn/evidence-and-detectability.md
     fact_sources:
       - scripts/evidence_tiers.py
       - abicheck/buildsource/model.py
-    worked_example: concepts/what-each-level-sees.md
+    worked_example: learn/what-each-level-sees.md
     task_pages:
-      - user-guide/scan-levels.md
+      - use/scan-levels.md
     allowed_summaries:
-      - getting-started.md
-      - user-guide/choose-your-workflow.md
-      - user-guide/tool-modes.md
+      - start/getting-started.md
+      - start/choose-your-workflow.md
+      - use/tool-modes.md
 
   verdicts:
-    canonical_page: concepts/verdicts.md
+    canonical_page: learn/verdicts.md
     fact_sources:
       - abicheck/change_registry.py
       - abicheck/checker_policy.py
     reference_page: reference/exit-codes.md
     task_pages:
-      - user-guide/ci-gating.md
-      - user-guide/severity.md
+      - use/ci-gating.md
+      - use/severity.md
     allowed_summaries:
-      - getting-started.md
+      - start/getting-started.md
 
   baseline-lifecycle:
-    canonical_page: user-guide/baseline-management.md
+    canonical_page: use/baseline-management.md
     fact_sources:
       - abicheck/model.py
       - abicheck/serialization.py
     task_pages:
-      - user-guide/create-baseline.md
-      - user-guide/baseline-storage.md
+      - use/create-baseline.md
+      - use/baseline-storage.md
     allowed_summaries:
-      - getting-started.md
+      - start/getting-started.md
 
   public-surface:
-    canonical_page: concepts/abi-surface.md
+    canonical_page: learn/abi-surface.md
     fact_sources:
       - abicheck/surface.py
     task_pages:
-      - user-guide/api-surface-intelligence.md
+      - use/api-surface-intelligence.md
 
   change-kinds:
     canonical_page: reference/change-kinds.md
@@ -87,33 +87,33 @@ topics:
     reference_page: reference/detector-spec.md
 
   platform-support-matrix:
-    canonical_page: concepts/limitations.md
+    canonical_page: learn/limitations.md
     allowed_summaries:
-      - concepts/architecture.md
+      - learn/architecture.md
 
   source-evidence-producers:
-    canonical_page: user-guide/producing-source-facts.md
+    canonical_page: use/producing-source-facts.md
     fact_sources:
       - abicheck/buildsource
       - contrib/abicheck-clang-plugin
-    reference_page: user-guide/build-evidence-setup.md
+    reference_page: use/build-evidence-setup.md
 
   cli-surface:
-    canonical_page: user-guide/cli-usage.md
+    canonical_page: use/cli-usage.md
     fact_sources:
       - abicheck/cli.py
     reference_page: reference/cli-reference.md
     task_pages:
-      - user-guide/dump-compare-flags.md
+      - use/dump-compare-flags.md
 
   mcp-tools:
-    canonical_page: user-guide/mcp-integration.md
+    canonical_page: use/mcp-integration.md
     fact_sources:
       - abicheck/mcp_server.py
     reference_page: reference/mcp-tools-reference.md
 
   python-api:
-    canonical_page: user-guide/python-api.md
+    canonical_page: use/python-api.md
     fact_sources:
       - abicheck/service.py
     reference_page: reference/python-api-reference.md

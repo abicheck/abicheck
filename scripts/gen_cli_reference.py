@@ -18,8 +18,8 @@
 from the live Click command tree instead of hand-copied.
 
 `abicheck/cli.py` (plus the `cli_<name>.py` sibling modules it registers) is
-the fact owner for every command, argument, and option — `docs/user-guide/
-cli-usage.md` and `docs/user-guide/dump-compare-flags.md` document the primary
+the fact owner for every command, argument, and option — `docs/use/
+cli-usage.md` and `docs/use/dump-compare-flags.md` document the primary
 workflows in prose, but neither one is (or should be) an exhaustive option
 table. This generator makes `docs/reference/cli-reference.md` that exhaustive,
 generated view: every top-level command/group, every subcommand, every
@@ -178,8 +178,8 @@ def render() -> str:
         "",
         "Every `abicheck` command, subcommand, argument, and option, generated "
         "directly from the live Click command tree (the same `help=` text "
-        "`--help` shows). See [CLI Usage](../user-guide/cli-usage.md) and "
-        "[Dump & Compare Flags](../user-guide/dump-compare-flags.md) for the "
+        "`--help` shows). See [CLI Usage](../use/cli-usage.md) and "
+        "[Dump & Compare Flags](../use/dump-compare-flags.md) for the "
         "narrative walkthroughs of the primary workflows; this page is the "
         "exhaustive field list only.",
         "",

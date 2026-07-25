@@ -19,7 +19,7 @@ from `abicheck/mcp_server.py`'s `@mcp.tool()` functions instead of hand-copied.
 
 Each `@mcp.tool()` function's signature (names, types, defaults) and Google-
 style docstring `Args:` section are already the fact owner for its parameter
-list; `docs/user-guide/mcp-integration.md` previously restated that list by
+list; `docs/use/mcp-integration.md` previously restated that list by
 hand in a Markdown table per tool. This generator makes `docs/reference/
 mcp-tools-reference.md` that exhaustive, generated parameter view;
 `mcp-integration.md` stays the narrative/task-owner page (install, configure,
@@ -151,7 +151,7 @@ def render() -> str:
         "",
         "Every parameter of every `abicheck-mcp` tool, generated directly from "
         "`abicheck/mcp_server.py`'s function signatures and docstrings. See "
-        "[MCP Server (Agent Integration)](../user-guide/mcp-integration.md) "
+        "[MCP Server (Agent Integration)](../use/mcp-integration.md) "
         "for install/configure steps, response envelope shapes, agent "
         "workflow examples, and the security model — this page is the "
         "exhaustive parameter list only.",

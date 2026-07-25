@@ -2,7 +2,7 @@
 
 # CLI Reference
 
-Every `abicheck` command, subcommand, argument, and option, generated directly from the live Click command tree (the same `help=` text `--help` shows). See [CLI Usage](../user-guide/cli-usage.md) and [Dump & Compare Flags](../user-guide/dump-compare-flags.md) for the narrative walkthroughs of the primary workflows; this page is the exhaustive field list only.
+Every `abicheck` command, subcommand, argument, and option, generated directly from the live Click command tree (the same `help=` text `--help` shows). See [CLI Usage](../use/cli-usage.md) and [Dump & Compare Flags](../use/dump-compare-flags.md) for the narrative walkthroughs of the primary workflows; this page is the exhaustive field list only.
 
 ## Root options
 

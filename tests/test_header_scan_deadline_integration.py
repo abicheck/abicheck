@@ -218,7 +218,7 @@ def test_pathological_header_natural_cost_is_tracked(
     # AST disk cache, or a clang upgrade changing dump behaviour) shows up in
     # the existing test-duration trend artifact (tests/conftest.py's
     # ABICHECK_DURATIONS_JSON hook -> scripts/summarize_test_durations.py ->
-    # CI run summary), the same mechanism docs/development/performance.md
+    # CI run summary), the same mechanism docs/contribute/performance.md
     # already relies on for the compare()-scaling story. Loose bounds only:
     # this must complete (proving the fixture is genuinely bounded, not a
     # true hang) but is expected to take real, non-trivial time.

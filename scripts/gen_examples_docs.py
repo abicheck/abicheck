@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the docs/examples/ tree from examples/ + ground_truth.json.
+"""Generate the docs/reference/examples/ tree from examples/ + ground_truth.json.
 
 Run before `mkdocs build`. Idempotent. Pass --check to fail if regeneration
 would change the tree (used by CI as a drift gate).
@@ -22,10 +22,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = ROOT / "examples"
-DOCS_EXAMPLES_DIR = ROOT / "docs" / "examples"
+DOCS_EXAMPLES_DIR = ROOT / "docs" / "reference" / "examples"
+#: DOCS_EXAMPLES_DIR's location relative to docs/ root -- drives how many
+#: "../" segments a link from a generated case page needs to reach another
+#: docs/-relative path (see _rewrite_links).
+DOCS_EXAMPLES_DIR_FROM_DOCS_ROOT = "reference/examples"
 GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
 EXAMPLES_README = EXAMPLES_DIR / "README.md"
-REPO_ROOT_FROM_DOCS_EXAMPLES = "../.."
+REPO_ROOT_FROM_DOCS_EXAMPLES = "../../.."
 
 # Short category labels used in the examples/README.md catalog index. These are
 # the exact strings the `examples-readme-sync` AI-readiness check asserts each
@@ -206,7 +210,15 @@ def _rewrite_links(body: str) -> str:
         # depth of leading "../" before "docs/".
         docs_target = re.match(r"^(?:\.\./)+docs/(.*)$", target)
         if docs_target:
-            url = posixpath.normpath("../" + docs_target.group(1))
+            # docs_target.group(1) is docs/-relative (e.g. "reference/change-
+            # kinds.md"), independent of where this generated page itself
+            # lives. Compute the link relative to the *generated* page's
+            # actual location (docs/reference/examples/), not a hard-coded
+            # single "../" -- that assumption broke when examples/ moved one
+            # level deeper, under reference/.
+            url = posixpath.relpath(
+                docs_target.group(1), start=DOCS_EXAMPLES_DIR_FROM_DOCS_ROOT
+            )
             return f"[{text}]({url})"
         # Bare filenames like v1.c, app.cpp and ../ source-tree paths live
         # outside docs/; keep the reference visible without creating a checked
@@ -352,7 +364,7 @@ def _render_index(cases: list[Case]) -> str:
         "- Learn **what kinds of changes break ABI** vs. which are safe.\n"
         "- See the **runtime failure mode** for each break (crash, wrong output, silent corruption…).\n"
         "- Look up the **mitigation pattern** for a specific change.\n"
-        "- Cross-reference detected [`ChangeKind`s](../reference/change-kinds.md) with concrete reproductions.\n\n",
+        "- Cross-reference detected [`ChangeKind`s](../change-kinds.md) with concrete reproductions.\n\n",
         "> **Ground truth.** Expected verdicts and detected change kinds live in "
         "`examples/ground_truth.json` and are the "
         "single source of truth — these pages are generated from that file plus per-case "
@@ -495,7 +507,7 @@ def _render_readme_headline(entries: list[ReadmeEntry]) -> str:
         f"This directory contains **{n_total} cases** "
         f"({n_single} single-library + {n_bundle} multi-library bundle cases, "
         "the latter tracked under "
-        "[ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) "
+        "[ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)) "
         "demonstrating real-world ABI/API break scenarios. Most cases are a "
         "minimal, compilable C/C++ example with:"
     )
@@ -531,7 +543,7 @@ def _render_readme_distribution(entries: list[ReadmeEntry]) -> str:
         (
             "Bundle (multi-binary)",
             n_bundle,
-            "see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)",
+            "see [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)",
             "🔵",
         ),
     ]
@@ -710,7 +722,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                 tmp_out, DOCS_EXAMPLES_DIR
             ):
                 print(
-                    "docs/examples/ is out of date. Run: python scripts/gen_examples_docs.py",
+                    "docs/reference/examples/ is out of date. Run: python scripts/gen_examples_docs.py",
                     file=sys.stderr,
                 )
                 if DOCS_EXAMPLES_DIR.exists():
@@ -728,7 +740,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         if not ok:
             return 1
         print(
-            f"docs/examples/ and examples/README.md are up to date ({len(cases)} cases)."
+            f"docs/reference/examples/ and examples/README.md are up to date ({len(cases)} cases)."
         )
         return 0
 

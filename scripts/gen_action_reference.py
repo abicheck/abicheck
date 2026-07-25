@@ -18,7 +18,7 @@
 generated from `action.yml` instead of hand-copied.
 
 `action.yml`'s `description:`/`required:`/`default:` fields are already the
-fact owner for every input and output; `docs/user-guide/github-action.md`
+fact owner for every input and output; `docs/use/github-action.md`
 previously restated them by hand across several prose subsections, an
 unmarked second copy that drifts the moment an input is added, renamed, or
 gets a new default. This generator makes `docs/reference/github-action-
@@ -85,7 +85,7 @@ def render(action: dict) -> str:
         "# GitHub Action Inputs and Outputs Reference",
         "",
         "Every `with:` input and `outputs.*` value for the "
-        "[abicheck GitHub Action](../user-guide/github-action.md), generated "
+        "[abicheck GitHub Action](../use/github-action.md), generated "
         "directly from `action.yml` — see that page for setup, mode/input "
         "compatibility, and usage recipes; this page is the exhaustive field "
         "list only.",

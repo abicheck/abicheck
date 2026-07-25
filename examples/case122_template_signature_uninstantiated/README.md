@@ -50,8 +50,8 @@ recompile"). A pure source-AST tool that diffs the headers directly *can* see
 this class of change — L4 is abicheck's own answer to that gap, opt-in because
 it needs a real compile context (compile flags, include paths) rather than
 just the two binaries. See
-[Limitations → Source-only changes](../../docs/concepts/limitations.md) and
-[Evidence and detectability](../../docs/concepts/evidence-and-detectability.md).
+[Limitations → Source-only changes](../../docs/learn/limitations.md) and
+[Evidence and detectability](../../docs/learn/evidence-and-detectability.md).
 
 ## Reproduce manually
 ```bash

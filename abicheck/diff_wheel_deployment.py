@@ -23,7 +23,7 @@ glibc-dependency check, both G27). This module adds: the macOS half (a
 cross-platform check (the wheel tag's claimed architecture against the
 binary's own recorded machine/cpu_type); and two RPATH/RUNPATH-hygiene
 checks scoped to a wheel-verification context — see
-docs/development/plans/g27-wheel-deployment-verification.md.
+docs/contribute/plans/g27-wheel-deployment-verification.md.
 
 Windows UCRT/runtime-requirement checking and CPU-ISA-baseline detection are
 still planned (see the plan's "Out of scope" and the registry entry's

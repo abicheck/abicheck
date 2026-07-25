@@ -64,7 +64,7 @@ _SNIFF_BYTES = 256
 # are available (``_attach_header_graph`` itself still no-ops without parsed
 # headers, and degrades to a declaration-only graph when clang is
 # unavailable) — no public flag controls this anymore; see
-# ``docs/development/plans/g31-header-graph-default-on-followup.md``.
+# ``docs/contribute/plans/g31-header-graph-default-on-followup.md``.
 # TODO(header-graph-phase-D): ``header_graph_includes`` runs one extra
 # ``clang -M`` pass per top-level header on every dump/compare with no
 # caching of its own (only the aggregate AST pass is disk-cached via
@@ -430,7 +430,7 @@ def resolve_input(
 
     # Static / import libraries (`.a`, `.lib`) are member archives, not single
     # linkable images. abicheck does not analyse archives (by design — see
-    # docs/concepts/limitations.md); fail with actionable guidance rather than a
+    # docs/learn/limitations.md); fail with actionable guidance rather than a
     # generic "unknown format" error.
     from .binary_utils import detect_archive
 

@@ -4,7 +4,7 @@ name: Performance
 #
 # The post-processing bottlenecks that made `compare` blow up on large real
 # libraries (e.g. libonedal_core.so, ~10,550 functions) are fixed — see
-# docs/development/performance.md. This workflow guards against regressions: it
+# docs/contribute/performance.md. This workflow guards against regressions: it
 # runs the synthetic scaling benchmark and the `slow` perf tests, uploads the
 # numbers, and writes them to the job summary.
 #

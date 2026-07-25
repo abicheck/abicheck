@@ -26,7 +26,7 @@ ever registered it, folded into one order-independent ``resolved`` dict via
 :func:`merge_graph_facts`, with genuine cross-producer disagreements recorded
 as :class:`FactConflict` instead of silently dropped (D2). :func:`edge_relation_key`
 adds a role-aware edge identity alongside the coarse ``(src, dst, kind)`` one
-(D1). See ADR-046 and ``docs/development/plans/g29-impact-analysis-layer.md``
+(D1). See ADR-046 and ``docs/contribute/plans/g29-impact-analysis-layer.md``
 Phase 2.
 """
 

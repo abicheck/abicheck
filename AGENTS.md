@@ -257,7 +257,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `claude-md-coverage` | ERROR | `CLAUDE.md` exists in each original major sub-tree (`REQUIRED_CLAUDE_MD_DIRS`) |
 | `agent-instructions-coverage` | ERROR | `AGENTS.md` or `CLAUDE.md` exists in `.github/`, `action/`, `contrib/abicheck-clang-plugin/` (`REQUIRED_AGENT_INSTRUCTION_DIRS`) |
 | `script-inventory` | WARN | Every `scripts/*.py` is named in `scripts/CLAUDE.md`'s inventory table — an unlisted script is invisible to that discovery path |
-| `generated-file-ownership` | ERROR | A known-generated file (`GENERATED_FILE_MARKERS`, plus every `docs/examples/case*.md`) still carries its "this is generated, don't hand-edit" marker comment |
+| `generated-file-ownership` | ERROR | A known-generated file (`GENERATED_FILE_MARKERS`, plus every `docs/reference/examples/case*.md`) still carries its "this is generated, don't hand-edit" marker comment |
 | `test-ratio` | WARN | At least 20% test-to-source file ratio; test files are discovered recursively under `tests/` (not just top-level) |
 | `future-annotations` | WARN | `from __future__ import annotations` per this file's convention |
 | `changekind-partition` | ERROR | Every `ChangeKind` is in exactly one of `BREAKING_KINDS` / `API_BREAK_KINDS` / `COMPATIBLE_KINDS` / `RISK_KINDS` |
@@ -270,7 +270,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `examples-ground-truth` | ERROR | Every `examples/case*/` has a `README.md` and an entry in `ground_truth.json` |
 | `examples-readme-sync` | ERROR | `examples/README.md` headline count, verdict distribution, and case-index rows match `ground_truth.json` (catches missing/stale catalog rows) |
 | `mkdocs-nav-coverage` | WARN | Every `docs/**/*.md` is in `mkdocs.yml` nav or linked from another doc |
-| `adr-index-nav-sync` | ERROR | Every `docs/development/adr/*.md` is linked from `adr/index.md`, and the ADR index page itself (not each individual ADR — relaxed, since that overloaded top-level nav with 50+ flat entries for no reader benefit) is listed in `mkdocs.yml`'s nav, so every ADR stays reachable from published navigation (this is what originally caught ADR-041 going missing from nav despite being accepted). Also requires every ADR to carry a Status metadata line/heading, and an ADR whose status leads with "Superseded" to link to its replacement |
+| `adr-index-nav-sync` | ERROR | Every `docs/contribute/adr/*.md` is linked from `adr/index.md`, and the ADR index page itself (not each individual ADR — relaxed, since that overloaded top-level nav with 50+ flat entries for no reader benefit) is listed in `mkdocs.yml`'s nav, so every ADR stays reachable from published navigation (this is what originally caught ADR-041 going missing from nav despite being accepted). Also requires every ADR to carry a Status metadata line/heading, and an ADR whose status leads with "Superseded" to link to its replacement |
 | `banned-imports` | ERROR | No `print(...)` outside CLI/reporter modules; no `subprocess(..., shell=True)` |
 | `license-header` | WARN | Every `abicheck/**/*.py` carries the Apache-2.0 header / SPDX identifier |
 | `test-assertion-density` | WARN | Every `test_*` function asserts something (directly or via a same-file helper) — flags zero-assertion smoke tests so coverage isn't "filled" without verification |
@@ -299,7 +299,7 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   churn; L2 scoping removes it; L0/L1 under-call breaks only headers/build see). Gates on
   top-tier correctness + under-call monotonicity (more evidence never hides a break an
   earlier tier caught — authority rule). CI posts the matrix to the step summary. User
-  docs: `docs/concepts/evidence-and-detectability.md` § "What each layer buys".
+  docs: `docs/learn/evidence-and-detectability.md` § "What each layer buys".
 - **Mutation testing** — `scripts/check_mutation_score.py` + `.github/workflows/mutation.yml`.
   `mutmut` mutates the detector core (`diff_*`, `checker_policy`); a *surviving* mutant
   is a covered-but-unverified line. Runs weekly / on the `mutation` PR label, gating on a

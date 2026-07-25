@@ -636,7 +636,7 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
     (set-input) compares instead, since the per-library fan-out never calls
     ``resolve_input``/``run_dump`` with a graph-attaching single-pair path in
     the first place (unchanged from before this change); see
-    ``docs/development/plans/g31-header-graph-default-on-followup.md`` for
+    ``docs/contribute/plans/g31-header-graph-default-on-followup.md`` for
     the Phase B+ plan to extend graph coverage to set inputs.
     """
     used = [

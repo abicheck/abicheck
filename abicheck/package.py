@@ -526,7 +526,7 @@ class CondaExtractor:
 # (PEP 600's ``manylinux_<glibc_major>_<glibc_minor>`` plus the three frozen
 # legacy aliases PEP 600 defines as exact synonyms). G10: a wheel's filename
 # tag is a promise about the *maximum* glibc symbol version its binaries may
-# require — see docs/development/plans/g10-glibc-floor-check.md.
+# require — see docs/contribute/plans/g10-glibc-floor-check.md.
 _MANYLINUX_LEGACY_FLOORS: dict[str, tuple[int, int]] = {
     "manylinux1": (2, 5),
     "manylinux2010": (2, 12),
@@ -599,7 +599,7 @@ def _wheel_platform_tag_segment(name: str) -> str:
 #: no symbol-versioning scheme, so there is no binary-evidence floor to check
 #: this version *against* — its presence is a yes/no "this wheel targets
 #: musl" signal for check_musllinux_glibc_dependency (G27). See
-#: docs/development/plans/g27-wheel-deployment-verification.md.
+#: docs/contribute/plans/g27-wheel-deployment-verification.md.
 _MUSLLINUX_TAG_RE = re.compile(r"musllinux_(?P<major>\d+)_(?P<minor>\d+)(?=_|$)")
 
 

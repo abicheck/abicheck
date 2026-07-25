@@ -1308,7 +1308,7 @@ def run_compare(
         # --old/new-build-info combination structurally skips the L2 graph
         # (silent, not_collected) — same behavior as before this change,
         # just without a flag to have explicitly asked for it. See
-        # docs/development/plans/g31-header-graph-default-on-followup.md for
+        # docs/contribute/plans/g31-header-graph-default-on-followup.md for
         # extending graph coverage to this path.
         import shutil
         import tempfile
