@@ -401,9 +401,27 @@ inputs:
     required: false
     default: '3.13'
   install-deps:
-    description: 'Install system dependencies (castxml, gcc). Set to false if pre-installed.'
+    description: >
+      Deprecated — use `dependency-source` instead (kept for one release
+      cycle). Ignored if `dependency-source` is set. true (the default) maps
+      to dependency-source=conda-forge; false maps to dependency-source=none.
     required: false
     default: 'true'
+  dependency-source:
+    description: >
+      How to install system dependencies (castxml, gcc/g++, clang, bear):
+      'conda-forge' (default — this repo's pixi-managed `scanner` conda-forge
+      environment, castxml 0.7.x + whichever gcc/g++ conda-forge currently
+      resolves as default; Linux/macOS only, no clang/bear yet),
+      'conda-forge-gcc14' / 'conda-forge-clang20' (same, but pinned to an
+      exact compiler family and major version — gcc 14.x or clang 20.x —
+      instead of whatever's currently default; Linux-only for gcc14, no
+      clang/bear on either), 'system' (apt/Homebrew + the pinned CastXML
+      Superbuild — the previous default, still available), or 'none' (skip;
+      dependencies must already be on PATH). Leave unset to fall back to
+      `install-deps` for backward compatibility.
+    required: false
+    default: ''
   upload-sarif:
     description: >
       Upload SARIF results to GitHub Code Scanning (requires security-events: write permission).
@@ -557,10 +575,78 @@ runs:
         python-version: ${{ inputs.python-version }}
 
     # ── 2. System dependencies ────────────────────────────────────────────────
-    - name: Install system dependencies
-      if: inputs.install-deps == 'true'
+    # `dependency-source` (new) takes priority; an unset `dependency-source`
+    # falls back to the legacy `install-deps` boolean for one release cycle —
+    # true (its own default too, so "never touched either input" lands here)
+    # now maps to conda-forge, the new default; false maps to none, preserving
+    # an explicit opt-out. A caller who explicitly wants the old apt/Homebrew
+    # path can still set dependency-source: system directly.
+    - name: Resolve dependency-source
+      id: resolve-deps
+      shell: bash
+      env:
+        INPUT_DEPENDENCY_SOURCE: ${{ inputs.dependency-source }}
+        INPUT_INSTALL_DEPS: ${{ inputs.install-deps }}
+      run: |
+        if [ -n "$INPUT_DEPENDENCY_SOURCE" ]; then
+          resolved="$INPUT_DEPENDENCY_SOURCE"
+        elif [ "$INPUT_INSTALL_DEPS" = "false" ]; then
+          resolved="none"
+        else
+          resolved="conda-forge"
+        fi
+        case "$resolved" in
+          system|conda-forge|conda-forge-gcc14|conda-forge-clang20|none) ;;
+          *)
+            echo "::error::dependency-source must be one of 'system', 'conda-forge'," \
+              "'conda-forge-gcc14', 'conda-forge-clang20', or 'none' (got '${resolved}')"
+            exit 1
+            ;;
+        esac
+        echo "value=${resolved}" >> "$GITHUB_OUTPUT"
+        # Maps a resolved dependency-source onto the pyproject.toml pixi
+        # environment name that provisions it (only meaningful for the three
+        # conda-forge-* values; unused otherwise).
+        case "$resolved" in
+          conda-forge) echo "pixi-env=scanner" >> "$GITHUB_OUTPUT" ;;
+          conda-forge-gcc14) echo "pixi-env=gcc14" >> "$GITHUB_OUTPUT" ;;
+          conda-forge-clang20) echo "pixi-env=clang20" >> "$GITHUB_OUTPUT" ;;
+        esac
+
+    - name: Install system dependencies (system)
+      if: steps.resolve-deps.outputs.value == 'system'
       shell: bash
       run: bash "${{ github.action_path }}/action/install-deps.sh"
+
+    - name: dependency-source=conda-forge* is not yet supported on Windows
+      if: startsWith(steps.resolve-deps.outputs.value, 'conda-forge') && runner.os == 'Windows'
+      shell: bash
+      run: |
+        echo "::error::dependency-source=${{ steps.resolve-deps.outputs.value }} is not yet" \
+          "supported on Windows (pyproject.toml's native-toolchain* pixi features don't cover" \
+          "win-64). Use dependency-source=system or install castxml/a compiler manually."
+        exit 1
+
+    # conda-forge* paths: pixi resolves one of this repo's own pyproject.toml
+    # environments (scanner/gcc14/clang20 — the mapped `pixi-env` output above,
+    # `pixi.lock`-frozen) instead of the checksum-pinned Superbuild installer.
+    # Linux/macOS only (gcc14 is linux-only — conda-forge's gcc doesn't build
+    # for macOS); no clang/bear on any of them yet (L4/L5 source scanning
+    # degrades gracefully, same as when they're absent on the system path).
+    - name: Set up pixi (conda-forge)
+      if: startsWith(steps.resolve-deps.outputs.value, 'conda-forge') && runner.os != 'Windows'
+      uses: prefix-dev/setup-pixi@v0.9.6
+      with:
+        manifest-path: ${{ github.action_path }}/pyproject.toml
+        environments: ${{ steps.resolve-deps.outputs.pixi-env }}
+        frozen: true
+
+    - name: Install system dependencies (conda-forge)
+      if: startsWith(steps.resolve-deps.outputs.value, 'conda-forge') && runner.os != 'Windows'
+      shell: bash
+      env:
+        ABICHECK_PIXI_ENV: ${{ steps.resolve-deps.outputs.pixi-env }}
+      run: bash "${{ github.action_path }}/action/install-deps-conda-forge.sh"
 
     # ── 3. Install abicheck ──────────────────────────────────────────────────
     - name: Install abicheck

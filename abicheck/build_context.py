@@ -28,6 +28,7 @@ Usage::
     ctx = build_context_for_header(db, Path("include/foo.h"))
     # ctx.defines, ctx.include_paths, ctx.language_standard, ...
 """
+
 from __future__ import annotations
 
 import json
@@ -44,11 +45,24 @@ from .errors import ValidationError
 _logger = logging.getLogger(__name__)
 
 # Flags that take a following argument (next token is the value).
-_FLAGS_WITH_ARG = frozenset({
-    "-I", "-isystem", "-include", "-isysroot", "--sysroot",
-    "-target", "--target", "-x", "-std", "-MF", "-MQ", "-MT",
-    "-o", "-c",
-})
+_FLAGS_WITH_ARG = frozenset(
+    {
+        "-I",
+        "-isystem",
+        "-include",
+        "-isysroot",
+        "--sysroot",
+        "-target",
+        "--target",
+        "-x",
+        "-std",
+        "-MF",
+        "-MQ",
+        "-MT",
+        "-o",
+        "-c",
+    }
+)
 
 # Regex for combined -Dfoo=bar or -Dfoo
 _DEFINE_RE = re.compile(r"^-D(.+?)(?:=(.*))?$")
@@ -232,10 +246,38 @@ def load_compile_db(path: Path) -> list[CompileEntry]:
     return entries
 
 
+#: ABI-relevant flags forwarded verbatim from a matched compile-DB entry into
+#: the real castxml/clang header-parse command (via ``to_castxml_flags``'s
+#: ``extra_flags``). Kept in sync with the broader
+#: ``buildsource.adapters.base.ABI_RELEVANT_FLAG_PREFIXES`` list (that one
+#: feeds the separate L3 build-evidence-drift diff, not the L2 header parse
+#: itself) — data-model/calling-convention/target flags a real build used are
+#: exactly the kind of thing that must reach the actual header parse, not
+#: just be recorded as advisory build-evidence (P0/P1 toolchain-profile
+#: audit): omitting them here silently re-introduces "header parse drift"
+#: for -m32/-m64/-march=/-stdlib=/enum-packing/char-signedness builds even
+#: though a matched compile_commands.json entry had the real flags.
 _ABI_EXTRA_PREFIXES = (
-    "-fabi-version=", "-fpack-struct=",
-    "-fms-extensions", "-fno-exceptions",
-    "-fno-rtti", "-fexceptions", "-frtti",
+    "-fabi-version=",
+    "-fpack-struct=",
+    "-fms-extensions",
+    "-fno-exceptions",
+    "-fno-rtti",
+    "-fexceptions",
+    "-frtti",
+    "-stdlib=",
+    "-m32",
+    "-m64",
+    "-march=",
+    "-mtune=",
+    "-mabi=",
+    "-mfloat-abi=",
+    "-mfpmath=",
+    "-fshort-enums",
+    "-fno-short-enums",
+    "-fshort-wchar",
+    "-fsigned-char",
+    "-funsigned-char",
 )
 
 
@@ -247,7 +289,9 @@ def _resolve_path(raw: str, directory: Path) -> Path:
     return p
 
 
-def _try_consume_include(arg: str, arguments: list[str], i: int, directory: Path, ctx: BuildContext) -> int:
+def _try_consume_include(
+    arg: str, arguments: list[str], i: int, directory: Path, ctx: BuildContext
+) -> int:
     """Handle -I (combined and separate forms). Returns new index."""
     m = _INCLUDE_RE.match(arg)
     if m:
@@ -259,7 +303,9 @@ def _try_consume_include(arg: str, arguments: list[str], i: int, directory: Path
     return i  # no match — caller must advance
 
 
-def _try_consume_isystem(arg: str, arguments: list[str], i: int, directory: Path, ctx: BuildContext) -> int:
+def _try_consume_isystem(
+    arg: str, arguments: list[str], i: int, directory: Path, ctx: BuildContext
+) -> int:
     """Handle -isystem (combined and separate forms). Returns new index."""
     m = _ISYSTEM_RE.match(arg)
     if m:
@@ -271,7 +317,9 @@ def _try_consume_isystem(arg: str, arguments: list[str], i: int, directory: Path
     return i  # no match — caller must advance
 
 
-def _try_consume_target(arg: str, arguments: list[str], i: int, ctx: BuildContext) -> int:
+def _try_consume_target(
+    arg: str, arguments: list[str], i: int, ctx: BuildContext
+) -> int:
     """Handle --target= and -target (combined and separate forms). Returns new index."""
     m = _TARGET_RE.match(arg)
     if m:
@@ -283,7 +331,9 @@ def _try_consume_target(arg: str, arguments: list[str], i: int, ctx: BuildContex
     return i  # no match — caller must advance
 
 
-def _try_consume_sysroot(arg: str, arguments: list[str], i: int, directory: Path, ctx: BuildContext) -> int:
+def _try_consume_sysroot(
+    arg: str, arguments: list[str], i: int, directory: Path, ctx: BuildContext
+) -> int:
     """Handle --sysroot=, --sysroot, and -isysroot forms. Returns new index.
 
     Relative sysroot paths are resolved against *directory* (the compile
@@ -305,7 +355,9 @@ def _is_abi_extra_flag(arg: str) -> bool:
     return bool(_VISIBILITY_RE.match(arg)) or arg.startswith(_ABI_EXTRA_PREFIXES)
 
 
-def _try_consume_define_undef(arg: str, arguments: list[str], i: int, ctx: BuildContext) -> int:
+def _try_consume_define_undef(
+    arg: str, arguments: list[str], i: int, ctx: BuildContext
+) -> int:
     """Handle -Dmacro[=value], -D macro[=value], -Umacro, -U macro.
 
     Handles both combined forms (``-DNAME=V``, ``-UNAME``) and split forms
@@ -396,7 +448,8 @@ def _extract_flags(arguments: list[str], directory: Path) -> BuildContext:
 
 
 def _header_included_by_tu(
-    header_path: Path, entry: CompileEntry,
+    header_path: Path,
+    entry: CompileEntry,
 ) -> bool:
     """Check if a TU's source file likely includes the given header.
 
@@ -416,9 +469,7 @@ def _header_included_by_tu(
     # Match #include "..." or #include <...> containing the header filename.
     # We check the matched path suffix against the actual header path to
     # reduce false positives from unrelated headers with the same name.
-    pattern = re.compile(
-        rf'#\s*include\s*[<"]([^>"]*{re.escape(header_name)})[>"]'
-    )
+    pattern = re.compile(rf'#\s*include\s*[<"]([^>"]*{re.escape(header_name)})[>"]')
     for m in pattern.finditer(source_content):
         include_arg = m.group(1)
         # Check if the include argument is a suffix of the header path
@@ -457,10 +508,7 @@ def build_context_for_header(
     # Filter entries
     filtered = entries
     if source_filter:
-        filtered = [
-            e for e in entries
-            if _entry_matches_filter(e, source_filter)
-        ]
+        filtered = [e for e in entries if _entry_matches_filter(e, source_filter)]
         if not filtered:
             _logger.warning(
                 "No compile entries match filter %r; using all entries",
@@ -520,7 +568,9 @@ def _std_sort_key(std: str) -> tuple[int, int]:
     return (1 if is_cpp else 0, version)
 
 
-def _filter_entries_by_glob(entries: list[CompileEntry], source_filter: str | None) -> list[CompileEntry]:
+def _filter_entries_by_glob(
+    entries: list[CompileEntry], source_filter: str | None
+) -> list[CompileEntry]:
     """Return entries matching *source_filter* glob, or all entries if no match."""
     if not source_filter:
         return entries
@@ -554,8 +604,7 @@ def _merge_defines_from_contexts(
     if conflicts:
         for macro, values in conflicts.items():
             _logger.warning(
-                "Macro %s has conflicting values across TUs: %s; "
-                "using first value",
+                "Macro %s has conflicting values across TUs: %s; using first value",
                 macro,
                 ", ".join(sorted(set(values))),
             )

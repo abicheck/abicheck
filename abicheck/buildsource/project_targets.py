@@ -441,19 +441,169 @@ class BundleSpec:
         return cls(id=name, targets=[str(t) for t in targets], checks=checks)
 
 
+def _safe_profile_atom(where: str, key: str, value: str) -> str:
+    """Reject a compiler-option atom that could smuggle multiple flags/args.
+
+    Mirrors ``buildsource.inline.BuildConfig``'s own ``_safe_compile_atom``:
+    a ``profiles:`` block is read from the same untrusted, auto-discovered
+    ``.abicheck.yml`` as ``compile:``/``build.query`` (CLAUDE.md M1's trust
+    boundary — see this module's docstring), and its ``compile.*`` overlay
+    fields are documented to eventually reach real compiler argv the same way
+    ``compile.std``/``compile.defines`` already do. Whitespace would let one
+    YAML scalar become several argv tokens (e.g. ``"gnu++17 -Xclang -load
+    ./evil.so"``), so it is rejected here at parse time regardless of whether
+    a consumer resolves this field into argv yet.
+    """
+    if not value or any(ch.isspace() for ch in value):
+        raise ValueError(f"{where}.{key} must be a single option atom, got {value!r}")
+    return value
+
+
+@dataclass
+class ProfileCompileSpec:
+    """Optional ``profiles.<id>.compile`` overlay (P1 toolchain-profile audit).
+
+    Declares the compiler/dialect/ABI contract axes a profile pins, as plain
+    data — never an executable path or shell-interpretable string. Per the
+    trust boundary this module's docstring and ``AGENTS.md`` "M1" describe: an
+    auto-discovered (untrusted) ``.abicheck.yml`` may *declare* a compiler
+    family, a version constraint, a target triple, a dialect/standard, a
+    standard-library name, ABI macros, and normalized extra args — but never a
+    raw executable path/command. ``binding`` is a *logical* identifier (e.g.
+    ``"gcc14"``) meant to be resolved against a separately-trusted toolchain
+    bindings file (an explicit ``--config``/CI-managed source), not looked up
+    here — this module only validates shape, same as the rest of the file (no
+    run-plan generator/toolchain resolver lives here yet, G30 P1.4).
+
+    All fields are optional and additive; an empty ``ProfileCompileSpec`` is
+    indistinguishable from an absent ``compile:`` block.
+    """
+
+    compiler_family: str = ""
+    compiler_version: str = ""
+    target: str = ""
+    standard: str = ""
+    stdlib: str = ""
+    binding: str = ""
+    abi_macros: dict[str, str] = field(default_factory=dict)
+    args: list[str] = field(default_factory=list)
+
+    @property
+    def is_empty(self) -> bool:
+        return self == ProfileCompileSpec()
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        if self.compiler_family:
+            d["compiler_family"] = self.compiler_family
+        if self.compiler_version:
+            d["compiler_version"] = self.compiler_version
+        if self.target:
+            d["target"] = self.target
+        if self.standard:
+            d["standard"] = self.standard
+        if self.stdlib:
+            d["stdlib"] = self.stdlib
+        if self.binding:
+            d["binding"] = self.binding
+        if self.abi_macros:
+            d["abi_macros"] = dict(self.abi_macros)
+        if self.args:
+            d["args"] = list(self.args)
+        return d
+
+    @classmethod
+    def from_dict(cls, where: str, d: dict[str, Any]) -> ProfileCompileSpec:
+        if not isinstance(d, dict):
+            raise ValueError(
+                f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
+            )
+        known = {
+            "compiler_family",
+            "compiler_version",
+            "target",
+            "standard",
+            "stdlib",
+            "binding",
+            "abi_macros",
+            "args",
+        }
+        unknown = _unknown_keys(d, known)
+        if unknown:
+            raise ValueError(f"{where}: unknown key(s) {unknown}")
+
+        str_fields: dict[str, str] = {}
+        for key in (
+            "compiler_family",
+            "compiler_version",
+            "target",
+            "standard",
+            "stdlib",
+            "binding",
+        ):
+            if key not in d:
+                continue
+            value = d[key]
+            if not isinstance(value, str):
+                raise ValueError(f"{where}.{key} must be a string, got {value!r}")
+            str_fields[key] = _safe_profile_atom(where, key, value)
+
+        abi_macros_raw = d.get("abi_macros", {})
+        if not isinstance(abi_macros_raw, dict):
+            raise ValueError(f"{where}.abi_macros must be a mapping")
+        abi_macros: dict[str, str] = {}
+        for macro_name, macro_value in abi_macros_raw.items():
+            if not isinstance(macro_name, str) or not isinstance(macro_value, str):
+                raise ValueError(
+                    f"{where}.abi_macros entries must be string: string, "
+                    f"got {macro_name!r}: {macro_value!r}"
+                )
+            abi_macros[_safe_profile_atom(where, "abi_macros", macro_name)] = (
+                _safe_profile_atom(where, "abi_macros", macro_value)
+                if macro_value
+                else macro_value
+            )
+
+        args_raw = d.get("args", [])
+        if not isinstance(args_raw, list):
+            raise ValueError(f"{where}.args must be a list of strings")
+        args: list[str] = []
+        for a in args_raw:
+            if not isinstance(a, str):
+                raise ValueError(f"{where}.args must be a list of strings, got {a!r}")
+            args.append(_safe_profile_atom(where, "args", a))
+
+        return cls(
+            compiler_family=str_fields.get("compiler_family", ""),
+            compiler_version=str_fields.get("compiler_version", ""),
+            target=str_fields.get("target", ""),
+            standard=str_fields.get("standard", ""),
+            stdlib=str_fields.get("stdlib", ""),
+            binding=str_fields.get("binding", ""),
+            abi_macros=abi_macros,
+            args=args,
+        )
+
+
 @dataclass
 class ProfileSpec:
     """One ``profiles:`` entry (ADR-047 §3) — a build-lane identity.
 
     ``contract: true`` (default) means this profile is an ABI contract (gets
     a baseline, gates CI); ``contract: false`` marks a test-only CI lane that
-    never gets a baseline (S17's point).
+    never gets a baseline (S17's point). The optional ``compile:`` overlay
+    (:class:`ProfileCompileSpec`, P1 toolchain-profile audit) declares the
+    compiler/dialect/ABI-macro axes this profile pins — additive over the
+    root ``compile:`` block (:class:`~abicheck.buildsource.inline.BuildConfig`);
+    a run-plan consumer is expected to merge root-then-profile, same
+    precedence as every other config layer in this project.
     """
 
     id: str = ""
     contract: bool = True
     os: str = ""
     arch: str = ""
+    compile: ProfileCompileSpec | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"contract": self.contract}
@@ -461,6 +611,8 @@ class ProfileSpec:
             d["os"] = self.os
         if self.arch:
             d["arch"] = self.arch
+        if self.compile is not None and not self.compile.is_empty:
+            d["compile"] = self.compile.to_dict()
         return d
 
     @classmethod
@@ -470,7 +622,7 @@ class ProfileSpec:
             raise ValueError(
                 f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
             )
-        unknown = _unknown_keys(d, {"contract", "os", "arch"})
+        unknown = _unknown_keys(d, {"contract", "os", "arch", "compile"})
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
         contract = d.get("contract", True)
@@ -479,11 +631,17 @@ class ProfileSpec:
         for key in ("os", "arch"):
             if key in d and not isinstance(d[key], str):
                 raise ValueError(f"{where}.{key} must be a string")
+        compile_spec: ProfileCompileSpec | None = None
+        if "compile" in d:
+            compile_spec = ProfileCompileSpec.from_dict(
+                f"{where}.compile", d["compile"]
+            )
         return cls(
             id=name,
             contract=contract,
             os=str(d.get("os", "") or ""),
             arch=str(d.get("arch", "") or ""),
+            compile=compile_spec,
         )
 
 

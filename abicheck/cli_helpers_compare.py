@@ -26,6 +26,7 @@ re-exported from ``abicheck.cli`` to keep existing import sites (sibling
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,12 +34,15 @@ from typing import TYPE_CHECKING
 
 import click
 
+from ._compiler_options import has_explicit_std
 from .binary_utils import strip_vendor_hash as strip_vendor_hash
+from .service_scan import pair_wide_cxx20_std_override
 
 if TYPE_CHECKING:
     from .buildsource.inline import BuildConfig
     from .checker_types import Change, DiffResult
     from .model import AbiSnapshot
+    from .service_scan import CompileContext
     from .severity import SeverityConfig
 
 
@@ -206,6 +210,56 @@ def _resolve_per_side_options(
     old_inc = list(old_includes_only) if old_includes_only else list(includes)
     new_inc = list(new_includes_only) if new_includes_only else list(includes)
     return old_h, new_h, old_inc, new_inc
+
+
+def _pair_wide_dialect_override(
+    lang: str,
+    old_h: list[Path],
+    new_h: list[Path],
+    compile_context: CompileContext,
+    side_compile_context: CompileContext,
+) -> tuple[CompileContext, CompileContext]:
+    """Pin ``-std=gnu++20`` for BOTH compare sides at once, or neither (P0 fix).
+
+    Thin wrapper around the shared core
+    (:func:`~abicheck.service_scan.pair_wide_cxx20_std_override`, also used by
+    ``service.run_compare_request``'s Python-API/MCP path, so the policy can't
+    drift between the two front-ends) that applies the decision to this CLI
+    path's two ``CompileContext`` objects: ``compile_context`` (used by the
+    inline-source-embed path) and ``side_compile_context`` (used by
+    ``_resolve_compare_snapshots``) — the sole call site derives the latter
+    from the former via ``dataclasses.replace(compile_context, frontend="auto")``,
+    so today they always carry identical ``gcc_options``/``gcc_option_tokens``;
+    the explicit-std guard below checks both anyway rather than relying on
+    that invariant holding for every future caller.
+
+    An explicit ``-std=``/``--std=``/``/std:`` from the user always wins and
+    this is then a no-op — auto-detection never overrides an explicit choice.
+    """
+    if has_explicit_std(
+        compile_context.gcc_options, compile_context.gcc_option_tokens
+    ) or has_explicit_std(
+        side_compile_context.gcc_options, side_compile_context.gcc_option_tokens
+    ):
+        return compile_context, side_compile_context
+    override = pair_wide_cxx20_std_override(
+        lang,
+        old_h,
+        new_h,
+        compile_context.gcc_options,
+        compile_context.gcc_option_tokens,
+    )
+    if override is None:
+        return compile_context, side_compile_context
+    compile_context = dataclasses.replace(
+        compile_context,
+        gcc_option_tokens=(*compile_context.gcc_option_tokens, *override),
+    )
+    side_compile_context = dataclasses.replace(
+        side_compile_context,
+        gcc_option_tokens=(*side_compile_context.gcc_option_tokens, *override),
+    )
+    return compile_context, side_compile_context
 
 
 def _warn_ignored_flags(

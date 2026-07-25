@@ -11,6 +11,8 @@ on:
       - 'actions/check-target/**'
       - 'actions/resolve-baseline/**'
       - 'abicheck/**'
+      - 'pyproject.toml'
+      - 'pixi.lock'
       - '.github/workflows/test-action.yml'
       - '.github/workflows/check-single.yml'
       - 'tests/fixtures/action/**'
@@ -22,6 +24,8 @@ on:
       - 'actions/check-target/**'
       - 'actions/resolve-baseline/**'
       - 'abicheck/**'
+      - 'pyproject.toml'
+      - 'pixi.lock'
       - '.github/workflows/test-action.yml'
       - '.github/workflows/check-single.yml'
       - 'tests/fixtures/action/**'
@@ -546,5 +550,113 @@ jobs:
           echo "Verdict: ${{ steps.abi.outputs.verdict }}"
           if [[ "${{ steps.abi.outputs.exit-code }}" != "0" ]]; then
             echo "::error::Expected estimate to exit 0, got ${{ steps.abi.outputs.exit-code }}"
+            exit 1
+          fi
+
+  # ── Test: dependency-source: conda-forge provisions a real castxml/gcc L2
+  # scan (not just install-deps: false against a pre-built snapshot) ─────────
+  test-dependency-source-conda-forge:
+    name: 'dependency-source: ${{ matrix.dependency-source }} on ${{ matrix.os }}'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The bare default (this default-flip's actual behavior change);
+          # exercised on both platforms since it's what every caller who
+          # never touches dependency-source now gets.
+          - os: ubuntu-latest
+            dependency-source: conda-forge
+          - os: macos-latest
+            dependency-source: conda-forge
+          # Pinned-major variants: gcc14 is linux-only (conda-forge's gcc
+          # doesn't build for macOS -- see native-toolchain-gcc14 in
+          # pyproject.toml); clang20 covers both.
+          - os: ubuntu-latest
+            dependency-source: conda-forge-gcc14
+          - os: ubuntu-latest
+            dependency-source: conda-forge-clang20
+          - os: macos-latest
+            dependency-source: conda-forge-clang20
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Build test binaries (runner's own pre-installed compiler)
+        run: |
+          cd examples/case01_symbol_removal
+          gcc -shared -fPIC v1.c -o libv1.so
+          gcc -shared -fPIC v2.c -o libv2.so
+
+      - name: 'Run abicheck compare (header-AST, via matrix dependency-source)'
+        id: abi
+        uses: ./
+        with:
+          old-library: examples/case01_symbol_removal/libv1.so
+          new-library: examples/case01_symbol_removal/libv2.so
+          old-header: examples/case01_symbol_removal/v1.h
+          new-header: examples/case01_symbol_removal/v2.h
+          format: json
+          output-file: conda-forge-result.json
+          dependency-source: ${{ matrix.dependency-source }}
+          fail-on-breaking: false
+
+      - name: Verify verdict is BREAKING and header-AST evidence was actually used
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
+          if [[ "${{ steps.abi.outputs.verdict }}" != "BREAKING" ]]; then
+            echo "::error::Expected verdict BREAKING, got ${{ steps.abi.outputs.verdict }}"
+            exit 1
+          fi
+          tier=$(python3 -c "import json; print(json.load(open('conda-forge-result.json'))['evidence_tier'])")
+          echo "evidence_tier: $tier"
+          if [[ "$tier" != "header_aware" ]]; then
+            echo "::error::Expected evidence_tier 'header_aware' (proves castxml actually parsed" \
+              "the headers via dependency-source=${{ matrix.dependency-source }}), got '$tier' —" \
+              "either castxml wasn't installed/found, or the header-AST parse silently failed."
+            exit 1
+          fi
+
+  test-dependency-source-none-and-legacy-alias:
+    name: 'dependency-source: none, and legacy install-deps=true/false aliasing'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: dependency-source=none does not attempt any install (pre-installed castxml)
+        id: abi-none
+        uses: ./
+        with:
+          old-library: tests/fixtures/action/action_test_v1.json
+          new-library: tests/fixtures/action/action_test_v2.json
+          dependency-source: none
+          fail-on-breaking: false
+
+      - name: Verify dependency-source=none ran successfully
+        shell: bash
+        run: |
+          if [[ "${{ steps.abi-none.outputs.verdict }}" != "BREAKING" ]]; then
+            echo "::error::Expected verdict BREAKING, got ${{ steps.abi-none.outputs.verdict }}"
+            exit 1
+          fi
+
+      - name: install-deps=false still maps to dependency-source=none (deprecated alias)
+        id: abi-legacy-false
+        uses: ./
+        with:
+          old-library: tests/fixtures/action/action_test_v1.json
+          new-library: tests/fixtures/action/action_test_v2.json
+          install-deps: false
+          fail-on-breaking: false
+
+      - name: Verify install-deps=false alias ran successfully
+        shell: bash
+        run: |
+          if [[ "${{ steps.abi-legacy-false.outputs.verdict }}" != "BREAKING" ]]; then
+            echo "::error::Expected verdict BREAKING, got ${{ steps.abi-legacy-false.outputs.verdict }}"
             exit 1
           fi

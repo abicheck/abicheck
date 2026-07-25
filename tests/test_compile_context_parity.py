@@ -946,3 +946,28 @@ def test_fallback_flag_is_scoped_to_one_cli_invocation(
     assert disabled.exit_code == 0
     assert disabled.output.strip() == "unset"
     assert "ABICHECK_ALLOW_AST_FALLBACK" not in os.environ
+
+
+def test_allow_unsupported_castxml_flag_is_scoped_to_one_cli_invocation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mirrors test_fallback_flag_is_scoped_to_one_cli_invocation for the
+    --allow-unsupported-castxml flag (castxml_policy's version-gate override) —
+    previously this had no CLI spelling at all, only its env var (model.py's
+    ast_toolchain_supported docstring documented a CLI flag that didn't exist)."""
+    monkeypatch.delenv("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", raising=False)
+
+    @click.command()
+    @compile_context_options
+    def probe(**_kwargs: object) -> None:
+        click.echo(os.environ.get("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", "unset"))
+
+    runner = CliRunner()
+    enabled = runner.invoke(probe, ["--allow-unsupported-castxml"])
+    disabled = runner.invoke(probe, [])
+
+    assert enabled.exit_code == 0
+    assert enabled.output.strip() == "1"
+    assert disabled.exit_code == 0
+    assert disabled.output.strip() == "unset"
+    assert "ABICHECK_ALLOW_UNSUPPORTED_CASTXML" not in os.environ

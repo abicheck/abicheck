@@ -525,6 +525,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--annotate",
         "--annotate-additions",
         "--allow-ast-frontend-fallback",
+        "--allow-unsupported-castxml",
         "--ast-frontend",
         "--btf",
         "--bundle-cohort",

@@ -44,10 +44,21 @@ policy — see [**Choose Your Workflow**](choose-your-workflow.md).
 
 ## 1) Install abicheck
 
+**Full installation (recommended)** — conda-forge bundles `abicheck` with `castxml`
+and a compatible compiler toolchain, so header AST analysis (L2) works immediately:
+
+```bash
+conda create -n abicheck -c conda-forge python=3.12 abicheck
+conda activate abicheck
+```
+
+No extra manual dependency installation is required when using the conda-forge package.
+
+**Lightweight/core installation** — the PyPI package is pure Python with no native
+scanner dependency:
+
 ```bash
 pip install abicheck
-# or
-conda install -c conda-forge abicheck
 ```
 
 ### Requirements
@@ -63,6 +74,10 @@ All Python dependencies (`pyelftools`, `pefile`, `macholib`) come with the `abic
 > with the system/conda packages below (the conda-forge package pulls it in
 > automatically). If you have no `castxml`, run **binary-only mode** by omitting the
 > header flags — abicheck falls back to DWARF/symbols analysis (weaker, but works).
+> **Don't run `pip install castxml`** to fill the gap: that installs the unmaintained
+> legacy PyPI distribution (last released 0.4.5 in 2018), which abicheck's version
+> gate rejects by default for an authoritative L2 scan — use one of the options below
+> (conda-forge, the pinned Superbuild, or your platform's package manager) instead.
 
 #### Option A: conda-forge (recommended)
 
@@ -95,14 +110,10 @@ choco install castxml
 
 #### Option C: conda-forge abicheck environment
 
-```bash
-# create env and install abicheck (recipe includes required analysis deps)
-# Python >= 3.10 is required; any supported version works
-conda create -n abicheck -c conda-forge python=3.12 abicheck
-conda activate abicheck
-```
-
-No extra manual dependency installation is required when using the conda-forge package.
+Already covered by the **Full installation** command at the top of this
+section (`conda create -n abicheck -c conda-forge python=3.12 abicheck`) —
+listed here too since it's also a valid answer to "how do I get `castxml`"
+if you already have `abicheck` installed a different way and are switching.
 
 ### Install from source
 
