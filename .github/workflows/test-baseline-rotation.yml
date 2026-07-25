@@ -236,6 +236,7 @@ jobs:
               f'run #1 -> id={c1[\"id\"]} size={c1.get(\"size_in_bytes\")} bytes, '
               f'run #2 -> id={c2[\"id\"]} size={c2.get(\"size_in_bytes\")} bytes'
           )
+          "
 
   # ── Delete this run's own test cache entries -- nothing else does ────────
   # Real accepted-main entries are managed by the calling project (GitHub's
@@ -272,4 +273,3 @@ jobs:
               echo "no cache entry to delete (already gone or never written): $key"
             fi
           done
-          "

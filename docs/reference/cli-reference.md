@@ -41,6 +41,24 @@ Aggregate per-target ABI reports in REPORTS_DIR into one CI gate verdict.
 
 Validate a project-produced ``abicheck-build/`` directory.
 
+### `build-output baseline-libraries`
+
+Derive actions/baseline's ``libraries`` JSON input from DIRECTORY's build-output.json (G30 P1.6, ADR-047 §6/§8 S14 correction).
+
+**Arguments**
+
+| Name | Required | Description |
+|---|:--:|---|
+| `directory` | yes |  |
+
+**Options**
+
+| Option | Required | Default | Description |
+|---|:--:|---|---|
+| `--format` | no | `json` | Output format (json only today). Choices: `json`. |
+| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
+
 ### `build-output validate`
 
 Validate DIRECTORY's build-output.json (ADR-047 §11.1).
