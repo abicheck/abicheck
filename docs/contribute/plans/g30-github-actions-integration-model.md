@@ -2887,6 +2887,21 @@ dangling "not yet attempted" item this plan carries forward by default.
 
 ## Pilot validation plan
 
+**Executed 2026-07-25 — see `validation/g30-pilot-validation-2026-07.md`**
+for the full real-run report (real clones, real builds, real `abicheck`
+scans, not simulated). Summary: PVXS re-run via the check-project.yml flow,
+CMake, Make (via the PVXS/EPICS Base build itself), package-only (`.deb`),
+and cross-compiled (aarch64) pilots all completed with real ABI breaks
+correctly detected; Bazel and the second vendor-toolchain pilot remain
+genuinely blocked by this environment's available tooling (see that report
+for why); one real, reproducible product bug (`dump`/`compare` disagreeing
+on `--header`-derived `public_header_dirs` provenance, causing a spurious
+`ScopeMismatchError` in the exact baseline-then-live-candidate pattern this
+pipeline relies on) was found and documented there, not fixed in this pass
+— it is an ADR-050 (comparability contract) issue, not an ADR-053/G30 P2
+one. The per-pilot plan below is kept as the original acceptance-criteria
+reference the executed report was checked against.
+
 ### PVXS (confirmed pilot — extend, don't re-validate from scratch)
 
 `validation/pvxs-abi-validation-2026-07.md` already validates the core
