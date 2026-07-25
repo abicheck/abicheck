@@ -591,6 +591,41 @@ class AbiSnapshot:
     # The --sysroot passed to the header frontend, if any.
     ast_sysroot: str | None = field(default=None, kw_only=True)
 
+    # DWARF-vs-header-AST layout-backfill coherence (schema v16, P0 evidence-
+    # coherence audit). Populated only on the clang-L2-backend + DWARF-present
+    # path where dumper_layout_backfill.backfill_dwarf_layout() actually runs
+    # (None/() everywhere else — castxml already computes its own layout, so
+    # there is nothing to reconcile against DWARF at all, and this is *not*
+    # the same as "unavailable": a castxml snapshot's layout is trivially
+    # self-consistent by construction). One of:
+    #   "matched"     — every header record eligible for backfill found a
+    #                    corroborated DWARF counterpart (or none needed one).
+    #   "partial"     — some records backfilled; others had no DWARF
+    #                    candidate at all (e.g. declared but never
+    #                    instantiated in this binary) or an ambiguous bare
+    #                    name — benign, expected on a real binary, not a
+    #                    disagreement.
+    #   "mismatch"    — at least one header record found a *unique* DWARF
+    #                    candidate by name but the two disagreed on kind
+    #                    (struct/union) or had no corroborating field/base
+    #                    overlap — backfill_dwarf_layout already refuses to
+    #                    merge that record's layout (it stays header-only,
+    #                    incomplete), so no incorrect data reaches the
+    #                    snapshot; this field exists purely so that refusal
+    #                    is visible instead of silent. See
+    #                    dwarf_layout_coherence_mismatches for which types.
+    #   "unavailable" — the clang L2 backend ran but the binary carried no
+    #                    usable DWARF at all, so backfill could not be
+    #                    attempted (every header record needing layout stays
+    #                    permanently layout-blind).
+    dwarf_layout_coherence: str | None = field(default=None, kw_only=True)
+    # Header record names backfill_dwarf_layout found a uniquely-named DWARF
+    # candidate for but rejected as not corroborated (the "mismatch" reason
+    # above) — empty unless dwarf_layout_coherence == "mismatch".
+    dwarf_layout_coherence_mismatches: tuple[str, ...] = field(
+        default_factory=tuple, kw_only=True
+    )
+
     # G28 Phase 3 — per-fact producer provenance for a "hybrid" snapshot only
     # (empty for every ordinary single-backend snapshot; ``ast_producer`` alone
     # already answers the question there). Keyed by the stable strings built by

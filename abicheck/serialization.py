@@ -142,7 +142,19 @@ from .model import (
 #     of this work; reusing the same integer for two unrelated additions
 #     would make "schema_version 14" ambiguous about which fields a given
 #     snapshot actually carries.
-SCHEMA_VERSION: int = 15
+# v16: `AbiSnapshot.dwarf_layout_coherence` / `dwarf_layout_coherence_mismatches`
+#     (P0 evidence-coherence audit) — observability over
+#     `dumper_layout_backfill.backfill_dwarf_layout`'s existing DWARF-vs-
+#     header-AST corroboration (unchanged: it already refused to merge an
+#     uncorroborated record's layout before this bump, so no snapshot
+#     gained different *data*, only a visible record of that refusal).
+#     `dwarf_layout_coherence` is one of "matched"/"partial"/"mismatch"/
+#     "unavailable", or `None` on any snapshot not built via the clang L2
+#     backend (castxml computes layout directly — not a coherence question)
+#     — see `AbiSnapshot`'s own field docstring. Purely additive: a pre-v16
+#     reader loads both as their conservative "not recorded" defaults
+#     (`None` / `()`).
+SCHEMA_VERSION: int = 16
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -955,6 +967,16 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     )
     raw_ast_sysroot = d.get("ast_sysroot")
     ast_sysroot = raw_ast_sysroot if isinstance(raw_ast_sysroot, str) else None
+    raw_layout_coherence = d.get("dwarf_layout_coherence")
+    dwarf_layout_coherence = (
+        raw_layout_coherence if isinstance(raw_layout_coherence, str) else None
+    )
+    raw_layout_coherence_mismatches = d.get("dwarf_layout_coherence_mismatches")
+    dwarf_layout_coherence_mismatches = (
+        tuple(str(m) for m in raw_layout_coherence_mismatches)
+        if isinstance(raw_layout_coherence_mismatches, (list, tuple))
+        else ()
+    )
     if "header_cv_facts_reliable" in d:
         # Trust an explicit marker over re-deriving from schema_version: a
         # load -> snapshot_to_dict -> (save) -> load round-trip always
@@ -1019,6 +1041,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         ast_cplusplus_macro=ast_cplusplus_macro,
         ast_compile_args=ast_compile_args,
         ast_sysroot=ast_sysroot,
+        dwarf_layout_coherence=dwarf_layout_coherence,
+        dwarf_layout_coherence_mismatches=dwarf_layout_coherence_mismatches,
         # See header_cv_facts_reliable_value's computation above: prefers an
         # explicit dict key (round-trip stability) and otherwise derives
         # from schema_version scoped to the CastXML header path specifically

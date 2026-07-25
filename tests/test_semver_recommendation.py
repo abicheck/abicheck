@@ -380,3 +380,19 @@ class TestCoherenceGating:
         assert rec.bump is SemverBump.PATCH
         assert rec.soname is SonameAction.NO_BUMP_NEEDED
         assert rec.state is ReleaseRecommendationState.ACTIONABLE
+
+    def test_breaking_with_header_binary_context_mismatch_is_unavailable(self) -> None:
+        # P0 evidence-coherence audit follow-up: a DWARF-vs-header-AST
+        # layout-backfill coherence mismatch is the same class of
+        # "this run's own evidence disagrees with itself" signal as
+        # compile_context_conflict/source_surface_dso_mismatch.
+        result = _result(
+            Verdict.BREAKING,
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+        )
+        result.evidence_tiers = ["elf", "dwarf"]
+        rec = recommend_release(result)
+        assert rec.soname is SonameAction.NOT_DETERMINED
+        assert rec.state is ReleaseRecommendationState.UNAVAILABLE
+        assert "header_binary_context_mismatch" in rec.rationale

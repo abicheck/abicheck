@@ -27,7 +27,7 @@ the AI-readiness file-size cap.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from .model import RecordType
@@ -129,10 +129,47 @@ def _topmost_scope_suffix(name: str) -> str:
     return name[last:]
 
 
+@dataclass(frozen=True)
+class DwarfLayoutCoherence:
+    """Observability for one :func:`backfill_dwarf_layout` run (P0
+    evidence-coherence audit) — *never* changes which records get
+    backfilled, only records what happened, so the already-reviewed
+    accept/reject decisions in :func:`backfill_dwarf_layout` stay untouched.
+
+    ``status`` uses the same four-state vocabulary as the AST-vs-build-
+    context coherence check (``compile_context_conflict``): ``"matched"``
+    (every eligible record corroborated), ``"partial"`` (some corroborated,
+    some had no DWARF candidate to check against at all — benign), or
+    ``"mismatch"`` (at least one record found a uniquely-named DWARF
+    candidate but the two disagreed — the case worth surfacing). A run with
+    no DWARF types at all is not constructed by this module; the caller
+    (``dumper.py``) is responsible for stamping ``AbiSnapshot
+    .dwarf_layout_coherence = "unavailable"`` directly in that case, since
+    :func:`backfill_dwarf_layout` returns *early* (a no-op) rather than
+    running any of this bucketing logic then.
+    """
+
+    status: str
+    matched: tuple[str, ...] = field(default_factory=tuple)
+    mismatched: tuple[str, ...] = field(default_factory=tuple)
+    unavailable_types: tuple[str, ...] = field(default_factory=tuple)
+    ambiguous: tuple[str, ...] = field(default_factory=tuple)
+
+
+def _coherence_status(
+    *, mismatched: list[str], unavailable_types: list[str], ambiguous: list[str]
+) -> str:
+    if mismatched:
+        return "mismatch"
+    if unavailable_types or ambiguous:
+        return "partial"
+    return "matched"
+
+
 def backfill_dwarf_layout(
     header_types: list[RecordType],
     dwarf_types: list[RecordType],
-) -> list[RecordType]:
+) -> tuple[list[RecordType], DwarfLayoutCoherence | None]:
     """Fill in missing struct/class layout on header-parsed types from DWARF.
 
     Matched by name — both come from the same source, so a name match is
@@ -318,9 +355,26 @@ def backfill_dwarf_layout(
     structurally can't (the clang header parser never populates
     ``RecordType.vtable`` itself), so a fieldless-but-polymorphic unrelated
     type must still be rejected exactly like the anonymous-aggregate case.
+
+    Returns ``(backfilled_types, coherence)`` (P0 evidence-coherence audit):
+    *coherence* is purely observational bookkeeping over the same
+    accept/reject decisions already made above — it changes nothing about
+    which records get backfilled. A "mismatch" bucket entry means this
+    function found a uniquely-named DWARF candidate and *declined* to trust
+    it (the record already stays header-only/incomplete, exactly as
+    before) — the caller uses this to make that refusal visible rather than
+    silent, not to react differently to it here. *coherence* is ``None``
+    when *dwarf_types* is empty (this function is a pure no-op then): this
+    module has no way to tell "the clang backend ran but the binary carried
+    no DWARF at all" (a real "unavailable" coherence state) apart from
+    "the header backend was castxml, which never calls this function's
+    caller with any DWARF types to begin with, because it doesn't need
+    to" (not a coherence question at all) — only ``dumper.py`` knows which
+    case it's in, so it decides the final ``AbiSnapshot.dwarf_layout_coherence``
+    value for this case itself.
     """
     if not dwarf_types:
-        return header_types
+        return header_types, None
     dwarf_candidates: dict[str, list[RecordType]] = {}
     for t in dwarf_types:
         for key in {t.name, _topmost_scope_suffix(t.name)}:
@@ -434,6 +488,11 @@ def backfill_dwarf_layout(
     for t in header_types:
         header_name_counts[t.name] = header_name_counts.get(t.name, 0) + 1
 
+    matched: list[str] = []
+    mismatched: list[str] = []
+    unavailable_types: list[str] = []
+    ambiguous: list[str] = []
+
     out: list[RecordType] = []
     for t in header_types:
         if t.size_bits is not None or t.is_opaque or t.is_template_pattern:
@@ -455,15 +514,18 @@ def backfill_dwarf_layout(
             # own header-parsed types, since there's no way to tell which of
             # the colliding types a name-based match actually belongs to.
             out.append(t)
+            ambiguous.append(t.name)
             continue
         dwarf_t = _dwarf_match(t.name)
-        if (
-            dwarf_t is None
-            or t.is_union != dwarf_t.is_union
-            or not _fields_corroborate(t, dwarf_t)
-        ):
+        if dwarf_t is None:
             out.append(t)
+            unavailable_types.append(t.name)
             continue
+        if t.is_union != dwarf_t.is_union or not _fields_corroborate(t, dwarf_t):
+            out.append(t)
+            mismatched.append(t.name)
+            continue
+        matched.append(t.name)
         dwarf_fields_by_name = {f.name: f for f in dwarf_t.fields}
         new_fields = []
         for f in t.fields:
@@ -495,4 +557,15 @@ def backfill_dwarf_layout(
                 t.is_trivially_copyable if t.is_trivially_copyable is not None else dwarf_t.is_trivially_copyable
             ),
         ))
-    return out
+    coherence = DwarfLayoutCoherence(
+        status=_coherence_status(
+            mismatched=mismatched,
+            unavailable_types=unavailable_types,
+            ambiguous=ambiguous,
+        ),
+        matched=tuple(matched),
+        mismatched=tuple(mismatched),
+        unavailable_types=tuple(unavailable_types),
+        ambiguous=tuple(ambiguous),
+    )
+    return out, coherence

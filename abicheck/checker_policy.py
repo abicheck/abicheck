@@ -655,6 +655,17 @@ class ChangeKind(str, Enum):
     PUBLIC_NOT_EXPORTED = "public_not_exported"  # public header declares an export obligation the binary does not provide → RISK
     HEADER_BUILD_CONTEXT_MISMATCH = "header_build_context_mismatch"  # headers parsed without the build's ABI-relevant context → API_BREAK
     PRIVATE_HEADER_LEAK = "private_header_leak"  # a public header pulls in a private/non-installed header → RISK
+    # P0 evidence-coherence audit — emitted directly by checker.compare() (not
+    # the crosscheck engine above; needs no L3/L4 evidence, only the always-
+    # available clang-L2-backend + DWARF dump path), when either side's
+    # AbiSnapshot.dwarf_layout_coherence == "mismatch": at least one record
+    # backfill_dwarf_layout() found a uniquely-named DWARF counterpart for
+    # but rejected as not corroborating (kind/field disagreement). Never
+    # BREAKING on its own — the uncorroborated record already stays header-
+    # only/incomplete rather than merged, so no incorrect layout data
+    # reaches the diff; this only flags that the analysis had a reduced-
+    # confidence spot. RISK, matching AC-008/009's evidence-coherence kinds.
+    HEADER_BINARY_CONTEXT_MISMATCH = "header_binary_context_mismatch"  # DWARF-vs-header-AST layout backfill found an uncorroborated record → RISK
     ODR_TYPE_VARIANT = "odr_type_variant"  # one type has divergent per-TU layouts (L4 ODR conflict) → API_BREAK
     PUBLIC_TO_INTERNAL_DEPENDENCY = "public_to_internal_dependency"  # public API reaches an internal (non-public) entity via the L5 graph → RISK
     # Single-release hygiene audit (ADR-035 D8). Intra-version "bad ABI hygiene"

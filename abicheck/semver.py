@@ -118,9 +118,17 @@ class ReleaseRecommendationState(str, Enum):
 #: action as if the analysis were coherent (P0 evidence-coherence audit;
 #: these two checks previously fed the verdict but were never consulted
 #: here, so an incoherent build/source context could still yield an
-#: unqualified "bump your SONAME").
+#: unqualified "bump your SONAME"). ``HEADER_BINARY_CONTEXT_MISMATCH``
+#: joins the same set for the same reason (P0 evidence-coherence audit,
+#: follow-up): a DWARF-vs-header-AST layout-backfill record that couldn't
+#: be corroborated as the same declaration is exactly the same class of
+#: "this run's own evidence disagrees with itself" signal as the other two.
 _COHERENCE_CONFLICT_KINDS = frozenset(
-    {ChangeKind.COMPILE_CONTEXT_CONFLICT, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH}
+    {
+        ChangeKind.COMPILE_CONTEXT_CONFLICT,
+        ChangeKind.SOURCE_SURFACE_DSO_MISMATCH,
+        ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+    }
 )
 
 

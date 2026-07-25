@@ -66,6 +66,9 @@ from .diff_kabi import (  # noqa: F401 — triggers detector registration
 from .diff_layout import (  # noqa: F401 — triggers detector registration
     _diff_layout_descriptor,
 )
+from .diff_layout_coherence import (  # noqa: F401 — triggers detector registration
+    _diff_dwarf_layout_coherence,
+)
 from .diff_long_double import (  # noqa: F401 — triggers detector registration
     _diff_long_double,
 )

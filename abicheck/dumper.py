@@ -1561,12 +1561,13 @@ def _dump_elf(
             public_dir_paths=[str(d) for d in (public_header_dirs or [])],
             extra_hash_dirs=extra_hash_dirs,
         )
+        _is_clang_backend = isinstance(parser, _ClangAstParser)
         dwarf_layout_types = dwarf_layout_types_or_empty(
             so_path,
             elf_meta,
             dwarf_meta,
             dwarf_adv,
-            isinstance(parser, _ClangAstParser),
+            _is_clang_backend,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
             debug_format=resolved_debug_format,
@@ -1578,6 +1579,26 @@ def _dump_elf(
         for _sess in _dwarf_session_out:
             _sess.close()
 
+    _backfilled_types, _layout_coherence = backfill_dwarf_layout(
+        parser.parse_types(), dwarf_layout_types
+    )
+    # P0 evidence-coherence audit: backfill_dwarf_layout returns coherence=None
+    # exactly when dwarf_layout_types was empty, which happens for two
+    # semantically different reasons only this caller can tell apart --
+    # dwarf_layout_types_or_empty() itself folds "castxml backend (layout
+    # already computed directly, not a coherence question)" and "clang
+    # backend but no usable DWARF at all (a real 'unavailable' state)" into
+    # the same empty-list result.
+    if not _is_clang_backend:
+        _dwarf_layout_coherence = None
+        _dwarf_layout_coherence_mismatches: tuple[str, ...] = ()
+    elif _layout_coherence is None:
+        _dwarf_layout_coherence = "unavailable"
+        _dwarf_layout_coherence_mismatches = ()
+    else:
+        _dwarf_layout_coherence = _layout_coherence.status
+        _dwarf_layout_coherence_mismatches = _layout_coherence.mismatched
+
     _so_mtime, _so_mtime_epoch = _safe_mtime(so_path)
     snapshot = AbiSnapshot(
         library=so_path.name,
@@ -1588,7 +1609,7 @@ def _dump_elf(
         source_size=_safe_size(so_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
-        types=backfill_dwarf_layout(parser.parse_types(), dwarf_layout_types),
+        types=_backfilled_types,
         enums=parser.parse_enums(),
         typedefs=parser.parse_typedefs(),
         constants=parser.parse_constants(),
@@ -1605,6 +1626,8 @@ def _dump_elf(
         ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
         platform="elf",
         language_profile=profile_hint,
+        dwarf_layout_coherence=_dwarf_layout_coherence,
+        dwarf_layout_coherence_mismatches=_dwarf_layout_coherence_mismatches,
         **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot),
     )
     _populate_elf_visibility(snapshot)
