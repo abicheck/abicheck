@@ -30,9 +30,14 @@ import json
 import os
 import shlex
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ._compiler_options import language_standard_field
 from .model import AbiSnapshot
+
+if TYPE_CHECKING:
+    from .comparability import IncludeDir
+    from .dump_manifest import DumpManifest
 
 
 def _profile_compiler_version(ast_toolchain: dict[str, str]) -> str | None:
@@ -60,6 +65,44 @@ def _profile_compiler_version(ast_toolchain: dict[str, str]) -> str | None:
     return json.dumps([producer, frontend_version, host_version])
 
 
+def _manifest_declared_includes(dump_manifest: DumpManifest) -> list[IncludeDir]:
+    """Union of every TU's own ``includes`` entries (ADR-050 D3), in
+    first-declared order across TUs, deduplicated by resolved path.
+
+    A ``project_owned`` entry's per-slot fingerprint token is the entry's
+    own root-relative string (relative to the manifest file's own
+    directory, ``dump_manifest.base_dir``) rather than a bare ``None``
+    label: manifest paths are already root-relative/side-normalized by
+    design, so — unlike the legacy CLI's labeled ``--include
+    old:LABEL=PATH`` form — no separate user-supplied label is needed for
+    two manifests describing the same logical support root under
+    different checkout roots to already share the same stable,
+    mount-point-independent per-slot token (see ``dump_manifest.py``'s own
+    docstring). A non-``project_owned`` entry gets ``label=None``, leaving
+    the ordinary ancestor rule (``_classify_include_dirs``) to decide
+    ownership, unchanged.
+    """
+    from .comparability import IncludeDir
+
+    seen: set[Path] = set()
+    result: list[IncludeDir] = []
+    base = dump_manifest.base_dir.resolve()
+    for tu in dump_manifest.translation_units:
+        for entry in tu.includes:
+            resolved = entry.path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            label = None
+            if entry.project_owned:
+                try:
+                    label = str(resolved.relative_to(base))
+                except ValueError:
+                    label = str(resolved)
+            result.append(IncludeDir(path=entry.path, label=label))
+    return result
+
+
 def _attach_extraction_contract(
     snapshot: AbiSnapshot,
     *,
@@ -71,6 +114,7 @@ def _attach_extraction_contract(
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
     extra_include_labels: dict[Path, str] | None = None,
+    dump_manifest: DumpManifest | None = None,
 ) -> None:
     """Populate *snapshot*.contract in place from this dump's resolved
     extraction inputs (profile/scope fingerprints), so a later
@@ -96,6 +140,14 @@ def _attach_extraction_contract(
     ``label`` field), threaded here from both call sites above. A path with
     no entry gets ``label=None``, identical to before this parameter
     existed.
+
+    ``dump_manifest`` (ADR-050 D3, G32 Phase B): when given, *declared_includes*
+    is derived from the manifest's own per-TU ``includes`` (via
+    :func:`_manifest_declared_includes`) instead of *extra_includes*/
+    *extra_include_labels* — a manifest-driven dump's ``extra_includes`` is
+    always empty (``dump()``'s own mutual-exclusivity check enforces that),
+    so without this branch a manifest's ``project_owned`` markers would
+    never reach ``profile_fingerprint`` at all.
     """
     from .comparability import IncludeDir, compute_extraction_contract
     from .dumper_toolchain import _compiler_family_from_toolchain
@@ -131,12 +183,18 @@ def _attach_extraction_contract(
         # scope for a DWARF-derived surface.
         declared_headers=list(headers) if snapshot.from_headers else [],
         declared_includes=(
-            [
-                IncludeDir(path=p, label=(extra_include_labels or {}).get(p))
-                for p in extra_includes
-            ]
-            if snapshot.from_headers and extra_includes
-            else []
+            []
+            if not snapshot.from_headers
+            else _manifest_declared_includes(dump_manifest)
+            if dump_manifest is not None
+            else (
+                [
+                    IncludeDir(path=p, label=(extra_include_labels or {}).get(p))
+                    for p in extra_includes
+                ]
+                if extra_includes
+                else []
+            )
         ),
         l2_frontend_ran=snapshot.from_headers,
         public_header_paths=list(public_headers or []),

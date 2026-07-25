@@ -575,3 +575,182 @@ class TestDumpWithManifest:
                 header_backend="clang",
                 dump_manifest=manifest,
             )
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason=(
+        "dump_manifest is ELF-only so far (ADR-050 D3) -- a `gcc -shared "
+        "-o *.so` build produces a genuine ELF binary only on Linux; see "
+        "TestDumpWithManifest's own gate for the same reasoning."
+    ),
+)
+class TestManifestIncludeOwnershipAndScopeFingerprint:
+    """ADR-050 D1's manifest-idiom ``includes: [{path, project_owned}]``
+    escape hatch, exercised through the real ``dumper.dump()`` manifest
+    path -- not just the legacy CLI's labeled ``--include old:LABEL=PATH``
+    form. Requires clang + gcc (real compile, real ``clang -ast-dump=json``;
+    no castxml needed)."""
+
+    def _build_lib_with_sibling_include(
+        self, tmp_path: Path, *, priv_content: str, project_owned: bool
+    ) -> tuple[Path, DumpManifest]:
+        # `inc_dir`/`src_dir` are SIBLINGS under tmp_path -- src_dir is not an
+        # ancestor of the declared header, so the ancestor rule alone would
+        # classify it external; only the explicit `project_owned` marker (or
+        # lack of it) decides which side of that this test exercises.
+        inc_dir = tmp_path / "include"
+        inc_dir.mkdir()
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        header = inc_dir / "foo.h"
+        header.write_text('#include "priv.h"\nint f(int a, int b);\n')
+        (src_dir / "priv.h").write_text(priv_content)
+        c_src = tmp_path / "lib.c"
+        c_src.write_text("int f(int a, int b) { return a + b; }\n")
+        so = tmp_path / "liblib.so"
+        subprocess.run(
+            ["gcc", "-shared", "-fPIC", "-o", str(so), str(c_src)],
+            check=True,
+            capture_output=True,
+        )
+        manifest = DumpManifest(
+            base_dir=tmp_path,
+            compiler="cc",
+            roots=(header,),
+            translation_units=(
+                TranslationUnit(
+                    name="main",
+                    forced_includes=(header,),
+                    includes=(
+                        IncludeEntry(path=src_dir, project_owned=project_owned),
+                    ),
+                ),
+            ),
+        )
+        return so, manifest
+
+    def test_project_owned_sibling_include_keeps_profile_fingerprint_stable(
+        self, tmp_path: Path
+    ):
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old_so, old_manifest = self._build_lib_with_sibling_include(
+            old_dir, priv_content="#define PRIV_V1 1\n", project_owned=True
+        )
+        new_so, new_manifest = self._build_lib_with_sibling_include(
+            new_dir, priv_content="#define PRIV_V2 2\n", project_owned=True
+        )
+        old_snap = dump(
+            old_so, [], version="old", compiler="cc", header_backend="clang",
+            dump_manifest=old_manifest,
+        )
+        new_snap = dump(
+            new_so, [], version="new", compiler="cc", header_backend="clang",
+            dump_manifest=new_manifest,
+        )
+        assert old_snap.contract is not None and new_snap.contract is not None
+        assert (
+            old_snap.contract.profile_fingerprint
+            == new_snap.contract.profile_fingerprint
+        )
+
+    def test_bare_sibling_include_classifies_external_not_project_owned(
+        self, tmp_path: Path
+    ):
+        """A bare (unmarked) manifest ``includes: [../src]`` entry on a
+        sibling-of-the-header directory is NOT project-owned -- proving the
+        mapping form's ``project_owned: true`` marker is a genuine
+        classification change, not a no-op parse flag.
+
+        Compares two identically-shaped dumps (same directory layout, same
+        private-header content) differing only in the ``project_owned``
+        marker: the owned one gets the manifest-idiom ``label:<relative
+        path>`` per-slot token (ADR-050 D1's stable, mount-point-independent
+        token for a manifest entry), the bare one falls through to the
+        ordinary ``ext:<content-hash>`` external-bucket token -- so the two
+        fingerprints differ even for byte-identical inputs.
+        """
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        owned_dir, bare_dir = tmp_path / "owned", tmp_path / "bare"
+        owned_dir.mkdir()
+        bare_dir.mkdir()
+        owned_so, owned_manifest = self._build_lib_with_sibling_include(
+            owned_dir, priv_content="#define X 1\n", project_owned=True
+        )
+        bare_so, bare_manifest = self._build_lib_with_sibling_include(
+            bare_dir, priv_content="#define X 1\n", project_owned=False
+        )
+        owned_snap = dump(
+            owned_so, [], version="1.0", compiler="cc", header_backend="clang",
+            dump_manifest=owned_manifest,
+        )
+        bare_snap = dump(
+            bare_so, [], version="1.0", compiler="cc", header_backend="clang",
+            dump_manifest=bare_manifest,
+        )
+        assert owned_snap.contract is not None and bare_snap.contract is not None
+        assert owned_snap.contract.profile_fields["include_sequence"] == '["0:label:src"]'
+        assert bare_snap.contract.profile_fields["include_sequence"].startswith(
+            '["0:ext:sha256:'
+        )
+        assert (
+            owned_snap.contract.profile_fingerprint
+            != bare_snap.contract.profile_fingerprint
+        )
+
+    def test_manifest_public_header_dirs_changes_scope_fingerprint(
+        self, tmp_path: Path
+    ):
+        """A manifest's own public_header_paths/public_header_dirs base-
+        profile fields are a genuine replacement for the legacy CLI's
+        --public-header/--public-header-dir -- not a no-op -- the same way
+        those flags already change scope_fingerprint on the legacy path."""
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        header = tmp_path / "foo.h"
+        header.write_text("int f(int a, int b);\n")
+        pub_dir = tmp_path / "pub"
+        pub_dir.mkdir()
+        c_src = tmp_path / "lib.c"
+        c_src.write_text("int f(int a, int b) { return a + b; }\n")
+        so = tmp_path / "liblib.so"
+        subprocess.run(
+            ["gcc", "-shared", "-fPIC", "-o", str(so), str(c_src)],
+            check=True,
+            capture_output=True,
+        )
+        base_manifest = DumpManifest(
+            base_dir=tmp_path,
+            compiler="cc",
+            roots=(header,),
+            translation_units=(
+                TranslationUnit(name="main", forced_includes=(header,)),
+            ),
+        )
+        with_pub_dir_manifest = DumpManifest(
+            base_dir=tmp_path,
+            compiler="cc",
+            roots=(header,),
+            public_header_dirs=(pub_dir,),
+            translation_units=(
+                TranslationUnit(name="main", forced_includes=(header,)),
+            ),
+        )
+        base_snap = dump(
+            so, [], version="1.0", compiler="cc", header_backend="clang",
+            dump_manifest=base_manifest,
+        )
+        with_pub_dir_snap = dump(
+            so, [], version="1.0", compiler="cc", header_backend="clang",
+            dump_manifest=with_pub_dir_manifest,
+        )
+        assert base_snap.contract is not None and with_pub_dir_snap.contract is not None
+        assert (
+            base_snap.contract.scope_fingerprint
+            != with_pub_dir_snap.contract.scope_fingerprint
+        )

@@ -1296,12 +1296,12 @@ def dump(
         snapshot,
         headers=list(dump_manifest.roots) if dump_manifest is not None else headers,
         extra_includes=extra_includes,
-        gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
+        gcc_options=gcc_options, gcc_option_tokens=gcc_option_tokens,
         lang=lang,
         public_headers=effective_public_headers,
         public_header_dirs=effective_public_header_dirs,
         extra_include_labels=extra_include_labels,
+        dump_manifest=dump_manifest,
     )
 
     # Tag declaration provenance (source_header + origin). Always derives
