@@ -119,8 +119,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Fail
+        env:
+          BUILD_OUTPUT_ARTIFACT_PREFIX: ${{ inputs.build-output-artifact-prefix }}
         run: |
-          echo "::error::no '${{ inputs.build-output-artifact-prefix }}*' build-output artifacts were found -- this run would otherwise report success having refreshed nothing. Make sure the calling workflow's build job(s) upload one such artifact per contract profile before calling this reusable workflow." >&2
+          echo "::error::no '${BUILD_OUTPUT_ARTIFACT_PREFIX}*' build-output artifacts were found -- this run would otherwise report success having refreshed nothing. Make sure the calling workflow's build job(s) upload one such artifact per contract profile before calling this reusable workflow." >&2
           exit 1
 
   # ── Job 2: dump + refresh one accepted-main cache entry per profile ──────
@@ -191,13 +193,15 @@ jobs:
           echo "cache-key=${KEY_PREFIX}-${PROFILE_ID}-${HEAD_SHA}" >> "$GITHUB_OUTPUT"
           echo "restore-prefix=${KEY_PREFIX}-${PROFILE_ID}-" >> "$GITHUB_OUTPUT"
 
-      # `key` is this run's own (not-yet-written, always-unique-by-head-sha)
-      # cache key -- it can never hit, so this always falls through to
-      # `restore-keys`, which resolves to the newest entry actually written
-      # under the profile's prefix (GitHub's cache-restore semantics: the
-      # most recently created matching entry wins). That is exactly what a
-      # freshness comparison needs: the latest previously accepted-main
-      # baseline-set, regardless of which head_sha wrote it.
+      # `key` is this run's own cache key, keyed by head-sha (unique per
+      # commit, not per run -- a rerun/retrigger of the same commit, or an
+      # explicit caller-supplied head-sha, reuses the same key and can hit
+      # an entry this same commit already wrote). Either way this step
+      # falls through to `restore-keys`, which resolves to the newest entry
+      # actually written under the profile's prefix (GitHub's cache-restore
+      # semantics: the most recently created matching entry wins). That is
+      # exactly what a freshness comparison needs: the latest previously
+      # accepted-main baseline-set, regardless of which head_sha wrote it.
       - name: Restore previous accepted-main baseline-set
         id: restore
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
@@ -223,9 +227,11 @@ jobs:
       - name: Derive baseline libraries from build-output.json
         id: libraries
         shell: bash
+        env:
+          PROFILE_ID: ${{ matrix.profile_id }}
         run: |
           set -euo pipefail
-          abicheck build-output baseline-libraries "build-output/${{ matrix.profile_id }}" -o baseline-libraries.json || true
+          abicheck build-output baseline-libraries "build-output/${PROFILE_ID}" -o baseline-libraries.json || true
           python3 -c "
           import json, sys
 
@@ -263,7 +269,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}
 
-      # Writes the NEW, always-unique key computed above -- never the stable
+      # Writes the per-commit key computed above -- never the stable
       # restore-prefix alone (ADR-047 section 10's explicit warning: a
       # workflow that reused one stable key across refreshes would silently
       # stop updating after the first write, since the cache action reports

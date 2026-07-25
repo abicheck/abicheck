@@ -59,7 +59,7 @@ rationale and the `binaries/` staging this depends on.
 
 ## When to move past this scenario
 
-- **Your libraries don't actually depend on each other** — you just build
+- **Your libraries don't actually depend on one another** — you just build
   them together — → [S15: Multiple Independent Targets](multi-dso-project.md).
 - **You want deeper (header/build/source) evidence for one specific member**
   → declare that member with its *own* `checks:` (independent of the bundle

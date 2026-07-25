@@ -121,8 +121,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Fail
+        env:
+          BUILD_OUTPUT_ARTIFACT_PREFIX: ${{ inputs.build-output-artifact-prefix }}
         run: |
-          echo "::error::no '${{ inputs.build-output-artifact-prefix }}*' build-output artifacts were found -- this run would otherwise report success having published nothing. Make sure the calling workflow's build job(s) upload one such artifact per contract profile before calling this reusable workflow." >&2
+          echo "::error::no '${BUILD_OUTPUT_ARTIFACT_PREFIX}*' build-output artifacts were found -- this run would otherwise report success having published nothing. Make sure the calling workflow's build job(s) upload one such artifact per contract profile before calling this reusable workflow." >&2
           exit 1
 
   # ── Job 2: dump + stage + publish one baseline-set per contract profile ──
@@ -192,6 +194,8 @@ jobs:
       - name: Derive baseline libraries from build-output.json
         id: libraries
         shell: bash
+        env:
+          PROFILE_ID: ${{ matrix.profile_id }}
         run: |
           set -euo pipefail
           # Deliberately not `set -e`-fatal on this one call: a report with
@@ -199,7 +203,7 @@ jobs:
           # Python block below reads report['errors'] to print each one as
           # its own ::error:: annotation -- a bare `set -e` failure here
           # would only surface a generic non-zero exit with no detail.
-          abicheck build-output baseline-libraries "build-output/${{ matrix.profile_id }}" -o baseline-libraries.json || true
+          abicheck build-output baseline-libraries "build-output/${PROFILE_ID}" -o baseline-libraries.json || true
           python3 -c "
           import json, sys
 
@@ -242,10 +246,11 @@ jobs:
         env:
           ASSET_NAME_TEMPLATE: ${{ inputs.asset-name-template }}
           PROFILE_ID: ${{ matrix.profile_id }}
+          BASELINE_PATH: ${{ steps.baseline.outputs.baseline-path }}
         run: |
           set -euo pipefail
           asset_name="${ASSET_NAME_TEMPLATE//\{profile\}/$PROFILE_ID}"
-          tar --zstd -cf "$asset_name" -C "${{ steps.baseline.outputs.baseline-path }}" .
+          tar --zstd -cf "$asset_name" -C "$BASELINE_PATH" .
           echo "asset-name=$asset_name" >> "$GITHUB_OUTPUT"
 
       # --clobber lets a re-run overwrite this profile's own previously
@@ -256,6 +261,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.github-token != '' && secrets.github-token || secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
+          ASSET_NAME: ${{ steps.package.outputs.asset-name }}
         run: |
           set -euo pipefail
-          gh release upload "$RELEASE_TAG" "${{ steps.package.outputs.asset-name }}" --clobber --repo "${{ github.repository }}"
+          gh release upload "$RELEASE_TAG" "$ASSET_NAME" --clobber --repo "${{ github.repository }}"

@@ -126,7 +126,7 @@ A GitHub Actions cache entry is immutable once written — a new version needs
 a new key, not an overwrite. `update-main-baseline.yml` therefore writes a
 **new key on every run**:
 
-```
+```text
 <key-prefix>-<profile-id>-<head-sha>
 ```
 
@@ -143,11 +143,17 @@ profile_id, head_sha)` / `accepted_main_cache_restore_prefix(key_prefix,
 profile_id)` are this format's pure-Python mirror.
 
 Each run: computes this run's own key, restores the newest entry matching
-the restore-keys prefix (never an exact hit, since `head-sha` is always
-unique) into a freshness-comparison staging directory, dumps the new
-baseline-set with `--previous-manifest` pointed at that restored
+the restore-keys prefix into a freshness-comparison staging directory, dumps
+the new baseline-set with `--previous-manifest` pointed at that restored
 `manifest.json` when one was found, then saves the fresh `.abicheck-baseline`
-directory under this run's own new key.
+directory under this run's own key. Note `head-sha` is unique per *commit*,
+not per *run*: a rerun/retrigger of the same commit, or an explicit
+caller-supplied `head-sha` input, reuses the same key — the exact-key restore
+can hit an entry that commit already wrote, falling through to
+`restore-keys` only on an actual miss. The restore step is written to behave
+correctly either way (a hit on this run's own previously written entry is
+still the newest matching entry), so this doesn't affect correctness, only
+the "always a miss" framing above.
 
 ### Known gap: nothing restores `accepted-main` from cache yet
 

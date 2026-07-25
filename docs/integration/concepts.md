@@ -121,9 +121,14 @@ report envelope every check produces.
 The exact, immutable description of which checks a CI run performs — derived
 from `.abicheck.yml`'s `targets:`/`bundles:`/`profiles:`/`checks:` plus each
 contract profile's `build-output.json`. Previously implicit in workflow YAML
-+ matrix configuration; now a machine-readable artifact
-(`run-plan.json`) a run can audit, filter (e.g. by changed component, S25),
-and project down to `abicheck aggregate`'s manifest shape. See the
++ matrix configuration; now a machine-readable artifact (`run-plan.json`) a
+run can audit and project down to `abicheck aggregate`'s manifest shape.
+`generate_run_plan()` has no built-in changed-path/changed-component filter
+— every declared check is always included in the generated plan; scoping a
+run to only the components a diff touched (e.g. in a monorepo, S25) is
+something the caller does externally, by conditionally skipping matrix
+cells or `check-project.yml` calls before this plan is generated, not
+something `run-plan generate` does for you. See the
 [Run Plan Schema](../reference/run-plan-schema.md).
 
 ## Report

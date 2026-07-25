@@ -37,9 +37,17 @@ targets:
 > are always in the generated plan. Until that lands, scope a monorepo PR
 > workflow yourself: compute the changed paths (e.g. `git diff --name-only`
 > against the PR's base) in your own CI step, and conditionally skip the
-> `check-project.yml` call (or a specific matrix cell) for components the
-> diff didn't touch — being explicit about what "fail-closed" means for your
-> own gating is safer than assuming a filter abicheck doesn't yet provide.
+> `check-project.yml` call (or a specific matrix cell) **only for
+> non-required components** the diff didn't touch. Any target/check marked
+> `required: true` must stay fail-closed — either run it unconditionally
+> regardless of what changed, or, if you do skip it, have your own gating
+> step independently verify its coverage (e.g. assert the skipped check's
+> `check_id` still appears with a pass/not-applicable result before the
+> workflow can succeed). Silently omitting a required check because your own
+> path filter decided it was "unaffected" is exactly the coverage gap this
+> scenario's opening paragraph warns against — the filter you write is not
+> covered by abicheck's own fail-closed guarantees, only your own targets
+> that already went through `check-project.yml` are.
 
 ## When to move past this scenario
 

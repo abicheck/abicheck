@@ -70,10 +70,10 @@ on; only the number of profiles and how the directory gets populated differ.
 
 - **Your build doesn't naturally produce a compile database / source facts,
   and you want source-level (not just binary/header) checks** → wire
-  `evidence/abicheck_inputs/` into the build output — see
+  `abicheck_inputs/` into the build output — see
   [Producing Source Facts](../../user-guide/producing-source-facts.md).
 - **Your libraries ship as a release bundle with cross-library dependencies,
-  not independently** → [S14](../index.md),
+  not independently** → [S14: Multi-DSO Release Bundle](release-bundle.md),
   [Multi-Binary Releases](../../user-guide/multi-binary.md).
 
 ## See also

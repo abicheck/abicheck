@@ -26,10 +26,13 @@ build-integration decision, not a downstream one.
 
 Both producers need a `collect-facts phase: prepare` step to run **before**
 your project's own build (setting up the wrapper/plugin so the compiler
-actually gets invoked through it), and, once the build finishes, a
-`phase: verify` (or `phase: auto`, which detects it can't do both steps for
-`producer: wrapper`/`clang-plugin` and tells you so explicitly rather than
-silently only completing the first) to validate the pack it collected:
+actually gets invoked through it), and, once the build finishes, an
+explicit `phase: verify` step to validate the pack it collected. Unlike
+`producer: replay` (S7), where `phase: auto` alone can do both the setup
+and the validation in one step, `producer: wrapper`/`clang-plugin` need the
+prepare/verify split spelled out explicitly — `phase: auto` isn't a
+meaningful choice for these two producers, since there's no single step
+that can run both before and after your build:
 
 ```yaml
 jobs:

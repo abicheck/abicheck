@@ -57,7 +57,7 @@ targets:
 [Plugin Systems](../../user-guide/plugin-systems.md) for the full
 `--required-symbol`/`--required-symbols`/`--policy plugin_abi` model.
 
-## Neither works with `baseline-channel: none`
+## Neither works with `channel: none`
 
 `scan` mode has no `--used-by`/`--required-symbols` equivalent — an
 app-consumer/plugin-contract check has no scope to audit without a baseline

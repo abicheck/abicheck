@@ -2307,7 +2307,8 @@ can actually reach today. This item does not revisit that restriction; if a
 future item lifts `BUNDLE_CHECK_DEPTHS`, staging per-member headers becomes
 that item's job, not a rediscovered gap.
 
-**Cache-key rotation — implemented exactly as specified.**
+**Cache-key rotation — implemented as specified; the plan's own required
+fixture is not yet met and is downgraded here rather than overclaimed.**
 `update-main-baseline.yml` computes `<key-prefix>-<profile-id>-<head-sha>`
 once per run (`abicheck.buildsource.baseline_publish.accepted_main_cache_key`
 is this format's pure-Python mirror, cross-checked against the workflow's
@@ -2316,20 +2317,28 @@ restores the newest previous entry via `restore-keys:
 <key-prefix>-<profile-id>-` (`accepted_main_cache_restore_prefix`) into a
 freshness-comparison staging directory, feeds its `manifest.json` (when one
 was found) to `actions/baseline` as `--previous-manifest`, and saves the
-fresh baseline-set under the new, always-unique key — never the stable
-prefix. The required fixture ("two consecutive `update-main-baseline.yml`
-runs produce two distinct baselines resolvable by `resolve-baseline`") is
-covered as a structural-plus-semantic pairing rather than a live two-run
-GitHub Actions fixture (this session had no way to execute one, the same
-limitation P1.4's own reusable-workflow items already documented): one test
-pins the workflow's literal key-computation template against the
-pure-Python mirror's exact string output for representative inputs, and a
-second confirms two different `head_sha`s the mirror produces two distinct
-keys sharing one `resolve-baseline`-discoverable prefix — reviewed and
-passing, but not yet confirmed against a real two-push run the way P1.3/P1.4's
-own end-to-end fixtures were confirmed against real CI. Treat this the same
-"reviewed but unverified until a real run confirms it" caveat this plan
-already gives other producer-side items.
+fresh baseline-set under the new key — never the stable prefix. Note
+`head-sha` is unique per *commit*, not per *run*: a rerun/retrigger of the
+same commit (or an explicit caller-supplied `head-sha`) reuses the same key
+and can hit an entry that commit already wrote; it is not a guaranteed-miss
+key on every invocation.
+
+This item's own stated requirement — "a fixture asserting two consecutive
+`update-main-baseline.yml` runs produce two distinct baselines resolvable
+by `resolve-baseline`" — is an executable, real two-run GitHub Actions
+fixture, and that is **not** what exists today. What exists instead is a
+structural-plus-semantic pairing of pure-Python tests (this session had no
+way to execute a live two-push run, the same limitation P1.4's own
+reusable-workflow items already documented): one test pins the workflow's
+literal key-computation template against the pure-Python mirror's exact
+string output for representative inputs, and a second confirms that two
+different `head_sha`s produce two distinct keys sharing one
+`resolve-baseline`-discoverable prefix. That is meaningfully weaker than
+the stated requirement — it verifies the key-format contract, not that a
+real second run actually produces a second, distinct, resolvable
+baseline-set. Treat the two-consecutive-run fixture as still open, not
+satisfied; closing it needs a live CI run (e.g. two pushes to a scratch
+branch with this workflow wired up) that this session could not perform.
 
 **Files delivered:** `actions/baseline/run.sh`, `actions/baseline/
 build_manifest.py`, `actions/baseline/action.yml` (`stage_binary` documented
