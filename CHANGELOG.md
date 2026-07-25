@@ -175,7 +175,7 @@ below at release time.
     for a `BREAKING` scoped verdict, making that claim false); it now states
     the actual computed exit code/scheme, mirroring the SARIF/JUnit/HTML
     wording.
-  - `docs/user-guide/appcompat.md`'s options table no longer contradicts the
+  - `docs/use/appcompat.md`'s options table no longer contradicts the
     snapshot-support text above it — a JSON snapshot works with `--used-by`
     when it carries binary evidence (an `elf`/`pe`/`macho` field), not only
     real library binaries.
@@ -1738,7 +1738,7 @@ below at release time.
   `ChangeKind`s).** Rebuilding the same source on a newer distro/toolchain can
   change where the binary loads without touching its interface; these findings
   name that root cause. New concepts doc:
-  `docs/concepts/environment-drift.md`; Markdown reports gain an
+  `docs/learn/environment-drift.md`; Markdown reports gain an
   **Environment & Toolchain Drift** section grouping these (plus the existing
   toolchain/stdlib drift kinds) so "the API moved" and "the build environment
   moved" are separable at a glance.
@@ -1934,7 +1934,7 @@ below at release time.
   min-of-imports inference. Cross-platform (ELF/PE imports, plus new Mach-O
   undefined-symbol capture; on Windows a version-specific `pythonXY.dll` import
   under `abi3` is flagged). See the
-  [Python Extensions](docs/user-guide/python-extensions.md) guide.
+  [Python Extensions](docs/use/python-extensions.md) guide.
 - **`post_manifest` library — POST Python ABI-commitment checking.**
   [POST Python](https://post-py.org/) compiles a typed subset of Python to a
   shared library whose stable C ABI is the set of `pp_*` symbols documented in a
@@ -1994,7 +1994,7 @@ below at release time.
   header surface takes precedence. This is measured as a first-class evidence
   layer (a `python-api` axis in the FP-rate gate and an L2-only signal in the
   per-tier accuracy gate). See the
-  [Python Extensions](docs/user-guide/python-extensions.md#beyond-the-c-abi-the-python-level-api)
+  [Python Extensions](docs/use/python-extensions.md#beyond-the-c-abi-the-python-level-api)
   guide.
 
 ### Changed
@@ -2156,7 +2156,7 @@ below at release time.
   enum value-change / member-removal changes and pointer-only *opaque* handle size
   changes scope out, while public-reachable enums and pointer-only
   *fully-defined* type size changes stay breaking. Baselines remain 0/0.
-- New user-guide page **CI Gating** (`docs/user-guide/ci-gating.md`) — the
+- New user-guide page **CI Gating** (`docs/use/ci-gating.md`) — the
   missing hub explaining how baselines, policies, suppressions, and severity
   combine into the exit code (order of operations + the two exit-code
   schemes), cross-linked from the four detail pages.
@@ -2164,7 +2164,7 @@ below at release time.
   bitmask→scalar exit-code translation, an `abidiff`→`abicheck` flag-by-flag
   map, `abidw`/`abipkgdiff` equivalents, and INI→YAML suppression
   translation. The verdict-parity QA matrix it previously contained moved to
-  `docs/development/libabigail-parity.md`, refreshed against the current
+  `docs/contribute/libabigail-parity.md`, refreshed against the current
   `PARITY_CASES` in `tests/test_abidiff_parity.py` (the vtable/return/param/
   struct-size gaps it still listed as open were closed by castxml
   integration).
@@ -2222,7 +2222,7 @@ below at release time.
   N concurrent giant ASTs and be OOM-killed. The call-graph worker count now
   shares the L4 RAM/cgroup-aware clamp (`ABICHECK_L4_JOB_MEM_GIB` budget);
   `ABICHECK_CALL_GRAPH_JOBS` still overrides CPU count but memory wins, mirroring
-  `ABICHECK_L4_JOBS`. See `docs/development/performance.md` § "Scan-level
+  `ABICHECK_L4_JOBS`. See `docs/contribute/performance.md` § "Scan-level
   scalability sweep".
 - **Seedless `--depth source` no longer pays a full-tree call-graph cost.** An
   unseeded s5 run scoped its L4 replay to the public-API surface (headers-only,
@@ -2271,10 +2271,10 @@ below at release time.
   end-to-end regression guard.
 
 #### Use-Case Coverage Evaluation + machine-checked registry
-- New `docs/development/usecase-coverage-evaluation.md` maps abicheck against
+- New `docs/contribute/usecase-coverage-evaluation.md` maps abicheck against
   the full application/library ABI-API change use-case space and records the
   code/test/example follow-ups (gaps G1–G8).
-- New `docs/development/usecase-registry.yaml` — the machine-checkable source of
+- New `docs/contribute/usecase-registry.yaml` — the machine-checkable source of
   truth for every use case (`status`, `axis`, `evidence`, `gap`, `next_steps`),
   validated by `tests/test_usecase_registry.py`: coverage claims must cite
   evidence paths that exist, and unfinished items must carry a gap + plan. This
@@ -2353,7 +2353,7 @@ below at release time.
 - `--report-mode impact` (sugar for `full` + `--show-impact`).
 - `appcompat` now warns (instead of silently ignoring) when `-H`/`-I` are supplied
   in weak (`--check-against`) / `--list-required-symbols` mode.
-- New rationale doc `docs/development/config-key-review.md` (full CLI/config-key
+- New rationale doc `docs/contribute/config-key-review.md` (full CLI/config-key
   surface audit with per-mode inconsistency analysis and implementation status).
 
 ### Changed
@@ -2446,7 +2446,7 @@ below at release time.
   and per-change `"severity"` field.
 - Replaces the removed `--fail-on-additions` flag.
 
-#### Report Filtering & Deduplication ([ADR-004](docs/development/adr/004-report-filtering-and-deduplication.md))
+#### Report Filtering & Deduplication ([ADR-004](docs/contribute/adr/004-report-filtering-and-deduplication.md))
 - **Redundancy filtering**: Automatically collapses derived changes caused by root type changes
   (e.g. a struct size change that propagates to 30 `FUNC_PARAMS_CHANGED` entries). Root type
   changes are annotated with `caused_count` and `affected_symbols`. Use `--show-redundant` to
@@ -2472,7 +2472,7 @@ below at release time.
   packages without manual unpacking.
 - Full-stack ABI checking with dependency resolution across package contents.
 
-#### DWARF-only Snapshot Builder ([ADR-003](docs/development/adr/003-data-source-architecture.md))
+#### DWARF-only Snapshot Builder ([ADR-003](docs/contribute/adr/003-data-source-architecture.md))
 - Headerless ELF analysis: build ABI snapshots from DWARF debug info alone, without
   requiring public headers or castxml.
 
@@ -2712,7 +2712,7 @@ additional capabilities.
 - Python ≥ 3.10
 - `castxml` (mandatory — for header-based C/C++ AST parsing; included in conda-forge install)
 - `g++` or `clang++` (accessible to castxml)
-- See [Installation](docs/getting-started.md) for full setup instructions
+- See [Installation](docs/start/getting-started.md) for full setup instructions
 
 ### Known Limitations
 

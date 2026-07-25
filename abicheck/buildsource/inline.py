@@ -265,7 +265,7 @@ class BuildConfig:
             {"public", "collapse_versioned_symbols", "public_symbols", "show_redundant"}
         ),
         "suppression": frozenset({"strict", "require_justification"}),
-        "source": frozenset({"method", "graph"}),
+        "source": frozenset({"method"}),
         "compile": frozenset(
             {
                 "frontend",

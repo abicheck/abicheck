@@ -2,7 +2,7 @@
 
 A small, **optional** [LibTooling](https://clang.llvm.org/docs/LibTooling.html)
 companion program for abicheck's G28 Phase 4
-(`docs/development/plans/g28-castxml-clang-l2-parity-hardening.md`).
+(`docs/contribute/plans/g28-castxml-clang-l2-parity-hardening.md`).
 
 ## What it does
 

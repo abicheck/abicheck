@@ -17,7 +17,7 @@
 
 This script backs the ``abicheck collect-facts`` composite Action: it
 resolves which source-facts producer to use (replay / wrapper / clang-
-plugin -- see ``docs/user-guide/producing-source-facts.md`` for the
+plugin -- see ``docs/use/producing-source-facts.md`` for the
 decision tree it mirrors), runs that producer's collection step, and
 verifies the resulting pack. Wrapper and clang-plugin need the caller's own
 build command to run *between* collection and verification, hence the

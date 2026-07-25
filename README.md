@@ -196,7 +196,7 @@ The [`examples/`](examples/README.md) directory contains **195 real-world ABI/AP
 
 The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
 
-The authoritative completeness gate is the full example matrix: compiler lanes, runtime smoke, bundle validation, and dedicated proof owners are aggregated into exactly one row per ground-truth case. A green single-library lane or a `libv1.so`/`libv2.so` pair scan is not full-catalog proof. See the [full example validation runbook](docs/development/examples-validation-runbook.md) for runner selection, the reproducible workflow, artifact semantics, and agent rules.
+The authoritative completeness gate is the full example matrix: compiler lanes, runtime smoke, bundle validation, and dedicated proof owners are aggregated into exactly one row per ground-truth case. A green single-library lane or a `libv1.so`/`libv2.so` pair scan is not full-catalog proof. See the [full example validation runbook](docs/contribute/examples-validation-runbook.md) for runner selection, the reproducible workflow, artifact semantics, and agent rules.
 
 ---
 
@@ -260,7 +260,7 @@ Per-case matrix, methodology, full-catalog notes, and the pinned cross-tool comp
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, code style, and PR workflow. Project status and roadmap: [development/goals.md](docs/development/goals.md). Coding agents (Claude Code, Copilot, Cursor, or otherwise): the canonical repository contract is [AGENTS.md](AGENTS.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, code style, and PR workflow. Project status and roadmap: [development/goals.md](docs/contribute/goals.md). Coding agents (Claude Code, Copilot, Cursor, or otherwise): the canonical repository contract is [AGENTS.md](AGENTS.md).
 
 ## License
 

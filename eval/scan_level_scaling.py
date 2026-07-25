@@ -19,7 +19,7 @@ This harness sweeps the **other** axis the field eval never automated: how each
 ``scan`` *level* (``--depth binary|headers|build|source|full`` plus the
 ``--source-method s4`` graph rung) scales as a project's **complexity** grows —
 TU count, per-TU symbol count, and C++ template/STL instantiation depth (the
-documented L4 cliff driver, see ``docs/development/performance.md`` §"Scan level
+documented L4 cliff driver, see ``docs/contribute/performance.md`` §"Scan level
 cost model"). Unlike ``scaling.py`` it needs **no network and no real repo**: it
 synthesises C++ trees of tunable size, builds them with the host C++ compiler
 into a ``.so`` + ``compile_commands.json`` (the JSON-compilation-database shape a

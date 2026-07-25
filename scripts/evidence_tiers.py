@@ -4,7 +4,7 @@
 abicheck reasons over *six sources of information* about a library, layered
 from the least to the most that a release engineer can hand it. Each source is
 labelled with the same ``L0``–``L5`` evidence-layer codes used across the
-docs (see ``docs/concepts/evidence-and-detectability.md`` and
+docs (see ``docs/learn/evidence-and-detectability.md`` and
 ``docs/concepts/evidence-pack.md``):
 
 ================  =====================================  =========================

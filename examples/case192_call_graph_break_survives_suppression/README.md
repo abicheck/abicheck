@@ -61,8 +61,8 @@ dependency is a **call**, not a field or base class.
 | `suppress-refused.yaml` — broad `namespace` rule, no override | **Refused.** Verdict stays `BREAKING`; a `suppression_would_hide_public_break` diagnostic names the proof path and suggests `allow_public_break: true`. |
 | `suppress-acknowledged.yaml` — same rule + `allow_public_break: true` | **Applied.** Verdict becomes `NO_CHANGE` — an explicit, reviewable acknowledgment that this specific break is accepted, not an accident of a broad glob. |
 
-See [Suppressions § Reachability-aware suppression](../../docs/user-guide/suppressions.md#reachability-aware-suppression)
-for the full mechanics and [ADR-044](../../docs/development/adr/044-reachability-aware-suppression.md)
+See [Suppressions § Reachability-aware suppression](../../docs/use/suppressions.md#reachability-aware-suppression)
+for the full mechanics and [ADR-044](../../docs/contribute/adr/044-reachability-aware-suppression.md)
 for the design rationale. Contrast with
 [case193](../case193_ordinary_exported_fn_call_not_reachable/README.md), where
 the identical suppression rule applies cleanly with no diagnostic at all,

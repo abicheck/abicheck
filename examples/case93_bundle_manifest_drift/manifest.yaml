@@ -1,6 +1,6 @@
 # Public ABI contract for this release (case93).
 # Each entry declares a symbol the bundle publicly promises to ship.
-# See docs/development/adr/023-bundle-aware-multi-binary-analysis.md.
+# See docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md.
 version: 1
 provides:
   - symbol: train_float_dense

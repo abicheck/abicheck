@@ -4,7 +4,7 @@
 library's ABI surface — and `abicheck compare` reads two snapshots (or a live
 binary and a saved snapshot) to produce a verdict. Checking a snapshot into your
 repository as a baseline is the recommended way to detect ABI drift over time
-(see [Baseline Management](../user-guide/baseline-management.md)).
+(see [Baseline Management](../use/baseline-management.md)).
 
 This page documents the snapshot contract: its schema version, its
 compatibility rules, and its top-level structure.
@@ -150,7 +150,7 @@ files:
 A snapshot has no `report_schema_version`, and a report has no
 `schema_version`; the two version numbers evolve independently. For the report
 contract and its stability policy, see
-[Output Formats](../user-guide/output-formats.md).
+[Output Formats](../use/output-formats.md).
 
 ---
 
@@ -159,7 +159,7 @@ contract and its stability policy, see
 - **Check baselines into version control.** A saved `.abi.json` is the intended
   input to `compare`; storing one per release lets CI diff each build against
   the last shipped ABI. See
-  [Baseline Management](../user-guide/baseline-management.md).
+  [Baseline Management](../use/baseline-management.md).
 - **Older baselines stay readable.** Because loading fills missing newer fields
   with defaults, a baseline written by an earlier abicheck compares correctly
   against a live binary dumped by a newer one — no regeneration required for a
@@ -175,5 +175,5 @@ contract and its stability policy, see
 
 ## See also
 
-- [Baseline Management](../user-guide/baseline-management.md) — producing, storing, and comparing snapshots as ABI baselines.
-- [Output Formats](../user-guide/output-formats.md) — the comparison-report JSON and `report_schema_version`.
+- [Baseline Management](../use/baseline-management.md) — producing, storing, and comparing snapshots as ABI baselines.
+- [Output Formats](../use/output-formats.md) — the comparison-report JSON and `report_schema_version`.

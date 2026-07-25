@@ -626,7 +626,7 @@ def compute_extraction_contract(
     scope_fingerprint: str | None = None
     scope_fields: dict[str, str] = {}
     if scope_inputs_present:
-        # All scope-identity inputs normalize against one shared, side-local
+        # All scope-identity inputs normalize against a shared, side-local
         # root — never raw absolute paths (Codex review, PR #624): a lone
         # `--public-header`/`--public-header-dir` provenance input (the
         # symbols-only-with-provenance case, no declared_headers at all) is
@@ -646,21 +646,46 @@ def compute_extraction_contract(
         # a directory asserts "everything under here is public," a
         # categorically different claim from naming individual files, so
         # merging it into "headers" would conflate the two rather than
-        # recognize genuine equivalence. Files use their parent for the
-        # root (preserving the basename, the same single-entry-preserving
-        # trick used everywhere else in this function); public_header_dirs
-        # are themselves directories, so their *own* parent is the analogous
-        # root candidate (preserving the directory's own basename the same
-        # way a lone header's basename survives). root_candidates is never
-        # empty here: scope_inputs_present is true (checked above) iff at
-        # least one of these same three sequences is non-empty.
-        root_candidates = [
-            str(_resolved(p).parent)
-            for p in (*declared_headers, *public_header_paths, *public_header_dirs)
+        # recognize genuine equivalence.
+        #
+        # "headers" and "public_header_dirs" normalize against SEPARATE
+        # roots, not one shared across both (found via real-world CI: a
+        # `--devel-pkg`/`-H <dir>` umbrella whose declared_headers live
+        # several directories below the extracted/declared root -- e.g.
+        # `<root>/usr/include/*.h` and `<root>/usr/share/doc/.../*.h` next
+        # to `<root>` itself passed as a public_header_dir). A single shared
+        # root, computed from every entry's parent including the directory
+        # entries, gets pulled up to the directory's *own* parent (one level
+        # above the declared root) the moment that directory sits shallower
+        # than the header files -- leaking that root's name (often
+        # per-run-random, e.g. a tempfile-extracted package) into "headers"'
+        # normalized identities even though "public_header_dirs" collapses
+        # its own single-entry case away separately. Two byte-identical
+        # extractions into two different temp directories then spuriously
+        # fingerprint as a scope mismatch. Each field already hashes
+        # independently (SCOPE_FIELD_KEYS), so there is no reason for them
+        # to share a root: files use their parent for the root (preserving
+        # the basename, the same single-entry-preserving trick used
+        # everywhere else in this function); public_header_dirs are
+        # themselves directories, so their *own* parent is the analogous
+        # root candidate for *that field alone* (preserving the directory's
+        # own basename the same way a lone header's basename survives).
+        headers_root_candidates = [
+            str(_resolved(p).parent) for p in (*declared_headers, *public_header_paths)
         ]
-        root = _common_root(root_candidates)
+        headers_root = (
+            _common_root(headers_root_candidates) if headers_root_candidates else None
+        )
+        header_dirs_root_candidates = [
+            str(_resolved(p).parent) for p in public_header_dirs
+        ]
+        header_dirs_root = (
+            _common_root(header_dirs_root_candidates)
+            if header_dirs_root_candidates
+            else None
+        )
 
-        def _normalize(paths: Sequence[Path]) -> list[str]:
+        def _normalize(paths: Sequence[Path], root: Path | None) -> list[str]:
             # sorted(set(...)), not sorted(...) (Codex review, PR #624): the
             # same logical header reaching this function through both
             # declared_headers and public_header_paths on one side (e.g. a
@@ -685,7 +710,9 @@ def compute_extraction_contract(
         # API surface is still verified by the ordinary diff engine; this
         # only concerns whether the extraction inputs count as "the same
         # declared surface" for the comparability gate.
-        _scope_header_identities = _normalize((*declared_headers, *public_header_paths))
+        _scope_header_identities = _normalize(
+            (*declared_headers, *public_header_paths), headers_root
+        )
         if len(_scope_header_identities) == 1:
             _scope_header_identities = ["<single-header>"]
 
@@ -699,7 +726,7 @@ def compute_extraction_contract(
         # a name against anyway. Two co-located declared dirs still need
         # real per-directory identity (a genuine declared-surface
         # difference), so this only collapses the single-entry case.
-        _scope_public_header_dirs = _normalize(public_header_dirs)
+        _scope_public_header_dirs = _normalize(public_header_dirs, header_dirs_root)
         if len(_scope_public_header_dirs) == 1:
             _scope_public_header_dirs = ["<single-header-dir>"]
 

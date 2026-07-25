@@ -27,7 +27,7 @@ on PATH, so it is a no-op on Linux/macOS and on Windows runners without the
 MSVC dev environment activated. It runs for real in the dedicated
 ``windows-msvc`` CI lane.
 
-Closes the MSVC + PDB backlog item (docs/development/backlog.md).
+Closes the MSVC + PDB backlog item (docs/contribute/backlog.md).
 """
 
 from __future__ import annotations

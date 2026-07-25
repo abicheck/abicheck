@@ -455,7 +455,7 @@ class TestCrossProducerUnmangledIdentityKnownLimitation:
     between two coincidentally-same-signature but genuinely different
     entities). That is exactly the class of problem Phase 3 (hybrid
     multi-producer snapshot with per-fact provenance) in
-    docs/development/plans/g28-castxml-clang-l2-parity-hardening.md is
+    docs/contribute/plans/g28-castxml-clang-l2-parity-hardening.md is
     scoped to solve. This test documents today's known behavior so a
     future Phase-3 fix has a concrete regression to flip (from asserting
     the false pair fires, to asserting it doesn't) rather than this gap

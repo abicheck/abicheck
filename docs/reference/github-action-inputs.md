@@ -2,7 +2,7 @@
 
 # GitHub Action Inputs and Outputs Reference
 
-Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../user-guide/github-action.md), generated directly from `action.yml` — see that page for setup, mode/input compatibility, and usage recipes; this page is the exhaustive field list only.
+Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../use/github-action.md), generated directly from `action.yml` — see that page for setup, mode/input compatibility, and usage recipes; this page is the exhaustive field list only.
 
 ## Inputs (72)
 

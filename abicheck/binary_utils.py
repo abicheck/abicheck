@@ -134,7 +134,7 @@ def detect_archive(path: str | Path) -> bool:
 #: chars immediately before ``.so``/``.dylib`` (or a numeric version
 #: component leading to one) so ordinary hyphenated names — e.g.
 #: ``libwebpdemux``, ``libbrotlicommon``, or a real ``-cafe`` (too short) —
-#: are never touched (G9, ADR: docs/development/plans/g9-wheel-vendored-matching.md).
+#: are never touched (G9, ADR: docs/contribute/plans/g9-wheel-vendored-matching.md).
 #: The lookahead ``(?=[0-9a-f]*[a-f])`` requires at least one non-decimal hex
 #: letter in the run: without it, a purely-decimal 6-16-digit suffix (a
 #: legitimate embedded build/version number, e.g. ``libfoo-100200.so.1`` vs.

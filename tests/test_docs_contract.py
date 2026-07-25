@@ -758,7 +758,7 @@ def test_page_links_to_recognises_reference_style_link(
 ) -> None:
     """Standard CommonMark reference-style links (`[text][label]` plus a
     `[label]: url` definition elsewhere in the document) are a valid
-    backlink too -- real pages in this repo (docs/user-guide/annotations.md)
+    backlink too -- real pages in this repo (docs/use/annotations.md)
     use this style, and mkdocs renders it identically to an inline link
     (regression test for the gap flagged in PR #619 review)."""
     monkeypatch.setattr(dc, "DOCS", tmp_path)

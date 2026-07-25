@@ -26,8 +26,8 @@ so the use cases are validated as flows, not just parsers:
   driven through ``compare`` and the reporter (not just the ``diff_sycl`` unit
   detector).
 
-See docs/development/usecase-coverage-evaluation.md (gap G6) and
-docs/user-guide/kernel-btf.md.
+See docs/contribute/usecase-coverage-evaluation.md (gap G6) and
+docs/use/kernel-btf.md.
 """
 
 from __future__ import annotations
