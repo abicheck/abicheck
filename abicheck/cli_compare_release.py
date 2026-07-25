@@ -275,6 +275,8 @@ def _compare_one_library(
             doc = {
                 "report_schema_version": REPORT_SCHEMA_VERSION,
                 "library": old_path.name,
+                "old_version": old_version,
+                "new_version": new_version,
                 "verdict": None,
                 "reason": {"kind": kind, "message": str(exc)},
             }

@@ -295,6 +295,16 @@ class TestCompareReleaseNotComparable:
         doc = json.loads((out_dir / "libtest.json").read_text(encoding="utf-8"))
         assert doc["verdict"] is None
         assert doc["reason"]["kind"] == "scope_mismatch"
+        # CodeRabbit review, PR #631: a not_comparable release artifact must
+        # keep the same old_version/new_version pair identity a normal
+        # to_json(result) report carries, or a consumer can't tell which
+        # release pair this report is for. compare's release fan-out defaults
+        # these to the literal "old"/"new" labels when --old-version/
+        # --new-version aren't given (unrelated to each snapshot's own
+        # AbiSnapshot.version) -- what matters here is that the field is
+        # present at all, matching to_json(result)'s normal shape.
+        assert doc["old_version"] == "old"
+        assert doc["new_version"] == "new"
 
 
 class TestJsonReporterContractFields:

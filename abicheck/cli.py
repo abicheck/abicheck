@@ -560,7 +560,7 @@ def main() -> None:
 # ── Debug artifact resolution (ADR-021a) ──────────────────────────────────────
 @click.option("--debug-root", "debug_roots", multiple=True, type=click.Path(path_type=Path),
               help="Directory containing separate debug files (build-id trees, "
-                   "path-mirror debug files, or dSYM bundles). Can be repeated.")
+                   "path-mirror debug files, or dSYM bundles). This option can be repeated.")
 @click.option("--debuginfod", is_flag=True, default=False,
               help="Enable debuginfod network resolution for debug info (opt-in). "
                    "Uses DEBUGINFOD_URLS environment variable or --debuginfod-url.")

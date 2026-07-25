@@ -333,7 +333,7 @@ Dump ABI snapshot of a shared library to JSON.
 | `--debug-format` | no | — | Force the ELF debug format (auto=pick best available). Supersedes the individual --btf/--ctf/--dwarf flags. Choices: `auto`, `dwarf`, `btf`, `ctf`. |
 | `--build-dir`, `-p` | no | — | Build directory containing compile\_commands.json, or path to the file itself. Enables deterministic header parsing with exact build flags. Requires -H/--header. |
 | `--compile-db-filter` | no | — | Glob pattern to filter compile\_commands.json entries by source file (e.g. 'src/libfoo/**'). Useful for large databases. |
-| `--debug-root` | no | — | Directory containing separate debug files (build-id trees, path-mirror debug files, or dSYM bundles). Can be repeated. |
+| `--debug-root` | no | — | Directory containing separate debug files (build-id trees, path-mirror debug files, or dSYM bundles). This option can be repeated. |
 | `--debuginfod` | no | `False` | Enable debuginfod network resolution for debug info (opt-in). Uses DEBUGINFOD\_URLS environment variable or --debuginfod-url. |
 | `--debuginfod-url` | no | — | debuginfod server URL (overrides DEBUGINFOD\_URLS env var). |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
