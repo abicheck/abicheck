@@ -102,6 +102,38 @@ def test_make_partial_relink_is_not_a_terminal_link_unit():
     assert ev.link_units == []
 
 
+def test_make_ar_with_dash_style_flags_recognized():
+    # Dash-style ar flags ("-rcs") are just a normal leading flag token, not
+    # the BSD-style bare-letters form _archive_link_unit special-cases --
+    # they're already filtered out by the generic "not startswith('-')" pass.
+    ev = MakeAdapter(dry_run="ar -rcs build/libx.a build/x.o").collect()
+    assert len(ev.link_units) == 1
+    assert ev.link_units[0].output == "build/libx.a"
+    assert ev.link_units[0].inputs == ["build/x.o"]
+
+
+def test_make_ar_with_too_few_operands_is_not_a_link_unit():
+    ev = MakeAdapter(dry_run="ar rcs onlyoutput.a").collect()
+    assert ev.link_units == []
+
+
+def test_make_ar_with_non_archive_output_is_not_a_link_unit():
+    ev = MakeAdapter(dry_run="ar rcs libx.so build/x.o").collect()
+    assert ev.link_units == []
+
+
+def test_make_ar_with_no_valid_inputs_is_not_a_link_unit():
+    ev = MakeAdapter(dry_run="ar rcs libx.a README.txt").collect()
+    assert ev.link_units == []
+
+
+def test_make_compiler_link_line_with_no_object_inputs_is_not_a_link_unit():
+    # "-o app.so -lm" has an output but no object/archive-extension operand.
+    ev = MakeAdapter(dry_run="gcc -o app.so -lm").collect()
+    assert ev.link_units == []
+    assert ev.compile_units == []
+
+
 def test_make_unrelated_recipe_lines_produce_no_link_unit():
     ev = MakeAdapter(
         dry_run="\n".join(

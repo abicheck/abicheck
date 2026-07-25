@@ -50,6 +50,27 @@ def test_unknown_source_is_absent_not_empty():
     assert attr.get("src/unrelated.cpp", frozenset()) == frozenset()
 
 
+def test_target_with_no_id_is_skipped():
+    ev = BuildEvidence(
+        targets=[
+            Target(id="", source_files=["src/anon.cpp"]),
+            Target(id="target://libfoo", source_files=["src/foo.cpp"]),
+        ]
+    )
+    attr = attribute_sources_to_targets(ev)
+    assert "src/anon.cpp" not in attr
+    assert attr["src/foo.cpp"] == frozenset({"target://libfoo"})
+
+
+def test_target_with_blank_source_entry_is_skipped():
+    ev = BuildEvidence(
+        targets=[Target(id="target://libfoo", source_files=["", "src/foo.cpp"])]
+    )
+    attr = attribute_sources_to_targets(ev)
+    assert attr["src/foo.cpp"] == frozenset({"target://libfoo"})
+    assert "" not in attr
+
+
 class TestTargetGraphChannel:
     def test_direct_source_attributes_to_its_own_target(self):
         ev = BuildEvidence(

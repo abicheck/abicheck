@@ -132,6 +132,7 @@ class TestSchemaRoundTrip:
                         kind="source-facts",
                         path="evidence/abicheck_inputs",
                         projection="declared",
+                        attribution_path="evidence/attribution.json",
                     ),
                 )
             ],
@@ -813,6 +814,125 @@ class TestInferredEvidenceProjection:
         report = validate_build_output(root)
         assert not report.ok
         assert any("escapes the build-output directory" in e for e in report.errors)
+
+    def test_inferred_evidence_path_escaping_is_rejected(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "/etc/passwd",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any(
+            "evidence.path" in e and "absolute or escapes" in e for e in report.errors
+        )
+
+    def test_inferred_evidence_path_not_a_pack_is_rejected(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        (root / "evidence" / "not-a-pack").mkdir(parents=True)
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/not-a-pack",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any("not a readable abicheck_inputs pack" in e for e in report.errors)
+
+    def test_malformed_attribution_json_fails(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        _write_pack(root, "evidence/abicheck_inputs", library="libfoo")
+        (root / "evidence" / "attribution.json").write_text("{not valid json")
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/abicheck_inputs",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any("could not be read as JSON" in e for e in report.errors)
+
+    def test_attribution_json_not_object_fails(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        _write_pack(root, "evidence/abicheck_inputs", library="libfoo")
+        (root / "evidence" / "attribution.json").write_text(json.dumps([1, 2, 3]))
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/abicheck_inputs",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any("is not a JSON object" in e for e in report.errors)
 
 
 class TestDeclaredEvidenceSharingScope:
