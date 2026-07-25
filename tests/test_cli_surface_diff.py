@@ -54,7 +54,8 @@ def test_dump_surface_covers_root_commands(dump_mod) -> None:  # type: ignore[no
     ``build-output`` — the G30 P1.1 ``build-output.json`` validator group —,
     ``project-targets`` — the G30 P1.5
     ``targets:``/``bundles:``/``profiles:``/``baseline:`` validator group —,
-    and ``run-plan`` — the G30 P1.4 run-plan generator group — all added
+    ``run-plan`` — the G30 P1.4 run-plan generator group —, and ``plan`` —
+    the ADR-050 D3 ``--dump-manifest`` diagnostic, G32 Phase B — all added
     afterward).
 
     `pr-comment` is deliberately NOT here: it is Action/library-only tooling
@@ -68,6 +69,7 @@ def test_dump_surface_covers_root_commands(dump_mod) -> None:  # type: ignore[no
         "compat",
         "deps",
         "dump",
+        "plan",
         "project-targets",
         "run-plan",
         "scan",

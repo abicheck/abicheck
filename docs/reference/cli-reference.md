@@ -360,6 +360,19 @@ Dump ABI snapshot of a shared library to JSON.
 | `--nostdinc`, `--no-nostdinc` | no | `False` | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
 | `--frontend-context` | no | `host` | Which AST context the L2 header frontend should target (ADR-050 D3/D5). Only 'host' is honored so far -- 'device' (e.g. a SYCL/DPC++ offload target) is rejected until the real device selector lands; declared now so a manifest's own frontend\_context field has a matching CLI counterpart for the legacy, non-manifest path. Choices: `host`, `device`. |
 
+## `plan`
+
+Parse and normalize a --dump-manifest document without extracting.
+
+**Options**
+
+| Option | Required | Default | Description |
+|---|:--:|---|---|
+| `--dump-manifest` | yes | — | The --dump-manifest YAML document to parse and normalize. |
+| `--format` | no | `text` | Output format. Choices: `text`, `json`. |
+| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
+
 ## `project-targets`
 
 Validate a project's target/bundle/profile/release-channel setup.
