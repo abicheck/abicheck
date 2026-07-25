@@ -185,6 +185,14 @@ jobs:
           # this fixture found both keys visible on the very first poll,
           # every time; this only guards against a slower registration on
           # an unusually loaded day.
+          #
+          # --paginate concatenates each page's raw JSON object back-to-back
+          # -- not valid JSON as a single blob (caught by a real run of this
+          # fixture: json.JSONDecodeError: Extra data). Parsed below via
+          # repeated json.JSONDecoder.raw_decode() calls, which correctly
+          # consumes multiple back-to-back top-level JSON values regardless
+          # of whitespace/formatting between them -- more robust than
+          # assuming a specific one-object-per-line shape from --jq.
           for attempt in $(seq 1 10); do
             entries="$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" --paginate 2>/dev/null || true)"
             if [[ -n "$entries" ]]; then
@@ -196,8 +204,19 @@ jobs:
           python3 -c "
           import json, os, sys
 
-          data = json.load(open('caches.json'))
-          by_key = {c['key']: c for c in data.get('actions_caches', [])}
+          text = open('caches.json').read()
+          decoder = json.JSONDecoder()
+          by_key = {}
+          pos = 0
+          length = len(text)
+          while pos < length:
+              while pos < length and text[pos].isspace():
+                  pos += 1
+              if pos >= length:
+                  break
+              page, pos = decoder.raw_decode(text, pos)
+              for entry in page.get('actions_caches', []):
+                  by_key[entry['key']] = entry
           key_1 = os.environ['KEY_1']
           key_2 = os.environ['KEY_2']
 
