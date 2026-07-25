@@ -79,6 +79,22 @@ class CastxmlVersionCheck:
     supported: bool
     reasons: list[str] = field(default_factory=list)
 
+    def provenance_fields(self) -> dict[str, str]:
+        """Structured, separately-queryable counterparts to the raw combined
+        ``--version`` transcript already stored under the snapshot's
+        ``ast_toolchain["version"]`` — CastXML's own release and its
+        bundled/linked Clang major.minor, keyed for direct merge into that
+        same ``dict[str, str]`` (P1 toolchain-provenance audit). Omits a key
+        entirely when its value couldn't be parsed, rather than writing an
+        empty/placeholder string."""
+        fields: dict[str, str] = {}
+        if self.castxml_version is not None:
+            fields["castxml_version"] = self.castxml_version
+        if self.clang_major_minor is not None:
+            major, minor = self.clang_major_minor
+            fields["castxml_bundled_clang_version"] = f"{major}.{minor}"
+        return fields
+
     def message(self, *, found_at: str | None = None) -> str:
         """Render the standard user-facing unsupported-version message."""
         where = f" was found at {found_at}" if found_at else ""

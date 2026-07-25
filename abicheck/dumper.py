@@ -577,6 +577,7 @@ def _header_ast_parser(
             check = evaluate_castxml_version(metadata.get("version", ""))
             setattr(parser, "_abicheck_ast_supported", check.supported)
             setattr(parser, "_abicheck_ast_unsupported_reasons", check.reasons)
+            metadata.update(check.provenance_fields())
         return parser
 
     def _run_clang(*, fallback_reason: str | None = None) -> _ClangAstParser:

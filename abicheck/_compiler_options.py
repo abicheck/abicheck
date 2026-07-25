@@ -79,24 +79,42 @@ def explicit_language_standard(
 
 
 def language_standard_field(
-    lang: str | None, gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+    lang: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...] = (),
+    *,
+    resolved_standard: str | None = None,
 ) -> str | None:
     """ADR-050 D1's ``language_standard`` profile field: combines the
-    explicit ``--lang`` mode (if any) with an explicit ``-std=`` value (if
-    any).
+    explicit ``--lang`` mode (if any) with the dump's actual C/C++ standard.
 
     A same-executable, no-``-std=`` dump differing only by ``lang="c"`` vs.
     ``lang="c++"`` must still fingerprint differently — the actual frontend
     command forces a different language mode (``-x c`` vs. C++ default)
     regardless of whether an explicit standard was also given (Codex
-    review, PR #624 follow-up). Pure content-based auto-detection (no
-    explicit ``--lang``, header content alone triggering C++ mode via
-    ``_detect_cpp_headers``) is **not** captured here — that needs the
-    frontend's own *resolved* ``force_cpp`` decision threaded out as
-    toolchain metadata, deferred as a narrower follow-up.
+    review, PR #624 follow-up).
+
+    *resolved_standard*, when given, is ``AbiSnapshot.ast_resolved_standard``
+    (schema v15, P1 toolchain-provenance audit) — the frontend's own
+    *resolved* standard, which is a strict superset of the explicit-``-std=``
+    value this function used to fall back to alone: it already reproduces
+    that value verbatim when one was given, but also captures the case this
+    function's own docstring used to flag as a gap — pure content-based
+    auto-detection (no explicit ``--lang``/``-std=``, header content alone
+    triggering the C++20 requires/concept heuristic's forced ``gnu++20``).
+    Without this, two dumps that differ only by one side's headers silently
+    triggering that heuristic shared an identical ``profile_fingerprint``
+    despite having been parsed under genuinely different dialects — the
+    comparability gate (:func:`abicheck.comparability.check_contracts_comparable`)
+    had nothing to catch that divergence on. Preferred over the raw
+    explicit-``-std=`` parse whenever given; falls back to the old
+    explicit-only behaviour when ``None`` (a non-header dump, or a caller
+    that hasn't threaded the resolved value through).
     """
     lang_mode = (lang or "").strip().lower()
-    explicit_std = explicit_language_standard(gcc_options, gcc_option_tokens)
-    if lang_mode and explicit_std:
-        return f"{lang_mode}:{explicit_std}"
-    return explicit_std or (lang_mode or None)
+    standard = resolved_standard or explicit_language_standard(
+        gcc_options, gcc_option_tokens
+    )
+    if lang_mode and standard:
+        return f"{lang_mode}:{standard}"
+    return standard or (lang_mode or None)

@@ -167,12 +167,63 @@ time.
 
 ## `profiles:`
 
-A mapping of profile id → `{contract, os, arch}`. `contract` (default
-`true`) decides whether this build lane is an ABI contract (gets a
+A mapping of profile id → `{contract, os, arch, compile}`. `contract`
+(default `true`) decides whether this build lane is an ABI contract (gets a
 baseline, gates CI) or a test-only CI lane that never gets one — "not every
 CI lane gets a baseline" is the whole point of this field (S17). The map
 key is the same `profile.id` string used throughout `build-output.json`,
 `run-plan.json`, and the report envelope's `profile_id` field.
+
+The optional `compile:` sub-block (P1 toolchain-profile audit) declares the
+compiler/dialect/ABI-macro axes this profile pins — additive over the root
+`compile:` block: `compiler_family`, `compiler_version` (a version
+constraint string), `target` (a target triple), `standard`, `stdlib`,
+`binding` (see below), `abi_macros` (a string→string mapping), and `args`
+(a list of normalized extra compiler-flag atoms). Every string value must
+be a single whitespace-free atom — a `.abicheck.yml` found by auto-discovery
+is untrusted, and whitespace would let one YAML scalar smuggle multiple
+argv tokens. This is config-schema/validation groundwork: no run-plan
+consumer resolves `compile:` into an actual `dump`/`compare` invocation yet.
+
+```yaml
+profiles:
+  linux-x86_64-gcc14-libstdcxx-gnu17-default:
+    contract: true
+    os: linux
+    arch: x86_64
+    compile:
+      compiler_family: gcc
+      compiler_version: ">=14.0,<15"
+      standard: gnu++17
+      stdlib: libstdc++
+      binding: gcc14
+```
+
+### `compile.binding` — resolving a logical toolchain id
+
+`binding` is a *logical* identifier (e.g. `"gcc14"`), never a raw
+executable path or command — the same untrusted-config trust boundary as
+every other `compile:` field. Resolving it to an exact executable requires
+a **separately trusted** bindings file (schema
+`abicheck.toolchain-bindings/v1`):
+
+```yaml
+# bindings.yml — operator/CI-managed, never auto-discovered
+schema: abicheck.toolchain-bindings/v1
+bindings:
+  gcc14: /opt/gcc-14.2.0/bin/g++
+  castxml07: /opt/conda/bin/castxml
+```
+
+`abicheck project-targets validate --toolchain-bindings bindings.yml` checks
+that every declared `profiles.<id>.compile.binding` resolves against it,
+in addition to the ordinary validation checks below — a config author can
+catch a typo'd or undeclared binding id before CI runs. Omitting
+`--toolchain-bindings` skips this check entirely (a profile declaring a
+`binding` with no bindings file given is not itself a validation error);
+loading a bindings file with the wrong `schema` or a malformed document is
+a usage error (exit `64`), matching the rest of this command's strict-parsing
+convention.
 
 ## `baseline:`
 

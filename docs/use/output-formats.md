@@ -372,7 +372,8 @@ is):
 
 | Value | Set when | Means |
 |-------|----------|-------|
-| `artifact_proven` | the finding's kind is intrinsically a `BREAKING_KINDS` member | L0/L1/L2 artifact evidence confirms a shipped ABI break. |
+| `artifact_proven` | the finding's kind is intrinsically a `BREAKING_KINDS` member, **and** this comparison's `evidence_tiers` confirm a real binary was examined | L0/L1/L2 artifact evidence confirms a shipped ABI break. |
+| `unattributed` | the finding's kind is intrinsically a `BREAKING_KINDS` member, but this comparison's `evidence_tiers` show only `"header"` — no real binary (ELF/PE/Mach-O/DWARF) was ever examined | The kind's own classification still stands, but this specific run cannot back it with an actual artifact — e.g. a Python-API caller comparing hand-built/loaded `AbiSnapshot` objects. Not a downgrade of the *kind*, only of what *this run* can claim to have proven. |
 | `source_contract` | intrinsically `API_BREAK_KINDS` | A source-level break that needs a recompile or a policy decision — not necessarily a shipped ABI break. |
 | `contextual_risk` | intrinsically `RISK_KINDS` (`COMPATIBLE_WITH_RISK` under the default policy) | Build/source/deployment context suggests risk without proving a break. |
 | `consumer_proven` | *(set explicitly, not derived from the finding's own classification)* | Runtime/`appcompat`/`plugin-check` evidence demonstrated that a **specific** consumer actually depends on what changed — see [Application Compatibility](appcompat.md). |
@@ -381,22 +382,27 @@ is):
 `COMPATIBLE`/`NO_CHANGE` findings (additions, clean comparisons) carry no
 `evidence_status` — there is no epistemic strength to qualify.
 
-**`evidence_status` is a pure function of the finding's `kind`** — unlike
-`severity`/the gate/exit code, it follows *no* verdict-modulation mechanism at
-all: not the active `--policy` (a named policy like `plugin_abi` folds every
-`COMPATIBLE_WITH_RISK` kind into its breaking set for gating; `sdk_vendor`
-downgrades source-level kinds), not a `PolicyFile` kind-set override, not a
-`PolicyFile` `evidence_policy` ceiling (the `build_context_drift`/
-`source_only_findings`/`graph_risk_findings` knobs, ADR-033 D7), and not a
-per-finding `effective_verdict` (ADR-027 A4 pattern modulation, frozen-
-namespace escalation). All of those change what *fails the build*, not what
-evidence actually proved — and since more than one of them share the same
+**`evidence_status` is a function of the finding's `kind`, refined by exactly
+one comparison-level fact** — unlike `severity`/the gate/exit code, it
+follows *no* verdict-modulation mechanism at all: not the active `--policy`
+(a named policy like `plugin_abi` folds every `COMPATIBLE_WITH_RISK` kind
+into its breaking set for gating; `sdk_vendor` downgrades source-level
+kinds), not a `PolicyFile` kind-set override, not a `PolicyFile`
+`evidence_policy` ceiling (the `build_context_drift`/`source_only_findings`/
+`graph_risk_findings` knobs, ADR-033 D7), and not a per-finding
+`effective_verdict` (ADR-027 A4 pattern modulation, frozen-namespace
+escalation). All of those change what *fails the build*, not what evidence
+actually proved — and since more than one of them share the same
 `effective_verdict` field, there is no reliable way to tell "a detector
 individually re-examined this one finding" apart from "an operator's
-evidence-tier ceiling swept a whole bucket," so none are trusted. `severity`
-answers "does this fail the build under the active policy?";
-`evidence_status` answers "what kind of evidence backs this finding, full
-stop?" — the two fields *can* disagree, and that's by design.
+evidence-tier ceiling swept a whole bucket," so none are trusted. The one
+comparison-level signal that *is* trusted is the run's own
+`evidence_tiers` — not a gating decision at all, but a positive record of
+what was actually examined — which is what distinguishes `artifact_proven`
+from `unattributed` above. `severity` answers "does this fail the build
+under the active policy?"; `evidence_status` answers "what kind of evidence
+backs this finding, full stop?" — the two fields *can* disagree, and that's
+by design.
 
 ```json
 {

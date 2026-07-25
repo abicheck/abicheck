@@ -121,6 +121,29 @@ before persistence — see `abicheck/buildsource/redaction.py`).
 | `ast_compile_args` | array of strings | `[]` | The ordered extra compiler arguments passed to the header frontend (`--gcc-option` tokens, then a shlex-split `--gcc-options`), redacted. |
 | `ast_sysroot` | string \| null | `null` | The `--sysroot` passed to the header frontend, if any, redacted. |
 
+`ast_toolchain` (`dict[str, str]`, populated since schema v9) carries the
+exact tool identity behind the header-AST parse. It is untyped/free-form —
+new keys are additive and never require a schema bump — but these keys are
+stable and machine-checked by `tests/test_tool_identity.py`/
+`tests/test_castxml_policy.py`:
+
+| Key | Meaning |
+|-----|---------|
+| `selected` / `compiler_selected` | The exact frontend/host-compiler executable path selected from `PATH` (or an explicit `--gcc-path`). |
+| `realpath` / `compiler_realpath` | The same path with symlinks resolved. |
+| `sha256` / `compiler_sha256` | SHA-256 of the executable's file contents, so a same-version binary rebuild/repackage still changes provenance. |
+| `version` / `compiler_version` | The raw, bounded `--version` transcript for that exact executable revision. |
+| `target_triple` / `compiler_target_triple` | The `<tool> -dumpmachine` output for that executable (GCC/G++/Clang/Clang++ only — omitted, not empty, for a tool that doesn't support the flag, e.g. castxml itself or MSVC `cl.exe`). |
+| `castxml_version` | CastXML's own release version (e.g. `"0.7.0"`), parsed from `version` — castxml-producer snapshots only. |
+| `castxml_bundled_clang_version` | The bundled/linked Clang's `major.minor` (e.g. `"18.1"`), parsed from `version` — castxml-producer snapshots only. Kept separate from `castxml_version` since the two floors (`MIN_CASTXML`, `MIN_CASTXML_CLANG_MAJOR` in `castxml_policy.py`) are independently enforced by the version gate. |
+
+A `hybrid` snapshot (`ast_producer == "hybrid"`) namespaces every key from
+both runs instead of picking one — `castxml_selected`, `castxml_version`,
+`castxml_castxml_version`, `clang_selected`, `clang_target_triple`, and so
+on (`dumper_hybrid.py`'s merge is a generic `castxml_`/`clang_`-prefixed
+dict union, so a key that already started with `castxml_` on the castxml
+side is not special-cased).
+
 ### ABI surface
 
 | Key | Type | Meaning |

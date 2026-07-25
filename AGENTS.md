@@ -392,6 +392,12 @@ Pick the right home:
   mutable tag/branch — those five carry `security-events:write`,
   `pull-requests:write`, `contents:write`, or `id-token:write` (OIDC/PyPI
   Trusted Publishing), so a re-pointed tag there is a real supply-chain risk.
+  The root `action.yml` (the composite Action third-party repos consume
+  directly) is pinned the same way, for the same reason: its final step
+  conditionally runs `github/codeql-action/upload-sarif` under whatever
+  `security-events: write` permission the *consuming* workflow grants it, so
+  it carries the same blast radius as the elevated-permission workflows
+  above even though this repo's own CI doesn't invoke it with that scope.
   Other workflows (`test-action.yml`, `eval-suite.yml`, `performance.yml`,
   `realworld-validation.yml`, `dependency-review.yml`, and any future ones)
   still use tags — deliberately deferred, since they only run with

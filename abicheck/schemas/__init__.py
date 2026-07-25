@@ -185,7 +185,17 @@ from typing import Any
 #:       ``root_cause_id`` is a stable hash of the grouping key, not the
 #:       eventual G29 Phase 6 ``RootCauseCorrelator``'s own identifier
 #:       scheme.
-REPORT_SCHEMA_VERSION = "2.16"
+#:   2.17: ``evidence_status`` gained a new enum member, ``"unattributed"``
+#:       (P0 evidence-provider audit) -- a finding whose kind is intrinsically
+#:       a BREAKING_KINDS member (would otherwise read ``"artifact_proven"``)
+#:       but whose comparison's ``evidence_tiers`` positively show no real
+#:       binary (ELF/PE/Mach-O/DWARF) was ever examined, e.g. a Python-API
+#:       caller comparing hand-built/loaded snapshots. Previously such a
+#:       finding always read ``"artifact_proven"`` purely from its kind,
+#:       regardless of what the comparison actually examined -- mirrors the
+#:       2.14 SONAME ``"not_determined"`` fix, applied to the per-finding
+#:       evidence label instead of the release recommendation. Additive.
+REPORT_SCHEMA_VERSION = "2.17"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

@@ -50,7 +50,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from .checker_policy import ADDITION_KINDS, ChangeKind, Verdict
+from .checker_policy import ADDITION_KINDS, ChangeKind, Verdict, has_binary_evidence
 from .checker_types import DiffResult
 
 
@@ -105,26 +105,23 @@ class ReleaseRecommendationState(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
-#: Evidence tiers (``DiffResult.evidence_tiers``) that constitute real
-#: binary-level evidence, as opposed to a pure header/declaration surface
-#: with no artifact ever examined. Mirrors ``confidence._detect_evidence_tiers``.
-_BINARY_EVIDENCE_TIERS = frozenset({"elf", "dwarf", "dwarf_advanced", "pe", "macho"})
-
-
-def _has_binary_evidence(evidence_tiers: list[str]) -> bool:
-    """Whether *evidence_tiers* includes at least one binary-level source.
-
-    An **empty** list means the field was never populated — typically a
-    ``DiffResult`` built directly rather than via ``checker.compare()`` (many
-    unit tests do this). That is "unknown", not "absent": treated as having
-    binary evidence so existing callers that don't populate this field keep
-    their prior (unconditionally actionable) behaviour. Only a *non-empty*
-    tier list containing nothing but ``"header"`` is a genuine, positive
-    signal that no binary was ever examined.
-    """
-    if not evidence_tiers:
-        return True
-    return bool(set(evidence_tiers) & _BINARY_EVIDENCE_TIERS)
+#: RISK-tier ``ChangeKind``s that flag the analyzed evidence itself as
+#: internally inconsistent, not any particular ABI change — AC-008
+#: (``COMPILE_CONTEXT_CONFLICT``: two L3 compile units of one build target
+#: carried conflicting ABI-relevant flags that were silently aggregated) and
+#: AC-009 (``SOURCE_SURFACE_DSO_MISMATCH``: the linked L4 source surface maps
+#: to none of the analyzed binary's exports, so it likely describes a
+#: different/shared DSO). Either one means *every* finding in this same
+#: comparison — including a BREAKING verdict backed by binary evidence —
+#: was reached over evidence abicheck cannot vouch for as self-consistent,
+#: so a release recommendation must not present a confident SONAME/MAJOR
+#: action as if the analysis were coherent (P0 evidence-coherence audit;
+#: these two checks previously fed the verdict but were never consulted
+#: here, so an incoherent build/source context could still yield an
+#: unqualified "bump your SONAME").
+_COHERENCE_CONFLICT_KINDS = frozenset(
+    {ChangeKind.COMPILE_CONTEXT_CONFLICT, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH}
+)
 
 
 @dataclass(frozen=True)
@@ -186,6 +183,7 @@ def recommend_release(result: DiffResult) -> ReleaseRecommendation:
     verdict = result.verdict
     kinds = {c.kind for c in result.changes}
     has_additions = bool(kinds & ADDITION_KINDS)
+    incoherent_kinds = kinds & _COHERENCE_CONFLICT_KINDS
 
     if verdict == Verdict.NO_CHANGE:
         return ReleaseRecommendation(
@@ -195,7 +193,21 @@ def recommend_release(result: DiffResult) -> ReleaseRecommendation:
         )
 
     if verdict == Verdict.BREAKING:
-        if not _has_binary_evidence(result.evidence_tiers):
+        if incoherent_kinds:
+            return ReleaseRecommendation(
+                SemverBump.MAJOR,
+                SonameAction.NOT_DETERMINED,
+                "Binary ABI break detected, but this comparison also flagged its "
+                "own evidence as internally inconsistent "
+                f"({', '.join(sorted(k.value for k in incoherent_kinds))}) — a "
+                "MAJOR release is still likely warranted, but abicheck cannot "
+                "confirm a SONAME action while the build/source context backing "
+                "the analysis does not coherently describe one binary. Resolve "
+                "the coherence finding(s) and re-run before treating this as a "
+                "confirmed binary break.",
+                state=ReleaseRecommendationState.UNAVAILABLE,
+            )
+        if not has_binary_evidence(result.evidence_tiers):
             return ReleaseRecommendation(
                 SemverBump.MAJOR,
                 SonameAction.NOT_DETERMINED,
@@ -214,6 +226,17 @@ def recommend_release(result: DiffResult) -> ReleaseRecommendation:
         )
 
     if verdict == Verdict.API_BREAK:
+        if incoherent_kinds:
+            return ReleaseRecommendation(
+                SemverBump.MAJOR,
+                SonameAction.NO_BUMP_NEEDED,
+                "Source-level API break detected, but this comparison also "
+                "flagged its own evidence as internally inconsistent "
+                f"({', '.join(sorted(k.value for k in incoherent_kinds))}) — "
+                "review the coherence finding(s) before relying on this "
+                "comparison's scope.",
+                state=ReleaseRecommendationState.UNAVAILABLE,
+            )
         return ReleaseRecommendation(
             SemverBump.MAJOR,
             SonameAction.NO_BUMP_NEEDED,
