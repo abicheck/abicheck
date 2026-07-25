@@ -253,6 +253,7 @@ python scripts/gen_cli_reference.py       # docs/reference/cli-reference.md
 python scripts/gen_mcp_reference.py       # docs/reference/mcp-tools-reference.md (needs the `mcp` extra)
 python scripts/gen_python_api_reference.py  # docs/reference/python-api-reference.md
 python scripts/gen_config_reference.py    # docs/reference/config-keys-reference.md
+python scripts/gen_platform_matrix.py     # docs/reference/platforms.md's "Quick Reference" section
 ```
 
 Commit the resulting files. `scripts/verify.py --profile pr` (via the

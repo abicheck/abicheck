@@ -2,10 +2,10 @@
 
 **Date:** 2026-07-22
 
-**Status:** Accepted — Stage 1 (governance), Stage 3 (cluster consolidation),
-and Stage 4 (physical restructuring) implemented; Stage 2 (source-of-truth
-automation) partial (4 of 6 generators); Stage 5 explicitly deferred, not
-silently dropped — see "Rollout stages" for what each covers and why.
+**Status:** Accepted — Stage 1 (governance), Stage 2 (source-of-truth
+automation), Stage 3 (cluster consolidation), and Stage 4 (physical
+restructuring) implemented; Stage 5 explicitly deferred, not silently
+dropped — see "Rollout stages" for what each covers and why.
 
 **Decision maker:** (pending — recorded per repository convention, the same
 bar ADR-044 D1 and ADR-048 set for a PR-driven ADR with no separate approval
@@ -112,10 +112,38 @@ attempted here:
 | Stage | Scope | Status |
 |---|---|---|
 | 1. Governance | `topics.yaml`, `docs/AGENTS.md`, front matter, warning-only docs-contract | **Done** |
-| 2. Source-of-truth automation | Generated CLI reference, Action inputs/outputs, MCP tools, Python API, config keys, platform/capability matrix | **Partial** — 4 of 6 now built: `scripts/gen_action_reference.py` (Action inputs/outputs), `scripts/gen_cli_reference.py` (every command/option, from the live Click tree), `scripts/gen_mcp_reference.py` (every `@mcp.tool()` parameter, from `abicheck/mcp_server.py`'s signatures/docstrings — requires the `mcp` extra), `scripts/gen_python_api_reference.py` (every `abicheck.service.__all__` signature/dataclass), and `scripts/gen_config_reference.py` (`.abicheck.yml` key/type list, from `BuildConfig`'s strict-schema registries) all follow the same pattern — a generator + a `--check` mode + a mirrored pytest test, per `docs/AGENTS.md`'s "Regenerating generated docs". **Platform/capability matrix deliberately not attempted**: unlike the other five, no existing machine-checkable schema backs a host-OS × binary-format capability matrix — `docs/contribute/usecase-registry.yaml` is a per-use-case coverage registry, not that matrix, and `reference/platforms.md`/`concepts/limitations.md` remain hand-written. Building one would mean inventing a new source-of-truth data structure from scratch rather than wiring an existing one, which is a bigger, separately-scoped design decision (its own registry schema, plus deciding what feeds it — CI workflow matrices? `tests/test_platform_coverage_honesty.py`?) — not a drive-by alongside the other four. |
+| 2. Source-of-truth automation | Generated CLI reference, Action inputs/outputs, MCP tools, Python API, config keys, platform/capability matrix | **Done** — all 6 built, each following the same pattern (a generator + a `--check` mode + a mirrored pytest test, per `docs/AGENTS.md`'s "Regenerating generated docs"): `scripts/gen_action_reference.py` (Action inputs/outputs), `scripts/gen_cli_reference.py` (every command/option, from the live Click tree), `scripts/gen_mcp_reference.py` (every `@mcp.tool()` parameter, from `abicheck/mcp_server.py`'s signatures/docstrings — requires the `mcp` extra), `scripts/gen_python_api_reference.py` (every `abicheck.service.__all__` signature/dataclass), `scripts/gen_config_reference.py` (`.abicheck.yml` key/type list, from `BuildConfig`'s strict-schema registries), and `scripts/gen_platform_matrix.py` (the host-OS × binary-format capability matrix, sourced from the new `scripts/platform_capabilities.py` — see "Stage 2: platform/capability matrix" below). |
 | 3. High-duplication cluster consolidation | Getting Started/Choose Workflow, evidence/scan/tool-modes, source-facts/build-evidence, verdict/policy/severity/exit-codes, baseline, GitHub Action, specialized contracts | **Done** — exit-codes/severity/platform-support-matrix dedup, `getting-started.md` and `tool-modes.md` trims, ADR nav relaxation (see below), `baseline-management.md`'s 3-way split (lifecycle concept / `create-baseline.md` how-to / `baseline-storage.md` recipes), the source-facts/build-evidence cluster (new `source-evidence-producers` topic; `producing-source-facts.md` as the canonical decision/wrapper-injection guide, `build-evidence-setup.md` as its `reference_page` owning the Clang-plugin build/wiring/traps and project-contract detail, with the two basic-invocation duplicates on each page trimmed to a cross-link), the GitHub Action page cluster (nested under one `mkdocs.yml` nav group instead of three flat "GitHub Action: ..." entries — nav-only, no file moves/redirects), and the Specialised Checks regrouping (11 flat entries regrouped into 7 contract-surface sub-groups — Packages & Multi-Library Products, Applications & Consumers, Plugins & Dynamic Loading, Python Extensions, Kernel & eBPF, Build & Toolchain Contracts, Security & Deployment — again nav-only) all landed. |
 | 4. Physical restructuring (`start/`/`learn/`/`use/`/`reference/`/`contribute/` + redirects) | High blast radius on live, indexed doc URLs; needs its own scoped pass with a redirect map, not a drive-by alongside governance work | **Done** — see "Stage 4: physical restructuring" below |
 | 5. Case Library / future providers (Cython, NumPy, wheel) | No such providers exist yet to catalog | **Not attempted** |
+
+### Stage 2: platform/capability matrix
+
+The other five Stage 2 generators all wired a generator onto a schema that
+already existed for another reason (`action.yml`, the live Click tree, the
+`@mcp.tool()` signatures, `service.__all__`, `BuildConfig`'s registries). The
+platform/capability matrix had no such schema to wire into — "what symbol/type
+diff works on which host for which binary format" is a fact about the tool's
+actual behavior, not something derivable from `docs/contribute/usecase-
+registry.yaml` (a per-use-case coverage registry, not this matrix) or a CI
+workflow matrix (which records what's *validated*, not what's *capable*).
+
+Closed by introducing the missing piece: **`scripts/platform_capabilities.py`**,
+a small, hand-curated, pure-Python data module (the same "pure stdlib,
+importable" shape as `scripts/evidence_tiers.py`) recording, per binary format
+(ELF/PE/Mach-O), each host OS's symbol-diff and type/param-diff capability and
+required tooling. **`scripts/gen_platform_matrix.py`** renders it into
+`docs/reference/platforms.md`'s "Quick Reference: What Works Where" section,
+spliced between `<!-- BEGIN/END GENERATED: platform-matrix -->` sentinels —
+the same splice-into-a-hand-authored-file pattern `gen_examples_docs.py`
+already uses for `examples/README.md`'s generated regions, since the rest of
+`platforms.md` (validation status, dependency summary, Windows toolchain
+matrix, macOS ARM64 differences, known limitations) stays hand-authored
+narrative rather than becoming a second, larger generated file. Regenerating
+also normalized a pre-existing inconsistency in the hand-typed tables (the
+native-host row inconsistently read "✅ Yes" instead of "✅ Full" on two of the
+three tables) — exactly the kind of small drift a generator exists to prevent
+from recurring.
 
 ### Stage 4: physical restructuring
 
@@ -241,7 +269,7 @@ Interface Contract) is the same "gate a surface against silent drift" idea
 for the CLI; `changelog.d/` fragments are the same "stop hand-editing a
 shared section that always conflicts" idea for the changelog. No existing
 ADR covers documentation structure directly — the pre-existing "educational
-track vs. tool track" split (`concepts/abi-api-handling.md`'s "Learning
+track vs. tool track" split (`learn/abi-api-handling.md`'s "Learning
 Series" framing) is a separate, already-implemented decision this ADR does
 not revisit or fold in.
 
