@@ -775,6 +775,14 @@ def _add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
     d["evidence_tiers"] = list(result.evidence_tiers)
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
+    # ADR-050 D2 (schema 2.17) — report-level comparability metadata, never a
+    # Change/ChangeKind finding, so it stays unreachable by --severity-*
+    # promotion. Omitted entirely (not emitted as null) when unset, matching
+    # every other optional field in this builder.
+    if result.contract_coverage is not None:
+        d["contract_coverage"] = result.contract_coverage
+    if result.assurance is not None:
+        d["assurance"] = result.assurance
 
 
 def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:

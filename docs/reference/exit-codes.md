@@ -58,6 +58,7 @@ below.
 | `0` | `NO_CHANGE`, `COMPATIBLE`, or `COMPATIBLE_WITH_RISK` — no binary ABI break |
 | `2` | `API_BREAK` — source-level API break — recompilation required |
 | `4` | `BREAKING` — binary ABI break |
+| `16` | `not_comparable` (ADR-050 D2) — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced (`verdict: null` in `--format json`, with a `reason` object). Pass `--diagnostic-comparison` to force a tentative diff instead. |
 | `64` | Invalid invocation — bad arguments/options or an unreadable/unrecognised input, deliberately outside the `0/2/4` verdict space |
 
 > **⚠️ Exit `0` covers `NO_CHANGE`, `COMPATIBLE`, and `COMPATIBLE_WITH_RISK`.** If your pipeline needs
@@ -75,6 +76,7 @@ is computed from the severity configuration rather than the verdict:
 | `1` | Error-level findings in `addition` or `quality_issues` only |
 | `2` | Error-level findings in `potential_breaking` (but not `abi_breaking`) |
 | `4` | Error-level findings in `abi_breaking` |
+| `16` | `not_comparable` (ADR-050 D2) — the comparability gate hard-fails before severity classification ever runs, identical to the legacy scheme's `16`. |
 
 The highest applicable code wins. For example, if both `abi_breaking=error` and
 `quality_issues=error` have findings, the exit code is `4`.

@@ -28,6 +28,7 @@ in ``check_ai_readiness``). Verdict routing stays through the Tier-2 service
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -37,6 +38,7 @@ import click
 
 from . import cli
 from .cli import (
+    _EXIT_NOT_COMPARABLE,
     _announce_exit_scheme,
     _embed_inline_source_side,
     _exit_with_severity_or_verdict,
@@ -69,7 +71,7 @@ from .cli_resolve import (
     _resolve_compare_snapshots,
     classify_compare_operand,
 )
-from .errors import AbicheckError
+from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
@@ -989,6 +991,50 @@ def _render_compare_dry_run(
     return result
 
 
+def _report_not_comparable(
+    exc: ProfileMismatchError | ScopeMismatchError,
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    fmt: str,
+    output: Path | None,
+) -> None:
+    """Surface an ADR-050 D2 comparability-gate hard failure to the user.
+
+    ``checker.compare``'s gate raises before any ``diff_*`` module runs, so
+    there is no ``DiffResult`` for any renderer to work with — unlike an
+    ordinary verdict, this cannot be formatted as markdown/sarif/junit/html.
+    ``--format json`` gets the schema-conformant ``{"verdict": null,
+    "reason": {...}}`` document (schema 2.17, ``compare_report.schema.json``);
+    every other format gets the same clear stderr message a ``click.UsageError``
+    would produce, since fabricating a fake sarif/junit/html document that
+    doesn't conform to those formats would be worse than writing nothing.
+    """
+    kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
+    message = str(exc)
+    click.echo(
+        f"Error: '{old.library}' old={old.version!r} new={new.version!r} are not "
+        f"comparable: {message}\n"
+        "The two snapshots were not extracted under a comparable profile/scope "
+        "contract (ADR-050 D1/D2), so no verdict was produced. Pass "
+        '--diagnostic-comparison to force a tentative diff (stamped '
+        'assurance: "none") if you understand the risk.',
+        err=True,
+    )
+    if fmt == "json":
+        from .schemas import REPORT_SCHEMA_VERSION
+
+        doc = {
+            "report_schema_version": REPORT_SCHEMA_VERSION,
+            "library": old.library,
+            "old_version": old.version,
+            "new_version": new.version,
+            "verdict": None,
+            "reason": {"kind": kind, "message": message},
+        }
+        _write_or_echo(output, json.dumps(doc, indent=2))
+
+
 def run_compare(
     ctx: click.Context,
     *,
@@ -1054,6 +1100,7 @@ def run_compare(
     required_symbols_opt: tuple[str, ...] = (),
     required_symbols_file: Path | None = None,
     verify_runtime: bool = False,
+    diagnostic_comparison: bool = False,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -1461,18 +1508,23 @@ def run_compare(
         env_matrix = load_env_matrix(env_matrix_path)
     except AbicheckError as exc:
         raise click.UsageError(str(exc)) from exc
-    result = compare_snapshots(
-        old, new, suppression=suppression, policy=policy, policy_file=pf,
-        env_matrix=env_matrix,
-        scope_to_public_surface=scope_public_headers,
-        force_public_symbols=force_public,
-        extra_changes=extra_changes,
-        pattern_verdicts=apply_patterns,
-        surface_metrics=surface_metrics,
-        collapse_versioned_symbols=collapse_versioned_symbols,
-        public_surface_allowlist=post_manifest_allowlist,
-        reconcile_build_context=reconcile_build_context,
-    )
+    try:
+        result = compare_snapshots(
+            old, new, suppression=suppression, policy=policy, policy_file=pf,
+            env_matrix=env_matrix,
+            scope_to_public_surface=scope_public_headers,
+            force_public_symbols=force_public,
+            extra_changes=extra_changes,
+            pattern_verdicts=apply_patterns,
+            surface_metrics=surface_metrics,
+            collapse_versioned_symbols=collapse_versioned_symbols,
+            public_surface_allowlist=post_manifest_allowlist,
+            reconcile_build_context=reconcile_build_context,
+            diagnostic_comparison=diagnostic_comparison,
+        )
+    except (ProfileMismatchError, ScopeMismatchError) as exc:
+        _report_not_comparable(exc, old, new, fmt=fmt, output=output)
+        sys.exit(_EXIT_NOT_COMPARABLE)
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     # Pass all injected findings (probe-matrix + evidence) so artifact-backed

@@ -541,6 +541,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--demangle",
         "--depth",
         "--devel-pkg",
+        "--diagnostic-comparison",
         "--dry-run",
         "--dso-only",
         "--dwarf",

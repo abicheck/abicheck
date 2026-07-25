@@ -1467,6 +1467,12 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "ADR-043: file form of --required-symbol (one symbol per line). Same "
         "per-run rationale."
     ),
+    "--diagnostic-comparison": (
+        "ADR-050 D2: downgrades a comparability-gate hard failure (mismatched "
+        "profile/scope ExtractionContract fingerprints) into a tentative diff "
+        "for this one invocation. Whether a given OLD/NEW pair happens to be "
+        "incomparable varies per run, not a stable project setting."
+    ),
 }
 
 #: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.

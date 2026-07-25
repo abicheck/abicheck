@@ -56,14 +56,20 @@ no counterpart on the old side — a manifest/CLI-flag drift between two
 extraction runs, not a real API change. `abicheck.comparability.compute_extraction_contract`/
 `check_contracts_comparable` (ADR-050 D1/D2, G32 Phase A) exist and are unit
 tested against exactly this shape of drift in `tests/test_comparability.py`,
-and `checker.compare` itself now calls the gate (Phase A slice 2) —
-comparing `old/` against `new/` through `compute_extraction_contract` +
-`compare()` hard-fails `ScopeMismatchError` (`not_comparable`) by default,
-and `compare(..., diagnostic_comparison=True)` downgrades that to a
-tentative, `assurance: "none"`-stamped diff. **Not yet true at the CLI/
-application level**: no `abicheck compare` flag, exit code, or front-end
-(`service.py`, `mcp_server.py`, `cli_scan.py`, etc.) reaches this gate yet —
-`dumper.py` doesn't call `compute_extraction_contract` on a real dump
-either, so every snapshot a real `dump`/`compare` invocation produces still
-has `contract=None` today. See `abicheck/comparability.py`'s own module
-docstring for the exact remaining scope.
+and `checker.compare` itself now calls the gate — comparing `old/` against
+`new/` through `compute_extraction_contract` + `compare()` hard-fails
+`ScopeMismatchError` (`not_comparable`) by default, and
+`compare(..., diagnostic_comparison=True)` downgrades that to a tentative,
+`assurance: "none"`-stamped diff. `dumper.py` now calls
+`compute_extraction_contract` on every real dump too, so a fresh
+`dump`/`compare` invocation carries a real `contract`, not `contract=None`.
+**Reachable today from the native `abicheck compare` CLI command**
+(`--diagnostic-comparison` flag, `verdict: null` JSON report, exit code
+`16`) and from `service.py`'s `CompareRequest`/`run_compare_request`/legacy
+`run_compare` shim (parameter threaded through, no dedicated exception
+handling of their own yet). **Not yet wired** into the other five ADR-050 D2
+entry points (`mcp_server.py`, `cli_compare_release.py`'s release fan-out,
+`compat/cli.py`, `cli_scan.py`'s `scan --against`, `stack_checker.py`'s
+`deps compare`) or into `snapshot_cache.py`'s cache-key fix. See
+`abicheck/comparability.py`'s own module docstring for the exact remaining
+scope.

@@ -425,6 +425,17 @@ def _collect_metadata(path: Path) -> LibraryMetadata | None:
 # collides with ``compare``'s documented "2 = source break"; this remaps it.
 _EXIT_USAGE_ERROR = 64
 
+# Exit code for a single-library ``compare`` whose OLD/NEW snapshots failed
+# ADR-050 D2's comparability gate (a ProfileMismatchError/ScopeMismatchError
+# — the two snapshots were not extracted under a comparable contract, so no
+# verdict was ever produced). Identical across the legacy (0/2/4) and
+# severity-aware (0/1/2/4) single-library schemes, since the gate runs before
+# either classification, and deliberately not ``8`` — that already means
+# ``--fail-on-removed-library`` in the release/multi-library table. ``16``
+# continues that table's own doubling pattern one step further and sits
+# outside every existing compare exit code in all three tables.
+_EXIT_NOT_COMPARABLE = 16
+
 
 class _AbicheckGroup(_RootGroupBase):
     """Root group that maps Click *usage* errors to a dedicated exit code.
@@ -1718,6 +1729,15 @@ def _embed_inline_source_side(
                    "depth/scope, show tool/config resolution -- and print a report "
                    "without running the diff. Writes nothing; incompatible with "
                    "-o/--output.")
+@click.option("--diagnostic-comparison", "diagnostic_comparison", is_flag=True, default=False,
+              help="ADR-050 D2's sanctioned escape hatch: when OLD and NEW were "
+                   "extracted under a genuinely incomparable profile/scope "
+                   "(ExtractionContract mismatch), downgrade the default hard "
+                   "failure (exit 16, no verdict) into a tentative diff instead, "
+                   "stamped assurance: \"none\" everywhere in the report so a "
+                   "reader knows not to trust it the way an ordinary comparable "
+                   "diff is trusted. Not needed, and does nothing, on a "
+                   "comparable pair.")
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
