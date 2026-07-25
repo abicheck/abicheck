@@ -247,6 +247,36 @@ class TestLinkUnitGraphChannel:
         attr = attribute_sources_to_targets(ev)
         assert attr["src/a.cpp"] == frozenset({"output://app"})
 
+    def test_terminal_link_unit_named_as_another_link_units_input_is_a_hard_stop(self):
+        # A dependent naming another DSO's *output path* directly (rather
+        # than -lfoo) must not fold that DSO's own objects into itself --
+        # mirrors the target-graph channel's SHARED_LIBRARY hard stop.
+        ev = BuildEvidence(
+            compile_units=[
+                CompileUnit(id="cu://a", source="src/a.cpp", output="build/liba_impl.o"),
+                CompileUnit(id="cu://b", source="src/b.cpp", output="build/b.o"),
+            ],
+            link_units=[
+                LinkUnit(
+                    id="link://build/liba.so",
+                    output="build/liba.so",
+                    kind="shared_library",
+                    inputs=["build/liba_impl.o"],
+                ),
+                LinkUnit(
+                    id="link://build/app",
+                    output="build/app",
+                    kind="executable",
+                    # Explicit .so path, not -lfoo -- liba.so's own objects
+                    # must NOT be folded into app's attribution.
+                    inputs=["build/b.o", "build/liba.so"],
+                ),
+            ],
+        )
+        attr = attribute_sources_to_targets(ev)
+        assert attr["src/a.cpp"] == frozenset({"output://liba.so"})
+        assert attr["src/b.cpp"] == frozenset({"output://app"})
+
     def test_static_library_link_unit_itself_is_never_a_terminal_identity(self):
         # Only shared_library/executable link units are attribution targets
         # -- a bare static-library link unit with nothing consuming it must

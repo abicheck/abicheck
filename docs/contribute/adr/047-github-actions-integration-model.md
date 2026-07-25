@@ -1379,12 +1379,13 @@ Three new validation points, all hard failures (not warnings) when tripped:
 
 1. **`build-output.json` validator** — every declared `headers/`/
    `generated-headers/` root is non-empty; every `targets[].binary` exists
-   and its digest matches `digests{}`; `evidence.projection` must be
-   `"declared"` (any other value was a hard validation failure until P2's
-   TU→DSO attribution existed — §2's correction above; **as of
-   [ADR-053](053-tu-link-unit-dso-attribution.md), `"inferred"` is now a
-   real, validated third option** alongside `"declared"`, re-deriving the
-   attribution rather than trusting the claim); for `"declared"`, a
+   and its digest matches `digests{}`; `evidence.projection` must be one of
+   `"declared"` or `"inferred"` (any other value is a hard validation
+   failure; `"inferred"` was itself a hard failure until P2's TU→DSO
+   attribution existed — §2's correction above; **as of
+   [ADR-053](053-tu-link-unit-dso-attribution.md), `"inferred"` is
+   validated by re-deriving the attribution** rather than trusting the
+   claim); for `"declared"`, a
    **non-empty TU count is
    necessary but not sufficient, and — a further correction from a
    follow-up review round — invoking `validate_inputs_pack` as-is is

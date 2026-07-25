@@ -86,9 +86,9 @@ DSOs must attribute to *both*, not arbitrarily pick one):
   transitively (an `.a` that is itself the input to another link unit) until
   reaching a `shared_library`/`executable` terminal link unit.
 
-A source with an **empty** attributed set is "unknown" (no signal from
-either channel) — callers must treat this as unresolved, never as
-"belongs to nothing" or "safe to drop silently."
+A source **absent** from the returned mapping is "unknown" (no signal from
+either channel; it is never present with an empty set) — callers must treat
+this as unresolved, never as "belongs to nothing" or "safe to drop silently."
 
 ### D2. Make gets real link-invocation capture
 

@@ -42,7 +42,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .build_evidence import BuildEvidence
@@ -615,19 +615,29 @@ def _inferred_evidence_projection_issues(
         manifest = load_inputs_manifest(pack_path)
         diagnostics: list[str] = []
         tus = read_source_facts(pack_path, manifest, diagnostics=diagnostics)
-        expected = f"target://{t.id}"
+        # link_attribution's link-unit-graph channel identifies a target with
+        # no target_id on its LinkUnit (the Make case, ADR-053 D2 -- Make has
+        # no semantic target concept to attach an id to) by
+        # output://{basename of target.binary} instead of target://{t.id}
+        # (see attribute_sources_to_targets's own docstring). Accept either
+        # identity here, or a Make-derived attribution would always resolve
+        # to zero matches and hard-fail validation.
+        expected_identities = {f"target://{t.id}"}
+        if t.binary:
+            expected_identities.add(f"output://{PurePosixPath(t.binary).name}")
         matched = sum(
             1
             for tu in tus
-            if expected in attribution.get(normalize_source_path(tu.source), frozenset())
+            if attribution.get(normalize_source_path(tu.source), frozenset())
+            & expected_identities
         )
         if matched == 0:
             issues.append(
                 f"target {t.id!r}: evidence.projection is 'inferred', but "
                 f"re-deriving attribution from {evidence.attribution_path!r} "
-                f"ties none of evidence.path {evidence.path!r}'s TUs to "
-                f"{expected!r} — this inferred claim would silently "
-                "contribute nothing to this target's evidence."
+                f"ties none of evidence.path {evidence.path!r}'s TUs to any "
+                f"of {sorted(expected_identities)!r} — this inferred claim "
+                "would silently contribute nothing to this target's evidence."
             )
     return issues
 

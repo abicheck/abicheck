@@ -2,22 +2,30 @@
 
 Executes the "Pilot validation plan" section of
 `docs/contribute/plans/g30-github-actions-integration-model.md` for real:
-clone real projects, install real tools, run real `abicheck` scans/compares,
-and record what actually happened — not a simulated or hypothetical run.
-All builds and scans below were performed against real cloned/compiled
-sources in this environment; nothing here is inferred from reading the code.
+install real tools and run real `abicheck` builds/scans/compares, recording
+what actually happened — not a simulated or hypothetical run. Every result
+below comes from an actual build and an actual `abicheck` invocation in this
+environment; nothing is inferred from reading the code. **Scope is mixed,
+and deliberately labeled as such below**: the PVXS/Make pilot is a real
+*upstream* open-source project (`epics-base/pvxs`, cloned from GitHub) built
+from source; the CMake/package/cross-compiled pilots exercise a synthetic
+in-repo two-version `libdemo` fixture (a real build/compile/link/compare
+each time, just not a real upstream codebase) — sufficient to validate the
+build-system integration and ABI-break detection path itself, but not a
+substitute for a second real-upstream project (see "Blocked" sections below
+for that gap).
 
 ## Summary
 
-| Pilot | Status | Real ABI break detected? |
-|---|---|---|
-| PVXS (recommended pilot, check-project.yml flow) | Done | Yes — 1.4.0→1.5.0 `API_BREAK`, 1.5.1→1.5.2 `BREAKING` |
-| CMake (minimal generic) | Done | Yes |
-| Make (minimal generic) | Done (via EPICS Base + PVXS themselves) | Yes |
-| Package-only, `.deb` (minimal generic) | Done | Yes |
-| Cross-compiled target (aarch64) | Done | Yes |
-| Bazel (minimal generic) | Blocked — see below | n/a |
-| Second complex/vendor-toolchain project | Blocked — see below | n/a |
+| Pilot | Project | Status | Real ABI break detected? |
+|---|---|---|---|
+| PVXS (recommended pilot, check-project.yml flow) | Real upstream (`epics-base/pvxs`) | Done | Yes — 1.4.0→1.5.0 `API_BREAK`, 1.5.1→1.5.2 `BREAKING` |
+| Make (minimal generic) | Real upstream (EPICS Base + PVXS themselves) | Done | Yes |
+| CMake (minimal generic) | Synthetic (`libdemo` fixture) | Done | Yes |
+| Package-only, `.deb` (minimal generic) | Synthetic (`libdemo` fixture) | Done | Yes |
+| Cross-compiled target (aarch64) | Synthetic (`libdemo` fixture) | Done | Yes |
+| Bazel (minimal generic) | — | Blocked — see below | n/a |
+| Second complex/vendor-toolchain project | — | Blocked — see below | n/a |
 
 One real, reproducible product bug was found along the way (not fixed in
 this pass — out of scope for ADR-053/G30 P2, see "Finding" below).

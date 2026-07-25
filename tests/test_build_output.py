@@ -672,6 +672,71 @@ class TestInferredEvidenceProjection:
         report = validate_build_output(root)
         assert report.ok, report.errors
 
+    def test_make_style_link_unit_attribution_with_no_target_id_passes(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-053 D2: Make link units carry no ``target_id`` (Make has no
+        semantic target graph) — ``attribute_sources_to_targets`` identifies
+        them as ``output://{basename}`` instead. The validator must accept
+        that identity too, not just ``target://{t.id}``, or every Make-
+        derived 'inferred' claim would resolve to zero matches and hard-fail
+        (CodeRabbit review, PR #632)."""
+        from abicheck.buildsource.build_evidence import (
+            BuildEvidence,
+            CompileUnit,
+            LinkUnit,
+        )
+
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        pack_dir = root / "evidence" / "abicheck_inputs"
+        (pack_dir / "source_facts").mkdir(parents=True)
+        (pack_dir / "manifest.json").write_text(json.dumps({"kind": "abicheck_inputs"}))
+        (pack_dir / "source_facts" / "tu0.jsonl").write_text(
+            json.dumps({"tu_id": "cu://src/foo.cpp", "source": "src/foo.cpp"}) + "\n"
+        )
+        # No target_id anywhere (the Make case, ADR-053 D2): link_attribution's
+        # link-unit channel walks LinkUnit.inputs back to CompileUnit.output
+        # and, absent a target_id, identifies the terminal link unit as
+        # output://{basename}.
+        evidence = BuildEvidence(
+            compile_units=[
+                CompileUnit(id="cu://src/foo.cpp", source="src/foo.cpp", output="src/foo.o"),
+            ],
+            link_units=[
+                LinkUnit(
+                    id="link://libfoo.so",
+                    output="libfoo.so",
+                    kind="shared_library",
+                    inputs=["src/foo.o"],
+                ),
+            ],
+        )
+        _write_attribution(root, "evidence/attribution.json", evidence)
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/abicheck_inputs",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert report.ok, report.errors
+
     def test_shared_pack_across_two_inferred_targets_passes(self, tmp_path: Path) -> None:
         """The defining case 'declared' rejects outright: two targets
         pointing at the SAME physical evidence.path, both 'inferred' — must

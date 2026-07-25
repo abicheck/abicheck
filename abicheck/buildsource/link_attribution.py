@@ -180,7 +180,17 @@ def _attribute_via_link_units(evidence: BuildEvidence) -> dict[str, set[str]]:
                 sources.add(source)
                 continue
             nested = link_by_output.get(inp)
-            if nested is not None and inp not in visited_links:
+            # Resolve nested static-library/object link units transitively
+            # only -- a terminal (shared_library/executable) link unit named
+            # as another link unit's input (e.g. an explicit .so path rather
+            # than -lfoo) must hard-stop here, exactly like the target-graph
+            # channel's own SHARED_LIBRARY hard stop, or its objects would be
+            # folded into an unrelated dependent (CodeRabbit review, PR #632).
+            if (
+                nested is not None
+                and nested.kind not in _TERMINAL_LINK_KINDS
+                and inp not in visited_links
+            ):
                 visited_links.add(inp)
                 stack.extend(nested.inputs)
         for src in sources:

@@ -259,7 +259,9 @@ class MakeAdapter:
         inputs = [
             a
             for a in argv[1:]
-            if not a.startswith(("-", "/")) and a.lower().endswith(_LINK_INPUT_EXTENSIONS)
+            if not a.startswith("-")
+            and not _is_msvc_flag(a)
+            and a.lower().endswith(_LINK_INPUT_EXTENSIONS)
         ]
         if not inputs:
             return None
@@ -401,6 +403,20 @@ def _is_relative_to(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _is_msvc_flag(token: str) -> bool:
+    """Whether *token* looks like an MSVC/clang-cl ``/``-flag (``/c``,
+    ``/Foapp.obj``, ``/EHsc``) rather than a POSIX absolute path operand
+    (``/work/build/main.o``).
+
+    A real absolute path always has a directory separator beyond the leading
+    ``/``; an MSVC flag never does (CodeRabbit review, PR #632 -- the prior
+    blanket ``startswith("/")`` rejection dropped every absolute-path link
+    input on POSIX, not just MSVC flags). Reduced-confidence heuristic,
+    matching this module's existing dry-run-transcript-scraping posture.
+    """
+    return token.startswith("/") and "/" not in token[1:]
 
 
 def _output_from_argv(argv: list[str]) -> str:

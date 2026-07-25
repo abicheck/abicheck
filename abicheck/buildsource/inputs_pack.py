@@ -644,14 +644,21 @@ def ingest_inputs_pack(
     # Thread the diagnostics sink so skipped/malformed source-fact records are
     # surfaced in the extractor ledger + IngestedInputs, not silently dropped.
     tus = read_source_facts(root, manifest, diagnostics=diagnostics)
+    # Kept out of `diagnostics` deliberately (CodeRabbit review, PR #632):
+    # `diagnostics` drives ExtractorRecord.status ("ok" only when empty, see
+    # below) on the premise that any diagnostic means a lossy/degraded read.
+    # Attribution-scoping a build-wide pack down to one target is the
+    # *intended* effect of passing attribution/expected_target_id, not a
+    # lossy one -- folding its note into `diagnostics` would flip a fully
+    # successful projected ingest to "partial" every time. Surfaced in
+    # `detail` instead, below.
+    attribution_note = ""
     if attribution is not None and expected_target_id is not None:
         tus, dropped = _filter_tus_by_attribution(tus, attribution, expected_target_id)
         if dropped:
-            diagnostics.append(
-                f"abicheck_inputs: {dropped} TU(s) excluded — "
-                f"attribution (ADR-053) did not tie them to {expected_target_id!r} "
-                "(either attributed to a different target, or unknown to both "
-                "attribution channels)."
+            attribution_note = (
+                f", {dropped} TU(s) excluded by attribution scoping to "
+                f"{expected_target_id!r}"
             )
     exports = sorted(set(manifest.exported_symbols) | set(exported_symbols))
 
@@ -706,6 +713,7 @@ def ingest_inputs_pack(
                 else ""
             )
             + (f", {len(diagnostics)} skipped/diagnostic" if diagnostics else "")
+            + attribution_note
             + (f" (produced by {manifest.created_by})" if manifest.created_by else "")
         ),
         diagnostics=list(diagnostics),

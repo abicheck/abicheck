@@ -38,8 +38,8 @@ def test_make_dry_run_extracts_compile_units():
     assert ev.generators[0].kind == "make"
     units = {c.source: c for c in ev.compile_units}
     # Only the two `-c` compile recipes become compile_units; the link/ar/info
-    # lines are recognized separately as link_units (ADR-053 D2, see
-    # test_make_adapter_link_units.py) or genuinely skipped ("Entering
+    # lines are recognized separately as link_units (ADR-053 D2, see the
+    # "link-unit capture" section below) or genuinely skipped ("Entering
     # directory").
     assert set(units) == {"src/a.c", "src/b.cpp"}
     assert units["src/a.c"].standard == "c11"
@@ -77,6 +77,29 @@ def test_make_executable_link_unit_recognized():
     assert lu.kind == "executable"
     assert lu.output == "build/app"
     assert lu.inputs == ["build/main.o", "build/lib.a"]
+
+
+def test_make_executable_link_unit_with_absolute_posix_inputs_recognized():
+    # An absolute POSIX object/archive path starts with "/" too -- must not
+    # be mistaken for an MSVC-style "/Fo..." flag and dropped.
+    ev = MakeAdapter(
+        dry_run="gcc -o /work/build/app /work/build/main.o /work/build/lib.a -lm"
+    ).collect()
+    assert len(ev.link_units) == 1
+    lu = ev.link_units[0]
+    assert lu.kind == "executable"
+    assert lu.inputs == ["/work/build/main.o", "/work/build/lib.a"]
+
+
+def test_make_msvc_style_flag_shaped_token_not_mistaken_for_a_link_input():
+    # "/Fsomething.obj" is shaped like a single-segment MSVC-style flag (no
+    # further "/") and happens to end in a recognized link-input extension --
+    # it must still be excluded, not mistaken for a real object input.
+    ev = MakeAdapter(
+        dry_run="gcc -o build/app build/main.o /Fsomething.obj"
+    ).collect()
+    assert len(ev.link_units) == 1
+    assert ev.link_units[0].inputs == ["build/main.o"]
 
 
 def test_make_shared_link_unit_recognized_via_dash_shared_flag():

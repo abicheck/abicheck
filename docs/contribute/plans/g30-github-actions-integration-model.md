@@ -2888,13 +2888,16 @@ dangling "not yet attempted" item this plan carries forward by default.
 ## Pilot validation plan
 
 **Executed 2026-07-25 — see `validation/g30-pilot-validation-2026-07.md`**
-for the full real-run report (real clones, real builds, real `abicheck`
-scans, not simulated). Summary: PVXS re-run via the check-project.yml flow,
-CMake, Make (via the PVXS/EPICS Base build itself), package-only (`.deb`),
-and cross-compiled (aarch64) pilots all completed with real ABI breaks
-correctly detected; Bazel and the second vendor-toolchain pilot remain
-genuinely blocked by this environment's available tooling (see that report
-for why); one real, reproducible product bug (`dump`/`compare` disagreeing
+for the full real-run report (real builds, real `abicheck` scans, not
+simulated — mixed scope, see below). Summary: PVXS (real-upstream
+`epics-base/pvxs`) re-run via the check-project.yml flow and Make (via that
+same real EPICS Base/PVXS build) both completed with real ABI breaks
+correctly detected; CMake, package-only (`.deb`), and cross-compiled
+(aarch64) pilots also completed with real ABI breaks correctly detected but
+against a synthetic in-repo `libdemo` fixture, not a second real-upstream
+project; Bazel and the second vendor-toolchain pilot remain genuinely
+blocked by this environment's available tooling (see that report for why);
+one real, reproducible product bug (`dump`/`compare` disagreeing
 on `--header`-derived `public_header_dirs` provenance, causing a spurious
 `ScopeMismatchError` in the exact baseline-then-live-candidate pattern this
 pipeline relies on) was found and documented there, not fixed in this pass

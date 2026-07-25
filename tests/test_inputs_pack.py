@@ -276,7 +276,14 @@ def test_ingest_with_attribution_filters_to_expected_target(tmp_path: Path) -> N
     assert surface is not None
     names = {e.qualified_name for e in surface.reachable_declarations}
     assert names == {"foo"}
-    assert any("1 TU(s) excluded" in d for d in ingested.diagnostics)
+    # The exclusion note is intentional-scoping information, not a lossy-read
+    # diagnostic (CodeRabbit review, PR #632) -- it must NOT flip a fully
+    # successful projected ingest's status to "partial", so it lives in the
+    # extractor's `detail` string, not in `diagnostics`/status computation.
+    assert not ingested.diagnostics
+    extractor = ingested.pack.manifest.extractors[0]
+    assert extractor.status == "ok"
+    assert "1 TU(s) excluded by attribution scoping" in extractor.detail
 
 
 def test_ingest_with_attribution_drops_unknown_source(tmp_path: Path) -> None:

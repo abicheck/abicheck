@@ -19,13 +19,16 @@ libraries (not synthetic fixtures), used to drive planning and improvement.
   alignment false positives, and a castxml-missing error that hid the clang
   fallback; documents the public-header-scoping requirement and a drop-in CI
   workflow replacing pvxs's ACC-based `abi-diff.sh`.
-- `g30-pilot-validation-2026-07.md` — **G30 pilot validation:** the G30 plan's
-  "Pilot validation plan" executed for real — PVXS re-run through the full
-  check-project.yml flow (config validate → build-output validate → run-plan
-  → baseline resolve → analysis compare), plus CMake/Make/package(`.deb`)/
-  cross-compiled(aarch64) minimal pilots. Bazel and a second vendor-toolchain
-  pilot were genuinely blocked by environment tooling. Found (not fixed here)
-  a real `dump`-vs-`compare` `public_header_dirs` provenance mismatch that
+- `g30-pilot-validation-2026-07.md` — **G30 pilot validation (mixed scope):**
+  the G30 plan's "Pilot validation plan" executed for real — PVXS
+  (real-upstream `epics-base/pvxs`) re-run through the full check-project.yml
+  flow (config validate → build-output validate → run-plan → baseline
+  resolve → analysis compare), and the Make pilot via that same real
+  EPICS/PVXS build; the CMake, package(`.deb`), and cross-compiled(aarch64)
+  minimal pilots exercise a synthetic in-repo `libdemo` fixture instead of a
+  second real-upstream project. Bazel and a second vendor-toolchain pilot
+  were genuinely blocked by environment tooling. Found (not fixed here) a
+  real `dump`-vs-`compare` `public_header_dirs` provenance mismatch that
   spuriously raises `ScopeMismatchError` for the baseline-then-live-candidate
   pattern the G30 pipeline relies on.
 - `REPORT.md` — earlier curated-matrix validation report (false-positive catalog)

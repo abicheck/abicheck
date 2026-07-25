@@ -114,14 +114,18 @@ def _validate_public_depth(depth: str | None) -> str | None:
     Note this only validates the *spelling*, not that the requested depth
     was actually *reached* — but that's not a gap on this surface (re-
     investigated for G30, AGENTS.md "Known gaps"/CLAUDE.md "M1-6", closed as
-    stale). This module's tools that accept ``depth=`` (``abi_scan``,
-    ``abi_estimate``) go through ``service.py``'s ``ScanRequest`` into
-    ``service_scan.run_scan``, which calls the same
+    stale). ``abi_scan`` builds a ``service.py`` ``ScanRequest`` and goes
+    through ``service_scan.run_scan``, which calls the same
     ``scan_engine.run_scan_core`` the CLI ``scan`` command
     (``cli_scan.py``) calls directly — both already share one pinned-depth
     evidence contract (``_check_scan_evidence_contract``'s
     ``_EvidenceContractError``, ADR-037 D5), so there is no CLI-vs-MCP
-    disparity to close here. ``dump --depth``'s separate, stricter
+    disparity to close for ``abi_scan``. ``abi_estimate`` also accepts
+    ``depth=`` but is a separate, cost-only path: it builds its own
+    ``ScanRequest`` and calls ``estimate_scan`` (never
+    ``run_scan``/``run_scan_core``), so it never actually parses a binary or
+    header for the estimate to be "unsatisfied" against — this validator's
+    spelling check is all that applies to it. ``dump --depth``'s separate, stricter
     ``DumpDepthNotSatisfiedError`` gate (PR #601, merged) lives in
     ``cli._write_snapshot_output`` and has no equivalent on this module's
     ``abi_dump`` tool to extend it to, because ``abi_dump`` never accepted a
