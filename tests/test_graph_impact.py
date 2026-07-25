@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from abicheck.buildsource.graph_impact import (
+    _node_is_public,
     _path_occurrence_id,
     attach_impact_metadata,
     is_direct_path,
@@ -170,6 +171,35 @@ def test_internal_dependency_finding_carries_structured_impact() -> None:
     assert change.affected_public_roots == ["entry"]
     assert change.impact_proof_path is not None
     assert change.impact_is_direct is True
+
+
+class TestNodeIsPublic:
+    """CodeRabbit review: _node_is_public must read `resolved` before
+    falling back to `attrs`, matching its sibling `_edge_is_overapprox`."""
+
+    def test_none_node_is_not_public(self) -> None:
+        assert _node_is_public(None) is False
+
+    def test_falls_back_to_attrs_for_an_unprocessed_bare_node(self) -> None:
+        # A GraphNode constructed directly, never passed through add_node/
+        # SourceGraphSummary.__post_init__ (ensure_facts_and_resolve), has an
+        # empty `resolved` by default even though `attrs` carries real data
+        # -- the actual scenario the `resolved or attrs` fallback protects,
+        # since a fully-processed node always has attrs synced to resolved.
+        node = GraphNode(
+            id="decl://pub", kind="source_decl", label="pub",
+            attrs={"visibility": "public_header"},
+        )
+        assert node.resolved == {}
+        assert _node_is_public(node) is True
+
+    def test_prefers_resolved_over_attrs_when_both_present(self) -> None:
+        node = GraphNode(
+            id="decl://pub", kind="source_decl", label="pub",
+            attrs={"visibility": "source"},
+            resolved={"visibility": "public_header"},
+        )
+        assert _node_is_public(node) is True
 
 
 class TestSelectPreferredGraphPath:

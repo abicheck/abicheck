@@ -184,7 +184,16 @@ from typing import Any
 #:       (slice 5, SARIF has no ``report_schema_version`` of its own) --
 #:       ``root_cause_id`` is a stable hash of the grouping key, not the
 #:       eventual G29 Phase 6 ``RootCauseCorrelator``'s own identifier
-#:       scheme.
+#:       scheme. ``impact_assessment.proof_path`` also gained three additive
+#:       optional keys this version (ADR-046 D6/D1, ADR-052's
+#:       ``occurrence_id`` follow-up) that were left undocumented here until
+#:       a later audit caught the gap: ``alternative_paths`` (up to 3
+#:       runner-up candidate paths not selected as primary, each shaped like
+#:       ``proof_path`` itself minus these three keys), ``discarded_path_count``
+#:       (candidates beyond that cap), and ``occurrence_id`` (a hash over the
+#:       path's edges' own graph occurrences, independent of ``description``
+#:       text). All absent for the common single-candidate/no-occurrence-data
+#:       case.
 #:   2.17: ``impact_assessment`` gained three additive optional keys --
 #:       ``root_cause_id``, ``root_cause_display``, ``impact_group_id``
 #:       (G29 Phase 3 follow-up, ADR-052) -- the same 2.16 root-cause

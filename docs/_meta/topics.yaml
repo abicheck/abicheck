@@ -130,6 +130,7 @@ topics:
       - abicheck/impact/model.py
       - abicheck/impact/engine.py
       - abicheck/buildsource/graph_impact.py
+      - abicheck/junit_report.py
     reference_page: reference/source-graph-schema.md
     task_pages:
       - contribute/detector-impact-contract.md
