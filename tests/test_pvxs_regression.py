@@ -30,11 +30,17 @@ that only ever declared C++11 support. That is now fixed at two levels
 entirely; ``cli_helpers_compare._pair_wide_dialect_override`` resolves the
 dialect once over the union of both sides so old/new can never disagree) —
 both already have direct unit coverage. This test is the missing outer
-layer: a real compile + a real ``abicheck compare`` invocation against actual
-binaries and headers containing exactly this pattern, on an explicit C++11
-profile, proving the whole pipeline stays inert end-to-end -- specifically,
-that a forced C++20 dialect never manifests as a false BREAKING/API_BREAK
-verdict or a MAJOR/SONAME-bump release advisory for this pair.
+layer: a real compile + real ``abicheck dump``/``compare`` invocations
+against actual binaries and headers containing exactly this pattern, on a
+project that only ever declared C++11 support and never passes an explicit
+``-std=``. The decisive assertion dumps each side and checks the schema v15
+``ast_resolved_standard`` provenance field directly to prove the dialect was
+not force-resolved to ``"gnu++20"`` -- checking only the ABI verdict/SONAME
+advisory (as an earlier version of this test did) would not actually
+falsify the bug here, since ``int pvxs_op(int x)`` mangles identically under
+gnu++11 and a wrongly-forced gnu++20 (CodeRabbit review). The ``compare``
+step and its verdict/SONAME assertions remain as a secondary full-pipeline
+smoke check.
 
 Marked ``integration`` (needs a real compiler); uses ``--ast-frontend clang``
 so it also runs on hosts with clang but no castxml (unlike most other
@@ -48,6 +54,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -108,6 +115,26 @@ def _build_lib(src_dir: Path, out_so: Path) -> None:
     )
 
 
+def _dump_snapshot(so_path: Path, header: Path, out_json: Path) -> dict[str, Any]:
+    result = CliRunner().invoke(
+        main,
+        [
+            "dump",
+            str(so_path),
+            "-H",
+            str(header),
+            "--ast-frontend",
+            "clang",
+            "--gcc-options",
+            "-DHAVE_BASE=1",
+            "-o",
+            str(out_json),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    return json.loads(out_json.read_text(encoding="utf-8"))
+
+
 def test_pvxs_error_requires_guard_does_not_force_cxx20(tmp_path: Path) -> None:
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -118,6 +145,24 @@ def test_pvxs_error_requires_guard_does_not_force_cxx20(tmp_path: Path) -> None:
     new_so = new_dir / "libpvxs.so"
     _build_lib(old_dir, old_so)
     _build_lib(new_dir, new_so)
+
+    # Decisive check first: dump each side on its own (no explicit -std=) and
+    # confirm the compile-context provenance (schema v15) shows the dialect
+    # was NOT forced to gnu++20 by the misleading "#error ... requires ..."
+    # text. This is the assertion that actually falsifies the bug --
+    # int pvxs_op(int x) mangles identically under gnu++11 and a
+    # wrongly-forced gnu++20, so neither the verdict nor SONAME-advisory
+    # assertions below would ever fail even with the detection bug
+    # reintroduced (CodeRabbit review: the original version of this test
+    # only checked those indirect, dialect-insensitive signals).
+    old_snap = _dump_snapshot(old_so, old_dir / "pvxs.h", tmp_path / "old.abi.json")
+    new_snap = _dump_snapshot(new_so, new_dir / "pvxs.h", tmp_path / "new.abi.json")
+    assert old_snap.get("ast_resolved_standard") is None, old_snap.get(
+        "ast_resolved_standard"
+    )
+    assert new_snap.get("ast_resolved_standard") is None, new_snap.get(
+        "ast_resolved_standard"
+    )
 
     out_json = tmp_path / "report.json"
     result = CliRunner().invoke(
@@ -150,10 +195,11 @@ def test_pvxs_error_requires_guard_does_not_force_cxx20(tmp_path: Path) -> None:
     # runtime/toolchain-floor RISK finding) the verdict can widen to
     # COMPATIBLE_WITH_RISK, which correctly earns its own PATCH/MINOR release
     # recommendation -- that degradation is orthogonal to the C++20 dialect
-    # bug this test guards against, so it isn't asserted away. What a forced
-    # C++20 dialect misclassification on this pair *would* look like is a
-    # false BREAKING/API_BREAK verdict, a MAJOR version bump, or a SONAME
-    # bump advisory -- those are the real regression guards below.
+    # bug this test guards against, so it isn't asserted away. These are a
+    # secondary, full-pipeline smoke check (does `compare` blow up on this
+    # pair at all) -- the decisive dialect-forcing guard is the
+    # ast_resolved_standard assertion above, since a forced C++20 dialect
+    # would not itself perturb these ABI-level signals for this pair.
     assert report["verdict"] not in ("BREAKING", "API_BREAK")
     assert report["summary"]["breaking"] == 0
     assert report["summary"]["source_breaks"] == 0
