@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .build_mode import BuildMode
 
+from .errors import IncompatibleSnapshotSchemaError
 from .model import (
     AbiSnapshot,
     AccessLevel,
@@ -31,6 +32,7 @@ from .model import (
     ElfVisibility,
     EnumMember,
     EnumType,
+    ExtractionContract,
     Function,
     Param,
     ParamKind,
@@ -97,10 +99,54 @@ from .model import (
 #     before headers were parsed. Purely additive: a pre-v13 reader loads both
 #     as their defaults (None / []), i.e. "gate outcome unknown" — the same
 #     conservative default a fresh in-memory snapshot has before any gate ran.
-SCHEMA_VERSION: int = 13
+# v14: ADR-050 D1 — ``AbiSnapshot.contract`` (profile/scope fingerprints
+#     proving the extraction contract two snapshots were compared under).
+#     Unlike every earlier bump, this one is *verdict-blocking*: a reader
+#     that doesn't recognize ``contract`` would silently compare two
+#     possibly-incomparable snapshots and produce an ordinary, wrong verdict
+#     — exactly the failure mode ADR-050 exists to close. See
+#     ``_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION`` below:
+#     ``snapshot_from_dict``'s hard-rejection guard protects any reader BUILT
+#     FROM THIS COMMIT ONWARD whose own ``SCHEMA_VERSION`` constant is below
+#     a future verdict-blocking bump's threshold — it cannot, and structurally
+#     never could, retroactively protect an already-released pre-v14 install
+#     (e.g. a deployed abicheck whose ``SCHEMA_VERSION`` is 13): such a reader
+#     simply does not contain this guard's code at all, so it falls through
+#     to the ordinary warn-and-continue path every earlier additive bump got,
+#     silently drops the unrecognized ``contract`` key, and produces an
+#     ordinary verdict (Codex review, PR #624) — no in-band schema-version
+#     change can close that gap for code that already shipped without it.
+#     `checker.compare`'s ``contract_coverage="partial"`` disclosure (ADR-050
+#     D2) is the mitigation available for exactly this case -- but it comes
+#     from whichever *v14-aware* `compare()` later evaluates the resulting
+#     pair, never from the pre-v14 reader that did the dropping (that reader
+#     predates the coverage logic too, and stays just as unaware of the drop
+#     as it was of ``contract`` itself; Codex review, PR #624). A pair where
+#     one side's contract is missing -- whether dropped by an old re-save or
+#     never populated -- is reported as partially covered rather than
+#     silently full, once a current reader does the comparing. As of this
+#     PR no real producer populates ``contract`` yet (``dumper.py`` wiring
+#     is separate, later work), so there is no snapshot in the wild today
+#     for an old reader to mis-handle.
+SCHEMA_VERSION: int = 14
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
+
+# ADR-050 D1 — the schema version at which a verdict-blocking field
+# (``AbiSnapshot.contract``) was first introduced. This constant only takes
+# effect inside code that already contains this guard (this commit onward);
+# it cannot retroactively make an already-released, pre-this-commit reader
+# (whose own code simply doesn't have this check) hard-reject — that reader
+# falls through to its old warn-and-continue path regardless of what this
+# constant says (Codex review, PR #624; see the v14 note above for the full
+# scope of what this guard can and cannot protect). Within code that DOES
+# contain this guard, ``snapshot_from_dict`` raises IncompatibleSnapshotSchemaError
+# whenever the snapshot's version is BOTH newer than this reader's own
+# SCHEMA_VERSION AND at or above this threshold — not merely "this reader
+# predates the threshold," which would stop protecting the moment a reader's
+# own SCHEMA_VERSION reaches it.
+_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION = 14
 
 
 def _sets_to_lists(obj: Any) -> Any:
@@ -576,6 +622,25 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # Currently only v1 and v2 exist and have the same on-disk layout, so no
     # migration is required.  This baseline lets future PRs add migration logic here.
     _schema_version: int = int(d.get("schema_version", 1))
+    if (
+        _schema_version > SCHEMA_VERSION
+        and _schema_version >= _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION
+    ):
+        # ADR-050 D1 — this reader has no code path that even looks for a
+        # verdict-blocking field introduced at or after this threshold
+        # (starting with ``contract``). Warn-and-continue here would let this
+        # reader silently compare two possibly-incomparable snapshots and
+        # produce an ordinary, wrong verdict — the exact failure mode this
+        # ADR exists to close. Raised as a SnapshotError subclass so existing
+        # ``except SnapshotError`` handling (e.g. cli_resolve.py's clean
+        # click.UsageError/ClickException translation) still catches it.
+        raise IncompatibleSnapshotSchemaError(
+            f"Snapshot schema_version {_schema_version} requires abicheck "
+            f"supporting at least schema_version "
+            f"{_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION} to read safely "
+            f"(this reader supports up to schema_version {SCHEMA_VERSION}). "
+            "Upgrade abicheck to read this snapshot."
+        )
     if _schema_version > SCHEMA_VERSION:
         import warnings
 
@@ -879,6 +944,11 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CV_FACTS
         )
 
+    # ADR-050 D1 (schema v12) — profile/scope fingerprints. Missing key (every
+    # snapshot predating this field) loads as None, same as every other
+    # additive optional field.
+    contract = _extraction_contract_from_dict(d.get("contract"))
+
     snap = AbiSnapshot(
         library=d["library"],
         version=d["version"],
@@ -951,6 +1021,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             str(t): {str(fn): dict(decl) for fn, decl in fields.items()}
             for t, fields in dict(d.get("conditional_fields", {})).items()
         },
+        # ADR-050 D1 — extraction-contract fingerprints (v12).
+        contract=contract,
     )
 
     # G14: derive the CPython extension surface for snapshots that predate the
@@ -981,6 +1053,32 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             snap.python_ext = detect_python_extension(snap)
 
     return snap
+
+
+def _extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
+    """Convert a serialized ExtractionContract dict (or None) back into the
+    typed dataclass (ADR-050 D1). Returns None when the field is missing
+    (every snapshot predating schema v12) or malformed."""
+    if not isinstance(raw, dict):
+        return None
+    profile_fingerprint = raw.get("profile_fingerprint")
+    scope_fingerprint = raw.get("scope_fingerprint")
+    profile_fields = raw.get("profile_fields")
+    scope_fields = raw.get("scope_fields")
+    return ExtractionContract(
+        profile_fingerprint=profile_fingerprint
+        if isinstance(profile_fingerprint, str)
+        else None,
+        scope_fingerprint=scope_fingerprint
+        if isinstance(scope_fingerprint, str)
+        else None,
+        profile_fields={str(k): str(v) for k, v in profile_fields.items()}
+        if isinstance(profile_fields, dict)
+        else {},
+        scope_fields={str(k): str(v) for k, v in scope_fields.items()}
+        if isinstance(scope_fields, dict)
+        else {},
+    )
 
 
 def _build_mode_from_dict(raw: Any) -> BuildMode | None:

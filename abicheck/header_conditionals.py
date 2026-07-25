@@ -66,7 +66,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
 # ── active-define extraction ─────────────────────────────────────────────────
 
@@ -76,7 +76,40 @@ def _macro_name(body: str) -> str | None:
     return name if re.fullmatch(r"[A-Za-z_]\w*", name) else None
 
 
-def defines_from_flags(flags: Iterable[str], initial: set[str] | None = None) -> set[str]:
+def _iter_define_tokens(flags: Iterable[str]) -> Iterator[tuple[str, str]]:
+    """Yield ``(op, raw_body)`` for every ``-D``/``-U`` flag in *flags*, in
+    order — the shared low-level walker behind both :func:`defines_from_flags`
+    (nets these down to an active *set*, dropping order and value, and
+    additionally filters to valid bare-identifier macro names) and
+    :func:`ordered_macro_ops` (ADR-050 profile field — keeps every token
+    unfiltered, including function-like macros like ``-DAPI(x)=x``: a
+    non-identifier body is real macro content that can change the parsed
+    AST and must still distinguish two extraction profiles, even though it
+    is not a name `defines_from_flags`'s reconciler consumer can act on —
+    Codex review, PR #624). ``op`` is ``"D"`` or ``"U"``; *raw_body* is the
+    un-stripped operand text (e.g. ``"FOO=1"`` for ``-DFOO=1``).
+    """
+    tokens = list(flags)
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        body: str | None = None
+        op = "D"
+        if tok in ("-D", "-U") and i + 1 < len(tokens):
+            body, op = tokens[i + 1], tok[1]
+            i += 1
+        elif tok.startswith("-D") and len(tok) > 2:
+            body, op = tok[2:], "D"
+        elif tok.startswith("-U") and len(tok) > 2:
+            body, op = tok[2:], "U"
+        if body is not None:
+            yield op, body
+        i += 1
+
+
+def defines_from_flags(
+    flags: Iterable[str], initial: set[str] | None = None
+) -> set[str]:
     """The **net active** macro set for one ordered flag list.
 
     Processes ``-D`` and ``-U`` in order (later wins): ``-DNAME`` / ``-DNAME=val``
@@ -91,25 +124,94 @@ def defines_from_flags(flags: Iterable[str], initial: set[str] | None = None) ->
     is not mutated.
     """
     active: set[str] = set(initial) if initial else set()
+    for op, body in _iter_define_tokens(flags):
+        name = _macro_name(body)
+        if name is None:  # function-like/malformed body -- not a plain macro name
+            continue
+        if op == "D":
+            active.add(name)
+        else:
+            active.discard(name)
+    return active
+
+
+def ordered_macro_ops(flags: Iterable[str]) -> list[tuple[str, str]]:
+    """Ordered ``(op, name_or_nameval)`` pairs for ADR-050's ``macro_ops``
+    profile field (``abicheck.comparability.compute_extraction_contract``) —
+    the same ``-D``/``-U`` tokens :func:`defines_from_flags` nets down to a
+    *set*, but preserving both ORDER and VALUE: ``macro_ops=[("D","FOO=1")]``
+    must fingerprint differently from ``[("D","FOO=2")]``, and
+    ``-DKEEP -UKEEP`` must fingerprint differently from a lone ``-DKEEP``
+    even though both net to the same *active* set.
+    """
+    return list(_iter_define_tokens(flags))
+
+
+def pass_through_flags_from_tokens(flags: Iterable[str]) -> list[str | Path]:
+    """Ordered ADR-050 ``pass_through_flags``
+    (``abicheck.comparability.compute_extraction_contract``) from a compiler
+    flag stream. Recognizes only ``-include <path>`` today (its
+    ``--gcc-option=-include --gcc-option=<path>`` CLI form already flattens
+    to this same two-token shape) — the one currently-known must-handle
+    repeatable, order-sensitive frontend flag (Codex review, PR #624); other
+    flags are not yet classified and are simply omitted, not mis-hashed. The
+    path operand becomes a ``Path`` so ``compute_extraction_contract``
+    content-hashes it instead of hashing a checkout-root-dependent literal
+    string.
+    """
     tokens = list(flags)
+    result: list[str | Path] = []
     i = 0
     while i < len(tokens):
-        tok = tokens[i]
-        name: str | None = None
-        add = True
-        if tok in ("-D", "-U") and i + 1 < len(tokens):
-            name = _macro_name(tokens[i + 1])
-            add = tok == "-D"
-            i += 1
-        elif tok.startswith("-D") and len(tok) > 2:
-            name = _macro_name(tok[2:])
-        elif tok.startswith("-U") and len(tok) > 2:
-            name = _macro_name(tok[2:])
-            add = False
-        if name is not None:
-            active.add(name) if add else active.discard(name)
+        if tokens[i] == "-include" and i + 1 < len(tokens):
+            result.append(tokens[i])
+            result.append(Path(tokens[i + 1]))
+            i += 2
+            continue
         i += 1
-    return active
+    return result
+
+
+def resolve_pass_through_paths(
+    items: Iterable[str | Path], search_dirs: Iterable[Path] = ()
+) -> list[str | Path]:
+    """Best-effort real-filesystem resolution of each ``Path``-valued
+    element of :func:`pass_through_flags_from_tokens`'s output, run by the
+    caller (``dumper.dump()``) that actually knows the ``-I`` search
+    directories used for this extraction (Codex review, PR #624 follow-up).
+
+    A bare ``Path(operand)`` for a forced-include flag (e.g.
+    ``-include config.h``) can name a file that only exists relative to the
+    frontend's own include search path, not abicheck's CWD — left
+    unresolved, ``compute_extraction_contract`` would either raise on a
+    perfectly valid dump (no such CWD file) or silently content-hash an
+    unrelated CWD file that happens to share the name. *search_dirs* (the
+    ``-I`` directories, in order) plus CWD are tried as candidate resolution
+    roots, mirroring basic ``-I`` precedence. When the operand cannot be
+    resolved anywhere known, the raw flag text is kept as a plain ``str``
+    instead — opaque, hashed as literal text, the same treatment
+    ``compute_extraction_contract`` already gives any unclassified flag —
+    rather than risk either failure mode above. System default include
+    directories, sysroot, and any ``-I``/``-isystem`` passed as raw text
+    inside ``gcc_options``/``gcc_option_tokens`` (as opposed to the
+    dedicated ``extra_includes`` param) are *not* modeled: those cases
+    degrade safely to the same opaque ``str`` fallback rather than crash,
+    but full resolution needs real compiler search-path evidence (the
+    depfile mechanism, ADR-050 D1's still-deferred
+    ``depfile_resolved_paths``/``generated_driver_path``).
+    """
+    roots = [*search_dirs, Path.cwd()]
+    resolved: list[str | Path] = []
+    for item in items:
+        if not isinstance(item, Path):
+            resolved.append(item)
+            continue
+        if item.is_absolute():
+            resolved.append(item if item.is_file() else str(item))
+            continue
+        found = next((root / item for root in roots if (root / item).is_file()), None)
+        resolved.append(found if found is not None else str(item))
+    return resolved
 
 
 def _split_command(command: object) -> list[str]:
@@ -157,7 +259,9 @@ def _compile_entry_matches(entry: dict[str, object], pattern: str) -> bool:
         return False
 
 
-def defines_from_compile_db(path: str | Path, source_filter: str | None = None) -> set[str]:
+def defines_from_compile_db(
+    path: str | Path, source_filter: str | None = None
+) -> set[str]:
     """Macros **reliably active** across a ``compile_commands.json``.
 
     Each entry's net active set is computed with :func:`defines_from_flags`
@@ -280,7 +384,9 @@ def _include_guard_macro(lines: list[str]) -> str | None:
     return None
 
 
-def _parse_field(decl: str) -> tuple[str, str, bool, int | None, bool, bool, bool] | None:
+def _parse_field(
+    decl: str,
+) -> tuple[str, str, bool, int | None, bool, bool, bool] | None:
     """Parse a member declaration into ``(name, type, is_bitfield, bits, const, volatile, mutable)``.
 
     Returns ``None`` for anything that is not a plain single-name member — a
@@ -347,7 +453,15 @@ def _record_qualified_name(scope_stack: list[_Scope], name: str) -> str | None:
 class _Scope:
     """One open ``{}`` scope: a namespace or a record body."""
 
-    __slots__ = ("kind", "name", "depth", "access", "qualified", "field_index", "recorded")
+    __slots__ = (
+        "kind",
+        "name",
+        "depth",
+        "access",
+        "qualified",
+        "field_index",
+        "recorded",
+    )
 
     def __init__(
         self, kind: str, name: str | None, depth: int, qualified: str | None
@@ -525,7 +639,9 @@ def _body_opens_first(rest: str) -> bool:
     pending)."""
     brace = rest.find("{")
     semi = rest.find(";")
-    return (brace != -1 and (semi == -1 or brace < semi)) or (brace == -1 and semi == -1)
+    return (brace != -1 and (semi == -1 or brace < semi)) or (
+        brace == -1 and semi == -1
+    )
 
 
 def _detect_scope_opener(line: str) -> tuple[str, str | None, str] | None:
@@ -609,7 +725,9 @@ def _capture_guarded_field(state: _ScanState, rec: _Scope, line: str) -> None:
     rec.recorded.append((entry, pos))
 
 
-def _open_pending_scope(state: _ScanState, pending: tuple[str, str | None, str]) -> None:
+def _open_pending_scope(
+    state: _ScanState, pending: tuple[str, str | None, str]
+) -> None:
     """Push the *pending* namespace/record opener as a newly opened scope."""
     kind, sc_name, keyword = pending
     if kind == "rec":
@@ -770,7 +888,8 @@ def collect_build_context(
     # review #498). Its macro state is unknown here, so mark every scanned guarded
     # field ``ambiguous`` and let the reconciler keep those types.
     forced_include = _has_forced_include(extra) or (
-        compile_db is not None and _compile_db_has_forced_include(compile_db, source_filter)
+        compile_db is not None
+        and _compile_db_has_forced_include(compile_db, source_filter)
     )
 
     registry: dict[str, dict[str, dict[str, object]]] = {}

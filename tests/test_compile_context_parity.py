@@ -36,6 +36,7 @@ from click.testing import CliRunner
 from abicheck.cli import compare_cmd, dump_cmd, main
 from abicheck.cli_options import compile_context_options
 from abicheck.cli_scan import scan_cmd
+from abicheck.model import AbiSnapshot
 from abicheck.service_scan import CompileContext, ScanRequest
 
 #: The dest names the compile-context family contributes (dump↔scan parity).
@@ -286,10 +287,7 @@ def test_merge_compile_config_keeps_config_values_literal(tmp_path: Path) -> Non
     # test_buildconfig_rejects_compile_{std,define}_flag_injection.
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text(
-        "compile:\n"
-        "  std: 'c++20'\n"
-        "  defines:\n"
-        '    - \'MSG="hi"\'\n',
+        "compile:\n  std: 'c++20'\n  defines:\n    - 'MSG=\"hi\"'\n",
         encoding="utf-8",
     )
     merged, _ = _merge_compile_config(CompileContext(), (), cfg)
@@ -298,6 +296,7 @@ def test_merge_compile_config_keeps_config_values_literal(tmp_path: Path) -> Non
         "-std=c++20",
         '-DMSG="hi"',
     )
+
 
 def test_merge_compile_config_noop_without_path() -> None:
     from abicheck.cli_scan import _merge_compile_config
@@ -543,14 +542,25 @@ def test_try_header_scoped_dump_threads_compile_to_dumper(
 
     def _fake_dumper_pe(*args, **kwargs):
         captured.update(kwargs)
-        # A snapshot with a PUBLIC-visibility symbol so scoping counts as matched
-        # (only `.visibility` is read by _has_matched_public_surface).
-        import types as _types
+        # A snapshot with a PUBLIC-visibility symbol so scoping counts as
+        # matched (only `.visibility` is read by _has_matched_public_surface).
+        # A real AbiSnapshot, not a bare SimpleNamespace: ADR-050's
+        # _attach_extraction_contract (called by _try_header_scoped_dump
+        # right after this returns) also reads `.ast_toolchain`/
+        # `.from_headers`.
+        from abicheck.model import Function, Visibility
 
-        from abicheck.model import Visibility
-
-        return _types.SimpleNamespace(
-            functions=[_types.SimpleNamespace(visibility=Visibility.PUBLIC)],
+        return AbiSnapshot(
+            library="x",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="foo",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
             variables=[],
         )
 
@@ -833,8 +843,15 @@ def test_compare_config_include_dirs_survive_per_side_include(
     result = CliRunner().invoke(
         main,
         [
-            "compare", str(old_so), str(new_so), "-H", str(header),
-            "--config", str(cfg), "--include", "old=" + str(old_only),
+            "compare",
+            str(old_so),
+            str(new_so),
+            "-H",
+            str(header),
+            "--config",
+            str(cfg),
+            "--include",
+            "old=" + str(old_only),
         ],
     )
     assert result.exit_code == 0, result.output
