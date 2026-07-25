@@ -366,6 +366,30 @@ def test_collapse_with_suppressed_advisory_still_justifies_soname_bump():
     assert "soname_bump_unnecessary" not in kinds, kinds
 
 
+def test_suppressed_advisory_is_attributed_to_its_matching_rule():
+    # Codex review: DetectVersionedSymbolScheme used the cheaper `is_suppressed`
+    # and appended the advisory straight to `ctx.suppressed` with no
+    # `suppression_rule` stamp, unlike every other late-finding suppression
+    # path (ApplySuppression, _merge_findings_respecting_suppression) -- a
+    # labelled rule matching this advisory left no attribution behind.
+    from abicheck.suppression import Suppression, SuppressionList
+    old = _snap_with_soname("75.1", "75", soname="libicui18n.so.75")
+    new = _snap_with_soname("78.3", "78", soname="libicui18n.so.75")
+    supp = SuppressionList([Suppression(
+        symbol_pattern=".*",
+        change_kind="versioned_symbol_scheme_detected",
+        label="icu-version-rename",
+    )])
+    result = compare(old, new, suppression=supp)
+    kinds = {c.kind.value for c in result.changes}
+    assert "versioned_symbol_scheme_detected" not in kinds
+    suppressed_adv = next(
+        c for c in result.suppressed_changes
+        if c.kind.value == "versioned_symbol_scheme_detected"
+    )
+    assert suppressed_adv.suppression_rule == "icu-version-rename"
+
+
 def test_no_soname_note_inferred_from_library_name_without_elf():
     # Codex P2: differently-named old/new snapshots with NO ELF metadata must not
     # manufacture a SONAME-bump/relink note from the library *name* — that name is

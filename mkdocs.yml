@@ -86,6 +86,7 @@ nav:
     - Architecture: concepts/architecture.md
     - Build Info & Sources (build-source data): concepts/build-source-data.md
     - Graph Coverage & Negative Evidence: concepts/graph-coverage.md
+    - Unified Impact Assessment: concepts/impact-analysis.md
     - Environment & Toolchain Drift: concepts/environment-drift.md
     - Limitations: concepts/limitations.md
   # Lookup tables — precise, exhaustive, no narrative.

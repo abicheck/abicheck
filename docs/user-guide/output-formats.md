@@ -197,6 +197,75 @@ listing every change individually. Available in Markdown and JSON formats.
 abicheck compare old.json new.json --report-mode leaf
 ```
 
+## `--report-mode root-cause`
+
+Groups findings that share a root cause under one entry, instead of listing
+every change individually — e.g. an internal helper's `func_removed` finding
+and the `internal_symbol_required_by_public_api` overlay finding that names
+it both land in the same group. Supported for `--format json`/`markdown`
+(the default rendered text output), and `sarif` (as additive `properties`,
+see below); `junit` still renders as `full` (no testsuite grouping
+equivalent yet — JUnit's `<testcase>` model already groups by symbol, not
+by finding). This is a
+first slice reusing the existing `Change.caused_by_type` field (see
+[ADR-052](../development/adr/052-unified-impact-assessment-model.md));
+a future slice (G29 Phase 6) will additionally correlate consumer-overlay
+findings that don't share a `caused_by_type` today.
+
+```bash
+abicheck compare old.json new.json --report-mode root-cause --format json
+```
+
+```json
+{
+  "root_causes": [
+    {
+      "root_cause_id": "ad544909f783ad0d",
+      "root": "ns::internal::helper",
+      "finding_count": 2,
+      "findings": ["... the two grouped Change entries ..."]
+    }
+  ],
+  "root_cause_count": 1,
+  "changes": ["... the same findings, flat, for backward compatibility ..."]
+}
+```
+
+The Markdown/text rendering groups the same way, one `### root` heading per
+group instead of `--report-mode full`'s severity-bucketed sections:
+
+```bash
+abicheck compare old.json new.json --report-mode root-cause
+```
+
+```markdown
+## Root Causes (1)
+
+### `ns::internal::helper` (2 findings)
+
+- **func_removed**: helper removed
+- **internal_symbol_required_by_public_api**: required
+```
+
+SARIF keeps its normal one-result-per-finding shape (so every existing
+SARIF/code-scanning consumer keeps working unchanged) but adds
+`properties.rootCauseId`/`properties.rootCause` to every result — group them
+yourself by `rootCauseId` if you want the same buckets JSON/markdown show:
+
+```bash
+abicheck compare old.so new.so --report-mode root-cause --format sarif
+```
+
+```json
+{
+  "ruleId": "internal_symbol_required_by_public_api",
+  "properties": {
+    "rootCauseId": "ad544909f783ad0d",
+    "rootCause": "ns::internal::helper"
+  }
+}
+```
+
 ## `--show-impact`
 
 Appends an impact summary table to the report, showing root changes and how many
