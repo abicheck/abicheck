@@ -40,9 +40,14 @@ from __future__ import annotations
 import collections
 import re
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .buildsource.call_graph import (
+    CALL_KIND_FUNCTION_POINTER,
+    CALL_KIND_VIRTUAL,
+    RESOLUTION_OVERAPPROX,
+)
 from .buildsource.entity_identity import candidate_lookup_keys
 from .buildsource.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
 from .checker_policy import ChangeKind, ReachabilityState
@@ -732,7 +737,7 @@ def _is_consumer_compiled_node(node_id: str, node_by_id: dict[str, GraphNode]) -
 
 @dataclass(frozen=True)
 class TraversalPolicy:
-    """Named, reusable graph-walk rules (ADR-046 D5, partial).
+    """Named, reusable graph-walk rules (ADR-046 D5).
 
     Formalizes what was previously :func:`_consumer_compiled_reachability`'s
     own hard-coded edge-kind set and stop check into one object a future
@@ -742,11 +747,19 @@ class TraversalPolicy:
     reachable (its own removal/change is still consumer-visible), only its
     outgoing edges are not queued for further descent.
 
-    Not implemented this slice: ``effect_transitions`` (how a walk's
-    precision label changes crossing a particular edge kind, e.g.
-    downgrading "exact" to "over-approximation" crossing a virtual-call
-    edge) — no current walk needs it, so adding it now would be speculative.
-    Also not (yet) adopted by :func:`compute_leak_paths`'s layout/type-graph
+    ``effect_transitions`` maps an edge's resolved ``call_kind`` (the only
+    per-edge precision discriminator any current producer populates — ADR-031
+    D4/D9) to the walk-level precision label a walk that crosses such an edge
+    should downgrade to from that point on — e.g. ``{"virtual": "overapprox"}``
+    downgrades a reachability proof from "exact" to "over-approximation" the
+    moment it crosses a virtual call, and every node reached transitively
+    past it inherits that downgrade too (see
+    :func:`_consumer_compiled_reachability`'s ``degraded`` return value).
+    Empty by default — a policy that never sets it (e.g. any future walk with
+    no precision-varying edge kinds) behaves exactly as before this field
+    existed.
+
+    Not (yet) adopted by :func:`compute_leak_paths`'s layout/type-graph
     walk — that walk traverses ``RecordType``/typedef structures, not the L5
     ``GraphNode``/``GraphEdge`` graph this policy shape describes, so it does
     not naturally fit without first changing its data model, which is out of
@@ -756,17 +769,36 @@ class TraversalPolicy:
     allowed_edges: frozenset[str]
     stop_conditions: Callable[[str, dict[str, GraphNode]], bool]
     minimum_confidence: str = CONF_UNKNOWN
+    effect_transitions: dict[str, str] = field(default_factory=dict)
 
 
 #: The call-graph leak walk's own rules (ADR-044 P1 item 1), reified as a
 #: policy instance instead of the inline edge_kinds/_is_consumer_compiled_node
-#: pair :func:`compute_call_graph_leak_paths` hard-coded before D5.
+#: pair :func:`compute_call_graph_leak_paths` hard-coded before D5. A virtual
+#: or function-pointer call is never statically exact (ADR-031 D4's own
+#: ``resolution=overapprox`` label on that ``CallEdge``) — the walk's
+#: ``effect_transitions`` mirrors that at the path level, so reachability
+#: proven only through such a call is distinguishable from one proven through
+#: an unbroken chain of direct calls (ADR-046 D5).
 CALL_GRAPH_TRAVERSAL_POLICY = TraversalPolicy(
     allowed_edges=frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"}),
     stop_conditions=lambda node_id, node_by_id: not _is_consumer_compiled_node(
         node_id, node_by_id
     ),
+    effect_transitions={
+        CALL_KIND_VIRTUAL: RESOLUTION_OVERAPPROX,
+        CALL_KIND_FUNCTION_POINTER: RESOLUTION_OVERAPPROX,
+    },
 )
+
+
+def _edge_effect_transition(policy: TraversalPolicy, edge: GraphEdge) -> str | None:
+    """The precision label crossing *edge* downgrades a walk to, per
+    ``policy.effect_transitions`` (ADR-046 D5), or ``None`` when *edge*'s
+    resolved ``call_kind`` isn't a key the policy transitions on.
+    """
+    call_kind = str(edge.resolved.get("call_kind") or edge.attrs.get("call_kind") or "")
+    return policy.effect_transitions.get(call_kind) if call_kind else None
 
 
 def _consumer_compiled_reachability(
@@ -774,7 +806,7 @@ def _consumer_compiled_reachability(
     policy: TraversalPolicy,
     entries: Iterable[str],
     node_by_id: dict[str, GraphNode],
-) -> dict[str, tuple[frozenset[str], dict[str, GraphEdge]]]:
+) -> dict[str, tuple[frozenset[str], dict[str, GraphEdge], frozenset[str]]]:
     """BFS from each *entry*, restricted per *policy* (ADR-046 D5).
 
     Unlike :func:`~abicheck.buildsource.source_graph_findings._dependency_reachability`
@@ -794,16 +826,23 @@ def _consumer_compiled_reachability(
     Also returns each entry's predecessor-edge map so the caller can
     reconstruct a proof path without a second, unrestricted graph walk that
     could show a route the restriction above would have rejected.
+
+    The third element of each entry's tuple is *degraded*: the subset of
+    ``seen`` first reached via an edge :func:`_edge_effect_transition` maps to
+    a lower-precision label (ADR-046 D5's ``effect_transitions``) — sticky,
+    so every node reached transitively past a degrading edge is degraded too,
+    even if the rest of its own path is direct calls.
     """
     min_rank = _CONFIDENCE_RANK.get(policy.minimum_confidence, 0)
     adjacency: dict[str, list[GraphEdge]] = {}
     for e in graph.edges:
         if e.kind in policy.allowed_edges and _CONFIDENCE_RANK.get(e.confidence, 0) >= min_rank:
             adjacency.setdefault(e.src, []).append(e)
-    out: dict[str, tuple[frozenset[str], dict[str, GraphEdge]]] = {}
+    out: dict[str, tuple[frozenset[str], dict[str, GraphEdge], frozenset[str]]] = {}
     for entry in entries:
         seen: set[str] = {entry}
         came_from: dict[str, GraphEdge] = {}
+        degraded: set[str] = set()
         queue: collections.deque[str] = collections.deque([entry])
         while queue:
             node = queue.popleft()
@@ -814,9 +853,12 @@ def _consumer_compiled_reachability(
                     continue
                 seen.add(e.dst)
                 came_from[e.dst] = e
+                if node in degraded or _edge_effect_transition(policy, e) is not None:
+                    degraded.add(e.dst)
                 queue.append(e.dst)
         seen.discard(entry)
-        out[entry] = (frozenset(seen), came_from)
+        degraded &= seen
+        out[entry] = (frozenset(seen), came_from, frozenset(degraded))
     return out
 
 
@@ -861,7 +903,11 @@ def compute_call_graph_leak_paths(
     returning a mapping ``lookup_key -> list of formatted proof-path
     strings`` (one per public entry that reaches it, edge-kind-annotated via
     :func:`~abicheck.buildsource.source_graph_findings._format_dependency_path`,
-    e.g. ``"pub() --[DECL_CALLS_DECL]--> detail::helper()"``).
+    e.g. ``"pub() --[DECL_CALLS_DECL]--> detail::helper()"``). A path that
+    only exists because it crossed a virtual/function-pointer call
+    (``CALL_GRAPH_TRAVERSAL_POLICY.effect_transitions``, ADR-046 D5) is
+    prefixed ``"overapprox: "`` — it proves *a* possible dispatch target
+    reaches the internal symbol, not that this exact chain does.
 
     Each reachable internal target is recorded under **two** keys when both
     are available (Codex review, fresh evidence): the graph node's own
@@ -937,7 +983,7 @@ def compute_call_graph_leak_paths(
     )
     result: dict[str, list[str]] = collections.defaultdict(list)
     for entry in entries:
-        targets, came_from = reachability.get(entry, (frozenset(), {}))
+        targets, came_from, degraded = reachability.get(entry, (frozenset(), {}, frozenset()))
         for target in targets:
             node = node_by_id.get(target)
             if node is None:
@@ -974,6 +1020,13 @@ def compute_call_graph_leak_paths(
             if not path_edges:
                 continue
             formatted = _format_dependency_path(graph, path_edges)
+            if target in degraded:
+                # ADR-046 D5 effect_transitions: this proof crossed a
+                # virtual/function-pointer call, so it is an
+                # over-approximation of the real dispatch target, not an
+                # exact proof -- flagged in the displayed path rather than
+                # silently shown identically to a direct-call-only chain.
+                formatted = f"overapprox: {formatted}"
             result[name].append(formatted)
             mangled = decl_to_symbol.get(target)
             if mangled and mangled != name:

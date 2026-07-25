@@ -1,7 +1,16 @@
-# ADR-052: Unified Impact Assessment Model (G29 Phase 3, slices 1-5)
+# ADR-052: Unified Impact Assessment Model (G29 Phase 3, slices 1-6)
 
 **Date:** 2026-07-22
-**Status:** Accepted — slices 1-5 implemented.
+**Status:** Accepted — slices 1-6 implemented. Slice 6 (G29 Phase 3
+follow-up) closed two items this ADR originally left open: `--format junit`
+now renders `--report-mode root-cause` (additive `rootCauseId`/`rootCause`
+attributes on each `<failure>`, not a restructured `<testcase>` tree — see
+"JUnit root-cause rendering" below), and a stable, `description`-independent
+`occurrence_id` now exists on `GraphProofPath` (built on
+[ADR-046](046-source-graph-identity-v2-and-evidence-merge.md) D1's
+`occurrence_id` half, itself implemented after this ADR was first accepted).
+`root_cause_id`/`impact_group_id` remain out of `ImpactAssessment` — see
+"Deliberately not implemented" below for why that one stays open.
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 3's own
 "needs its own ADR" gate — [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s
@@ -531,11 +540,10 @@ threaded through `service_render.render_output` and
 `mcp_server._render_output`'s `sarif` branches, both of which previously
 accepted (but silently dropped) the parameter for that format.
 
-`--report-mode root-cause` still renders as `full` for `--format junit` —
-JUnit's `<testcase>` model already groups by *symbol* (`_partition_changes`),
-not by finding, so a caused_by_type-keyed grouping would need to decide what
-happens when a multi-change testcase's changes disagree on root cause; left
-for a dedicated slice rather than bolted on here.
+`--report-mode root-cause` rendered as `full` for `--format junit` through
+Slice 5; Slice 6 (below) closes that gap the same way SARIF did — additive
+attributes, no restructuring — rather than the symbol-keyed `<testcase>`
+regrouping this section originally worried about.
 
 **Follow-up fix (Codex review), same PR:** `to_sarif`'s `referenced_causes`
 was originally computed from an *unfiltered* preview of
@@ -547,6 +555,64 @@ disagreeing with JSON/markdown root-cause mode (which computes
 `referenced_causes` from the filtered set only). Fixed by computing the
 filtered `scoped_only_changes` once, up front, and reusing that single list
 for both `referenced_causes` and the results loop.
+
+## Slice 6 — JUnit root-cause rendering + `occurrence_id` (G29 Phase 3 follow-up)
+
+Closes two of the four items Slices 1-5 left open ("Deliberately not
+implemented this slice," below) — landed after
+[ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s D1
+`occurrence_id` half and D6 structured-path selector shipped, both of which
+this slice builds directly on.
+
+**JUnit root-cause rendering** (`abicheck/junit_report.py`): rather than
+SARIF's per-*result* additive properties, JUnit gets per-*failure* additive
+attributes — `_root_cause_lookup(changes, missing_labels, gate_scope)`
+precomputes `finding_id -> (root_cause_id, root_display)` once per
+testsuite (the same `_root_cause_key_and_display`/hash JSON/markdown/SARIF
+already share, so no format can disagree about a finding's root cause), and
+`_add_failure` sets `rootCauseId`/`rootCause` on each `<failure>` element
+when a lookup entry exists. This sidesteps the "what if a testcase's
+changes disagree on root cause" question this ADR originally raised for a
+symbol-keyed regrouping: there is no regrouping — `<testcase>` still groups
+by symbol exactly as before, and a symbol with multiple changes gets
+multiple `<failure>` children, each carrying only its *own* change's root
+cause. `to_junit_xml`/`to_junit_xml_multi`/`_build_testsuite` gained a
+`report_mode` parameter (mirroring `to_sarif`/`to_sarif_str`); any value
+other than `"root-cause"` renders identically to before this slice.
+Missing-contract labels (`_emit_missing_contract_testcases`) get the same
+treatment, mirroring `sarif._missing_contract_result`'s
+`_root_cause_for(None, label, rule_id, label)` handling.
+
+**The actual end-to-end gap, found while wiring this up:**
+`service_render.render_output`'s `"junit"` branch called `to_junit_xml`
+without forwarding its own `report_mode` parameter at all — so
+`--format junit --report-mode root-cause` silently rendered as plain `full`
+with no error, for every caller (CLI, MCP, Python API) that went through
+`render_output`, not just a JUnit-internal limitation. Fixed by forwarding
+`report_mode=report_mode` in that branch.
+
+**`occurrence_id`** (`abicheck/buildsource/graph_impact.py`,
+`impact/model.py`, `impact/engine.py`): `_path_occurrence_id(path)` folds a
+structured path's edges' own `GraphEdge.occurrences`
+([ADR-046 D1](046-source-graph-identity-v2-and-evidence-merge.md#d1-implementation-g29-phase-2-slices-3-and-6-both-halves))
+into one hash, set as `Change.impact_occurrence_id` by
+`attach_impact_metadata` and surfaced as `GraphProofPath.occurrence_id` by
+`assess_change`. `None` whenever no edge on the path carries occurrence-level
+attrs — still every finding today, since no producer populates them (D1's
+own opt-in note). `root_cause_id`/`impact_group_id` are **not** included in
+this slice — see "Deliberately not implemented" below, unchanged from why
+Slices 1-5 left them out.
+
+`tests/test_junit_report_root_cause.py` (split from `test_junit_report.py`,
+already at the line-count cap): full mode never sets the new attributes;
+root-cause mode sets them; shared `caused_by_type` findings get the same
+`rootCauseId`; unrelated findings get different ones; two failures on one
+testcase get independent root causes; a missing-contract label gets one
+too; other report modes (e.g. `"leaf"`) behave like `"full"`;
+`to_junit_xml_multi` forwards `report_mode`; and a direct regression test
+for the `render_output` forwarding gap. `tests/test_graph_impact.py`
+(`TestPathOccurrenceId`) covers `_path_occurrence_id` directly and its
+propagation through `attach_impact_metadata`/`assess_change`.
 
 ## Deliberately not implemented this slice
 
@@ -580,30 +646,40 @@ remaining four tiers):
   suppression correctness, not just to this reporting layer. Left for a
   dedicated slice.
 - **The full `RootCauseCorrelator` correlation across consumer-overlay
-  findings that don't share a `caused_by_type` today** — Slices 3-5 above
-  ship the `caused_by_type`-based first cut (JSON, markdown/text, and SARIF
-  properties); Phase 6's `RootCauseCorrelator` is the fuller job that adds
-  correlation for findings with no `caused_by_type` link at all. `--format
-  junit` still renders `root-cause` mode as `full` (Slice 5's ADR section
-  above explains why JUnit's symbol-grouped `<testcase>` model doesn't take
-  the same properties-only approach SARIF did).
-- **Stable `finding_id`/`occurrence_id`/`root_cause_id`/`impact_group_id`
-  identifiers independent of `description` text** — `reporter._finding_id`
-  already exists (schema 2.3) and is stable across repeated runs, but (unlike
-  the plan's stated goal) it *does* include `description` text as a
+  findings that don't share a `caused_by_type` today** — Slices 3-5 shipped
+  the `caused_by_type`-based first cut (JSON, markdown/text, and SARIF
+  properties), and Slice 6 extended the same first cut to JUnit (additive
+  `<failure>` attributes, not a restructuring). Phase 6's
+  `RootCauseCorrelator` is still the fuller job that adds correlation for
+  findings with no `caused_by_type` link at all — none of Slices 1-6 attempt
+  it.
+- **Stable `finding_id`/`root_cause_id`/`impact_group_id` identifiers
+  independent of `description` text** — `reporter._finding_id` already
+  exists (schema 2.3) and is stable across repeated runs, but (unlike the
+  plan's stated goal) it *does* include `description` text as a
   discriminator by design — disambiguating same-kind/same-symbol findings
   that would otherwise collide (e.g. two parameters of one function both
   changing pointer depth). Changing that derivation to drop `description`
   would itself be a breaking change to an already-published, schema-2.3
   field's values — out of scope for an additive slice, and not attempted
-  here. `occurrence_id`/`root_cause_id`/`impact_group_id` have no producer to
-  populate them from yet (the first two need ADR-046 D1's undone
-  `occurrence_id` half and Phase 6's correlator respectively).
+  here. `occurrence_id` **is** now populated (Slice 6, above) — it needed
+  only ADR-046 D1's `occurrence_id` half, which has since landed, and it is
+  computable from a single `Change`'s own path. `root_cause_id`/
+  `impact_group_id` are different in kind, not just in what data exists:
+  correctly computing either needs whole-`DiffResult` context (which
+  findings elsewhere reference this one, via `referenced_causes` — see
+  `_root_cause_key_and_display`) that a single `Change`'s pure read view
+  cannot see, so neither belongs on `ImpactAssessment`/`GraphProofPath` at
+  all — see the [Detector Impact Contract](../detector-impact-contract.md)
+  for the same reasoning applied to future detectors. Both stay
+  report-level concepts (`--report-mode root-cause`'s grouping key, Phase
+  6's correlator), not per-finding fields.
 - **`docs/reference/source-graph-schema.md`,
-  `docs/contribute/detector-impact-contract.md`** — reference docs for the
-  full edge/detector surface Phases 2/5/6 will add; premature while those
-  surfaces don't exist yet. This ADR adds `docs/learn/impact-analysis.md`
-  instead, scoped to what this slice actually ships.
+  `docs/contribute/detector-impact-contract.md`** — both now exist (G29
+  Phase 2/3 follow-up), once D1/D5/D6/Slice 6 gave them enough real surface
+  to document. `docs/learn/impact-analysis.md` remains the narrative
+  canonical page; the two reference pages summarize it rather than
+  duplicating its explanation.
 
 ## Non-goals
 
@@ -612,17 +688,17 @@ remaining four tiers):
   membership, or to which findings suppression withholds — this ADR is a
   read view and a reporting addition underneath the existing tri-state
   reachability model (ADR-044, ADR-046, ADR-048), not a policy change.
-- **Not** removing, renaming, or reshaping any existing JSON/SARIF field.
-  `public_reachable`/`reachability_kind`/`reachability_proof_path`/
+- **Not** removing, renaming, or reshaping any existing JSON/SARIF/JUnit
+  field. `public_reachable`/`reachability_kind`/`reachability_proof_path`/
   `affected_public_roots`/`impact_proof_path`/`impact_is_direct`/
-  `correlated_change_kind` all stay exactly as they are; `impact_assessment`
-  is additive.
-- **Not** JUnit surfacing for `--report-mode root-cause`, for the same reason
-  ADR-048 D4 already gave (`--format junit` still renders `root-cause` mode as
-  `full`). `--report-mode root-cause` itself is *not* deferred — Slices 3-5
-  above ship it for JSON, markdown/text, and SARIF; what remains deferred to
-  Phase 6 is the fuller `RootCauseCorrelator` (see "Deliberately not
-  implemented this slice" above).
+  `correlated_change_kind` all stay exactly as they are; `impact_assessment`,
+  `impact_alternative_paths`/`impact_discarded_path_count`/
+  `impact_occurrence_id`, and JUnit's `rootCauseId`/`rootCause` are all
+  additive.
+- **Not** the fuller `RootCauseCorrelator` (Phase 6) — Slices 3-6 ship the
+  `caused_by_type`-based first cut for every format including JUnit (Slice
+  6); correlating findings with no `caused_by_type` link at all is still
+  deferred (see "Deliberately not implemented this slice" above).
 
 ## Consequences
 
@@ -636,13 +712,13 @@ proof" instead of five separately-named, independently-nullable keys.
 
 **Costs:** `impact_assessment` duplicates data already present at the
 top level for findings where both are emitted — an accepted, documented
-redundancy (D3 above), not an oversight. This slice does not reduce the
+redundancy (D3 above), not an oversight. This ADR does not reduce the
 scattered-field problem Phase 3 exists to solve at the *producer* level
 (D2) — only at the *reporting* level. The remaining phases (the D2 flip,
 Phase 4's consumer/use-case join, Phase 5's new graph families, Phase 6's
-detectors and the fuller `RootCauseCorrelator` beyond Slices 3-5's shipped
-`--report-mode root-cause`) are unaffected by and do not depend on anything
-in this slice being done differently.
+detectors and the fuller `RootCauseCorrelator` beyond Slices 3-6's shipped
+`--report-mode root-cause`, including JUnit) are unaffected by and do not
+depend on anything in this ADR being done differently.
 
 ## References
 

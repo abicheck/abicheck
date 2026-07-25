@@ -15,6 +15,7 @@
           "producer": ""
         }
       ],
+      "occurrences": [],
       "provenance": "",
       "resolved": {},
       "src": "hdr:include/demo/config2.h"
@@ -36,6 +37,7 @@
           "producer": ""
         }
       ],
+      "occurrences": [],
       "provenance": "",
       "resolved": {
         "role": "field"
@@ -59,6 +61,7 @@
           "producer": ""
         }
       ],
+      "occurrences": [],
       "provenance": "",
       "resolved": {
         "role": "field"

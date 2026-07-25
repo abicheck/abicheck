@@ -1,19 +1,29 @@
 # ADR-046: Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge
 
 **Date:** 2026-07-19
-**Status:** Accepted — D1, D2, D3, a partial D5, and a partial D6 slice
-implemented: role-aware edge identity (`GraphEdge.relation_key()`/
-`edge_relation_key`, the `relation_key` half of D1's split — `occurrence_id`
-remains open), the evidence-preserving node/edge merge (`GraphFact`/
-`FactConflict`/`merge_graph_facts`, replacing `SourceGraphSummary.add_node`/
-`add_edge`'s v1 first-writer-wins drop), the per-(kind,role) coverage matrix
-for `inline_graph_fold.fold_type_graph`, a named `TraversalPolicy` reifying
-the call-graph leak walk's own edge-kind/stop/confidence rules
-(`internal_leak.TraversalPolicy`/`CALL_GRAPH_TRAVERSAL_POLICY` — see "D5
-implementation" for what's covered and what's deferred), and a two-tier
-proof-path preference (`internal_leak.select_preferred_path`, wired into
-`post_processing.py`'s layout-walk selection only — see "D6 implementation"
-for what's covered and what's deferred). D4 (`EntityResolver`/
+**Status:** Accepted — D1, D2, D3, D5, and D6 implemented (each to the extent
+described below; D4 remains a deliberate stop, not a gap): role-aware edge
+identity plus the opt-in per-call-site occurrence trail
+(`GraphEdge.relation_key()`/`edge_relation_key` for D1's `relation_key` half,
+`GraphEdge.occurrences`/`edge_occurrence_id` for its `occurrence_id` half —
+free of cost until a producer populates the four occurrence-level attrs, per
+the Costs section below), the evidence-preserving node/edge merge
+(`GraphFact`/`FactConflict`/`merge_graph_facts`, replacing
+`SourceGraphSummary.add_node`/`add_edge`'s v1 first-writer-wins drop), the
+per-(kind,role) coverage matrix for `inline_graph_fold.fold_type_graph`, a
+named `TraversalPolicy` reifying the call-graph leak walk's own
+edge-kind/stop/confidence/precision rules
+(`internal_leak.TraversalPolicy`/`CALL_GRAPH_TRAVERSAL_POLICY`, now including
+a real `effect_transitions` — see "D5 implementation" for what's covered and
+what's still deferred to the layout walk), and a proof-path preference order
+across two selectors split by how much per-hop structure their walk's path
+representation carries (`internal_leak.select_preferred_path` — 2 of 6
+tiers, the layout walk's plain `list[str]` paths;
+`buildsource.graph_impact.select_preferred_graph_path` — 4 of 6 tiers, a
+structured `list[GraphEdge]` path — plus the `primary_path`/
+`alternative_paths`/`discarded_path_count` finding shape on
+`impact.model.GraphProofPath`; see "D6 implementation" for the exact tier
+mapping and what's still deferred). D4 (`EntityResolver`/
 `SOURCE_GRAPH_VERSION = 2`) remains open, and is a deliberate stop, not an
 oversight — see "D4: deliberately deferred" below for why. See "D1
 implementation"/"D2 implementation"/"D3 implementation"/"D5 implementation"/
@@ -265,7 +275,7 @@ The finding keeps `primary_path` (the highest-preference path found) plus
 "how much evidence was there, and how strong was the best of it," not just
 one arbitrary shortest path.
 
-## D1 implementation (G29 Phase 2, slice 3 — the `relation_key` half)
+## D1 implementation (G29 Phase 2, slices 3 and 6 — both halves)
 
 - `abicheck/buildsource/graph_facts.py`: `edge_relation_key(src, dst, kind,
   resolved)` and `GraphEdge.relation_key()` — the `(src, dst, kind, role)`
@@ -279,18 +289,33 @@ one arbitrary shortest path.
   to `relation_key()`, since deduping on the coarse key alone silently
   folded two real, role-distinct edges into one before `relation_key()`
   could ever observe both roles on a real, `add_edge`-built graph.
-- **Not implemented**: `occurrence_id` (the full, non-deduplicated
-  per-call-site/per-configuration evidence trail one `relation_key` can back
-  many of). The ADR's own Costs section flags this specifically as needing "a
-  measured check against the existing scan-level cost model... before this
-  lands on a default, always-on path rather than an opt-in one" — that
-  measurement hasn't been done, so this slice stops at the identity split and
-  does not add per-occurrence storage.
-- `tests/test_source_graph_v2.py` (`TestRelationKey`): role discriminates two
-  edges that collapse on `key()`; defaults to `""` when no role attr;
-  defaults absent; reads the D2-merged `resolved` view (not whichever fact
-  registered first) rather than a raw/stale attr; the free function and
-  method agree.
+- **`occurrence_id` (slice 6, G29 Phase 2 follow-up):** `edge_occurrence_id(
+  relation_key, attrs)` and `GraphEdge.occurrences` — a stable
+  `sha256:<hex>` hash over `(relation_key, source_location,
+  configuration_id, instantiation_id, callsite_id)`, computed per fact and
+  accumulated (deduplicated) into `occurrences` by
+  `ensure_facts_and_resolve` alongside `resolved`/`conflicts`. Answers the
+  Costs section's own gate differently than a default-on path would:
+  `edge_occurrence_id` returns `None` — contributing nothing to
+  `occurrences` — whenever a fact carries none of the four occurrence keys,
+  which is every fact from every current producer. So this lands as
+  genuinely opt-in surface (zero cost, zero behavior change, until a
+  producer populates those attrs) rather than needing the scan-level
+  cost-model measurement a default-on path would have required. No current
+  producer opts in yet; this is forward-compatible schema, not a change to
+  what any pack contains today.
+- `tests/test_source_graph_v2.py` (`TestRelationKey`, `TestOccurrenceId`):
+  role discriminates two edges that collapse on `key()`; defaults to `""`
+  when no role attr; defaults absent; reads the D2-merged `resolved` view
+  (not whichever fact registered first) rather than a raw/stale attr; the
+  free function and method agree. `TestOccurrenceId` covers: no occurrence
+  attrs → `None`/empty `occurrences`; a stable, deterministic hash for
+  identical inputs; distinct call sites and distinct relation keys both
+  produce distinct ids; two facts with different `callsite_id`s on one
+  `relation_key`-deduped edge both survive in `occurrences`; re-registering
+  the same call site doesn't duplicate; round-trips through
+  `to_dict()`/`from_dict()`; self-heals from a v1 pack with no `occurrences`
+  key.
 
 ### Mechanical follow-up: `GraphNode`/`GraphEdge` moved into `graph_facts.py`
 
@@ -580,19 +605,20 @@ preference order all remain open follow-up work under this same ADR — see
   family-level `extractor_passes` side); `role_pass_covered()`'s direct-hit
   and family-fallback behavior.
 
-## D5 implementation (G29 Phase 2, slice 5 — partial)
+## D5 implementation (G29 Phase 2, slices 5 and 7)
 
 - `abicheck/internal_leak.py`: `TraversalPolicy` (`allowed_edges`,
-  `stop_conditions`, `minimum_confidence`) and `CALL_GRAPH_TRAVERSAL_POLICY`
-  — the call-graph leak walk's own rules (`{DECL_CALLS_DECL,
-  DECL_REFERENCES_DECL}`, the existing `is_consumer_compiled_node` stop
-  check) reified as one named, reusable object instead of the inline
-  `edge_kinds` frozenset + hard-coded `_is_consumer_compiled_node` call
-  `_consumer_compiled_reachability`/`compute_call_graph_leak_paths` had
-  before. `stop_conditions` matches the Decision text's own polarity (True =
-  "do not expand past this node," the node itself still counts as
-  reachable) — the inverse sense of `is_consumer_compiled_node`, which the
-  policy's `stop_conditions` lambda negates.
+  `stop_conditions`, `minimum_confidence`, `effect_transitions`) and
+  `CALL_GRAPH_TRAVERSAL_POLICY` — the call-graph leak walk's own rules
+  (`{DECL_CALLS_DECL, DECL_REFERENCES_DECL}`, the existing
+  `is_consumer_compiled_node` stop check) reified as one named, reusable
+  object instead of the inline `edge_kinds` frozenset + hard-coded
+  `_is_consumer_compiled_node` call `_consumer_compiled_reachability`/
+  `compute_call_graph_leak_paths` had before. `stop_conditions` matches the
+  Decision text's own polarity (True = "do not expand past this node," the
+  node itself still counts as reachable) — the inverse sense of
+  `is_consumer_compiled_node`, which the policy's `stop_conditions` lambda
+  negates.
 - `minimum_confidence` is real, wired filtering — `_consumer_compiled_reachability`
   now skips any edge whose confidence rank is below the policy's floor
   before building its adjacency map — not just a passthrough field. The
@@ -601,14 +627,26 @@ preference order all remain open follow-up work under this same ADR — see
   existing caller; a policy built with a stricter floor (e.g. `CONF_HIGH`)
   is new capability future code can opt into without this walk's own logic
   changing again.
-- **Not implemented this slice**: `effect_transitions` (how a walk's
-  precision label changes crossing a particular edge kind) — no current
-  walk needs it, so it would be speculative surface with no caller.
+- **`effect_transitions` (slice 7, G29 Phase 2 follow-up):**
+  `CALL_GRAPH_TRAVERSAL_POLICY.effect_transitions = {"virtual": "overapprox",
+  "function_pointer": "overapprox"}` — a virtual/function-pointer call is
+  never statically exact (the same `CallEdge.resolution="overapprox"` label
+  ADR-031 D4/D9 already puts on that edge), so crossing one downgrades the
+  walk's precision from that point on. `_edge_effect_transition(policy,
+  edge)` looks up an edge's resolved `call_kind` against the policy's map;
+  `_consumer_compiled_reachability` now returns a third element per entry —
+  `degraded: frozenset[str]` — the subset of reached nodes first reached via
+  a transitioning edge, sticky for every node reached transitively past it
+  (a private-function signature change, callers of `_consumer_compiled_reachability`
+  updated to the 3-tuple accordingly). `compute_call_graph_leak_paths`
+  prefixes a degraded path's formatted string with `"overapprox: "`, so a
+  proof that only exists through a possible-dispatch-target edge is
+  distinguishable from one proven through an unbroken chain of direct calls.
   `compute_leak_paths`'s layout/type-graph walk (the other of the two walks
-  D5's Decision text names) does **not** adopt `TraversalPolicy` — it
+  D5's Decision text names) still does **not** adopt `TraversalPolicy` — it
   traverses `RecordType`/typedef structures, not the L5 `GraphNode`/
   `GraphEdge` graph this policy shape describes, so it would need its own
-  data-model change first, which is out of scope here (matches the
+  data-model change first, which stays out of scope (matches the
   same-shaped scoping decision D3 made for `inline_graph_fold` vs.
   `header_graph.py`/the clang-plugin producer).
 - `tests/test_internal_leak.py` (`TestTraversalPolicy`): the shared policy's
@@ -618,40 +656,66 @@ preference order all remain open follow-up work under this same ADR — see
   while still recording that node itself as reachable; the public
   `compute_call_graph_leak_paths` entry point still routes through
   `CALL_GRAPH_TRAVERSAL_POLICY` end to end.
+  `tests/test_internal_leak_effect_transitions.py` (`TestEffectTransitions`,
+  split out to stay under the line-count cap): no transition for a direct
+  call; a real transition for a virtual call; the target of a virtual call
+  is marked degraded; the downgrade is sticky past the transitioning edge; a
+  policy with no `effect_transitions` behaves exactly as before this field
+  existed; `compute_call_graph_leak_paths` flags the overapprox-only path.
 
-## D6 implementation (G29 Phase 2, slice 4 — partial)
+## D6 implementation (G29 Phase 2, slices 4 and 8)
 
 - `abicheck/internal_leak.py`: `select_preferred_path(paths: list[list[str]])
   -> list[str]` implements the two tiers this walk's own per-path signals
-  already support out of the Decision text's six-tier order — "exact" (a
-  value-propagating path, tier 2 in the six-tier list) and "virtual/indirect
-  over-approximation" (tier 6). A pointer/reference-only path never wins over
-  an available value-propagating one just because it's shorter (what plain
-  `min(paths, key=len)` did); within a tier, shortest still wins. The other
-  four tiers (consumer-proven, public-header structural, multi-producer-
-  confirmed, reduced-confidence name resolution) need structured per-hop
-  evidence (confidence, producer, `ScopeOrigin`) this walk's plain
-  `list[str]` path representation doesn't carry — not implemented.
-- Wired into two call sites over the same layout-walk path representation:
+  support out of the Decision text's six-tier order — "exact" (a
+  value-propagating path, tier 2) and "virtual/indirect over-approximation"
+  (tier 6). A pointer/reference-only path never wins over an available
+  value-propagating one just because it's shorter (what plain
+  `min(paths, key=len)` did); within a tier, shortest still wins. Wired into
   `post_processing.py`'s `MarkReachability` proof-path selection (the
-  `reachable_types`-keyed branch), and `internal_leak._build_leak_change`
+  `reachable_types`-keyed branch) and `internal_leak._build_leak_change`
   (the `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` synthetic finding's own
-  displayed proof path — CodeRabbit review caught that the first wiring
-  missed this second consumer of the same `paths` shape). The
-  call-graph-walk's own `min(call_paths, key=len)` selection is **deliberately
-  left unchanged** — `call_paths` there are already-formatted strings with no
-  structured value/indirection signal to tier on, so `select_preferred_path`
-  cannot apply without first changing that walk's path representation, which
-  is out of scope for this slice.
-- `post_processing.py` was already at the AI-readiness 2000-line hard cap
-  before this change; wiring in `select_preferred_path` was paired with
-  collapsing the layout walk's separate `reachability_kind`
-  value-propagating-check and `reachability_proof_path` `min(...)` call into
-  one shared `preferred_path = select_preferred_path(paths)` — net negative
-  line count even after the new import, and the two derived fields are now
-  provably consistent (`reachability_kind` reads `"value_embedding"` exactly
-  when the selected proof path itself is value-propagating, not "any path
-  is" independently of which one gets shown).
+  displayed proof path). The call-graph walk's own `min(call_paths,
+  key=len)` selection is **deliberately left unchanged for this string-path
+  representation** — a formatted string still carries no per-hop
+  value/indirection signal to tier `select_preferred_path` on.
+- **`select_preferred_graph_path` (slice 8, G29 Phase 2 follow-up,
+  `abicheck/buildsource/graph_impact.py`):** a *second* selector, over
+  structured `list[GraphEdge]` paths rather than plain `list[str]` — a real
+  `GraphEdge` carries per-edge confidence, fact-producer count (D2), and
+  (via each endpoint node's `visibility` attr) public/private surface
+  information, so this selector implements four of the six tiers instead of
+  two: "exact/high-confidence" (every edge `CONF_HIGH`), "public-header
+  structural" (every node `PUBLIC_VISIBILITIES`), "multi-producer-confirmed"
+  (some edge has >1 distinct fact producer), and a residual
+  "reduced-confidence" catch-all; over-approximation (crossing an
+  `effect_transitions`-tagged edge, D5) is checked first and forces the
+  weakest tier regardless of the other signals, since an over-approximated
+  proof is never "exact" no matter how confident its other edges look. Tier
+  1 (consumer-proven) stays out of scope for both selectors — it needs the
+  Phase 4 consumer graph. Wired into
+  `source_graph_findings.py`'s `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`
+  producer, replacing its own `min(target_paths, key=lambda tp: len(tp[1]))`
+  — the same plain-shortest anti-pattern this ADR's Decision text
+  originally called out, now closed for the one detector whose path
+  representation is already structured enough to support it.
+- **`primary_path`/`alternative_paths[0..N]`/`discarded_path_count` (slice
+  8):** `buildsource.graph_impact.attach_impact_metadata` gained an
+  `alternative_paths` parameter — the runner-up candidates *not* selected as
+  primary, capped at 3 (matching `_build_leak_change`'s own "+N more paths"
+  cap), with any remainder recorded as `Change.impact_discarded_path_count`.
+  `impact.model.GraphProofPath` gained matching `alternative_paths`
+  (nested `GraphProofPath`s) and `discarded_path_count` fields;
+  `impact.engine._build_proof_path` reads the new `Change` fields into them.
+  Both are empty/zero for the still-common single-candidate case. See
+  [Unified Impact Assessment](../../learn/impact-analysis.md) and
+  [Source Graph Schema Reference](../../reference/source-graph-schema.md#primary_path-alternative_paths-discarded_path_count).
+- **Still not implemented**: the two evidence-requiring tiers neither
+  selector covers (consumer-proven, and a genuinely finer
+  "reduced-confidence name resolution" axis beyond the residual case
+  `select_preferred_graph_path` folds it into) — both need evidence
+  (a consumer graph; a producer-name-resolution confidence signal) that
+  doesn't exist yet.
 - `tests/test_internal_leak.py` (`TestSelectPreferredPath`): value-propagating
   preferred over a shorter indirect path; shortest wins within the same tier;
   a pointer/signature-only path beats a pure-indirect one; a single path
@@ -659,11 +723,12 @@ preference order all remain open follow-up work under this same ADR — see
   `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` finding's own `reachability_proof_path`
   also prefers the value-propagating path (verified to fail without the fix);
   the description's "+N more paths" count still reflects the full,
-  unreordered candidate collection.
-- **Not implemented**: the `primary_path`/`alternative_paths[0..N]`/
-  `discarded_path_count` finding shape the Decision text describes, and the
-  four evidence-requiring tiers listed above — this slice only replaces the
-  layout walk's path-selection comparator, not the finding schema around it.
+  unreordered candidate collection. `tests/test_graph_impact.py`
+  (`TestSelectPreferredGraphPath`, `TestAttachImpactMetadataAlternatives`,
+  `TestPathOccurrenceId`): each of the four computable tiers beats a weaker
+  candidate; ties within a tier prefer the shorter path;
+  `attach_impact_metadata` records/caps alternatives correctly and excludes
+  the primary path from its own alternatives list.
 
 ## D4: deliberately deferred
 
@@ -754,11 +819,16 @@ respects rather than sidesteps.
   its strongest form; a castxml-only pipeline sees no identity-fragmentation
   improvement from D4 (still falls back to v1 hashing), only the D2/D3/D5/D6
   benefits.
-- `occurrence_id`'s extra granularity (D1) grows pack size for a
-  template-heavy codebase (more distinct occurrences per relation) — needs a
-  measured check against the existing scan-level cost model
-  (`docs/contribute/performance.md`) before this lands on a default,
-  always-on path rather than an opt-in one.
+- `occurrence_id`'s extra granularity (D1) would grow pack size for a
+  template-heavy codebase (more distinct occurrences per relation) if it
+  landed on a default, always-on path — the implemented slice sidesteps the
+  scan-level cost-model measurement (`docs/contribute/performance.md`) this
+  would otherwise need by making it strictly opt-in instead:
+  `edge_occurrence_id` costs one dict-membership check and returns `None`
+  (contributing nothing to `occurrences`) unless a fact already carries
+  `source_location`/`configuration_id`/`instantiation_id`/`callsite_id` —
+  which no current producer sets. The cost-model measurement is still owed
+  *if and when* a producer opts in and this stops being a no-op in practice.
 - This is explicitly **schema-only** groundwork: none of D1-D6 alone changes
   a single `ChangeKind`'s output. The payoff is realized only once G29
   Phases 3-6 (reporting, consumer join, new edge families, new detectors)

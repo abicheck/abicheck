@@ -126,6 +126,7 @@ nav:
     - Detector Spec Matrix: reference/detector-spec.md
     - Exit Codes: reference/exit-codes.md
     - Snapshot Format: reference/snapshot-format.md
+    - Source Graph Schema: reference/source-graph-schema.md
     - Build Output Schema: reference/build-output-schema.md
     - Project Targets Schema: reference/project-targets-schema.md
     - resolve-baseline Action: reference/resolve-baseline.md
@@ -189,6 +190,7 @@ nav:
       - Codebase Overview: contribute/codebase-overview.md
       - Writing Documentation: contribute/documentation.md
       - Testing: contribute/testing.md
+      - Detector Impact Contract: contribute/detector-impact-contract.md
       - Performance: contribute/performance.md
       - Troubleshooting: contribute/troubleshooting.md
     - Roadmap & Status:

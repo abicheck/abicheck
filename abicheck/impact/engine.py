@@ -50,6 +50,25 @@ def _proof_path_target(change: Any, steps: tuple[ProofStep, ...]) -> str:
     return str(getattr(change, "symbol", "") or "")
 
 
+def _build_alternative_path(
+    raw_steps: list[dict[str, object]], *, root: str | None
+) -> GraphProofPath:
+    """One runner-up candidate as its own (prose-less) ``GraphProofPath`` —
+    ADR-046 D6's ``alternative_paths``. Shares ``root`` with the primary
+    path (same walk origin); ``target``/``is_direct`` are derived from its
+    own steps, since an alternative can legitimately point at a different
+    subject than the primary (see :func:`_build_proof_path`).
+    """
+    steps = tuple(ProofStep.from_dict(raw) for raw in raw_steps)
+    last_node = next((s for s in reversed(steps) if s.step_type == "node"), None)
+    return GraphProofPath(
+        target=last_node.label if last_node is not None else (root or ""),
+        root=root,
+        is_direct=len(raw_steps) <= 1 if raw_steps else None,
+        steps=steps,
+    )
+
+
 def _build_proof_path(change: Any) -> GraphProofPath | None:
     impact_proof_path = getattr(change, "impact_proof_path", None)
     affected_roots = getattr(change, "affected_public_roots", None)
@@ -59,12 +78,19 @@ def _build_proof_path(change: Any) -> GraphProofPath | None:
         return None
     steps = tuple(ProofStep.from_dict(raw) for raw in (impact_proof_path or []))
     root = affected_roots[0] if affected_roots else None
+    alt_raw = getattr(change, "impact_alternative_paths", None) or []
+    alternatives = tuple(_build_alternative_path(p, root=root) for p in alt_raw)
+    discarded = int(getattr(change, "impact_discarded_path_count", 0) or 0)
+    occurrence_id = getattr(change, "impact_occurrence_id", None)
     return GraphProofPath(
         target=_proof_path_target(change, steps),
         root=root,
         is_direct=is_direct,
         steps=steps,
         prose=prose,
+        alternative_paths=alternatives,
+        discarded_path_count=discarded,
+        occurrence_id=occurrence_id,
     )
 
 

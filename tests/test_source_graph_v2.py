@@ -23,7 +23,7 @@
 
 from __future__ import annotations
 
-from abicheck.buildsource.graph_facts import edge_relation_key
+from abicheck.buildsource.graph_facts import edge_occurrence_id, edge_relation_key
 from abicheck.buildsource.source_graph import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -668,3 +668,118 @@ class TestGraphIdRoleAware:
         a = self._single_edge_graph("return")
         b = self._single_edge_graph("return")
         assert a.compute_graph_id() == b.compute_graph_id()
+
+
+class TestOccurrenceId:
+    """ADR-046 D1's second half: the opt-in per-call-site occurrence trail
+    (:func:`edge_occurrence_id` / :attr:`GraphEdge.occurrences`) layered on
+    top of the already-implemented ``relation_key``."""
+
+    def test_no_occurrence_attrs_means_no_occurrences(self) -> None:
+        g = SourceGraphSummary()
+        g.add_edge(
+            GraphEdge(
+                src="decl://a",
+                dst="decl://b",
+                kind="DECL_CALLS_DECL",
+                provenance="call_graph",
+                confidence=CONF_HIGH,
+            )
+        )
+        (edge,) = g.edges
+        assert edge.occurrences == []
+
+    def test_edge_occurrence_id_returns_none_without_occurrence_attrs(self) -> None:
+        assert edge_occurrence_id(("a", "b", "K", ""), {"role": "return"}) is None
+
+    def test_edge_occurrence_id_is_stable_and_deterministic(self) -> None:
+        rk = ("decl://a", "decl://b", "DECL_CALLS_DECL", "")
+        attrs = {"callsite_id": "cs1", "source_location": "a.cpp:10"}
+        assert edge_occurrence_id(rk, attrs) == edge_occurrence_id(rk, dict(attrs))
+
+    def test_edge_occurrence_id_distinguishes_different_call_sites(self) -> None:
+        rk = ("decl://a", "decl://b", "DECL_CALLS_DECL", "")
+        first = edge_occurrence_id(rk, {"callsite_id": "cs1"})
+        second = edge_occurrence_id(rk, {"callsite_id": "cs2"})
+        assert first is not None
+        assert second is not None
+        assert first != second
+
+    def test_edge_occurrence_id_distinguishes_different_relation_keys(self) -> None:
+        attrs = {"callsite_id": "cs1"}
+        a = edge_occurrence_id(("decl://a", "decl://b", "K", ""), attrs)
+        b = edge_occurrence_id(("decl://a", "decl://c", "K", ""), attrs)
+        assert a != b
+
+    def test_two_facts_with_distinct_callsites_both_preserved(self) -> None:
+        # Two producers observe the same (src, dst, kind, role) relation --
+        # so they collapse onto one GraphEdge by relation_key() -- but at
+        # different call sites. The occurrence trail must keep both, not
+        # silently keep only the winning fact's.
+        g = SourceGraphSummary()
+        g.add_edge(
+            GraphEdge(
+                src="decl://a",
+                dst="decl://b",
+                kind="DECL_CALLS_DECL",
+                provenance="producer_1",
+                confidence=CONF_REDUCED,
+                attrs={"callsite_id": "cs1"},
+            )
+        )
+        g.add_edge(
+            GraphEdge(
+                src="decl://a",
+                dst="decl://b",
+                kind="DECL_CALLS_DECL",
+                provenance="producer_2",
+                confidence=CONF_HIGH,
+                attrs={"callsite_id": "cs2"},
+            )
+        )
+        (edge,) = g.edges
+        assert len(edge.occurrences) == 2
+
+    def test_re_registering_the_same_callsite_does_not_duplicate(self) -> None:
+        g = SourceGraphSummary()
+        for _ in range(2):
+            g.add_edge(
+                GraphEdge(
+                    src="decl://a",
+                    dst="decl://b",
+                    kind="DECL_CALLS_DECL",
+                    provenance="producer_1",
+                    confidence=CONF_HIGH,
+                    attrs={"callsite_id": "cs1"},
+                )
+            )
+        (edge,) = g.edges
+        assert len(edge.occurrences) == 1
+
+    def test_occurrences_round_trip_through_to_dict_from_dict(self) -> None:
+        edge = GraphEdge(
+            src="decl://a",
+            dst="decl://b",
+            kind="DECL_CALLS_DECL",
+            provenance="call_graph",
+            confidence=CONF_HIGH,
+            attrs={"callsite_id": "cs1"},
+        )
+        SourceGraphSummary(edges=[edge])  # __post_init__ resolves facts
+        assert edge.occurrences
+        restored = GraphEdge.from_dict(edge.to_dict())
+        assert restored.occurrences == edge.occurrences
+
+    def test_occurrences_self_heal_from_a_v1_pack_with_no_occurrences_key(
+        self,
+    ) -> None:
+        raw = {
+            "edge": "DECL_CALLS_DECL",
+            "src": "decl://a",
+            "dst": "decl://b",
+            "provenance": "call_graph",
+            "confidence": CONF_HIGH,
+            "attrs": {"callsite_id": "cs1"},
+        }
+        edge = GraphEdge.from_dict(raw)
+        assert edge.occurrences

@@ -1,3 +1,20 @@
+---
+doc_type: explanation
+audience:
+  - contributor
+  - library-maintainer
+level: intermediate
+canonical_for:
+  - impact-analysis
+depends_on:
+  - abicheck/impact/model.py
+  - abicheck/impact/engine.py
+  - abicheck/buildsource/graph_impact.py
+  - abicheck/junit_report.py
+lifecycle: active
+generated: false
+---
+
 # Unified Impact Assessment
 
 abicheck's reachability, graph-proof-path, and suppression-decision signals
@@ -65,7 +82,17 @@ independently-nullable keys:
   them — `root` and `steps` come from the structured L5 graph walk
   ([ADR-048](../contribute/adr/048-canonical-entity-identity-and-graph-reconciliation.md)),
   `prose` is the human-readable rendering. `steps` is empty when only the
-  prose rendering is available.
+  prose rendering is available. When a producer had more than one candidate
+  path and picked this one via the
+  [ADR-046 D6 preference order](../reference/source-graph-schema.md#proof-path-preference-order-adr-046-d6),
+  the runner-ups appear as `alternative_paths` (each its own nested
+  `proof_path`-shaped object) and `discarded_path_count` counts any further
+  candidates beyond the kept cap — both absent for the common single-candidate
+  case. `occurrence_id` is a stable, `description`-independent hash over this
+  path's underlying graph occurrences
+  ([ADR-046 D1](../reference/source-graph-schema.md#relation_key-and-occurrence_id)) —
+  absent today for nearly every finding, since no current producer populates
+  the per-call-site attrs it's derived from.
 - `decision` records whether the finding was kept or suppressed, and (when a
   [pattern-aware modulation](../use/api-surface-intelligence.md) or
   other classification override fired) the reason code and
@@ -94,17 +121,52 @@ changes route through a separate builder that mirrors the same fields), and
 each entry in `suppression.suppressed_changes[]` — a suppressed finding's
 `decision.state` is always `"suppressed"` there, so its `impact_assessment`
 is always present. SARIF carries the same two fields as `properties.reachabilityState`/
-`properties.impactAssessment`. JUnit does not — see ADR-052 / ADR-048 for
-why.
+`properties.impactAssessment`. JUnit does not carry the full object (a
+structured node/edge object is a poor fit for JUnit's `<properties>`
+text-value model) — but `--report-mode root-cause --format junit` does add
+additive `rootCauseId`/`rootCause` attributes to each `<failure>` element,
+without restructuring JUnit's per-symbol `<testcase>` tree; see
+[Root-cause grouping](#root-cause-grouping) below.
+
+## Root-cause grouping
+
+`--report-mode root-cause` groups findings that share a root cause —
+today, findings whose `caused_by_type` names the same internal entity, or
+that share a `symbol` another finding's `caused_by_type` actually
+references (see `reporter_markdown._root_cause_key_and_display` for the
+exact grouping rule). JSON nests grouped findings under a `root_causes[]`
+array; markdown renders one section per root cause; SARIF and JUnit keep
+their existing flat shapes and instead add `rootCauseId`/`rootCause` to
+each result/failure (SARIF: `properties.rootCauseId`/`properties.rootCause`;
+JUnit: attributes directly on `<failure>`) — restructuring either format's
+established shape would break every existing consumer's parsing
+assumptions. `root_cause_id` is a stable hash of the grouping key, so it is
+consistent across JSON/markdown/SARIF/JUnit for the same underlying report —
+none of the four formats can disagree about which findings share a root
+cause.
+
+JUnit's own `<testcase>` groups by *symbol*, not by finding
+(`_partition_changes`), so a symbol with more than one change gets multiple
+`<failure>` children under one `<testcase>` — each carries its *own*
+change's `rootCauseId`/`rootCause` independently. There is no merging and so
+no "what if this testcase's findings disagree on root cause" question: two
+sibling `<failure>` elements can legitimately show two different root
+causes.
 
 ## What this does not cover yet
 
 `impact_assessment` does not (yet) include which consumers or use cases are
-affected, a coverage summary, or a root-cause identifier — those need the
-consumer/use-case graph (G29 Phase 4), the per-role coverage matrix wired
-through the impact layer, and the root-cause correlator (G29 Phase 6),
-none of which exist yet. Adding empty placeholder fields for data no
-producer can populate would misrepresent what abicheck actually knows, so
-they are left out of the schema entirely rather than always-`null`. See
+affected, a coverage summary, or a `root_cause_id`/`impact_group_id` on the
+assessment itself — those need the consumer/use-case graph (G29 Phase 4),
+the per-role coverage matrix wired through the impact layer, and the
+root-cause correlator (G29 Phase 6). Correctly computing a per-finding
+`root_cause_id` also needs whole-`DiffResult` context (which findings
+elsewhere reference this one) that a single finding's read view can't see —
+see the [Detector Impact Contract](../contribute/detector-impact-contract.md)
+for why this stays a report-level grouping (`--report-mode root-cause`
+above) rather than an `impact_assessment.proof_path` field. Adding empty
+placeholder fields for data no producer can populate would misrepresent what
+abicheck actually knows, so they are left out of the schema entirely rather
+than always-`null`. See
 [ADR-052](../contribute/adr/052-unified-impact-assessment-model.md) for the
 full list of what this slice deliberately does not implement.

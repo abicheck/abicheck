@@ -31,10 +31,20 @@ detector was already going to emit.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import TYPE_CHECKING, Any
 
+from .call_graph import (
+    CALL_KIND_FUNCTION_POINTER,
+    CALL_KIND_VIRTUAL,
+    RESOLUTION_OVERAPPROX,
+)
+from .graph_facts import CONF_HIGH
+from .source_graph import PUBLIC_VISIBILITIES
+
 if TYPE_CHECKING:
-    from .source_graph import GraphEdge, SourceGraphSummary
+    from .source_graph import GraphEdge, GraphNode, SourceGraphSummary
 
 
 def structured_proof_path(
@@ -89,18 +99,134 @@ def is_direct_path(path: list[GraphEdge]) -> bool:
     return len(path) <= 1
 
 
+#: ADR-046 D6's six-tier proof-path preference order, numbered by how many of
+#: this module's *computable* tiers a path satisfies (lower is stronger).
+#: Tier 1 ("consumer-proven") needs a consumer graph that doesn't exist yet
+#: (Phase 4) so is not represented here; tiers 2-6 map onto the constants
+#: below in the ADR's own order.
+_TIER_EXACT = 0  # ADR tier 2: every edge is CONF_HIGH
+_TIER_PUBLIC_STRUCTURAL = 1  # ADR tier 3: every node on the path is public
+_TIER_MULTI_PRODUCER = 2  # ADR tier 4: some edge has >1 distinct fact producer
+_TIER_REDUCED = 3  # ADR tier 5: no stronger signal found (the residual case)
+_TIER_OVERAPPROX = 4  # ADR tier 6: crosses a virtual/function-pointer call
+
+
+def _edge_is_overapprox(edge: GraphEdge) -> bool:
+    """Whether *edge* is a virtual/function-pointer call or otherwise
+    resolved ``overapprox`` (ADR-031 D4/D9, ADR-046 D5's ``call_kind``
+    vocabulary — the same signal ``internal_leak.CALL_GRAPH_TRAVERSAL_POLICY.
+    effect_transitions`` downgrades a walk's precision on).
+    """
+    resolved = edge.resolved or edge.attrs
+    call_kind = resolved.get("call_kind")
+    if call_kind in (CALL_KIND_VIRTUAL, CALL_KIND_FUNCTION_POINTER):
+        return True
+    return resolved.get("resolution") == RESOLUTION_OVERAPPROX
+
+
+def _node_is_public(node: GraphNode | None) -> bool:
+    return node is not None and node.attrs.get("visibility") in PUBLIC_VISIBILITIES
+
+
+def _path_node_ids(path: list[GraphEdge]) -> list[str]:
+    if not path:
+        return []
+    return [path[0].src, *(e.dst for e in path)]
+
+
+def _graph_path_tier(node_by_id: dict[str, GraphNode], path: list[GraphEdge]) -> int:
+    """This path's ADR-046 D6 tier — see the module-level ``_TIER_*``
+    constants. Overapprox is checked first and wins regardless of any other
+    signal: a path that crosses a virtual/function-pointer call is never
+    "exact", however high-confidence its other edges are.
+    """
+    if any(_edge_is_overapprox(e) for e in path):
+        return _TIER_OVERAPPROX
+    if all(e.confidence == CONF_HIGH for e in path):
+        return _TIER_EXACT
+    if all(_node_is_public(node_by_id.get(nid)) for nid in _path_node_ids(path)):
+        return _TIER_PUBLIC_STRUCTURAL
+    if any(len({f.producer for f in e.facts}) > 1 for e in path):
+        return _TIER_MULTI_PRODUCER
+    return _TIER_REDUCED
+
+
+def select_preferred_graph_path(
+    graph: SourceGraphSummary, paths: list[list[GraphEdge]]
+) -> list[GraphEdge]:
+    """Pick the strongest candidate proof path among *paths* (ADR-046 D6).
+
+    Unlike :func:`~abicheck.internal_leak.select_preferred_path`'s plain
+    ``list[str]`` layout-walk paths, a structured ``list[GraphEdge]`` path
+    carries per-edge confidence, fact-producer count (ADR-046 D2), and —
+    via each hop's node ``visibility`` attr — public/private surface
+    information, so this selector implements four of the ADR's six tiers
+    (see :func:`_graph_path_tier`); "consumer-proven" (tier 1) needs a
+    consumer graph (Phase 4) and a genuinely finer "reduced-confidence name
+    resolution" axis (tier 5, beyond the residual case this collapses into)
+    are both left for a future slice.
+
+    Ties within a tier keep the shortest path (fewest hops), matching
+    :func:`~abicheck.internal_leak.select_preferred_path`'s own tie-break.
+    Returns ``[]`` for an empty *paths* list; a single-candidate list is
+    returned unchanged with no tier computation (the common case today, same
+    as before this function existed).
+    """
+    if not paths:
+        return []
+    if len(paths) == 1:
+        return paths[0]
+    node_by_id = {n.id: n for n in graph.nodes}
+    return min(paths, key=lambda p: (_graph_path_tier(node_by_id, p), len(p)))
+
+
+def _path_occurrence_id(path: list[GraphEdge]) -> str | None:
+    """A stable id for *path*'s underlying graph occurrences (ADR-046 D1,
+    ADR-052's ``occurrence_id`` follow-up), independent of ``description``
+    text — distinct from ``reporter._finding_id``, which deliberately still
+    includes it.
+
+    Folds every edge's own :attr:`GraphEdge.occurrences` (ADR-046 D1's
+    per-call-site trail) into one hash. ``None`` when no edge on *path*
+    carries any occurrence-level attrs — still the common case today, since
+    no producer populates them yet (same opt-in cost model as D1 itself: this
+    stays free until one does).
+    """
+    ids = sorted({oid for e in path for oid in e.occurrences})
+    if not ids:
+        return None
+    blob = json.dumps(ids, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(blob).hexdigest()
+
+
 def attach_impact_metadata(
     change: Any,
     *,
     affected_public_roots: list[str],
     path: list[GraphEdge],
     graph: SourceGraphSummary,
+    alternative_paths: list[list[GraphEdge]] | None = None,
 ) -> None:
     """Attach B3's structured impact fields to an existing ``Change`` object
     in place. Never constructs a new ``Change`` — enrichment only.
+
+    *alternative_paths* (ADR-046 D6, G29 Phase 2 follow-up): the runner-up
+    candidates *path* was preferred over, when the caller had more than one
+    (e.g. via :func:`select_preferred_graph_path`). Capped at 3, matching
+    :func:`~abicheck.internal_leak._build_leak_change`'s own "+N more paths"
+    cap — ``change.impact_discarded_path_count`` records how many more were
+    dropped beyond that cap.
     """
     change.affected_public_roots = list(affected_public_roots) or None
     change.impact_proof_path = structured_proof_path(graph, path) or None
     change.impact_is_direct = (
         is_direct_path(path) if path or affected_public_roots else None
     )
+    change.impact_occurrence_id = _path_occurrence_id(path)
+    alts = [p for p in (alternative_paths or []) if p is not path]
+    cap = 3
+    kept = alts[:cap]
+    change.impact_alternative_paths = [
+        structured_proof_path(graph, p) for p in kept
+    ] or None
+    change.impact_discarded_path_count = max(0, len(alts) - len(kept))

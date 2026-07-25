@@ -94,6 +94,28 @@ class GraphProofPath:
     duplicating its logic here would be a second, driftable implementation.
     ``steps`` is empty when only the prose rendering is available (no
     structured ``impact_proof_path`` was attached for this finding).
+
+    ``alternative_paths``/``discarded_path_count`` (ADR-046 D6, G29 Phase 2
+    follow-up) are this path's runner-ups: when a producer had more than one
+    candidate path and picked this one as primary via a preference order
+    (e.g. ``buildsource.graph_impact.select_preferred_graph_path``), the
+    next-best candidates (capped by the producer) are kept here as their own
+    ``GraphProofPath``s (typically with their own, different ``target`` —
+    see that function's docstring), and ``discarded_path_count`` is how many
+    more existed beyond the cap. Both are empty/zero when only one candidate
+    path was ever available, which is still the common case today.
+
+    ``occurrence_id`` (ADR-052's stable-identifier follow-up, built on top of
+    ADR-046 D1) is a hash over this path's edges' own graph occurrence trail
+    — independent of ``description`` text, unlike ``reporter._finding_id``.
+    ``None`` whenever no edge on the path carries occurrence-level attrs
+    (``buildsource.graph_impact._path_occurrence_id``) — still the common
+    case today, since no producer populates them yet. ``root_cause_id``/
+    ``impact_group_id`` stay out of this dataclass: unlike a path's own
+    occurrences, correctly computing either needs whole-``DiffResult``
+    context (which findings elsewhere reference this one) that a single
+    ``Change``'s read view can't see — see ADR-052's "Deliberately not
+    implemented" section and Phase 6's ``RootCauseCorrelator``.
     """
 
     target: str
@@ -101,6 +123,9 @@ class GraphProofPath:
     is_direct: bool | None = None
     steps: tuple[ProofStep, ...] = ()
     prose: str | None = None
+    alternative_paths: tuple[GraphProofPath, ...] = ()
+    discarded_path_count: int = 0
+    occurrence_id: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         d: dict[str, object] = {"target": self.target}
@@ -112,6 +137,12 @@ class GraphProofPath:
             d["steps"] = [s.to_dict() for s in self.steps]
         if self.prose is not None:
             d["prose"] = self.prose
+        if self.alternative_paths:
+            d["alternative_paths"] = [p.to_dict() for p in self.alternative_paths]
+        if self.discarded_path_count:
+            d["discarded_path_count"] = self.discarded_path_count
+        if self.occurrence_id is not None:
+            d["occurrence_id"] = self.occurrence_id
         return d
 
 

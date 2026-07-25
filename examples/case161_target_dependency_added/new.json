@@ -15,6 +15,7 @@
           "producer": ""
         }
       ],
+      "occurrences": [],
       "provenance": "",
       "resolved": {},
       "src": "target:libdemo"

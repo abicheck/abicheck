@@ -1864,7 +1864,7 @@ class TestTraversalPolicy:
             allowed_edges=frozenset({"DECL_CALLS_DECL"}),
             stop_conditions=lambda node_id, node_by_id: node_id == "decl://mid",
         )
-        reachable, _ = _consumer_compiled_reachability(
+        reachable, _, _ = _consumer_compiled_reachability(
             graph, stop_at_mid, ["decl://pub"], node_by_id
         )["decl://pub"]
         assert "decl://mid" in reachable
@@ -1885,3 +1885,7 @@ class TestTraversalPolicy:
         )
         paths = compute_call_graph_leak_paths(snap)
         assert "ns::detail::helper" in paths
+
+
+# See test_internal_leak_effect_transitions.py for ADR-046 D5's
+# effect_transitions tests (split out to stay under the line-count cap).

@@ -40,6 +40,7 @@ Mapping rules:
 
 from __future__ import annotations
 
+import hashlib
 import io
 import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING
@@ -47,6 +48,7 @@ from typing import TYPE_CHECKING
 from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
 from .reporter import _finding_id, apply_show_only
+from .reporter_markdown import _root_cause_key_and_display
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -226,6 +228,60 @@ def _failure_type(
 
 
 # ---------------------------------------------------------------------------
+# --report-mode root-cause (G29 Phase 3, ADR-052 follow-up)
+# ---------------------------------------------------------------------------
+
+
+def _root_cause_lookup(
+    changes: list[Change],
+    missing_labels: tuple[str, ...],
+    gate_scope: str | None,
+) -> dict[str, tuple[str, str]]:
+    """Precompute ``finding_id -> (root_cause_id, root_display)`` for
+    ``--report-mode root-cause`` (mirrors ``sarif.py``'s ``_root_cause_for``
+    closure and the JSON/markdown ``_group_changes_by_root_cause`` grouping
+    key, so all four formats never disagree about a finding's root cause).
+
+    Keyed by finding id (:func:`~abicheck.reporter._finding_id` for a real
+    ``Change``, the label itself for a missing-contract entry — a label has
+    no backing ``Change``/finding id of its own) rather than restructuring
+    the per-symbol ``<testcase>`` tree JUnit's schema already commits to:
+    each ``<failure>`` attaches its *own* change's root cause independently,
+    so the "what if a testcase's changes disagree on root cause" question
+    ADR-052 raised for a symbol-keyed grouping never arises here — there is
+    no merging, only a per-failure lookup.
+    """
+    referenced_causes = frozenset(c.caused_by_type for c in changes if c.caused_by_type)
+    lookup: dict[str, tuple[str, str]] = {}
+    for c in changes:
+        key, root_display = _root_cause_key_and_display(
+            c.caused_by_type,
+            c.symbol,
+            c.kind.value,
+            _finding_id(c),
+            referenced_causes=referenced_causes,
+        )
+        lookup[_finding_id(c)] = (
+            hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
+            root_display,
+        )
+    rule_id = "used_by_missing_symbol" if gate_scope == "used_by" else "required_symbol_missing"
+    for label in missing_labels:
+        # A missing-contract label has no caused_by_type; its own name only
+        # becomes a *grouping* key when some other finding's caused_by_type
+        # names it (the referenced_causes guard above) — mirrors
+        # sarif._root_cause_for(None, label, rule_id, label) exactly.
+        key, root_display = _root_cause_key_and_display(
+            None, label, rule_id, label, referenced_causes=referenced_causes
+        )
+        lookup[label] = (
+            hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
+            root_display,
+        )
+    return lookup
+
+
+# ---------------------------------------------------------------------------
 # Single DiffResult → <testsuite>
 # ---------------------------------------------------------------------------
 
@@ -302,6 +358,7 @@ def _emit_testcases(
     severity_config: SeverityConfig | None,
     *,
     relevant_ids: frozenset[str] | None = None,
+    root_cause_lookup: dict[str, tuple[str, str]] | None = None,
 ) -> None:
     """Append ``<testcase>`` elements to *ts* for every symbol in *all_symbols*.
 
@@ -321,6 +378,7 @@ def _emit_testcases(
                     kind_sets,
                     severity_config,
                     relevant_ids=relevant_ids,
+                    root_cause_lookup=root_cause_lookup,
                 )
     else:
         # No snapshot — only emit changed symbols
@@ -335,6 +393,7 @@ def _emit_testcases(
                 kind_sets,
                 severity_config,
                 relevant_ids=relevant_ids,
+                root_cause_lookup=root_cause_lookup,
             )
 
 
@@ -346,6 +405,7 @@ def _append_extra_failures(
     severity_config: SeverityConfig | None,
     *,
     relevant_ids: frozenset[str] | None = None,
+    root_cause_lookup: dict[str, tuple[str, str]] | None = None,
 ) -> None:
     """Append extra ``<failure>`` children to already-existing testcases.
 
@@ -357,7 +417,14 @@ def _append_extra_failures(
         if _is_failure(c, result, kind_sets, severity_config, relevant_ids=relevant_ids):
             for tc in ts:
                 if tc.get("name") == c.symbol:
-                    _add_failure(tc, c, result, kind_sets, severity_config)
+                    _add_failure(
+                        tc,
+                        c,
+                        result,
+                        kind_sets,
+                        severity_config,
+                        root_cause_lookup=root_cause_lookup,
+                    )
                     break
 
 
@@ -367,6 +434,7 @@ def _build_testsuite(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
+    report_mode: str = "full",
 ) -> ET.Element:
     """Build a ``<testsuite>`` element from a single DiffResult.
 
@@ -449,6 +517,17 @@ def _build_testsuite(
 
     _add_scoped_properties(ts, result)
 
+    # G29 Phase 3 (ADR-052 follow-up): --report-mode root-cause adds
+    # rootCauseId/rootCause attributes to each <failure> rather than
+    # restructuring the per-symbol <testcase> tree — see
+    # _root_cause_lookup's docstring. None (the default "full" mode) keeps
+    # every downstream call a no-op, matching pre-existing behavior exactly.
+    root_cause_lookup = (
+        _root_cause_lookup(changes, missing_labels, getattr(result, "gate_scope", None))
+        if report_mode == "root-cause"
+        else None
+    )
+
     _emit_testcases(
         ts,
         all_symbols,
@@ -457,12 +536,23 @@ def _build_testsuite(
         kind_sets,
         severity_config,
         relevant_ids=relevant_ids,
+        root_cause_lookup=root_cause_lookup,
     )
     _append_extra_failures(
-        ts, extra_changes, result, kind_sets, severity_config, relevant_ids=relevant_ids
+        ts,
+        extra_changes,
+        result,
+        kind_sets,
+        severity_config,
+        relevant_ids=relevant_ids,
+        root_cause_lookup=root_cause_lookup,
     )
     _emit_missing_contract_testcases(
-        ts, missing_labels, getattr(result, "gate_scope", None), blocks=missing_blocks
+        ts,
+        missing_labels,
+        getattr(result, "gate_scope", None),
+        blocks=missing_blocks,
+        root_cause_lookup=root_cause_lookup,
     )
 
     return ts
@@ -471,6 +561,7 @@ def _build_testsuite(
 def _emit_missing_contract_testcases(
     ts: ET.Element, missing_labels: tuple[str, ...], gate_scope: str | None,
     *, blocks: bool = True,
+    root_cause_lookup: dict[str, tuple[str, str]] | None = None,
 ) -> None:
     """Emit a ``<testcase>`` per missing required symbol/version/entrypoint.
 
@@ -496,6 +587,11 @@ def _emit_missing_contract_testcases(
             fail = ET.SubElement(tc, "failure")
             fail.set("message", f"Required symbol/version '{label}' is missing from the new library.")
             fail.set("type", "MISSING_CONTRACT_MEMBER")
+            if root_cause_lookup is not None:
+                entry = root_cause_lookup.get(label)
+                if entry is not None:
+                    fail.set("rootCauseId", entry[0])
+                    fail.set("rootCause", entry[1])
 
 
 def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:
@@ -564,10 +660,13 @@ def _maybe_add_failure(
     severity_config: SeverityConfig | None = None,
     *,
     relevant_ids: frozenset[str] | None = None,
+    root_cause_lookup: dict[str, tuple[str, str]] | None = None,
 ) -> None:
     """Add a ``<failure>`` child to *tc* if the change is a failure."""
     if _is_failure(change, result, kind_sets, severity_config, relevant_ids=relevant_ids):
-        _add_failure(tc, change, result, kind_sets, severity_config)
+        _add_failure(
+            tc, change, result, kind_sets, severity_config, root_cause_lookup=root_cause_lookup
+        )
 
 
 def _add_failure(
@@ -576,6 +675,8 @@ def _add_failure(
     result: DiffResult,
     kind_sets: KindSets,
     severity_config: SeverityConfig | None = None,
+    *,
+    root_cause_lookup: dict[str, tuple[str, str]] | None = None,
 ) -> None:
     """Append a ``<failure>`` element to testcase *tc*."""
     ftype = _failure_type(change, result, kind_sets, severity_config)
@@ -585,6 +686,11 @@ def _add_failure(
     fail = ET.SubElement(tc, "failure")
     fail.set("message", message)
     fail.set("type", ftype)
+    if root_cause_lookup is not None:
+        entry = root_cause_lookup.get(_finding_id(change))
+        if entry is not None:
+            fail.set("rootCauseId", entry[0])
+            fail.set("rootCause", entry[1])
 
     # Body text: detailed explanation + source location
     body_parts = [description]
@@ -638,6 +744,7 @@ def to_junit_xml(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
+    report_mode: str = "full",
 ) -> str:
     """Convert a single DiffResult to a JUnit XML string.
 
@@ -655,6 +762,15 @@ def to_junit_xml(
         Optional severity configuration (from ``--severity-preset`` or
         ``--severity-*`` overrides).  When provided, the JUnit failure
         classification honours user-configured severity escalations.
+    report_mode:
+        ``"full"`` (default) or ``"root-cause"`` (G29 Phase 3, ADR-052
+        follow-up) — the latter adds ``rootCauseId``/``rootCause``
+        attributes to each ``<failure>`` element (see
+        :func:`_root_cause_lookup`); it does not restructure the
+        per-symbol ``<testcase>`` tree the way JSON/markdown/SARIF's
+        root-cause mode regroups findings. Any other value (e.g.
+        ``"leaf"``/``"impact"``) renders identically to ``"full"``, same as
+        before this parameter existed.
 
     Returns
     -------
@@ -669,6 +785,7 @@ def to_junit_xml(
         old_snapshot,
         show_only=show_only,
         severity_config=severity_config,
+        report_mode=report_mode,
     )
     root.append(ts)
 
@@ -686,6 +803,7 @@ def to_junit_xml_multi(
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
     error_libraries: list[dict[str, object]] | None = None,
+    report_mode: str = "full",
 ) -> str:
     """Convert multiple DiffResults to a JUnit XML string (compare-release).
 
@@ -695,6 +813,8 @@ def to_junit_xml_multi(
     dicts for libraries whose comparison failed.  Each becomes a
     ``<testsuite>`` with a single ``<error>`` testcase so CI dashboards
     reflect the failure.
+
+    *report_mode*: see :func:`to_junit_xml`.
     """
     root = ET.Element("testsuites")
     root.set("name", "abicheck")
@@ -709,6 +829,7 @@ def to_junit_xml_multi(
             old_snap,
             show_only=show_only,
             severity_config=severity_config,
+            report_mode=report_mode,
         )
         root.append(ts)
         total_tests += int(ts.get("tests", "0"))

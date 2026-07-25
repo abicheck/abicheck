@@ -43,6 +43,7 @@
               "producer": ""
             }
           ],
+          "occurrences": [],
           "provenance": "",
           "resolved": {},
           "src": "decl://json_parse"
@@ -60,6 +61,7 @@
               "producer": ""
             }
           ],
+          "occurrences": [],
           "provenance": "",
           "resolved": {},
           "src": "header://src/json_internal.cc"
