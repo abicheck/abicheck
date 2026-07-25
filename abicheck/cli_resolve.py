@@ -642,6 +642,7 @@ _COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
     "header_backend": "--ast-frontend",
     "old_header_backend": "--old-ast-frontend",
     "new_header_backend": "--new-ast-frontend",
+    "frontend_context": "--frontend-context",
 }
 
 #: Build/source evidence flags (param dest → flag). ``depth`` is the

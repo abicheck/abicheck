@@ -608,6 +608,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              depth: str | None = None,
              header_graph_deprecated: bool = False,
              header_graph_includes_deprecated: bool = False,
+             frontend_context: str = "host",
              _resolved_compile_context: CompileContext | None = None,
              _resolved_collect_mode: str | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
@@ -675,6 +676,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
         header_backend=header_backend, includes=includes,
         build_config=build_config, sources=sources,
+        frontend_context=frontend_context,
     )
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
     gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc

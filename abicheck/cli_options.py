@@ -583,6 +583,18 @@ def compile_context_options(func: F) -> F:
     :class:`~abicheck.service_scan.CompileContext` kwargs exactly.
     """
     func = click.option(
+        "--frontend-context",
+        "frontend_context",
+        default="host",
+        show_default=True,
+        type=click.Choice(["host", "device"], case_sensitive=False),
+        help="Which AST context the L2 header frontend should target (ADR-050 "
+        "D3/D5). Only 'host' is honored so far -- 'device' (e.g. a SYCL/DPC++ "
+        "offload target) is rejected until the real device selector lands; "
+        "declared now so a manifest's own frontend_context field has a "
+        "matching CLI counterpart for the legacy, non-manifest path.",
+    )(func)
+    func = click.option(
         "--nostdinc/--no-nostdinc",
         "nostdinc",
         default=False,
@@ -792,6 +804,7 @@ def resolve_compile_context(
     includes: tuple[Path, ...],
     build_config: Path | None,
     sources: Path | None = None,
+    frontend_context: str = "host",
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Build the CLI :class:`CompileContext` and fold the config ``compile:`` block in.
 
@@ -802,7 +815,18 @@ def resolve_compile_context(
     source (so an explicitly-typed value — even a default-looking ``auto`` — beats
     a pinned config one). ``compare`` / ``dump`` / ``scan`` all call this so their
     L2 compile context cannot drift.
+
+    ``frontend_context`` (ADR-050 D3/D5) is validated here — the single choke
+    point all three commands share — rather than per-callback: only ``"host"``
+    is honored this phase (Phase D adds the real device/DPC++ selector), so a
+    ``"device"`` request is rejected loudly instead of silently extracted as
+    if it were host.
     """
+    if frontend_context != "host":
+        raise click.UsageError(
+            f"--frontend-context {frontend_context!r} is not supported yet "
+            "(ADR-050 D3/D5) — only 'host' is honored this phase."
+        )
     from .service_scan import CompileContext
 
     cli_ctx = CompileContext(
@@ -813,6 +837,7 @@ def resolve_compile_context(
         sysroot=sysroot,
         nostdinc=nostdinc,
         frontend=header_backend,
+        frontend_context=frontend_context,
     )
 
     def _explicit(param: str) -> bool:
@@ -1594,6 +1619,12 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "place of a single -H/--header list. Which side(s) need a manifest "
         "(and which manifest) varies per comparison, not a stable project "
         "setting."
+    ),
+    "--frontend-context": (
+        "ADR-050 D3/D5: which AST context the L2 header frontend should "
+        "target (host, or a future device/DPC++ selector). A per-run "
+        "extraction-target choice, not a stable project setting -- like "
+        "--ast-frontend."
     ),
 }
 

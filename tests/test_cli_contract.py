@@ -554,6 +554,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--fail-on-removed-library",
         "--follow-deps",
         "--format",
+        "--frontend-context",
         "--gcc-option",
         "--gcc-options",
         "--gcc-path",

@@ -1143,6 +1143,7 @@ def run_compare(
     include_labels: dict[Path, str] | None = None,
     old_dump_manifest: Path | None = None,
     new_dump_manifest: Path | None = None,
+    frontend_context: str = "host",
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -1365,6 +1366,7 @@ def run_compare(
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
         header_backend=header_backend, includes=includes, build_config=cfg_path,
+        frontend_context=frontend_context,
     )
     # The dirs the config appended past the CLI -I roots. These are documented as
     # applying to *both* sides, so they must survive a per-side --old/new-include

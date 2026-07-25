@@ -662,6 +662,7 @@ def scan_cmd(
     gcc_option_tokens: tuple[str, ...] = (),
     sysroot: Path | None = None,
     nostdinc: bool = False,
+    frontend_context: str = "host",
 ) -> None:
     """Deterministic source-intelligence scan (classify → always-on tier → level).
 
@@ -734,6 +735,7 @@ def scan_cmd(
         includes=tuple(includes),
         build_config=build_config,
         sources=sources,
+        frontend_context=frontend_context,
     )
     includes = includes_tuple
     binary = artifact

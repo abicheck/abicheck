@@ -119,6 +119,7 @@ Compare two ABI surfaces and report changes.
 | `--gcc-option` | no | — | A single extra compiler flag passed to the header frontend verbatim (repeatable; not whitespace-split). Use two for a flag + spaced value, e.g. --gcc-option=-include --gcc-option='some header.h'. |
 | `--sysroot` | no | — | Alternative system root directory for header resolution. |
 | `--nostdinc`, `--no-nostdinc` | no | `False` | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
+| `--frontend-context` | no | `host` | Which AST context the L2 header frontend should target (ADR-050 D3/D5). Only 'host' is honored so far -- 'device' (e.g. a SYCL/DPC++ offload target) is rejected until the real device selector lands; declared now so a manifest's own frontend\_context field has a matching CLI counterpart for the legacy, non-manifest path. Choices: `host`, `device`. |
 | `--lang` | no | `c++` | Language mode for the header backend. Choices: `c++`, `c`. |
 | `--old-ast-frontend` | no | — | C/C++ AST frontend for the old side only (overrides --ast-frontend for old). Use when the old release parses on castxml but the new one needs clang (or vice versa). Choices: `auto`, `castxml`, `clang`, `hybrid`. |
 | `--new-ast-frontend` | no | — | C/C++ AST frontend for the new side only (overrides --ast-frontend for new). Choices: `auto`, `castxml`, `clang`, `hybrid`. |
@@ -357,6 +358,7 @@ Dump ABI snapshot of a shared library to JSON.
 | `--gcc-option` | no | — | A single extra compiler flag passed to the header frontend verbatim (repeatable; not whitespace-split). Use two for a flag + spaced value, e.g. --gcc-option=-include --gcc-option='some header.h'. |
 | `--sysroot` | no | — | Alternative system root directory for header resolution. |
 | `--nostdinc`, `--no-nostdinc` | no | `False` | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
+| `--frontend-context` | no | `host` | Which AST context the L2 header frontend should target (ADR-050 D3/D5). Only 'host' is honored so far -- 'device' (e.g. a SYCL/DPC++ offload target) is rejected until the real device selector lands; declared now so a manifest's own frontend\_context field has a matching CLI counterpart for the legacy, non-manifest path. Choices: `host`, `device`. |
 
 ## `project-targets`
 
@@ -466,3 +468,4 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 | `--gcc-option` | no | — | A single extra compiler flag passed to the header frontend verbatim (repeatable; not whitespace-split). Use two for a flag + spaced value, e.g. --gcc-option=-include --gcc-option='some header.h'. |
 | `--sysroot` | no | — | Alternative system root directory for header resolution. |
 | `--nostdinc`, `--no-nostdinc` | no | `False` | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
+| `--frontend-context` | no | `host` | Which AST context the L2 header frontend should target (ADR-050 D3/D5). Only 'host' is honored so far -- 'device' (e.g. a SYCL/DPC++ offload target) is rejected until the real device selector lands; declared now so a manifest's own frontend\_context field has a matching CLI counterpart for the legacy, non-manifest path. Choices: `host`, `device`. |
