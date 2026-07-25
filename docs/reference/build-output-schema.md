@@ -8,11 +8,12 @@ downstream tooling then validates and consumes.
 
 > **Status.** This page documents the schema and the
 > `abicheck build-output validate` command shipped in G30 P1.1. The
-> consumers that read a validated `build-output.json` to resolve a baseline
-> or run a check (`resolve-baseline`, `check-target`) are G30 P1.2/P1.3,
-> not built yet — see the
+> consumers that read a validated `build-output.json` to resolve a
+> baseline or run a check — `resolve-baseline`/`check-target` (G30
+> P1.2/P1.3) and `abicheck run-plan generate`/[`check-project.yml`](reusable-workflows.md)
+> (G30 P1.4) — are all shipped; see the
 > [G30 plan](../development/plans/g30-github-actions-integration-model.md).
-> There is also no `abicheck build-output emit` producer helper yet; author
+> There is still no `abicheck build-output emit` producer helper; author
 > `build-output.json` by hand or from your build's own `install` step.
 
 ## Directory layout
@@ -93,6 +94,17 @@ can only ever describe one profile — never a list. A project matrixing over
 several profiles publishes one uniquely-named
 `abicheck-build-<profile.id>/` artifact per profile (S17 in the ADR-047
 scenario catalog), not one artifact holding several.
+
+**`profile.id` is required, not just recommended, for [`check-project.yml`](reusable-workflows.md) callers.**
+Every other field really is optional-and-defaulted per the note above, but
+`check-project.yml`'s `plan` job derives each `--build-output PROFILE=DIR`
+argument from `profile.id` alone (`find`-ing every downloaded
+`build-output.json` and reading its own `profile.id`, rather than the
+artifact/directory name — `actions/download-artifact` flattens a
+single-artifact match with no subdirectory, so the name is ambiguous by
+construction) and hard-fails the `plan` job if a file has no `profile.id`
+set. Set it explicitly if your build-output producer targets
+`check-project.yml`.
 
 ### `targets[]` fields
 

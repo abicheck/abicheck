@@ -12,6 +12,7 @@ on:
       - 'actions/resolve-baseline/**'
       - 'abicheck/**'
       - '.github/workflows/test-action.yml'
+      - '.github/workflows/check-single.yml'
       - 'tests/fixtures/action/**'
   push:
     branches: [main]
@@ -22,6 +23,7 @@ on:
       - 'actions/resolve-baseline/**'
       - 'abicheck/**'
       - '.github/workflows/test-action.yml'
+      - '.github/workflows/check-single.yml'
       - 'tests/fixtures/action/**'
 
 concurrency:
@@ -546,4 +548,3 @@ jobs:
             echo "::error::Expected estimate to exit 0, got ${{ steps.abi.outputs.exit-code }}"
             exit 1
           fi
-

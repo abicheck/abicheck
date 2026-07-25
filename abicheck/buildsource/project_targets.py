@@ -95,7 +95,7 @@ from pathlib import Path
 from typing import Any
 
 from .inline import KNOWN_TOP_LEVEL_KEYS
-from .scan_levels import USER_DEPTHS
+from .scan_levels import USER_DEPTHS, EvidenceDepth
 
 #: The identifier charset every target/bundle/profile/channel id must satisfy
 #: — matches the per-component pattern the report-identity envelope (ADR-047
@@ -123,6 +123,26 @@ BASELINE_SOURCES = frozenset({"github-release", "actions-cache", "git"})
 #: the same four public rungs ``requested_depth``/``effective_depth`` accept
 #: in the report schema (ADR-047 §7).
 CHECK_DEPTHS = frozenset(d.value for d in USER_DEPTHS)
+
+#: A ``bundle`` check's ``depth`` is further restricted to this single rung --
+#: ``kind: bundle`` always compares directories (the resolved binaries-dir vs.
+#: the candidate bundle directory) in ``actions/check-target``, which routes
+#: through the CLI's per-library release fan-out and never collects inline
+#: build/source evidence for that path (``actions/check-target/
+#: validate-inputs.sh`` rejects ``build``/``source`` for ``kind: bundle``).
+#: ``headers`` is *also* rejected here (not just build/source): a bundle
+#: baseline's old-library operand is always a directory of raw binaries
+#: (``actions/baseline``'s bundle staging, unlike its single-target mode,
+#: never produces pre-dumped ``.abi.json`` snapshots with historical header
+#: data already baked in), so at ``depth: headers`` both the old and new
+#: sides would be freshly header-parsed at compare time using the SAME
+#: current checkout's headers (``check-project.yml`` has only one
+#: project-wide ``header:`` input) -- a header-only change between baseline
+#: and candidate (e.g. an inline function or template removed) would be
+#: silently invisible, since only one version of the headers is ever parsed
+#: (Codex review). Until per-bundle-member baseline header staging exists,
+#: only binary-level (L0/L1) evidence is safe for a bundle check.
+BUNDLE_CHECK_DEPTHS = frozenset({EvidenceDepth.BINARY.value})
 
 #: Sentinel ``channel`` value for a ``baseline: none`` check (ADR-047 §6 S5
 #: correction) — ``check-target`` (P1.3) must skip ``resolve-baseline``
@@ -266,6 +286,21 @@ class CheckSpec:
             # defaulting it to a blocking gate would surprise a minimal
             # `{channel: none, depth: ...}` entry into failing CI.
             gate_mode = "advisory" if channel == NO_BASELINE_CHANNEL else "local"
+        if d.get("profiles") == []:
+            # `_require_str_list` can't distinguish an omitted `profiles:`
+            # key from an explicit `profiles: []` -- both parse to `[]` --
+            # but this field's own semantics (see the dataclass docstring)
+            # treat an empty selector as "every contract profile," so a
+            # config author who wrote `profiles: []` expecting "select
+            # nothing" would silently get the opposite (Codex review).
+            # Reject the explicit-empty spelling outright instead of
+            # reinterpreting it: omit the key for "every profile," or name
+            # at least one profile id.
+            raise ValueError(
+                f"{where}.profiles must not be an explicit empty list -- "
+                "omit the key entirely to run on every contract profile, "
+                "or list at least one profile id"
+            )
         profiles = _require_str_list(d, "profiles", where=where)
         return cls(
             channel=channel,
@@ -727,6 +762,26 @@ def _target_issues(config: ProjectTargetsConfig, target: TargetSpec) -> list[str
                 f"target {target.id!r}: kind: plugin-contract requires contract_file."
             )
         issues.extend(_library_reference_issues(config, target))
+    if target.kind != TARGET_KIND_LIBRARY:
+        # actions/check-target/validate-inputs.sh rejects baseline-channel:
+        # none for any target-kind other than library -- a no-baseline audit
+        # routes to `scan` (a one-build check), which has no
+        # --used-by/--required-symbols equivalent to scope an app-consumer/
+        # plugin-contract check against. Reject at generation time rather
+        # than letting a validated-looking config produce a run-plan cell
+        # that check-target refuses with no per-cell report for aggregate
+        # to read.
+        for i, check in enumerate(target.checks):
+            if check.channel == NO_BASELINE_CHANNEL:
+                issues.append(
+                    f"target {target.id!r}.checks[{i}]: channel: "
+                    f"{NO_BASELINE_CHANNEL!r} is not supported for kind: "
+                    f"{target.kind!r} -- a no-baseline audit check has no "
+                    "--used-by/--required-symbols equivalent to scope an "
+                    "app-consumer/plugin-contract check against "
+                    "(actions/check-target/validate-inputs.sh). Use kind: "
+                    "library for a no-baseline audit, or set a real channel."
+                )
     for i, check in enumerate(target.checks):
         issues.extend(_check_issues(config, f"target {target.id!r}.checks[{i}]", check))
     return issues
@@ -754,7 +809,11 @@ def _library_reference_issues(
 
 
 def _check_issues(
-    config: ProjectTargetsConfig, where: str, check: CheckSpec
+    config: ProjectTargetsConfig,
+    where: str,
+    check: CheckSpec,
+    *,
+    is_bundle: bool = False,
 ) -> list[str]:
     issues: list[str] = []
     if (
@@ -780,7 +839,8 @@ def _check_issues(
             issues.append(
                 f"{where}: profiles entry {profile_id!r} is not declared under profiles:."
             )
-        elif not profile.contract and check.channel != NO_BASELINE_CHANNEL:
+            continue
+        if not profile.contract and check.channel != NO_BASELINE_CHANNEL:
             # contract: false profiles are documented as test-only lanes that
             # never get a baseline (S17) -- a real-channel check scoped only
             # to one can never be satisfied. A channel: "none" audit check has
@@ -792,6 +852,27 @@ def _check_issues(
                 f"declares a real channel ({check.channel!r}) — only a "
                 f"{NO_BASELINE_CHANNEL!r}-channel audit check may scope to a "
                 "non-contract profile."
+            )
+        # abicheck/bundle.py's build_bundle_snapshot() skips non-ELF inputs
+        # outright (baseline_set.py's _not_elf_issue), so a bundle check
+        # explicitly scoped to a declared Windows/macOS profile can never
+        # resolve -- it always produces an operationally-failing matrix
+        # leg rather than a usable check (Codex review). An UNSET os
+        # (profile.os == "") is left unrejected -- most projects never
+        # bother declaring it, and treating "unspecified" as an error
+        # would punish that common case for a field that's still purely
+        # informational everywhere else in this module. Implicit (not
+        # explicitly profile-scoped) bundle checks are handled separately
+        # at run-plan generation time, where they're silently skipped
+        # rather than erroring, the same way a profile that simply
+        # doesn't build a given target is skipped.
+        if is_bundle and profile.os and profile.os != "linux":
+            issues.append(
+                f"{where}: profiles entry {profile_id!r} has os: {profile.os!r}, "
+                "but a bundle check's backend (abicheck/bundle.py) is ELF-only "
+                "and skips every non-ELF member -- explicitly scope this bundle "
+                "check to a linux profile, or drop it from profiles: and let "
+                "the implicit sweep skip non-ELF profiles automatically."
             )
     return issues
 
@@ -816,7 +897,39 @@ def _bundle_issues(config: ProjectTargetsConfig, bundle: BundleSpec) -> list[str
                 "bundle: field and its membership here must agree."
             )
     for i, check in enumerate(bundle.checks):
-        issues.extend(_check_issues(config, f"bundle {bundle.id!r}.checks[{i}]", check))
+        if check.depth not in BUNDLE_CHECK_DEPTHS and check.depth in CHECK_DEPTHS:
+            # A depth outside CHECK_DEPTHS entirely is already reported by
+            # _check_issues below -- only flag the bundle-specific
+            # restriction for an otherwise-valid depth (build/source).
+            issues.append(
+                f"bundle {bundle.id!r}.checks[{i}]: depth {check.depth!r} is not "
+                f"supported for a bundle check -- use one of "
+                f"{sorted(BUNDLE_CHECK_DEPTHS)} (actions/check-target/"
+                "validate-inputs.sh rejects build/source for kind: bundle, "
+                "which always compares directories)."
+            )
+        if check.channel == NO_BASELINE_CHANNEL:
+            # channel: none routes check-target to the root Action's scan
+            # mode (no baseline to compare against) -- but a bundle check's
+            # candidate is always a staged directory of member binaries
+            # (check-project.yml's own bundle-staging step), and scan mode
+            # rejects a directory/package new-library outright (Codex
+            # review). There is no real bundle audit path today.
+            issues.append(
+                f"bundle {bundle.id!r}.checks[{i}]: channel: "
+                f"{NO_BASELINE_CHANNEL!r} is not supported for a bundle "
+                "check -- a bundle's candidate is always a staged directory "
+                "of member binaries, and action/validate-inputs.sh rejects "
+                "a directory/package new-library for scan mode (the "
+                "no-baseline routing). Set a real baseline channel for a "
+                "bundle check, or scope each member individually with a "
+                "channel: 'none' library-kind target check instead."
+            )
+        issues.extend(
+            _check_issues(
+                config, f"bundle {bundle.id!r}.checks[{i}]", check, is_bundle=True
+            )
+        )
     return issues
 
 

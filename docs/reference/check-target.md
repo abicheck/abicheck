@@ -13,10 +13,12 @@ up front, before any of that, and produces no report or outputs at all.
 > **Status.** This page documents the `actions/check-target` composite
 > Action shipped in G30 P1.3. The reusable workflows that generate a
 > `run-plan.json` and fan this Action out over a matrix
-> (`check-single.yml`/`check-project.yml`) are G30 P1.4, not built yet — see
-> the [G30 plan](../development/plans/g30-github-actions-integration-model.md).
-> Until then, `check-target` can be called directly as a step (ADR-047's S4
-> shortcut) or from a hand-written per-target workflow (S1/S2/S5/S6/S15/S21).
+> (`check-single.yml`/`check-project.yml`, G30 P1.4) are documented
+> separately — see the
+> [run-plan schema](run-plan-schema.md) and the
+> [reusable workflows reference](reusable-workflows.md). `check-target` can
+> also still be called directly as a step (ADR-047's S4 shortcut) or from a
+> hand-written per-target workflow (S1/S2/S5/S6/S15/S21) without either.
 
 ## What it does
 
@@ -109,11 +111,11 @@ caller-provided directory of the candidate build's own member binaries.
 | `baseline-target` | no | (= `name`) | Which target's baseline actually resolves — set to the referenced library for `app-consumer`/`plugin-contract`. Ignored for `kind: bundle`. |
 | `bundle-members` | when `kind: bundle` | `[]` | JSON array of the bundle's member target ids. |
 | `profile` | yes | — | The build `profile.id` this check runs under. |
-| `baseline-channel` | yes | — | A channel name, or the literal `none` for a no-baseline audit (S5). |
+| `baseline-channel` | yes | — | A channel name, or the literal `none` for a no-baseline audit (S5) — `none` is rejected for `kind: bundle` (a bundle has no no-baseline audit path; it always compares directories, which `scan` cannot do). |
 | `baseline-path` | when channel ≠ `none` | `''` | Forwarded to `resolve-baseline`. |
 | `baseline-required` | no | `true` | Forwarded to `resolve-baseline`'s `required`. |
 | `candidate-build-output` | no | `''` | Forwarded to `resolve-baseline`'s `incompatible_evidence` check. |
-| `requested-depth` | yes | — | `binary` \| `headers` \| `build` \| `source`. |
+| `requested-depth` | yes | — | `binary` \| `headers` \| `build` \| `source` — for `kind: bundle`, only `binary` is supported (`headers`/`build`/`source` are all rejected: a bundle's baseline is always raw binaries with no historical header/build/source evidence staged per member). |
 | `gate-mode` | no | `local` | `local` \| `deferred` \| `advisory`. |
 | `project` | no | `${{ github.repository }}` | Recorded in the report envelope. |
 | `head-sha` | no | `${{ github.sha }}` | Recorded in the report envelope. |
@@ -140,11 +142,16 @@ caller-provided directory of the candidate build's own member binaries.
 ## Report envelope (ADR-047 §7)
 
 Every run writes a single JSON report at
-`check-target-report-<name>-<profile>-<baseline_channel>-<requested_depth>.json`
+`check-target-report-<name>-<profile>-<baseline_channel>-<requested_depth>-<digest>.json`
 (the exact path is always available via the `report-path` output — don't
 hard-code the filename, since running `check-target` more than once in the
 same job, e.g. the same target against two baseline channels, would
-otherwise overwrite an earlier run's report), starting from whatever the
+otherwise overwrite an earlier run's report; the trailing `<digest>` is a
+12-hex-char SHA-256 prefix of the original, unsanitized identity tuple, so
+two identities that collapse to the same slug under the filename's lossy
+character substitution still produce distinct files — needed because
+`check-project.yml` downloads every matrix cell's report into one shared
+flat directory), starting from whatever the
 underlying `compare`/`scan` run already produced and layering on the
 fields below. For a normal single-library `compare` (the common case),
 that starting shape is `abicheck/reporter.py`'s existing compare-report

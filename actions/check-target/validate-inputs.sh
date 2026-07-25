@@ -86,6 +86,22 @@ if [[ "$KIND" == "bundle" ]]; then
   if [[ "$BUNDLE_MEMBERS" == "[]" ]]; then
     _fail "bundle-members must be a non-empty JSON array when kind is 'bundle'."
   fi
+  if [[ "$BASELINE_CHANNEL" == "none" ]]; then
+    # A bundle check always compares directories (the resolved baseline
+    # binaries-dir vs. the candidate bundle directory), which routes
+    # through the CLI's per-library release fan-out; with no baseline, the
+    # analysis step instead routes to `scan` (a one-build audit against
+    # new-library directly), which never uses bundle-members at all -- a
+    # directory candidate then fails as an operational error, while a
+    # single-file candidate would silently report a "bundle" check having
+    # scanned only one artifact (Codex review). abicheck/buildsource/
+    # project_targets.py already rejects this combination in the generated
+    # .abicheck.yml/run-plan.json path, but that validation never runs for
+    # a caller invoking check-target directly (e.g. via check-single.yml,
+    # or this composite Action on its own) -- reject it here too, at the
+    # one place every caller actually goes through.
+    _fail "baseline-channel: none is not supported when kind is 'bundle' -- a bundle check has no baseline-less audit path (it always compares directories via the CLI's release fan-out, which 'scan' cannot do). Use kind: target for a no-baseline audit of a single library, or provide a real baseline-channel for the bundle."
+  fi
   if [[ "$REQUESTED_DEPTH" == "build" || "$REQUESTED_DEPTH" == "source" ]]; then
     # kind: bundle always compares directories (the resolved binaries-dir vs.
     # the candidate bundle directory), which routes through the CLI's
@@ -95,7 +111,21 @@ if [[ "$KIND" == "bundle" ]]; then
     # directory operand (Codex review). Failing here, before resolve-
     # baseline/collect-facts even run, gives a clearer and cheaper error
     # than letting the nested analysis step fail later.
-    _fail "requested-depth '$REQUESTED_DEPTH' is not supported when kind is 'bundle' -- a bundle compares directories, which the CLI's per-library release fan-out never collects inline build/source evidence for. Use requested-depth: binary or headers for a bundle check, or kind: target to compare one library at build/source depth."
+    _fail "requested-depth '$REQUESTED_DEPTH' is not supported when kind is 'bundle' -- a bundle compares directories, which the CLI's per-library release fan-out never collects inline build/source evidence for. Use requested-depth: binary for a bundle check, or kind: target to compare one library at build/source/headers depth."
+  fi
+  if [[ "$REQUESTED_DEPTH" == "headers" ]]; then
+    # A bundle's old-library operand is always a directory of raw binaries
+    # (actions/baseline's bundle staging never produces pre-dumped .abi.json
+    # snapshots with historical header data already baked in, unlike its
+    # single-target mode) -- at depth: headers both the old and new sides
+    # would be freshly header-parsed at compare time using the SAME current
+    # checkout's headers (this Action has only one project-wide `header:`
+    # input, no per-baseline-version header staging), so a header-only
+    # change between baseline and candidate (e.g. an inline function or
+    # template removed) would be silently invisible: only one version of
+    # the headers is ever parsed (Codex review). Reject until per-bundle-
+    # member baseline header staging exists.
+    _fail "requested-depth 'headers' is not supported when kind is 'bundle' -- a bundle's baseline is always raw binaries with no historical header snapshot, so a headers-depth bundle compare would parse both sides against the SAME current checkout's headers, silently missing any header-only change. Use requested-depth: binary for a bundle check, or kind: target to compare one library at headers depth."
   fi
 fi
 if [[ "$TARGET_KIND" == "app-consumer" && -z "$CONSUMER_BINARY" ]]; then
