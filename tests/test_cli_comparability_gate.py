@@ -235,6 +235,58 @@ class TestNotComparableExitCode:
             new_src: "support",
         }
 
+    def test_labeled_include_reaches_inline_source_embed(self, tmp_path, monkeypatch):
+        """A labeled ``--include old:LABEL=PATH`` combined with a raw
+        ``--old-sources`` tree (the inline-embed path,
+        ``cli._embed_inline_source_side``) must also carry the resolved
+        ``include_labels`` map through its own nested ``dump`` invocation —
+        found via CodeRabbit review: ``include_labels`` reached
+        ``_resolve_compare_snapshots`` (the test above) but was never
+        threaded into the *inline*-embed call sites, so a raw source tree's
+        temporary snapshot silently lost the label the non-inline path
+        already carried."""
+        old_p, new_p = _write_placeholder_inputs(tmp_path)
+        old_src = tmp_path / "old" / "src"
+        old_sources = tmp_path / "old" / "tree"
+        old_src.mkdir(parents=True)
+        old_sources.mkdir(parents=True)
+
+        captured: dict[str, object] = {}
+
+        def _fake_embed(*_a, **kw):
+            captured["include_labels"] = kw.get("include_labels")
+            return old_p, None, None
+
+        monkeypatch.setattr(
+            "abicheck.cli_compare_helpers._embed_inline_source_side", _fake_embed
+        )
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
+        monkeypatch.setattr(
+            "abicheck.cli_compare_helpers._resolve_compare_snapshots",
+            lambda *_a, **_kw: (snap, snap),
+        )
+        monkeypatch.setattr(
+            "abicheck.service.compare_snapshots",
+            lambda *_a, **_kw: DiffResult(
+                old_version="1", new_version="1", library="libfoo.so.1",
+                verdict=Verdict.NO_CHANGE, assurance="none",
+            ),
+        )
+        monkeypatch.setattr(
+            "abicheck.service_render.to_markdown", lambda _r, **_kw: "REPORT"
+        )
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--sources", f"old={old_sources}",
+                "--include", f"old:support={old_src}",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["include_labels"] == {old_src: "support"}
+
 
 class TestCompareReleaseNotComparable:
     """ADR-050 D2 wired into the directory/package (release) fan-out

@@ -610,7 +610,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              header_graph_includes_deprecated: bool = False,
              frontend_context: str = "host",
              _resolved_compile_context: CompileContext | None = None,
-             _resolved_collect_mode: str | None = None) -> None:
+             _resolved_collect_mode: str | None = None,
+             _resolved_include_labels: dict[Path, str] | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -944,6 +945,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         depth=depth,
         compile_db_context_matched=compile_db_matched,
         dump_manifest=parsed_dump_manifest,
+        include_labels=_resolved_include_labels,
     )
 
 
@@ -1373,6 +1375,7 @@ def _embed_inline_source_side(
     debug_roots: tuple[Path, ...] = (),
     debuginfod: bool = False,
     debuginfod_url: str | None = None,
+    include_labels: dict[Path, str] | None = None,
 ) -> tuple[Path, Path | None, Path | None]:
     """Resolve one side's ``--sources`` into the input ``compare`` should read.
 
@@ -1397,6 +1400,15 @@ def _embed_inline_source_side(
     ``--old/new-sources`` tree bypassed ``--debug-root`` entirely (the inline
     dump used its own unset defaults), so a stripped binary on this side still
     lost its DWARF even though the sibling non-inline path was fixed.
+
+    ``include_labels`` (ADR-050 D1, CodeRabbit review): this side's already-
+    resolved ``path -> label`` map from a labeled ``--include
+    old:LABEL=PATH``/``new:LABEL=PATH`` compare entry, forwarded to the
+    inline ``dump`` invocation's private ``_resolved_include_labels`` hook —
+    without this, a raw ``--old/new-sources`` tree's inline-dumped temporary
+    snapshot silently lost its label, leaving that side's extraction contract
+    fingerprinted as if the support root were unlabeled/external even though
+    the non-inline path already threads the same label correctly.
 
     ``depth`` is ``compare``'s own (unmodified) ``--depth`` string, used only
     to reproduce ``dump_cmd``'s ``--depth source`` + ``--ast-frontend hybrid``
@@ -1541,6 +1553,7 @@ def _embed_inline_source_side(
         debug_roots=debug_roots,
         debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
+        _resolved_include_labels=include_labels,
     )
     # The raw sources/build-info are now embedded in the snapshot; pack-shaped
     # inputs (kept_*) ride through to the later prepare_embedded_build_source so

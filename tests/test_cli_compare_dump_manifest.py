@@ -242,3 +242,106 @@ class TestCompareDumpManifestEndToEnd:
         kinds = [c["kind"] for c in data.get("changes", [])]
         # old side only declares add_a -- add_b is a genuine addition on new.
         assert "func_added" in kinds
+
+    def test_both_sides_dump_manifest_dumps_each_from_its_own_manifest(
+        self, tmp_path, runner
+    ):
+        """old=/new= each get their OWN manifest, not both dumped from one --
+        the specific bug side-scoping (SIDED_PATH_PARAM, not a single shared
+        --dump-manifest) exists to prevent."""
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        old_a = old_dir / "a.h"
+        old_a.write_text("int add_a(int a, int b);\n")
+        old_src = old_dir / "old.c"
+        old_src.write_text("int add_a(int a, int b) { return a + b; }\n")
+        old_so = old_dir / "libold.so"
+        subprocess.run(
+            ["gcc", "-shared", "-fPIC", "-o", str(old_so), str(old_src)],
+            check=True,
+            capture_output=True,
+        )
+        old_manifest = _write_manifest(
+            old_dir / "old_manifest.yaml",
+            "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so, new_manifest = self._build_two_tu_lib(new_dir)
+
+        out = tmp_path / "result.json"
+        result = runner.invoke(
+            main,
+            [
+                "compare", str(old_so), str(new_so),
+                "--dump-manifest", "old=" + str(old_manifest),
+                "--dump-manifest", "new=" + str(new_manifest),
+                "--ast-frontend", "clang", "--lang", "c",
+                "--diagnostic-comparison",
+                "--format", "json", "-o", str(out),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(out.read_text())
+        kinds = [c["kind"] for c in data.get("changes", [])]
+        # old's manifest declares only add_a; new's own (different) manifest
+        # merges add_a + add_b -- if the old side were accidentally dumped
+        # from new's manifest (or vice versa) this would report no addition
+        # (both sides identical) instead of a genuine add_b addition.
+        assert "func_added" in kinds
+        assert "symbol_removed" not in kinds
+
+
+def test_compare_dump_manifest_and_release_manifest_coexist(
+    tmp_path, runner, monkeypatch
+):
+    """--dump-manifest (this ADR's extraction manifest) and the pre-existing
+    --manifest (ADR-023 release instantiation manifest) are distinct,
+    independently-settable options on the same compare invocation -- the
+    specific Click-level collision this ADR's flag naming exists to avoid."""
+    from abicheck.checker import DiffResult, Verdict
+    from abicheck.model import AbiSnapshot
+
+    old_so = _elf_stub(tmp_path / "old.so")
+    new_so = _elf_stub(tmp_path / "new.so")
+    dump_manifest = _write_manifest(
+        tmp_path / "dm.yaml",
+        "roots: [foo.h]\ntranslation_units:\n  - name: main\n    forced_includes: [foo.h]\n",
+    )
+    release_manifest = tmp_path / "release_manifest.yaml"
+    release_manifest.write_text("symbols: []\n")
+
+    captured: dict[str, object] = {}
+    snap = AbiSnapshot(library="old.so", version="1.0")
+
+    def _fake_resolve(*_a, **kw):
+        captured["old_dump_manifest"] = kw.get("old_dump_manifest")
+        return snap, snap
+
+    monkeypatch.setattr(
+        "abicheck.cli_compare_helpers._resolve_compare_snapshots", _fake_resolve
+    )
+    monkeypatch.setattr(
+        "abicheck.service.compare_snapshots",
+        lambda *_a, **_kw: DiffResult(
+            old_version="1", new_version="1", library="old.so",
+            verdict=Verdict.NO_CHANGE, assurance="none",
+        ),
+    )
+    monkeypatch.setattr(
+        "abicheck.service_render.to_markdown", lambda _r, **_kw: "REPORT"
+    )
+
+    result = runner.invoke(
+        main,
+        [
+            "compare", str(old_so), str(new_so),
+            "--manifest", str(release_manifest),
+            "--dump-manifest", "old=" + str(dump_manifest),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["old_dump_manifest"] is not None
+    assert captured["old_dump_manifest"].roots  # a real parsed DumpManifest
