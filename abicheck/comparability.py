@@ -53,13 +53,15 @@ dropped scope:
   (``SidedIncludePathParam``) does not exist yet; this module accepts a
   resolved ``label`` per :class:`IncludeDir` directly; only the CLI-parsing
   glue that would populate it from a command line is missing.
-- ``snapshot_cache.py``'s cache-key order-sensitivity fix, and the
-  ``sarif.py``/``junit_report.py``/``html_report.py``/``aggregate.py``/
-  ``action/run.sh`` surfaces the ADR's D2 section calls for, are not part of
+- The ``sarif.py``/``junit_report.py``/``html_report.py``/``aggregate.py``/
+  ``action/run.sh`` surfaces the ADR's D2 section calls for are not part of
   this module either — only ``reporter.py``'s JSON output
   (``contract_coverage``/``assurance`` on an ordinary completed diff, plus
   the ``verdict: null`` document on a hard-fail) and each front-end's own
   plain-text/JSON rendering have been updated so far.
+  (``snapshot_cache.py``'s cache-key order-sensitivity — headers/includes
+  order is real, load-bearing input, the same rule ``profile_fingerprint``
+  below already enforces — is fixed, cache version ``4``.)
 - ``cli_compare_release.py``'s fan-out does not accept
   ``--diagnostic-comparison`` at all (rejected up front by
   ``_reject_set_input_flags``, alongside every other single-pair-only flag)
