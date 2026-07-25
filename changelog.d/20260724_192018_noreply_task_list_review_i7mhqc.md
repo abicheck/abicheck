@@ -22,6 +22,16 @@ it should read in CHANGELOG.md. Delete the other sections.
   (singular); a config that used the wrong block name was accepted and
   silently ignored instead of erroring. `source: {graph: ...}` now raises
   the same "unknown key" error as any other typo.
+- **A `-H`/`--header`/`--devel-pkg` directory input no longer spuriously
+  fails `compare` with `ScopeMismatchError`** — the comparability contract
+  (ADR-050) fingerprinted a directory the same way as an individual header
+  file, corrupting `scope_fingerprint`'s common-root computation whenever
+  the directory sat shallower than the declared headers under it (e.g. a
+  `--devel-pkg`-extracted package root passed alongside headers discovered
+  several directories below it). Two extractions of byte-identical headers
+  into two differently-named temp directories — including the exact case a
+  real-world `.deb` self-comparison hit in CI — could fingerprint as a
+  scope mismatch even though nothing about the declared surface differed.
 
 <!--
 ### Deprecated

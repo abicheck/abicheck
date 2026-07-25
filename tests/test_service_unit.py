@@ -604,6 +604,52 @@ class TestImplicitHeaderIncludes:
         assert _implicit_header_includes([ghost]) == []
 
 
+class TestSplitPublicHeaderInputs:
+    """A `-H`/`--header`/`--devel-pkg` input may name a file or a whole
+    directory; the two must route to resolve_input's public_headers vs.
+    public_header_dirs separately (real CI incident, comparability.py's
+    scope_fingerprint common-root leak when a directory entry was
+    fingerprinted as an individual file identity)."""
+
+    def test_all_files(self, tmp_path):
+        from abicheck.header_utils import split_public_header_inputs
+
+        a = tmp_path / "a.h"
+        a.write_text("// a")
+        b = tmp_path / "b.h"
+        b.write_text("// b")
+        files, dirs = split_public_header_inputs([a, b])
+        assert files == [a, b]
+        assert dirs == []
+
+    def test_all_directories(self, tmp_path):
+        from abicheck.header_utils import split_public_header_inputs
+
+        d1 = tmp_path / "include"
+        d1.mkdir()
+        d2 = tmp_path / "usr" / "include"
+        d2.mkdir(parents=True)
+        files, dirs = split_public_header_inputs([d1, d2])
+        assert files == []
+        assert dirs == [d1, d2]
+
+    def test_mixed_files_and_directories_preserve_relative_order(self, tmp_path):
+        from abicheck.header_utils import split_public_header_inputs
+
+        f = tmp_path / "a.h"
+        f.write_text("// a")
+        d = tmp_path / "include"
+        d.mkdir()
+        files, dirs = split_public_header_inputs([f, d])
+        assert files == [f]
+        assert dirs == [d]
+
+    def test_empty_input(self):
+        from abicheck.header_utils import split_public_header_inputs
+
+        assert split_public_header_inputs([]) == ([], [])
+
+
 class TestResolveInferredHeaderRoots:
     def _umbrella(self, tmp_path):
         root = tmp_path / "include"

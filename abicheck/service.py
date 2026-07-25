@@ -38,7 +38,11 @@ from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .clang_layout_tool import attach_clang_layout
 from .errors import AbicheckError, SnapshotError, ValidationError
-from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
+from .header_utils import (
+    deferred_token_dirs,
+    resolve_inferred_header_roots,
+    split_public_header_inputs,
+)
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 from .serialization import load_snapshot
 from .service_dump_cache import cached_run_dump
@@ -1710,7 +1714,21 @@ def run_compare_request(
     # request.{old,new}.headers double as the public-header set for provenance
     # tagging — same rule as the single-pair CLI path (cli_resolve._resolve_compare_snapshots):
     # CompareRequest has no lower-level "parse only, don't classify" mode, so a
-    # header supplied to compare is by definition the public contract.
+    # header supplied to compare is by definition the public contract. Split
+    # into files/directories before tagging (not passed through unsplit): a
+    # directory entry fingerprinted as an individual file identity corrupts
+    # compute_extraction_contract's scope_fingerprint common-root computation
+    # (see split_public_header_inputs's docstring) — this is exactly the
+    # --devel-pkg release-compare path's own header_dir umbrella, which
+    # previously made a byte-identical self-comparison spuriously raise
+    # ScopeMismatchError.
+    old_public_headers, old_public_header_dirs = split_public_header_inputs(
+        request.old.headers
+    )
+    new_public_headers, new_public_header_dirs = split_public_header_inputs(
+        request.new.headers
+    )
+
     def _resolve_old_side() -> AbiSnapshot:
         return resolve_input(
             request.old.path,
@@ -1724,7 +1742,8 @@ def run_compare_request(
             enable_debuginfod=request.enable_debuginfod,
             debuginfod_url=request.debuginfod_url,
             header_backend=header_backend,
-            public_headers=list(request.old.headers),
+            public_headers=old_public_headers,
+            public_header_dirs=old_public_header_dirs,
         )
 
     def _resolve_new_side() -> AbiSnapshot:
@@ -1740,7 +1759,8 @@ def run_compare_request(
             enable_debuginfod=request.enable_debuginfod,
             debuginfod_url=request.debuginfod_url,
             header_backend=header_backend,
-            public_headers=list(request.new.headers),
+            public_headers=new_public_headers,
+            public_header_dirs=new_public_header_dirs,
         )
 
     # Old/new resolution has no data dependency on each other until they're

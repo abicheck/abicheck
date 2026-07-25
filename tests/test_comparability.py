@@ -1035,6 +1035,53 @@ def test_two_public_header_dirs_with_different_names_still_distinguishes(tmp_pat
     assert old_contract.scope_fingerprint != new_contract.scope_fingerprint
 
 
+def test_public_header_dir_shallower_than_declared_headers_does_not_leak_its_name(
+    tmp_path,
+):
+    # Real CI incident: a `--devel-pkg`/`-H <dir>` umbrella extracted to a
+    # per-run-random temp root (e.g. dpkg -x'd into
+    # /tmp/abicheck_dev_XXXXXX), with the root itself passed as a lone
+    # public_header_dir *alongside* declared_headers discovered several
+    # directories below it (e.g. <root>/usr/include/zlib.h,
+    # <root>/usr/share/doc/.../gzlog.h -- exactly zlib1g-dev's real layout).
+    # "headers" and "public_header_dirs" must normalize against SEPARATE
+    # roots: sharing one (computed from every entry's parent, including the
+    # directory) pulls the shared root up to the directory's *own* parent
+    # the moment the directory sits shallower than the header files,
+    # leaking that root's random name into "headers"' identities even
+    # though "public_header_dirs" collapses its own single-entry case away
+    # separately. Two independent extractions of byte-identical headers
+    # into two differently-named roots must still fingerprint identically.
+    old_root = tmp_path / "abicheck_dev_oldrandom"
+    new_root = tmp_path / "abicheck_dev_newrandom"
+    old_headers = [
+        _write(old_root / "usr" / "include" / "zlib.h", "int zlib_api(void);"),
+        _write(
+            old_root / "usr" / "share" / "doc" / "examples" / "gzlog.h",
+            "int gzlog_example(void);",
+        ),
+    ]
+    new_headers = [
+        _write(new_root / "usr" / "include" / "zlib.h", "int zlib_api(void);"),
+        _write(
+            new_root / "usr" / "share" / "doc" / "examples" / "gzlog.h",
+            "int gzlog_example(void);",
+        ),
+    ]
+    old_contract = compute_extraction_contract(
+        declared_headers=old_headers, public_header_dirs=[old_root]
+    )
+    new_contract = compute_extraction_contract(
+        declared_headers=new_headers, public_header_dirs=[new_root]
+    )
+    assert old_contract.scope_fields["headers"] == new_contract.scope_fields["headers"]
+    assert (
+        old_contract.scope_fields["headers"]
+        == '["include/zlib.h", "share/doc/examples/gzlog.h"]'
+    )
+    assert old_contract.scope_fingerprint == new_contract.scope_fingerprint
+
+
 def test_declared_headers_and_public_header_paths_share_one_scope_identity(tmp_path):
     # Codex review (PR #624): the same logical header captured via a full L2
     # dump's declared_headers on one side and a symbols-only dump's
