@@ -73,7 +73,7 @@ def test_readme_never_recommends_pip_install_castxml() -> None:
 
 
 def test_getting_started_never_recommends_pip_install_castxml() -> None:
-    text = _read("docs/getting-started.md")
+    text = _read("docs/start/getting-started.md")
     for block in _fenced_code_blocks(text):
         assert "pip install castxml" not in block.lower()
 
@@ -96,7 +96,7 @@ def test_readme_presents_conda_forge_before_pip_lightweight_install() -> None:
 
 
 def test_getting_started_presents_conda_forge_before_pip_lightweight_install() -> None:
-    text = _read("docs/getting-started.md")
+    text = _read("docs/start/getting-started.md")
     conda_idx = text.find("conda create -n abicheck -c conda-forge")
     pip_idx = text.find("pip install abicheck")
     assert conda_idx != -1, (
