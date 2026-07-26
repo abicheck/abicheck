@@ -358,7 +358,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [96](case96_hidden_friend_removed/README.md) | Hidden Friend Operator Removed | API Break | 🟠 API_BREAK |
 | [97](case97_api_depends_on_consumer_env/README.md) | API Depends on Consumer Environment | Breaking | 🔴 BREAKING |
 | [98](case98_cxx_standard_floor_raised/README.md) | C++ Standard Floor Raised | Risk | 🟡 COMPATIBLE_WITH_RISK |
-| [99](case99_experimental_graduated/README.md) | experimental → stable graduation (compatible) | Addition | 🟢 COMPATIBLE |
+| [99](case99_experimental_graduated/README.md) | Experimental to Stable Graduation (Compatible) | Addition | 🟢 COMPATIBLE |
 | [100](case100_experimental_removed_without_replacement/README.md) | Experimental Declaration Removed Without Replacement | Breaking | 🔴 BREAKING |
 | [101](case101_inline_namespace_version_bumped/README.md) | Inline Namespace Version Bumped | Breaking | 🔴 BREAKING |
 | [102](case102_frozen_runtime_signature_changed/README.md) | Frozen Runtime Signature Changed | Breaking | 🔴 BREAKING |

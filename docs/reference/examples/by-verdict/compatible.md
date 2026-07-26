@@ -22,7 +22,7 @@ _30 case(s)._ [← back to all examples](../index.md)
 | [case54_used_reserved_field](../case54_used_reserved_field.md) | Used Reserved Field | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case61_var_added](../case61_var_added.md) | Global Variable Added | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case62_type_field_added_compatible](../case62_type_field_added_compatible.md) | Type Field Added (Compatible — Opaque Struct) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case99_experimental_graduated](../case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case99_experimental_graduated](../case99_experimental_graduated.md) | Experimental to Stable Graduation (Compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case103_toolchain_flag_drift](../case103_toolchain_flag_drift.md) | Toolchain Flag Drift | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case128_symbol_binding_strengthened](../case128_symbol_binding_strengthened.md) | Symbol Binding Strengthened (Weak → Global) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case136_executable_stack_removed](../case136_executable_stack_removed.md) | Executable Stack Removed (the fix direction) | 🟢 COMPATIBLE | Quality (Compatible) |

@@ -146,7 +146,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case96_hidden_friend_removed](case96_hidden_friend_removed.md) | Hidden Friend Operator Removed | 🟠 API_BREAK | API Break |
 | [case97_api_depends_on_consumer_env](case97_api_depends_on_consumer_env.md) | API Depends on Consumer Environment | 🔴 BREAKING | Breaking |
 | [case98_cxx_standard_floor_raised](case98_cxx_standard_floor_raised.md) | C++ Standard Floor Raised | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case99_experimental_graduated](case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case99_experimental_graduated](case99_experimental_graduated.md) | Experimental to Stable Graduation (Compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case100_experimental_removed_without_replacement](case100_experimental_removed_without_replacement.md) | Experimental Declaration Removed Without Replacement | 🔴 BREAKING | Breaking |
 | [case101_inline_namespace_version_bumped](case101_inline_namespace_version_bumped.md) | Inline Namespace Version Bumped | 🔴 BREAKING | Breaking |
 | [case102_frozen_runtime_signature_changed](case102_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed | 🔴 BREAKING | Breaking |

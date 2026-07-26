@@ -1,8 +1,8 @@
 # Case 183: Internal ELF symbol-version node churn
 
-**Category:** Risk | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK (exit 0)
+**Category:** Risk | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
-## What changes
+## Verdict and consumer impact
 
 `foo_worker()` is a private helper, versioned onto `FOO_INTERNAL_1` — a
 version node whose name itself is the author's machine-readable declaration
@@ -10,58 +10,103 @@ version node whose name itself is the author's machine-readable declaration
 glibc's `GLIBC_PRIVATE` or nettle's `NETTLE_INTERNAL_*` / `HOGWEED_INTERNAL_*`
 nodes). `public_api()`, on the stable `FOO_1.0` node, is unchanged. In v2,
 `foo_worker()` and the entire `FOO_INTERNAL_1` node are removed — its logic
-was inlined into `public_api()`.
+was inlined into `public_api()`. Any consumer that only links the public API
+(the supported way to use this library) is unaffected; the risk is confined
+to anyone who reached past the version boundary and linked the internal node
+directly.
 
-## Why this is not a hard break
+## Old/new diff
+
+| old/lib.c + old/version.map | new/lib.c + new/version.map |
+|------------------------------|------------------------------|
+| `int foo_worker(int x) { return x * 2; }` on `FOO_INTERNAL_1` | *(removed, inlined below)* |
+| `int public_api(int x) { return foo_worker(x) + 1; }` on `FOO_1.0` | `int public_api(int x) { return x * 2 + 1; }` on `FOO_1.0` |
+
+## abicheck command
+
+```bash
+gcc -shared -fPIC -g old/lib.c -o libfoo_v1.so -Wl,--version-script=old/version.map
+gcc -shared -fPIC -g new/lib.c -o libfoo_v2.so -Wl,--version-script=new/version.map
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
+
+Deployment Risk Changes:
+- func_removed: Public function removed: foo_worker
+- symbol_version_node_removed: Version node FOO_INTERNAL_1 was entirely
+  removed from the version script. Symbols previously under this node:
+  foo_worker. Applications linked against FOO_INTERNAL_1 will get
+  unresolved symbol errors.
+```
 
 A raw symbol-table diff sees exactly what it would see for any other removed
-exported function: a binding disappears. Naively that is `FUNC_REMOVED` →
-`BREAKING`. But the *version node name* is evidence the author never
-considered `foo_worker@@FOO_INTERNAL_1` part of the supported ABI — nobody
-is expected to link against an `*_INTERNAL_*` node directly, the same way
-nobody vendors `GLIBC_PRIVATE` symbols into their own binaries.
+exported function: a binding disappears. Naively that's `func_removed` →
+`BREAKING`. `abicheck/diff_versioning.py`'s `is_internal_version_node()` and
+`demote_internal_version_node_findings()` recognize that the *version node
+name* is evidence the author never considered `foo_worker@@FOO_INTERNAL_1`
+part of the supported ABI, and downgrade the finding to
+`COMPATIBLE_WITH_RISK` — conservative in one direction only: a symbol
+*promoted* from a public node to a private one is not demoted, since that
+still breaks old consumers who linked the public version.
 
-`abicheck/diff_versioning.py` recognizes this pattern:
+## Minimum evidence
 
-- `is_internal_version_node()` matches version names containing `PRIVATE` or
-  `INTERNAL` as a substring (`FOO_INTERNAL_1`, `GLIBC_PRIVATE`,
-  `NETTLE_INTERNAL_8_1`, `HOGWEED_INTERNAL_6_1`, ...).
-- `demote_internal_version_node_findings()` downgrades BREAKING/API_BREAK
-  findings confined to symbols whose *old*-side bindings were **all** on
-  internal nodes to `COMPATIBLE_WITH_RISK` — conservative in one direction
-  only: a symbol *promoted* from a public node to a private one is not
-  demoted, since that still breaks old consumers who linked the public
-  version.
+`min_evidence: L0` — the ELF `.gnu.version_d`/`.gnu.version` sections plus
+`.dynsym` bindings carry both the removed symbol and the internal-looking
+version-node name; no debug info or public headers needed to make this call.
 
-```bash
-abicheck compare libv1.so libv2.so --header old=old/lib.h --header new=new/lib.h
-# verdict: COMPATIBLE_WITH_RISK (exit 0)
-# symbol_version_node_removed: Version node FOO_INTERNAL_1 was entirely
-#   removed. Symbols previously under this node: foo_worker.
-```
+## Why abicheck catches it
 
-This is not a synthetic scenario: this exact rule was added after a real
-nettle 3.6 → 3.7 upgrade, where treating `HOGWEED_INTERNAL_*`/
-`NETTLE_INTERNAL_*` symbol churn as a hard break raised abicheck's live
-tool-agreement score for that release from 67% to 100%.
+abicheck parses the version-definition section directly from each binary's
+symbol table, so it sees not just *that* `foo_worker` disappeared but
+*which* version node it was bound to in both versions. Matching that node
+name against the `PRIVATE`/`INTERNAL` naming convention is what lets the
+detector distinguish "an internal implementation detail moved" from "a
+public API contract broke," entirely from L0 evidence.
 
-## Negative twin
+## Runtime failure demonstration
 
-If `foo_worker` had instead been versioned onto the **public** `FOO_1.0`
-node, the same removal would stay `BREAKING` — the demotion only fires when
-every old-side binding for the symbol is confined to an internal/private
-node. See `tests/test_internal_version_node_scope.py::test_compare_public_versioned_symbol_removal_stays_breaking`
-for the compiled-equivalent unit test.
-
-## How to reproduce
+**Severity: LOW — no observable effect for consumers of the public API.**
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build
-cmake --build /tmp/abicheck-examples-build --target \
-    case183_internal_version_node_churn_v1 case183_internal_version_node_churn_v2
+# Build old library + app (app only calls public_api)
+gcc -shared -fPIC -g old/lib.c -o libfoo.so -Wl,--version-script=old/version.map
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → public_api(5) -> 11
 
-python3 -m abicheck.cli compare \
-    /tmp/abicheck-examples-build/case183_internal_version_node_churn/libv1.so \
-    /tmp/abicheck-examples-build/case183_internal_version_node_churn/libv2.so \
-    --header old=old/lib.h --header new=new/lib.h
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g new/lib.c -o libfoo.so -Wl,--version-script=new/version.map
+./app
+# → public_api(5) -> 11   (identical — app never linked foo_worker)
 ```
+
+The risk only materializes for a consumer that explicitly linked
+`foo_worker@FOO_INTERNAL_1` — an unsupported use in the first place — which
+would now fail with `undefined symbol: foo_worker`.
+
+## Safe redesign
+
+If a helper genuinely needs to stay linkable across versions, put it on a
+public, stable version node instead of an `*_INTERNAL_*`/`*_PRIVATE_*` one.
+If it's truly private, this churn (removing/inlining it) is exactly the
+safe, expected evolution the internal-node convention exists to allow.
+
+**Real-world example:** this exact rule was added after a real nettle 3.6 →
+3.7 upgrade, where treating `HOGWEED_INTERNAL_*`/`NETTLE_INTERNAL_*` symbol
+churn as a hard break raised abicheck's live tool-agreement score for that
+release from 67% to 100%. glibc's own `GLIBC_PRIVATE` node follows the same
+convention: symbols there are removed/changed freely across releases because
+nothing outside glibc itself is expected to link against them.
+
+## Cross-tool comparison
+
+A negative twin exists in the test suite:
+`tests/test_internal_version_node_scope.py::test_compare_public_versioned_symbol_removal_stays_breaking`
+verifies that the same removal on the **public** `FOO_1.0` node — instead of
+`FOO_INTERNAL_1` — stays `BREAKING`; the demotion only fires when every
+old-side binding for the symbol is confined to an internal/private node.
