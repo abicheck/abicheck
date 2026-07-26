@@ -98,7 +98,7 @@ and the doc corpus in `docs/use/`:
 
 5. **Two real pilots exist, but with materially different scope, and an
    earlier draft of this finding mischaracterized the second one —
-   corrected here per review.** `validation/pvxs-abi-validation-2026-07.md`
+   corrected here per review.** A real PVXS validation pass
    (epics-base/pvxs, two libraries `libpvxs`/`libpvxsIoc`, Make-based build,
    no compile DB) found and fixed three real defects (an O(N²) perf bug,
    RTTI-symbol false positives, a zero-config `scan --sources` include-dir
@@ -1242,7 +1242,7 @@ aggregate job to run."
 | S8 | Source facts via `abicheck-cc` wrapper | `collect-facts producer: wrapper` (prepare) → real build → (verify) | any | Two-step; `phase: auto` limitation (finding 3) documented, not hidden. |
 | S9 | Source facts via Clang plugin | `collect-facts producer: clang-plugin` | any | Opt-in optimization, not onboarding default (LLVM-major coupling). |
 | S10 | Generated headers / codegen-before-scan | `build-output.json`'s `generated-headers/` root | any | Empty-but-declared root is a hard validation failure (§2). |
-| S11 | Make/EPICS/custom build | `collect-facts producer: wrapper` over Make `CC=`/`CXX=` | any | The PVXS validated path (`validation/pvxs-abi-validation-2026-07.md`). |
+| S11 | Make/EPICS/custom build | `collect-facts producer: wrapper` over Make `CC=`/`CXX=` | any | The PVXS validated path. |
 | S12 | Bazel/sandboxed build | `build-output.json` populated from `aquery`/declared outputs | any | Sandbox side effects must be declared artifacts, not filesystem scraping. |
 | S13 | Package-only / prebuilt artifacts | `check-project.yml` via a package→`build-output.json` adapter | any | No source checkout required; folds into `check-project`, no separate workflow (D7). |
 | S14 | Multi-DSO release bundle | one `check-target` over the bundle (directory/`--manifest` compare); **`resolve-baseline`'s unit of resolution is the bundle, not a single target** — see the note below the table | any | One report; distinct from S15. |

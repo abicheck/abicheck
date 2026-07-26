@@ -1202,7 +1202,7 @@ def dump(
             ``public_header_dirs`` scope field, so comparing it against a
             live `compare`-side extraction of the identical header set
             spuriously raises ``ScopeMismatchError`` (found during the G30
-            pilot validation, ``validation/g30-pilot-validation-2026-07.md``).
+            pilot validation).
             The CLI's ``dump`` command passes its own raw ``-H``/``--header``
             directory arguments here (``cli_dump_helpers.perform_elf_dump``).
             Mutually exclusive with *dump_manifest*, same as *headers*.

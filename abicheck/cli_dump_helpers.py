@@ -1382,8 +1382,7 @@ def perform_elf_dump(
     """
     compiler = "cc" if lang == "c" else "c++"
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
-    # ADR-050 D1 follow-up (G30 pilot validation, validation/
-    # g30-pilot-validation-2026-07.md): fold -H/--header's own directory
+    # ADR-050 D1 follow-up (G30 pilot validation): fold -H/--header's own directory
     # arguments into the extraction contract's scope (not just
     # public_header_dirs/apply_provenance's opt-in flags), matching
     # `compare`'s own --header handling (cli_resolve._resolve_compare_

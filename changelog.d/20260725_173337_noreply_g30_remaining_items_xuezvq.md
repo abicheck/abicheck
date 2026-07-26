@@ -7,8 +7,7 @@
   --header <dir>` always populates it for the live side it dumps — so
   comparing a `dump`-produced baseline against a live `compare`-side
   candidate of the *identical* header set spuriously raised
-  `ScopeMismatchError` (found during the G30 pilot validation,
-  `validation/g30-pilot-validation-2026-07.md`). `dump`'s CLI now folds a
+  `ScopeMismatchError` (found during the G30 pilot validation). `dump`'s CLI now folds a
   bare `-H`/`--header` directory argument into the extraction contract's
   scope fingerprint the same way `compare` already does, via a new
   `dumper.dump(scope_header_dirs=...)` parameter that feeds only the

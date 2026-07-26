@@ -5,8 +5,7 @@ header parse **false-positives** BREAKING; the build's active defines clear it.
 
 This case demonstrates ADR-039 (build-context reconciliation): a false positive
 that the `binary` and `headers` depths cannot avoid and that only **build**
-evidence resolves — the one class the depth analysis
-(`validation/false-positive-depth-analysis-2026-07.md`) identified.
+evidence resolves.
 
 ## What changes
 

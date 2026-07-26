@@ -309,8 +309,7 @@ grows — is swept by [`eval/scan_level_scaling.py`](https://github.com/abicheck
 a self-contained harness (no network/repo) that synthesises STL/template-heavy
 C++ trees of increasing TU count, builds them with the host compiler, and runs
 `scan` at each level against a slightly-changed baseline — recording wall time
-and **peak child RSS** (`os.wait4`) per (size, level). Raw findings:
-[`validation/scan-level-scalability-2026-06.md`](https://github.com/abicheck/abicheck/blob/main/validation/scan-level-scalability-2026-06.md).
+and **peak child RSS** (`os.wait4`) per (size, level).
 
 Two results:
 

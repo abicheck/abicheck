@@ -3,42 +3,6 @@
 Evidence-based validation of abicheck against real upstream C/C++ shared
 libraries (not synthetic fixtures), used to drive planning and improvement.
 
-- `uxl-scan-levels-timing-2026-06.md` — **UXL `scan`-level findings & follow-ups:**
-  a `scan` stack run across source-scan levels on oneTBB (C++) and UMF (C),
-  reduced to actionable datapoints + a problems/testing list (P1 castxml-only L2,
-  P2 pointer-reachability over-detection, …). The distilled **timing guide** lives
-  in [`docs/use/scan-levels.md`](../docs/use/scan-levels.md) and
-  [`docs/contribute/performance.md`](../docs/contribute/performance.md#scan-level-cost-model-one-cliff-at-l4).
-  Raw per-level data: `data/uxl_scan_results_2026-06.json`.
-- `realworld-tracker-parity-2026-06.md` — **latest parity** run: abicheck scored
-  live against the ABICC abi-laboratory oracle across 60 libraries / 185
-  comparable pairs (94.1 % agreement, 0 confirmed defects).
-- `pvxs-abi-validation-2026-07.md` — **EPICS pvxs integration:** built four
-  releases (1.4.0–1.5.2, two libraries) and scanned across L0–L5. Found and
-  fixed an O(N²) internal-leak hotspot (compare > 340 s → ~70 s), RTTI-symbol
-  alignment false positives, and a castxml-missing error that hid the clang
-  fallback; documents the public-header-scoping requirement and a drop-in CI
-  workflow replacing pvxs's ACC-based `abi-diff.sh`.
-- `g30-pilot-validation-2026-07.md` — **G30 pilot validation (mixed scope):**
-  the G30 plan's "Pilot validation plan" executed for real — PVXS
-  (real-upstream `epics-base/pvxs`) re-run through the full check-project.yml
-  flow (config validate → build-output validate → run-plan → baseline
-  resolve → analysis compare), and the Make pilot via that same real
-  EPICS/PVXS build; the CMake, Bazel, package(`.deb`), and
-  cross-compiled(aarch64) minimal pilots exercise a synthetic in-repo
-  `libdemo` fixture instead of a second real-upstream project (the Bazel
-  pilot additionally re-validates this PR's own ADR-053 TU→DSO attribution
-  against a real, live `bazel aquery` capture). The Intel `icpx`/oneAPI
-  vendor-toolchain pilot installed cleanly and validated real icpx-compiled
-  binaries + real SYCL device-code compilation; MSVC/PDB remains genuinely
-  blocked (no redistributable Linux path to `cl.exe`). Found and fixed two
-  real product bugs: a `dump`-vs-`compare` `public_header_dirs`
-  scope-fingerprint mismatch that spuriously raised `ScopeMismatchError` for
-  the baseline-then-live-candidate pattern the G30 pipeline relies on
-  (`dumper.dump()`'s new `scope_header_dirs` parameter, decoupled from
-  ADR-015 provenance tagging); and a `sycl_metadata.py` UR-adapter
-  detection gap that silently rejected real, current Intel oneAPI 2026.1
-  UR adapters as invalid.
 - `REPORT.md` — earlier curated-matrix validation report (false-positive catalog)
 - `DESIGN_ANALYSIS.md` — code-level root cause + architectural fix per false
   positive. FP-1/FP-2 are fixed in `abicheck/model.py` + `abicheck/diff_types.py`;

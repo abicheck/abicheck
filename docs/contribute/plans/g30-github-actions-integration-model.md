@@ -2887,8 +2887,7 @@ dangling "not yet attempted" item this plan carries forward by default.
 
 ## Pilot validation plan
 
-**Executed 2026-07-25 — see `validation/g30-pilot-validation-2026-07.md`**
-for the full real-run report (real builds, real `abicheck` scans, not
+**Executed 2026-07-25** (real builds, real `abicheck` scans, not
 simulated — mixed scope, see below). Summary: PVXS (real-upstream
 `epics-base/pvxs`) re-run via the check-project.yml flow and Make (via that
 same real EPICS Base/PVXS build) both completed with real ABI breaks
@@ -2909,20 +2908,18 @@ pipeline relies on (`dumper.dump(scope_header_dirs=...)`, decoupled from
 ADR-015's declaration-provenance tagging); (2) `sycl_metadata.py` silently
 rejecting real, current Intel oneAPI 2026.1 UR adapters as invalid (they
 export only `urGet<Category>ProcAddrTable` getters, not the older
-`urAdapterGet`-based per-verb symbols the detector required) — see that
-report's "Finding" sections for the full root-cause and fix detail on
-both. The per-pilot plan below is kept as the
-original acceptance-criteria
-reference the executed report was checked against.
+`urAdapterGet`-based per-verb symbols the detector required). The per-pilot
+plan below is kept as the original acceptance-criteria reference the
+executed pilot was checked against.
 
 ### PVXS (confirmed pilot — extend, don't re-validate from scratch)
 
-`validation/pvxs-abi-validation-2026-07.md` already validates the core
-scanning correctness (3 real defects found and fixed) and proposes a
-two-library `compare` workflow. **New validation needed once P1 lands:**
-re-run the pilot using `check-project.yml` + `.abicheck.yml`'s `targets:`
-block instead of the hand-written directory-fan-out `compare` workflow the
-existing report recommends, and confirm:
+A prior PVXS validation pass already validated the core scanning
+correctness (3 real defects found and fixed) and proposed a two-library
+`compare` workflow. **New validation needed once P1 lands:** re-run the
+pilot using `check-project.yml` + `.abicheck.yml`'s `targets:` block
+instead of the hand-written directory-fan-out `compare` workflow
+previously recommended, and confirm:
 
 - The existing Make-based build is reused unmodified (S3/S11 acceptance).
 - `libpvxs`/`libpvxsIoc` are correctly modeled as two `targets:` under one
@@ -2958,9 +2955,9 @@ backlog item is narrower than "find a second pilot from scratch":**
   DSOs with distinct public surfaces, an existing expensive build worth
   reusing, and (ideally) an existing libabigail or ABICC gate to migrate
   alongside.
-- Produce a validation report in the same format as
-  `validation/pvxs-abi-validation-2026-07.md` — defects found/fixed,
-  documented-not-fixed issues, a recommended workflow — before claiming any
+- Produce a validation report in the same format as the earlier PVXS
+  validation pass — defects found/fixed, documented-not-fixed issues, a
+  recommended workflow — before claiming any
   S9/S15/S17/S21/S26 acceptance criteria are met for a vendor-toolchain
   project. Until that report exists, treat those scenario rows in ADR-047
   §8 as **design-validated against PVXS's simpler case only**, not proven
@@ -2982,8 +2979,7 @@ not just correctness:
   simpler EPICS module or a synthetic Make fixture is used instead
   (S11 acceptance, distinct from the full PVXS pilot above).
 - Bazel repository (S12 acceptance) — **done, 2026-07-25** (real `bazelisk`/
-  Bazel 9.2.0 + a minimal `cc_binary` fixture, see
-  `validation/g30-pilot-validation-2026-07.md`'s "Bazel pilot" section).
+  Bazel 9.2.0 + a minimal `cc_binary` fixture).
 - Package-only RPM/Deb/tar comparison (S13 acceptance).
 - Linux/macOS/Windows matrix (S17 acceptance) — the existing CI matrix
   (ADR-047-unrelated, `.github/workflows/ci.yml`) already exercises

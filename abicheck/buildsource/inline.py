@@ -832,7 +832,7 @@ def collect_inline_pack(
             # The unseeded fallback is 'headers-only' (the public-API-covering TU
             # subset), NOT 'target' (the whole target): an unseeded s5/pr run otherwise
             # silently pays full-target (== s6) replay cost — the ADR-035 P3 cliff
-            # (validation/uxl-scan-levels-timing-2026-06.md). 'headers-only' keeps a
+            # (found during a real-world UXL field run). 'headers-only' keeps a
             # non-empty public surface for the cross-checks at a fraction of the cost;
             # the caller (cli_scan) emits the advisory naming --since to focus further.
             replay_scope = (

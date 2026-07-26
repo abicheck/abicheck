@@ -20,8 +20,8 @@ A sibling to :mod:`abicheck.dumper_castxml` that produces the **same**
 from a ``clang -ast-dump=json`` tree instead of castxml XML, so a clang-only host
 can still run the header-aware L2 layer — public-surface scoping and the
 ADR-035 D4 cross-source checks that depend on header provenance (ADR-003,
-"Extension: clang as an alternative L2 frontend"; surfaced by the UXL field run,
-``validation/uxl-scan-levels-timing-2026-06.md`` P1).
+"Extension: clang as an alternative L2 frontend"; surfaced by a real-world
+UXL field run).
 
 :class:`_ClangAstParser` mirrors :class:`abicheck.dumper_castxml._CastxmlParser`'s
 public method surface exactly, so the two are interchangeable producers behind
