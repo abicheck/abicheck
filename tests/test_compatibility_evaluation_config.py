@@ -226,6 +226,11 @@ class TestImmutableIdentityRequiresDigest:
         identity = _identity("strict_abi", sha256="abc123")
         assert identity.sha256 == "abc123"
 
+    def test_empty_string_sha256_is_rejected(self):
+        # A present-but-empty digest is exactly as useless as a missing one.
+        with pytest.raises(ValueError, match="non-empty digest"):
+            ImmutableIdentity(id="strict_abi", version=1, sha256="")
+
 
 class TestPackVersionedIdentity:
     # ADR-049 D6: "every selected provider/base/preset/pack or rule set
@@ -281,6 +286,11 @@ class TestDigestedItems:
     def test_missing_sha256_is_a_type_error(self):
         with pytest.raises(TypeError):
             DigestedItems(items=["linux-x86_64"])  # type: ignore[call-arg]
+
+    def test_empty_string_sha256_is_rejected(self):
+        # A present-but-empty digest is exactly as useless as a missing one.
+        with pytest.raises(ValueError, match="non-empty digest"):
+            DigestedItems(sha256="", items=["linux-x86_64"])
 
     def test_empty_items_still_requires_a_digest(self):
         # An explicitly selected source that resolves to zero items is not

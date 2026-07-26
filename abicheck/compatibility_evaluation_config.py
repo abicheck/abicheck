@@ -61,6 +61,15 @@ def _frozen_tuple(s: Sequence[object]) -> tuple[object, ...]:
     return tuple(s)
 
 
+def _require_nonempty_digest(sha256: str, *, owner: str) -> None:
+    if not sha256:
+        raise ValueError(
+            f"{owner}.sha256 must be a non-empty digest (ADR-049 D6): an "
+            "empty string is exactly as unable to detect content drift on "
+            "replay as no digest at all."
+        )
+
+
 def _require_digest_when_nonempty(
     items: Sequence[object], sha256: str | None, *, owner: str
 ) -> None:
@@ -140,6 +149,9 @@ class ImmutableIdentity:
     version: int
     sha256: str
 
+    def __post_init__(self) -> None:
+        _require_nonempty_digest(self.sha256, owner="ImmutableIdentity")
+
 
 @dataclass(frozen=True)
 class DigestedItems:
@@ -166,6 +178,7 @@ class DigestedItems:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "items", _frozen_tuple(self.items))
+        _require_nonempty_digest(self.sha256, owner="DigestedItems")
 
 
 # --------------------------------------------------------------------------
