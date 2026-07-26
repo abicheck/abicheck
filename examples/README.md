@@ -351,8 +351,8 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [89](case89_inline_accessor_renamed_pimpl_member/README.md) | Inline Accessor References Renamed Pimpl Member | Breaking | 🔴 BREAKING |
 | [90](case90_bundle_intra_dep_removed/README.md) | Bundle — Intra-Bundle Removed Symbol | Bundle | 🔵 BUNDLE |
 | [91](case91_bundle_intra_signature_drift/README.md) | Bundle — Intra-Bundle extern-C Signature Drift | Bundle | 🔵 BUNDLE |
-| [92](case92_bundle_provider_changed/README.md) | Bundle — symbol provider migration | Bundle | 🔵 BUNDLE |
-| [93](case93_bundle_manifest_drift/README.md) | Bundle — instantiation manifest drift | Bundle | 🔵 BUNDLE |
+| [92](case92_bundle_provider_changed/README.md) | Bundle — Symbol Provider Migration | Bundle | 🔵 BUNDLE |
+| [93](case93_bundle_manifest_drift/README.md) | Bundle — Instantiation Manifest Drift | Bundle | 🔵 BUNDLE |
 | [94](case94_empty_tag_gained_state/README.md) | Empty Tag Gained State | Breaking | 🔴 BREAKING |
 | [95](case95_allocator_nested_typedef_removed/README.md) | Allocator Nested-Typedef Removed | Breaking | 🔴 BREAKING |
 | [96](case96_hidden_friend_removed/README.md) | Hidden Friend Operator Removed | API Break | 🟠 API_BREAK |

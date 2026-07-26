@@ -1,76 +1,137 @@
-# Case 93: Bundle — instantiation manifest drift
+# Case 93: Bundle — Instantiation Manifest Drift
 
-**Category:** Bundle / manifest
-**Bundle verdict (with `--manifest`):** 🔴 BREAKING
-**Bundle verdict (without `--manifest`):** 🟢 NO_CHANGE
-**Combined verdict (per-library worst-of × bundle):** 🔴 BREAKING — the
-per-library diff still flags `func_removed` even when no manifest is
-supplied; `--manifest` upgrades the diagnosis from "a symbol vanished" to
-"a documented public promise was broken".
+**Category:** Bundle / manifest | **Verdict:** 🔴 BREAKING (both with and
+without `--manifest`; the manifest upgrades *why* it's breaking)
 
-## What changed
-The release ships a single library `libcore.so` with four explicit template
-instantiations:
+## Verdict and consumer impact
 
-| Symbol                | v1  | v2  |
-|-----------------------|-----|-----|
-| `train_float_dense`   | ✅  | ✅  |
-| `train_float_sparse`  | ✅  | ✅  |
-| `train_double_dense`  | ✅  | ✅  |
-| `train_double_sparse` | ✅  | ❌ (dropped)  |
+The release ships a single library, `libcore.so`, with four explicit
+template instantiations. `train_double_sparse` silently disappears between
+v1 and v2 (in real oneDAL these would be mangled C++ symbols for
+`train_ops<Float, Method, Task>` triples; plain `extern "C"` names are used
+here so the example is reproducible without a specific demangler).
+Downstream code that instantiated the dropped triple fails to link or
+resolve the symbol at runtime — recompilation cannot fix a binary that
+already calls it. Per-library `func_removed` already flags the missing
+symbol as BREAKING with no extra input. What only the bundle layer's
+`--manifest` can add is *why* it matters: distinguishing "a documented
+public promise was broken" from "an internal helper happened to be
+visible and got cleaned up," which a bare removed-symbol diff can't tell
+apart on its own.
 
-In real oneDAL these are mangled C++ symbols for
-`train_ops<Float, Method, Task>` triples. Dropping one without
-documentation is a silent contract violation: downstream code that
-instantiated the dropped triple will fail to link.
+## Old/new diff
 
-## Real Failure Demo
+| Symbol | v1 | v2 |
+|---|---|---|
+| `train_float_dense` | present | present |
+| `train_float_sparse` | present | present |
+| `train_double_dense` | present | present |
+| `train_double_sparse` | present | *(removed)* |
 
-**Severity: BREAKING / MANIFEST PROMISE REMOVED**
+`manifest.yaml` declares all four as promised public instantiations
+(`docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md`).
+
+## abicheck command
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case93_bundle_manifest_drift_old_libcore case93_bundle_manifest_drift_new_libcore
-PYTHONPATH=. python3 -m abicheck.cli compare-release   /tmp/abicheck-examples-build/case93_bundle_manifest_drift/old   /tmp/abicheck-examples-build/case93_bundle_manifest_drift/new   --manifest examples/case93_bundle_manifest_drift/manifest.yaml   --format markdown
-# bundle_manifest_instantiation_removed: train_double_sparse is promised but no longer exported.
+g++ -shared -fPIC -g old/libcore.cpp -o old/libcore.so
+g++ -shared -fPIC -g new/libcore.cpp -o new/libcore.so
+abicheck compare old/ new/ --manifest manifest.yaml --format markdown
 ```
 
-## Why this needs a manifest
-Per-library `func_removed` detection already flags the missing symbol —
-but it can't tell whether the symbol was a *promised* part of the public
-ABI or an internal helper that happened to be visible. Without an
-explicit manifest, the tool has to choose between:
-- Treating every removed symbol as BREAKING (lots of false positives for
-  internal helpers).
-- Treating every removed symbol as a free choice (misses real contract
-  violations like this one).
+## Expected abicheck finding
 
-The `--manifest` input externalises the contract: it lists exactly the
-symbols the release promises to keep. The bundle layer then enforces
-"every manifest entry must be exported by some library in the new
-bundle".
+Without `--manifest` — the per-library break is still caught, just not
+attributed to a broken promise:
 
-## Reproducing
-```bash
-abicheck compare-release old/ new/ --manifest manifest.yaml
-```
-
-Expected output:
 ```text
-## 🔗 Bundle (Cross-Library) Findings
-- bundle_manifest_instantiation_removed — train_double_sparse
-  - Manifest promises train_double_sparse but no library in the new
-    bundle exports it.
+Verdict: BREAKING (exit 4)
+Bundle:  NO_CHANGE (0 cross-library findings)
+
+libcore.so -> BREAKING
+- func_removed: Public function removed: train_double_sparse
 ```
 
-Exit code: 4 (BREAKING).
+With `--manifest manifest.yaml`:
 
-Without `--manifest`, the run still flags `func_removed` per-library
-(BREAKING), but the diagnosis is "a symbol disappeared" rather than
-"the documented contract was violated".
+```text
+Verdict: BREAKING (exit 4)
+Bundle:  BREAKING (1 cross-library finding)
 
-## Real-world analogue
-oneDAL maintains explicit instantiation lists for its algorithms (the
-build-system file enumerates which `(Float, Method, Task)` triples are
-instantiated). Refactors that change these lists are ABI changes — but
-only the bundle level can detect them.
+libcore.so -> BREAKING
+- func_removed: Public function removed: train_double_sparse
+
+## 🔗 Bundle (Cross-Library) Findings
+- bundle_manifest_instantiation_removed: train_double_sparse (provider: libcore.so)
+  > Manifest promises symbol 'train_double_sparse' but no exported symbol
+    in the new bundle matches it.
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the exported-symbol table alone tells abicheck
+`train_double_sparse` is gone from `libcore.so`'s `.dynsym`; cross-checking
+it against `manifest.yaml`'s promised-symbol list needs no debug info or
+headers either. `-g` above is only there so the *Runtime failure
+demonstration* below can build a matching app.
+
+## Why abicheck catches it
+
+Per-library `func_removed` detection already flags the missing symbol from
+plain `.dynsym` diffing. The `--manifest` input externalizes the contract:
+it lists exactly the symbols the release promises to keep. The bundle
+layer then enforces "every manifest entry must be exported by some library
+in the new bundle" and emits `bundle_manifest_instantiation_removed` for
+any promised symbol that isn't — the same underlying fact
+(`func_removed`), but classified against a documented public-API contract
+instead of inferred from symbol visibility alone.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1, swap in v2 `libcore.so` without
+recompile.
+
+```bash
+# Build old library + app
+g++ -shared -fPIC -g old/libcore.cpp -o libcore.so
+gcc app.c -L. -lcore -Wl,-rpath,. -o app
+./app
+# → train_float_dense() = 1
+# → train_double_sparse() = 4
+
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g new/libcore.cpp -o libcore.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol: train_double_sparse
+```
+
+**Why CRITICAL:** `train_double_sparse` is removed from the dynamic symbol
+table in v2; the runtime linker cannot resolve the symbol and the process
+is killed immediately on startup.
+
+## Safe redesign
+
+Never drop a documented instantiation from a template-explosion library
+without a deprecation cycle — apply the same discipline as removing any
+other public symbol. Keep a `manifest.yaml`-style promised-symbol list in
+CI (`abicheck compare --manifest`) so a build-system regression that
+silently drops an instantiation fails the release gate instead of shipping
+quietly.
+
+**Real-world example:** oneDAL maintains explicit instantiation lists for
+its algorithms (the build-system file enumerates which `(Float, Method,
+Task)` triples are instantiated). Refactors that change these lists are
+real ABI changes — but distinguishing "promised" from "incidental" removal
+needs the manifest, not just the symbol diff.
+
+## Cross-tool comparison
+
+`abidiff` and `abi-compliance-checker` have no manifest/promised-symbol
+concept — run against `libcore.so` old vs. new, either would report the
+same `train_double_sparse` removal as a plain symbol change, with no way
+to distinguish "a documented public promise was broken" from "an internal
+helper was cleaned up." That distinction is exactly what
+`--manifest`-driven `bundle_manifest_instantiation_removed` adds on top of
+the per-library removal both tools already see.
