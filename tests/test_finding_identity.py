@@ -25,6 +25,7 @@ from abicheck.finding_identity import (
     IDENTITY_TIER_REDUCED,
     FindingIdentity,
     _looks_like_itanium_encoding,
+    _stringify_change_value,
     is_real_mangled_name,
     normalize_mangled_name,
     normalized_signature,
@@ -226,6 +227,28 @@ class TestNormalizedSignature:
 
     def test_empty_inputs_still_produce_a_string(self) -> None:
         assert normalized_signature("", "", ()) == "sig:\x1f\x1f0"
+
+
+class TestStringifyChangeValue:
+    # Codex review, fresh evidence: Change.old_value/new_value are annotated
+    # str | None, but diff_python.py's PYTHON_STABLE_ABI_VIOLATION
+    # emissions pass a list for several of its findings -- this helper
+    # exists so _change_discriminator can join a deterministic string
+    # instead of crashing on the structured value.
+    def test_none_becomes_empty_string(self) -> None:
+        assert _stringify_change_value(None) == ""
+
+    def test_str_passes_through_unchanged(self) -> None:
+        assert _stringify_change_value("callable") == "callable"
+
+    def test_list_joins_deterministically(self) -> None:
+        assert _stringify_change_value(["a", "b"]) == "a,b"
+
+    def test_tuple_joins_deterministically(self) -> None:
+        assert _stringify_change_value(("a", "b")) == "a,b"
+
+    def test_unforeseen_structured_value_falls_back_to_str(self) -> None:
+        assert _stringify_change_value({"a": 1}) == str({"a": 1})
 
 
 class TestSourceRelativeIdentity:
@@ -485,6 +508,23 @@ class TestResolveVariableIdentity:
 
 
 class TestResolveChangeIdentity:
+    def test_list_valued_new_value_does_not_crash(self) -> None:
+        # Codex review, fresh evidence: Change.old_value/new_value are
+        # annotated str | None, but diff_python.py's
+        # PYTHON_STABLE_ABI_VIOLATION emissions pass a list (e.g.
+        # new_value=sorted(group)) for several of its findings -- joining
+        # that list directly into _change_discriminator's parts previously
+        # crashed with "TypeError: sequence item 0: expected str instance,
+        # list found" instead of producing an identity.
+        change = Change(
+            kind=ChangeKind.PYTHON_STABLE_ABI_VIOLATION,
+            symbol="mymodule",
+            description="Gained private imports outside the stable ABI",
+            new_value=["_PyObject_GC_New", "_Py_Dealloc"],
+        )
+        identity = resolve_change_identity(change)
+        assert "_PyObject_GC_New" in identity.primary_id
+
     def test_symbol_slug_kind_with_mangled_symbol_is_canonical(self) -> None:
         # Codex review: SYMBOL_TYPE_CHANGED etc. (the ELF symbol_* family)
         # carry a real mangled symbol too, not just func_*/var_*/ifunc_*.

@@ -710,6 +710,33 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
 }
 
 
+def _stringify_change_value(value: object) -> str:
+    """Deterministic string form of a ``Change.old_value``/``new_value``.
+
+    Both fields are annotated ``str | None``, but that annotation isn't
+    runtime-enforced and at least one real producer violates it:
+    ``diff_python.py``'s ``PYTHON_STABLE_ABI_VIOLATION`` emissions pass a
+    list (e.g. ``new_value=sorted(group)``) for several of its findings.
+    Joining that list directly into ``_change_discriminator``'s
+    ``\\x1f``-separated ``parts`` crashed with ``TypeError: sequence item
+    ...: expected str instance, list found`` instead of producing an
+    identity (Codex review, fresh evidence) -- this module must resolve an
+    identity for every real flat ``Change``, not only ones matching the
+    aspirational type annotation. Lists/tuples (the one structured shape
+    actually observed) join deterministically, preserving the producer's
+    own ordering (already sorted where order matters); any other
+    unforeseen structured value falls back to ``str()`` rather than
+    crashing.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return ",".join(str(v) for v in value)
+    return str(value)
+
+
 def _change_discriminator(
     change: Change, kind_value: str, *, include_description: bool = True
 ) -> str:
@@ -742,7 +769,11 @@ def _change_discriminator(
     category = _EQUIVALENT_CHANGE_CATEGORIES.get(kind_value)
     if category is not None:
         return f"category:{category}"
-    parts = [kind_value, change.old_value or "", change.new_value or ""]
+    parts = [
+        kind_value,
+        _stringify_change_value(change.old_value),
+        _stringify_change_value(change.new_value),
+    ]
     if include_description:
         parts.append(change.description or "")
     return "\x1f".join(parts)

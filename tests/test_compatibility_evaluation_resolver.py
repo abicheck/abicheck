@@ -522,6 +522,17 @@ class TestDetectPackConflicts:
                 ]
             )
 
+    def test_non_string_explicit_override_key_is_rejected(self):
+        # Codex review, fresh evidence: the Mapping check alone only guards
+        # the collection shape -- a non-str key (e.g. {2: "legacy"})
+        # previously passed silently, since `field_name in
+        # explicit_overrides` never touches the key's type, so
+        # detect_pack_conflicts([], explicit_overrides={2: "legacy"})
+        # returned successfully instead of rejecting the malformed
+        # override namespace.
+        with pytest.raises(TypeError, match="detect_pack_conflicts"):
+            detect_pack_conflicts([], explicit_overrides={2: "legacy"})  # type: ignore[dict-item]
+
     def test_non_mapping_explicit_overrides_is_rejected(self):
         # Codex review: the `Mapping[str, Hashable]` annotation isn't
         # runtime-enforced -- an untyped pack adapter passing a plain

@@ -398,6 +398,22 @@ def detect_pack_conflicts(
             "detect_pack_conflicts: explicit_overrides must be a "
             f"Mapping[str, Hashable], not {explicit_overrides!r}."
         )
+    # The Mapping check above only guards the collection shape -- a
+    # non-str key (e.g. {2: "legacy"}) still passed silently, since
+    # `field_name in explicit_overrides` never touches the key's type. An
+    # untyped pack adapter could therefore supply a malformed override
+    # namespace whose non-str entries are simply never matched by the
+    # string-keyed `field_name in explicit_overrides` check below, instead
+    # of being rejected as the configuration error they are (Codex review,
+    # fresh evidence).
+    non_string_override_keys = sorted(
+        repr(k) for k in explicit_overrides if not isinstance(k, str)
+    )
+    if non_string_override_keys:
+        raise TypeError(
+            "detect_pack_conflicts: explicit_overrides keys must be str, "
+            f"not: {non_string_override_keys}"
+        )
     by_field: dict[str, list[tuple[ImmutableIdentity, Hashable]]] = {}
     for identity, assignments in pack_assignments:
         # A future untyped pack-manifest adapter supplying a bare/decoded
