@@ -509,3 +509,20 @@ class TestDetectPackConflicts:
                     ),
                 ]
             )
+
+    def test_unhashable_assignment_value_is_rejected(self):
+        # Codex review: an untyped pack adapter supplying a decoded
+        # collection-valued assignment (e.g. {"contract.overlays": ["api"]})
+        # previously reached the `{value for _, value in contributors}` set
+        # comprehension unvalidated, crashing with an uncontextualized
+        # "TypeError: unhashable type: 'list'" instead of a message
+        # identifying which pack/field caused it.
+        with pytest.raises(TypeError, match="detect_pack_conflicts"):
+            detect_pack_conflicts(
+                [
+                    (
+                        _pack("rust_c_ffi"),
+                        {"contract.overlays": ["api"]},  # type: ignore[dict-item]
+                    ),
+                ]
+            )

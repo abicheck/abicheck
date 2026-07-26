@@ -399,6 +399,24 @@ def detect_pack_conflicts(
                     "detect_pack_conflicts: every assignment key must be a "
                     f"str, not {field_name!r} (from pack {identity!r})."
                 )
+            # An untyped pack adapter supplying a decoded collection-valued
+            # assignment (e.g. {"contract.overlays": ["api"]}) previously
+            # reached the `{value for _, value in contributors}` set
+            # comprehension below unvalidated, crashing with an
+            # uncontextualized "TypeError: unhashable type: 'list'" instead
+            # of a message identifying which pack/field caused it --
+            # FieldCandidate.__post_init__ guards this same
+            # annotation-isn't-runtime-enforced gap for individual
+            # candidates, but this separate pack-conflict path wasn't
+            # covered (Codex review).
+            try:
+                hash(value)
+            except TypeError as exc:
+                raise TypeError(
+                    "detect_pack_conflicts: assignment value for field "
+                    f"{field_name!r} from pack {identity!r} must be "
+                    f"hashable, not {value!r} ({exc})."
+                ) from exc
             by_field.setdefault(field_name, []).append((identity, value))
 
     for field_name in sorted(by_field):
