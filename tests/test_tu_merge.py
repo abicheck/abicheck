@@ -38,7 +38,7 @@ import pytest
 from abicheck.change_registry import REGISTRY
 from abicheck.checker_policy import ChangeKind
 from abicheck.errors import TuMergeError
-from abicheck.model import EnumType, Function, RecordType, TypeField, Variable
+from abicheck.model import EnumType, Function, Param, RecordType, TypeField, Variable
 from abicheck.tu_fragment import MergedTuFragments, TuFragment
 from abicheck.tu_merge import (
     HETEROGENEOUS_ABI_CONTEXT,
@@ -174,6 +174,114 @@ def test_merge_fragments_variable_union_prefers_non_none_value():
     assert merged.variables[0].value == "42"
 
 
+def test_merge_fragments_variable_raises_on_conflicting_value():
+    # Two different non-None values for the same variable is a genuine
+    # conflict, not a "declaration without an initializer" union case.
+    a = TuFragment(tu_name="a", variables=(_var("g_x", "g_x", value="1"),))
+    b = TuFragment(tu_name="b", variables=(_var("g_x", "g_x", value="2"),))
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    assert excinfo.value.entity_key == ("variable", "g_x")
+
+
+def test_merge_fragments_function_raises_on_conflicting_default_argument():
+    # f(int=1) vs f(int=2): two different non-None defaults for the same
+    # parameter is a genuine conflict, not "an added default argument".
+    param_one = Param(name="n", type="int", default="1")
+    param_two = Param(name="n", type="int", default="2")
+    a = TuFragment(tu_name="a", functions=(_fn("f", "_Z1fi", params=[param_one]),))
+    b = TuFragment(tu_name="b", functions=(_fn("f", "_Z1fi", params=[param_two]),))
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    assert excinfo.value.entity_key == ("function", "_Z1fi")
+
+
+def test_merge_fragments_function_unions_default_argument_across_tus():
+    param_no_default = Param(name="n", type="int")
+    param_with_default = Param(name="n", type="int", default="0")
+    a = TuFragment(
+        tu_name="a", functions=(_fn("f", "_Z1fi", params=[param_no_default]),)
+    )
+    b = TuFragment(
+        tu_name="b", functions=(_fn("f", "_Z1fi", params=[param_with_default]),)
+    )
+    merged = merge_fragments([a, b])
+    assert merged.functions[0].params[0].default == "0"
+
+
+def test_merge_fragments_prefers_public_header_provenance():
+    # TU "a" (sorted first) reaches the declaration only through a private,
+    # differently-named header; TU "b" reaches the identical declaration
+    # through the declared public one. Deliberately different basenames
+    # ("detail.h" vs "api.h") so this doesn't accidentally pass via
+    # provenance.classify_origin's own basename-fallback matching (D3) --
+    # it must be the merge's public-origin preference doing the work, not a
+    # same-basename coincidence. The merged entity must carry the public
+    # location, not arbitrarily whichever TU happened to sort first --
+    # otherwise a genuinely public declaration would misclassify as private
+    # once abicheck.provenance.apply_provenance runs on the merged snapshot.
+    a = TuFragment(
+        tu_name="a",
+        functions=(_fn("f", "_Z1fv", source_location="internal/detail.h:1"),),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(_fn("f", "_Z1fv", source_location="include/api.h:1"),),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert merged.functions[0].source_location == "include/api.h:1"
+
+
+def test_merge_fragments_without_public_set_keeps_deterministic_default():
+    # No public_header_paths/public_header_dirs supplied -- origin
+    # classification stays opt-in (matches abicheck.provenance's own
+    # default), so the tu_name-sorted-first side's location wins, unchanged
+    # from before this fix.
+    a = TuFragment(tu_name="a", functions=(_fn("f", "_Z1fv", source_location="a.h:1"),))
+    b = TuFragment(tu_name="b", functions=(_fn("f", "_Z1fv", source_location="b.h:1"),))
+    merged = merge_fragments([a, b])
+    assert merged.functions[0].source_location == "a.h:1"
+
+
+def test_merge_fragments_type_raises_on_conflicting_kind_for_opaque_pair():
+    # A `union X;` forward declaration is not compatible with a
+    # `struct X { ... };` definition, even though both key on the bare
+    # name "X" -- the opaque/definition merge must check `kind` too.
+    forward_union = RecordType(name="X", kind="union", is_opaque=True)
+    struct_definition = RecordType(
+        name="X", kind="struct", fields=[TypeField(name="v", type="int")]
+    )
+    a = TuFragment(tu_name="a", types=(forward_union,))
+    b = TuFragment(tu_name="b", types=(struct_definition,))
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    assert excinfo.value.entity_key == ("type", "X")
+
+
+def test_merge_fragments_enum_raises_on_conflicting_underlying_type_for_forward_pair():
+    # `enum E : int;` is not compatible with `enum E : unsigned { X };`,
+    # even though the forward declaration has no members to compare against
+    # the definition's -- the empty-members/definition merge must check
+    # underlying_type/is_scoped too.
+    from abicheck.model import EnumMember
+
+    forward = EnumType(name="E", members=[], underlying_type="int")
+    definition = EnumType(
+        name="E", members=[EnumMember(name="X", value=0)], underlying_type="unsigned"
+    )
+    a = TuFragment(tu_name="a", enums=(forward,))
+    b = TuFragment(tu_name="b", enums=(definition,))
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    assert excinfo.value.entity_key == ("enum", "E")
+
+
 def test_merge_fragments_variable_raises_on_conflicting_type():
     a = TuFragment(
         tu_name="a", variables=(Variable(name="g_x", mangled="g_x", type="int"),)
@@ -213,6 +321,96 @@ def test_merge_fragments_enum_raises_on_conflicting_members():
         merge_fragments([a, b])
     assert excinfo.value.code == INCONSISTENT_DECLARATION
     assert excinfo.value.entity_key == ("enum", "Color")
+
+
+def test_merge_fragments_function_raises_on_differing_param_count():
+    a = TuFragment(
+        tu_name="a",
+        functions=(_fn("f", "_Z1fi", params=[Param(name="x", type="int")]),),
+    )
+    b = TuFragment(tu_name="b", functions=(_fn("f", "_Z1fi", params=[]),))
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    assert excinfo.value.entity_key == ("function", "_Z1fi")
+
+
+def test_merge_fragments_type_reconciles_definition_then_opaque_across_tus():
+    # Same shape as the forward-decl/definition test above, but with the
+    # roles swapped (a = definition, b = opaque) -- both directions of the
+    # is_opaque branch must merge, not just a-opaque-first.
+    definition = RecordType(
+        name="Point", kind="struct", fields=[TypeField(name="x", type="int")]
+    )
+    forward = RecordType(name="Point", kind="struct", is_opaque=True)
+    a = TuFragment(tu_name="a", types=(definition,))
+    b = TuFragment(tu_name="b", types=(forward,))
+    merged = merge_fragments([a, b])
+    assert merged.types == (definition,)
+
+
+def test_merge_fragments_type_raises_on_conflicting_kind_for_reversed_opaque_pair():
+    struct_definition = RecordType(
+        name="X", kind="struct", fields=[TypeField(name="v", type="int")]
+    )
+    forward_union = RecordType(name="X", kind="union", is_opaque=True)
+    a = TuFragment(tu_name="a", types=(struct_definition,))
+    b = TuFragment(tu_name="b", types=(forward_union,))
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    assert excinfo.value.entity_key == ("type", "X")
+
+
+def test_merge_fragments_enum_reconciles_definition_then_forward_across_tus():
+    # Roles swapped from the enum forward-decl/definition test above (a =
+    # definition, b = forward/empty) -- both directions must merge.
+    from abicheck.model import EnumMember
+
+    definition = EnumType(name="Color", members=[EnumMember(name="RED", value=0)])
+    forward = EnumType(name="Color", members=[])
+    a = TuFragment(tu_name="a", enums=(definition,))
+    b = TuFragment(tu_name="b", enums=(forward,))
+    merged = merge_fragments([a, b])
+    assert merged.enums == (definition,)
+
+
+def test_merge_fragments_enum_raises_on_conflicting_underlying_type_for_reversed_forward_pair():
+    from abicheck.model import EnumMember
+
+    definition = EnumType(
+        name="E", members=[EnumMember(name="X", value=0)], underlying_type="unsigned"
+    )
+    forward = EnumType(name="E", members=[], underlying_type="int")
+    a = TuFragment(tu_name="a", enums=(definition,))
+    b = TuFragment(tu_name="b", enums=(forward,))
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    assert excinfo.value.entity_key == ("enum", "E")
+
+
+def test_merge_fragments_enum_reconciles_identical_definitions_across_tus():
+    # Both sides fully defined (non-empty members), identical modulo
+    # provenance -- exercises the "_more_public_of" tie-break path for
+    # enums, distinct from the forward-decl/definition path above.
+    from abicheck.model import EnumMember
+
+    a_def = EnumType(
+        name="Color",
+        members=[EnumMember(name="RED", value=0)],
+        source_location="a.h:1",
+    )
+    b_def = EnumType(
+        name="Color",
+        members=[EnumMember(name="RED", value=0)],
+        source_location="b.h:1",
+    )
+    a = TuFragment(tu_name="a", enums=(a_def,))
+    b = TuFragment(tu_name="b", enums=(b_def,))
+    merged = merge_fragments([a, b])
+    assert len(merged.enums) == 1
+    assert merged.enums[0].members == [EnumMember(name="RED", value=0)]
 
 
 def test_merge_fragments_raises_on_conflicting_constant_value():
@@ -273,6 +471,15 @@ def test_odr_conflict_fixture_raises_through_real_clang_backend(tmp_path):
     tu_b = TranslationUnit(
         name="tu_b", forced_includes=(_G32_DIR / "odr_conflict" / "tu_b.h",)
     )
+    # No explicit lang="c++" here (unlike the odr_safe test above, which
+    # genuinely needs it for the bare `Point` forward-declaration syntax) --
+    # these headers are valid under either C or C++ linkage, and forcing
+    # lang="c++" was observed to route Windows' clang toward MSVC-mode name
+    # mangling, where int/double-returning `compute(int)` overloads did not
+    # collide under the same entity_key the way they reliably do under
+    # Itanium mangling (CI: windows-latest, PR #635) -- matching
+    # test_dumper_manifest.py's own real-backend conflict test, which
+    # likewise leaves lang unset and passes on every platform.
     with pytest.raises(TuMergeError) as excinfo:
         run_tu_loop(
             (tu_a, tu_b),
@@ -283,7 +490,6 @@ def test_odr_conflict_fixture_raises_through_real_clang_backend(tmp_path):
             ],
             backend="clang",
             compiler="c++",
-            lang="c++",
             exported_dynamic={"compute"},
             exported_static=set(),
         )

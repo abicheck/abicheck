@@ -65,10 +65,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
+from functools import partial
 from typing import TypeVar
 
 from .errors import TuMergeError
 from .model import EnumType, Function, Param, RecordType, ScopeOrigin, Variable
+from .provenance import build_public_set, classify_origin, header_from_location
 from .tu_fragment import MergedTuFragments, TuFragment, entity_key
 
 #: TuMergeError.code values (ADR-050 D4). Kept as plain module constants
@@ -80,11 +82,28 @@ HETEROGENEOUS_ABI_CONTEXT = "HETEROGENEOUS_ABI_CONTEXT"
 _T = TypeVar("_T")
 
 
-def merge_fragments(fragments: Sequence[TuFragment]) -> MergedTuFragments:
+def merge_fragments(
+    fragments: Sequence[TuFragment],
+    *,
+    public_header_paths: Sequence[str] = (),
+    public_header_dirs: Sequence[str] = (),
+) -> MergedTuFragments:
     """Merge *fragments* into one :class:`MergedTuFragments`, resolving
     cross-TU redeclarations of the same :func:`~abicheck.tu_fragment.entity_key`
     when they are compatible and raising :class:`~abicheck.errors.TuMergeError`
     when they are not (ADR-050 D4).
+
+    *public_header_paths*/*public_header_dirs* are the same manifest-wide
+    public-surface inputs :func:`abicheck.provenance.apply_provenance` later
+    classifies declarations against (opt-in — omitted, every declaration's
+    origin stays ``UNKNOWN`` and this has no effect, matching that module's
+    own default). When supplied, they let a trivial merge prefer whichever
+    side's ``source_location`` classifies as ``PUBLIC_HEADER`` as the
+    winning declaration's representative provenance -- see
+    :func:`_more_public_of`'s own docstring for why this matters: a merged
+    entity carries exactly one ``source_location``, and picking the wrong
+    side can make a genuinely public declaration read as private/unreachable
+    once ``apply_provenance`` runs on the merged snapshot.
     """
     if not fragments:
         return MergedTuFragments(
@@ -105,32 +124,56 @@ def merge_fragments(fragments: Sequence[TuFragment]) -> MergedTuFragments:
     # order) -- see this module's own "Determinism" docstring section.
     ordered = sorted(fragments, key=lambda f: f.tu_name)
 
+    header_segs, dir_segs, have_public_set = build_public_set(
+        list(public_header_paths), list(public_header_dirs)
+    )
+
     functions = _flatten(
         _merge_group(
             ((f.tu_name, fn) for f in ordered for fn in f.functions),
             key_fn=lambda fn: entity_key("function", fn.mangled),
-            merge_fn=_merge_functions,
+            merge_fn=partial(
+                _merge_functions,
+                header_segs=header_segs,
+                dir_segs=dir_segs,
+                have_public_set=have_public_set,
+            ),
         )
     )
     variables = _flatten(
         _merge_group(
             ((f.tu_name, var) for f in ordered for var in f.variables),
             key_fn=lambda var: entity_key("variable", var.mangled),
-            merge_fn=_merge_variables,
+            merge_fn=partial(
+                _merge_variables,
+                header_segs=header_segs,
+                dir_segs=dir_segs,
+                have_public_set=have_public_set,
+            ),
         )
     )
     types = _flatten(
         _merge_group(
             ((f.tu_name, rt) for f in ordered for rt in f.types),
             key_fn=lambda rt: entity_key("type", rt.name),
-            merge_fn=_merge_types,
+            merge_fn=partial(
+                _merge_types,
+                header_segs=header_segs,
+                dir_segs=dir_segs,
+                have_public_set=have_public_set,
+            ),
         )
     )
     enums = _flatten(
         _merge_group(
             ((f.tu_name, en) for f in ordered for en in f.enums),
             key_fn=lambda en: entity_key("enum", en.name),
-            merge_fn=_merge_enums,
+            merge_fn=partial(
+                _merge_enums,
+                header_segs=header_segs,
+                dir_segs=dir_segs,
+                have_public_set=have_public_set,
+            ),
         )
     )
     typedefs = _merge_scalar_group(
@@ -288,16 +331,79 @@ def _blank_provenance(entity: _T) -> _T:
     )
 
 
-def _merge_functions(a: Function, b: Function) -> Function | None:
+def _more_public_of(
+    a: _T,
+    b: _T,
+    *,
+    header_segs: list[tuple[str, ...]],
+    dir_segs: list[tuple[str, ...]],
+    have_public_set: bool,
+) -> _T:
+    """Pick whichever of *a*/*b* -- two already-confirmed-compatible
+    declarations -- should lend its ``source_location``/``source_header``/
+    ``origin`` to the merged result.
+
+    A merged declaration carries exactly one ``source_location`` (the model
+    has no "seen from N headers" field), and
+    :func:`abicheck.provenance.apply_provenance` classifies a declaration's
+    public/private ``origin`` from that single field, *after* this merge
+    already ran. Defaulting to an arbitrary side (e.g. always the
+    tu_name-sorted-first one) is a real correctness gap, not a cosmetic
+    choice: if TU ``a`` reaches this declaration only through a private
+    header while TU ``b`` reaches the identical declaration through a
+    declared *public* one, keeping ``a``'s location would make a genuinely
+    public API read as private -- silently hiding a real ABI change from
+    public-surface scoping (Codex review, PR #635). When exactly one side
+    classifies as ``PUBLIC_HEADER``, that side wins; otherwise *a* (the
+    deterministic tu_name-ordered default) is kept, unchanged from before.
+    """
+    if not have_public_set:
+        return a
+    origin_a = classify_origin(
+        header_from_location(getattr(a, "source_location", None)),
+        header_segs,
+        dir_segs,
+        have_public_set=have_public_set,
+    )
+    if origin_a == ScopeOrigin.PUBLIC_HEADER:
+        return a
+    origin_b = classify_origin(
+        header_from_location(getattr(b, "source_location", None)),
+        header_segs,
+        dir_segs,
+        have_public_set=have_public_set,
+    )
+    return b if origin_b == ScopeOrigin.PUBLIC_HEADER else a
+
+
+def _merge_functions(
+    a: Function,
+    b: Function,
+    *,
+    header_segs: list[tuple[str, ...]],
+    dir_segs: list[tuple[str, ...]],
+    have_public_set: bool,
+) -> Function | None:
     """Trivial-merge two same-``entity_key`` :class:`Function` declarations
     -- a plain redeclaration, or a difference confined to one or more
     parameters' ``default`` (ADR-050 D4's "declaration + redeclaration,
     differing only in an added default argument"). Any other difference
     (return type, params other than ``default``, virtuality, ...) is a
-    genuine conflict.
+    genuine conflict -- **including two different non-``None`` defaults for
+    the same parameter** (``f(int=1)`` vs. ``f(int=2)``): that is not "an
+    added default argument", it is two TUs disagreeing on the default
+    itself, and silently keeping one side would produce an arbitrary
+    snapshot rather than surfacing the conflict (Codex review, PR #635).
     """
     if len(a.params) != len(b.params):
         return None
+    for pa, pb in zip(a.params, b.params, strict=True):
+        if (
+            pa.default is not None
+            and pb.default is not None
+            and pa.default != pb.default
+        ):
+            return None
     a_bare = _blank_provenance(
         replace(a, params=[replace(p, default=None) for p in a.params])
     )
@@ -310,51 +416,112 @@ def _merge_functions(a: Function, b: Function) -> Function | None:
         replace(pa, default=pa.default if pa.default is not None else pb.default)
         for pa, pb in zip(a.params, b.params, strict=True)
     ]
-    return replace(a, params=merged_params)
+    base = _more_public_of(
+        a,
+        b,
+        header_segs=header_segs,
+        dir_segs=dir_segs,
+        have_public_set=have_public_set,
+    )
+    return replace(base, params=merged_params)
 
 
-def _merge_variables(a: Variable, b: Variable) -> Variable | None:
+def _merge_variables(
+    a: Variable,
+    b: Variable,
+    *,
+    header_segs: list[tuple[str, ...]],
+    dir_segs: list[tuple[str, ...]],
+    have_public_set: bool,
+) -> Variable | None:
     """Trivial-merge two same-``entity_key`` :class:`Variable` declarations
     -- identical (modulo provenance), or differing only in ``value`` (an
     ``extern`` declaration in one TU paired with the defining, initialized
-    redeclaration in another).
+    redeclaration in another). Two different non-``None`` values is a
+    genuine conflict, the variable analogue of :func:`_merge_functions`'s
+    conflicting-default-argument check.
     """
+    if a.value is not None and b.value is not None and a.value != b.value:
+        return None
     a_bare = _blank_provenance(replace(a, value=None))
     b_bare = _blank_provenance(replace(b, value=None))
     if a_bare != b_bare:
         return None
     value = a.value if a.value is not None else b.value
-    return replace(a, value=value)
+    base = _more_public_of(
+        a,
+        b,
+        header_segs=header_segs,
+        dir_segs=dir_segs,
+        have_public_set=have_public_set,
+    )
+    return replace(base, value=value)
 
 
-def _merge_types(a: RecordType, b: RecordType) -> RecordType | None:
+def _merge_types(
+    a: RecordType,
+    b: RecordType,
+    *,
+    header_segs: list[tuple[str, ...]],
+    dir_segs: list[tuple[str, ...]],
+    have_public_set: bool,
+) -> RecordType | None:
     """Trivial-merge two same-``entity_key`` :class:`RecordType` declarations
     -- ADR-050 D4's canonical "forward-declaration + definition" case:
     ``is_opaque`` (incomplete, no fields) paired with a complete definition
-    merges to the definition. Two complete (non-opaque) definitions must be
-    identical (modulo provenance) to merge; if they disagree, that is a
-    genuine ODR conflict.
+    merges to the definition, **provided the two agree on ``kind``**
+    (``struct``/``class``/``union``) -- a `union X;` forward declaration is
+    not compatible with a `struct X { ... };` definition even though both
+    key on the bare name ``X`` (Codex review, PR #635). Two complete
+    (non-opaque) definitions must be identical (modulo provenance) to
+    merge; if they disagree, that is a genuine ODR conflict.
     """
     if a.is_opaque and not b.is_opaque:
-        return b
+        return b if a.kind == b.kind else None
     if b.is_opaque and not a.is_opaque:
-        return a
+        return a if a.kind == b.kind else None
     if _blank_provenance(a) == _blank_provenance(b):
-        return a
+        return _more_public_of(
+            a,
+            b,
+            header_segs=header_segs,
+            dir_segs=dir_segs,
+            have_public_set=have_public_set,
+        )
     return None
 
 
-def _merge_enums(a: EnumType, b: EnumType) -> EnumType | None:
+def _merge_enums(
+    a: EnumType,
+    b: EnumType,
+    *,
+    header_segs: list[tuple[str, ...]],
+    dir_segs: list[tuple[str, ...]],
+    have_public_set: bool,
+) -> EnumType | None:
     """Trivial-merge two same-``entity_key`` :class:`EnumType` declarations
     -- the enum analogue of :func:`_merge_types`: an underlying-type-only
     forward declaration (no ``members``) paired with the full definition
-    merges to the definition; two non-empty member lists must agree (modulo
-    provenance).
+    merges to the definition, **provided the two agree on
+    ``underlying_type``/``is_scoped``** -- ``enum E : int;`` is not
+    compatible with ``enum E : unsigned { X };`` even though the forward
+    declaration has no members to compare (Codex review, PR #635). Two
+    non-empty member lists must agree (modulo provenance) to merge.
     """
     if not a.members and b.members:
+        if a.underlying_type != b.underlying_type or a.is_scoped != b.is_scoped:
+            return None
         return b
     if not b.members and a.members:
+        if a.underlying_type != b.underlying_type or a.is_scoped != b.is_scoped:
+            return None
         return a
     if _blank_provenance(a) == _blank_provenance(b):
-        return a
+        return _more_public_of(
+            a,
+            b,
+            header_segs=header_segs,
+            dir_segs=dir_segs,
+            have_public_set=have_public_set,
+        )
     return None

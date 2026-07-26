@@ -233,7 +233,11 @@ def run_tu_loop(
                 exc_info=True,
             )
 
-    return merge_tu_fragments(fragments)
+    return merge_tu_fragments(
+        fragments,
+        public_header_paths=resolved_public_paths,
+        public_header_dirs=resolved_public_dirs,
+    )
 
 
 @dataclass(frozen=True)

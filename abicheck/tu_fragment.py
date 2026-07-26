@@ -104,15 +104,3 @@ def entity_key(kind: str, name: str) -> tuple[str, str]:
     ``return_type``/``type`` at all.
     """
     return (kind, name)
-
-
-def fragment_entity_keys(fragment: TuFragment) -> list[tuple[str, str]]:
-    """Every ``entity_key`` *fragment* contributes, across all six kinds."""
-    keys: list[tuple[str, str]] = []
-    keys.extend(entity_key("function", fn.mangled) for fn in fragment.functions)
-    keys.extend(entity_key("variable", var.mangled) for var in fragment.variables)
-    keys.extend(entity_key("type", rt.name) for rt in fragment.types)
-    keys.extend(entity_key("enum", en.name) for en in fragment.enums)
-    keys.extend(entity_key("typedef", name) for name in fragment.typedefs)
-    keys.extend(entity_key("constant", name) for name in fragment.constants)
-    return keys
