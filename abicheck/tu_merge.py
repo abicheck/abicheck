@@ -484,11 +484,50 @@ def _merge_group(
     A single TU's own parser output may legitimately repeat a key (e.g. two
     destructors both falling back to castxml's synthesized no-mangled-name
     marker within the same TU, already tolerated by the flat single-TU
-    dump path) -- this is not a cross-TU merge concern, so a candidate
-    sharing its accumulator's *own* ``tu_name`` is never passed to
-    *merge_fn*; it rides through untouched as an extra entry in the
-    returned tuple instead. Only a candidate from a genuinely different TU
-    ever participates in an actual merge/conflict check.
+    dump path) -- this is not a cross-TU merge concern, so a TU's *own*
+    repeated candidates for a key are never passed to *merge_fn* against
+    each other or against their own TU's representative; they ride through
+    untouched as extra entries in the returned tuple. Only the *first*
+    candidate contributed by each distinct TU (that TU's representative)
+    participates in the cross-TU fold below.
+
+    A representative is identified by grouping candidates *per TU* before
+    folding, not by comparing against the accumulator's current identity --
+    a candidate's tu_name is checked against the TU that actually produced
+    it, not against whichever TU's declaration the accumulator happens to
+    carry after a prior successful merge. The naive "skip when tu_name
+    equals the accumulator's tu_name" check used before this fix made a
+    TU's own repeat ride through unchecked only by *accident*, whenever it
+    happened to immediately follow a successful cross-TU merge that left
+    the accumulator attributed to that same TU -- the exact same repeat,
+    processed in a different fragment order, would instead be compared
+    (via the accumulator still carrying the *other* TU's identity) and
+    correctly raise. For example, TU ``a`` declaring ``f(): void`` and TU
+    ``b`` declaring both ``f(): void`` and ``f(): int`` under the same key
+    would previously merge fine or raise ``TuMergeError`` depending purely
+    on which of ``b``'s two entries happened to be listed first in ``b``'s
+    own fragment -- not on the actual conflict (Codex review, PR #635).
+
+    Once every distinct TU's representative has been folded into a single
+    cross-TU accumulator, each TU's remaining repeats (from *any*
+    contributing TU) are validated against that final accumulator too --
+    not merged into it, just checked for compatibility -- so a repeat that
+    genuinely conflicts with what every other TU agrees on still raises,
+    rather than silently riding through as an unvalidated extra. When only
+    one distinct TU contributes to a key at all, there is no cross-TU
+    accumulator to validate against, and repeats ride through exactly as
+    before (unconditionally tolerated, matching the flat single-TU
+    behavior this carve-out exists to preserve).
+
+    Known, accepted limitation: if *two different* TUs both exhibit the
+    same producer-side key-collision quirk (e.g. two unrelated symbols in
+    two different TUs both fall back to the same synthesized marker), the
+    repeat-vs-accumulator check above can raise a spurious conflict between
+    two entities that don't actually correspond to each other -- an
+    inherent consequence of the producer's lossy key derivation, the same
+    category of gap already documented on the ``types``/``enums`` key_fn
+    and the typedef/constant ``key`` above in :func:`merge_fragments`, and
+    likewise not fixable here without a producer-side schema change.
 
     Iteration order over *items* determines both dict insertion order (the
     returned mapping's iteration order, and therefore the caller's final
@@ -502,12 +541,14 @@ def _merge_group(
 
     merged: dict[tuple[str, str], tuple[_T, ...]] = {}
     for key, candidates in by_key.items():
-        acc_tu, acc_entity = candidates[0]
-        extras: list[_T] = []
-        for tu_name, entity in candidates[1:]:
-            if tu_name == acc_tu:
-                extras.append(entity)
-                continue
+        per_tu: dict[str, list[_T]] = {}
+        for tu_name, entity in candidates:
+            per_tu.setdefault(tu_name, []).append(entity)
+
+        tu_names = list(per_tu)
+        acc_tu, acc_entity = tu_names[0], per_tu[tu_names[0]][0]
+        for tu_name in tu_names[1:]:
+            entity = per_tu[tu_name][0]
             result = merge_fn(acc_entity, entity)
             if result is None:
                 kind, name = key
@@ -525,6 +566,24 @@ def _merge_group(
                 )
             acc_entity = result
             acc_tu = tu_name
+
+        extras: list[_T] = []
+        for tu_name in tu_names:
+            for entity in per_tu[tu_name][1:]:
+                if len(tu_names) > 1 and merge_fn(acc_entity, entity) is None:
+                    kind, name = key
+                    raise TuMergeError(
+                        f"translation unit {tu_name!r} declares a repeated "
+                        f"{kind} {name!r} that conflicts with the version "
+                        "every other translation unit agrees on -- ADR-050 "
+                        "Phase C's merge only reconciles a forward "
+                        "declaration + definition, a plain redeclaration, "
+                        "or a default-argument-only difference.",
+                        code=INCONSISTENT_DECLARATION,
+                        entity_key=key,
+                        tu_names=(acc_tu, tu_name),
+                    )
+                extras.append(entity)
         merged[key] = (acc_entity, *extras)
     return merged
 
@@ -564,11 +623,15 @@ def _merge_scalar_group(
     return merged
 
 
-def _pick_deprecated(primary: _T, secondary: _T) -> str | None:
+def _pick_deprecated(
+    primary: _T, secondary: _T, *, secondary_is_private: bool = False
+) -> str | None:
     """Pick which side's ``deprecated`` message survives a merge -- prefer
     *primary* (whichever side the caller already selected as the merge's
     representative, e.g. via :func:`_more_public_of`) when it carries one,
-    otherwise fall back to *secondary*.
+    otherwise fall back to *secondary* -- **unless** *secondary_is_private*
+    is ``True``, in which case an unset *primary* stays unset rather than
+    picking up *secondary*'s message.
 
     Two TUs' redeclarations carrying *different* non-``None`` messages --
     e.g. ``[[deprecated("a")]] void f();`` in one TU, ``[[deprecated("b")]]
@@ -582,10 +645,24 @@ def _pick_deprecated(primary: _T, secondary: _T) -> str | None:
     genuinely incompatible ABI-relevant claims. There is therefore nothing
     to reject here -- this never fails, unlike every other optional-fact
     merge in this module.
+
+    But when the caller can *prove* *secondary* is the strictly-less-public
+    side (:func:`_other_is_strictly_less_public`), an unset *primary* must
+    not pick up *secondary*'s message anyway: a private-only redeclaration
+    annotating an otherwise-undecorated public declaration as
+    ``[[deprecated]]`` does not make the library's actual public consumers
+    -- who only ever see the public header -- see that deprecation, and
+    later removing/changing that private-only annotation would surface as
+    a false ``FUNC_DEPRECATED_REMOVED``/``CHANGED`` (or the variable/type/
+    enum equivalent) against a public surface that never carried it (Codex
+    review, PR #635 round 18) -- the same leak :func:`_merge_functions`'s
+    default-argument union was fixed against in round 17.
     """
-    return (
-        primary.deprecated if primary.deprecated is not None else secondary.deprecated
-    )
+    if primary.deprecated is not None:
+        return primary.deprecated
+    if secondary_is_private:
+        return None
+    return secondary.deprecated
 
 
 #: Attribute families whose arguments are a *set* that legally accumulates
@@ -671,6 +748,40 @@ def _merge_contract_attributes(
     if sum(1 for token in merged if _is_cc_attribute(token)) > 1:
         return False, None
     return True, sorted(merged)
+
+
+def _suppress_private_only_attributes(
+    merged: list[str] | None,
+    base_attrs: list[str] | None,
+    other_attrs: list[str] | None,
+) -> list[str] | None:
+    """Drop tokens from *merged* (a :func:`_merge_contract_attributes`
+    result) that came *only* from *other_attrs* and not *base_attrs* --
+    called only when the caller has already proven *other* is the
+    strictly-less-public side of a merge (Codex review, PR #635 round 18).
+
+    A calling-convention token is never dropped: unlike a source-facing
+    attribute such as ``nodiscard``/``nonnull``, it describes the actual
+    compiled function's ABI regardless of which header happens to spell
+    it, so it is a real fact about the public entity either way --
+    :func:`_merge_contract_attributes`'s conflict validation already ran
+    unconditionally on both sides before this function is ever called.
+
+    If either *base_attrs* or *other_attrs* is ``None`` ("not captured",
+    not "captured empty" -- see :func:`_merge_contract_attributes`'s own
+    docstring), this returns *merged* unchanged: an uncaptured side's true
+    attribute set is unknown, not provably empty, so there is nothing safe
+    to subtract.
+    """
+    if merged is None or base_attrs is None or other_attrs is None:
+        return merged
+    base_set = set(base_attrs)
+    other_set = set(other_attrs)
+    return [
+        token
+        for token in merged
+        if _is_cc_attribute(token) or token in base_set or token not in other_set
+    ]
 
 
 def _blank_provenance(entity: _T) -> _T:
@@ -848,7 +959,16 @@ def _with_more_public_provenance(
         have_public_set=have_public_set,
     )
     provenance_fallback = other if provenance_source is winner else winner
-    deprecated = _pick_deprecated(provenance_source, provenance_fallback)
+    fallback_is_private = _other_is_strictly_less_public(
+        provenance_source,
+        provenance_fallback,
+        header_segs=header_segs,
+        dir_segs=dir_segs,
+        have_public_set=have_public_set,
+    )
+    deprecated = _pick_deprecated(
+        provenance_source, provenance_fallback, secondary_is_private=fallback_is_private
+    )
     merged = (
         winner
         if provenance_source is winner
@@ -899,7 +1019,14 @@ def _merge_identical_modulo_provenance(
         have_public_set=have_public_set,
     )
     other = b if winner is a else a
-    deprecated = _pick_deprecated(winner, other)
+    other_is_private = _other_is_strictly_less_public(
+        winner,
+        other,
+        header_segs=header_segs,
+        dir_segs=dir_segs,
+        have_public_set=have_public_set,
+    )
+    deprecated = _pick_deprecated(winner, other, secondary_is_private=other_is_private)
     return (
         winner
         if winner.deprecated == deprecated
@@ -924,17 +1051,16 @@ def _merge_functions(
     the same parameter** (``f(int=1)`` vs. ``f(int=2)``): that is not "an
     added default argument", it is two TUs disagreeing on the default
     itself, and silently keeping one side would produce an arbitrary
-    snapshot rather than surfacing the conflict (Codex review, PR #635).
+    snapshot rather than surfacing the conflict (Codex review, PR #635) --
+    **unless** the conflicting side is provably the strictly-less-public one
+    (:func:`_other_is_strictly_less_public`), in which case the conflict is
+    invisible to the library's actual public consumers and the public
+    side's own default is kept instead of raising (Codex review, PR #635
+    round 18; this check is therefore deferred until after ``base``/
+    ``other`` below are known, rather than run unconditionally up front).
     """
     if len(a.params) != len(b.params):
         return None
-    for pa, pb in zip(a.params, b.params, strict=True):
-        if (
-            pa.default is not None
-            and pb.default is not None
-            and pa.default != pb.default
-        ):
-            return None
     # Parameter *names* are not part of a C/C++ function's type -- `void
     # f(int value);` and `void f(int n);` are the identical declaration,
     # redeclared with cosmetically different names (both castxml and clang
@@ -987,17 +1113,11 @@ def _merge_functions(
     # purely from which TU happened to sort first (Codex review, PR #635
     # round 4).
     other = b if base is a else a
-    # `deprecated` is blanked by `_blank_provenance` above (not required to
-    # match for an ordinary redeclaration), and two differing non-`None`
-    # messages are not a conflict (Codex review, PR #635 round 13) -- see
-    # `_pick_deprecated`.
-    deprecated = _pick_deprecated(base, other)
-    # A default argument only `other` declares must NOT be pulled onto
-    # `base` when `other` is definitively the less-public side -- a default
-    # argument grants callers a real capability (calling without that
-    # parameter), and a private-only redeclaration adding one does not
-    # extend that capability to the library's actual public consumers, who
-    # never see it (Codex review, PR #635 round 17) -- see
+    # `other_is_private` gates every "which side's optional fact wins"
+    # decision below: a default argument, contract attribute, or
+    # deprecation message that exists *only* on the provably-less-public
+    # side must not leak onto the public-representative merged declaration
+    # (Codex review, PR #635 rounds 17-18) -- see
     # `_other_is_strictly_less_public`.
     other_is_private = _other_is_strictly_less_public(
         base,
@@ -1006,6 +1126,45 @@ def _merge_functions(
         dir_segs=dir_segs,
         have_public_set=have_public_set,
     )
+    # Two different non-`None` defaults for the same parameter is a genuine
+    # conflict (see the docstring above) -- unless `other` is provably the
+    # private side, in which case its conflicting default is invisible to
+    # public consumers and simply discarded in favor of `base`'s own,
+    # rather than aborting the merge (Codex review, PR #635 round 18).
+    if not other_is_private:
+        for p_base, p_other in zip(base.params, other.params, strict=True):
+            if (
+                p_base.default is not None
+                and p_other.default is not None
+                and p_base.default != p_other.default
+            ):
+                return None
+    # `deprecated` is blanked by `_blank_provenance` above (not required to
+    # match for an ordinary redeclaration), and two differing non-`None`
+    # messages are not a conflict (Codex review, PR #635 round 13) -- see
+    # `_pick_deprecated`. A message only `other` carries must not leak onto
+    # `base` when `other` is private (round 18).
+    deprecated = _pick_deprecated(base, other, secondary_is_private=other_is_private)
+    # A contract attribute only `other` declares must likewise not leak
+    # onto `base` when `other` is private -- a private-only redeclaration's
+    # `[[nodiscard]]` isn't visible to public callers either, and later
+    # removing it would surface as a false
+    # `FUNC_CONTRACT_ATTRIBUTE_REMOVED` against the public surface (Codex
+    # review, PR #635 round 18). Calling-convention tokens are exempt: they
+    # describe the actual compiled function's ABI regardless of which
+    # header happens to spell them, so `_merge_contract_attributes`'s
+    # conflict validation above already ran unconditionally, and the
+    # (still real, still ABI-relevant) fact is kept either way.
+    if other_is_private:
+        contract_attributes = _suppress_private_only_attributes(
+            contract_attributes, base.contract_attributes, other.contract_attributes
+        )
+    # A default argument only `other` declares must NOT be pulled onto
+    # `base` when `other` is definitively the less-public side -- a default
+    # argument grants callers a real capability (calling without that
+    # parameter), and a private-only redeclaration adding one does not
+    # extend that capability to the library's actual public consumers, who
+    # never see it (Codex review, PR #635 round 17).
     merged_params: list[Param] = [
         replace(
             p_base,
@@ -1036,15 +1195,16 @@ def _merge_variables(
     ``extern`` declaration in one TU paired with the defining, initialized
     redeclaration in another). Two different non-``None`` values is a
     genuine conflict, the variable analogue of :func:`_merge_functions`'s
-    conflicting-default-argument check.
+    conflicting-default-argument check -- **unless** the conflicting side
+    is provably the strictly-less-public one
+    (:func:`_other_is_strictly_less_public`), the same visibility carve-out
+    :func:`_merge_functions` applies to its own conflicting-default check
+    (Codex review, PR #635 round 18).
     """
-    if a.value is not None and b.value is not None and a.value != b.value:
-        return None
     a_bare = _blank_provenance(replace(a, value=None))
     b_bare = _blank_provenance(replace(b, value=None))
     if a_bare != b_bare:
         return None
-    value = a.value if a.value is not None else b.value
     base = _more_public_of(
         a,
         b,
@@ -1053,10 +1213,35 @@ def _merge_variables(
         have_public_set=have_public_set,
     )
     other = b if base is a else a
+    # `other_is_private` gates both the conflicting-`value` check and the
+    # `deprecated` union below, mirroring `_merge_functions` (Codex review,
+    # PR #635 round 18).
+    other_is_private = _other_is_strictly_less_public(
+        base,
+        other,
+        header_segs=header_segs,
+        dir_segs=dir_segs,
+        have_public_set=have_public_set,
+    )
+    if (
+        not other_is_private
+        and base.value is not None
+        and other.value is not None
+        and base.value != other.value
+    ):
+        return None
+    # A `value` only `other` declares must NOT be pulled onto `base` when
+    # `other` is definitively the less-public side -- an initializer only a
+    # private redeclaration provides isn't visible to public consumers
+    # either (the same leak `_merge_functions`'s default-argument union was
+    # fixed against in round 17).
+    value = base.value if (base.value is not None or other_is_private) else other.value
     # `deprecated` is blanked by `_blank_provenance` above (not required to
     # match), and two differing non-`None` messages are not a conflict
-    # (Codex review, PR #635 round 13) -- see `_pick_deprecated`.
-    deprecated = _pick_deprecated(base, other)
+    # (Codex review, PR #635 round 13) -- see `_pick_deprecated`. A message
+    # only `other` carries must not leak onto `base` when `other` is
+    # private (round 18).
+    deprecated = _pick_deprecated(base, other, secondary_is_private=other_is_private)
     return replace(base, value=value, deprecated=deprecated)
 
 

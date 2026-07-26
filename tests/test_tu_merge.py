@@ -626,6 +626,362 @@ def test_merge_fragments_without_public_set_keeps_deterministic_default():
     assert merged.functions[0].source_location == "a.h:1"
 
 
+def test_merge_fragments_function_tolerates_conflicting_default_from_private_side():
+    # f(int = 1) on the public side vs f(int = 2) on a private-only
+    # redeclaration is not visible to real public consumers -- who only
+    # ever see the public default -- so the merge must keep the public
+    # default rather than aborting extraction (Codex review, PR #635
+    # round 18; this check was previously unconditional, running before
+    # _other_is_strictly_less_public even had a chance to apply).
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="n", type="int", default="2")],
+                source_location="internal/detail.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="n", type="int", default="1")],
+                source_location="include/api.h:1",
+            ),
+        ),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].params[0].default == "1"
+
+
+def test_merge_fragments_function_raises_on_conflicting_default_when_neither_side_is_public():
+    # public_header_paths is supplied but neither declaration matches it --
+    # base is only the arbitrary tie-break, not a proven-public side, so a
+    # genuine default conflict is still surfaced (unchanged from before
+    # round 18's visibility carve-out).
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="n", type="int", default="2")],
+                source_location="internal/one.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="n", type="int", default="1")],
+                source_location="internal/two.h:1",
+            ),
+        ),
+    )
+    with pytest.raises(TuMergeError):
+        merge_fragments(
+            [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+        )
+
+
+def test_merge_fragments_function_does_not_leak_private_contract_attribute_onto_public():
+    # The public declaration is unannotated; a private-only redeclaration
+    # adds `[[nodiscard]]` (captured as `warn_unused_result`). That
+    # attribute is not visible to real public consumers, so it must not
+    # appear on the merged public declaration -- otherwise later removing
+    # it from the private header alone would surface a false
+    # FUNC_CONTRACT_ATTRIBUTE_REMOVED against a public surface that never
+    # actually had it (Codex review, PR #635 round 18).
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="n", type="int")],
+                contract_attributes=["warn_unused_result"],
+                source_location="internal/detail.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="n", type="int")],
+                contract_attributes=[],
+                source_location="include/api.h:1",
+            ),
+        ),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].contract_attributes == []
+
+
+def test_merge_fragments_function_keeps_calling_convention_attribute_from_private_side():
+    # Unlike a source-facing semantic attribute, a calling-convention token
+    # describes the actual compiled function's ABI regardless of which
+    # header spells it -- so it is kept (and still validated for conflicts)
+    # even when it only appears on the private side (Codex review, PR #635
+    # round 18).
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="n", type="int")],
+                contract_attributes=["ms_abi"],
+                source_location="internal/detail.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="n", type="int")],
+                contract_attributes=[],
+                source_location="include/api.h:1",
+            ),
+        ),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].contract_attributes == ["ms_abi"]
+
+
+def test_merge_fragments_function_does_not_leak_private_deprecated_message():
+    # The public declaration carries no deprecation; a private-only
+    # redeclaration marks it [[deprecated]]. Real public consumers never
+    # see that annotation, so it must not land on the merged public
+    # declaration -- otherwise later removing it privately would surface a
+    # false FUNC_DEPRECATED_REMOVED against the public surface (Codex
+    # review, PR #635 round 18).
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fv",
+                deprecated="internal note",
+                source_location="internal/detail.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(_fn("f", "_Z1fv", source_location="include/api.h:1"),),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].deprecated is None
+
+
+def test_merge_fragments_variable_tolerates_conflicting_value_from_private_side():
+    # extern int x = 2 on a private-only redeclaration vs the public
+    # extern int x = 1 -- the variable analogue of the function
+    # conflicting-default carve-out above (Codex review, PR #635 round 18).
+    a = TuFragment(
+        tu_name="a",
+        variables=(_var("x", value="2", source_location="internal/detail.h:1"),),
+    )
+    b = TuFragment(
+        tu_name="b",
+        variables=(_var("x", value="1", source_location="include/api.h:1"),),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.variables) == 1
+    assert merged.variables[0].value == "1"
+
+
+def test_merge_fragments_variable_does_not_leak_private_value_onto_public_extern():
+    # A private-only redeclaration provides an initializer the public
+    # extern declaration doesn't have; that initializer is not visible to
+    # public consumers and must not be pulled onto the merged public
+    # declaration (Codex review, PR #635 round 18).
+    a = TuFragment(
+        tu_name="a",
+        variables=(_var("x", value="2", source_location="internal/detail.h:1"),),
+    )
+    b = TuFragment(
+        tu_name="b",
+        variables=(_var("x", value=None, source_location="include/api.h:1"),),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.variables) == 1
+    assert merged.variables[0].value is None
+
+
+def test_merge_fragments_variable_does_not_leak_private_deprecated_message():
+    a = TuFragment(
+        tu_name="a",
+        variables=(
+            _var(
+                "x",
+                deprecated="internal note",
+                source_location="internal/detail.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        variables=(_var("x", source_location="include/api.h:1"),),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.variables) == 1
+    assert merged.variables[0].deprecated is None
+
+
+def test_merge_fragments_type_forward_decl_does_not_leak_private_deprecated_message():
+    # _with_more_public_provenance's deprecated union must also respect a
+    # provably-private fallback side (Codex review, PR #635 round 18).
+    public_forward_decl = RecordType(
+        name="X", kind="struct", is_opaque=True, source_location="include/api.h:1"
+    )
+    private_definition = RecordType(
+        name="X",
+        kind="struct",
+        fields=[TypeField(name="a", type="int")],
+        deprecated="internal note",
+        source_location="internal/detail.h:1",
+    )
+    a = TuFragment(tu_name="a", types=(public_forward_decl,))
+    b = TuFragment(tu_name="b", types=(private_definition,))
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.types) == 1
+    winner = merged.types[0]
+    assert winner.source_location == "include/api.h:1"
+    assert winner.fields == [TypeField(name="a", type="int")]
+    assert winner.deprecated is None
+
+
+def test_merge_fragments_type_two_definitions_does_not_leak_private_deprecated_message():
+    # _merge_identical_modulo_provenance's deprecated union must likewise
+    # respect a provably-private fallback side (Codex review, PR #635
+    # round 18).
+    public_definition = RecordType(
+        name="X",
+        kind="struct",
+        fields=[TypeField(name="a", type="int")],
+        source_location="include/api.h:1",
+    )
+    private_definition = RecordType(
+        name="X",
+        kind="struct",
+        fields=[TypeField(name="a", type="int")],
+        deprecated="internal note",
+        source_location="internal/detail.h:1",
+    )
+    a = TuFragment(tu_name="a", types=(private_definition,))
+    b = TuFragment(tu_name="b", types=(public_definition,))
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.types) == 1
+    winner = merged.types[0]
+    assert winner.source_location == "include/api.h:1"
+    assert winner.deprecated is None
+
+
+# ---------------------------------------------------------------------------
+# _merge_group: same-TU "extras" tolerance vs. genuine cross-TU conflicts
+# ---------------------------------------------------------------------------
+
+
+def test_merge_fragments_raises_when_a_tus_repeat_conflicts_with_another_tu():
+    # TU "b" contributes two entries under the same key (f(): void and
+    # f(): int -- e.g. two declarations that happen to collide on a
+    # producer-derived key); TU "a" contributes a single, conflicting
+    # f(): void. Whichever of "b"'s two entries is checked against "a"
+    # must actually be checked -- previously, whichever entry ended up
+    # sharing the *accumulator's* tu_name (an accident of processing
+    # order, not the entry's own tu_name) rode through completely
+    # unvalidated, so this conflict was silently absorbed into the merged
+    # snapshot rather than raising (Codex review, PR #635 round 18).
+    a = TuFragment(tu_name="a", functions=(_fn("f", "_Z1fv"),))
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn("f", "_Z1fv"),
+            _fn("f", "_Z1fv", return_type="int"),
+        ),
+    )
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+
+
+def test_merge_fragments_raises_on_a_tus_repeat_conflict_regardless_of_fragment_order():
+    # Same scenario as above, but with "b"'s two entries listed in the
+    # opposite order within its own fragment -- before round 18's fix,
+    # this ordering difference alone flipped the outcome between "raises"
+    # and "silently merges", even though the actual conflict is identical
+    # (Codex review, PR #635 round 18).
+    a = TuFragment(tu_name="a", functions=(_fn("f", "_Z1fv"),))
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn("f", "_Z1fv", return_type="int"),
+            _fn("f", "_Z1fv"),
+        ),
+    )
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+
+
+def test_merge_fragments_tolerates_a_single_tus_own_repeated_key():
+    # TU "b" contributes two entries under the same key (the castxml
+    # synthesized-no-mangled-name-marker scenario the "extras" carve-out
+    # exists for); TU "a" contributes an unrelated function, so no *other*
+    # TU contributes to the "f" key at all. There is no cross-TU
+    # accumulator to validate "f"'s repeats against, so both ride through
+    # untouched, exactly as before round 18.
+    a = TuFragment(tu_name="a", functions=(_fn("g", "_Z1gv"),))
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn("f", "_Z1fv"),
+            _fn("f", "_Z1fv", return_type="int"),
+        ),
+    )
+    merged = merge_fragments([a, b])
+    f_entries = [fn for fn in merged.functions if fn.name == "f"]
+    assert len(f_entries) == 2
+    assert {fn.return_type for fn in f_entries} == {"void", "int"}
+
+
 def test_merge_fragments_types_with_same_bare_name_different_namespace_do_not_collide():
     # RecordType.name is deliberately bare; the namespace lives in
     # qualified_name. Two genuinely unrelated types sharing a leaf name
