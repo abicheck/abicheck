@@ -249,6 +249,20 @@ class ValueProvenance:
     shadowed_legacy: ValueProvenance | None = None
 
     def __post_init__(self) -> None:
+        # An untyped manifest/API adapter supplying shadowed_legacy as a raw
+        # mapping (e.g. {}) was previously accepted outright -- only
+        # selected_by was validated -- so the enclosing ValueProvenance
+        # would freeze into CompatibilityEvaluationConfig.provenance as a
+        # valid entry while retaining a caller-owned mutable dict, and a
+        # receipt consumer expecting shadowed_legacy.layer would get the
+        # wrong interface (Codex review).
+        if self.shadowed_legacy is not None and not isinstance(
+            self.shadowed_legacy, ValueProvenance
+        ):
+            raise TypeError(
+                "ValueProvenance.shadowed_legacy must be a ValueProvenance "
+                f"or None, not {self.shadowed_legacy!r}."
+            )
         object.__setattr__(
             self,
             "selected_by",

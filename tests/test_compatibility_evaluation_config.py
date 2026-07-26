@@ -317,6 +317,16 @@ class TestValueProvenance:
         assert winner.shadowed_legacy.layer is SelectorLayer.LEGACY_ALIAS
         assert winner.shadowed_legacy.path == "legacy.yml"
 
+    def test_raw_mapping_shadowed_legacy_is_rejected(self):
+        # Codex review: only selected_by was validated in __post_init__, so
+        # shadowed_legacy={} previously constructed successfully -- the
+        # enclosing ValueProvenance would then freeze into
+        # CompatibilityEvaluationConfig.provenance as a valid entry while
+        # retaining a caller-owned mutable dict, and a receipt consumer
+        # expecting shadowed_legacy.layer would get the wrong interface.
+        with pytest.raises(TypeError, match=r"ValueProvenance\.shadowed_legacy"):
+            ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, shadowed_legacy={})  # type: ignore[arg-type]
+
 
 class TestEvidenceProviderRequirement:
     def test_required_capability_with_pinned_implementation(self):
