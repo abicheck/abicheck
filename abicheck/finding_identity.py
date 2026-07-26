@@ -367,14 +367,38 @@ def resolve_variable_identity(var: Variable) -> FindingIdentity:
 #: ``symbol_*`` family (``symbol_binding_changed``, ``symbol_type_changed``,
 #: ``symbol_size_changed``, ...) is the ELF-level symbol-table diff --
 #: equally unambiguous, added after Codex review flagged it missing.
-_SYMBOL_LEVEL_KIND_PREFIXES = ("func_", "var_", "ifunc_", "symbol_")
+_SYMBOL_LEVEL_KIND_PREFIXES = (
+    "func_",
+    "var_",
+    "ifunc_",
+    "symbol_",
+    # A function's own parameters/return value are never independently
+    # type-level -- ``param_*``/``return_*`` always describe one function's
+    # signature (verified against every current param_*/return_* slug).
+    "param_",
+    "return_",
+)
 
 #: Individually-named kinds that don't share one of the prefixes above but
 #: are still unambiguously about one function/variable symbol (Codex
-#: review: ``VIRTUAL_METHOD_ADDED``/``CALLING_CONVENTION_CHANGED``/
-#: ``METHOD_ACCESS_CHANGED`` were flagged as missing). Not claimed to be an
-#: exhaustive audit of all ~395 `ChangeKind` values -- extend as gaps are
-#: found.
+#: review, four rounds: ``VIRTUAL_METHOD_ADDED``/``CALLING_CONVENTION_CHANGED``/
+#: ``METHOD_ACCESS_CHANGED``/``DEFAULT_ARGUMENT_CHANGED``/the two
+#: function-template ``TEMPLATE_*_TYPE_CHANGED`` kinds were flagged as
+#: missing in turn).
+#:
+#: This allowlist-of-individual-kinds approach has a structural limit: it
+#: can only ever be as complete as whatever review has spot-checked so far
+#: against ~395 `ChangeKind` values, and each round has found another real
+#: gap in the same way. That is an accepted, deliberate property of this
+#: primitive, not an oversight to keep closing case-by-case -- the module's
+#: own contract (see :func:`_is_symbol_level_kind`'s docstring) is that
+#: missing an entry here only causes an unnecessary degrade to NORMALIZED,
+#: never a wrong CANONICAL promotion, so incompleteness is safe by
+#: construction. Extend this set when a *concrete* wiring change (Phase 2's
+#: remaining work: actually consuming this identity in
+#: ``diff_symbols.py``/``diff_filtering.py``) needs a specific kind
+#: reclassified, rather than continuing to enumerate hypothetical gaps
+#: against an unwired primitive.
 _SYMBOL_LEVEL_KIND_SLUGS = frozenset(
     {
         "virtual_method_added",
@@ -383,6 +407,9 @@ _SYMBOL_LEVEL_KIND_SLUGS = frozenset(
         "hidden_friend_added",
         "hidden_friend_removed",
         "method_access_changed",
+        "default_argument_changed",
+        "template_param_type_changed",
+        "template_return_type_changed",
     }
 )
 

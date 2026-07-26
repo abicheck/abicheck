@@ -341,6 +341,40 @@ class TestResolveChangeIdentity:
         identity = resolve_change_identity(change)
         assert identity.tier == IDENTITY_TIER_CANONICAL
 
+    def test_param_level_kind_is_canonical(self) -> None:
+        # Codex review: two overloads (A::f(int) vs A::f(double)) both
+        # emitting PARAM_DEFAULT_VALUE_CHANGED with the same old/new value
+        # get the same enriched qualified_name -- their distinct mangled
+        # symbols must stay authoritative, not collapse via the prefix gate.
+        change = Change(
+            kind=ChangeKind.PARAM_DEFAULT_VALUE_CHANGED,
+            symbol=_ITANIUM_MANGLED,
+            description="default value changed",
+            qualified_name="A::f",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_CANONICAL
+
+    def test_return_level_kind_is_canonical(self) -> None:
+        change = Change(
+            kind=ChangeKind.RETURN_POINTER_LEVEL_CHANGED,
+            symbol=_ITANIUM_MANGLED,
+            description="T* -> T**",
+            qualified_name="foo",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_CANONICAL
+
+    def test_default_argument_changed_is_canonical(self) -> None:
+        change = Change(
+            kind=ChangeKind.DEFAULT_ARGUMENT_CHANGED,
+            symbol=_ITANIUM_MANGLED,
+            description="default arg changed",
+            qualified_name="foo",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_CANONICAL
+
     def test_real_mangled_symbol_is_canonical(self) -> None:
         change = Change(
             kind=ChangeKind.FUNC_REMOVED,
