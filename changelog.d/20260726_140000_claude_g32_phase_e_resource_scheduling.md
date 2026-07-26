@@ -43,3 +43,28 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   every call uncacheable, but would have silently fallen back to a legacy
   single-TU dump on every cold cache the moment manifest caching was
   enabled. Fixed alongside enabling that caching, not left latent.
+- `comparability.manifest_tu_scope_field` used to relativize every TU
+  `forced_includes`/`includes` path against the manifest's `base_dir` with
+  `os.path.relpath` after `Path.resolve()`. For a genuinely external
+  absolute path (e.g. `/usr/include`), `.resolve()` collapses any `..`
+  components and destroys the signal needed to tell "declared relative in
+  YAML" from "declared absolute" — the relativized string ends up
+  checkout-depth-dependent (`../../../usr/include` at one nesting depth vs.
+  `../../../../usr/include` at another), so two manifests with an identical
+  absolute include path spuriously mismatched on `scope_fingerprint`. Fixed
+  by checking the *unresolved* path string against the *unresolved*
+  `base_dir` string prefix before deciding whether to relativize, since
+  `dump_manifest.py` always builds a relative-YAML path as a literal
+  `base_dir / raw` join (a real string-prefix relationship that survives
+  only before `.resolve()` runs).
+- `dumper_manifest._run_tu_fragments`'s pooled branch used to observe
+  `Future` results in submission order rather than completion order. A
+  required TU submitted early but slow could delay observing a
+  later-submitted required TU's fast failure, during which the pool kept
+  starting newly-queued heavyweight AST work — so a manifest already known
+  to fail could burn its full CPU/RAM budget for the slow TU's duration
+  before cancellation ever ran. Fixed by switching to
+  `concurrent.futures.as_completed` with index-addressed result storage, so
+  a required failure is observed (and pending futures cancelled) as soon as
+  it completes, while the final fragment list is still assembled in the
+  manifest's declared TU order.

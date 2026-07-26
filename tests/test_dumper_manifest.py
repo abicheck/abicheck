@@ -508,6 +508,82 @@ def test_run_tu_fragments_preserves_declared_order_despite_completion_order(
     assert [f.tu_name for f in fragments] == ["a", "b"]
 
 
+def test_run_tu_fragments_cancels_pending_futures_promptly_on_required_failure(
+    monkeypatch,
+):
+    """Codex review, PR #636: a required TU's failure must be observed (and
+    its siblings' cancellation attempted) in COMPLETION order, not
+    submission order -- otherwise a fast-failing, later-submitted required
+    TU sits unnoticed behind an earlier-submitted, merely slow TU's future,
+    letting the pool keep queued heavyweight AST work starting during that
+    delay. Deterministic via a Future.cancel spy + a manually-held Event
+    (not wall-clock timing): cancellation must happen while "slow" is still
+    deliberately blocked, proving it wasn't gated behind waiting on "slow"'s
+    own future first.
+    """
+    import threading
+    from concurrent.futures import Future
+
+    from abicheck.dumper_manifest import _run_tu_fragments
+    from abicheck.errors import SnapshotError
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+
+    cancel_called = threading.Event()
+    orig_cancel = Future.cancel
+
+    def _spy_cancel(self):
+        cancel_called.set()
+        return orig_cancel(self)
+
+    monkeypatch.setattr(Future, "cancel", _spy_cancel)
+
+    slow_release = threading.Event()
+
+    def _stub(headers, extra_includes, **kwargs):
+        name = Path(headers[0]).stem
+        if name == "slow":
+            slow_release.wait(timeout=5)
+            return _StubParser(functions=(_fn("slow"),))
+        if name == "bad":
+            return _StubParser(fail=True)
+        return _StubParser(functions=(_fn(name),))
+
+    tus = (_tu("slow", "slow.h"), _tu("bad", "bad.h", required=True))
+
+    def _run() -> None:
+        try:
+            _run_tu_fragments(
+                tus,
+                header_ast_parser=_stub,
+                backend="auto",
+                compiler="c++",
+                gcc_path=None,
+                gcc_prefix=None,
+                gcc_options=None,
+                gcc_option_tokens=(),
+                sysroot=None,
+                nostdinc=False,
+                lang=None,
+                exported_dynamic=set(),
+                exported_static=set(),
+                public_header_paths=[],
+                public_dir_paths=[],
+                extra_hash_dirs=(),
+            )
+        except SnapshotError:
+            pass
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    try:
+        cancelled_promptly = cancel_called.wait(timeout=5)
+    finally:
+        slow_release.set()
+        t.join(timeout=5)
+    assert cancelled_promptly
+
+
 def test_tu_jobs_env_override_forces_serial(monkeypatch):
     from abicheck.dumper_manifest import _tu_jobs
 

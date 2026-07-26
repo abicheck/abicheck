@@ -50,7 +50,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -261,12 +261,20 @@ def _run_tu_fragments(
     sequential loop -- ``run_tu_loop``'s own extraction step, split out so
     the pooled-vs-serial dispatch has one obvious home.
 
-    Fragments are collected and returned in *tus*' own declared order
-    (submission order), never completion order -- :func:`merge_tu_fragments`
+    Fragments are always **assembled** in *tus*' own declared order (never
+    completion order) for the final return value -- :func:`merge_tu_fragments`
     treats TU order as significant (which TU's declaration "wins" an
-    ODR-compatible merge), so a pool that returns results out of order would
+    ODR-compatible merge), so a pool that returned results out of order would
     make the merge outcome depend on scheduling luck instead of the
-    manifest's own declared TU order.
+    manifest's own declared TU order. Failures are, by contrast, *observed*
+    in completion order (not submission order) precisely so a required TU's
+    failure gets reacted to -- and its siblings' cancellation attempted --
+    as soon as it happens, not delayed behind an earlier-submitted, merely
+    slower TU's still-pending future (Codex review, PR #636). Each future's
+    successful result is recorded by its declared index as it completes;
+    the assembly pass at the end reads that index-ordered list, so
+    observation order and assembly order are decoupled rather than the same
+    loop conflating the two.
 
     A ``required=True`` TU's failure (the default) still propagates and
     fails the whole manifest dump -- any not-yet-started future is cancelled
@@ -325,13 +333,24 @@ def _run_tu_fragments(
                 _handle_failure(tu)
         return fragments
 
+    # Results are recorded by INDEX (declared order), but observed in
+    # COMPLETION order (via as_completed), not submission order -- a
+    # required TU submitted late that fails immediately must not sit behind
+    # an earlier-submitted, merely-slow TU's future before its failure is
+    # even noticed. Waiting on futures strictly in submission order would
+    # let already-queued heavyweight AST jobs keep starting during that
+    # delay, making the cancellation below far less effective on a manifest
+    # already known to be doomed (Codex review, PR #636). The final
+    # `results`-to-`fragments` pass below is what restores declared order
+    # for the merge step, which still needs it.
+    results: list[TuFragment | None] = [None] * len(tus)
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        futures: list[tuple[Future[TuFragment], TranslationUnit]] = [
-            (pool.submit(_run_one, tu), tu) for tu in tus
-        ]
-        for fut, tu in futures:
+        future_to_index = {pool.submit(_run_one, tu): i for i, tu in enumerate(tus)}
+        for fut in as_completed(future_to_index):
+            idx = future_to_index[fut]
+            tu = tus[idx]
             try:
-                fragments.append(fut.result())
+                results[idx] = fut.result()
             except Exception:
                 if tu.required:
                     # Cancel whatever hasn't started yet (best effort -- a
@@ -341,9 +360,10 @@ def _run_tu_fragments(
                     # is about to be discarded anyway. An optional TU's
                     # failure, by contrast, must not cancel its siblings --
                     # the loop is meant to keep collecting the rest.
-                    for other_fut, _other_tu in futures:
+                    for other_fut in future_to_index:
                         other_fut.cancel()
                 _handle_failure(tu)
+    fragments.extend(r for r in results if r is not None)
     return fragments
 
 

@@ -1316,6 +1316,38 @@ def test_manifest_scope_fingerprint_matches_across_mount_points(tmp_path):
     assert old_c.scope_fingerprint == new_c.scope_fingerprint
 
 
+def test_manifest_scope_fingerprint_external_absolute_path_ignores_checkout_depth(
+    tmp_path,
+):
+    # Codex review, PR #636: an absolute, genuinely-external manifest entry
+    # (e.g. `/usr/include`) has no structural relationship to the checkout
+    # at all. Relativizing it against base_dir would climb a `../` distance
+    # that depends on how deeply THIS checkout happens to be nested -- two
+    # otherwise-identical manifests whose checkouts sit at different depths
+    # must still fingerprint identically.
+    external = tmp_path / "usr" / "include"
+    external.mkdir(parents=True)
+    body = (
+        f"roots: [a.h]\ntranslation_units:\n"
+        f"  - name: tu_a\n    forced_includes: [a.h]\n"
+        f"    includes: ['{external}']\n"
+    )
+    shallow_base = tmp_path / "checkout1" / "manifest_dir"
+    deep_base = tmp_path / "checkout2" / "nested" / "much" / "deeper" / "manifest_dir"
+    shallow_base.mkdir(parents=True)
+    deep_base.mkdir(parents=True)
+    shallow = parse_manifest(body, base_dir=shallow_base, source="<shallow>")
+    deep = parse_manifest(body, base_dir=deep_base, source="<deep>")
+    shallow_c = compute_extraction_contract(
+        declared_headers=list(shallow.roots),
+        manifest_tu_scope=manifest_tu_scope_field(shallow),
+    )
+    deep_c = compute_extraction_contract(
+        declared_headers=list(deep.roots), manifest_tu_scope=manifest_tu_scope_field(deep)
+    )
+    assert shallow_c.scope_fingerprint == deep_c.scope_fingerprint
+
+
 def test_manifest_tu_scope_field_falls_back_on_cross_drive_relpath_error(
     tmp_path, monkeypatch
 ):

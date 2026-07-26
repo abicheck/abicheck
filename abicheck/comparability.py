@@ -505,8 +505,31 @@ def manifest_tu_scope_field(dump_manifest: Any) -> str:
     ``.base_dir``/``.translation_units`` are read, structurally.
     """
     base = _resolved(dump_manifest.base_dir)
+    # The literal, UN-resolved base_dir string -- dump_manifest.py's own
+    # _resolve_path() builds every relative-in-YAML path as exactly
+    # `base_dir / raw`, so its str() always carries this exact prefix
+    # before any ".." components get collapsed by .resolve() below. This is
+    # what lets _rel tell "a relative-declared sibling path (../src)" apart
+    # from "a genuinely external absolute path (/usr/include)" -- checking
+    # AFTER resolving can't: .resolve() collapses `manifest_dir/../src`
+    # down to the same shape as an unrelated absolute path, discarding the
+    # one signal that distinguishes them (Codex review, PR #636).
+    _base_dir_str = str(dump_manifest.base_dir)
+    _base_dir_prefix = _base_dir_str + os.sep
 
     def _rel(p: Path) -> str:
+        p_str = str(p)
+        if p_str != _base_dir_str and not p_str.startswith(_base_dir_prefix):
+            # A genuinely external path (declared absolute in the manifest,
+            # e.g. `/usr/include`, and not already under this checkout) has
+            # no structural relationship to base_dir at all -- relativizing
+            # it would climb a `../` distance that depends on how deeply
+            # THIS checkout happens to be nested, not on anything about the
+            # external path itself, so two otherwise-identical manifests at
+            # different checkout depths would spuriously fingerprint
+            # differently. Keep it as the resolved absolute path instead,
+            # which is already checkout-depth-independent by construction.
+            return str(_resolved(p))
         try:
             return os.path.relpath(_resolved(p), base)
         except ValueError:
