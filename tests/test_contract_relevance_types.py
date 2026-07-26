@@ -139,9 +139,12 @@ class TestEvidenceSearchRecordEnums:
 
 class TestSelectorLayer:
     def test_required_layers_present(self):
-        # ADR-049 D7: required selector layers (set is extensible; these
-        # seven must exist).
-        assert {layer.value for layer in SelectorLayer} == {
+        # ADR-049 D7: required selector layers. The set is explicitly
+        # extensible (a future adapter may add a layer), so this asserts
+        # the seven required members are present, not that they're the only
+        # ones -- a subset check, not exact-set equality, so a later
+        # extension doesn't spuriously break this test.
+        required = {
             "explicit_cli",
             "api_request",
             "legacy_alias",
@@ -150,6 +153,7 @@ class TestSelectorLayer:
             "project_config",
             "built_in_default",
         }
+        assert required <= {layer.value for layer in SelectorLayer}
 
 
 class TestContractReasonCodes:

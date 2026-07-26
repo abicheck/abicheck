@@ -177,6 +177,19 @@ class TestValueProvenance:
         prov = ValueProvenance(layer=SelectorLayer.PROJECT_CONFIG, path=".abicheck.yml")
         assert prov.layer is SelectorLayer.PROJECT_CONFIG
 
+    def test_version_distinguishes_manifest_revisions_sharing_a_reference(self):
+        # ADR-049 D7: "path, digest, manifest identity/version, and field
+        # location identify the actual definition used for exact replay" --
+        # a manifest can be revised under the same reference/name.
+        v1 = ValueProvenance(
+            layer=SelectorLayer.EXPLICIT_CLI, reference="security", version=1
+        )
+        v2 = ValueProvenance(
+            layer=SelectorLayer.EXPLICIT_CLI, reference="security", version=2
+        )
+        assert v1.reference == v2.reference
+        assert v1 != v2
+
 
 class TestEvidenceProviderRequirement:
     def test_required_capability_with_pinned_implementation(self):
@@ -260,15 +273,22 @@ class TestDigestedItems:
     # ADR-049 D6: variants/explicit_scope are persisted as {items, sha256},
     # not bare lists -- the digest identifies the *external source* that
     # produced the items, so a definition change is detectable even when
-    # the item names stay identical.
-    def test_empty_items_need_no_digest(self):
-        empty = DigestedItems()
-        assert empty.items == ()
-        assert empty.sha256 is None
+    # the item names stay identical. sha256 is unconditionally required,
+    # including for an explicitly-selected-but-empty source: "a source was
+    # selected and resolved to zero items" and "no source was selected at
+    # all" are different facts, and only the latter is representable without
+    # a digest -- as DigestedItems | None = None at the container level.
+    def test_missing_sha256_is_a_type_error(self):
+        with pytest.raises(TypeError):
+            DigestedItems(items=["linux-x86_64"])  # type: ignore[call-arg]
 
-    def test_nonempty_items_without_digest_is_a_value_error(self):
-        with pytest.raises(ValueError, match="sha256 is required"):
-            DigestedItems(items=["linux-x86_64"])
+    def test_empty_items_still_requires_a_digest(self):
+        # An explicitly selected source that resolves to zero items is not
+        # the same as no source at all -- it still needs its digest so a
+        # later change from empty to populated is detectable on replay.
+        selected_but_empty = DigestedItems(sha256="digest-of-empty-variant-file")
+        assert selected_but_empty.items == ()
+        assert selected_but_empty.sha256 == "digest-of-empty-variant-file"
 
     def test_nonempty_items_with_digest_constructs(self):
         variants = DigestedItems(items=["linux-x86_64", "windows-msvc"], sha256="abc")
@@ -281,17 +301,20 @@ class TestDigestedItems:
         b = DigestedItems(items=["linux-x86_64"], sha256="digest-v2")
         assert a != b
 
-    def test_evidence_config_variants_defaults_to_empty_digested_items(self):
+    def test_evidence_config_variants_defaults_to_no_source_selected(self):
         evidence = EvidenceConfig()
-        assert evidence.variants == DigestedItems()
+        assert evidence.variants is None
 
-    def test_evidence_config_variants_requires_digest_when_populated(self):
-        with pytest.raises(ValueError, match="sha256 is required"):
-            EvidenceConfig(variants=DigestedItems(items=["linux-x86_64"]))
+    def test_evidence_config_distinguishes_no_source_from_selected_empty(self):
+        no_source = EvidenceConfig()
+        selected_empty = EvidenceConfig(variants=DigestedItems(sha256="empty-digest"))
+        assert no_source.variants is None
+        assert selected_empty.variants is not None
+        assert no_source != selected_empty
 
-    def test_surface_config_explicit_scope_defaults_to_empty_digested_items(self):
+    def test_surface_config_explicit_scope_defaults_to_no_source_selected(self):
         surface = SurfaceConfig()
-        assert surface.explicit_scope == DigestedItems()
+        assert surface.explicit_scope is None
 
     def test_surface_config_internal_namespaces_stay_a_plain_tuple(self):
         # ADR-049 D6's hints: {internal_namespaces: []} carries no digest,

@@ -97,12 +97,18 @@ class ValueProvenance:
     ``layer=EXPLICIT_CLI``, while the same manifest referenced from
     ``.abicheck.yml`` has ``layer=PROJECT_CONFIG`` -- the ``reference``/
     ``path``/``sha256`` identify *which* manifest, ``layer`` identifies *how
-    it was chosen for this run*.
+    it was chosen for this run*. ``version`` records the manifest's own
+    immutable version separately from ``reference`` (its name/id): D7 states
+    "path, digest, manifest identity/version, and field location identify
+    the actual definition used for exact replay" -- a manifest can be
+    revised under the same ``reference`` name, and only ``version`` (plus
+    ``sha256``) can tell two revisions apart.
     """
 
     layer: SelectorLayer
     source_kind: str | None = None
     reference: str | None = None
+    version: int | None = None
     path: str | None = None
     sha256: str | None = None
     field_location: str | None = None
@@ -143,17 +149,23 @@ class DigestedItems:
     variant-definition file, an explicit-scope manifest, ...), not the
     ``items`` tuple itself: two definitions can produce the same item names
     while differing in content, and only an externally supplied digest can
-    catch that drift on replay. Required whenever ``items`` is non-empty; an
-    empty, undeclared collection carries no digest since there is no
-    external source selected.
+    catch that drift on replay. ``sha256`` is unconditionally required --
+    including when ``items`` is empty -- because "a source was selected and
+    it currently resolves to zero items" and "no source was selected at
+    all" are different facts: if the digest were dropped for the empty case,
+    the source could later gain items with no way to prove it was genuinely
+    empty (as opposed to unconsidered) at decision time. A field that has no
+    source to select at all (the common case) represents that as
+    ``DigestedItems | None = None`` at the container level -- see
+    :attr:`EvidenceConfig.variants` / :attr:`SurfaceConfig.explicit_scope` --
+    rather than as an empty, digest-less ``DigestedItems``.
     """
 
+    sha256: str
     items: tuple[str, ...] = ()
-    sha256: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "items", _frozen_tuple(self.items))
-        _require_digest_when_nonempty(self.items, self.sha256, owner="DigestedItems")
 
 
 # --------------------------------------------------------------------------
@@ -201,8 +213,10 @@ class EvidenceConfig:
     #: Declared compile/generated-header variant set (ADR-049 D5: "projects
     #: with configuration-dependent declarations must declare the variant
     #: set; all required variants must complete"). Content-digested, per
-    #: ADR-049 D6's ``variants: {items: [], sha256: "..."}``.
-    variants: DigestedItems = field(default_factory=DigestedItems)
+    #: ADR-049 D6's ``variants: {items: [], sha256: "..."}``. ``None`` means
+    #: no variant source was selected at all; a ``DigestedItems`` with
+    #: ``items=()`` means a source was selected and resolved to none.
+    variants: DigestedItems | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "providers", _frozen_tuple(self.providers))
@@ -222,9 +236,12 @@ class SurfaceConfig:
     ``explicit_scope`` is content-digested (ADR-049 D6:
     ``explicit_scope: {items: [], sha256: "..."}``) since it directly
     decides root/closure membership and must detect drift on replay.
+    ``None`` means no explicit-scope source was selected at all; a
+    ``DigestedItems`` with ``items=()`` means a source was selected and
+    resolved to no entries.
     """
 
-    explicit_scope: DigestedItems = field(default_factory=DigestedItems)
+    explicit_scope: DigestedItems | None = None
     internal_namespaces: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
