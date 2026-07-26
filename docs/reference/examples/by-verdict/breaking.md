@@ -109,7 +109,7 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case177_long_double_abi_changed](../case177_long_double_abi_changed.md) | long double ABI Changed | 🔴 BREAKING | Breaking |
 | [case182_accidental_export_removed_still_breaking](../case182_accidental_export_removed_still_breaking.md) | Accidental export removed — still BREAKING under public-header scoping | 🔴 BREAKING | Breaking |
 | [case187_public_struct_private_field_type](../case187_public_struct_private_field_type.md) | Public Struct Field Retyped to an Internal Type | 🔴 BREAKING | Breaking |
-| [case188_public_class_private_base_class](../case188_public_class_private_base_class.md) | _public_class_private_base_class — Public class gains a private base class | 🔴 BREAKING | Breaking |
+| [case188_public_class_private_base_class](../case188_public_class_private_base_class.md) | Public Class Gains a Private Base Class | 🔴 BREAKING | Breaking |
 | [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type.md) | _public_function_private_parameter_type — Public function parameter retyped to an internal type | 🔴 BREAKING | Breaking |
 | [case191_header_only_graph_field_type](../case191_header_only_graph_field_type.md) | _header_only_graph_field_type — Same finding, proven with a genuine confirmed-zero (no coverage trick) | 🔴 BREAKING | Breaking |
 | [case192_call_graph_break_survives_suppression](../case192_call_graph_break_survives_suppression.md) | Call-graph-reachable break survives a broad internal-namespace suppression | 🔴 BREAKING | Breaking |

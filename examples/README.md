@@ -446,7 +446,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [185](case185_inherited_override_reuses_slot/README.md) | Inherited override reuses the base's vtable slot | Addition | 🟢 COMPATIBLE |
 | [186](case186_c_api_pointee_const_abi_neutral/README.md) | C API Pointee const-Qualification Is ABI-Neutral | No Change | ✅ NO_CHANGE |
 | [187](case187_public_struct_private_field_type/README.md) | Public Struct Field Retyped to an Internal Type | Breaking | 🔴 BREAKING (bad practice) |
-| [188](case188_public_class_private_base_class/README.md) | _public_class_private_base_class — Public class gains a private base class | Breaking | 🔴 BREAKING (bad practice) |
+| [188](case188_public_class_private_base_class/README.md) | Public Class Gains a Private Base Class | Breaking | 🔴 BREAKING (bad practice) |
 | [189](case189_public_function_private_parameter_type/README.md) | _public_function_private_parameter_type — Public function parameter retyped to an internal type | Breaking | 🔴 BREAKING (bad practice) |
 | [190](case190_public_inline_function_references_internal_constant/README.md) | _public_inline_function_references_internal_constant — Public inline function newly reads an internal constant | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [191](case191_header_only_graph_field_type/README.md) | _header_only_graph_field_type — Same finding, proven with a genuine confirmed-zero (no coverage trick) | Breaking | 🔴 BREAKING (bad practice) |
