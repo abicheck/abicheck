@@ -247,3 +247,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   non-host `frontend_context` — the same host/device tradeoff already made
   for DWARF layout backfill (`dumper._dump_elf`) and the clang layout tool:
   honestly "not collected" rather than confidently wrong (Codex review).
+- `sycl_context._iter_json_documents` still unconditionally joined every
+  document's chunks into one string before yielding, even a document the
+  caller already knew (from the previous fix's own `stderr`-positional
+  logic) it would immediately discard unparsed — so a non-matching multi-GB
+  pass's text was still fully materialized once, alongside an
+  already-selected multi-GB match's dict, before the join. Now takes a
+  `want_text` callback so a document known in advance not to match is never
+  joined into one string at all, not just never parsed (Codex review,
+  follow-up).
+- `sycl_context`'s streaming document decoder never checked the active scan
+  deadline while reading/scanning — only the caller did, before and after
+  the whole decode. A budget that expired partway through a multi-GB
+  single-pass AST document could therefore still spend minutes streaming
+  and scanning it before the timeout was ever reported. Now checks the
+  deadline once per underlying chunk read (Codex review).

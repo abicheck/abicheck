@@ -51,6 +51,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import deadline
 from .errors import AstContextAmbiguousError, AstContextMissingError, SnapshotError
 
 #: A real DPC++ driver `-cc1` invocation line on `-v` stderr output: names
@@ -182,7 +183,9 @@ def _one_match_or_raise(
     return matches[0]
 
 
-def _iter_json_documents(read_more: Callable[[], str]) -> Iterator[str]:
+def _iter_json_documents(
+    read_more: Callable[[], str], want_text: Callable[[int], bool] | None = None
+) -> Iterator[str | None]:
     """Yield each top-level JSON document's raw TEXT (not parsed into a
     dict) from a stream fed by *read_more* -- boundary detection only.
 
@@ -207,29 +210,44 @@ def _iter_json_documents(read_more: Callable[[], str]) -> Iterator[str]:
     re-copies the whole accumulated buffer on every single append. A
     hundreds-of-MB or multi-GB single-pass AST (this module's whole reason
     to exist) made both costs dominate. Here, each byte is inspected exactly
-    once across the whole stream, and a document's text is materialized
-    (joined) exactly once, when its closing bracket is found.
+    once across the whole stream.
+
+    *want_text*, if given, is called with each document's 0-based index
+    BEFORE that document's text is joined -- when it returns ``False``, this
+    function still scans through the document (so the boundary of the NEXT
+    one can be found) but yields ``None`` instead of joining its chunks into
+    one string (P1, Codex review, follow-up: skipping ``json.loads`` for a
+    definitely-non-matching document, as :func:`_select_from_document_stream`
+    already did, is not enough on its own -- unconditionally joining its
+    chunks into ``doc_text`` first still materializes a full extra copy of a
+    document about to be discarded unread. The *kind* of the pass that
+    produced a document is knowable from ``stderr`` alone, positionally,
+    before this function's ``read_more`` is ever called for that document's
+    bytes at all, so a definitely-non-matching multi-GB document is now
+    never joined into one string in the first place, not just never parsed).
+    ``want_text=None`` (the default) always joins and yields the text, same
+    as before this parameter existed.
 
     Deliberately does NOT call ``json.loads`` here -- that decision belongs
-    to the caller (:func:`_select_from_document_stream`), which only
-    materializes a document into a dict when it actually needs the content
-    (P1, Codex review: the *kind* of the pass that produced a document is
-    already known from ``stderr`` alone, positionally, before this
-    function's ``read_more`` is ever called for that document's bytes --
-    parsing a definitely-non-matching multi-GB document into a dict just to
-    immediately discard it, while an already-selected multi-GB match is
-    simultaneously held live in memory, is exactly the peak-memory doubling
-    this module exists to avoid). Only a genuinely truncated stream (input
-    ends mid-document) or a leading non-object/array character is rejected
-    here; a bracket-balanced-but-invalid-JSON document (e.g. ``"{,}"``) is
-    handed to the caller as text -- whether/when that surfaces as an error
-    depends on whether the caller actually parses it.
+    to the caller (:func:`_select_from_document_stream`). Only a genuinely
+    truncated stream (input ends mid-document) or a leading non-object/array
+    character is rejected here; a bracket-balanced-but-invalid-JSON document
+    (e.g. ``"{,}"``) is handed to the caller as text when wanted -- whether/
+    when that surfaces as an error depends on whether the caller parses it.
+
+    Calls :func:`abicheck.deadline.check` once per underlying *read_more*
+    call (P2, Codex review): a single document can take minutes to stream
+    through on a multi-GB DPC++ AST pass, and the only deadline checks
+    around this decode live in the caller (before/after the whole decode),
+    so a budget that expired early would otherwise still burn through the
+    rest of that time before the timeout is ever reported.
     """
     eof = False
     chunks: list[str] = []
 
     def _fill() -> bool:
         nonlocal eof
+        deadline.check()
         chunk = read_more()
         if not chunk:
             eof = True
@@ -254,6 +272,7 @@ def _iter_json_documents(read_more: Callable[[], str]) -> Iterator[str]:
             if eof or not _fill():
                 return None
 
+    doc_index = 0
     while True:
         c = _current()
         while c is not None and c.isspace():
@@ -298,7 +317,10 @@ def _iter_json_documents(read_more: Callable[[], str]) -> Iterator[str]:
                     continue
             co += 1
 
-        if start_ci == end_ci:
+        doc_text: str | None
+        if want_text is not None and not want_text(doc_index):
+            doc_text = None
+        elif start_ci == end_ci:
             doc_text = chunks[start_ci][start_co:end_co]
         else:
             doc_text = "".join(
@@ -319,15 +341,17 @@ def _iter_json_documents(read_more: Callable[[], str]) -> Iterator[str]:
         chunks[0] = chunks[0][end_co:]
         ci = 0
         co = 0
+        doc_index += 1
 
 
 def _select_from_document_stream(
-    doc_texts: Iterator[str], stderr: str, requested_kind: str
+    read_more: Callable[[], str], stderr: str, requested_kind: str
 ) -> FrontendContext:
     """Shared core of both ``decode_and_select_frontend_context*`` entry
-    points: correlates *doc_texts* against *stderr*'s ``-cc1`` invocation
-    lines positionally, and applies the same three-outcome selection logic --
-    raising :class:`abicheck.errors.AstContextAmbiguousError` as soon as a
+    points: correlates the documents streamed from *read_more* against
+    *stderr*'s ``-cc1`` invocation lines positionally, and applies the same
+    three-outcome selection logic -- raising
+    :class:`abicheck.errors.AstContextAmbiguousError` as soon as a
     **second** matching document is seen (Codex review) rather than
     scanning and retaining every match first, since each matching pass can
     itself be multi-GB (a device build can emit several offload-target
@@ -340,18 +364,28 @@ def _select_from_document_stream(
     malformed extra document is reported directly instead of only via the
     less-specific count-mismatch check below). A definitely-non-matching
     document's kind is known positionally from *stderr* alone, before its
-    text is even looked at -- so it is never parsed at all, not even
-    transiently (P1, Codex review): without this, a non-matching multi-GB
-    pass's full dict would be built and briefly live in memory *at the same
-    time* as an already-selected multi-GB match's dict.
+    text is even looked at -- computed here as ``invocations`` and handed to
+    :func:`_iter_json_documents` as *want_text* so it never even joins that
+    document's chunks into one string, let alone parses it (P1, Codex
+    review, twice): without this, a non-matching multi-GB pass's full text
+    (and then its dict) would be built and briefly live in memory *at the
+    same time* as an already-selected multi-GB match's dict.
     """
     invocations = list(_CC1_INVOCATION_RE.finditer(stderr))
+
+    def _want_text(doc_index: int) -> bool:
+        return (
+            doc_index >= len(invocations)
+            or invocations[doc_index].group("kind") == requested_kind
+        )
+
     first_match: FrontendContext | None = None
     doc_count = 0
-    for doc_text in doc_texts:
+    for doc_text in _iter_json_documents(read_more, _want_text):
         invocation = invocations[doc_count] if doc_count < len(invocations) else None
         kind = invocation.group("kind") if invocation is not None else None
         if invocation is None or kind == requested_kind:
+            assert doc_text is not None
             try:
                 doc = json.loads(doc_text)
             except json.JSONDecodeError as exc:
@@ -414,9 +448,7 @@ def decode_and_select_frontend_context(
         chunk, remaining[0] = remaining[0], ""
         return chunk
 
-    return _select_from_document_stream(
-        _iter_json_documents(_read_more), stderr, requested_kind
-    )
+    return _select_from_document_stream(_read_more, stderr, requested_kind)
 
 
 def decode_and_select_frontend_context_from_path(
@@ -436,5 +468,5 @@ def decode_and_select_frontend_context_from_path(
     """
     with open(ast_path, encoding="utf-8") as fh:
         return _select_from_document_stream(
-            _iter_json_documents(lambda: fh.read(chunk_size)), stderr, requested_kind
+            lambda: fh.read(chunk_size), stderr, requested_kind
         )

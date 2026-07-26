@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from abicheck import deadline
 from abicheck.errors import (
     AstContextAmbiguousError,
     AstContextMissingError,
@@ -30,6 +31,7 @@ from abicheck.errors import (
 )
 from abicheck.sycl_context import (
     FrontendContext,
+    _iter_json_documents,
     decode_and_select_frontend_context,
     decode_and_select_frontend_context_from_path,
     decode_frontend_contexts,
@@ -352,6 +354,56 @@ def test_fused_select_skips_parsing_non_matching_malformed_document() -> None:
     )
     selected = decode_and_select_frontend_context(stdout, stderr, "host")
     assert selected.ast == {"kind": "TranslationUnitDecl", "small": "host-payload"}
+
+
+def test_iter_json_documents_want_text_false_skips_join() -> None:
+    """P1 (Codex review, follow-up): skipping json.loads for a definitely-
+    non-matching document isn't enough on its own -- unconditionally joining
+    its chunks into one string first still materializes a full extra copy.
+    want_text=False must skip the join itself, yielding None instead of the
+    document's text."""
+    remaining = ['{"a": 1}{"b": 2}']
+
+    def _read_more() -> str:
+        chunk, remaining[0] = remaining[0], ""
+        return chunk
+
+    docs = list(_iter_json_documents(_read_more, lambda i: i == 1))
+    assert docs == [None, '{"b": 2}']
+
+
+def test_iter_json_documents_default_want_text_always_joins() -> None:
+    remaining = ['{"a": 1}{"b": 2}']
+
+    def _read_more() -> str:
+        chunk, remaining[0] = remaining[0], ""
+        return chunk
+
+    docs = list(_iter_json_documents(_read_more))
+    assert docs == ['{"a": 1}', '{"b": 2}']
+
+
+def test_fused_select_checks_deadline_during_stream() -> None:
+    """P2 (Codex review): a DPC++ AST document can take minutes to stream
+    through, but before this fix the only deadline checks around this
+    decode lived in the caller (dumper_clang_errors), before/after the
+    whole decode -- an already-expired budget would still run the full
+    scan/parse before the timeout was ever reported. Now checked once per
+    underlying read, so an expired deadline is caught on the very first
+    chunk instead of only after decoding completes."""
+    stdout, stderr = _real_stdout_stderr()
+    with deadline.deadline_scope(-1):  # already expired
+        with pytest.raises(deadline.DeadlineExceeded):
+            decode_and_select_frontend_context(stdout, stderr, "host")
+
+
+def test_from_path_checks_deadline_during_stream(tmp_path: Path) -> None:
+    stdout, stderr = _real_stdout_stderr()
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text(stdout, encoding="utf-8")
+    with deadline.deadline_scope(-1):  # already expired
+        with pytest.raises(deadline.DeadlineExceeded):
+            decode_and_select_frontend_context_from_path(ast_path, stderr, "host")
 
 
 def test_from_path_ambiguous_stops_at_second_match_with_tiny_chunk_size(
