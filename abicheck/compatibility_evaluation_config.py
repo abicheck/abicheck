@@ -306,6 +306,18 @@ class EvidenceProviderRequirement:
     required: bool
     implementation: ImmutableIdentity
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.implementation, ImmutableIdentity):
+            raise TypeError(
+                "EvidenceProviderRequirement.implementation must be an "
+                f"ImmutableIdentity, not {self.implementation!r} -- the "
+                "`implementation: ImmutableIdentity` annotation isn't "
+                "runtime-enforced, so an untyped service/manifest adapter "
+                "could otherwise pass a bare slug through to a value that "
+                "later crashes with AttributeError in _provider_sort_key's "
+                "canonicalization instead of failing validation cleanly."
+            )
+
 
 def _provider_sort_key(
     req: EvidenceProviderRequirement,

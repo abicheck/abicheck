@@ -322,6 +322,20 @@ class TestEvidenceProviderRequirement:
         assert req.required is False
         assert req.implementation.id == "clang_ast"
 
+    def test_raw_string_implementation_is_rejected(self):
+        # implementation: ImmutableIdentity isn't runtime-enforced -- an
+        # untyped adapter passing a bare slug would otherwise crash with
+        # AttributeError in _provider_sort_key's canonicalization instead
+        # of failing validation cleanly at construction.
+        with pytest.raises(
+            TypeError, match="EvidenceProviderRequirement.implementation"
+        ):
+            EvidenceProviderRequirement(
+                capability="headers",
+                required=True,
+                implementation="castxml",  # type: ignore[arg-type]
+            )
+
     def test_providers_tuple_is_frozen(self):
         evidence = EvidenceConfig(
             providers=[
