@@ -476,6 +476,40 @@ def _public_stdlib_type_used_directly_layout_changed() -> tuple[
     return old, new
 
 
+def _public_std_string_typedef_alias_layout_changed() -> tuple[
+    AbiSnapshot, AbiSnapshot
+]:
+    # Closes the last piece of the typedef-aliased-stdlib-type gap: a public
+    # function spelled with the real DWARF backend's bare signature form
+    # ("string") for a std::string parameter, resolved through
+    # snapshot.typedefs["std::string"] -> the real
+    # std::__cxx11::basic_string<...> RecordType (empirically verified
+    # against a real DWARF-dumped std::string parameter). Before this, the
+    # alias was never connected back to the RecordType that owns the real
+    # layout, so this size change was silently filtered as toolchain noise.
+    _BASIC_STRING = (
+        "std::__cxx11::basic_string<char, std::char_traits<char>, "
+        "std::allocator<char> >"
+    )
+    old = _snap(
+        "1",
+        functions=[_fn("api", params=("string",))],
+        types=[RecordType(name=_BASIC_STRING, kind="class", size_bits=256)],
+        typedefs={
+            "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
+        },
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", params=("string",))],
+        types=[RecordType(name=_BASIC_STRING, kind="class", size_bits=320)],
+        typedefs={
+            "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
+        },
+    )
+    return old, new
+
+
 def _public_function_removed() -> tuple[AbiSnapshot, AbiSnapshot]:
     old = _snap("1", functions=[_fn("api"), _fn("also_public")])
     new = _snap("2", functions=[_fn("api")])
@@ -807,6 +841,11 @@ CORPUS: list[Case] = [
         "public_stdlib_type_used_directly_layout_changed",
         False,
         _public_stdlib_type_used_directly_layout_changed,
+    ),
+    Case(
+        "public_std_string_typedef_alias_layout_changed",
+        False,
+        _public_std_string_typedef_alias_layout_changed,
     ),
     Case("public_function_removed", False, _public_function_removed),
     Case("public_param_type_changed", False, _public_param_type_changed),
@@ -1235,6 +1274,7 @@ CASE_CATEGORY: dict[str, str] = {
     "stdlib_type_unreferenced_stays_filtered": "stdlib-direct-reference",
     "internal_record_field_stdlib_churn_stays_filtered": "stdlib-direct-reference",
     "public_stdlib_type_used_directly_layout_changed": "stdlib-direct-reference",
+    "public_std_string_typedef_alias_layout_changed": "stdlib-direct-reference",
     # versioned-symbol scheme / multi-.so bundle
     "versioned_scheme_internal_churn": "versioned-scheme",
     "bundle_sibling_soname_churn": "versioned-scheme",

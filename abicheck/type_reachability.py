@@ -38,15 +38,18 @@ reachable at distance one from the public surface, as opposed to only
 reachable transitively via deep instantiation chains never named anywhere
 outside the standard library itself.
 
-**Not yet wired into any live detector.** Retrofitting the ~15
-``is_non_abi_surface_type``/``is_abi_surface_type_name`` call sites across
-``diff_types.py``/``diff_platform.py``/``diff_symbols.py``/
+**Wired into `diff_types.py`'s ``RecordType``-based detectors** (struct/
+union size, alignment, fields, bases, vtable, kind, reserved fields,
+qualifiers, renames, deprecation) via the shared ``_is_abi_surface_type``
+gate. The remaining ~14 ``is_non_abi_surface_type``/``is_abi_surface_type_name``
+call sites across ``diff_platform.py``/``diff_symbols.py``/
 ``diff_vtable_layout.py``/``diff_stdlib_impl.py``/``diff_layout.py``/
-``diff_filtering.py``/``diff_type_spellings.py`` to consult this needs each
-site individually verified against the FP-rate/mutation-score gates (this
-codebase's test-quality guards exist specifically to catch exactly this kind
-of change going wrong) — a scoped follow-up, not a drive-by extension here
-(status-review, CLAUDE.md "M1-6"-style deferred item).
+``diff_filtering.py``/``diff_type_spellings.py``, plus ``diff_types.py``'s
+own enum/typedef paths, remain unwired — each needs its own site
+individually verified against the FP-rate/mutation-score gates (this
+codebase's test-quality guards exist specifically to catch exactly this
+kind of change going wrong), a scoped follow-up rather than a drive-by
+extension here.
 """
 
 from __future__ import annotations
@@ -73,8 +76,14 @@ __all__ = [
 # namespaces are transparent to lookup/spelling) but very much present in a
 # debug-info-derived RecordType's own qualified name. A signature spelled by
 # the same backend's bare-name convention omits it too, same as the
-# "std::"-namespace prefix itself (Codex review, fresh evidence).
-_LIBCXX_INLINE_NAMESPACE_MARKERS: tuple[str, ...] = ("__1::", "__ndk1::")
+# "std::"-namespace prefix itself (Codex review, fresh evidence). libstdc++
+# does the identical thing for its own post-C++11 dual-ABI types
+# (``std::__cxx11::basic_string``/``list``, gated by
+# ``_GLIBCXX_USE_CXX11_ABI``) -- confirmed empirically via a real
+# DWARF-dumped ``std::string`` parameter: ``RecordType.name`` is
+# ``"std::__cxx11::basic_string<...>"`` while ``snapshot.typedefs["std::string"]``
+# resolves to the bare ``"basic_string<...>"`` (no ``__cxx11::`` at all).
+_STDLIB_ABI_NAMESPACE_MARKERS: tuple[str, ...] = ("__1::", "__ndk1::", "__cxx11::")
 
 # Boundary character class shared by type_string_references_name's manual
 # check and the compiled multi-spelling pattern below -- kept as one
@@ -166,23 +175,23 @@ def _stripped_signature_spelling(identity: str) -> str | None:
 
     libc++ (and Android NDK's libc++) additionally wrap the standard library
     in an inline namespace right after ``std::`` (``std::__1::vector<int>``,
-    ``std::__ndk1::vector<int>``) — invisible to real C++ code but very much
-    present in the debug-info-derived qualified name, so it must be stripped
-    too or the reconstructed spelling (``"__1::vector<int>"``) still never
-    matches a bare backend signature (Codex review, fresh evidence).
+    ``std::__ndk1::vector<int>``), and libstdc++ does the same for its own
+    post-C++11 dual-ABI types (``std::__cxx11::basic_string``/``list``) —
+    invisible to real C++ code but very much present in the debug-info-
+    derived qualified name, so it must be stripped too or the reconstructed
+    spelling (``"__1::vector<int>"``) still never matches a bare backend
+    signature (Codex review, fresh evidence).
 
-    This does **not** close the deeper, separate gap of typedef-aliased
-    stdlib types (``std::string``, ``std::wstring``, ...): a signature
-    spelled ``std::string`` names the alias, not the real underlying class
-    (``std::basic_string<char, ...>``) that owns the ``RecordType`` entry,
-    and no current model field maps one back to the other. See
-    ``AGENTS.md``'s "Known gaps" for why resolving that needs a dedicated
-    typedef-alias-resolution layer, not a string-spelling fallback.
+    Resolving a signature spelled with a typedef alias to a stdlib type
+    (``std::string`` naming the real ``std::__cxx11::basic_string<...>``)
+    is handled separately, in :func:`_typedef_spelling_targets` — this
+    function only strips the namespace/ABI-tag *prefix* of an already-known
+    identity, it does not resolve typedef aliasing on its own.
     """
     for prefix in STDLIB_TYPE_NAMESPACE_PREFIXES:
         if identity.startswith(prefix):
             rest = identity[len(prefix) :]
-            for marker in _LIBCXX_INLINE_NAMESPACE_MARKERS:
+            for marker in _STDLIB_ABI_NAMESPACE_MARKERS:
                 if rest.startswith(marker):
                     rest = rest[len(marker) :]
                     break
@@ -242,6 +251,42 @@ def _spelling_index(
         # else: ambiguous bare alias shared by distinct records -- drop.
 
     return {spelling: frozenset(ids) for spelling, ids in index.items()}
+
+
+def _typedef_spelling_targets(
+    typedefs: dict[str, str], non_stdlib_identities: frozenset[str]
+) -> dict[str, str]:
+    """spelling -> target type string, for every ``snapshot.typedefs`` key
+    plus (for a stdlib-namespaced key) its namespace/ABI-tag-stripped bare
+    form — closing the last piece of the typedef-aliased-stdlib-type gap
+    (Codex review, fresh evidence, verified against a real DWARF-dumped
+    ``std::string`` parameter): ``snapshot.typedefs["std::string"]``
+    resolves to the bare ``"basic_string<char, std::char_traits<char>,
+    std::allocator<char> >"`` (matching the real ``RecordType``'s identity
+    after :func:`_stripped_signature_spelling`), but the typedef *key*
+    itself is the fully-qualified ``"std::string"`` while the DWARF
+    backend's own signature spelling is the bare ``"string"`` — the exact
+    same bare-vs-qualified split ``_spelling_index`` already handles for
+    ``RecordType`` identities, just one level up, on the alias name itself.
+
+    A stripped key that collides with a real non-stdlib record's own
+    identity, or with a *different* typedef's target, is dropped rather
+    than recorded (same false-negative-over-false-positive principle as
+    ``_spelling_index``): an ambiguous resolution is worse than none.
+    """
+    index: dict[str, str] = dict(typedefs)
+    stripped_candidates: dict[str, set[str]] = {}
+    for key, target in typedefs.items():
+        stripped = _stripped_signature_spelling(key)
+        if stripped is None or stripped in non_stdlib_identities:
+            continue
+        stripped_candidates.setdefault(stripped, set()).add(target)
+    for stripped, targets in stripped_candidates.items():
+        if len(targets) == 1 and stripped not in index:
+            index[stripped] = next(iter(targets))
+        # else: ambiguous (colliding with a real record, or two typedefs
+        # disagreeing on the target) -- drop.
+    return index
 
 
 def _compile_spelling_pattern(spellings: Collection[str]) -> re.Pattern[str] | None:
@@ -327,19 +372,25 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     substitution already present in ``snapshot.typedefs``, nothing needs
     inventing.
 
-    A non-stdlib record's own fields are only consulted once that record
-    itself is confirmed reachable from a public root — by direct mention in
-    a public function's own signature, by being that function's *owner*
-    class/struct for a member function (Codex review, fresh evidence: a
-    public method like ``void Foo::run()`` never repeats ``Foo`` in its own
-    return/parameter types, so without also seeding
-    :func:`abicheck.diff_cxx_rules.owner_class_of` the previous version
-    never queued ``Foo`` at all — a genuine layout break in one of its
-    fields would be silently missed), or transitively through another
-    already-reachable record's fields (Codex review, fresh evidence: the
-    previous version scanned *every* non-stdlib record's fields
-    unconditionally, so a purely internal, never-actually-reachable record
-    — e.g. one a DWARF-only snapshot retains with the default
+    A non-stdlib record's own fields *and bases* (both direct and virtual —
+    Codex review, fresh evidence: a public ``Derived`` inheriting a
+    non-stdlib ``Base`` whose own field is a stdlib record was otherwise
+    never reached, since only ``rec.fields`` was followed; mirrors
+    ``surface.py``'s own closure, which follows both for the same reason —
+    virtual inheritance still embeds the base subobject + vtable path) are
+    only consulted once that record itself is confirmed reachable from a
+    public root — by direct mention in a public function's own signature,
+    by being that function's *owner* class/struct for a member function
+    (Codex review, fresh evidence: a public method like ``void Foo::run()``
+    never repeats ``Foo`` in its own return/parameter types, so without
+    also seeding :func:`abicheck.diff_cxx_rules.owner_class_of` the
+    previous version never queued ``Foo`` at all — a genuine layout break
+    in one of its fields would be silently missed), or transitively
+    through another already-reachable record's fields/bases (Codex review,
+    fresh evidence: the previous version scanned *every* non-stdlib
+    record's fields unconditionally, so a purely internal,
+    never-actually-reachable record — e.g. one a DWARF-only snapshot
+    retains with the default
     ``ScopeOrigin.UNKNOWN`` even though nothing public touches it — could
     still make an unrelated stdlib type look directly referenced). A
     record's own ``origin`` being ``PRIVATE_HEADER``/``SYSTEM_HEADER``/
@@ -385,7 +436,9 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     reached_records: set[str] = set()
     worklist: list[str] = []
 
-    typedef_targets: dict[str, str] = dict(snapshot.typedefs)
+    typedef_targets = _typedef_spelling_targets(
+        dict(snapshot.typedefs), frozenset(non_stdlib_identities)
+    )
     typedef_pattern = (
         _compile_spelling_pattern(typedef_targets) if typedef_targets else None
     )
@@ -452,5 +505,13 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
             continue
         for f in rec.fields:
             _scan(f.type)
+        # Both direct and virtual bases are ABI-reachable through the
+        # derived type (virtual inheritance still embeds the base
+        # subobject + vtable path), same as surface.py's own closure
+        # (Codex review, fresh evidence): a public Derived inheriting a
+        # non-stdlib Base whose own field is a stdlib record was
+        # otherwise never reached, since only rec.fields was followed.
+        for base in (*rec.bases, *rec.virtual_bases):
+            _scan(base)
 
     return frozenset(referenced)

@@ -672,13 +672,36 @@ Once a root command genuinely clears the bar above, pick the right home:
   field; castxml/clang keep `name` bare and `qualified_name` separate) — so
   a pure full-identity substring match still couldn't connect the two.
   Fixed by also generating a namespace-prefix-stripped spelling per
-  candidate and matching against either form. **Still not fixed, and out of
-  scope for that fix**: a signature spelled with a typedef alias
+  candidate and matching against either form. **Since resolved** (a later
+  pass, user-requested): a signature spelled with a typedef alias
   (`std::string`, `std::wstring`, ...) names the alias, not the real
   underlying class (`std::basic_string<char, ...>`) that owns the
-  `RecordType` entry, and no current model field maps one back to the
-  other — resolving that needs a dedicated typedef-alias-resolution layer
-  (walking `snapshot.typedefs`), a separate scoped project.
+  `RecordType` entry — no current model field maps one back to the other
+  directly, but `snapshot.typedefs` does carry the alias → target mapping.
+  Verified empirically against a real DWARF-dumped `std::string`
+  parameter: `snapshot.typedefs["std::string"]` resolves to the bare
+  `"basic_string<char, std::char_traits<char>, std::allocator<char> >"`,
+  while the owning `RecordType.name` is the fully-qualified
+  `"std::__cxx11::basic_string<char, std::char_traits<char>,
+  std::allocator<char> >"` — libstdc++ wraps its own post-C++11 dual-ABI
+  types in an inline namespace (`__cxx11::`) the exact same way libc++
+  wraps its whole standard library (`__1::`/`__ndk1::`, already handled),
+  so that inline-namespace-stripping list gained a third entry. The
+  typedef *key* itself needed the identical bare-vs-qualified treatment
+  already applied to `RecordType` identities (the DWARF backend spells the
+  signature with the bare form `"string"`, never the qualified typedef key
+  `"std::string"`), so `_typedef_spelling_targets()` builds a
+  `spelling -> target` index covering both the literal key and its
+  namespace-stripped bare form (dropped instead of recorded when
+  ambiguous, same false-negative-over-false-positive principle as the
+  `RecordType` spelling index), and `_scan()` now follows a matched
+  typedef alias to its target the same way `surface.py`'s own
+  reachability closure does. What this does *not* cover: a stdlib alias
+  the producing backend never emitted into `snapshot.typedefs` at all (no
+  empirical case of this found across the three backends so far, but
+  nothing guarantees one couldn't exist) — that residual case degrades
+  silently back to "not directly referenced," the same conservative
+  false-negative default this whole module already uses throughout.
 
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built

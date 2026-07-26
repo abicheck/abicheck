@@ -30,6 +30,7 @@ from abicheck.model import (
 from abicheck.type_reachability import (
     _compile_spelling_pattern,
     _stripped_signature_spelling,
+    _typedef_spelling_targets,
     directly_referenced_stdlib_types,
     type_string_references_name,
 )
@@ -1025,3 +1026,148 @@ class TestPublicVariablesAndTypedefResolution:
             ],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_direct_base_class_field_is_a_reachability_root(self) -> None:
+        """Codex review, fresh evidence: a public Derived inheriting a
+        non-stdlib Base whose own field is a stdlib record must reach that
+        field -- only rec.fields was followed, not rec.bases."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="Derived")],
+            types=[
+                RecordType(name="Derived", kind="class", bases=["Base"]),
+                RecordType(
+                    name="Base",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_virtual_base_class_field_is_a_reachability_root(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="Derived")],
+            types=[
+                RecordType(name="Derived", kind="class", virtual_bases=["Base"]),
+                RecordType(
+                    name="Base",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
+class TestStdlibTypedefAliasResolution:
+    def test_std_string_typedef_alias_resolves_to_real_record(self) -> None:
+        """The concrete gap this closes: a public function spelled with the
+        bare DWARF signature form ("string") must resolve through
+        snapshot.typedefs["std::string"] (qualified key, bare target) to
+        the real std::__cxx11::basic_string<...> RecordType -- verified
+        empirically against a real DWARF-dumped std::string parameter."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="string")],
+            types=[
+                RecordType(
+                    name="std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >",
+                    kind="class",
+                )
+            ],
+        )
+        snap.typedefs = {
+            "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
+        }
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {
+                "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+            }
+        )
+
+    def test_qualified_typedef_key_spelling_also_matches(self) -> None:
+        """A signature spelled with the fully-qualified alias itself
+        ("std::string", not the bare DWARF form) must still resolve --
+        the literal typedefs key is always kept in the index."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="std::string")],
+            types=[
+                RecordType(
+                    name="std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >",
+                    kind="class",
+                )
+            ],
+        )
+        snap.typedefs = {
+            "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
+        }
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {
+                "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+            }
+        )
+
+    def test_stripped_typedef_key_colliding_with_non_stdlib_record_is_dropped(
+        self,
+    ) -> None:
+        """The stripped alias spelling must not be registered if it
+        collides with a real, unrelated non-stdlib record's own identity
+        -- same false-negative-over-false-positive principle as the
+        RecordType-level collision guard."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    params=[Param(name="s", type="string")],
+                )
+            ],
+            types=[
+                # An unrelated user type whose bare spelling collides with
+                # the stripped form of the "std::string" typedef key.
+                RecordType(name="string", kind="class"),
+                RecordType(
+                    name="std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >",
+                    kind="class",
+                ),
+            ],
+        )
+        snap.typedefs = {
+            "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
+        }
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_two_typedefs_disagreeing_on_stripped_target_are_dropped(self) -> None:
+        """Two distinct stdlib-namespaced typedef keys reducing to the same
+        stripped spelling but pointing at different targets must not
+        register that ambiguous spelling at all -- an ambiguous resolution
+        is worse than none. Unit-tested directly against
+        _typedef_spelling_targets: std::Alias and __gnu_cxx::Alias both
+        strip to bare "Alias", but point at different targets."""
+        index = _typedef_spelling_targets(
+            {"std::Alias": "detail::Real", "__gnu_cxx::Alias": "other::Real"},
+            frozenset(),
+        )
+        assert "Alias" not in index
+        assert index["std::Alias"] == "detail::Real"
+        assert index["__gnu_cxx::Alias"] == "other::Real"
+
+    def test_agreeing_stripped_typedef_targets_are_kept(self) -> None:
+        """Guard against over-correcting: two typedef keys reducing to the
+        same stripped spelling that agree on the target must still
+        register it (no real ambiguity in the outcome)."""
+        index = _typedef_spelling_targets(
+            {"std::Alias": "Real", "__gnu_cxx::Alias": "Real"},
+            frozenset(),
+        )
+        assert index["Alias"] == "Real"

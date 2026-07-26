@@ -222,3 +222,34 @@
   signature spelled with a *stdlib* alias like `std::string` (which names
   a compiler-internal alias with no reverse mapping back to the owning
   `RecordType` in any current model field).
+- **`type_reachability.py`'s reachability closure now also follows base
+  classes** (Codex review, fresh evidence): a public `Derived` inheriting
+  a non-stdlib `Base` whose own field is a stdlib record was never
+  reached, since the worklist expansion only followed `rec.fields`, not
+  `rec.bases`/`rec.virtual_bases`. Fixed by enqueuing both direct and
+  virtual bases the same way `surface.py`'s own reachability closure does
+  — virtual inheritance still embeds the base subobject + vtable path, so
+  both are ABI-reachable through the derived type.
+- **`type_reachability.py` resolves the previously-documented typedef-
+  aliased-stdlib-type gap** (user-requested): a signature spelled with a
+  typedef alias (`std::string`, `std::wstring`, ...) names the alias, not
+  the real underlying class (`std::basic_string<char, ...>`) that owns the
+  `RecordType` entry. Verified empirically against a real DWARF-dumped
+  `std::string` parameter: `snapshot.typedefs["std::string"]` resolves to
+  the bare `"basic_string<char, std::char_traits<char>,
+  std::allocator<char> >"`, while the owning `RecordType.name` is the
+  fully-qualified `"std::__cxx11::basic_string<char, std::char_traits<char>,
+  std::allocator<char> >"` — libstdc++ wraps its own post-C++11 dual-ABI
+  types in an inline namespace (`__cxx11::`) the same way libc++ wraps its
+  whole standard library (`__1::`/`__ndk1::`, already handled), so that
+  list gained a third entry. The typedef *key* itself also needed the same
+  bare-vs-qualified treatment already applied to `RecordType` identities
+  (the DWARF backend spells the signature bare — `"string"`, never the
+  qualified key `"std::string"`), so a new `_typedef_spelling_targets()`
+  builds a `spelling -> target` index covering both the literal key and
+  its namespace-stripped bare form (an ambiguous stripped spelling is
+  dropped rather than recorded, same principle as the `RecordType`
+  spelling index), and the scan now follows a matched typedef alias to its
+  target the same way `surface.py`'s own reachability closure does. New
+  FP-rate corpus case `public_std_string_typedef_alias_layout_changed`
+  (real-break/FN sentinel) passes at baseline 0/0.
