@@ -212,6 +212,16 @@ class TestNormalizeMangledName:
         assert normalize_mangled_name("_ZN1E", "_ZN1E") is None
         assert normalize_mangled_name("_ZN", "_ZN") is None
 
+    def test_local_name_with_nothing_after_terminator_is_rejected(self) -> None:
+        # Codex review, fresh evidence: unlike <nested-name> (complete once
+        # its own terminator E is found), a <local-name> is
+        # "Z <function encoding> E <entity name>" -- the terminator MUST
+        # be followed by a non-empty entity name. "_ZZ1fvE" has a
+        # terminator (the trailing E) but nothing after it, so it
+        # previously passed the shared N/Z terminator check despite being
+        # incomplete.
+        assert normalize_mangled_name("_ZZ1fvE", "_ZZ1fvE") is None
+
     def test_local_name_with_no_terminator_is_rejected(self) -> None:
         assert normalize_mangled_name("_ZZnonsense", "_ZZnonsense") is None
         assert normalize_mangled_name("_ZZ", "_ZZ") is None

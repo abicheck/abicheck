@@ -288,8 +288,23 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
         source_name_end = _source_name_end(rest[1:])
         if source_name_end is not None:
             search_start = 1 + source_name_end
-            return rest.find("E", search_start) >= search_start
-        return rest.find("E", 1) > 1
+            e_index = rest.find("E", search_start)
+            terminator_ok = e_index >= search_start
+        else:
+            e_index = rest.find("E", 1)
+            terminator_ok = e_index > 1
+        if not terminator_ok:
+            return False
+        if rest[0] == "Z":
+            # Unlike <nested-name> (complete once its own terminator E is
+            # found), a <local-name> is "Z <function encoding> E <entity
+            # name> [<discriminator>]" -- the terminator MUST be followed
+            # by a non-empty entity name. "_ZZ1fvE" has a terminator (the
+            # trailing E) but nothing after it, so it previously passed
+            # the shared N/Z check above despite being incomplete (Codex
+            # review, fresh evidence).
+            return e_index + 1 < len(rest)
+        return True
     if rest[0] == "L" and len(rest) > 1 and rest[1].isdigit():
         # GCC internal-linkage prefix (_ZL7g_count) + <source-name>
         return _valid_source_name(rest[1:])
