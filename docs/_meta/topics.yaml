@@ -48,6 +48,7 @@ topics:
       - start/getting-started.md
       - start/choose-your-workflow.md
       - use/tool-modes.md
+      - learn/architecture.md
 
   verdicts:
     canonical_page: learn/verdicts.md
