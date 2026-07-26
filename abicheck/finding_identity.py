@@ -468,7 +468,14 @@ def resolve_symbol_identity(
     # fragment the same entity's identity across evidence tiers.
     normalized_basis = mangled if (mangled and not real_mangled) else qn
     sig = normalized_signature(normalized_basis, kind, param_types)
-    rel = source_relative_identity(source_location, name or qn)
+    # `name or qn` alone drops the raw export entirely when a partial
+    # producer supplies only `mangled` (e.g. a symbols-only snapshot with
+    # no name/qualified_name at all) -- normalized_basis already prefers
+    # that raw mangled value in exactly this case, so falling back to it
+    # here keeps the relsrc: alias's basis consistent with sig/primary_id
+    # instead of silently losing the only entity signal available (Codex
+    # review, fresh evidence).
+    rel = source_relative_identity(source_location, name or qn or normalized_basis)
 
     aliases: list[str] = []
     if real_mangled:
@@ -485,7 +492,16 @@ def resolve_symbol_identity(
         primary = f"mangled:{real_mangled}"
         return FindingIdentity(primary, IDENTITY_TIER_CANONICAL, tuple(aliases))
 
-    if qn:
+    # `normalized_basis`, not `qn`: a partial producer supplying only
+    # `mangled` (e.g. resolve_symbol_identity(mangled="plain_export",
+    # name=None)) has `qn == ""` but `normalized_basis == "plain_export"`
+    # (the raw export, already the actual basis `sig` was built from) --
+    # checking `qn` alone previously demoted that case all the way to a
+    # REDUCED synthetic hash, even though the identical export becomes
+    # NORMALIZED as soon as another producer also supplies `name`,
+    # fragmenting one entity's identity solely on metadata completeness
+    # (Codex review, fresh evidence).
+    if normalized_basis:
         return FindingIdentity(sig, IDENTITY_TIER_NORMALIZED, tuple(aliases))
 
     # Synthetic fallback: clearly marked low-confidence (IDENTITY_TIER_REDUCED,

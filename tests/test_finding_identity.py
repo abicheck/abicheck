@@ -386,6 +386,35 @@ class TestResolveSymbolIdentity:
         assert identity.tier == IDENTITY_TIER_NORMALIZED
         assert "qualified:ns::foo" in identity.aliases
 
+    def test_raw_unverified_mangled_only_is_normalized_not_reduced(self) -> None:
+        # Codex review, fresh evidence: a partial producer supplying only
+        # `mangled` (no name/qualified_name at all -- e.g. a symbols-only
+        # snapshot) has qn == "" but normalized_basis == the raw export,
+        # already the actual basis `sig` was built from. Checking `qn`
+        # alone previously demoted this to a REDUCED synthetic hash, even
+        # though the identical export becomes NORMALIZED as soon as
+        # another producer also supplies `name`, fragmenting one entity's
+        # identity solely on metadata completeness.
+        identity = resolve_symbol_identity(
+            mangled="plain_export", name=None, kind="function"
+        )
+        assert identity.tier == IDENTITY_TIER_NORMALIZED
+        assert identity.primary_id == normalized_signature("plain_export", "function")
+
+    def test_raw_unverified_mangled_only_feeds_relsrc_alias(self) -> None:
+        # Codex review, fresh evidence: `name or qn` alone drops the raw
+        # export from the relsrc: alias's basis when name/qualified_name
+        # are both absent -- normalized_basis (the same value sig already
+        # uses) must feed it too, instead of silently losing the only
+        # entity signal available.
+        identity = resolve_symbol_identity(
+            mangled="plain_export",
+            name=None,
+            kind="function",
+            source_location="foo.c:1",
+        )
+        assert "relsrc:foo.c:1\x1fplain_export" in identity.aliases
+
     def test_nothing_available_falls_back_to_synthetic(self) -> None:
         identity = resolve_symbol_identity()
         assert identity.tier == IDENTITY_TIER_REDUCED
