@@ -23,4 +23,9 @@
   clean — e.g. "libfoo is broken under linux-gcc14/linux-clang20 but fine
   under windows-msvc" instead of three opaque rows. Empty (and every target's
   `profile_id` absent) for a `target_id` with no profile encoding — the
-  common single-profile case — so this is purely additive.
+  common single-profile case — so this is purely additive. Grouping combines
+  *all* of a profile's checks worst-verdict-wins rather than keying by
+  `profile_id` alone, since a run plan can carry more than one check for the
+  same target+profile at different baseline channels/requested depths — a
+  naive last-write-wins would let a later, cleaner check silently overwrite
+  an earlier, breaking one for that profile (Codex review).

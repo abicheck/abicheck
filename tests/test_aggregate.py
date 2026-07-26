@@ -819,6 +819,30 @@ class TestProfileMatrix:
         ).render_text()
         assert "libfoo: clean on all checked profiles" in text
 
+    def test_profile_matrix_combines_multiple_checks_per_profile_worst_wins(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: the same (base_target, profile) pair can have more
+        than one check differing only by baseline_channel/requested_depth —
+        e.g. one profile checked at both `headers` and `build` depth. A
+        later, cleaner check must not silently overwrite an earlier,
+        breaking one for that same profile."""
+        headers_check = "libfoo@linux-gcc14#release@headers"
+        build_check = "libfoo@linux-gcc14#release@build"
+        other_profile = "libfoo@windows-msvc#release@headers"
+        _write_report(tmp_path, headers_check, "BREAKING")
+        _write_report(tmp_path, build_check, "COMPATIBLE")  # would overwrite naively
+        _write_report(tmp_path, other_profile, "COMPATIBLE")
+        r = aggregate_reports_dir(
+            tmp_path, expected=_expect(headers_check, build_check, other_profile)
+        )
+        (entry,) = r.profile_matrix
+        assert entry.profiles == ("linux-gcc14", "windows-msvc")
+        # linux-gcc14 must still be affected -- one of its two checks broke.
+        assert entry.affected_profiles == ("linux-gcc14",)
+        assert entry.verdict_by_profile["linux-gcc14"] == "BREAKING"
+        assert entry.verdict_by_profile["windows-msvc"] == "COMPATIBLE"
+
 
 class TestAggregateCLI:
     def _run(self, args):

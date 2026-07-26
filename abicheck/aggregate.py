@@ -583,33 +583,47 @@ class AggregateResult:
         no target in this result carries a ``profile_id`` (the common
         single-profile case), not an error. ``unexpected_targets`` are not
         grouped — a not-in-manifest report is a different axis entirely.
+
+        A run plan can carry *more than one* check for the same
+        (base_target, profile) pair — the same target checked under one
+        profile at two different baseline channels or requested depths
+        (e.g. ``libfoo@linux-gcc14#release@headers`` and
+        ``libfoo@linux-gcc14#release@build``). All of a profile's checks are
+        combined worst-verdict-wins (Codex review) rather than keying by
+        profile_id alone, which would let a later, cleaner check silently
+        overwrite an earlier, breaking one for the same profile.
         """
-        by_target: dict[str, dict[str, TargetReport]] = {}
+        by_target: dict[str, dict[str, list[TargetReport]]] = {}
         for t in self.targets:
             pid = t.profile_id
             if pid is None:
                 continue
-            by_target.setdefault(t.base_target, {})[pid] = t
+            by_target.setdefault(t.base_target, {}).setdefault(pid, []).append(t)
 
         entries = []
         for base_target in sorted(by_target):
-            reports = by_target[base_target]
-            profiles = tuple(sorted(reports))
-            affected = tuple(
-                pid
-                for pid in profiles
-                if reports[pid].compatibility_verdict is not None
-                and reports[pid].compatibility_verdict not in _UNAFFECTED_VERDICTS
-            )
+            reports_by_profile = by_target[base_target]
+            profiles = tuple(sorted(reports_by_profile))
+            affected = []
             verdict_by_profile: dict[str, str | None] = {}
             for pid in profiles:
-                v = reports[pid].compatibility_verdict
-                verdict_by_profile[pid] = v.value if v is not None else None
+                verdicts = [
+                    r.compatibility_verdict
+                    for r in reports_by_profile[pid]
+                    if r.compatibility_verdict is not None
+                ]
+                if not verdicts:
+                    verdict_by_profile[pid] = None
+                    continue
+                worst = max(verdicts, key=lambda v: _VERDICT_RANK[v])
+                verdict_by_profile[pid] = worst.value
+                if worst not in _UNAFFECTED_VERDICTS:
+                    affected.append(pid)
             entries.append(
                 ProfileMatrixEntry(
                     base_target=base_target,
                     profiles=profiles,
-                    affected_profiles=affected,
+                    affected_profiles=tuple(affected),
                     verdict_by_profile=verdict_by_profile,
                 )
             )
