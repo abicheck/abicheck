@@ -86,3 +86,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   in memory simultaneously just to report an error that needs neither
   tree. Now raises `AstContextAmbiguousError` as soon as a second match is
   seen, without scanning or retaining anything further (Codex review).
+- The real production DPC++ decode path still read the entire concatenated
+  host+device stream into one Python `str` (`ast_path.read_text()`) before
+  any parsing began, even after the fixes above stopped retaining every
+  *parsed* document — a multi-pass DPC++ capture's combined raw text is
+  itself a multiple of any single pass's already-multi-GB size. New
+  `sycl_context.decode_and_select_frontend_context_from_path` reads the
+  file incrementally instead, bounding peak buffered text to roughly one
+  document's size; `dumper_clang_errors._parse_clang_ast_result` now calls
+  it instead of pre-reading the file. The cache-write side of the same
+  path also gained `dumper_cache._atomic_write_json`, which streams
+  `json.dump` straight to the cache file instead of building a full
+  `json.dumps(...).encode()` blob first (Codex review, second round).

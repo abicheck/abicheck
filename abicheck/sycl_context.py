@@ -46,7 +46,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .errors import AstContextAmbiguousError, AstContextMissingError, SnapshotError
@@ -180,65 +182,77 @@ def _one_match_or_raise(
     return matches[0]
 
 
-def decode_and_select_frontend_context(
-    stdout: str, stderr: str, requested_kind: str
+def _iter_json_documents(read_more: Callable[[], str]) -> Iterator[dict[str, Any]]:
+    """Yield each top-level JSON document from a stream fed by *read_more*.
+
+    *read_more* returns the next chunk of text, or ``""`` at end of input.
+    Only ever buffers as much text as the CURRENTLY-being-parsed document
+    needs (plus whatever a single ``read_more()`` call over-reads into the
+    next one) -- never the whole stream at once. This is what lets a
+    file-backed caller (:func:`decode_and_select_frontend_context_from_path`)
+    avoid holding a multi-document DPC++ capture's full combined size in
+    memory just to reach one document near the end (Codex review: a prior
+    fix stopped retaining every *parsed* document, but the raw text of the
+    whole stream was still read up front in one ``read_text()`` call before
+    any parsing began -- this generator is what actually closes that gap).
+
+    A ``json.JSONDecodeError`` when more input is still available (not yet
+    at end of stream) is treated as "this document isn't complete yet" and
+    triggers reading another chunk; the same error once ``read_more()`` has
+    signalled end-of-input means the document is genuinely truncated or
+    malformed, and raises :class:`abicheck.errors.SnapshotError`.
+    """
+    decoder = json.JSONDecoder()
+    buf = ""
+    eof = False
+
+    def _fill() -> bool:
+        nonlocal buf, eof
+        chunk = read_more()
+        if not chunk:
+            eof = True
+            return False
+        buf += chunk
+        return True
+
+    while True:
+        buf = buf.lstrip()
+        while not buf and not eof:
+            if not _fill():
+                break
+            buf = buf.lstrip()
+        if not buf:
+            return
+        while True:
+            try:
+                doc, end = decoder.raw_decode(buf, 0)
+                break
+            except json.JSONDecodeError as exc:
+                if eof or not _fill():
+                    raise SnapshotError(
+                        "DPC++ frontend produced a truncated or malformed "
+                        f"AST document stream: {exc}"
+                    ) from exc
+        yield doc
+        buf = buf[end:]
+
+
+def _select_from_document_stream(
+    docs: Iterator[dict[str, Any]], stderr: str, requested_kind: str
 ) -> FrontendContext:
-    """Fused decode+select: parses only as much of *stdout* as needed and
-    never retains a non-matching document's full AST tree (Codex review).
-
-    :func:`decode_frontend_contexts` builds every document into a Python
-    ``dict`` up front, including every kind the caller will discard a
-    moment later -- fine for tests exercising the decoder generically, but
-    wasteful for the one real production caller
-    (``dumper_clang_errors._parse_clang_ast_result``): a DPC++ header can
-    legitimately produce a multi-GB AST per pass (this module's own
-    `tests/fixtures/g32/README.md` capture notes an accidental 2.5GB dump
-    from one stray ``#include <sycl/sycl.hpp>``), and holding a host pass's
-    full tree merely to throw it away after selecting the device pass (or
-    vice versa) multiplies peak memory by the pass count for no reason.
-
-    This still requires a full linear scan through *stdout* (the stdlib
-    ``json`` decoder has no way to locate a document's end without parsing
-    it), so it does not change worst-case scan *time* -- only which parsed
-    documents survive long enough to be retained. A document whose ``kind``
-    doesn't match *requested_kind* is parsed (to find where the next
-    document starts and to still catch a genuinely truncated/malformed
-    document at that position) and then immediately dropped, letting the
-    garbage collector reclaim it rather than accumulating in a list
-    alongside every other decoded document. A **second** matching document
-    raises :class:`abicheck.errors.AstContextAmbiguousError` immediately
-    (Codex review) rather than continuing to scan and accumulate every
-    further match first -- each matching pass can itself be multi-GB
-    (a device build can emit several offload-target passes), so holding two
-    or more full trees simultaneously just to report an error neither needs
-    is the exact same avoidable-multiplication risk this function exists to
-    close for the non-matching passes.
-
-    Behaves identically to ``select_frontend_context(decode_frontend_
-    contexts(stdout, stderr), requested_kind)`` for the exactly-one-match
-    and zero-matches outcomes (including the count-mismatch/truncated-
-    document errors); for the ambiguous outcome, it reports only the first
-    two matching targets rather than every one found, in exchange for never
-    retaining more than one matching AST tree at a time.
+    """Shared core of both ``decode_and_select_frontend_context*`` entry
+    points: correlates *docs* against *stderr*'s ``-cc1`` invocation lines
+    positionally, and applies the same three-outcome selection logic --
+    raising :class:`abicheck.errors.AstContextAmbiguousError` as soon as a
+    **second** matching document is seen (Codex review) rather than
+    scanning and retaining every match first, since each matching pass can
+    itself be multi-GB (a device build can emit several offload-target
+    passes).
     """
     invocations = list(_CC1_INVOCATION_RE.finditer(stderr))
-    decoder = json.JSONDecoder()
     first_match: FrontendContext | None = None
-    pos = 0
-    length = len(stdout)
     doc_count = 0
-    while pos < length:
-        stripped = stdout[pos:].lstrip()
-        pos += len(stdout[pos:]) - len(stripped)
-        if pos >= length:
-            break
-        try:
-            doc, end = decoder.raw_decode(stdout, pos)
-        except json.JSONDecodeError as exc:
-            raise SnapshotError(
-                "DPC++ frontend produced a truncated or malformed AST "
-                f"document stream at offset {pos}: {exc}"
-            ) from exc
+    for doc in docs:
         if doc_count < len(invocations):
             invocation = invocations[doc_count]
             if invocation.group("kind") == requested_kind:
@@ -256,7 +270,6 @@ def decode_and_select_frontend_context(
                         "specific target."
                     )
         doc_count += 1
-        pos = end
     if doc_count != len(invocations):
         raise SnapshotError(
             f"DPC++ frontend produced {doc_count} AST document(s) but "
@@ -269,3 +282,54 @@ def decode_and_select_frontend_context(
     matches = [first_match] if first_match is not None else []
     available = sorted({inv.group("kind") for inv in invocations})
     return _one_match_or_raise(matches, doc_count, available, requested_kind)
+
+
+def decode_and_select_frontend_context(
+    stdout: str, stderr: str, requested_kind: str
+) -> FrontendContext:
+    """Fused decode+select over an already-in-memory *stdout* string.
+
+    Never retains a non-matching (or second-matching) document's full AST
+    tree (see :func:`_select_from_document_stream`), but *stdout* itself is
+    assumed already fully materialized by the caller -- this is a thin
+    convenience wrapper for tests and any caller that already has the
+    decoded text in hand. The real production caller with a file on disk
+    should use :func:`decode_and_select_frontend_context_from_path`
+    instead, which never loads the whole stream into memory at all.
+
+    Behaves identically to ``select_frontend_context(decode_frontend_
+    contexts(stdout, stderr), requested_kind)`` for the exactly-one-match
+    and zero-matches outcomes (including the count-mismatch/truncated-
+    document errors); for the ambiguous outcome, it reports only the first
+    two matching targets rather than every one found.
+    """
+    remaining = [stdout]
+
+    def _read_more() -> str:
+        chunk, remaining[0] = remaining[0], ""
+        return chunk
+
+    return _select_from_document_stream(
+        _iter_json_documents(_read_more), stderr, requested_kind
+    )
+
+
+def decode_and_select_frontend_context_from_path(
+    ast_path: Path, stderr: str, requested_kind: str, *, chunk_size: int = 1 << 20
+) -> FrontendContext:
+    """Like :func:`decode_and_select_frontend_context`, but reads *ast_path*
+    incrementally in *chunk_size*-byte increments instead of loading the
+    whole concatenated stream into memory up front (Codex review, second
+    round: the first fused-decoder fix stopped retaining every *parsed*
+    document, but ``dumper_clang_errors._parse_clang_ast_result`` still read
+    the entire raw stream via one ``ast_path.read_text()`` call before any
+    parsing began -- a DPC++ header's combined host+device stream can
+    itself be a multiple of any single pass's already-multi-GB size). Peak
+    buffered text is bounded by roughly one document's size (plus at most
+    one chunk of over-read into the next document), not the combined size
+    of every pass in the stream.
+    """
+    with open(ast_path, encoding="utf-8") as fh:
+        return _select_from_document_stream(
+            _iter_json_documents(lambda: fh.read(chunk_size)), stderr, requested_kind
+        )

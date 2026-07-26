@@ -9,13 +9,19 @@ Windows branch (unreachable on the Linux CI host without monkeypatching
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
 
 import pytest
 
-from abicheck.dumper_cache import _atomic_copy, _atomic_write, _cache_path
+from abicheck.dumper_cache import (
+    _atomic_copy,
+    _atomic_write,
+    _atomic_write_json,
+    _cache_path,
+)
 
 
 def test_posix_uses_xdg_cache_home(monkeypatch, tmp_path) -> None:
@@ -130,6 +136,56 @@ def test_replace_failure_cleans_up_temp_file_and_reraises(
 
     # The staging file (a hidden `.<name>.<random>.tmp` sibling) was cleaned
     # up rather than left behind, and the real target was never touched.
+    assert list(target.parent.iterdir()) == []
+
+
+# ── _atomic_write_json() ─────────────────────────────────────────────────────
+#
+# Streams json.dump() straight into the staging file instead of building a
+# full json.dumps(...).encode() blob first, so a DPC++ AST cache write of a
+# multi-GB selected document doesn't add a second full-size in-memory copy
+# on top of the dict the caller already holds (Codex review, PR #636).
+
+
+def test_atomic_write_json_writes_content_and_leaves_no_temp_file(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "cache" / "abcd.json"
+    target.parent.mkdir(parents=True)
+
+    _atomic_write_json(target, {"kind": "TranslationUnitDecl", "inner": []})
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {
+        "kind": "TranslationUnitDecl",
+        "inner": [],
+    }
+    assert list(target.parent.iterdir()) == [target]
+
+
+def test_atomic_write_json_overwrites_existing_file(tmp_path: Path) -> None:
+    target = tmp_path / "cache" / "abcd.json"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"old": true}', encoding="utf-8")
+
+    _atomic_write_json(target, {"new": True})
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {"new": True}
+
+
+def test_atomic_write_json_replace_failure_cleans_up_temp_file_and_reraises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / "cache" / "abcd.json"
+    target.parent.mkdir(parents=True)
+
+    def _raise_oserror(*_args, **_kwargs):
+        raise OSError("simulated cross-device rename failure")
+
+    monkeypatch.setattr(os, "replace", _raise_oserror)
+
+    with pytest.raises(OSError, match="simulated cross-device rename failure"):
+        _atomic_write_json(target, {"a": 1})
+
     assert list(target.parent.iterdir()) == []
 
 

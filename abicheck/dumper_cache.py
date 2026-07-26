@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -32,6 +33,33 @@ def _atomic_copy(src: Path, dst: Path) -> None:
         with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
             shutil.copyfileobj(inp, out)
         os.replace(tmp_name, dst)
+    except OSError:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_write_json(path: Path, obj: object) -> None:
+    """Serialize *obj* as JSON straight into *path* via a same-directory
+    temp file + ``os.replace``, without ever materializing the fully
+    encoded document as one Python ``str``/``bytes`` object first.
+
+    ``json.dump`` writes incrementally to the file object as it encodes,
+    unlike ``_atomic_write(path, json.dumps(obj).encode(...))`` -- the
+    latter's ``json.dumps`` call builds the entire encoded string in memory
+    before ``_atomic_write`` ever sees it, doubling peak memory again on
+    top of *obj* itself for exactly the kind of multi-GB DPC++ AST tree
+    this cache path exists to write out (Codex review).
+    """
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(obj, f)
+        os.replace(tmp_name, path)
     except OSError:
         try:
             os.unlink(tmp_name)

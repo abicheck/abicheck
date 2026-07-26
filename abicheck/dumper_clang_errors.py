@@ -36,9 +36,9 @@ from pathlib import Path
 from typing import Any
 
 from . import deadline
-from .dumper_cache import _atomic_copy, _atomic_write
+from .dumper_cache import _atomic_copy, _atomic_write_json
 from .errors import SnapshotError
-from .sycl_context import decode_and_select_frontend_context
+from .sycl_context import decode_and_select_frontend_context_from_path
 
 log = logging.getLogger(__name__)
 
@@ -518,16 +518,20 @@ def _parse_clang_ast_result(
     encoding pass.
 
     ``dpcpp_capable`` (ADR-050 D5, G32 Phase D) routes *ast_path* through
-    :func:`abicheck.sycl_context.decode_and_select_frontend_context` instead
-    of a bare single-document ``json.load`` — *ast_path* holds a concatenated
-    host+device document stream in that case, one ``clang -ast-dump=json``
-    document per ``-cc1`` compilation pass. That function (rather than the
-    separate decode-then-select two-step) never retains a non-matching
+    :func:`abicheck.sycl_context.decode_and_select_frontend_context_from_path`
+    instead of a bare single-document ``json.load`` — *ast_path* holds a
+    concatenated host+device document stream in that case, one ``clang
+    -ast-dump=json`` document per ``-cc1`` compilation pass. That function
+    reads the file incrementally (never the whole stream into memory at
+    once, Codex review) and never retains a non-matching or second-matching
     pass's full AST tree, since a DPC++ header's per-pass dump can itself
-    reach multi-GB size. The cache then stores only the *selected* single
-    document (keyed by *frontend_context*, see ``dumper._clang_header_dump``'s
-    cache key), not the whole raw stream, so the cache-hit read-back path (a
-    bare ``json.loads``) needs no changes for either case.
+    reach multi-GB size. The cache write below uses ``_atomic_write_json``
+    for the same reason — it streams the *selected* document straight into
+    the cache file rather than building one big ``json.dumps(...).encode()``
+    blob first. The cache then stores only the *selected* single document
+    (keyed by *frontend_context*, see ``dumper._clang_header_dump``'s cache
+    key), not the whole raw stream, so the cache-hit read-back path (a bare
+    ``json.loads``) needs no changes for either case.
     """
     if result.returncode != 0:
         raise SnapshotError(
@@ -553,9 +557,8 @@ def _parse_clang_ast_result(
     # exiting successfully doesn't silently run well past it (Codex review).
     deadline.check()
     if dpcpp_capable:
-        stdout_text = ast_path.read_text(encoding="utf-8")
-        selected = decode_and_select_frontend_context(
-            stdout_text, result.stderr or "", frontend_context
+        selected = decode_and_select_frontend_context_from_path(
+            ast_path, result.stderr or "", frontend_context
         )
         root = selected.ast
     else:
@@ -599,7 +602,7 @@ def _parse_clang_ast_result(
     if cache_write:
         try:
             if dpcpp_capable:
-                _atomic_write(cached, json.dumps(root).encode("utf-8"))
+                _atomic_write_json(cached, root)
             else:
                 _atomic_copy(ast_path, cached)
         except OSError:

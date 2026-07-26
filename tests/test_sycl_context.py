@@ -30,6 +30,7 @@ from abicheck.errors import (
 from abicheck.sycl_context import (
     FrontendContext,
     decode_and_select_frontend_context,
+    decode_and_select_frontend_context_from_path,
     decode_frontend_contexts,
     select_frontend_context,
 )
@@ -248,3 +249,124 @@ def test_fused_select_tolerates_trailing_whitespace_after_last_document() -> Non
     stderr = ' "clang" -cc1 -triple x86_64-unknown-linux-gnu -fsycl-is-host foo\n'
     selected = decode_and_select_frontend_context(stdout, stderr, "host")
     assert selected.kind == "host"
+
+
+# ── decode_and_select_frontend_context_from_path: incremental file reads ────
+# (Codex review, second round: the first fused-decoder fix stopped retaining
+# every *parsed* document, but the real caller still read the whole raw
+# stream into memory via one read_text() call before any parsing began.)
+
+
+def test_from_path_device_selects_real_fixture_with_tiny_chunk_size(
+    tmp_path: Path,
+) -> None:
+    """A deliberately tiny chunk_size forces many incremental reads across
+    the real two-document capture -- proving the file-based path decodes
+    correctly even when no single read() call sees a whole document."""
+    stdout, stderr = _real_stdout_stderr()
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text(stdout, encoding="utf-8")
+    selected = decode_and_select_frontend_context_from_path(
+        ast_path, stderr, "device", chunk_size=64
+    )
+    assert selected.kind == "device"
+    assert selected.target == "spir64-unknown-unknown"
+    assert selected.ast["kind"] == "TranslationUnitDecl"
+
+
+def test_from_path_host_selects_real_fixture_with_tiny_chunk_size(
+    tmp_path: Path,
+) -> None:
+    stdout, stderr = _real_stdout_stderr()
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text(stdout, encoding="utf-8")
+    selected = decode_and_select_frontend_context_from_path(
+        ast_path, stderr, "host", chunk_size=64
+    )
+    assert selected.kind == "host"
+    assert selected.target == "x86_64-unknown-linux-gnu"
+
+
+def test_from_path_matches_string_based_result_at_default_chunk_size(
+    tmp_path: Path,
+) -> None:
+    stdout, stderr = _real_stdout_stderr()
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text(stdout, encoding="utf-8")
+    from_path = decode_and_select_frontend_context_from_path(ast_path, stderr, "device")
+    from_string = decode_and_select_frontend_context(stdout, stderr, "device")
+    assert from_path.kind == from_string.kind
+    assert from_path.target == from_string.target
+    assert from_path.ast == from_string.ast
+
+
+def test_from_path_does_not_retain_non_matching_document_ast(tmp_path: Path) -> None:
+    stdout = (
+        '{"kind": "TranslationUnitDecl", "huge": "discarded-device-payload"}\n'
+        '{"kind": "TranslationUnitDecl", "small": "host-payload"}'
+    )
+    stderr = (
+        ' "clang" -cc1 -triple spir64-unknown-unknown -fsycl-is-device foo\n'
+        ' "clang" -cc1 -triple x86_64-unknown-linux-gnu -fsycl-is-host foo\n'
+    )
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text(stdout, encoding="utf-8")
+    selected = decode_and_select_frontend_context_from_path(
+        ast_path, stderr, "host", chunk_size=8
+    )
+    assert selected.ast == {"kind": "TranslationUnitDecl", "small": "host-payload"}
+    assert "huge" not in selected.ast
+
+
+def test_from_path_ambiguous_stops_at_second_match_with_tiny_chunk_size(
+    tmp_path: Path,
+) -> None:
+    stdout = (
+        '{"kind": "TranslationUnitDecl", "inner": []}\n'
+        '{"kind": "TranslationUnitDecl", "inner": []}\n'
+        '{"kind": "TranslationUnitDecl", "inner": ['  # truncated -- never reached
+    )
+    stderr = (
+        ' "clang" -cc1 -triple spir64 -fsycl-is-device foo\n'
+        ' "clang" -cc1 -triple spir64_x86_64 -fsycl-is-device foo\n'
+        ' "clang" -cc1 -triple spir64_gen -fsycl-is-device foo\n'
+    )
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text(stdout, encoding="utf-8")
+    with pytest.raises(AstContextAmbiguousError, match="spir64"):
+        decode_and_select_frontend_context_from_path(
+            ast_path, stderr, "device", chunk_size=8
+        )
+
+
+def test_from_path_zero_matches_raises_missing(tmp_path: Path) -> None:
+    stdout, stderr = _real_stdout_stderr()
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text(stdout, encoding="utf-8")
+    with pytest.raises(AstContextMissingError):
+        decode_and_select_frontend_context_from_path(ast_path, stderr, "bogus-kind")
+
+
+def test_from_path_rejects_truncated_document_with_tiny_chunk_size(
+    tmp_path: Path,
+) -> None:
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": [', encoding="utf-8")
+    with pytest.raises(SnapshotError, match="truncated or malformed"):
+        decode_and_select_frontend_context_from_path(
+            ast_path, "", "host", chunk_size=4
+        )
+
+
+def test_from_path_rejects_document_count_mismatch(tmp_path: Path) -> None:
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8")
+    with pytest.raises(SnapshotError, match="cannot correlate"):
+        decode_and_select_frontend_context_from_path(ast_path, "", "host")
+
+
+def test_from_path_empty_file_raises_missing(tmp_path: Path) -> None:
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text("", encoding="utf-8")
+    with pytest.raises(AstContextMissingError):
+        decode_and_select_frontend_context_from_path(ast_path, "", "host")
