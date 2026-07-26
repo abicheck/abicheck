@@ -1689,6 +1689,9 @@ def test_profile_compile_overlay_rejects_quoted_dangerous_arg_shlex_round_trip()
         "--castxml-cc-gnu",
         "--castxml-cc-gnu-c",
         "--castxml-cc-msvc",
+        "-B./tools/",
+        "-B",
+        "-B/some/dir",
     ],
 )
 def test_profile_compile_overlay_rejects_dangerous_args(dangerous_arg: str) -> None:

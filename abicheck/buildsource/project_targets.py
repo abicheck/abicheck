@@ -506,6 +506,25 @@ class BundleSpec:
 #: here anyway for defense-in-depth/a clearer abicheck-level error instead
 #: of relying on that castxml-internal invariant holding across every
 #: supported castxml version.
+#:
+#: ``-B<dir>``/``-B <dir>`` is the same shape of finding as
+#: ``--castxml-cc-`` above: real for the mechanism it names, but verified
+#: empirically to not reach abicheck's actual pipeline as claimed. GCC's
+#: ``-B<dir>`` really does add *dir* to its compiler-component search path
+#: and really does execute an attacker-supplied ``cc1``/``cc1plus`` placed
+#: there instead of the real one (confirmed: ``gcc -B./tools/ -E`` ran a
+#: planted ``./tools/cc1``) -- but every consumer of this composed string
+#: (castxml's internal bundled Clang, and the direct ``--ast-frontend
+#: clang`` backend) is Clang, not GCC, and Clang has no separate,
+#: ``-B``-discoverable ``cc1`` to substitute: it re-execs itself via
+#: ``-cc1`` instead. Confirmed empirically that ``-B./tools/`` does not
+#: run a planted ``./tools/cc1`` for either castxml or a direct ``clang -E``
+#: invocation, even though ``clang -B./tools/ -print-prog-name=cc1`` shows
+#: ``-B`` does influence *where Clang would look* for a tool named that.
+#: Blocked anyway: cheap, and closes the door in case a future toolchain-
+#: execution-contract change (AGENTS.md's "Known gaps" entry) ever forwards
+#: these flags to a real GCC invocation directly, which would restore the
+#: attack.
 _DANGEROUS_ARG_PREFIXES = (
     "-Xclang",
     "-Xpreprocessor",
@@ -525,6 +544,7 @@ _DANGEROUS_ARG_PREFIXES = (
     "-Wp,",
     "-Wl,",
     "--castxml-cc-",
+    "-B",
     "@",
 )
 

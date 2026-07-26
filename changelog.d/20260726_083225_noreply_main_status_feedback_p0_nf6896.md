@@ -66,6 +66,19 @@
   but blocked anyway for defense-in-depth and a clearer abicheck-level
   error instead of relying on that castxml-internal invariant holding
   across every supported version.
+- **`profiles.<id>.compile.args` also rejects `-B<dir>`/`-B <dir>` now.**
+  GCC's `-B<dir>` really does add a directory to its compiler-component
+  search path and really does execute an attacker-supplied `cc1`/`cc1plus`
+  placed there (empirically confirmed: `gcc -B./tools/ -E` ran a planted
+  `./tools/cc1`) — but empirically verified this does not reach abicheck's
+  actual pipeline: every consumer of this composed string (castxml's
+  internal bundled Clang, and the direct `--ast-frontend clang` backend)
+  is Clang, not GCC, and Clang re-execs itself via `-cc1` instead of
+  spawning a separate, `-B`-discoverable `cc1` (confirmed: `-B./tools/`
+  did not run a planted `./tools/cc1` for either castxml or a direct
+  `clang -E`). Blocked anyway: cheap, and closes the door in case a
+  future toolchain-execution-contract change ever forwards these flags to
+  a real GCC invocation directly.
 
 ### Documentation
 

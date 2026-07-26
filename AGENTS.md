@@ -459,8 +459,23 @@ Pick the right home:
   `shlex.split()` — an atom like `"'-fplugin=./evil.so'"` starts with a
   quote, not `-fplugin=`, so the prefix denylist alone accepted it, but
   POSIX shlex quote-removal reconstitutes the exact blocked flag on
-  re-split (confirmed with an actual `shlex.split()` round-trip). This
-  denylist is necessarily reactive to the delivery *mechanism*, not exhaustive over
+  re-split (confirmed with an actual `shlex.split()` round-trip). Two more
+  review rounds each found a flag real for the mechanism it names but
+  empirically NOT exploitable through abicheck's actual pipeline —
+  verified rather than taken on faith, and blocked anyway since doing so
+  is free: `--castxml-cc-` (a second occurrence naively looks like it
+  could replace the trusted `--castxml-cc-<id> <path>` pair
+  `dumper_ast_config.py` composes ahead of `args`, but real castxml
+  0.6.3 hard-rejects any repeated `--castxml-cc-*` occurrence at
+  argv-parse time instead of silently substituting the compiler); and
+  `-B<dir>`/`-B <dir>` (GCC's compiler-component search path override
+  really does let a planted `cc1`/`cc1plus` run instead of the real one,
+  confirmed against real GCC — but every consumer of this composed
+  string is Clang, not GCC, and Clang re-execs itself via `-cc1` rather
+  than spawning a separate, `-B`-discoverable one; confirmed neither
+  castxml's internal bundled Clang nor the direct `--ast-frontend clang`
+  backend ran a planted `cc1` with `-B` set). This denylist is
+  necessarily reactive to the delivery *mechanism*, not exhaustive over
   every dangerous flag a mechanism could carry — a real fix for the
   whack-a-mole shape of this (an allowlist of known-safe ABI flags instead
   of a denylist of known-dangerous ones) was suggested during review but
