@@ -1,106 +1,117 @@
-# Case 76: Internal `detail::` polymorphic base vtable change
+# Case 76: Internal `detail::` Polymorphic Base Vtable Change
 
-**Category:** Internal-leak | **Verdict:** BREAKING
+**Category:** Internal Leak | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-```cpp
-namespace mylib::detail {
-    class algorithm_iface {
-        virtual ~algorithm_iface();
-        virtual int run() = 0;
-        virtual int status() const = 0;
-    };
-}
-class svm_algorithm : public detail::algorithm_iface { /* ... */ };
-```
+The public `mylib::svm_algorithm` inherits from `mylib::detail::algorithm_iface`.
+v2 inserts a new virtual `progress()` *between* `run()` and `status()` in the
+"internal" base class. Every later vtable slot shifts by one. A v1-compiled
+consumer calling `status()` on an `svm_algorithm` instance now dispatches
+through the slot v2 occupies with `progress()` — wrong return value at best,
+crash at worst. No public *name* changed, only slot indices — invisible to
+any symbol-name-only tool.
 
-v2 inserts a new virtual `progress()` *between* `run()` and `status()`
-in the "internal" `detail::algorithm_iface`. The vtable layout shifts:
+## Old/new diff
 
-| Slot | v1                   | v2                     |
-| ---- | -------------------- | ---------------------- |
-| 0    | `~algorithm_iface()` | `~algorithm_iface()`   |
-| 1    | `run()`              | `run()`                |
-| 2    | `status()`           | `progress()`  ← NEW    |
-| 3    | —                    | `status()`             |
+| v1.h | v2.h |
+|------|------|
+| `virtual ~algorithm_iface(); virtual int run() = 0; virtual int status() const = 0;` | `virtual ~algorithm_iface(); virtual int run() = 0; virtual int progress() const; virtual int status() const = 0;` |
 
-A v1-compiled consumer that calls `status()` on a `svm_algorithm`
-instance now dispatches through the slot occupied at runtime by
-`progress()` — wrong return value at best, crash at worst. The
-reshuffle never touches any public *name*; only the slot indices
-move. That makes the break invisible to symbol-level tools.
+| Slot | v1 | v2 |
+|------|----|----|
+| 0 | `~algorithm_iface()` | `~algorithm_iface()` |
+| 1 | `run()` | `run()` |
+| 2 | `status()` | `progress()` ← NEW |
+| 3 | — | `status()` |
 
-## Real Failure Demo
-
-**Severity: BREAKING / WRONG RESULT**
+## abicheck command
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case76_detail_pimpl_vtable_changed_app case76_detail_pimpl_vtable_changed_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case76_detail_pimpl_vtable_changed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case76_detail_pimpl_vtable_changed/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# status=50 (expect 1)
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --ast-frontend clang
 ```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_vtable_changed: vtable changed: svm_algorithm
+  (run(), status() const, ~svm_algorithm()
+   -> run(), progress() const, status() const, ~svm_algorithm())
+  > Vtable slot reordering; virtual dispatch calls wrong method.
+- vtable_slot_count_changed: Vtable for 'mylib::svm_algorithm' changed size:
+  48 -> 56 bytes (~4 -> ~5 virtual slots)
+- vtable_slot_count_changed: Vtable for 'mylib::detail::algorithm_iface'
+  changed size: 48 -> 56 bytes
+- virtual_method_added: New virtual method added to existing class
+  mylib::detail::algorithm_iface: progress
+  > grows/relayouts the vtable, breaking derived classes and old binaries
+```
+
+The public `svm_algorithm` itself carries a `type_vtable_changed` finding —
+because it inherits the reshuffled base, its own effective vtable is
+reported changed too, not just the "internal" base's.
+
+## Minimum evidence
+
+`min_evidence: L2` — the header AST is what lets abicheck see that the
+public `svm_algorithm` inherits `detail::algorithm_iface`, so a vtable
+change on the base is understood to reach the public class's own dispatch
+table. castxml is the documented default backend for this evidence layer;
+clang (`--ast-frontend clang`) is a supported alternative AST frontend used
+above.
 
 ## Why abicheck catches it
 
-On Linux the vtable symbol (`_ZTVN5mylib6detail15algorithm_ifaceE`)
-grows from 48 to 56 bytes; `symbol_size_changed` catches that and
-combined with the inherited public class drives the verdict to
-BREAKING. The `internal_type_leaks_via_public_api` overlay attaches a
-synthetic finding citing the inheritance chain
+DWARF/header vtable comparison sees `algorithm_iface` gain a virtual slot
+mid-table (`virtual_method_added` + `vtable_slot_count_changed`, backed by
+the `_ZTV...algorithm_iface` symbol growing from 48 to 56 bytes on Linux).
+Because the header AST records `svm_algorithm : public detail::algorithm_iface`,
+abicheck's inheritance-aware vtable diff also reports the change on the
+derived public class's own effective vtable (`type_vtable_changed` on
+`svm_algorithm`) — the public-facing dispatch-table change is what makes
+this BREAKING rather than an invisible internal edit.
 
-```text
-mylib::svm_algorithm → base:mylib::detail::algorithm_iface
+> **Known gap on macOS / Windows:** Mach-O and PE export tables carry no
+> symbol-size field, so the ELF-only `symbol_size`-based signal above
+> doesn't apply there, and the header AST's `vtable_index` is not reliably
+> populated per virtual on those toolchains, so the structural vtable diff
+> can collapse the reshuffle onto a single slot. Registered as a
+> `known_gap` in `examples/ground_truth.json`.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile —
+`status()` calls resolve to whatever now sits in that vtable slot.
+
+```bash
+# Build old library + app
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo.so
+g++ -std=c++17 -g app.cpp -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → status=1 (expect 1)
+
+# Swap in new library (no recompile)
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo.so
+./app
+# → status=50 (expect 1)
 ```
 
-so reviewers see the "internal" vtable change is in fact part of the
-public ABI.
+**Why CRITICAL:** the app's call to `a->status()` still compiles to "call
+whatever is in vtable slot 2" — in v2 that slot now holds `progress()`,
+which returns `50`. The wrong method runs silently; there is no crash to
+signal the bug, only a wrong answer.
 
-> **Known gap on macOS / Windows:** Mach-O `LC_DYSYMTAB` and PE export
-> tables do not carry a symbol-size field, so the
-> `symbol_size_changed` signal cannot fire. castxml additionally
-> emits `vtable_index=None` for every virtual on these toolchain
-> profiles, so the structural vtable diff collapses all virtuals into
-> a single slot and `type_vtable_changed` also misses the reshuffle.
-> The case is registered as a `known_gap` in
-> `examples/ground_truth.json` and the autodiscovery test xfails on
-> those platforms.
+## Safe redesign
 
-## Code diff
-
-```cpp
-// v1
-namespace mylib::detail {
-class algorithm_iface {
-public:
-    virtual ~algorithm_iface();
-    virtual int run() = 0;
-    virtual int status() const = 0;
-};
-}
-
-// v2 — one new virtual inserted MID-vtable
-namespace mylib::detail {
-class algorithm_iface {
-public:
-    virtual ~algorithm_iface();
-    virtual int run() = 0;
-    virtual int progress() const;   // NEW — shifts every later slot
-    virtual int status() const = 0;
-};
-}
-```
-
-## How to fix
-
-Treat `detail::` polymorphic bases as a frozen surface, or hide them
-behind pimpl so the public class no longer inherits from anything
-that can change:
+Treat `detail::` polymorphic bases as a frozen ABI surface, or hide them
+behind pimpl so the public class no longer inherits from anything that can
+change:
 
 ```cpp
 class svm_algorithm {
@@ -109,18 +120,18 @@ public:
     int status() const;
 private:
     struct impl;
-    impl* p_;             // any virtual dispatch happens inside *p_,
-                          // never through this class's vtable.
+    impl* p_;   // any virtual dispatch happens inside *p_, never through
+                // this class's own vtable.
 };
 ```
 
-If polymorphism must remain part of the public surface, only ever
-*append* new virtuals at the end of the vtable — never insert mid-table
-— and document the slot order as part of the binary contract.
+If polymorphism must remain part of the public surface, only ever *append*
+new virtuals at the end of the vtable — never insert mid-table — and
+document the slot order as part of the binary contract.
 
 ## References
 
-- Itanium C++ ABI §2.5.3: vtable layout, slot indices, and the
-  "appending is OK, inserting is not" rule.
+- Itanium C++ ABI §2.5.3: vtable layout, slot indices, and the "appending
+  is OK, inserting is not" rule.
 - KDE Techbase, *Binary Compatibility Issues With C++*: section on
   virtual-method insertion.
