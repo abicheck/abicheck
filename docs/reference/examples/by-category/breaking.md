@@ -100,7 +100,7 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case142_vtable_slot_count_binary_only](../case142_vtable_slot_count_binary_only.md) | Vtable Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
 | [case166_ref_qualifier_added](../case166_ref_qualifier_added.md) | Method Ref-Qualifier Added (`str()` → `str() &`) | 🔴 BREAKING | Breaking |
 | [case167_base_became_virtual](../case167_base_became_virtual.md) | Base Class Became Virtual (`: public Device` → `: public virtual Device`) | 🔴 BREAKING | Breaking |
-| [case168_virtual_method_devirtualized](../case168_virtual_method_devirtualized.md) | Virtual Method Devirtualized (flush() leaves the vtable) | 🔴 BREAKING | Breaking |
+| [case168_virtual_method_devirtualized](../case168_virtual_method_devirtualized.md) | Virtual Method Devirtualized (`flush()` leaves the vtable) | 🔴 BREAKING | Breaking |
 | [case172_vtable_thunk_offset_changed](../case172_vtable_thunk_offset_changed.md) | Vtable Thunk Offset Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
 | [case173_vtt_slot_count_changed](../case173_vtt_slot_count_changed.md) | VTT Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
 | [case174_secondary_vtable_group_changed](../case174_secondary_vtable_group_changed.md) | Secondary Vtable Group Changed | 🔴 BREAKING | Breaking |

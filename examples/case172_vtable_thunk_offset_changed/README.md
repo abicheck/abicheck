@@ -1,104 +1,102 @@
 # Case 172: Vtable Thunk Offset Changed (detected from a stripped binary)
 
-**Category:** C++ Layout | **Verdict:** BREAKING
+**Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
-## What this case is about
-
-```cpp
-// v1                                  // v2
-struct Base1 {                         struct Base1 {
-    int x;                                 int x;
-                                            double y;    // <- new field
-    virtual int f1();                      virtual int f1();
-    virtual ~Base1();                      virtual ~Base1();
-};                                      };
-struct Base2 { ... };                  struct Base2 { ... };   // unchanged
-struct Derived : Base1, Base2 {        struct Derived : Base1, Base2 {
-    int f2() override;                     int f2() override;
-};                                      };
-```
+## Verdict and consumer impact
 
 `Derived` multiply-inherits from `Base1` (primary) and `Base2` (secondary),
-overriding `Base2::f2()`. Because `Base2` is not the primary base, the
-Itanium ABI compiles `Derived::f2()` behind a **non-virtual this-adjusting
-thunk** (`_ZThn16_...f2Ev`): a small stub that subtracts `Base2`'s byte
-offset within `Derived` from `this` before jumping to the real
-implementation, so the same override works correctly whether reached through
-a `Derived*` or a `Base2*` (`Base1` does not declare `f2()`, so it is not a
-valid call path to it).
+overriding `Base2::f2()` behind a non-virtual this-adjusting thunk
+(`_ZThn16_...f2Ev`). v2 adds one field to `Base1`; `Derived`'s method set
+and vtable slot count are **completely unchanged**, but `Base1` grows from
+16 to 24 bytes, so `Base2`'s subobject moves from offset 16 to offset 24
+within `Derived`. The thunk's baked-in adjustment must change to match
+(`_ZThn16_` → `_ZThn24_`). Any consumer that performs
+`static_cast<Base2*>(derived_ptr)` (or an implicit upcast) computed that
+pointer adjustment as a **compile-time constant** baked into the caller's
+machine code — a binary compiled against v1 still subtracts 16, but v2's
+real `Base2` subobject starts at 24. Recompilation is mandatory; the
+mismatch is a deterministic crash, not a symbol-resolution error.
 
-v2 adds one field to `Base1`. `Derived`'s **method set is completely
-unchanged** — same virtual functions, same vtable slot count — but `Base1`
-grew from 16 to 24 bytes, so `Base2`'s subobject now starts at offset 24
-instead of 16. The thunk's baked-in adjustment must change to match:
-`_ZThn16_` → `_ZThn24_`.
+## Old/new diff
 
-## Why this case exists: binary-only (L0) detection, and a genuine hazard
+| v1.h | v2.h |
+|------|------|
+| `struct Base1 { int x; virtual int f1(); virtual ~Base1(); };` (16 bytes) | `struct Base1 { int x; double y; virtual int f1(); virtual ~Base1(); };` (24 bytes) |
+| `Base2` subobject in `Derived` @ offset 16 | `Base2` subobject in `Derived` @ offset 24 |
+| thunk: `_ZThn16_...f2Ev` | thunk: `_ZThn24_...f2Ev` |
 
-`case142_vtable_slot_count_binary_only` already shows the *slot-count*
-signal (`_ZTV` growing). This case demonstrates a different, easy-to-miss
-signal: **the main vtable's size does not change at all**, so a size-only
-check would call this "no change." The `_ZTh...` thunk symbols in `.dynsym`
-are the only place the offset shift shows up — and it is a real hazard: any
-code that performs a `static_cast<Base2*>` (or an implicit upcast) of a
-`Derived*` computes that pointer adjustment as a **compile-time constant**
-baked into the *caller's* machine code, not looked up dynamically. A
-consumer compiled against v1 has `16` baked in; against v2's binary, `Base2`
-actually starts at `24`.
-
-## What abicheck detects
-
-- **`vtable_thunk_offset_changed`** — a thunk's target method persists on
-  both sides, but its encoded this-adjustment offset(s) changed: `Derived::f2()`
-  (`h:n16` → `h:n24`) and the deleting destructor thunk (same shift).
-  **Evidence tier L0** — read directly from the `_ZTh.../_ZTv.../_ZTc...`
-  symbol names in `.dynsym`; no DWARF, no headers.
-
-**Overall verdict: BREAKING**
-
-## How to reproduce (stripped, binary-only)
+## abicheck command
 
 ```bash
 g++ -shared -fPIC -g v1.cpp -o libv1.so
 g++ -shared -fPIC -g v2.cpp -o libv2.so
 strip --strip-debug libv1.so libv2.so
-
-python3 -m abicheck.cli dump libv1.so -o /tmp/v1.json
-python3 -m abicheck.cli dump libv2.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → BREAKING: vtable_thunk_offset_changed (Derived::f2(), h:n16 -> h:n24)
+abicheck compare libv1.so libv2.so
 ```
 
-(With DWARF present, the same swap additionally reports `type_field_added`,
-`type_size_changed`, and `base_class_offset_changed` — the L1/L2 view of the
-*same* root cause. The point of this case is that `vtable_thunk_offset_changed`
-survives even when none of that debug info is available.)
+## Expected abicheck finding
 
-## Real Failure Demo
+```text
+Verdict: BREAKING (exit 4)
 
-**Severity: BREAKING / SEGFAULT ON A NON-VIRTUAL UPCAST**
+- vtable_thunk_offset_changed: Vtable thunk offset changed for
+  Derived::f2(): h:n16 -> h:n24
+  > A base subobject moved; old binaries mis-adjust `this` on virtual
+    dispatch, corrupting memory with no symbol error.
+- vtable_thunk_offset_changed: Vtable thunk offset changed for
+  Derived::~Derived(): h:n16 -> h:n24
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — read directly from the `_ZTh.../_ZTv.../_ZTc...` thunk
+symbol names in `.dynsym`; no DWARF, no headers. The command above
+deliberately strips debug info (`strip --strip-debug`) to demonstrate that
+the finding survives even on a fully stripped binary — `case142
+_vtable_slot_count_binary_only` shows the *slot-count* signal (`_ZTV`
+growing), but here the primary vtable's size doesn't change at all; the
+thunk offset encoded in the symbol name is the only place the shift shows
+up.
+
+## Why abicheck catches it
+
+Itanium mangles a non-virtual this-adjusting thunk's baked-in offset
+directly into its symbol name (`_ZThn16_...` vs. `_ZThn24_...`). abicheck
+parses that offset from both sides' `.dynsym` for each thunk whose target
+method persists across versions, and reports a change as
+`vtable_thunk_offset_changed` — no DWARF or header evidence needed, since
+the fact lives entirely in the exported symbol table.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL — segfault on a non-virtual upcast**
+
+**Scenario:** compile app against v1 (bakes in the offset-16 adjustment),
+swap in v2 `.so` without recompile.
 
 ```bash
+# Build old library + app
 g++ -shared -fPIC -g v1.cpp -o libv1.so
 g++ -g app.cpp -I. -L. -lv1 -Wl,-rpath,. -o app
 ./app
-# f2() via Base2* = 20 (expected 20)   ✓
+# → f2() via Base2* = 20 (expected 20)
 
+# Swap in new library (no recompile)
 g++ -shared -fPIC -g v2.cpp -o libv2.so
 cp libv2.so libv1.so
 ./app
-# Segmentation fault
+# → Segmentation fault
 ```
 
-`app.cpp` performs `static_cast<Base2*>(derived_ptr)` — the compiler resolves
-this at compile time using v1's offset (16). Against v2's binary, the real
-`Base2` subobject is 8 bytes further along, so the computed pointer lands 8
-bytes into `Base1`'s own data instead. Dereferencing it as a `Base2*` reads
-those bytes as a vtable pointer and jumps through garbage — a deterministic
-crash caused entirely by a this-adjustment baked into the *old* app, with no
-change to any function's name or signature.
+**Why CRITICAL:** `app.cpp` performs `static_cast<Base2*>(derived_ptr)` —
+the compiler resolves this at compile time using v1's offset (16). Against
+v2's binary, the real `Base2` subobject is 8 bytes further along, so the
+computed pointer lands 8 bytes into `Base1`'s own data instead.
+Dereferencing it as a `Base2*` reads those bytes as a vtable pointer and
+jumps through garbage — a deterministic crash with no change to any
+function's name or signature.
 
-## Mitigation
+## Safe redesign
 
 - Avoid inserting or resizing data members ahead of a secondary polymorphic
   base in a published class — it silently moves every subobject after it.

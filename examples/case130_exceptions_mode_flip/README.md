@@ -1,40 +1,110 @@
 # Case 130: Exceptions Mode Flip (`-fno-exceptions`)
 
-**Category:** Build mode | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
+**Category:** Build Mode | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
-> Same source, same exported symbols. The only difference is the **build mode**:
-> v1 was built with C++ exceptions enabled (`-fexceptions`), v2 with
-> `-fno-exceptions`. abicheck captures the per-side build context (L3) from a
-> generated CMake `compile_commands.json` and reports
-> `exceptions_mode_changed`.
+## Verdict and consumer impact
 
-## What this demonstrates
-The two modes are not link-compatible: an exception thrown in `-fexceptions`
-code that unwinds through a frame compiled `-fno-exceptions` is undefined
-behaviour, and `-fno-exceptions` changes the codegen / EH tables of every public
-inline that uses `throw`/`try`/`catch`. A symbol-only or even DWARF-only check
-sees nothing — the signal lives in the captured build flags.
+Same source, same exported symbols in both versions — the only difference
+is the *build mode*: v1 is built with C++ exceptions enabled
+(`-fexceptions`), v2 with `-fno-exceptions`. The two modes are not
+link-compatible: an exception thrown in `-fexceptions` code that unwinds
+through a frame compiled `-fno-exceptions` is undefined behavior, and
+`-fno-exceptions` changes the codegen/EH tables of every public inline that
+uses `throw`/`try`/`catch`. A symbol-only or DWARF-only check sees nothing —
+the signal lives entirely in the captured build flags, which is why this is
+a RISK finding rather than a proven binary break: nothing in this
+particular fixture's trivial `compute()` actually throws, so the artifact
+diff has nothing concrete to confirm.
 
-## Why COMPATIBLE_WITH_RISK
-Per ADR-028 D3 a build-context finding never decides a shipped-ABI break on its
-own; the artifact diff proves any concrete break. This flags the elevated risk
-and localizes the cause for review.
+## Old/new diff
 
-## How abicheck detects it
-The CMake fixture builds v1 with `-fexceptions` and v2 with `-fno-exceptions`.
-The generated build-dir `compile_commands.json` carries those flags; the L3
-build-evidence diff normalizes them to the canonical `exceptions` option and
-reports the flip.
+| v1.cpp | v2.cpp |
+|--------|--------|
+| `int compute(int x) { return x + 1; }` (built `-fexceptions`) | identical source (built `-fno-exceptions`) |
 
-## Reproduce manually
+## abicheck command
+
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-cmake --build /tmp/abicheck-examples-build --target case130_exceptions_mode_flip_v1 case130_exceptions_mode_flip_v2
-abicheck dump /tmp/abicheck-examples-build/case130_exceptions_mode_flip/libv1.so --build-info /tmp/abicheck-examples-build/compile_commands.json -o v1.abi.json
-abicheck dump /tmp/abicheck-examples-build/case130_exceptions_mode_flip/libv2.so --build-info /tmp/abicheck-examples-build/compile_commands.json -o v2.abi.json
-abicheck compare v1.abi.json v2.abi.json   # → exceptions_mode_changed
+cmake -S examples -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build build --target case130_exceptions_mode_flip_v1 case130_exceptions_mode_flip_v2
+
+# Scope the build-info to each side's own compile entry: the shared
+# compile_commands.json covers every case in this fixture tree, and
+# abicheck's build-context diff aggregates whatever compile units it's
+# given, so an unscoped file would show BOTH -fexceptions and
+# -fno-exceptions on both sides and find no difference.
+jq '[.[] | select(.file | endswith("case130_exceptions_mode_flip/v1.cpp"))]' \
+    build/compile_commands.json > v1_cc.json
+jq '[.[] | select(.file | endswith("case130_exceptions_mode_flip/v2.cpp"))]' \
+    build/compile_commands.json > v2_cc.json
+
+abicheck dump build/case130_exceptions_mode_flip/libv1.so --build-info v1_cc.json -o v1.abi.json
+abicheck dump build/case130_exceptions_mode_flip/libv2.so --build-info v2_cc.json -o v2.abi.json
+abicheck compare v1.abi.json v2.abi.json
 ```
 
-## How to fix
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
+
+Deployment Risk Changes:
+- exceptions_mode_changed: Runtime-model option 'exceptions:CXX' changed:
+  'on' -> 'off'. May not be link- or runtime-compatible across consumers;
+  the artifact diff confirms any concrete break.
+```
+
+## Minimum evidence
+
+`min_evidence: L3` — the exceptions mode is not recorded in the ELF symbol
+table or DWARF at all for this fixture; it is only visible in the per-side
+compile flags captured from a `compile_commands.json` (or an equivalent
+build-system compile database). No artifact-level (L0/L1/L2) evidence
+carries this fact, which is exactly why the verdict tops out at RISK rather
+than BREAKING (ADR-028 D3: an L3-only finding may never silently become a
+proven binary break).
+
+## Why abicheck catches it
+
+`abicheck dump --build-info` normalizes each side's captured compiler flags
+into build options; the `-fexceptions`/`-fno-exceptions` pair is recognized
+as the canonical `exceptions` runtime-model option. `compare` then diffs the
+two sides' option sets and reports the flip as `exceptions_mode_changed`
+when they disagree.
+
+## Runtime failure demonstration
+
+**No crash in this minimal fixture.** `compute()` never throws or unwinds,
+so there's nothing for the mode mismatch to trip over here — that's the
+point of RISK rather than BREAKING: the finding localizes a real
+link/runtime hazard without claiming proof of a concrete failure.
+
+```bash
+g++ -std=gnu++17 -fPIC -shared -g -fexceptions v1.cpp -o libcompute.so
+g++ -g app.cpp -L. -lcompute -Wl,-rpath,. -o app
+./app
+# -> exit: 0
+
+# Swap in the -fno-exceptions build (no recompile)
+g++ -std=gnu++17 -fPIC -shared -g -fno-exceptions v2.cpp -o libcompute.so
+./app
+# -> exit: 0   (this fixture never exercises the unwind path)
+```
+
+The real hazard shows up once a public inline actually throws across the
+boundary — mixed exception modes there is undefined behavior, not a benign
+no-op.
+
+## Safe redesign
+
 Ship one exception mode for the public ABI, or rebuild all consumers in the
-matching mode if the public API exposes exception types or throwing inlines.
+matching mode if the public API exposes exception types or throwing
+inlines. Document the library's exception-mode contract explicitly rather
+than relying on consumers matching the build flag by convention.
+
+## Cross-tool comparison
+
+`abidiff`/`abidw` operate on ELF and DWARF only — a build-flag-only change
+like this leaves no trace there, so a binary-only comparison tool reports no
+change at all. This class of finding only exists at abicheck's L3
+build-context layer.

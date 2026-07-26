@@ -1,34 +1,101 @@
 # Case 131: RTTI Mode Flip (`-fno-rtti`)
 
-**Category:** Build mode | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
+**Category:** Build Mode | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
-> Same source, same symbols; v1 built with RTTI (`-frtti`), v2 with `-fno-rtti`.
-> The generated CMake build context (L3) reveals the flip →
-> `rtti_mode_changed`.
+## Verdict and consumer impact
 
-## What this demonstrates
-`-fno-rtti` omits `type_info` for polymorphic types, so `dynamic_cast`/`typeid`
-and cross-DSO exception matching that relies on RTTI identity can fail to link or
-silently misbehave when one side has RTTI and the other does not.
+Same source, same exported symbols in both versions — the only difference
+is the *build mode*: v1 is built with RTTI enabled (`-frtti`), v2 with
+`-fno-rtti`. `-fno-rtti` omits `type_info` for polymorphic types, so
+`dynamic_cast`/`typeid` and cross-DSO exception matching that relies on RTTI
+identity can fail to link, or silently misbehave, when one side has RTTI and
+the other does not. A symbol-only or DWARF-only check sees nothing — the
+signal lives entirely in the captured build flags, which keeps this a RISK
+finding rather than a proven binary break in this trivial fixture (which
+uses no polymorphic types at all).
 
-## Why COMPATIBLE_WITH_RISK
-A build-mode signal, not a proven binary break (ADR-028 D3). The artifact diff
-confirms any concrete break; this localizes the elevated risk.
+## Old/new diff
 
-## How abicheck detects it
-The CMake fixture builds v1 with `-frtti` and v2 with `-fno-rtti`; the generated
-build-dir `compile_commands.json` carries those flags. The L3 diff normalizes to
-the canonical `rtti` option and reports it.
+| v1.cpp | v2.cpp |
+|--------|--------|
+| `int compute(int x) { return x + 1; }` (built `-frtti`) | identical source (built `-fno-rtti`) |
 
-## Reproduce manually
+## abicheck command
+
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-cmake --build /tmp/abicheck-examples-build --target case131_rtti_mode_flip_v1 case131_rtti_mode_flip_v2
-abicheck dump /tmp/abicheck-examples-build/case131_rtti_mode_flip/libv1.so --build-info /tmp/abicheck-examples-build/compile_commands.json -o v1.abi.json
-abicheck dump /tmp/abicheck-examples-build/case131_rtti_mode_flip/libv2.so --build-info /tmp/abicheck-examples-build/compile_commands.json -o v2.abi.json
-abicheck compare v1.abi.json v2.abi.json   # → rtti_mode_changed
+cmake -S examples -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build build --target case131_rtti_mode_flip_v1 case131_rtti_mode_flip_v2
+
+# Scope the build-info to each side's own compile entry (see case130's
+# README for why an unscoped compile_commands.json finds no difference).
+jq '[.[] | select(.file | endswith("case131_rtti_mode_flip/v1.cpp"))]' \
+    build/compile_commands.json > v1_cc.json
+jq '[.[] | select(.file | endswith("case131_rtti_mode_flip/v2.cpp"))]' \
+    build/compile_commands.json > v2_cc.json
+
+abicheck dump build/case131_rtti_mode_flip/libv1.so --build-info v1_cc.json -o v1.abi.json
+abicheck dump build/case131_rtti_mode_flip/libv2.so --build-info v2_cc.json -o v2.abi.json
+abicheck compare v1.abi.json v2.abi.json
 ```
 
-## How to fix
-Keep a single RTTI mode for the public ABI, or rebuild consumers in the matching
-mode if the public API exposes polymorphic types or `dynamic_cast`/`typeid`.
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
+
+Deployment Risk Changes:
+- rtti_mode_changed: Runtime-model option 'rtti:CXX' changed: 'on' -> 'off'.
+  May not be link- or runtime-compatible across consumers; the artifact
+  diff confirms any concrete break.
+```
+
+## Minimum evidence
+
+`min_evidence: L3` — the RTTI mode is not recorded in the ELF symbol table
+or DWARF for this fixture; it is only visible in the per-side compile flags
+captured from a `compile_commands.json` (or an equivalent build-system
+compile database). No artifact-level (L0/L1/L2) evidence carries this fact,
+which is why the verdict tops out at RISK rather than BREAKING (ADR-028 D3).
+
+## Why abicheck catches it
+
+`abicheck dump --build-info` normalizes each side's captured compiler flags
+into build options; the `-frtti`/`-fno-rtti` pair is recognized as the
+canonical `rtti` runtime-model option. `compare` then diffs the two sides'
+option sets and reports the flip as `rtti_mode_changed` when they disagree.
+
+## Runtime failure demonstration
+
+**No crash in this minimal fixture.** `compute()` uses no polymorphic types,
+so there's no `dynamic_cast`/`typeid` for the mode mismatch to break here —
+that's the point of RISK rather than BREAKING.
+
+```bash
+g++ -std=gnu++17 -fPIC -shared -g -frtti v1.cpp -o libcompute.so
+g++ -g app.cpp -L. -lcompute -Wl,-rpath,. -o app
+./app
+# -> exit: 0
+
+# Swap in the -fno-rtti build (no recompile)
+g++ -std=gnu++17 -fPIC -shared -g -fno-rtti v2.cpp -o libcompute.so
+./app
+# -> exit: 0   (this fixture exercises no dynamic_cast/typeid path)
+```
+
+The real hazard shows up once a public polymorphic type crosses the
+boundary and one side lacks its `type_info`.
+
+## Safe redesign
+
+Keep a single RTTI mode for the public ABI, or rebuild consumers in the
+matching mode if the public API exposes polymorphic types or
+`dynamic_cast`/`typeid`. Document the library's RTTI-mode contract
+explicitly rather than relying on consumers matching the build flag by
+convention.
+
+## Cross-tool comparison
+
+`abidiff`/`abidw` operate on ELF and DWARF only — a build-flag-only change
+like this leaves no trace there, so a binary-only comparison tool reports no
+change at all. This class of finding only exists at abicheck's L3
+build-context layer.

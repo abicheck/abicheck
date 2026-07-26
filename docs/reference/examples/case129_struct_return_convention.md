@@ -10,59 +10,115 @@
 | **Detected `ChangeKind`s** | `struct_return_convention_changed` |
 | **Source files** | `examples/case129_struct_return_convention/` |
 
-**Category:** Calling convention | **Verdict:** 🔴 BREAKING (exit 4)
+**Category:** Calling Convention | **Verdict:** 🔴 BREAKING
 
-> A public function returns an aggregate by value. The aggregate gained a
-> user-declared destructor, making it **non-trivial**. By the System V AMD64 ABI a
-> non-trivial class is returned through a hidden caller-provided pointer (sret)
-> instead of in registers — the return convention flipped, even though the
-> function's mangled name (`_Z7computev`) is unchanged.
+## Verdict and consumer impact
 
-## What breaks
-`Result compute()` returned a small trivially-copyable struct in registers
-(`RAX:XMM0`) in v1. In v2 `Result` has a user-declared destructor, so it is no
-longer trivially copyable and the ABI returns it via a hidden pointer the caller
-allocates and passes in `RDI`. A caller compiled against v1 expects the result in
-registers; relinked against v2 without recompiling it reads the return value from
-the wrong location — silent corruption or a crash.
+`Result compute()` returns a small aggregate by value. In v1, `Result` is
+trivially copyable, so the System V AMD64 ABI returns it in registers
+(`RAX:XMM0`). In v2, `Result` gains a user-declared destructor, making it
+non-trivial — the ABI now returns it through a hidden caller-provided
+pointer (sret) passed in `RDI` instead. The function's mangled name
+(`_Z7computev`) is byte-for-byte unchanged, so a symbol-only check sees
+nothing, but a caller compiled against v1's in-register convention and
+relinked against v2 without recompiling reads the return value from the
+wrong location entirely.
 
-## Why abicheck catches it
-The DWARF value-ABI **return** trait for `compute` flips `trivial → nontrivial`,
-which crosses the in-register ↔ sret boundary. abicheck emits
-`struct_return_convention_changed` (the return-specific refinement of
-`value_abi_trait_changed`), verdict BREAKING.
+## Old/new diff
 
-## Code diff
-
-| v1 | v2 |
-|------|------|
+| v1.cpp | v2.cpp |
+|--------|--------|
 | `struct Result { int code; double value; };` | `struct Result { int code; double value; ~Result(); };` |
-| `Result compute();` | `Result compute();` |
+| `Result compute();` (in-register return) | `Result compute();` (sret return) |
 
-The symbol `compute()` is byte-for-byte the same mangled name in both versions —
-only the *mechanism* by which its return value is delivered changed.
+## abicheck command
 
-## Reproduce manually
 ```bash
 g++ -shared -fPIC -g -Og v1.cpp -o libfoo_v1.so
 g++ -shared -fPIC -g -Og v2.cpp -o libfoo_v2.so
-abicheck dump libfoo_v1.so -o v1.abi.json
-abicheck dump libfoo_v2.so -o v2.abi.json
-abicheck compare v1.abi.json v2.abi.json
-echo "exit: $?"   # → 4 (BREAKING)
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
-Treat a triviality change on a by-value public return type as an ABI break: keep
-the type trivially copyable, or bump the SONAME and rebuild all consumers. If a
-destructor is genuinely required, return through an opaque handle or an out-
-parameter instead of by value so the convention is explicit and stable.
+## Expected abicheck finding
 
-## Real-world example
-Adding a `std::unique_ptr` member, a user-declared destructor, or any non-trivial
-member to a small struct that a public factory returns by value is the common form
-of this break in C++ libraries — it looks like an innocuous source edit but it
-silently changes the call ABI of every function returning the type by value.
+```text
+Verdict: BREAKING (exit 4)
+
+- struct_return_convention_changed: Aggregate return convention changed:
+  compute() (ret:trivial -> ret:nontrivial)
+  > The aggregate return convention changed for a public function -- e.g.
+    a small struct that was returned in registers is now returned via a
+    hidden caller-provided pointer (sret), or vice versa. Callers and
+    callee disagree on where the result lives, so the return value is
+    read from the wrong location -- silent corruption or a crash.
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's per-function value-ABI facts record whether a
+returned aggregate is trivial or non-trivial for the purposes of calls;
+abicheck reads that trait directly from the compiled `.so`'s debug info, no
+public headers required.
+
+## Why abicheck catches it
+
+DWARF's return-type facts for `compute` flip `trivial -> nontrivial`, which
+crosses the in-register/sret boundary defined by the System V AMD64 ABI.
+abicheck emits `struct_return_convention_changed` (the return-specific
+refinement of the more general `value_abi_trait_changed`) as BREAKING, since
+this is a proven calling-convention fact, not just a build-flag signal.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+```bash
+# Build old library + app (app expects the in-register v1 convention)
+g++ -shared -fPIC -g -Og v1.cpp -o libfoo.so
+g++ -g -Og app.cpp -I. -L. -lfoo -Wl,-rpath,. -o app
+./app
+# -> exit: 0
+
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g -Og v2.cpp -o libfoo.so
+./app
+# -> Segmentation fault
+# -> exit: 139
+```
+
+**Why CRITICAL:** the app calls `compute()` expecting the result in
+`RAX:XMM0` (v1's in-register convention). Against v2, `compute()` instead
+writes the result through a hidden sret pointer that the app's v1-compiled
+call site never set up — the app reads garbage register state as the
+return value and crashes.
+
+## Safe redesign
+
+Treat a triviality change on a by-value public return type as an ABI break:
+keep the type trivially copyable, or bump the SONAME and rebuild all
+consumers. If a destructor is genuinely required, return through an opaque
+handle or an out-parameter instead of by value so the convention stays
+explicit and stable.
+
+**Real-world example:** adding a `std::unique_ptr` member, a user-declared
+destructor, or any non-trivial member to a small struct that a public
+factory returns by value is a common form of this break in C++ libraries —
+it looks like an innocuous source edit but silently changes the call ABI of
+every function returning the type by value.
+
+## Cross-tool comparison
+
+`abidiff` also reads DWARF and can see the same triviality flip in
+principle, but its handling of the specific in-register/sret ABI transition
+is not independently verified in this sandbox (no `abidw`/`abidiff`
+installed here); treat this section as an invocation reference rather than a
+verified result:
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 
