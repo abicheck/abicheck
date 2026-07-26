@@ -28,6 +28,7 @@ from abicheck.compatibility_evaluation_config import (
     CompatibilityEvaluationConfig,
     CompatibilityPolicyConfig,
     ContractConfig,
+    DigestedItems,
     EvidenceConfig,
     EvidenceProviderRequirement,
     GateConfig,
@@ -253,3 +254,64 @@ class TestGateSeverityDefault:
         # defaults already used elsewhere, not a second set of defaults.
         gate = GateConfig()
         assert gate.severity == SeverityConfig()
+
+
+class TestDigestedItems:
+    # ADR-049 D6: variants/explicit_scope are persisted as {items, sha256},
+    # not bare lists -- the digest identifies the *external source* that
+    # produced the items, so a definition change is detectable even when
+    # the item names stay identical.
+    def test_empty_items_need_no_digest(self):
+        empty = DigestedItems()
+        assert empty.items == ()
+        assert empty.sha256 is None
+
+    def test_nonempty_items_without_digest_is_a_value_error(self):
+        with pytest.raises(ValueError, match="sha256 is required"):
+            DigestedItems(items=["linux-x86_64"])
+
+    def test_nonempty_items_with_digest_constructs(self):
+        variants = DigestedItems(items=["linux-x86_64", "windows-msvc"], sha256="abc")
+        assert variants.items == ("linux-x86_64", "windows-msvc")
+        assert variants.sha256 == "abc"
+
+    def test_same_item_names_different_digest_are_distinguishable(self):
+        # The whole point: identical item names, different source content.
+        a = DigestedItems(items=["linux-x86_64"], sha256="digest-v1")
+        b = DigestedItems(items=["linux-x86_64"], sha256="digest-v2")
+        assert a != b
+
+    def test_evidence_config_variants_defaults_to_empty_digested_items(self):
+        evidence = EvidenceConfig()
+        assert evidence.variants == DigestedItems()
+
+    def test_evidence_config_variants_requires_digest_when_populated(self):
+        with pytest.raises(ValueError, match="sha256 is required"):
+            EvidenceConfig(variants=DigestedItems(items=["linux-x86_64"]))
+
+    def test_surface_config_explicit_scope_defaults_to_empty_digested_items(self):
+        surface = SurfaceConfig()
+        assert surface.explicit_scope == DigestedItems()
+
+    def test_surface_config_internal_namespaces_stay_a_plain_tuple(self):
+        # ADR-049 D6's hints: {internal_namespaces: []} carries no digest,
+        # unlike explicit_scope -- hints are advisory (D8), not replay-exact.
+        surface = SurfaceConfig(internal_namespaces=["detail"])
+        assert surface.internal_namespaces == ("detail",)
+        assert not isinstance(surface.internal_namespaces, DigestedItems)
+
+
+class TestSuppressionConfigDigest:
+    def test_empty_rules_need_no_digest(self):
+        suppressions = SuppressionConfig()
+        assert suppressions.rules == ()
+        assert suppressions.sha256 is None
+
+    def test_nonempty_rules_without_digest_is_a_value_error(self):
+        with pytest.raises(ValueError, match="sha256 is required"):
+            SuppressionConfig(rules=["ignore-internal-symbol"])
+
+    def test_nonempty_rules_with_digest_constructs(self):
+        suppressions = SuppressionConfig(rules=["ignore-internal-symbol"], sha256="xyz")
+        assert suppressions.rules == ("ignore-internal-symbol",)
+        assert suppressions.sha256 == "xyz"

@@ -61,6 +61,18 @@ def _frozen_tuple(s: Sequence[object]) -> tuple[object, ...]:
     return tuple(s)
 
 
+def _require_digest_when_nonempty(
+    items: Sequence[object], sha256: str | None, *, owner: str
+) -> None:
+    if items and not sha256:
+        raise ValueError(
+            f"{owner}.sha256 is required when its item/rule list is "
+            "non-empty (ADR-049 D6): the digest identifies the external "
+            "source that produced the list, not the list's contents, so a "
+            "source change is detectable even when the names stay the same."
+        )
+
+
 # --------------------------------------------------------------------------
 # D7: field-level provenance.
 # --------------------------------------------------------------------------
@@ -123,6 +135,27 @@ class ImmutableIdentity:
     sha256: str
 
 
+@dataclass(frozen=True)
+class DigestedItems:
+    """A content-addressed item list (ADR-049 D6: ``{items, sha256}``).
+
+    ``sha256`` digests the *external source* that produced ``items`` (a
+    variant-definition file, an explicit-scope manifest, ...), not the
+    ``items`` tuple itself: two definitions can produce the same item names
+    while differing in content, and only an externally supplied digest can
+    catch that drift on replay. Required whenever ``items`` is non-empty; an
+    empty, undeclared collection carries no digest since there is no
+    external source selected.
+    """
+
+    items: tuple[str, ...] = ()
+    sha256: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "items", _frozen_tuple(self.items))
+        _require_digest_when_nonempty(self.items, self.sha256, owner="DigestedItems")
+
+
 # --------------------------------------------------------------------------
 # D7 namespaces: contract / evidence / surface / assurance / policy / gate /
 # suppressions.
@@ -167,12 +200,12 @@ class EvidenceConfig:
     providers: tuple[EvidenceProviderRequirement, ...] = ()
     #: Declared compile/generated-header variant set (ADR-049 D5: "projects
     #: with configuration-dependent declarations must declare the variant
-    #: set; all required variants must complete").
-    variants: tuple[str, ...] = ()
+    #: set; all required variants must complete"). Content-digested, per
+    #: ADR-049 D6's ``variants: {items: [], sha256: "..."}``.
+    variants: DigestedItems = field(default_factory=DigestedItems)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "providers", _frozen_tuple(self.providers))
-        object.__setattr__(self, "variants", _frozen_tuple(self.variants))
 
 
 @dataclass(frozen=True)
@@ -182,14 +215,19 @@ class SurfaceConfig:
     ``internal_namespaces`` and similar hints inform reachability/
     out-of-contract proofs but cannot themselves demote a proven public fact
     (ADR-049 D8: surface hints "cannot themselves silently demote a public
-    fact").
+    fact"); ADR-049 D6's illustrative ``hints: {internal_namespaces: []}``
+    carries no digest, unlike ``explicit_scope``, so it stays a plain tuple
+    here too.
+
+    ``explicit_scope`` is content-digested (ADR-049 D6:
+    ``explicit_scope: {items: [], sha256: "..."}``) since it directly
+    decides root/closure membership and must detect drift on replay.
     """
 
-    explicit_scope: tuple[str, ...] = ()
+    explicit_scope: DigestedItems = field(default_factory=DigestedItems)
     internal_namespaces: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "explicit_scope", _frozen_tuple(self.explicit_scope))
         object.__setattr__(
             self, "internal_namespaces", _frozen_tuple(self.internal_namespaces)
         )
@@ -239,13 +277,22 @@ class GateConfig:
 
 @dataclass(frozen=True)
 class SuppressionConfig:
-    """Immutable rules and digest (ADR-049 D7)."""
+    """Immutable rules and digest (ADR-049 D7).
+
+    ``sha256`` is required whenever ``rules`` is non-empty (ADR-049 D6:
+    ``suppressions: {rules: [], sha256: "..."}`` -- same content-digest
+    requirement as :class:`DigestedItems`, kept as its own field pair here
+    since the ADR's own key is ``rules``, not ``items``).
+    """
 
     rules: tuple[str, ...] = ()
     sha256: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "rules", _frozen_tuple(self.rules))
+        _require_digest_when_nonempty(
+            self.rules, self.sha256, owner="SuppressionConfig"
+        )
 
 
 # --------------------------------------------------------------------------
