@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from abicheck.diff_cxx_rules import owner_class_of
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -770,6 +771,62 @@ class TestOwnerClassSeedingAndAmbiguousAliases:
                     kind="class",
                     fields=[TypeField(name="s", type="std::string")],
                 ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_owner_class_of_conversion_operator_with_qualified_target(self) -> None:
+        """Codex review, fresh evidence: a real compiled+demangled
+        conversion operator to a namespace-qualified type renders as
+        "Foo::operator ns::Bar" -- naively splitting at the *last* "::"
+        would treat the target type's own qualification as the owner
+        boundary, producing "Foo::operator ns" instead of "Foo"."""
+        fn = Function(
+            name="Foo::operator ns::Bar",
+            mangled="_ZNK3FoocvN2ns3BarEEv",
+            return_type="ns::Bar",
+            params=[],
+        )
+        assert owner_class_of(fn) == "Foo"
+
+    def test_owner_class_of_conversion_operator_with_nested_owner(self) -> None:
+        """Guard against over-correcting: the owner itself can also be
+        namespace-nested, and the fix must still find the right boundary
+        (the "::" immediately before the "operator" keyword)."""
+        fn = Function(
+            name="ns::Foo::operator ns2::Bar",
+            mangled="_ZNK2ns3FoocvN3ns23BarEEv",
+            return_type="ns2::Bar",
+            params=[],
+        )
+        assert owner_class_of(fn) == "ns::Foo"
+
+    def test_public_conversion_operator_to_qualified_type_seeds_its_owner_class(
+        self,
+    ) -> None:
+        """End-to-end: a public conversion operator whose own target type
+        is namespace-qualified must still seed its owner class as
+        reachable, so a genuine layout break in one of the owner's fields
+        is not silently missed."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="Foo::operator ns::Bar",
+                    mangled="_ZNK3FoocvN2ns3BarEEv",
+                    return_type="ns::Bar",
+                    params=[],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="ns::Bar", kind="class"),
                 RecordType(name="std::string", kind="class"),
             ],
         )

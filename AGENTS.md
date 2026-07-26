@@ -747,6 +747,34 @@ Once a root command genuinely clears the bar above, pick the right home:
   spelling *some* non-stdlib record can be named by) shared by both
   collision guards.
 
+  **A fourth finding pointed one level deeper, into shared infrastructure
+  this module calls rather than into `type_reachability.py` itself**
+  (Codex review, fresh evidence): `diff_cxx_rules.owner_class_of()` — the
+  helper this module's owner-class seeding reuses, also used by
+  `diff_symbols.py`'s owner-based move detection, `diff_cxx_rules.py`'s
+  own member-move heuristics, and `surface.py`'s reachability closure —
+  mis-parses a public conversion operator's owner when the operator's own
+  target type is namespace-qualified. Confirmed against a real compiled
+  and demangled symbol: `struct Foo { operator ns::Bar() const; };`
+  demangles to `"Foo::operator ns::Bar() const"`, and abicheck's own
+  `Function.name` (after its existing signature-stripping step) is exactly
+  `"Foo::operator ns::Bar"`. The old naive `rsplit("::", 1)` split at the
+  *lexically last* `"::"` — which belongs to the operator's own qualified
+  target (`ns::Bar`), not the owner/member boundary — producing the
+  corrupted owner `"Foo::operator ns"` instead of `"Foo"`, so a public
+  conversion operator to a qualified type would never seed its owner
+  class, potentially hiding a genuine layout break in one of the owner's
+  fields. Fixed in `owner_class_of()` itself (not duplicated locally) by
+  locating the literal `"::operator "` marker — present only for a
+  conversion-to-named-type operator, never for a symbol operator like
+  `operator+`/`operator[]`, which has no target type to separate from the
+  keyword with a space — and splitting there when present, falling back to
+  the previous behavior otherwise. Fixing the shared helper directly
+  (rather than working around it only in `type_reachability.py`) also
+  corrects the same latent mis-parse for its other three callers, since
+  none of them could have been relying on the old behavior's output for
+  this input shape without already being wrong.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a

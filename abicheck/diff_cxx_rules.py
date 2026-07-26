@@ -284,8 +284,23 @@ def owner_class_of(f: Function) -> str | None:
     name when the dumper recorded an unqualified leaf (CastXML records the bare
     ``bar`` rather than ``C::bar``). ``Foo::bar`` → ``Foo``;
     ``ns::Foo::bar`` → ``ns::Foo``; a free function → ``None``.
+
+    A conversion operator's own target type can itself carry ``"::"`` (e.g.
+    ``"Foo::operator ns::Bar"`` for `operator ns::Bar()`, confirmed against a
+    real compiled+demangled symbol) — naively splitting at the *last* ``"::"``
+    would then wrongly treat that target's own qualification as the
+    owner/member boundary, producing ``"Foo::operator ns"`` instead of
+    ``"Foo"`` (Codex review, fresh evidence). A real demangled conversion
+    operator always renders as ``"<owner>::operator <target>"`` with exactly
+    one space after the ``operator`` keyword (never present for a symbol
+    operator like ``operator+``/``operator[]``, which has no target type to
+    separate from the keyword), so the true boundary is the ``"::"``
+    immediately before that literal ``"::operator "`` marker when present.
     """
     if "::" in f.name:
+        marker_idx = f.name.find("::operator ")
+        if marker_idx != -1:
+            return f.name[:marker_idx]
         return f.name.rsplit("::", 1)[0]
     comps = itanium_scope_components(f.mangled)
     if not comps or len(comps) < 2:

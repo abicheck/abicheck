@@ -305,3 +305,24 @@
   (bare-aliased non-stdlib type vs. an unrelated stdlib record with the
   same bare spelling, through both the direct-record and typedef-alias
   routes).
+- **`diff_cxx_rules.owner_class_of()` mis-parsed a public conversion
+  operator's owner when the operator's own target type is
+  namespace-qualified** (Codex review, fresh evidence, found via
+  `type_reachability.py`'s new owner-seeding call site but affecting every
+  caller of this shared helper — `diff_symbols.py`'s owner-based move
+  detection, `diff_cxx_rules.py`'s own member-move heuristics, and
+  `surface.py`'s reachability closure). Confirmed against a real compiled
+  and demangled symbol: `struct Foo { operator ns::Bar() const; };`
+  demangles to `"Foo::operator ns::Bar() const"`, and after the existing
+  signature-stripping step abicheck's own `Function.name` is exactly
+  `"Foo::operator ns::Bar"`. The old naive `rsplit("::", 1)` split at the
+  *lexically last* `"::"` — which belongs to the operator's own qualified
+  target (`ns::Bar`), not the owner/member boundary — producing the
+  corrupted owner `"Foo::operator ns"` instead of `"Foo"`. Fixed by
+  locating the literal `"::operator "` marker (present only for a
+  conversion-to-named-type operator, never for a symbol operator like
+  `operator+`/`operator[]`, which has no target type to separate from the
+  keyword with a space) and splitting there when present, falling back to
+  the previous behavior otherwise. New regression tests cover the direct
+  unit behavior (including a namespace-nested owner, to guard against
+  over-correcting) and the end-to-end `type_reachability.py` seeding path.
