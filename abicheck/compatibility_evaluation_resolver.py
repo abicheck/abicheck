@@ -385,6 +385,19 @@ def detect_pack_conflicts(
     conflict is detected first never depends on ``pack_assignments`` input
     order ("pack order never decides semantics").
     """
+    # The `Mapping[str, Hashable]` annotation isn't runtime-enforced -- an
+    # untyped pack adapter passing a plain collection (e.g.
+    # explicit_overrides=["exit_code_scheme"]) was previously accepted
+    # outright, since `field_name in explicit_overrides` below is a valid
+    # membership check on a list too. That silently treated *any* field
+    # named in the collection as override-covered and suppressed a genuine
+    # pack-vs-pack conflict on it, even though no override value was
+    # actually supplied (Codex review).
+    if not isinstance(explicit_overrides, Mapping):
+        raise TypeError(
+            "detect_pack_conflicts: explicit_overrides must be a "
+            f"Mapping[str, Hashable], not {explicit_overrides!r}."
+        )
     by_field: dict[str, list[tuple[ImmutableIdentity, Hashable]]] = {}
     for identity, assignments in pack_assignments:
         for field_name, value in assignments.items():

@@ -493,6 +493,24 @@ class TestDetectPackConflicts:
         )
         assert result is None
 
+    def test_non_mapping_explicit_overrides_is_rejected(self):
+        # Codex review: the `Mapping[str, Hashable]` annotation isn't
+        # runtime-enforced -- an untyped pack adapter passing a plain
+        # collection (e.g. explicit_overrides=["exit_code_scheme"]) was
+        # previously accepted outright, since `field_name in
+        # explicit_overrides` is a valid membership check on a list too.
+        # That silently treated any field named in the list as
+        # override-covered and suppressed a genuine pack-vs-pack conflict on
+        # it, even though no override value was actually supplied.
+        with pytest.raises(TypeError, match="detect_pack_conflicts"):
+            detect_pack_conflicts(
+                [
+                    (_pack("security_hardening"), {"exit_code_scheme": "severity"}),
+                    (_pack("release_governance"), {"exit_code_scheme": "legacy"}),
+                ],
+                explicit_overrides=["exit_code_scheme"],  # type: ignore[arg-type]
+            )
+
     def test_non_string_assignment_key_is_rejected(self):
         # Codex review: an untyped pack adapter supplying a mixed-type
         # assignments mapping (e.g. {"exit_code_scheme": "severity", 2:
