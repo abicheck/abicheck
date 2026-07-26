@@ -172,8 +172,23 @@ LOCAL_NAME_PREFIX = "_ZZ"
 # content, and a chain that bottoms out at a NON-stdlib function (e.g. a
 # lambda inside the library-under-test's own code) still correctly fails to
 # match afterward.
+#
+# The optional ``(?:GV)?`` right after the leading ``_Z`` recognizes the
+# Itanium *guard variable* wrapper (Codex review, PR #641 follow-up, sixth
+# P2): a dynamically-initialized function-local static also gets a
+# companion one-time-init guard object, mangled as ``GV`` + the same local-
+# name object name -- i.e. the local static's own ``_ZZ<encoding>E<name>``
+# becomes ``_ZGVZ<encoding>E<name>`` for its guard variable, not a fresh
+# production of its own. That companion is exported as an ordinary data
+# object (``STT_OBJECT``) with the same address-placement-only alignment
+# signal as the local static it guards -- no header ever declares it either
+# -- so without this, an alignment shift on e.g. the guard for a libstdc++
+# ``<regex>`` local static's own guard variable still produced the same
+# false positive this exemption exists to suppress. See
+# ``export_accounting.py``'s ``_ZGVZ``/``_ZGV`` handling for the same
+# mangled-shape fact used elsewhere in this codebase.
 _STDLIB_LOCAL_NAME_RE = re.compile(
-    r"^_ZZZ*N?[rVK]{0,3}[RO]?"
+    r"^_Z(?:GV)?ZZ*N?[rVK]{0,3}[RO]?"
     r"(?:St|Sa|Sb|Ss|Si|So|Sd|3std|9__gnu_cxx|11__gnu_debug|10__cxxabiv1|7__cxx11)"
 )
 
@@ -241,8 +256,17 @@ _STDLIB_LOCAL_NAME_RE = re.compile(
 # by `4hash` reads as one contiguous word-character run), so the engine
 # must backtrack to the shortest inline-namespace match that still lets one
 # of the listed alternatives match immediately after.
+# The optional ``(?:GV)?`` right after the leading ``_Z`` mirrors
+# `_STDLIB_LOCAL_NAME_RE`'s own guard-variable handling above (Codex review,
+# PR #641 follow-up, sixth P2): a user specialization's local static can
+# just as well be dynamically-initialized, e.g. `_ZGVZNKSt4hashI6MyTypeEclE...`
+# for `std::hash<MyType>::operator()`'s guard, so this exclusion must
+# recognize the guard-wrapped form too -- otherwise `_STDLIB_LOCAL_NAME_RE`
+# would match the guard variable's `St4hash...` prefix and misclassify a
+# user-owned specialization's guard as stdlib-owned, the same failure mode
+# this regex exists to prevent for the plain local-static form.
 _USER_SPECIALIZABLE_STD_TEMPLATE_RE = re.compile(
-    r"^_ZZZ*N?[rVK]{0,3}[RO]?(?:St|3std)"
+    r"^_Z(?:GV)?ZZ*N?[rVK]{0,3}[RO]?(?:St|3std)"
     r"(?:\d+__[A-Za-z0-9_]+?)?"
     r"(?:4hash|4less|7greater|8equal_to|12not_equal_to|10less_equal|"
     r"13greater_equal|11char_traits|14numeric_limits|15iterator_traits|"

@@ -107,6 +107,11 @@ def test_is_local_name_symbol_false(name: str) -> None:
         # static local to a lambda's own call operator, where the lambda is
         # itself local to a stdlib function (std::outer()). Real GCC output.
         "_ZZZSt5outervENKUlvE_clEvE1x",
+        # Codex review, PR #641 follow-up (sixth P2): a dynamically-
+        # initialized stdlib local static's companion one-time-init guard
+        # variable mangles as `GV` + the same local-name object (`_ZGVZ...`,
+        # not `_ZZ...`) -- must be recognized the same as the plain form.
+        "_ZGVZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames",
     ],
 )
 def test_is_stdlib_local_name_symbol_true(name: str) -> None:
@@ -154,6 +159,10 @@ def test_is_stdlib_local_name_symbol_nested_but_user_owned_false() -> None:
         # inline-namespace component), which the exclusion regex must still
         # recognize even though it doesn't match the bare GCC shape.
         "_ZZNKSt3__14hashI1XEclERKS1_E4salt",
+        # Codex review, PR #641 follow-up (sixth P2): the guard-variable
+        # wrapper applies to a user specialization's local static too --
+        # must still be excluded, same as the plain form above.
+        "_ZGVZNKSt4hashI6MyTypeEclERKS0_E4salt",
     ],
 )
 def test_is_stdlib_local_name_symbol_user_specialized_customization_point_false(
@@ -177,6 +186,10 @@ def test_is_stdlib_local_name_symbol_user_specialized_customization_point_false(
         # this.
         "_ZZN10__cxxabivEv1x",
         "",
+        # Codex review, PR #641 follow-up (sixth P2): the guard-variable
+        # wrapper on a library-owned local static must still fail to match,
+        # same as the plain form.
+        "_ZGVZN4pvxs6client6ConfigEvE5cache",
     ],
 )
 def test_is_stdlib_local_name_symbol_false(name: str) -> None:

@@ -113,14 +113,19 @@ def _qualifier_and_n(draw: st.DrawFn) -> tuple[bool, str, str]:
 
 
 @st.composite
-def _stdlib_local_name(draw: st.DrawFn) -> tuple[str, bool]:
+def _stdlib_local_name(draw: st.DrawFn) -> tuple[str, bool, bool]:
     """A synthetic, grammar-valid stdlib-rooted ``<local-name>`` string,
     paired with the boolean :func:`is_stdlib_local_name_symbol` must return
-    for it."""
+    for it, and whether it was wrapped in the guard-variable production."""
     extra_zs = draw(st.integers(min_value=0, max_value=3))
     has_n, quals, ref = draw(_qualifier_and_n())
     marker = draw(st.sampled_from(_STDLIB_MARKERS))
     suffix = draw(st.sampled_from(_ENTITY_SUFFIXES))
+    # Codex review, PR #641 follow-up (sixth P2): a dynamically-initialized
+    # local static's companion one-time-init guard variable mangles as
+    # "GV" + the same local-name object -- must classify identically to the
+    # unwrapped form.
+    has_gv = draw(st.booleans())
 
     # Only St/3std are covered by _USER_SPECIALIZABLE_STD_TEMPLATE_RE --
     # the standard-substitution codes (Sa-Sd) and the runtime-implementation
@@ -132,7 +137,7 @@ def _stdlib_local_name(draw: st.DrawFn) -> tuple[str, bool]:
         draw(st.sampled_from(_LIBCXX_INLINE_NAMESPACES)) if is_customizable_root else ""
     )
 
-    prefix = "_Z" + "Z" * (1 + extra_zs)
+    prefix = "_Z" + ("GV" if has_gv else "") + "Z" * (1 + extra_zs)
     n_part = "N" if has_n else ""
 
     if wants_customization:
@@ -147,51 +152,57 @@ def _stdlib_local_name(draw: st.DrawFn) -> tuple[str, bool]:
             f"6vectorIiSaIiEE9push_backERKiE{suffix}"
         )
         expected = True
-    return mangled, expected
+    return mangled, expected, has_gv
 
 
 @st.composite
-def _library_owned_local_name(draw: st.DrawFn) -> tuple[str, bool]:
+def _library_owned_local_name(draw: st.DrawFn) -> tuple[str, bool, bool]:
     """A synthetic ``<local-name>`` string rooted in a non-stdlib
     (library-under-test) function -- must never classify as stdlib-owned,
-    at any nesting depth or qualifier combination."""
+    at any nesting depth, qualifier combination, or guard-variable
+    wrapping."""
     extra_zs = draw(st.integers(min_value=0, max_value=3))
     has_n, quals, ref = draw(_qualifier_and_n())
     root = draw(st.sampled_from(_LIBRARY_OWNED_ROOTS))
     suffix = draw(st.sampled_from(_ENTITY_SUFFIXES))
+    has_gv = draw(st.booleans())
 
-    prefix = "_Z" + "Z" * (1 + extra_zs)
+    prefix = "_Z" + ("GV" if has_gv else "") + "Z" * (1 + extra_zs)
     n_part = "N" if has_n else ""
     mangled = f"{prefix}{n_part}{quals}{ref}{root}{suffix}"
-    return mangled, False
+    return mangled, False, has_gv
 
 
 @given(case=_stdlib_local_name())
 @_HSETTINGS
 def test_stdlib_rooted_local_name_grammar_classified_correctly(
-    case: tuple[str, bool],
+    case: tuple[str, bool, bool],
 ) -> None:
     """Every stdlib-rooted ``<local-name>`` production this module's grammar
     covers -- any nesting depth, any CV/ref-qualifier combination, any
-    recognized namespace/standard-substitution marker -- classifies as
-    stdlib-owned, UNLESS it's also a user-specializable customization-point
-    specialization (e.g. ``std::hash<MyType>``), which must not."""
-    mangled, expected = case
-    assert is_local_name_symbol(mangled)
+    recognized namespace/standard-substitution marker, guard-variable-
+    wrapped or not -- classifies as stdlib-owned, UNLESS it's also a
+    user-specializable customization-point specialization (e.g.
+    ``std::hash<MyType>``), which must not."""
+    mangled, expected, has_gv = case
+    # is_local_name_symbol matches only the bare "_ZZ..." production, not
+    # its "_ZGVZ..." guard-variable wrapper -- a distinct special-name
+    # production of its own (Codex review, PR #641 follow-up, sixth P2).
+    assert is_local_name_symbol(mangled) == (not has_gv)
     assert is_stdlib_local_name_symbol(mangled) == expected
 
 
 @given(case=_library_owned_local_name())
 @_HSETTINGS
 def test_library_owned_local_name_grammar_never_classified_stdlib(
-    case: tuple[str, bool],
+    case: tuple[str, bool, bool],
 ) -> None:
     """A ``<local-name>`` rooted in a non-stdlib function must never
-    classify as stdlib-owned, regardless of nesting depth or qualifier
-    combination -- the library-under-test's own public inline-function
-    local statics must keep firing a real alignment regression (Codex
-    review, PR #641)."""
-    mangled, expected = case
+    classify as stdlib-owned, regardless of nesting depth, qualifier
+    combination, or guard-variable wrapping -- the library-under-test's own
+    public inline-function local statics must keep firing a real alignment
+    regression (Codex review, PR #641)."""
+    mangled, expected, has_gv = case
     assert expected is False
-    assert is_local_name_symbol(mangled)
+    assert is_local_name_symbol(mangled) == (not has_gv)
     assert is_stdlib_local_name_symbol(mangled) is False

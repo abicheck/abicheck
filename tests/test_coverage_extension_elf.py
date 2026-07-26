@@ -463,6 +463,28 @@ class TestObjectAlignmentReduced:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
 
+    # Codex review, PR #641 follow-up (sixth P2): a dynamically-initialized
+    # stdlib local static's companion one-time-init guard variable mangles
+    # as `_ZGVZ...` (GV + the same local-name object), not `_ZZ...` -- the
+    # same address-placement-only alignment signal as the local static it
+    # guards, since no header declares it either.
+    def test_stdlib_local_name_guard_variable_is_exempt(self):
+        sym = "_ZGVZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames"
+        old = _elf(symbols=[_obj(sym, alignment=512)])
+        new = _elf(symbols=[_obj(sym, alignment=128)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
+
+    # Same guard-variable wrapper, but the enclosing function belongs to the
+    # library under test -- must still fire, same as the plain local-static
+    # form's own "still fires" case below.
+    def test_library_owned_local_name_guard_variable_still_fires(self):
+        sym = "_ZGVZN4pvxs6client8Config1_5cacheEvE5cache"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
     # Codex review, PR #641: the exemption above must NOT cover a local-name
     # symbol whose enclosing function belongs to the library under test, not
     # the C++ runtime -- a PUBLIC inline/template function's function-local
