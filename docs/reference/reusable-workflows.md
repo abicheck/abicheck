@@ -78,8 +78,10 @@ already point at a checked-in fixture doesn't need any of them.
 
 Three jobs, always in this order:
 
-1. **`plan`** — generates `run-plan.json` (`abicheck run-plan generate`)
-   from `inputs.config-path` (default `.abicheck.yml`) plus every downloaded
+1. **`plan`** — generates `run-plan.json` (`abicheck project plan
+   --allow-empty`, deferring the empty-plan guard to the `no-checks` job
+   below rather than the command's own fail-closed default) from
+   `inputs.config-path` (default `.abicheck.yml`) plus every downloaded
    `<build-output-artifact-prefix><profile-id>` artifact, uploads it under
    `inputs.run-plan-artifact-name`, and exposes its `checks[]` as a matrix
    `include:` list (job output `matrix`) plus a `has-checks` flag.
@@ -92,9 +94,10 @@ Three jobs, always in this order:
    (`if: always()`) — uploads the resulting report under
    `<report-artifact-prefix><check_id>`.
 3. **`aggregate`** (`needs: [plan, check]`, **`if: always()`**) — downloads
-   every report artifact, projects `run-plan.json` to an aggregate manifest
-   (`abicheck run-plan to-aggregate-manifest`), and runs
-   `abicheck aggregate reports --manifest ...`.
+   every report artifact and runs `abicheck aggregate reports --run-plan
+   run-plan.json ...`, which projects `run-plan.json` to the expected-target
+   set internally (no separate projection step or intermediate manifest
+   file, ADR-054).
 
 ### The two required `if: always()` placements
 
@@ -218,7 +221,7 @@ iteration extends `run-plan.json`'s schema to carry per-cell overrides.
 **Exception: `gcc-path`/`gcc-options` do get a per-cell override**, from
 that cell's `.abicheck.yml` `profiles.<id>.compile` overlay (P1
 toolchain-profile audit — [`project-targets-schema.md`](project-targets-schema.md#profiles)),
-when `toolchain-bindings-path` is set. `abicheck run-plan generate
+when `toolchain-bindings-path` is set. `abicheck project plan
 --toolchain-bindings <path>` (run by the `plan` job) resolves each
 profile's declared `compile.binding` logical id (e.g. `"gcc14"`) against
 that trusted, separately-managed mapping file into an exact executable

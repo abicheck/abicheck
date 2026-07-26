@@ -781,7 +781,7 @@ def test_cli_validate_ok(tmp_path: Path) -> None:
     config_path.write_text(
         "targets:\n  libfoo:\n    kind: library\n    binary_pattern: lib/libfoo.so\n"
     )
-    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
     assert result.exit_code == 0, result.output
     assert "OK" in result.output
 
@@ -789,7 +789,7 @@ def test_cli_validate_ok(tmp_path: Path) -> None:
 def test_cli_validate_reports_errors(tmp_path: Path) -> None:
     config_path = tmp_path / ".abicheck.yml"
     config_path.write_text("targets:\n  libfoo:\n    kind: library\n")
-    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
     assert result.exit_code == 1, result.output
     assert "requires binary_pattern" in result.output
 
@@ -800,7 +800,7 @@ def test_cli_validate_json_output(tmp_path: Path) -> None:
         "targets:\n  libfoo:\n    kind: library\n    binary_pattern: lib/libfoo.so\n"
     )
     result = CliRunner().invoke(
-        main, ["project-targets", "validate", str(config_path), "--format", "json"]
+        main, ["project", "validate", str(config_path), "--format", "json"]
     )
     assert result.exit_code == 0, result.output
     assert '"ok": true' in result.output
@@ -835,7 +835,7 @@ def test_cli_validate_toolchain_bindings_resolves(tmp_path: Path) -> None:
     result = CliRunner().invoke(
         main,
         [
-            "project-targets",
+            "project",
             "validate",
             str(config_path),
             "--toolchain-bindings",
@@ -855,7 +855,7 @@ def test_cli_validate_toolchain_bindings_reports_unresolved(tmp_path: Path) -> N
     result = CliRunner().invoke(
         main,
         [
-            "project-targets",
+            "project",
             "validate",
             str(config_path),
             "--toolchain-bindings",
@@ -876,7 +876,7 @@ def test_cli_validate_toolchain_bindings_malformed_file_is_usage_error(
     result = CliRunner().invoke(
         main,
         [
-            "project-targets",
+            "project",
             "validate",
             str(config_path),
             "--toolchain-bindings",
@@ -893,26 +893,24 @@ def test_cli_validate_without_toolchain_bindings_flag_ignores_binding(
     # --toolchain-bindings given is not itself a validation error (the
     # bindings file is a separately-trusted, opt-in input).
     config_path = _bindings_config(tmp_path, "gcc14")
-    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
     assert result.exit_code == 0, result.output
 
 
 def test_cli_validate_malformed_yaml_is_usage_error(tmp_path: Path) -> None:
     config_path = tmp_path / ".abicheck.yml"
     config_path.write_text("targets:\n  libfoo:\n    kind: bogus-kind\n")
-    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
     assert result.exit_code == 64, result.output
 
 
 def test_cli_validate_missing_config_is_usage_error() -> None:
-    result = CliRunner().invoke(
-        main, ["project-targets", "validate", "/no/such/config.yml"]
-    )
+    result = CliRunner().invoke(main, ["project", "validate", "/no/such/config.yml"])
     assert result.exit_code != 0
 
 
 def test_cli_group_help() -> None:
-    result = CliRunner().invoke(main, ["project-targets", "--help"])
+    result = CliRunner().invoke(main, ["project", "--help"])
     assert result.exit_code == 0
     assert "validate" in result.output
 
@@ -1793,14 +1791,14 @@ def test_load_project_targets_config_non_mapping_yaml_is_all_defaults(
 def test_cli_validate_empty_file_is_ok(tmp_path: Path) -> None:
     config_path = tmp_path / ".abicheck.yml"
     config_path.write_text("")
-    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
     assert result.exit_code == 0, result.output
 
 
 def test_cli_validate_non_mapping_yaml_is_usage_error(tmp_path: Path) -> None:
     config_path = tmp_path / ".abicheck.yml"
     config_path.write_text("- just\n- a\n- list\n")
-    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
     assert result.exit_code == 64, result.output
     assert "must contain a yaml mapping" in result.output.lower()
 
@@ -1808,7 +1806,7 @@ def test_cli_validate_non_mapping_yaml_is_usage_error(tmp_path: Path) -> None:
 def test_cli_validate_with_warnings_shown_in_text_output(tmp_path: Path) -> None:
     config_path = tmp_path / ".abicheck.yml"
     config_path.write_text("")
-    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
     assert result.exit_code == 0, result.output
     assert "warning(s)" in result.output
 
@@ -1816,7 +1814,7 @@ def test_cli_validate_with_warnings_shown_in_text_output(tmp_path: Path) -> None
 def test_cli_validate_malformed_yaml_raises_usage_error(tmp_path: Path) -> None:
     config_path = tmp_path / ".abicheck.yml"
     config_path.write_text("targets: [this is not: valid: yaml: at: all\n")
-    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    result = CliRunner().invoke(main, ["project", "validate", str(config_path)])
     assert result.exit_code == 64, result.output
     assert "cannot read" in result.output.lower()
 
@@ -1830,7 +1828,7 @@ def test_cli_validate_writes_to_output_file(tmp_path: Path) -> None:
     result = CliRunner().invoke(
         main,
         [
-            "project-targets",
+            "project",
             "validate",
             str(config_path),
             "-o",
