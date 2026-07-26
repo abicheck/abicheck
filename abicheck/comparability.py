@@ -256,6 +256,28 @@ _OWNED_HEADER_TOKEN_PREFIX = "hdrs:"
 _OWNED_HEADER_SINGLE_SENTINEL = "hdrs:<single-header>"
 
 
+def _slot_indices_match_position(slots: list[str]) -> bool:
+    """Whether every ``"<slot-index>:<token>"`` entry in *slots* carries the
+    literal decimal index matching its own position in the list (the real
+    ``_slot_token_for_ancestor`` construction always emits
+    ``f"{idx}:{token}"`` from ``enumerate(declared_includes)``, so a
+    genuine ``include_sequence`` value's indices are always exactly
+    ``"0"``, ``"1"``, ``"2"``, ... in order).
+
+    :func:`_include_sequence_is_additive_owned_growth`'s per-slot loop only
+    checked that a slot's index was *unchanged* between the old and new
+    side (``old_idx != new_idx``), never that the index was itself a real,
+    well-formed position rather than an arbitrary string (Codex review, PR
+    #641 follow-up, seventh P2): an externally-constructed contract with a
+    slot literally named ``"bogus:hdrs:[...]"`` on both sides passed that
+    check trivially (``"bogus" == "bogus"``) and could still reach the
+    owned-header superset comparison below. Requiring every index to match
+    its position closes this without changing the carve-out's own additive
+    semantics, since a genuine ``include_sequence`` always satisfies it.
+    """
+    return all(slot.partition(":")[0] == str(i) for i, slot in enumerate(slots))
+
+
 def _include_sequence_is_additive_owned_growth(
     old_value: str | None, new_value: str | None
 ) -> bool:
@@ -284,6 +306,8 @@ def _include_sequence_is_additive_owned_growth(
     if old_slots is None or new_slots is None:
         return False
     if len(old_slots) != len(new_slots):
+        return False
+    if not (_slot_indices_match_position(old_slots) and _slot_indices_match_position(new_slots)):
         return False
     for old_slot, new_slot in zip(old_slots, new_slots):
         if old_slot == new_slot:

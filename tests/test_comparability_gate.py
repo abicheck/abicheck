@@ -487,6 +487,18 @@ def test_include_sequence_additive_owned_growth_false_for_index_mismatch():
     assert not _include_sequence_is_additive_owned_growth(old, new)
 
 
+def test_include_sequence_additive_owned_growth_false_for_non_positional_index():
+    # Codex review, PR #641 follow-up (seventh P2): a slot index that is
+    # IDENTICAL on both sides but not a real positional index (the
+    # per-slot loop only checks old_idx == new_idx, never that the shared
+    # index is actually valid) must still be declined -- otherwise a
+    # fabricated slot label lets malformed evidence through as if it were
+    # genuine additive owned-header growth.
+    old = json.dumps(["bogus:hdrs:[[\"a.h\", \"a.h\"]]"])
+    new = json.dumps(["bogus:hdrs:[[\"a.h\", \"a.h\"], [\"b.h\", \"b.h\"]]"])
+    assert not _include_sequence_is_additive_owned_growth(old, new)
+
+
 def test_gate_handles_the_real_directory_based_f8_scenario_end_to_end(tmp_path):
     # Codex review (PR #641 follow-up, fourth round): the real production
     # dump path (cli_dump_helpers.py) calls resolve_inferred_header_roots,
