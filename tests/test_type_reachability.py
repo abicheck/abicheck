@@ -1916,3 +1916,82 @@ class TestMachODoubleUnderscorePrefixRecognized:
             ],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
+class TestMsvcOwnerSeedingRecognized:
+    """Codex review, fresh evidence: a clang-cl (``--target=*-windows-msvc``)
+    direct-clang snapshot records a method's bare AST name (the same
+    unqualified-leaf convention as CastXML) while ``mangledName`` is MSVC-
+    mangled, not Itanium -- confirmed via real ``clang --target=x86_64-pc-
+    windows-msvc -Xclang -ast-dump=json`` output (``?run@Foo@@QEAAXXZ`` for
+    ``Foo::run()``). ``owner_class_of``'s Itanium-only mangled-name fallback
+    left this owner unresolved, so an embedded stdlib record's fields were
+    never walked when the method was the only public root for its owner."""
+
+    def test_bare_named_method_seeds_owner_from_msvc_mangling(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="run",
+                    mangled="?run@Foo@@QEAAXXZ",
+                    return_type="void",
+                    params=[],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_bare_named_stdlib_function_stays_filtered_with_msvc_mangling(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="touch",
+                    mangled="?touch@std@@YAXXZ",
+                    return_type="std::string",
+                    params=[],
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_msvc_constructor_does_not_seed_owner(self) -> None:
+        """A constructor's MSVC mangling is not modelled by
+        ``msvc_scope_components`` (special-member operator code, not a
+        plain leaf/scope split) -- must fall back to None, not crash or
+        mis-seed an unrelated owner."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="Foo",
+                    mangled="??0Foo@@QEAA@XZ",
+                    return_type="void",
+                    params=[],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()

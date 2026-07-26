@@ -58,7 +58,7 @@ import re
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
-from .diff_cxx_rules import itanium_qualified_name, owner_class_of
+from .diff_cxx_rules import itanium_qualified_name, msvc_qualified_name, owner_class_of
 from .model import ScopeOrigin, Visibility
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
@@ -700,7 +700,9 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
             break
         if fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
             continue
-        qualified_fn = itanium_qualified_name(fn.mangled)
+        qualified_fn = itanium_qualified_name(fn.mangled) or msvc_qualified_name(
+            fn.mangled
+        )
         if qualified_fn is not None and qualified_fn.startswith(
             STDLIB_TYPE_NAMESPACE_PREFIXES
         ):
@@ -726,7 +728,9 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
             break
         if var.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
             continue
-        qualified_var = itanium_qualified_name(var.mangled)
+        qualified_var = itanium_qualified_name(var.mangled) or msvc_qualified_name(
+            var.mangled
+        )
         if qualified_var is not None and qualified_var.startswith(
             STDLIB_TYPE_NAMESPACE_PREFIXES
         ):

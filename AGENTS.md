@@ -989,6 +989,51 @@ Once a root command genuinely clears the bar above, pick the right home:
   Itanium-prefix check, mirroring `dumper_clang.py`'s own
   `_symbol_candidates()` de-prefixing approach for the identical quirk.
 
+  **An eighth finding pointed at a different mangling scheme entirely, not
+  a variant of the same Itanium quirk.** A `clang-cl` (or any
+  `--target=*-windows-msvc`) direct-clang snapshot records a method's bare
+  AST name — the same unqualified-leaf convention CastXML uses — while
+  `mangledName` is mangled in the proprietary Microsoft C++ ABI scheme, not
+  Itanium (Codex review, fresh evidence). `owner_class_of()`'s mangled-name
+  fallback only ever recognized the Itanium `_Z`/`__Z` prefix, so this
+  owner seed stayed `None` on every MSVC-mangled bare-named method,
+  regardless of the Mach-O fix above (a different, unrelated prefix
+  convention, not fixed by it). Confirmed empirically by compiling real
+  headers with `clang --target=x86_64-pc-windows-msvc -fms-compatibility
+  -Xclang -ast-dump=json`: `Foo::run()` mangles to `?run@Foo@@QEAAXXZ`
+  (scope components written *innermost first*, `@`-separated, terminated
+  by the first `@@` — the reverse order and terminator convention Itanium
+  uses, confirmed against nested-namespace, single-letter-class-name, and
+  global-free-function cases too). Fixed with a new, genuinely separate
+  `msvc_scope_components()`/`msvc_qualified_name()` pair in
+  `diff_cxx_rules.py` (not a branch inside the Itanium parser, since the
+  two schemes share no structure beyond both being length/separator-based),
+  tried as a second fallback in `owner_class_of()` after Itanium — the two
+  prefixes (`_Z`/`__Z` vs. `?`) are mutually exclusive, so trying both in
+  sequence is unambiguous and free on the common Itanium path. Deliberately
+  conservative, mirroring `itanium_scope_components`'s own "model the
+  simple cases, return `None` for the rest" contract, confirmed unmodelled
+  against the same real compiler output: special member functions and
+  operators (`??0` ctor, `??1`/`??_D` dtor, `??4` `operator=`, ...) mangle
+  with a *second* `?` immediately after the first, so the leaf/scope split
+  does not apply and is rejected outright; template classes/functions
+  (`?$Name@Args@`) embed the template-argument encoding inside the same
+  `@`-delimited region as the scope chain, and an argument token is
+  indistinguishable from a scope token by simple splitting, so any
+  component starting with `?` (the template marker `?$` or the anonymous-
+  namespace marker `?A`) is rejected; a bare-digit component is a
+  name-backreference into MSVC's per-symbol substitution table, not a
+  literal identifier (no real C++ identifier is all-digits, so this is an
+  unambiguous, lossless signal to bail — verified this does *not*
+  misfire on a genuine single-letter class name like `struct A`, which
+  mangles as a component that is a letter, never a bare digit). Also wired
+  the same new fallback into `type_reachability.py`'s two direct
+  `itanium_qualified_name()` call sites (the free-function/variable
+  stdlib-namespace guards, not just the owner-seeding path the review
+  comment named) — same root cause, same one-line fix, verified against a
+  `std::`-namespaced MSVC-mangled free function that would otherwise have
+  bypassed the guard identically to the Mach-O case above.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a

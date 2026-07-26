@@ -36,6 +36,8 @@ from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.diff_cxx_rules import (
     itanium_qualified_name,
     itanium_scope_components,
+    msvc_qualified_name,
+    msvc_scope_components,
     owner_class_of,
 )
 from abicheck.model import (
@@ -618,5 +620,69 @@ class TestItaniumScopeParser:
 
     def test_owner_none_for_free_function(self):
         f = Function(name="draw", mangled="_Z4drawi",
+                     return_type="void", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) is None
+
+
+class TestMsvcScopeParser:
+    """Structural parser for clang-cl/MSVC-mangled symbols (Codex review,
+    fresh evidence: confirmed against real ``clang --target=x86_64-pc-
+    windows-msvc -Xclang -ast-dump=json`` output for every case below)."""
+
+    @pytest.mark.parametrize("mangled,expected", [
+        ("?run@Foo@@QEAAXXZ", ["Foo", "run"]),                    # Foo::run()
+        ("?freefunc@ns@@YAXXZ", ["ns", "freefunc"]),              # ns::freefunc()
+        ("?method@Box@inner@outer@@QEAAXXZ",
+         ["outer", "inner", "Box", "method"]),                    # outer::inner::Box::method()
+        ("?instantiate@@YAXXZ", ["instantiate"]),                 # global free function
+        ("?vf@Base@@UEAAXXZ", ["Base", "vf"]),                    # virtual member
+        ("?f@A@@QEAAXXZ", ["A", "f"]),                            # single-letter class name
+        ("?g@A@N@@QEAAXXZ", ["N", "A", "g"]),                     # N::A::g()
+    ])
+    def test_components(self, mangled, expected):
+        assert msvc_scope_components(mangled) == expected
+
+    @pytest.mark.parametrize("mangled", [
+        "foo",                             # not MSVC-mangled (no leading ?)
+        "??0Box@inner@outer@@QEAA@XZ",      # constructor -- not modelled
+        "??_DBox@inner@outer@@QEAAXXZ",     # destructor -- not modelled
+        "??4Base@@QEAAAEAU0@AEBU0@@Z",      # operator= -- not modelled
+        "?go@?$Wrapper@H@@QEAAXXZ",         # template class -- not modelled
+        "??0?$Wrapper@H@@QEAA@XZ",          # template ctor -- not modelled
+        "?run@Foo@",                        # missing "@@" terminator
+        "?@@YAXXZ",                         # empty leaf name
+    ])
+    def test_unmodelled_or_degenerate_does_not_crash(self, mangled):
+        result = msvc_scope_components(mangled)
+        assert result is None or isinstance(result, list)
+
+    def test_qualified_name(self):
+        assert msvc_qualified_name("?run@Foo@@QEAAXXZ") == "Foo::run"
+        assert msvc_qualified_name("?instantiate@@YAXXZ") == "instantiate"
+
+    def test_owner_falls_back_to_msvc_mangled(self):
+        # clang-cl records a bare AST name (like CastXML) but MSVC mangling
+        # (unlike CastXML's Itanium mangling) -- owner_class_of must try both.
+        f = Function(name="run", mangled="?run@Foo@@QEAAXXZ",
+                     return_type="void", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) == "Foo"
+
+    def test_owner_none_for_unscoped_msvc_free_function(self):
+        f = Function(name="instantiate", mangled="?instantiate@@YAXXZ",
+                     return_type="void", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) is None
+
+    def test_owner_treats_namespaced_msvc_free_function_scope_as_owner(self):
+        # Same pre-existing namespace-vs-class ambiguity documented for the
+        # Itanium fallback (AGENTS.md "Known gaps" -- owner_class_of cannot
+        # syntactically tell a namespace from a class): a namespaced free
+        # function's enclosing scope resolves the same way a method's owning
+        # class would, for both mangling schemes alike.
+        f = Function(name="freefunc", mangled="?freefunc@ns@@YAXXZ",
+                     return_type="void", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) == "ns"
+
+    def test_owner_none_for_msvc_constructor(self):
+        f = Function(name="Box", mangled="??0Box@inner@outer@@QEAA@XZ",
                      return_type="void", visibility=Visibility.PUBLIC)
         assert owner_class_of(f) is None

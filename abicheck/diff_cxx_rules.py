@@ -310,6 +310,66 @@ def itanium_qualified_name(mangled: str) -> str | None:
     return "::".join(comps) if comps else None
 
 
+def msvc_scope_components(mangled: str) -> list[str] | None:
+    """Scope components of an MSVC-mangled C++ symbol, parsed structurally.
+
+    Direct-clang snapshots taken with ``clang-cl`` (or any ``--target=
+    *-windows-msvc`` invocation) record ``mangledName`` in the proprietary
+    Microsoft C++ ABI scheme, not Itanium — confirmed empirically::
+
+        ?run@Foo@@QEAAXXZ            -> ["Foo", "run"]        (Foo::run())
+        ?freefunc@ns@@YAXXZ          -> ["ns", "freefunc"]    (ns::freefunc())
+        ?method@Box@inner@outer@@... -> ["outer", "inner", "Box", "method"]
+        ?instantiate@@YAXXZ          -> ["instantiate"]       (free function)
+
+    The qualified name is written ``<leaf>@<scope1>@<scope2>...@@<type-enc>``
+    with scope components listed *innermost first*, terminated by the first
+    ``@@`` — the reverse order and terminator convention Itanium uses, so this
+    is a genuinely separate parser, not a reuse of ``itanium_scope_components``.
+
+    Returns ``None`` for forms it does not model, mirroring
+    ``itanium_scope_components``'s "return None, let the caller fall back"
+    contract:
+
+    * Special member functions and operators (constructors ``??0``,
+      destructors ``??1``/``??_D``, ``operator=`` ``??4``, ...) all mangle
+      with a *second* ``?`` immediately after the first — the "name" slot
+      is an operator code, not a plain identifier, so the simple
+      leaf/scope split below does not apply.
+    * Template classes/functions (``?$Name@Args@``) embed the template
+      argument list inside the same ``@``-delimited region as the scope
+      chain using the identical separator, and argument encodings can
+      themselves be arbitrary nested type strings — a naive split cannot
+      tell an argument token from a scope token, so any component
+      starting with ``?`` (the template marker ``?$`` or the anonymous-
+      namespace marker ``?A``) is rejected rather than mis-parsed.
+    * A bare-digit component is a name-backreference into MSVC's
+      per-symbol substitution table, not a literal identifier — no real
+      C++ identifier is all-digits, so this is an unambiguous signal to
+      bail rather than resolve it wrong.
+    """
+    if not mangled.startswith("?") or mangled[1:2] == "?":
+        return None
+    idx = mangled.find("@@")
+    if idx == -1:
+        return None
+    head = mangled[1:idx]
+    if not head:
+        return None
+    parts = head.split("@")
+    if any(not p or p.startswith("?") or p.isdigit() for p in parts):
+        return None
+    name = parts[0]
+    scope = list(reversed(parts[1:]))
+    return [*scope, name]
+
+
+def msvc_qualified_name(mangled: str) -> str | None:
+    """Fully scope-qualified name (``ns::C::bar``) from an MSVC-mangled symbol, or None."""
+    comps = msvc_scope_components(mangled)
+    return "::".join(comps) if comps else None
+
+
 def owner_class_of(f: Function) -> str | None:
     """The enclosing class/struct of a method.
 
@@ -329,13 +389,22 @@ def owner_class_of(f: Function) -> str | None:
     operator like ``operator+``/``operator[]``, which has no target type to
     separate from the keyword), so the true boundary is the ``"::"``
     immediately before that literal ``"::operator "`` marker when present.
+
+    A direct-clang MSVC (``clang-cl``) snapshot preserves ``mangledName`` in
+    the Microsoft mangling scheme while still recording a bare AST name for a
+    member (the same "CastXML records the bare leaf" situation as above, just
+    with a different mangled-name dialect) — the Itanium-only mangled-name
+    fallback below left this owner unresolved (Codex review, fresh evidence).
+    Tried second, after Itanium: the two schemes are mutually exclusive by
+    their leading-byte convention (``_Z``/``__Z`` vs. ``?``), so trying both
+    in sequence is unambiguous and costs nothing on the common Itanium path.
     """
     if "::" in f.name:
         marker_idx = f.name.find("::operator ")
         if marker_idx != -1:
             return f.name[:marker_idx]
         return f.name.rsplit("::", 1)[0]
-    comps = itanium_scope_components(f.mangled)
+    comps = itanium_scope_components(f.mangled) or msvc_scope_components(f.mangled)
     if not comps or len(comps) < 2:
         return None
     return "::".join(comps[:-1])

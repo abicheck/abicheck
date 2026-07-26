@@ -522,3 +522,27 @@
   substitution forms under Mach-O mangling, plus an end-to-end guard that
   genuine non-stdlib owner seeding still works. Full suite green, 100%
   module coverage, FP-rate gate stays 0 FP/0 FN.
+- **A `clang-cl`/MSVC-mangled owner was never recognized at all — a
+  different mangling scheme, not another Mach-O-style prefix quirk**
+  (Codex review, fresh evidence): direct-clang snapshots taken with
+  `--target=*-windows-msvc` record a method's bare AST name (like
+  CastXML) but mangle `mangledName` in the proprietary Microsoft C++ ABI
+  scheme, not Itanium — confirmed by compiling real headers with
+  `clang --target=x86_64-pc-windows-msvc -fms-compatibility -Xclang
+  -ast-dump=json` (`Foo::run()` → `?run@Foo@@QEAAXXZ`). `owner_class_of()`'s
+  mangled-name fallback only ever tried the Itanium `_Z`/`__Z` prefix, so
+  this owner stayed unresolved and an embedded stdlib record's layout
+  break went unfiltered on the affected platform. Added a genuinely
+  separate `msvc_scope_components()`/`msvc_qualified_name()` parser in
+  `diff_cxx_rules.py` (scope components are written innermost-first and
+  `@`-terminated — the opposite convention from Itanium, confirmed against
+  nested-namespace, single-letter-class, and global-free-function cases),
+  tried as a second fallback after Itanium in `owner_class_of()` and wired
+  into `type_reachability.py`'s two direct stdlib-namespace guards too.
+  Deliberately conservative like its Itanium counterpart: constructors,
+  destructors, operators, and template instantiations are recognized and
+  rejected (return `None`) rather than mis-parsed, verified against real
+  compiler output for each. New regression tests cover the MSVC parser
+  directly plus an end-to-end owner-seeding guard through
+  `directly_referenced_stdlib_types`. Full suite green, 100% module
+  coverage, FP-rate gate stays 0 FP/0 FN.
