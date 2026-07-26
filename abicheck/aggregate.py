@@ -425,13 +425,25 @@ class ProfileMatrixEntry:
     base_target: str
     #: Every profile that reported for this target, sorted.
     profiles: tuple[str, ...]
-    #: Subset of ``profiles`` whose verdict was neither ``NO_CHANGE`` nor
-    #: ``COMPATIBLE`` (i.e. contributed a break, source break, or risk
-    #: finding) — deliberately excludes an *unavailable* profile (no
-    #: verdict at all is a coverage gap, not "this profile is affected").
+    #: Subset of ``profiles`` whose worst analyzed verdict was neither
+    #: ``NO_CHANGE`` nor ``COMPATIBLE`` (i.e. contributed a break, source
+    #: break, or risk finding). A profile with *zero* analyzed checks (every
+    #: check for it is unavailable) is never "affected" here — no verdict at
+    #: all is a coverage gap, not a break — but see ``incomplete_profiles``:
+    #: a profile can be BOTH affected (one check broke) AND incomplete
+    #: (another of its checks never reported) at once.
     affected_profiles: tuple[str, ...]
-    #: profile -> verdict value, or ``None`` when that profile's target
-    #: report is unavailable.
+    #: Subset of ``profiles`` where at least one of that profile's checks
+    #: (this target can have more than one, at different baseline
+    #: channels/requested depths) is unavailable — no report arrived for it.
+    #: ``verdict_by_profile``/``affected_profiles`` are still computed from
+    #: whichever of that profile's checks DID report (Codex review: an
+    #: unavailable check must never be silently dropped from the picture,
+    #: since a clean *completed* check plus a missing required one is a
+    #: coverage gap, not "this profile is clean").
+    incomplete_profiles: tuple[str, ...]
+    #: profile -> worst analyzed verdict value, or ``None`` when *every*
+    #: check for that profile is unavailable (no analyzed check at all).
     verdict_by_profile: dict[str, str | None]
 
     def to_dict(self) -> dict[str, Any]:
@@ -439,6 +451,7 @@ class ProfileMatrixEntry:
             "base_target": self.base_target,
             "profiles": list(self.profiles),
             "affected_profiles": list(self.affected_profiles),
+            "incomplete_profiles": list(self.incomplete_profiles),
             "verdict_by_profile": dict(self.verdict_by_profile),
         }
 
@@ -591,7 +604,12 @@ class AggregateResult:
         ``libfoo@linux-gcc14#release@build``). All of a profile's checks are
         combined worst-verdict-wins (Codex review) rather than keying by
         profile_id alone, which would let a later, cleaner check silently
-        overwrite an earlier, breaking one for the same profile.
+        overwrite an earlier, breaking one for the same profile. When one of
+        a profile's checks is unavailable while another did report, the
+        unavailable one is never silently dropped either (Codex review) — it
+        surfaces in ``incomplete_profiles`` alongside whatever verdict the
+        completed check(s) contributed, rather than letting an incomplete
+        profile read as flatly "clean".
         """
         by_target: dict[str, dict[str, list[TargetReport]]] = {}
         for t in self.targets:
@@ -605,11 +623,15 @@ class AggregateResult:
             reports_by_profile = by_target[base_target]
             profiles = tuple(sorted(reports_by_profile))
             affected = []
+            incomplete = []
             verdict_by_profile: dict[str, str | None] = {}
             for pid in profiles:
+                reports = reports_by_profile[pid]
+                if any(r.compatibility_verdict is None for r in reports):
+                    incomplete.append(pid)
                 verdicts = [
                     r.compatibility_verdict
-                    for r in reports_by_profile[pid]
+                    for r in reports
                     if r.compatibility_verdict is not None
                 ]
                 if not verdicts:
@@ -624,6 +646,7 @@ class AggregateResult:
                     base_target=base_target,
                     profiles=profiles,
                     affected_profiles=tuple(affected),
+                    incomplete_profiles=tuple(incomplete),
                     verdict_by_profile=verdict_by_profile,
                 )
             )
@@ -663,16 +686,22 @@ class AggregateResult:
             lines.append("Profile matrix:")
             for entry in matrix:
                 if entry.affected_profiles:
-                    lines.append(
+                    line = (
                         f"  {entry.base_target}: affected on "
                         f"{', '.join(entry.affected_profiles)} "
                         f"(checked on {', '.join(entry.profiles)})"
                     )
                 else:
-                    lines.append(
+                    line = (
                         f"  {entry.base_target}: clean on all checked profiles "
                         f"({', '.join(entry.profiles)})"
                     )
+                if entry.incomplete_profiles:
+                    line += (
+                        f" [incomplete coverage on "
+                        f"{', '.join(entry.incomplete_profiles)}]"
+                    )
+                lines.append(line)
 
         lines.append("Coverage:")
         if self.coverage is CoverageStatus.COMPLETE:

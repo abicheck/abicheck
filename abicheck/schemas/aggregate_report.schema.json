@@ -130,7 +130,7 @@
     "profile_matrix_entry": {
       "type": "object",
       "description": "Added in schema 1.1. One logical target's outcome across every profile that checked it.",
-      "required": ["base_target", "profiles", "affected_profiles", "verdict_by_profile"],
+      "required": ["base_target", "profiles", "affected_profiles", "incomplete_profiles", "verdict_by_profile"],
       "properties": {
         "base_target": {"type": "string"},
         "profiles": {
@@ -141,7 +141,12 @@
         "affected_profiles": {
           "type": "array",
           "items": {"type": "string"},
-          "description": "Subset of profiles whose verdict was neither NO_CHANGE nor COMPATIBLE."
+          "description": "Subset of profiles whose worst analyzed verdict was neither NO_CHANGE nor COMPATIBLE."
+        },
+        "incomplete_profiles": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Subset of profiles where at least one of that profile's checks (a base_target/profile pair can have more than one, at different baseline channels/requested depths) is unavailable -- no report arrived for it. A profile can be both affected and incomplete at once."
         },
         "verdict_by_profile": {
           "type": "object",

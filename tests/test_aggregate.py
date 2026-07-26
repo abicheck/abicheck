@@ -799,6 +799,7 @@ class TestProfileMatrix:
                 "base_target": "libfoo",
                 "profiles": ["linux-clang20", "linux-gcc14"],
                 "affected_profiles": ["linux-gcc14"],
+                "incomplete_profiles": [],
                 "verdict_by_profile": {
                     "linux-clang20": "COMPATIBLE",
                     "linux-gcc14": "BREAKING",
@@ -842,6 +843,41 @@ class TestProfileMatrix:
         assert entry.affected_profiles == ("linux-gcc14",)
         assert entry.verdict_by_profile["linux-gcc14"] == "BREAKING"
         assert entry.verdict_by_profile["windows-msvc"] == "COMPATIBLE"
+
+    def test_profile_matrix_surfaces_incomplete_coverage_not_silently_clean(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: one profile has a completed, compatible headers
+        check plus a missing required build-depth check for the same
+        target. The missing check must not be silently dropped -- the
+        profile is incomplete, not flatly "clean"."""
+        headers_check = "libfoo@linux-gcc14#release@headers"
+        build_check = "libfoo@linux-gcc14#release@build"  # never reports
+        _write_report(tmp_path, headers_check, "COMPATIBLE")
+        r = aggregate_reports_dir(
+            tmp_path, expected=_expect(headers_check, build_check)
+        )
+        (entry,) = r.profile_matrix
+        assert entry.profiles == ("linux-gcc14",)
+        assert entry.affected_profiles == ()  # the one completed check was clean
+        assert entry.incomplete_profiles == ("linux-gcc14",)  # but coverage isn't
+        assert entry.verdict_by_profile["linux-gcc14"] == "COMPATIBLE"
+        text = r.render_text()
+        assert "libfoo: clean on all checked profiles" in text
+        assert "[incomplete coverage on linux-gcc14]" in text
+
+    def test_profile_matrix_incomplete_profile_can_still_be_affected(
+        self, tmp_path: Path
+    ) -> None:
+        headers_check = "libfoo@linux-gcc14#release@headers"
+        build_check = "libfoo@linux-gcc14#release@build"  # never reports
+        _write_report(tmp_path, headers_check, "BREAKING")
+        r = aggregate_reports_dir(
+            tmp_path, expected=_expect(headers_check, build_check)
+        )
+        (entry,) = r.profile_matrix
+        assert entry.affected_profiles == ("linux-gcc14",)
+        assert entry.incomplete_profiles == ("linux-gcc14",)
 
 
 class TestAggregateCLI:

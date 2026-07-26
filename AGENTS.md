@@ -614,6 +614,55 @@ Once a root command genuinely clears the bar above, pick the right home:
     a broad task suite plus a scoring/leaderboard story, which should grow
     from real usage of the one-task harness rather than being speculatively
     built out now.
+- **Evidence-provider model — investigated, found not to reproduce as
+  described; no fix applied.** A status-review follow-up asked whether
+  `evidence_status_for_result`'s report-level downgrade (kind-level
+  `ARTIFACT_PROVEN` → `UNATTRIBUTED` only when `DiffResult.evidence_tiers`
+  is header-only for the *whole* comparison) can let an individual
+  header-derived `BREAKING_KINDS` finding read as artifact-proven merely
+  because *some other, unrelated* part of the same report had binary
+  evidence. Traced this for the highest-stakes family it could apply to —
+  layout findings (`TYPE_SIZE_CHANGED`/`TYPE_ALIGNMENT_CHANGED`,
+  `diff_types.py`) — and it does not hold up: (1) the direct-clang L2
+  backend's `RecordType.size_bits`/`alignment_bits` are populated **only**
+  when `dumper_layout_backfill.backfill_dwarf_layout()` actually
+  corroborates them against real DWARF (`model.py`'s own
+  `dwarf_layout_coherence` docstring) — with no DWARF to backfill against,
+  those fields stay `None` and `_append_type_size_and_alignment_changes`'s
+  own `is not None` guard means no finding is even emitted, so an
+  "unconfirmed clang-derived layout finding" cannot occur; (2) the castxml
+  backend computes struct layout itself, via its own bundled real compiler
+  targeting the resolved ABI — `model.py` already documents this as
+  deliberately treated as sufficient L2 evidence ("trivially self-consistent
+  by construction", not needing DWARF corroboration), a prior, intentional
+  design decision this pass would have to *overturn*, not merely patch.
+  The one place this class of risk is genuinely live is exactly the
+  already-tracked toolchain-identity-probe gap above (castxml/clang invoked
+  with compiler/ABI flags that don't match the real build) — not a separate
+  evidence-status bug. A **real** per-finding provider model (recording,
+  per `Change`, which of L0–L5 actually produced/corroborated it) would
+  need new provenance plumbing through all ~45 `Change(...)` construction
+  sites across `diff_*.py`/`buildsource/*.py`, each individually verified
+  against the FP-rate/mutation-score gates — a multi-day project on its
+  own, not attempted here.
+- **Type reachability (direct vs. transitive stdlib references) — a new,
+  additive, unwired building block only.** `abicheck/type_reachability.py`
+  (`directly_referenced_stdlib_types()`) computes, from a snapshot alone,
+  which `std::`/`__gnu_cxx::`/etc. record types are directly referenced by
+  a non-stdlib function's signature or a non-stdlib type's own field — as
+  opposed to only reachable via deep template-instantiation internals
+  (`std::string::_Alloc_hider`, `std::_Rb_tree_node_base`) that
+  `is_non_abi_surface_type`'s existing whole-name-prefix filter already
+  correctly excludes as toolchain-artifact churn either way. This closes
+  the *computational* gap (the distinction the status review asked for is
+  now computable) but is **not wired into any live detector** — retrofitting
+  the ~15 `is_non_abi_surface_type`/`is_abi_surface_type_name` call sites in
+  `diff_types.py`/`diff_platform.py`/`diff_symbols.py`/
+  `diff_vtable_layout.py`/`diff_stdlib_impl.py`/`diff_layout.py`/
+  `diff_filtering.py`/`diff_type_spellings.py` needs each site individually
+  verified against the FP-rate/mutation-score gates (exactly the guard those
+  gates exist for), a scoped follow-up rather than a drive-by extension
+  here.
 
 ## What NOT to do
 

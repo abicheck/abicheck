@@ -65,6 +65,7 @@ __all__ = [
     "is_cxx_runtime_library",
     "canonicalize_type_name",
     "cv_qualifiers_only_differ",
+    "STDLIB_TYPE_NAMESPACE_PREFIXES",
 ]
 
 # This module has no intra-package imports on purpose: it sits at the bottom of
@@ -122,15 +123,30 @@ INTERNAL_NAMESPACE_COMPONENTS: tuple[str, ...] = (
 # It is the *union* of both — a superset — and both call sites now share it.
 STDLIB_RTTI_PREFIXES: tuple[str, ...] = (
     # std:: (libstdc++ / libc++)
-    "_ZTISt", "_ZTSSt", "_ZTVSt", "_ZTTSt",
+    "_ZTISt",
+    "_ZTSSt",
+    "_ZTVSt",
+    "_ZTTSt",
     # nested std:: names
-    "_ZTINSt", "_ZTSNSt", "_ZTVNSt", "_ZTTNSt",
+    "_ZTINSt",
+    "_ZTSNSt",
+    "_ZTVNSt",
+    "_ZTTNSt",
     # __gnu_cxx::
-    "_ZTIN9__gnu_cxx", "_ZTSN9__gnu_cxx", "_ZTVN9__gnu_cxx", "_ZTTN9__gnu_cxx",
+    "_ZTIN9__gnu_cxx",
+    "_ZTSN9__gnu_cxx",
+    "_ZTVN9__gnu_cxx",
+    "_ZTTN9__gnu_cxx",
     # __cxxabiv1:: (Itanium runtime)
-    "_ZTIN10__cxxabiv", "_ZTSN10__cxxabiv", "_ZTVN10__cxxabiv", "_ZTTN10__cxxabiv",
+    "_ZTIN10__cxxabiv",
+    "_ZTSN10__cxxabiv",
+    "_ZTVN10__cxxabiv",
+    "_ZTTN10__cxxabiv",
     # std::__cxx11::
-    "_ZTIN7__cxx11", "_ZTSN7__cxx11", "_ZTVN7__cxx11", "_ZTTN7__cxx11",
+    "_ZTIN7__cxx11",
+    "_ZTSN7__cxx11",
+    "_ZTVN7__cxx11",
+    "_ZTTN7__cxx11",
 )
 
 
@@ -184,11 +200,18 @@ def symbol_origin(symbol: str) -> str:
 # ---------------------------------------------------------------------------
 
 # Compiler internal types that are never the inspected library's own surface.
-COMPILER_INTERNAL_TYPES: frozenset[str] = frozenset({
-    "__va_list_tag", "__builtin_va_list", "__gnuc_va_list",
-    "__int128", "__int128_t", "__uint128_t",
-    "__NSConstantString_tag", "__NSConstantString",
-})
+COMPILER_INTERNAL_TYPES: frozenset[str] = frozenset(
+    {
+        "__va_list_tag",
+        "__builtin_va_list",
+        "__gnuc_va_list",
+        "__int128",
+        "__int128_t",
+        "__uint128_t",
+        "__NSConstantString_tag",
+        "__NSConstantString",
+    }
+)
 
 _TYPEDEF_ALIAS_RE = re.compile(r"^typedef\s+(.+?)\s+([A-Za-z_][\w:]*)$")
 
@@ -197,14 +220,22 @@ _TYPEDEF_ALIAS_RE = re.compile(r"^typedef\s+(.+?)\s+([A-Za-z_][\w:]*)$")
 # inspection. These leak into DWARF when a library inlines STL usage; the layout
 # the compiler emits varies by compiler/LTO, so diffing them produces
 # toolchain-artifact false positives (validation/REPORT.md FP-1).
-_STDLIB_TYPE_NAMESPACE_PREFIXES: tuple[str, ...] = (
-    "std::", "__gnu_cxx::", "__gnu_debug::", "__cxxabiv1::", "__cxx11::",
+STDLIB_TYPE_NAMESPACE_PREFIXES: tuple[str, ...] = (
+    "std::",
+    "__gnu_cxx::",
+    "__gnu_debug::",
+    "__cxxabiv1::",
+    "__cxx11::",
 )
 
 # Substrings marking an anonymous / local type with no stable cross-version ABI
 # identity — lambdas and unnamed struct/union/enum (validation/REPORT.md FP-2).
 _ANONYMOUS_TYPE_MARKERS: tuple[str, ...] = (
-    "<lambda", "{lambda", "(anonymous", "(unnamed", "<unnamed",
+    "<lambda",
+    "{lambda",
+    "(anonymous",
+    "(unnamed",
+    "<unnamed",
 )
 
 # Core stems of the C++ runtime / standard-library DSOs (without the ``lib``
@@ -213,7 +244,10 @@ _ANONYMOUS_TYPE_MARKERS: tuple[str, ...] = (
 # (Codex review on PR #273). Order matters: longer stems first so the startswith
 # check is unambiguous.
 _CXX_RUNTIME_CORE_STEMS: tuple[str, ...] = (
-    "stdc++", "c++abi", "supc++", "c++",
+    "stdc++",
+    "c++abi",
+    "supc++",
+    "c++",
 )
 
 
@@ -228,10 +262,14 @@ def is_compiler_internal_type(name: str) -> bool:
     if not m:
         return False
     aliased, alias = m.groups()
-    return aliased.strip() in COMPILER_INTERNAL_TYPES and alias in COMPILER_INTERNAL_TYPES
+    return (
+        aliased.strip() in COMPILER_INTERNAL_TYPES and alias in COMPILER_INTERNAL_TYPES
+    )
 
 
-def is_non_abi_surface_type(name: str, *, exclude_stdlib_namespaces: bool = True) -> bool:
+def is_non_abi_surface_type(
+    name: str, *, exclude_stdlib_namespaces: bool = True
+) -> bool:
     """Return True if *name* is a type that is never the inspected library's own
     ABI surface and must be excluded from type diffing.
 
@@ -249,7 +287,7 @@ def is_non_abi_surface_type(name: str, *, exclude_stdlib_namespaces: bool = True
         return False
     if is_compiler_internal_type(name):
         return True
-    if exclude_stdlib_namespaces and name.startswith(_STDLIB_TYPE_NAMESPACE_PREFIXES):
+    if exclude_stdlib_namespaces and name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
         return True
     return any(marker in name for marker in _ANONYMOUS_TYPE_MARKERS)
 
@@ -412,7 +450,9 @@ def _find_matching_close(name: str, open_idx: int) -> int:
     return len(name) - 1
 
 
-def _strip_cv_in_segment(name: str, chars: list[str], start: int, end: int, *, strict: bool) -> None:
+def _strip_cv_in_segment(
+    name: str, chars: list[str], start: int, end: int, *, strict: bool
+) -> None:
     """Blank out strippable ``const``/``volatile`` tokens in ``name[start:end]``.
 
     A ``<...>``/``[...]`` sub-range is always fully skipped (a cv qualifier
@@ -672,45 +712,45 @@ def cv_qualifiers_only_differ(old_type: str, new_type: str) -> bool:
 
 def func_signature_cv_only_differ(old_type: str, new_type: str) -> bool:
     """Return True when two *function-parameter or return-type* spellings
-    differ only by ``const``/``volatile`` tokens, including a top-level
-    BY-VALUE difference (``int`` -> ``volatile int``) that
-    :func:`cv_qualifiers_only_differ` deliberately excludes.
+        differ only by ``const``/``volatile`` tokens, including a top-level
+        BY-VALUE difference (``int`` -> ``volatile int``) that
+        :func:`cv_qualifiers_only_differ` deliberately excludes.
 
-DO NOT use this for an ordinary field/variable comparison — a top-level
-    by-value cv change on THOSE is intentionally treated as a source-level
-    contract change (see :func:`cv_qualifiers_only_differ`'s own docstring
-    and the ``case30_field_qualifiers`` example; confirmed by
-    ``test_top_level_field_const_is_not_neutralised``). The one deliberate
-    exception is a *legacy-snapshot* fallback (``header_cv_facts_reliable``
-    is False): both ``diff_types._field_type_genuinely_changed`` and
-    ``diff_symbols._check_variable`` reuse this function there specifically
-    because a pre-fix CastXML snapshot's spelling may have silently dropped
-    the real qualifier, making a genuine field/variable cv change
-    indistinguishable from tool-upgrade noise — see those callers' own
-    docstrings. This function exists in the first place because the field/
-    variable reasoning does NOT extend to a function's own parameter or
-    return type: per the C++ standard, a top-level cv-qualifier on a
-    by-value parameter or return type is dropped from the function's type
-    for linkage/mangling purposes — ``void f(int)`` and ``void f(const
-    int)`` name the very same function — so unlike a field, there is no
-    corresponding dedicated detector and no ABI-relevant meaning to escalate
-    (Codex review, PR #582: castxml's parser began spelling a by-value
-    ``volatile`` parameter as ``"volatile int"``, which without this check
-    misfired the generic, breaking ``FUNC_PARAMS_CHANGED``/return-type-
-    changed path for a change with zero ABI/mangling effect).
+    DO NOT use this for an ordinary field/variable comparison — a top-level
+        by-value cv change on THOSE is intentionally treated as a source-level
+        contract change (see :func:`cv_qualifiers_only_differ`'s own docstring
+        and the ``case30_field_qualifiers`` example; confirmed by
+        ``test_top_level_field_const_is_not_neutralised``). The one deliberate
+        exception is a *legacy-snapshot* fallback (``header_cv_facts_reliable``
+        is False): both ``diff_types._field_type_genuinely_changed`` and
+        ``diff_symbols._check_variable`` reuse this function there specifically
+        because a pre-fix CastXML snapshot's spelling may have silently dropped
+        the real qualifier, making a genuine field/variable cv change
+        indistinguishable from tool-upgrade noise — see those callers' own
+        docstrings. This function exists in the first place because the field/
+        variable reasoning does NOT extend to a function's own parameter or
+        return type: per the C++ standard, a top-level cv-qualifier on a
+        by-value parameter or return type is dropped from the function's type
+        for linkage/mangling purposes — ``void f(int)`` and ``void f(const
+        int)`` name the very same function — so unlike a field, there is no
+        corresponding dedicated detector and no ABI-relevant meaning to escalate
+        (Codex review, PR #582: castxml's parser began spelling a by-value
+        ``volatile`` parameter as ``"volatile int"``, which without this check
+        misfired the generic, breaking ``FUNC_PARAMS_CHANGED``/return-type-
+        changed path for a change with zero ABI/mangling effect).
 
-    Returns False when the canonical forms are already identical (the
-    caller's own equality check already handles that), or when a genuine
-    non-cv difference remains after stripping.
+        Returns False when the canonical forms are already identical (the
+        caller's own equality check already handles that), or when a genuine
+        non-cv difference remains after stripping.
 
-    >>> func_signature_cv_only_differ("int", "volatile int")
-    True
-    >>> func_signature_cv_only_differ("int", "const int")
-    True
-    >>> func_signature_cv_only_differ("int", "long")
-    False
-    >>> func_signature_cv_only_differ("char *", "const char *")
-    True
+        >>> func_signature_cv_only_differ("int", "volatile int")
+        True
+        >>> func_signature_cv_only_differ("int", "const int")
+        True
+        >>> func_signature_cv_only_differ("int", "long")
+        False
+        >>> func_signature_cv_only_differ("char *", "const char *")
+        True
     """
     co = canonicalize_type_name(old_type)
     cn = canonicalize_type_name(new_type)

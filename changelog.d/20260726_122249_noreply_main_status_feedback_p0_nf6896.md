@@ -28,4 +28,21 @@
   `profile_id` alone, since a run plan can carry more than one check for the
   same target+profile at different baseline channels/requested depths — a
   naive last-write-wins would let a later, cleaner check silently overwrite
-  an earlier, breaking one for that profile (Codex review).
+  an earlier, breaking one for that profile (Codex review). Each
+  `profile_matrix` entry also gains `incomplete_profiles`: when one of a
+  profile's checks is unavailable while another did report, the unavailable
+  one is surfaced here instead of being silently dropped — a completed,
+  compatible `headers`-depth check plus a missing required `build`-depth
+  check for the same profile is an incomplete-coverage gap, not "this
+  profile is clean" (Codex review).
+- **`abicheck/type_reachability.py`**: a new, additive building block for
+  status-review item 3 ("direct vs. transitive type reachability").
+  `directly_referenced_stdlib_types()` computes, from a snapshot alone,
+  which `std::`/`__gnu_cxx::`/etc. record types are directly referenced by a
+  non-stdlib function's signature or a non-stdlib type's own field — as
+  opposed to only reachable via deep template-instantiation internals
+  (`std::string::_Alloc_hider`, `std::_Rb_tree_node_base`) that the existing
+  whole-name-prefix filter (`is_non_abi_surface_type`) already correctly
+  treats as toolchain-artifact churn either way. Not yet wired into any live
+  detector — see `AGENTS.md`'s "Known gaps" for why retrofitting the ~15
+  existing call sites needs its own scoped, individually-verified follow-up.
