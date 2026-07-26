@@ -78,6 +78,20 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `_deadline_bound_worker`; fixed the same way here by capturing
   `deadline.current_deadline_ts()` on the submitting thread and
   re-establishing it inside each worker with `deadline.with_deadline_ts`.
+- `run_tu_loop`/`merge_tu_fragments` never actually consulted a translation
+  unit's `contributes_to_abi` flag — a `contributes_to_abi: false` TU (a
+  support-only TU that exists purely to satisfy other TUs' compiles, e.g. a
+  private header) that parsed *successfully* still had its declarations
+  merged into the snapshot exactly like any other TU. Parse-time's own
+  `contributes_to_abi=True ⇒ required=True` invariant only guaranteed the
+  *failure* half of this flag's contract (a dropped optional TU's failure
+  can never hide a real removal); the success half — actually excluding a
+  non-contributing TU's declarations from the merge — was never
+  implemented, even though `MergedTuFragments`'s own docstring already
+  described its input as "every *contributing* TU's `TuFragment`". Fixed by
+  filtering `run_tu_loop`'s fragment list (matched by TU name, since a
+  dropped optional-TU failure leaves `fragments` not index-aligned with
+  `tus`) to only contributing TUs before merging (Codex review).
 - `dumper_manifest._run_tu_fragments` wrapped its pool in
   `with ThreadPoolExecutor(...) as pool:` — cancelling not-yet-started
   futures on a required failure happened promptly, but the `with` block's

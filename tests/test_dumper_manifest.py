@@ -382,6 +382,44 @@ def test_run_tu_loop_calls_once_per_tu_with_shared_public_header_paths():
     assert {fn.name for fn in merged.functions} == {"a", "b"}
 
 
+def test_run_tu_loop_excludes_successful_non_contributing_tu_from_merged_abi():
+    """Codex review, PR #636: a ``contributes_to_abi: false`` TU that PARSES
+    SUCCESSFULLY must still have its declarations excluded from the merged
+    ABI surface -- the flag's whole point (a support-only TU that exists
+    purely to satisfy other TUs' compiles, e.g. a private header) is
+    undermined if its own functions/variables/etc. leak into the snapshot
+    just because parsing happened to succeed.
+
+    Existing coverage (``test_run_tu_loop_optional_tu_failure_is_skipped``)
+    only exercised the FAILURE half of ``contributes_to_abi``'s guarantee --
+    parse-time's own ``contributes_to_abi=True ⇒ required=True`` invariant
+    already ensures a non-contributing TU's dropped *failure* can never hide
+    a real removal. This is the separate, previously-missing SUCCESS half:
+    ``run_tu_loop``/``merge_tu_fragments`` never actually consulted the flag
+    at all, so a non-contributing TU that parsed fine still contributed its
+    declarations to the merged ABI exactly like any other TU.
+    """
+    calls: list = []
+    stub = _make_stub_header_ast_parser(calls)
+    tus = (
+        _tu("main", "main.h"),
+        _tu("support", "support.h", required=False, contributes=False),
+    )
+    merged = run_tu_loop(
+        tus,
+        header_ast_parser=stub,
+        roots=[Path("main.h")],
+        backend="auto",
+        compiler="c++",
+        exported_dynamic=set(),
+        exported_static=set(),
+    )
+    # Both TUs were actually parsed (this isn't the failure-skip path)...
+    assert len(calls) == 2
+    # ...but only the contributing TU's declarations reached the merge.
+    assert [fn.name for fn in merged.functions] == ["main"]
+
+
 def test_run_tu_loop_required_tu_failure_propagates():
     calls: list = []
     stub = _make_stub_header_ast_parser(calls, fail_for=frozenset({"a.h"}))

@@ -490,6 +490,19 @@ def run_tu_loop(
         frontend_context=frontend_context,
     )
 
+    # A `contributes_to_abi: false` TU exists purely to satisfy other TUs'
+    # compiles (e.g. a private support header) -- its own declarations must
+    # never reach the merged ABI surface. Parse-time's `contributes_to_abi
+    # =True ⇒ required=True` invariant only guarantees the FAILURE half of
+    # this (a dropped optional TU can never have been meant to contribute);
+    # this is the separate SUCCESS half -- a non-contributing TU that parses
+    # fine must still be excluded here, which neither this function nor
+    # merge_tu_fragments previously did (Codex review). `fragments` isn't
+    # reliably index-aligned with `tus` (an optional TU's failure drops its
+    # entry rather than leaving a placeholder), so match by name instead.
+    contributing_names = {tu.name for tu in tus if tu.contributes_to_abi}
+    fragments = [f for f in fragments if f.tu_name in contributing_names]
+
     return merge_tu_fragments(
         fragments,
         public_header_paths=explicit_public_paths,
