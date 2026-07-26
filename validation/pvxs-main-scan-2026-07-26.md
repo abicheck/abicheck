@@ -77,7 +77,7 @@ fire; the new exemption below (F9) does not touch them.
 **Symptom.** `compare 1.5.2-build/libpvxs.so master-build/libpvxs.so -H
 1.5.2-build/include -H master-build/include ...` exits `16` with no verdict:
 
-```
+```text
 Error: 'libpvxs.so.1.5' old='1.5.2' new='master' are not comparable: old and
 new snapshots do not cover the same declared surface (scope_fingerprint
 mismatch) — the comparison is not comparable. This commonly means a
@@ -146,7 +146,7 @@ refuses and tells the caller exactly how to proceed.
 Forcing the `1.5.2 → master` `libpvxs` diff (above) surfaced one more
 finding before the fix below:
 
-```
+```text
 exported_object_alignment_reduced | _ZZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames
   Exported object alignment reduced: ... (512 → 128 bytes)
 ```
@@ -189,12 +189,26 @@ Verified against the real pair: before the fix, `libpvxs 1.5.2 → master`
 (diagnostic-forced) reported 11 risk + 1 addition (12 total); after, 10 risk
 + 1 addition (11 total) — the exact spurious finding gone, verdict unchanged
 (`COMPATIBLE_WITH_RISK`). New regression tests: `tests/test_name_classification.py`
-(`test_is_local_name_symbol_true/false`, `test_is_stdlib_local_name_symbol_true/false`),
-`tests/test_coverage_extension_elf.py::TestObjectAlignmentReduced::test_local_name_symbol_is_exempt`
+(`test_is_local_name_symbol_true/false`, `test_is_stdlib_local_name_symbol_true/false`,
+including a restrict-qualified (`r`) stdlib match and a truncated-namespace
+rejection case caught in a later review pass — see below),
+`tests/test_coverage_extension_elf.py::TestObjectAlignmentReduced::test_stdlib_local_name_symbol_is_exempt`
 (uses the exact real mangled name from this run) and
 `test_library_owned_local_name_symbol_still_fires` (the Codex-flagged case).
-Full fast unit suite (19541 passed / 30 skipped / 4 xfailed), `mypy abicheck/`,
-and `ruff check abicheck/ tests/` all clean after the change.
+Full fast unit suite (19543 passed / 30 skipped / 4 xfailed, `--cov-branch`
+96–98% line/branch coverage on both touched modules), `mypy abicheck/`, and
+`ruff check abicheck/ tests/` all clean after the final revision.
+
+**Further refined after two more PR review passes** (`chatgpt-codex-connector`,
+`coderabbitai`): the qualifier character class was missing the `r` (restrict)
+CV-qualifier entirely, and `10__cxxabiv1?`'s optional trailing digit could
+over-match a truncated, never-actually-emitted `10__cxxabiv` + arbitrary next
+character instead of requiring the complete, exact `__cxxabiv1` namespace
+name. `_STDLIB_LOCAL_NAME_RE` now uses `[rVK]{0,3}[RO]?` (CV-qualifiers and
+ref-qualifier as separate, correctly-bounded groups) and the full
+`10__cxxabiv1` literal, with regression tests pinning both the
+previously-unmatched restrict-qualified case and the previously-over-matched
+truncated one.
 
 ## CI / GitHub Action integration — verified end-to-end
 
@@ -233,6 +247,19 @@ castxml-having runner was not available to test directly here, but
 `ast-frontend: clang` is confirmed as the correct fallback for a
 clang-only/no-castxml runner, which this whole validation pass ran under):
 
+Two corrections from an initial draft of this section, both caught in PR
+review (`chatgpt-codex-connector`) and confirmed against `action.yml`/
+`action/run.sh` before fixing: a bare `header:` applies that *one* tree to
+**both** operands (`old-header:`/`new-header:` are the side-scoped inputs —
+required here since old and new genuinely have different header sets, the
+F8 scenario above), and `format: sarif` is rejected before comparison runs
+for a directory/package operand (`old-library`/`new-library` pointing at a
+directory fans out over both SONAME-matched libraries, but SARIF/
+`upload-sarif` is single-pair-only). The corrected form below instead does
+one single-pair `compare` per library — the same operand shape this report's
+"CI / GitHub Action integration" section above actually ran and verified,
+not a new untested shape:
+
 ```yaml
 # .github/workflows/abi.yml (for epics-base/pvxs)
 name: ABI check
@@ -246,6 +273,9 @@ permissions:
 jobs:
   abi:
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        lib: [libpvxs, libpvxsIoc]
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -253,24 +283,24 @@ jobs:
         run: ./ci/build-two-refs.sh   # produces old/lib/<arch> and new/lib/<arch>
       - uses: abicheck/abicheck@v0.4.0
         with:
-          old-library: old/lib/linux-x86_64
-          new-library: new/lib/linux-x86_64
-          header: new/include
+          old-library: old/lib/linux-x86_64/${{ matrix.lib }}.so
+          new-library: new/lib/linux-x86_64/${{ matrix.lib }}.so
+          old-header: old/include
+          new-header: new/include
           include: >-
             ${{ env.EPICS_BASE }}/include
             ${{ env.EPICS_BASE }}/include/os/Linux
             ${{ env.EPICS_BASE }}/include/compiler/gcc
           scope-public-headers: 'true'
-          fail-on-removed-library: 'true'
           format: sarif
-          output-file: abi.sarif
+          output-file: abi-${{ matrix.lib }}.sarif
           # A release that adds a new public header (F8 above) needs
           # extra-args: '--diagnostic-comparison' for that one PR, or the
           # step correctly fails closed with a clear message instead of a
           # wrong verdict — this is NOT something to blanket-set by default.
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
-        with: { sarif_file: abi.sarif }
+        with: { sarif_file: abi-${{ matrix.lib }}.sarif }
 ```
 
 ## L3–L5 source-depth scan on `master` — attempted, not completed (documented)
@@ -304,7 +334,8 @@ whole library.
 
 - **Fixed & tested in this branch:** F9 (a second, differently-mangled
   RTTI-adjacent alignment false positive — Itanium local-name-production
-  symbols). Full fast unit suite green (19532 passed), mypy/ruff clean.
+  symbols, scoped to the stdlib-owned subset after PR review). Full fast
+  unit suite green (19543 passed / 30 skipped / 4 xfailed), mypy/ruff clean.
 - **Verified working, no code change needed:** the full 1.4.0→1.5.0→1.5.1→
   1.5.2 tag-to-tag matrix (real, from-scratch EPICS Base R7.0.10 + pvxs
   builds — the acceptance spike's "still owed" step); the abicheck GitHub

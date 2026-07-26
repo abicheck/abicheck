@@ -119,17 +119,32 @@ LOCAL_NAME_PREFIX = "_ZZ"
 
 # A LOCAL_NAME_PREFIX symbol whose *enclosing function* belongs to the C++
 # runtime/standard library (std::, __gnu_cxx::, __cxxabiv1::) rather than the
-# library under test -- the qualifier letters ``r``/``V``/``K`` (restrict/
-# volatile/const) and ref-qualifier ``R``/``O`` a const/ref-qualified member
-# function's <encoding> may carry appear between the ``_ZZN`` nested-name
-# opener and the namespace component itself (e.g. ``_ZZNKSt7__cxx11...`` for
-# a const std::__cxx11:: member function), hence the ``[KVRO]{0,3}`` gap
-# rather than a plain fixed-prefix match. Deliberately narrower than
-# :func:`is_local_name_symbol`: a library's OWN public inline function's local
-# static (e.g. ``_ZZN4somelib...``) must NOT match here, since its alignment
-# genuinely matters to consumers (see LOCAL_NAME_PREFIX's docstring above).
+# library under test -- the <CV-qualifiers> a const/volatile/restrict-
+# qualified member function's <encoding> may carry (``r``/``V``/``K``, in
+# that grammar order) plus an optional trailing ref-qualifier (``R``/``O``
+# for &/&&) appear between the ``_ZZN`` nested-name opener and the namespace
+# component itself (e.g. ``_ZZNKSt7__cxx11...`` for a const std::__cxx11::
+# member function), hence the ``[rVK]{0,3}[RO]?`` gap rather than a plain
+# fixed-prefix match -- ``[rVK]{0,3}`` for the 0-3 CV-qualifier letters
+# (loosely: real manglings never repeat one, but a whitelist doesn't need to
+# enforce that), then an independent, at-most-one ``[RO]?`` for the separate
+# ref-qualifier production, not folded into the same repeated class (Codex
+# review, PR #641: the qualifier class must include ``r`` -- omitted in an
+# earlier version, matching only ``K``/``V``/``R``/``O`` and silently
+# failing to recognize a restrict-qualified stdlib member function's local
+# name as stdlib-owned). ``__cxxabiv1`` is matched as the complete, exact
+# length-prefixed name (``10__cxxabiv1``, never with an optional trailing
+# digit -- an earlier version's ``10__cxxabiv1?`` could match a truncated,
+# never-actually-emitted ``10__cxxabiv`` + arbitrary next character, which
+# is not what any real compiler emits and is strictly more permissive than
+# the grammar warrants).
+#
+# Deliberately narrower than :func:`is_local_name_symbol`: a library's OWN
+# public inline function's local static (e.g. ``_ZZN4somelib...``) must NOT
+# match here, since its alignment genuinely matters to consumers (see
+# LOCAL_NAME_PREFIX's docstring above).
 _STDLIB_LOCAL_NAME_RE = re.compile(
-    r"^_ZZN?[KVRO]{0,3}(?:St|3std|9__gnu_cxx|10__cxxabiv1?|7__cxx11)"
+    r"^_ZZN?[rVK]{0,3}[RO]?(?:St|3std|9__gnu_cxx|10__cxxabiv1|7__cxx11)"
 )
 
 # Length-prefixed Itanium namespace components (``<len><name>``) for the

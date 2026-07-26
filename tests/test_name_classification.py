@@ -85,6 +85,10 @@ def test_is_local_name_symbol_false(name: str) -> None:
         "_ZZN9__gnu_cxx13new_allocatorIiE10deallocateEPim1E",
         "_ZZN10__cxxabiv116__enum_type_infoD2Ev1x",
         "_ZZSt4sortIN9__gnu_cxx17__normal_iteratorIPiSt6vectorIiSaIiEEEEEvT_S6_1x",
+        # CodeRabbit review, PR #641: a restrict-qualified ('r') stdlib
+        # member function's local name must also match -- an earlier version
+        # of the qualifier character class omitted 'r' entirely.
+        "_ZZNr10__cxxabiv116__enum_type_infoD2Ev1x",
     ],
 )
 def test_is_stdlib_local_name_symbol_true(name: str) -> None:
@@ -99,6 +103,12 @@ def test_is_stdlib_local_name_symbol_true(name: str) -> None:
         # stdlib-owned, since consumers can genuinely bind against it.
         "_ZZN4pvxs6client6ConfigEvE5cache",
         "_ZN3Foo3barEv",  # not a local-name symbol at all
+        # CodeRabbit review, PR #641: a truncated "10__cxxabiv" (9-character
+        # name after a length-10 prefix -- not a real, never-emitted
+        # spelling) followed by an arbitrary next character must NOT match;
+        # an earlier version's optional trailing "1" on __cxxabiv1 over-matched
+        # this.
+        "_ZZN10__cxxabivEv1x",
         "",
     ],
 )
