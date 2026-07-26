@@ -58,7 +58,7 @@ import re
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
-from .diff_cxx_rules import owner_class_of
+from .diff_cxx_rules import itanium_qualified_name, owner_class_of
 from .model import ScopeOrigin, Visibility
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
@@ -199,24 +199,38 @@ def _stripped_signature_spelling(identity: str) -> str | None:
     return None
 
 
-def _bare_type_name(identity: str) -> str:
-    """*identity* with its outer namespace-qualification stripped — the
-    part after the last ``::`` that occurs at template-argument bracket
-    depth zero, keeping the entire spelling (including any inner qualified
-    template arguments) otherwise intact.
+def _namespace_suffix_spellings(identity: str) -> list[str]:
+    """Every suffix spelling of *identity* obtainable by dropping some
+    prefix of its namespace/class-scope chain, at each ``"::"`` boundary
+    that occurs at template-argument bracket depth zero — from the full
+    identity itself (dropping nothing) down to the fully bare leaf.
 
-    A plain ``identity.rsplit("::", 1)`` would incorrectly split *inside* a
-    template argument's own qualified name (Codex review, fresh evidence):
-    for ``"api::Wrapper<dep::Tag>"``, the lexically last ``"::"`` belongs
-    to the template argument ``dep::Tag``, not the outer namespace path, so
-    a naive rsplit produces the bare form ``"Tag>"`` instead of the correct
-    ``"Wrapper<dep::Tag>"``. Tracking ``<``/``>`` nesting depth and only
-    considering a ``"::"`` at depth zero as a namespace separator fixes
-    this. Returns *identity* unchanged when it carries no depth-zero
-    ``"::"`` at all (already bare, or only qualified inside template args).
+    A real backend does not always spell a nested type as either the
+    fully-qualified identity or the fully-bare leaf (Codex review, fresh
+    evidence, confirmed empirically via ``clang -ast-dump`` on
+    ``namespace api { struct Outer { struct Inner {}; }; Outer::Inner
+    g(); }``): direct-clang prints that function's return type as exactly
+    ``"Outer::Inner"`` — dropping the *enclosing namespace* (``api::``,
+    implied by lookup context inside that namespace) while keeping the
+    *class-nesting* qualifier (``Outer::``, a distinct scope that is never
+    elided) — a partial qualification distinct from both the full identity
+    ``"api::Outer::Inner"`` and the fully-bare leaf ``"Inner"``. Generating
+    every such suffix (not just the two extremes) is what lets a signature
+    spelled this way still resolve to the right record.
+
+    A plain ``identity.rsplit("::", 1)`` would additionally split *inside*
+    a template argument's own qualified name: for
+    ``"api::Wrapper<dep::Tag>"``, the lexically last ``"::"`` belongs to
+    the template argument ``dep::Tag``, not an outer namespace boundary.
+    Tracking ``<``/``>`` nesting depth and only considering a ``"::"`` at
+    depth zero as a namespace separator avoids that.
+
+    Returns ``[identity]`` (a single-element list) when *identity* carries
+    no depth-zero ``"::"`` at all (already bare, or only qualified inside
+    template arguments).
     """
     depth = 0
-    split_at = -1
+    splits = [0]
     i = 0
     n = len(identity)
     while i < n:
@@ -226,24 +240,31 @@ def _bare_type_name(identity: str) -> str:
         elif ch == ">":
             depth -= 1
         elif ch == ":" and depth == 0 and i + 1 < n and identity[i + 1] == ":":
-            split_at = i
+            splits.append(i + 2)
             i += 1
         i += 1
-    if split_at == -1:
-        return identity
-    return identity[split_at + 2 :]
+    return [identity[s:] for s in splits]
+
+
+def _bare_type_name(identity: str) -> str:
+    """*identity* with its outer namespace-qualification fully stripped —
+    the innermost suffix from :func:`_namespace_suffix_spellings` (the
+    fully bare leaf), keeping any inner qualified template arguments
+    intact. See that function's docstring for the full rationale.
+    """
+    return _namespace_suffix_spellings(identity)[-1]
 
 
 def _non_stdlib_signature_spellings(
     non_stdlib_identities: frozenset[str],
 ) -> frozenset[str]:
     """Every spelling a real dumper backend could use in a signature to
-    name *some* non-stdlib record: its full identity, plus its bare
-    (namespace-unqualified, see :func:`_bare_type_name`) alias when that
-    differs.
+    name *some* non-stdlib record: its full identity, plus every
+    namespace-suffix spelling from :func:`_namespace_suffix_spellings`
+    (not just the fully bare leaf).
 
     Deliberately broader than :func:`_spelling_index`'s own ``record_index``
-    return value — an ambiguous bare alias (shared by two or more distinct
+    return value — an ambiguous suffix (shared by two or more distinct
     non-stdlib records) is still included here even though ``record_index``
     itself drops it (Codex review, fresh evidence): a non-stdlib record
     like ``api::vector<int>`` is spelled bare as ``"vector<int>"`` in a real
@@ -253,15 +274,15 @@ def _non_stdlib_signature_spellings(
     missed this collision entirely, since ``"vector<int>"`` never equals
     ``"api::vector<int>"`` — letting a signature naming the unrelated user
     type also mark the real ``std::vector<int>`` as directly referenced.
-    Whether that bare alias is ambiguous or not is irrelevant here: either
-    way it is a real spelling *some* non-stdlib record can be named by, so
-    a stdlib candidate reducing to it must still be rejected as a possible
+    Whether that suffix is ambiguous or not is irrelevant here: either way
+    it is a real spelling *some* non-stdlib record can be named by, so a
+    stdlib candidate reducing to it must still be rejected as a possible
     collision (same false-negative-over-false-positive principle as every
     other collision guard in this module).
     """
-    spellings = set(non_stdlib_identities)
+    spellings: set[str] = set()
     for identity in non_stdlib_identities:
-        spellings.add(_bare_type_name(identity))
+        spellings.update(_namespace_suffix_spellings(identity))
     return frozenset(spellings)
 
 
@@ -303,15 +324,17 @@ def _spelling_index(
     one spelling (e.g. two distinct namespaces both reducing to the same
     bare form) — every one of them is recorded, not just the first.
 
-    A non-stdlib record's own bare (namespace-unqualified, see
-    :func:`_bare_type_name`) alias is dropped instead of recorded when it
-    is ambiguous — shared by two or more *different* non-stdlib records
-    (Codex review, fresh evidence: e.g. ``api::Inner`` and ``detail::Inner``
-    both reducing to bare ``Inner``): unlike the stdlib case above, queuing
-    every colliding record here would let a signature naming one of them
-    wrongly walk an unrelated internal record's fields too, misattributing
-    its own implementation-only churn as publicly reachable. Each record's
-    own full identity is never ambiguous this way and is always kept.
+    A non-stdlib record's own namespace-suffix spelling (see
+    :func:`_namespace_suffix_spellings` — every suffix obtainable by
+    dropping some prefix of its scope chain, not just the fully bare
+    leaf) is dropped instead of recorded when it is ambiguous — shared by
+    two or more *different* non-stdlib records (Codex review, fresh
+    evidence: e.g. ``api::Inner`` and ``detail::Inner`` both reducing to
+    bare ``Inner``): unlike the stdlib case above, queuing every colliding
+    record here would let a signature naming one of them wrongly walk an
+    unrelated internal record's fields too, misattributing its own
+    implementation-only churn as publicly reachable. Each record's own
+    full identity is never ambiguous this way and is always kept.
     """
     non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
     stdlib_index: dict[str, set[str]] = {}
@@ -325,13 +348,12 @@ def _spelling_index(
     generic_bare: dict[str, set[str]] = {}
     for identity in non_stdlib_identities:
         record_index.setdefault(identity, set()).add(identity)
-        bare = _bare_type_name(identity)
-        if bare != identity:
-            generic_bare.setdefault(bare, set()).add(identity)
+        for suffix in _namespace_suffix_spellings(identity)[1:]:
+            generic_bare.setdefault(suffix, set()).add(identity)
     for bare, ids in generic_bare.items():
         if len(ids) == 1:
             record_index.setdefault(bare, set()).update(ids)
-        # else: ambiguous bare alias shared by distinct records -- drop.
+        # else: ambiguous suffix spelling shared by distinct records -- drop.
 
     return (
         {spelling: frozenset(ids) for spelling, ids in stdlib_index.items()},
@@ -368,18 +390,20 @@ def _typedef_spelling_targets(
     incorrectly resolve through this typedef target to ``std::string``'s
     real backing record, unfiltering stdlib layout churn that isn't real.
 
-    A **non-stdlib** namespace-qualified typedef key also needs a bare
-    alias, not just a stdlib one (Codex review, fresh evidence): the DWARF
-    backend stores a qualified key like ``"api::Alias"`` while a
-    declaration's own type string spells the bare ``"Alias"`` — the exact
-    same bare-vs-qualified split as everywhere else in this module, just on
-    the typedef key this time instead of a ``RecordType`` identity. Without
-    this, a public signature using the bare alias never resolves through
-    this typedef target at all, silently missing a stdlib field reachable
-    through it. Reuses :func:`_bare_type_name` (already correct for
-    qualified template arguments) rather than a separate stdlib-only
-    stripper, since this case has nothing to do with stdlib namespace/ABI
-    markers.
+    A **non-stdlib** namespace-qualified typedef key also needs suffix
+    spellings, not just a stdlib-stripped one (Codex review, fresh
+    evidence): the DWARF backend stores a qualified key like
+    ``"api::Alias"`` while a declaration's own type string spells the bare
+    ``"Alias"`` — the exact same bare-vs-qualified split as everywhere
+    else in this module, just on the typedef key this time instead of a
+    ``RecordType`` identity. Without this, a public signature using the
+    bare alias never resolves through this typedef target at all, silently
+    missing a stdlib field reachable through it. Reuses
+    :func:`_namespace_suffix_spellings` (every suffix, not just the fully
+    bare leaf — already correct for qualified template arguments and for
+    a partially-qualified nested-class spelling) rather than a separate
+    stdlib-only stripper, since this case has nothing to do with stdlib
+    namespace/ABI markers.
     """
     non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
     index: dict[str, str] = dict(typedefs)
@@ -387,7 +411,10 @@ def _typedef_spelling_targets(
     for key, target in typedefs.items():
         candidates = {
             c
-            for c in (_stripped_signature_spelling(key), _bare_type_name(key))
+            for c in (
+                _stripped_signature_spelling(key),
+                *_namespace_suffix_spellings(key),
+            )
             if c is not None and c != key
         }
         for stripped in candidates:
@@ -473,6 +500,31 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     variables as type roots, but this scan originally only walked
     ``snapshot.functions`` — a public exported global like ``Foo global``
     never seeded ``Foo`` at all).
+
+    Both loops also check the declaration's own *recovered qualified name*
+    (:func:`abicheck.diff_cxx_rules.itanium_qualified_name`, from
+    ``mangled``) against ``STDLIB_TYPE_NAMESPACE_PREFIXES``, not just the
+    bare ``name``/``fn.name`` field (Codex review, fresh evidence):
+    CastXML/direct-clang record a function or namespace-scope variable's
+    own display name bare (e.g. ``"touch"``, never
+    ``"__gnu_cxx::Node::touch"`` or ``"std::touch"``), so the plain
+    ``name.startswith(...)`` check cannot catch a retained, seemingly-
+    public declaration that is actually part of the standard library
+    itself — a stdlib-internal method or a namespace-scope stdlib variable
+    — whose return type/params/type mentioning a stdlib record would
+    otherwise be scanned and incorrectly marked directly referenced,
+    unfiltering purely internal toolchain churn as a public break. This
+    check subsumes (and replaces) an earlier, narrower version that only
+    checked the *owner* class recovered by ``owner_class_of`` before
+    seeding it: whenever that owner starts with a stdlib prefix, the full
+    recovered qualified name (owner plus its own trailing member) always
+    does too, so the owner-only check could never fire without this
+    broader one already having skipped the declaration entirely — and the
+    broader check additionally catches a stdlib namespace's own direct
+    free function/variable (a single mangled scope component, e.g.
+    ``"std::touch"``), which the owner-only check missed since
+    ``owner_class_of`` returns a bare ``"std"`` (no trailing ``"::"``) for
+    that shape, never matching the ``"std::"`` prefix string.
 
     A signature/field type string spelled with a user-defined typedef alias
     (e.g. a public function returning ``Alias`` where ``snapshot.typedefs``
@@ -601,6 +653,11 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
             break
         if fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
             continue
+        qualified_fn = itanium_qualified_name(fn.mangled)
+        if qualified_fn is not None and qualified_fn.startswith(
+            STDLIB_TYPE_NAMESPACE_PREFIXES
+        ):
+            continue
         if fn.visibility != Visibility.PUBLIC:
             continue
         if fn.origin in _NON_PUBLIC_ORIGINS:
@@ -609,13 +666,18 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
         for param in fn.params:
             _scan(param.type)
         owner = owner_class_of(fn)
-        if owner is not None and not owner.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
+        if owner is not None:
             _scan(owner)
 
     for var in snapshot.variables:
         if not remaining:
             break
         if var.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
+            continue
+        qualified_var = itanium_qualified_name(var.mangled)
+        if qualified_var is not None and qualified_var.startswith(
+            STDLIB_TYPE_NAMESPACE_PREFIXES
+        ):
             continue
         if var.visibility != Visibility.PUBLIC:
             continue

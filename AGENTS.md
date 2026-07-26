@@ -816,6 +816,39 @@ Once a root command genuinely clears the bar above, pick the right home:
   compounding-edge-case complexity this file's own docstring already
   flags as needing "its own scoped follow-up," not a reactive patch.
 
+  **Two more real gaps found and fixed in the same pass** (Codex review,
+  fresh evidence): (1) A real backend does not always spell a nested type
+  as either the fully-qualified identity or the fully-bare leaf —
+  confirmed empirically via `clang -ast-dump` on `namespace api { struct
+  Outer { struct Inner {}; }; Outer::Inner g(); }`: direct-clang prints
+  the return type as exactly `"Outer::Inner"`, dropping the enclosing
+  namespace (`api::`) while keeping the class-nesting qualifier
+  (`Outer::`). Neither the full-identity match nor the single
+  fully-bare-leaf match (`_bare_type_name`) covered this partial
+  qualification. Generalized `_bare_type_name` into
+  `_namespace_suffix_spellings()`, returning every suffix obtainable by
+  dropping some prefix of the scope chain at each depth-zero `"::"`
+  boundary, and updated all three call sites to register every suffix
+  (same ambiguity-drop collision guard extended to each). (2)
+  CastXML/direct-clang record a function or namespace-scope variable's
+  own display name bare (e.g. `"touch"`, never
+  `"__gnu_cxx::Node::touch"` or `"std::touch"`), so the existing
+  `name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)` guard cannot catch a
+  retained, seemingly-public declaration that is actually part of the
+  standard library itself — verified with two real Itanium
+  mangled-symbol repros (a namespace-scope stdlib variable and a stdlib
+  free function) that both incorrectly marked `std::string` as directly
+  referenced before the fix. Fixed by also checking the declaration's
+  recovered qualified name (`diff_cxx_rules.itanium_qualified_name`, from
+  `mangled`) against the stdlib prefixes for both functions and
+  variables — which subsumes the narrower owner-only check from the
+  fourth finding above (a stdlib-prefixed owner always makes the full
+  qualified name stdlib-prefixed too, but not vice versa: a stdlib
+  namespace's own direct free function/variable is a single mangled
+  scope component, so `owner_class_of` returns a bare `"std"` with no
+  trailing `"::"`, never matching the `"std::"` prefix string), so the
+  now-redundant owner-only guard was removed.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a

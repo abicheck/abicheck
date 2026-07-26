@@ -360,3 +360,44 @@
   (`stdlib_internal_owner_method_stays_filtered`, `stdlib-direct-reference`
   category) reproducing the exact scenario; gate stays 0 FP/0 FN (32
   cases).
+- **`type_reachability.py` gains two more fixes, closing a class of
+  partially-qualified backend spellings and a class of bare-named stdlib
+  declarations** (Codex review, fresh evidence): (1) A real backend does
+  not always spell a nested type as either the fully-qualified identity
+  or the fully-bare leaf — confirmed empirically via `clang -ast-dump` on
+  `namespace api { struct Outer { struct Inner {}; }; Outer::Inner g();
+  }`: direct-clang prints the return type as exactly `"Outer::Inner"`,
+  dropping the enclosing namespace (`api::`) while keeping the
+  class-nesting qualifier (`Outer::`). Neither the previous full-identity
+  match nor the single fully-bare-leaf match (`_bare_type_name`) covered
+  this partial qualification. Generalized `_bare_type_name` into
+  `_namespace_suffix_spellings()`, which returns every suffix obtainable
+  by dropping some prefix of the scope chain at each depth-zero `"::"`
+  boundary (not just the innermost one), and updated all three call sites
+  (`_spelling_index`'s record index, `_non_stdlib_signature_spellings`,
+  `_typedef_spelling_targets`) to register every suffix instead of only
+  the fully-bare one, with the same ambiguity-drop collision guard
+  extended to every suffix. `_bare_type_name` itself is kept (now a thin
+  wrapper returning the innermost suffix) since it's still independently
+  tested and used for its narrower semantics. (2) CastXML/direct-clang
+  record a function or namespace-scope variable's own display name bare
+  (e.g. `"touch"`, never `"__gnu_cxx::Node::touch"` or `"std::touch"`), so
+  the existing `name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)` guard
+  cannot catch a retained, seemingly-public declaration that is actually
+  part of the standard library itself — verified with two real Itanium
+  mangled-symbol repros (`_ZN3std5touchE` for a namespace-scope stdlib
+  variable, `_ZN3std5touchEv` for a stdlib free function) that both
+  incorrectly marked `std::string` as directly referenced before the fix.
+  Fixed by also checking the declaration's recovered qualified name
+  (`diff_cxx_rules.itanium_qualified_name`, from `mangled`) against the
+  stdlib prefixes for both functions and variables. This subsumes (and
+  replaces) the narrower owner-only check added earlier in this PR: since
+  a stdlib-prefixed owner always makes the full qualified name
+  stdlib-prefixed too, but not vice versa (a stdlib namespace's own direct
+  free function/variable is a single mangled scope component, so
+  `owner_class_of` returns a bare `"std"` with no trailing `"::"`, which
+  never matches the `"std::"` prefix string), the broader check is
+  strictly more correct and the redundant owner-only guard was removed.
+  New regression tests cover both fixes (positive, negative, and
+  ambiguity-guard cases); full suite green, 100% module coverage, FP-rate
+  gate stays 0 FP/0 FN.

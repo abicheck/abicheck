@@ -31,6 +31,7 @@ from abicheck.model import (
 from abicheck.type_reachability import (
     _bare_type_name,
     _compile_spelling_pattern,
+    _namespace_suffix_spellings,
     _non_stdlib_signature_spellings,
     _stripped_signature_spelling,
     _typedef_spelling_targets,
@@ -1506,5 +1507,150 @@ class TestStdlibOwnerNotSeededAsReferenced:
                 ),
                 RecordType(name="std::string", kind="class"),
             ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
+class TestNamespaceSuffixSpellings:
+    def test_full_identity_and_bare_leaf_are_both_present(self) -> None:
+        suffixes = _namespace_suffix_spellings("api::Outer::Inner")
+        assert suffixes == ["api::Outer::Inner", "Outer::Inner", "Inner"]
+
+    def test_no_depth_zero_separator_returns_single_element_list(self) -> None:
+        assert _namespace_suffix_spellings("Inner") == ["Inner"]
+
+    def test_template_argument_colon_colon_is_not_a_split_point(self) -> None:
+        assert _namespace_suffix_spellings("api::Wrapper<dep::Tag>") == [
+            "api::Wrapper<dep::Tag>",
+            "Wrapper<dep::Tag>",
+        ]
+
+    def test_bare_type_name_matches_the_last_suffix(self) -> None:
+        assert _bare_type_name("api::Outer::Inner") == "Inner"
+
+    def test_partially_qualified_nested_record_spelling_resolves(self) -> None:
+        """Codex review, fresh evidence, confirmed empirically via
+        `clang -ast-dump` on `namespace api { struct Outer { struct Inner
+        {}; }; Outer::Inner g(); }`: direct-clang spells that function's
+        return type as exactly "Outer::Inner" -- dropping the enclosing
+        namespace ("api::") while keeping the class-nesting qualifier
+        ("Outer::"). Neither the full identity nor the fully-bare leaf
+        alone would match this partially-qualified spelling."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("g", return_type="Outer::Inner")],
+            types=[
+                RecordType(
+                    name="Inner",
+                    kind="class",
+                    qualified_name="api::Outer::Inner",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_ambiguous_partial_suffix_between_distinct_records_is_dropped(self) -> None:
+        """Guard: a partial suffix (not just the fully-bare leaf) shared by
+        two distinct records must still be dropped as ambiguous."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("g", return_type="Outer::Inner")],
+            types=[
+                RecordType(
+                    name="Inner", kind="class", qualified_name="api::Outer::Inner"
+                ),
+                RecordType(
+                    name="Inner2",
+                    kind="class",
+                    qualified_name="other::Outer::Inner",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+
+class TestStdlibScopeRecoveredFromMangledName:
+    def test_bare_named_stdlib_variable_stays_filtered(self) -> None:
+        """Codex review, fresh evidence: a namespace-scope variable's own
+        `name` can be bare ("touch") while its mangled name reveals it is
+        actually inside `std::` -- without recovering the qualified name
+        from the mangled symbol, this bypassed the existing
+        var.name.startswith(...) guard and marked its stdlib type
+        directly referenced."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            variables=[
+                Variable(name="touch", mangled="_ZN3std5touchE", type="std::string")
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_bare_named_genuine_public_variable_still_seeds_its_type(self) -> None:
+        """Guard against over-correcting: a bare-named variable with no
+        recoverable stdlib scope (or none at all) must still be scanned
+        normally."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            variables=[
+                Variable(
+                    name="global_str",
+                    mangled="_ZN3Foo10global_strE",
+                    type="std::string",
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_bare_named_stdlib_free_function_stays_filtered(self) -> None:
+        """Codex review, fresh evidence (same root cause as the variable
+        case above, verified to also apply to functions' own return/param
+        scan): a free function directly inside namespace std, recorded
+        under a bare Function.name by CastXML/direct-clang, must not have
+        its return type scanned as if it were part of this library's own
+        public API -- it's the standard library's own internals leaking
+        into the binary's symbol table."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="touch",
+                    mangled="_ZN3std5touchEv",
+                    return_type="std::string",
+                    params=[],
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_bare_named_genuine_public_free_function_still_scans_return_type(
+        self,
+    ) -> None:
+        """Guard against over-correcting: a bare-named free function with
+        no recoverable stdlib scope must still have its return type
+        scanned normally."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="touch",
+                    mangled="_Z5touchv",
+                    return_type="std::string",
+                    params=[],
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
