@@ -113,6 +113,24 @@ def _is_clang_family_binary(path: str) -> bool:
     return "clang" in stem or stem in _CLANG_FAMILY_ALIAS_NAMES
 
 
+def _is_intel_sycl_driver(path: str) -> bool:
+    """True if *path* is Intel's oneAPI DPC++/C++ compiler (icx/icpx/dpcpp[-cl]).
+
+    These are the only clang-family drivers known to implement
+    ``-fsycl-host-only``/``-fsycl-device-only`` (Intel's SYCL
+    single-compilation-pass flags): stock upstream clang accepts a bare
+    ``-fsycl`` and parses it fine as a single pass, but hard-rejects both
+    flags with "unknown argument" (Codex review, PR #643: verified against a
+    real clang 17/18 install). Deliberately narrower than
+    :func:`_is_clang_family_binary` (which also matches plain
+    "clang"/"clang++") — widening this to that check would make
+    :func:`abicheck.dumper._needs_sycl_host_only` append a flag stock clang
+    cannot parse, breaking a ``--gcc-path clang`` + ``-fsycl`` combination
+    that previously worked.
+    """
+    return Path(path).stem.lower() in _CLANG_FAMILY_ALIAS_NAMES
+
+
 def _resolve_clang_bin(
     compiler: str,
     gcc_path: str | None,

@@ -45,6 +45,7 @@ from abicheck.dumper_clang import (
     _Decl,
     _function_qualifiers,
     _is_clang_family_binary,
+    _is_intel_sycl_driver,
     _pointer_depth,
     _return_type,
 )
@@ -782,23 +783,31 @@ def test_build_clang_header_command_cpp_and_c(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "tokens,expected",
+    "cc_bin,tokens,expected",
     [
-        (["-fsycl"], True),
-        (["-fsycl", "-DFOO=1"], True),
+        ("icpx", ["-fsycl"], True),
+        ("icx", ["-fsycl", "-DFOO=1"], True),
+        ("/opt/oneapi/bin/dpcpp", ["-fsycl"], True),
+        ("dpcpp-cl", ["-fsycl"], True),
         # No -fsycl at all: nothing to pin.
-        (["-DFOO=1"], False),
-        ([], False),
+        ("icpx", ["-DFOO=1"], False),
+        ("icpx", [], False),
         # Caller already pinned a single pass explicitly: don't second-guess it.
-        (["-fsycl", "-fsycl-host-only"], False),
-        (["-fsycl", "-fsycl-device-only"], False),
+        ("icpx", ["-fsycl", "-fsycl-host-only"], False),
+        ("icpx", ["-fsycl", "-fsycl-device-only"], False),
         # A flag that merely starts with "-fsycl" is not the bare enabling
         # flag itself (exact-token match, not a prefix/substring check).
-        (["-fsycl-device-only"], False),
+        ("icpx", ["-fsycl-device-only"], False),
+        # Stock clang accepts a bare -fsycl as a single pass and does not
+        # recognize -fsycl-host-only at all (Codex review, PR #643) -- must
+        # never be gated on for a non-Intel clang-family binary.
+        ("clang", ["-fsycl"], False),
+        ("clang++", ["-fsycl"], False),
+        ("/usr/bin/clang-18", ["-fsycl"], False),
     ],
 )
-def test_needs_sycl_host_only(tokens: list[str], expected: bool) -> None:
-    assert _needs_sycl_host_only(tokens) is expected
+def test_needs_sycl_host_only(cc_bin: str, tokens: list[str], expected: bool) -> None:
+    assert _needs_sycl_host_only(cc_bin, tokens) is expected
 
 
 def test_build_clang_header_command_appends_sycl_host_only(tmp_path: Path) -> None:
@@ -834,6 +843,20 @@ def test_build_clang_header_command_respects_explicit_sycl_device_only(
 def test_build_clang_header_command_without_sycl_unaffected(tmp_path: Path) -> None:
     agg = tmp_path / "agg.hpp"
     cmd = _build_clang_header_command("clang++", "gnu", [], agg, force_cpp=True)
+    assert "-fsycl-host-only" not in cmd
+
+
+def test_build_clang_header_command_stock_clang_sycl_not_gated(tmp_path: Path) -> None:
+    # Codex review (PR #643): stock upstream clang accepts a bare -fsycl and
+    # parses it as a single pass fine, but does not recognize
+    # -fsycl-host-only at all -- it hard-rejects it with "unknown argument".
+    # Appending it here would turn a working --gcc-path clang + -fsycl parse
+    # into a guaranteed failure, so this must stay gated on the resolved
+    # binary actually being an Intel oneAPI driver (icx/icpx/dpcpp[-cl]).
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "clang++", "gnu", [], agg, force_cpp=True, gcc_options="-fsycl"
+    )
     assert "-fsycl-host-only" not in cmd
 
 
@@ -2474,6 +2497,30 @@ def test_is_clang_family_binary(path: str, expected: bool) -> None:
     alias-set branch (icx/icpx/dpcpp/dpcpp-cl) in isolation from the larger
     _clang_header_dump/_resolve_clang_bin call chain the tests below cover."""
     assert _is_clang_family_binary(path) is expected
+
+
+@pytest.mark.parametrize(
+    "path,expected",
+    [
+        ("icx", True),
+        ("icpx", True),
+        ("dpcpp", True),
+        ("dpcpp-cl", True),
+        ("/opt/intel/oneapi/compiler/2026.1/bin/icpx", True),
+        ("ICPX", True),  # case-insensitive
+        ("icpx.exe", True),  # extension stripped, still matches
+        # Stock clang is clang-family but NOT the Intel SYCL driver: it does
+        # not implement -fsycl-host-only/-fsycl-device-only at all.
+        ("clang", False),
+        ("clang++", False),
+        ("/usr/bin/clang-18", False),
+        ("clang-cl.exe", False),
+        ("gcc", False),
+        ("icc", False),
+    ],
+)
+def test_is_intel_sycl_driver(path: str, expected: bool) -> None:
+    assert _is_intel_sycl_driver(path) is expected
 
 
 def test_clang_header_dump_gcc_path_not_used_as_clang(
