@@ -1,6 +1,7 @@
 # Public-contract default: implementation and rollout plan
 
-**Status:** Proposed — specification only; no implementation in this PR
+**Status:** ADR-049 accepted (2026-07-26); implementation in progress — see
+"Work breakdown" below for current per-phase status
 **Normative decision:** [ADR-049](../adr/049-contract-relevance-and-compatibility-configuration.md)
 **Related:** ADR-010, ADR-013, ADR-015, ADR-024, ADR-028/033, ADR-037/040/043, ADR-042, ADR-048, PR #494 / case97
 **Scope:** `compare`, the comparison portion of `scan --against`, service/API
@@ -763,11 +764,12 @@ or aggregate required-target coverage.
 **Gate:** docs and schemas have no `exports == all`, `PRIVATE`, hidden
 `public_contract` preset, or policy/contract conflation.
 
-**Progress:** vocabulary/reason-code/schema-version types reserved
+**Progress:** ADR-049 accepted (2026-07-26, decision maker: napetrov).
+Vocabulary/reason-code/schema-version types reserved
 (`abicheck/contract_relevance_types.py`); nothing wired into detection,
-policy, the CLI, or reports yet. "Accept ADR-049" itself is still
-outstanding — the ADR is Status: Proposed with a pending decision maker, so
-this phase is partial, not done.
+policy, the CLI, or reports yet — the remaining Phase 0 items are pure
+documentation/schema artifacts that ride along with Phase 1's wiring work
+rather than being separately actionable.
 
 ### Phase 1 — effective resolver
 
@@ -786,13 +788,24 @@ and hard errors for unknown `ChangeKind` slugs.
 `CompatibilityEvaluationConfig` and provenance receipt.
 
 **Progress:** the typed `CompatibilityEvaluationConfig` shape (slice 1,
-`abicheck/compatibility_evaluation_config.py`) and the field-level
-precedence resolver (slice 2, `abicheck/compatibility_evaluation_resolver.py`
-`resolve_field`, implementing this phase's conflicts/aliases rules) are
-done. No front end (`cli_options.py`, `.abicheck.yml`, service/API)
-constructs real `FieldCandidate`s from argv/config/recipe input yet, and
-pack-conflict detection plus the unknown-`ChangeKind`-slug hard error are
-not started.
+`abicheck/compatibility_evaluation_config.py`), the field-level precedence
+resolver (slice 2, `abicheck/compatibility_evaluation_resolver.py`
+`resolve_field`, implementing this phase's conflicts/aliases rules), pack
+conflict detection (`detect_pack_conflicts`, same module), and the
+unknown-`ChangeKind`-slug hard error (`policy_file.py`'s `_parse_overrides`
+now raises `PolicyError` instead of warning-and-skipping) are done. The
+first real front-end wiring also landed:
+`abicheck/compatibility_evaluation_wiring.py`'s
+`resolve_legacy_contract_mode` resolves `contract.mode` from the real
+`--scope-public-headers`/`--no-scope-public-headers` CLI flag via
+`resolve_field` — not called from any live command yet (that's the Phase 3
+shadow evaluator's job). Still remaining: wiring any other field
+(`cli_options.py`'s other shared option families, `.abicheck.yml`
+schema/reference docs, service/API request models) to construct real
+`FieldCandidate`s, and loading actual pack *content* (a pack-manifest
+format `detect_pack_conflicts` can consume — today it only has the
+conflict-detection algorithm, no loader) — packs are otherwise unused
+beyond `CompatibilityEvaluationConfig`'s own `ImmutableIdentity` references.
 
 ### Phase 2 — canonical identity and fact conservation
 

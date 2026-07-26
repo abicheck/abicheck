@@ -163,24 +163,35 @@ Core pipeline (in order of data flow):
    - `checker_types.py` — `DiffResult`, result types
    - `checker_policy.py` — verdict classification (ChangeKind enum lives here)
 5. **Policy & Suppression**
-   - `policy_file.py` — YAML policy profiles
+   - `policy_file.py` — YAML policy profiles. An unknown `ChangeKind` slug in
+     an `overrides:` block is a hard load error (`PolicyError`), not a
+     warning-and-skip (ADR-049 D8)
    - `suppression.py` — suppression rules (YAML + ABICC formats)
    - `severity.py` — severity configuration
-   - `contract_relevance_types.py` — ADR-049 Phase 0: reserved contract-mode/
-     relevance vocabulary, reason-code registry, and snapshot/decision schema
-     versions. Leaf module; not yet wired into detection, policy, or reports
-     (see `docs/contribute/plans/public-contract-default.md`)
+   - `contract_relevance_types.py` — ADR-049 Phase 0 (accepted): reserved
+     contract-mode/relevance vocabulary, reason-code registry, and
+     snapshot/decision schema versions. Leaf module; not yet wired into
+     detection or reports (see `docs/contribute/plans/public-contract-default.md`)
    - `compatibility_evaluation_config.py` — ADR-049 Phase 1 slice 1: the
      `CompatibilityEvaluationConfig` typed object (contract/evidence/surface/
      assurance/policy/gate/suppressions + field-level `ValueProvenance`).
-     Shape only — no resolver wires a CLI/config/recipe front end to it yet
+     Shape only — no service/API front end constructs one from real
+     CLI/config/recipe input yet
    - `compatibility_evaluation_resolver.py` — ADR-049 Phase 1 slice 2: the
      field-level precedence resolver (`resolve_field`) implementing D7's
      `explicit_cli/api_request > legacy_alias > run_recipe > run_profile >
      project_config > built_in_default` tier order over already-collected
-     `FieldCandidate`s, plus the conflicting-values/legacy-alias-disagreement
-     usage-error rules. Pure resolution logic — no front end constructs
-     candidates from real argv/config/recipe input yet
+     `FieldCandidate`s, the conflicting-values/legacy-alias-disagreement
+     usage-error rules, and `detect_pack_conflicts` (D8: two selected packs
+     assigning different values to the same `ChangeKind` are a usage error
+     unless an explicit override resolves it). Pure resolution logic
+   - `compatibility_evaluation_wiring.py` — ADR-049 Phase 1's first real
+     front-end wiring: `resolve_legacy_contract_mode` resolves
+     `contract.mode` from the actual `--scope-public-headers`/
+     `--no-scope-public-headers` CLI flag via `resolve_field`. Not called
+     from any live command yet (deferred to the Phase 3 shadow evaluator
+     per the rollout plan) — only `cli_options.py`/service/API still don't
+     construct real `FieldCandidate`s for any other field
 6. **Reporting** — output results
    - `reporter.py` — JSON/Markdown/text output
    - `html_report.py` — HTML reports
