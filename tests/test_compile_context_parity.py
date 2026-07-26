@@ -27,6 +27,7 @@ sides while the per-side ``--old/new-ast-frontend`` override still wins.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import click
@@ -540,6 +541,14 @@ def test_probe_gnu_system_includes_keeps_unresolved_walk_back_libstdcxx(
     assert out == [unresolved_libstdcxx]
 
 
+_SYMLINK_SKIP_REASON = (
+    "creates a directory symlink via Path.symlink_to(target_is_directory=True), "
+    "which needs SeCreateSymbolicLinkPrivilege/Developer Mode on native Windows "
+    "(same rationale as test_runtime_probe.py's symlink-dependent skips)"
+)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason=_SYMLINK_SKIP_REASON)
 def test_probe_gnu_system_includes_resolves_symlink_before_classifying(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -601,6 +610,7 @@ def test_probe_gnu_system_includes_resolves_symlink_before_classifying(
     assert out == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason=_SYMLINK_SKIP_REASON)
 def test_probe_gnu_system_includes_drops_terminal_symlinked_resource_dir(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -644,6 +654,7 @@ def test_probe_gnu_system_includes_drops_terminal_symlinked_resource_dir(
     assert out == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason=_SYMLINK_SKIP_REASON)
 def test_probe_gnu_system_includes_keeps_libstdcxx_symlinked_under_lib_gcc(
     monkeypatch, tmp_path: Path
 ) -> None:
