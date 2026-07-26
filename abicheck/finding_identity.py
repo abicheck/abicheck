@@ -358,7 +358,13 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
         # back-references (S_, S0_, ...). A bare "_ZSt" previously passed
         # this check with nothing after it (Codex review, fresh evidence).
         if rest[1] == "t":
-            return len(rest) > 2
+            # A length-only check let "_ZSt0"/"_ZSt9abc" through: "0" is a
+            # zero-length <source-name> and "9abc" is truncated (claims 9
+            # bytes, has 3) -- neither is a valid unqualified-name after
+            # the namespace prefix. Reuse _operand_looks_valid's same
+            # digit-prefixed <source-name> check (Codex review, fresh
+            # evidence, round 3).
+            return len(rest) > 2 and _operand_looks_valid(rest[2:])
         if rest[1].isdigit() or (rest[1].isalpha() and rest[1].isupper()):
             # Numbered substitution: <seq-id> ::= [0-9A-Z]+, ALWAYS
             # followed by a literal terminating "_" (e.g. "S0_", "SA_") --

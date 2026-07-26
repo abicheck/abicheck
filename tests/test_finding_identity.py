@@ -258,6 +258,14 @@ class TestNormalizeMangledName:
         # with nothing after it.
         assert normalize_mangled_name("_ZSt", "_ZSt") is None
 
+    def test_std_namespace_prefix_with_invalid_digit_name_is_rejected(self) -> None:
+        # Codex review, fresh evidence, round 3: a length-only check let
+        # "_ZSt0"/"_ZSt9abc" through -- "0" is a zero-length <source-name>
+        # and "9abc" is truncated (claims 9 bytes, has 3), neither a valid
+        # unqualified-name after the std:: namespace prefix.
+        assert normalize_mangled_name("_ZSt0", "_ZSt0") is None
+        assert normalize_mangled_name("_ZSt9abc", "_ZSt9abc") is None
+
     def test_other_std_substitution_abbreviations_stay_accepted(self) -> None:
         # Sa/Sb/Sd/Si/So/Ss (each a complete named substitution) and
         # numbered back-references (S_) are unaffected by the "St"
