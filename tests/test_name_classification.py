@@ -124,6 +124,25 @@ def test_is_stdlib_local_name_symbol_nested_but_user_owned_false() -> None:
 @pytest.mark.parametrize(
     "name",
     [
+        # Codex review, PR #641: a user specialization of a standard
+        # customization-point template contains USER-AUTHORED code, so it
+        # must NOT be classified as stdlib-owned even though it nominally
+        # lives in namespace std. Real GCC output for an inline
+        # std::hash<MyType>::operator()'s local static.
+        "_ZZNKSt4hashI6MyTypeEclERKS0_E4salt",
+        "_ZZNKSt4lessI6MyTypeEclERKS0_S3_E1x",
+        "_ZZNKSt7greaterI6MyTypeEclERKS0_S3_E1x",
+    ],
+)
+def test_is_stdlib_local_name_symbol_user_specialized_customization_point_false(
+    name: str,
+) -> None:
+    assert not is_stdlib_local_name_symbol(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
         # A library-under-test's own public inline/template function's local
         # static (Codex review, PR #641): must NOT be classified as
         # stdlib-owned, since consumers can genuinely bind against it.

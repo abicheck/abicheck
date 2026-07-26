@@ -542,6 +542,18 @@ class TestObjectAlignmentReduced:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
 
+    # Codex review, PR #641: a USER specialization of a standard
+    # customization-point template (std::hash<MyType>) contains user-authored
+    # code, so it must still fire even though it nominally lives in std::.
+    # Real GCC output for an inline std::hash<MyType>::operator()'s local
+    # static.
+    def test_user_specialized_std_hash_local_name_still_fires(self):
+        sym = "_ZZNKSt4hashI6MyTypeEclERKS0_E4salt"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
     def test_real_mangled_data_object_still_fires(self):
         # The exemption is by RTTI prefix, not "looks mangled": a genuine
         # namespace-scoped global variable (_ZN…E, not _ZT*) is real data whose

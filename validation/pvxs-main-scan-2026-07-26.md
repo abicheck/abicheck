@@ -365,6 +365,46 @@ integration today, not something to copy-paste as a permanent pin: once a
 release ships the feature (and once this PR's F9 fix merges), retarget to
 that release's tag/commit instead.
 
+**A ninth review pass** (`chatgpt-codex-connector`) found one gap in each of
+the last two fixes:
+
+- The `c9e135a` pin above is this PR's own *base* commit — it predates this
+  PR entirely, so it contains the D2 gate/flag but **not** F9 (the local-name
+  alignment fix this whole report is about). A user following this
+  recommendation today would run a workflow that never exercises the fix.
+  Since this PR hasn't merged yet, there is no mainline commit that has both
+  the gate and F9 simultaneously other than this PR's own branch tip. The
+  pin below now targets that (this PR's HEAD as of the commit fixing this),
+  with the same "retarget once released" caveat as before, made more
+  explicit: this is a temporary, PR-scoped reference, not a stable target.
+- `is_stdlib_local_name_symbol()` classified **any** `std::`-nested local
+  name as stdlib-owned, including a **user's own specialization** of a
+  standard customization-point template (e.g. `template<> struct
+  std::hash<MyType> { ... }` is user-authored code, unlike an ordinary
+  instantiation like `std::vector<MyType>`, which is 100% stdlib-authored
+  code merely instantiated for `MyType`). Real GCC output for an inline
+  `std::hash<MyType>::operator()`'s local static
+  (`_ZZNKSt4hashI6MyTypeEclERKS0_E4salt`) matched the stdlib-owned check and
+  was wrongly exempted. Fixed with a new, deliberately non-exhaustive
+  `_USER_SPECIALIZABLE_STD_TEMPLATE_RE` covering the standard's most commonly
+  specialized customization points (`hash`, `less`, `greater`, `equal_to`,
+  `not_equal_to`, `less_equal`, `greater_equal`, `char_traits`,
+  `numeric_limits`, `iterator_traits`, `default_delete`, `formatter`) — a
+  match on any of these **always** excludes the symbol from stdlib-owned
+  classification, even for a stdlib-provided instantiation like
+  `std::hash<int>`, erring toward reporting a possibly-noisy finding rather
+  than risking hiding a real one (this can never be a complete list: the
+  standard permits specializing effectively any library template this way,
+  a limitation string-based mangled-name classification can't fully close
+  without a real demangler or type-graph analysis).
+
+New regression tests: `test_is_stdlib_local_name_symbol_user_specialized_customization_point_false`
+(`hash`/`less`/`greater` cases) and
+`test_user_specialized_std_hash_local_name_still_fires` (the exact GCC
+example, end-to-end through the detector). Full fast unit suite (19567
+passed / 29 skipped / 4 xfailed), mypy/ruff clean — this is the final state
+of the fix.
+
 ```yaml
 # .github/workflows/abi.yml (for epics-base/pvxs)
 name: ABI check

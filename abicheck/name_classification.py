@@ -177,6 +177,31 @@ _STDLIB_LOCAL_NAME_RE = re.compile(
     r"(?:St|Sa|Sb|Ss|Si|So|Sd|3std|9__gnu_cxx|11__gnu_debug|10__cxxabiv1|7__cxx11)"
 )
 
+# A small, deliberately non-exhaustive set of standard-library templates the
+# C++ standard explicitly permits *user code* to specialize for a
+# program-defined type (customization points) -- unlike an ordinary
+# instantiation such as std::vector<MyType> (100% stdlib-authored code, just
+# instantiated for MyType), a specialization of one of these contains
+# USER-AUTHORED code, so its ABI is the library-under-test's concern even
+# though the mangled name nominally lives in namespace std (Codex review,
+# PR #641: real GCC output for an inline `std::hash<MyType>::operator()`'s
+# local static is `_ZZNKSt4hashI6MyTypeEclERKS0_E4salt` -- the plain
+# namespace check above would otherwise wrongly treat this as toolchain
+# noise). Matching one of these ALWAYS excludes the symbol from the
+# stdlib-owned classification below, even for a stdlib-provided
+# specialization over a builtin type (e.g. std::hash<int>) -- deliberately
+# erring toward reporting a possibly-noisy finding rather than risking
+# hiding a real one, the same guiding principle as the rest of this
+# exemption. This list can never be complete (the standard permits
+# specializing effectively any library template this way), so it only
+# covers the templates most commonly specialized in practice.
+_USER_SPECIALIZABLE_STD_TEMPLATE_RE = re.compile(
+    r"^_ZZZ*N?[rVK]{0,3}[RO]?(?:St|3std)"
+    r"(?:4hash|4less|7greater|8equal_to|12not_equal_to|10less_equal|"
+    r"13greater_equal|11char_traits|14numeric_limits|15iterator_traits|"
+    r"14default_delete|9formatter)I"
+)
+
 # Length-prefixed Itanium namespace components (``<len><name>``) for the
 # conventional internal namespaces. Matching the length prefix avoids false
 # hits on unrelated identifiers that merely contain the substring.
@@ -242,7 +267,13 @@ def is_stdlib_local_name_symbol(name: str) -> bool:
     """Return True if *name* is a local-name-production symbol (see
     :func:`is_local_name_symbol`) whose enclosing function is owned by the
     C++ runtime/standard library, not the library under test. See
-    :data:`_STDLIB_LOCAL_NAME_RE`."""
+    :data:`_STDLIB_LOCAL_NAME_RE`.
+
+    Returns False for a specialization of a user-specializable customization
+    point (e.g. ``std::hash<MyType>``) even though it nominally lives in
+    namespace std -- see :data:`_USER_SPECIALIZABLE_STD_TEMPLATE_RE`."""
+    if _USER_SPECIALIZABLE_STD_TEMPLATE_RE.match(name):
+        return False
     return bool(_STDLIB_LOCAL_NAME_RE.match(name))
 
 
