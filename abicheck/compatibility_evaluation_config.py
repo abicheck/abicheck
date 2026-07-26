@@ -354,11 +354,19 @@ class SurfaceConfig:
     """
 
     explicit_scope: DigestedItems | None = None
+    #: Consumed set-wise (``internal_leak.py``'s ``is_internal_type`` builds
+    #: a ``set(internal_namespaces)`` before membership-testing), unlike
+    #: ``explicit_scope``/``variants`` where a deterministic parser + digest
+    #: already guarantees order-identity for equal-digest inputs --
+    #: canonicalized (sorted+deduped) the same way as ``overlays``/``packs``
+    #: for D7's equivalent-input equality guarantee.
     internal_namespaces: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
-            self, "internal_namespaces", _frozen_tuple(self.internal_namespaces)
+            self,
+            "internal_namespaces",
+            _canonical_tuple(self.internal_namespaces, key=lambda s: s),
         )
 
 

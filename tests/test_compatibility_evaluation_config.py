@@ -583,6 +583,16 @@ class TestDigestedItems:
         assert surface.internal_namespaces == ("detail",)
         assert not isinstance(surface.internal_namespaces, DigestedItems)
 
+    def test_internal_namespaces_order_does_not_affect_equality(self):
+        # internal_leak.py consumes these set-wise (is_internal_type builds
+        # set(internal_namespaces)) -- two equivalent selections in
+        # different orders must compare equal (D7's equivalent-input
+        # equality guarantee), same as overlays/packs.
+        forward = SurfaceConfig(internal_namespaces=("detail", "impl"))
+        backward = SurfaceConfig(internal_namespaces=("impl", "detail"))
+        assert forward == backward
+        assert forward.internal_namespaces == ("detail", "impl")
+
 
 class TestSuppressionConfigDigest:
     # ADR-049 D6/D7 review follow-up: suppressions now distinguish "no
