@@ -414,6 +414,46 @@ example, end-to-end through the detector). Full fast unit suite (19567
 passed / 29 skipped / 4 xfailed), mypy/ruff clean — this is the final state
 of the fix.
 
+**A tenth review pass** (`chatgpt-codex-connector`), on the F8 additive-only
+header-set carve-out and the customization-point allowlist added in this
+same follow-up branch, found three more gaps:
+
+- `check_contracts_comparable`'s F8 carve-out returned `None` as soon as
+  the scope mismatch was waived — an early return from the whole function,
+  which also silently skipped the `profile_fingerprint` check immediately
+  below it. A release that both adds a header (the additive, safe case)
+  **and** changes an unrelated, uncorroborated extraction-profile field
+  (compiler flags, macros, include order — not covered by any existing
+  profile carve-out) would have been wrongly waved through as fully
+  comparable instead of raising `ProfileMismatchError` for the second,
+  genuinely unsafe drift. Confirmed and fixed: the carve-out is now gated
+  into the scope condition's own boolean expression rather than an early
+  `return None` inside the block, so waiving the scope mismatch falls
+  through to the profile check that follows instead of bypassing it.
+  Verified against a real repro (stashed the fix, confirmed the new test
+  fails with "DID NOT RAISE ProfileMismatchError," then restored it).
+- The `_USER_SPECIALIZABLE_STD_TEMPLATE_RE` allowlist added for the
+  `std::hash<MyType>` case was still missing `std::swap` — a *function*
+  template (not a class template like the others already listed) the
+  standard equally explicitly permits specializing for a program-defined
+  type (`template<> inline void std::swap<MyType>(...)`, mangling as
+  `_ZZSt4swapI6MyTypeE...`). Added `4swap` to the alternation.
+- This report's own recommended workflow pin (`612e481f`) predates the
+  commit that introduces `_scope_field_is_additive_superset` (F8) — a user
+  following this recommendation today for the exact `1.5.2 → master`
+  scenario the report describes would still hit the F8 scope mismatch
+  instead of the promised SARIF result. Retargeted below to `d0d34097`
+  (this same follow-up branch's HEAD as of the commit fixing this finding),
+  with the same "temporary, PR-scoped, retarget once released" caveat as
+  every prior round of this same correction.
+
+New regression test: `test_gate_additive_header_set_carve_out_still_checks_profile_afterward`
+(the exact "additive scope + unrelated profile drift" scenario, proven to
+fail without the fix and pass with it) and a new `4swap` parametrize case
+in `test_is_stdlib_local_name_symbol_user_specialized_customization_point_false`.
+Full fast unit suite green, mypy/ruff clean — this is the final state of
+both fixes as of this branch.
+
 ```yaml
 # .github/workflows/abi.yml (for epics-base/pvxs)
 name: ABI check
@@ -435,7 +475,7 @@ jobs:
         with: { fetch-depth: 0 }
       - name: Build old + new (EPICS Base + both pvxs refs, -g -Og)
         run: ./ci/build-two-refs.sh   # produces old/lib/<arch> and new/lib/<arch>
-      - uses: abicheck/abicheck@612e481fc709b144967c66a030d52ba9be38448f  # PR #641 HEAD, 2026-07-26 (temporary -- see note below; retarget to a release once one ships this PR's fixes)
+      - uses: abicheck/abicheck@d0d340970d0fad0030eebfbec8e26e8d7bebfc19  # claude/pvxs-version-scan-02efc5 HEAD, 2026-07-26 (temporary -- see note below; retarget to a release once one ships this branch's fixes)
         with:
           old-library: old/lib/linux-x86_64/${{ matrix.lib }}.so
           new-library: new/lib/linux-x86_64/${{ matrix.lib }}.so
