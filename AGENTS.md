@@ -451,8 +451,16 @@ Pick the right home:
   assembler/preprocessor/linker; `-Wp,-fplugin=./evil.so` reaches cc1 the
   same as a bare `-fplugin=`, `-Wl,-plugin=./evil.dso` loads an LTO linker
   plugin) and Clang's `-Xpreprocessor`/`-Xassembler`/`-Xlinker`
-  (separate-argument equivalent of `-Xclang`). This denylist is
-  necessarily reactive to the delivery *mechanism*, not exhaustive over
+  (separate-argument equivalent of `-Xclang`). A third review round found a
+  deeper issue than another missing flag spelling: every `compile.*` atom
+  (not just `args`) now also rejects quote (`'`/`"`) and backslash (`\`)
+  characters, since `_compose_gcc_options` space-joins every field into one
+  string that `dumper.py`'s `--gcc-options` handling later re-splits with
+  `shlex.split()` — an atom like `"'-fplugin=./evil.so'"` starts with a
+  quote, not `-fplugin=`, so the prefix denylist alone accepted it, but
+  POSIX shlex quote-removal reconstitutes the exact blocked flag on
+  re-split (confirmed with an actual `shlex.split()` round-trip). This
+  denylist is necessarily reactive to the delivery *mechanism*, not exhaustive over
   every dangerous flag a mechanism could carry — a real fix for the
   whack-a-mole shape of this (an allowlist of known-safe ABI flags instead
   of a denylist of known-dangerous ones) was suggested during review but

@@ -1608,6 +1608,60 @@ def test_profile_compile_overlay_rejects_whitespace_injection_in_abi_macros() ->
 
 
 @pytest.mark.parametrize(
+    "field,value",
+    [
+        ("standard", "gnu++17'"),
+        ("stdlib", 'libstdc++"'),
+        ("target", "x86_64\\-linux-gnu"),
+    ],
+)
+def test_profile_compile_overlay_rejects_quote_backslash_in_scalar_fields(
+    field: str, value: str
+) -> None:
+    """A quote/backslash survives the whitespace check but is not inert: the
+    composed compile_gcc_options string is later re-split with shlex, which
+    can reconstitute a different, unvalidated token -- and since shlex
+    parses the whole joined string in one pass, an unbalanced quote in one
+    atom can shift where token boundaries fall in a NEIGHBORING atom too, so
+    this is checked for every compile.* field, not just args (Codex
+    review)."""
+    with pytest.raises(ValueError, match="quote/backslash"):
+        ProjectTargetsConfig.from_dict(
+            {"profiles": {"linux": {"compile": {field: value}}}}
+        )
+
+
+def test_profile_compile_overlay_rejects_quote_backslash_in_abi_macros() -> None:
+    with pytest.raises(ValueError, match="quote/backslash"):
+        ProjectTargetsConfig.from_dict(
+            {
+                "profiles": {
+                    "linux": {"compile": {"abi_macros": {"FOO": "'1'"}}},
+                }
+            }
+        )
+
+
+def test_profile_compile_overlay_rejects_quoted_dangerous_arg_shlex_round_trip() -> (
+    None
+):
+    """The exact bypass Codex demonstrated: compile.args:
+    ["'-fplugin=./evil.so'"] starts with a quote, not `-fplugin=`, so a raw
+    prefix check alone would accept it -- but shlex.split() (what
+    dumper.py's --gcc-options handling actually re-parses the composed
+    string with) strips the quotes and reconstitutes the exact blocked
+    flag."""
+    import shlex
+
+    smuggled = "'-fplugin=./evil.so'"
+    assert shlex.split(smuggled) == ["-fplugin=./evil.so"]  # confirms the bypass
+    with pytest.raises(ValueError, match="quote/backslash"):
+        ProjectTargetsConfig.from_dict(
+            {"profiles": {"linux": {"compile": {"args": [smuggled]}}}}
+        )
+
+
+@pytest.mark.parametrize(
     "dangerous_arg",
     [
         "-Xclang",

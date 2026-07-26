@@ -26,6 +26,17 @@
   cc1 and loads the plugin exactly as a bare `-fplugin=` would, and
   `-Wl,-plugin=./evil.dso` loads an LTO linker plugin the same way — each
   could otherwise reintroduce a blocked argument past this same denylist.)
+- **Every `profiles.<id>.compile.*` atom (`standard`/`stdlib`/`target`/
+  `abi_macros`/`args`) now also rejects quote (`'`/`"`) and backslash (`\`)
+  characters, not just whitespace.** `_compose_gcc_options` space-joins
+  every atom from every field into one string, and the eventual consumer
+  (`dumper.py`'s `--gcc-options` handling) re-splits that whole string with
+  `shlex.split(..., posix=...)` to recover argv — an atom like
+  `"'-fplugin=./evil.so'"` starts with a quote, not `-fplugin=`, so the
+  denylist above alone would accept it, but POSIX shlex quote-removal
+  reconstitutes the exact blocked flag once the composed string is
+  re-split. Found and confirmed during review with a `shlex.split()`
+  round-trip demonstration; regression-tested the same way.
 - **`run-plan generate`'s composed `compile_gcc_options` no longer emits
   `-stdlib=`/`--target=` for a profile declaring `compile.compiler_family:
   gcc`.** Both are Clang-driver-only spellings a real GCC binary rejects

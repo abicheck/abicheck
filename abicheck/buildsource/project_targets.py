@@ -521,6 +521,26 @@ def _reject_dangerous_arg(where: str, key: str, value: str) -> None:
         )
 
 
+#: Characters ``shlex.split()`` (POSIX mode) treats specially: quoting and
+#: escaping. ``run_plan._compose_gcc_options`` space-joins every atom from
+#: every ``compile.*`` field (``standard``/``stdlib``/``target``/
+#: ``abi_macros``/``args``) into ONE string, and the eventual consumer
+#: (``dumper.py``'s ``--gcc-options`` handling) re-splits that whole string
+#: with ``shlex.split(gcc_options, posix=os.name != "nt")`` to recover argv.
+#: An atom containing a quote or backslash survives every check above
+#: unchanged (neither is whitespace, and a quote-wrapped dangerous flag like
+#: ``"'-fplugin=./evil.so'"`` does not start with a bare ``-fplugin=``) but
+#: is not inert: POSIX shlex quote-removal reconstitutes it into the exact
+#: blocked flag once the composed string is re-split, and because shlex
+#: parses the WHOLE joined string in one pass, an unbalanced quote in one
+#: atom can also shift where token boundaries fall in a neighboring atom.
+#: Rejecting these characters in every atom (not just ``args``) keeps the
+#: "one atom == one post-shlex token, independent of its neighbors"
+#: invariant the denylist above and the whitespace check both already rely
+#: on. (Codex review, PR #639.)
+_SHLEX_UNSAFE_CHARS = frozenset("'\"\\")
+
+
 def _safe_profile_atom(
     where: str, key: str, value: str, *, reject_dangerous: bool = False
 ) -> str:
@@ -534,7 +554,10 @@ def _safe_profile_atom(
     ``compile.std``/``compile.defines`` already do. Whitespace would let one
     YAML scalar become several argv tokens (e.g. ``"gnu++17 -Xclang -load
     ./evil.so"``), so it is rejected here at parse time regardless of whether
-    a consumer resolves this field into argv yet.
+    a consumer resolves this field into argv yet. A quote or backslash
+    character is rejected for the same reason — see
+    :data:`_SHLEX_UNSAFE_CHARS`'s docstring — for every field, not just
+    ``args``, since all of them land in the same shlex-re-split string.
 
     ``reject_dangerous`` additionally runs :func:`_reject_dangerous_arg` —
     set only for ``args`` (the one field appended to compiler argv as
@@ -544,6 +567,14 @@ def _safe_profile_atom(
     """
     if not value or any(ch.isspace() for ch in value):
         raise ValueError(f"{where}.{key} must be a single option atom, got {value!r}")
+    if any(ch in _SHLEX_UNSAFE_CHARS for ch in value):
+        raise ValueError(
+            f"{where}.{key} must not contain quote/backslash characters, got "
+            f"{value!r} — these survive re-parsing as inert but are not: the "
+            "composed compile_gcc_options string is later re-split with "
+            "shlex, which would reconstitute them into a different, "
+            "unvalidated token"
+        )
     if reject_dangerous:
         _reject_dangerous_arg(where, key, value)
     return value
