@@ -757,6 +757,32 @@ class TestResolveChangeIdentity:
         assert "_Znwm" not in first_identity.primary_id
         assert all("_Znwm" not in a for a in first_identity.aliases)
 
+    def test_visibility_leak_is_batch_shaped(self) -> None:
+        # Codex review, fresh evidence: diff_platform_elf_dynamic.py's
+        # _diff_visibility_leak fires once per release with a fixed
+        # symbol="<visibility>" sentinel (never a real exported name) and
+        # embeds up to five names sampled from unsorted old.functions into
+        # description -- two semantically identical snapshots serialized in
+        # a different function order would otherwise get different
+        # discriminators and fragment into separate primary_ids.
+        first = Change(
+            kind=ChangeKind.VISIBILITY_LEAK,
+            symbol="<visibility>",
+            description="_internal_helper_a, _internal_helper_b",
+            old_value="2",
+        )
+        second = Change(
+            kind=ChangeKind.VISIBILITY_LEAK,
+            symbol="<visibility>",
+            description="_internal_helper_b, _internal_helper_a",
+            old_value="2",
+        )
+        first_identity = resolve_change_identity(first)
+        second_identity = resolve_change_identity(second)
+        assert first_identity.primary_id == second_identity.primary_id
+        assert "_internal_helper_a" not in first_identity.primary_id
+        assert all("_internal_helper_a" not in a for a in first_identity.aliases)
+
     def test_per_symbol_gnu_unique_transition_is_still_canonical(self) -> None:
         # Regression guard: _check_binding_change's genuine per-symbol
         # SYMBOL_BINDING_BECAME_UNIQUE emission -- a real SymbolBinding value

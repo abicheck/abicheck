@@ -136,10 +136,24 @@ class FieldCandidate:
         # its set comprehensions with "TypeError: unhashable type" even
         # with only one candidate, instead of the deliberate configuration
         # error this constructor exists to produce (Codex review).
+        #
+        # isinstance(..., Hashable) only checks that the *type* defines
+        # __hash__, not that every instance actually hashes -- a tuple
+        # nesting an unhashable element (e.g. `([],)`) passes that check but
+        # still raises "TypeError: unhashable type: 'list'" from `hash()`
+        # itself. Call hash() directly and translate the failure to the same
+        # boundary error (Codex review, fresh evidence).
         if not isinstance(self.value, Hashable):
             raise TypeError(
                 f"FieldCandidate.value must be hashable, not {self.value!r}."
             )
+        try:
+            hash(self.value)
+        except TypeError as exc:
+            raise TypeError(
+                f"FieldCandidate.value must be hashable, not {self.value!r} "
+                f"(contains an unhashable element: {exc})."
+            ) from exc
 
     @property
     def layer(self) -> SelectorLayer:

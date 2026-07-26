@@ -606,10 +606,21 @@ _BATCH_SHAPED_OLD_VALUES = {
 #: SymbolBinding-style sibling to disambiguate against, since these two
 #: ``ChangeKind`` values have exactly one producer each (verified: no other
 #: ``make_change`` call site in the codebase emits either kind).
+#:
+#: ``visibility_leak`` joins this set for the same reason (Codex review,
+#: fresh evidence): ``diff_platform_elf_dynamic.py``'s ``_diff_visibility_leak``
+#: is the sole producer, fires once per release with a fixed
+#: ``symbol="<visibility>"`` sentinel (never a real exported name), and
+#: embeds up to five names sampled from unsorted ``old.functions`` into
+#: ``description`` -- two semantically identical snapshots whose functions
+#: happen to serialize in a different order would otherwise get different
+#: discriminators (via ``description``) and fragment into separate
+#: ``primary_id``s for the same logical finding.
 _ALWAYS_BATCH_SHAPED_KIND_SLUGS = frozenset(
     {
         "allocator_replacement_added",
         "allocator_replacement_removed",
+        "visibility_leak",
     }
 )
 

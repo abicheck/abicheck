@@ -274,6 +274,20 @@ class TestFieldCandidateLayerProperty:
                 value=["public"],  # type: ignore[arg-type]
             )
 
+    def test_nested_unhashable_value_is_rejected(self):
+        # Codex review, fresh evidence: isinstance(..., Hashable) only
+        # checks that the *type* defines __hash__, not that every instance
+        # actually hashes -- a tuple nesting an unhashable element (e.g.
+        # `([],)`) passed the isinstance check outright, and resolve_field()
+        # would later crash inside its set comprehension with "TypeError:
+        # unhashable type: 'list'" instead of the deliberate configuration
+        # error this constructor exists to produce.
+        with pytest.raises(TypeError, match=r"FieldCandidate\.value"):
+            FieldCandidate(
+                provenance=ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI),
+                value=([],),  # type: ignore[arg-type]
+            )
+
 
 class TestRunProfileFieldScoping:
     # ADR-049 D7 scopes RUN_PROFILE precedence to "execution fields only"
