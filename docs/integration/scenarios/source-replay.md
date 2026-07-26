@@ -32,8 +32,10 @@ where the *build* emits source facts as it compiles instead.
   does **not** install clang on Linux/macOS either; pin
   `dependency-source: conda-forge-clang20` (or `system`, or install clang
   yourself) instead. Without clang, L3 build-context evidence (this
-  scenario's compile database) is still collected — only the clang-dependent
-  L4 replay and L5 graph stages are skipped, not the whole source scan; see
+  scenario's compile database) is still collected, and the structural L5
+  target/compile-unit/source graph still builds from that L3 evidence alone
+  — only L4 replay and the clang-backed call/type/include-graph edges of L5
+  are skipped, not the whole source scan or the whole L5 graph; see
   [Source-Scan Depth](../../use/scan-levels.md) for what each layer needs.
   Check the `layers`/coverage output to confirm L4 actually ran. See
   [GitHub Action: dependency-source](../../use/github-action.md).
