@@ -78,6 +78,11 @@ def _frozen_tuple(s: Sequence[_T], *, element_type: type[_T]) -> tuple[_T, ...]:
     required, same as ``_canonical_tuple``'s, since every current caller
     has a known element type to validate against; it rejects any element
     that isn't an instance, the same way ``_canonical_tuple``'s does.
+
+    Materializes *s* into a tuple before validating: a one-shot iterable
+    (e.g. a generator expression) would otherwise be fully consumed by the
+    validation pass, so the later ``tuple(s)`` build would silently return
+    empty instead of the caller's actual items (Codex review).
     """
     if isinstance(s, (str, bytes)):
         raise TypeError(
@@ -86,12 +91,13 @@ def _frozen_tuple(s: Sequence[_T], *, element_type: type[_T]) -> tuple[_T, ...]:
             "characters, not the intended elements; wrap a single value in "
             "a list/tuple explicitly."
         )
-    invalid = [item for item in s if not isinstance(item, element_type)]
+    materialized = tuple(s)
+    invalid = [item for item in materialized if not isinstance(item, element_type)]
     if invalid:
         raise TypeError(
             f"Every element must be a {element_type.__name__}, not: {invalid!r}"
         )
-    return tuple(s)
+    return materialized
 
 
 def _canonical_tuple(
@@ -134,6 +140,12 @@ def _canonical_tuple(
     it into individual characters (``("a", "i")``) rather than raising,
     silently selecting the wrong contract roots or namespace hints instead
     of failing validation (Codex review).
+
+    Materializes *s* into a tuple before validating, same reason as
+    :func:`_frozen_tuple`: a one-shot iterable would otherwise be fully
+    consumed by the validation pass, so the later ``sorted(s, ...)`` would
+    silently sort nothing instead of the caller's actual items (Codex
+    review).
     """
     if isinstance(s, (str, bytes)):
         raise TypeError(
@@ -142,12 +154,13 @@ def _canonical_tuple(
             "characters, not the intended elements; wrap a single value in "
             "a list/tuple explicitly."
         )
-    invalid = [item for item in s if not isinstance(item, element_type)]
+    materialized = tuple(s)
+    invalid = [item for item in materialized if not isinstance(item, element_type)]
     if invalid:
         raise TypeError(
             f"Every element must be a {element_type.__name__}, not: {invalid!r}"
         )
-    return tuple(dict.fromkeys(sorted(s, key=key)))
+    return tuple(dict.fromkeys(sorted(materialized, key=key)))
 
 
 def _require_nonempty_digest(sha256: str, *, owner: str) -> None:

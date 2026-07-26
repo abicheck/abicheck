@@ -232,17 +232,22 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
     if rest[0] == "L" and len(rest) > 1 and rest[1].isdigit():
         # GCC internal-linkage prefix (_ZL7g_count) + <source-name>
         return _valid_source_name(rest[1:])
-    if rest[0] == "T" and len(rest) > 1 and rest[1] in "VITSHW":
+    if rest[0] == "T" and len(rest) > 2 and rest[1] in "VITSHW":
         # <special-name>: vtable(V)/VTT(T)/typeinfo(I)/typeinfo-name(S)/
         # thread-local-init(H)/thread-local-wrapper(W). Previously included
         # unverified "F"/"J" (CodeRabbit review: no corresponding Itanium
         # production found for either) -- dropped rather than guessed at,
         # matching this module's ambiguity-safe bias (a real production
         # this set is missing only degrades to NORMALIZED, never a wrong
-        # promotion the other way).
+        # promotion the other way). `len(rest) > 2`, not `> 1`: every one of
+        # these productions requires an operand (a type or source-name)
+        # after the two-letter prefix -- a bare "_ZTV" has no such operand
+        # and is not a complete encoding (Codex review).
         return True
-    if rest[0] == "G" and len(rest) > 1 and rest[1] in "VR":
-        # guard variable / reference temporary
+    if rest[0] == "G" and len(rest) > 2 and rest[1] in "VR":
+        # guard variable / reference temporary -- same "requires an operand
+        # after the two-letter prefix" reasoning as <special-name> above; a
+        # bare "_ZGV" is not a complete encoding either.
         return True
     if rest[0] == "S" and len(rest) > 1 and (rest[1].isalnum() or rest[1] == "_"):
         # substitution-abbreviated std:: name

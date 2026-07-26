@@ -187,6 +187,16 @@ class TestContractConfigUnresolvedBehavior:
         contract = ContractConfig(mode=ContractMode.PUBLIC, overlays=("a", "a", "b"))
         assert contract.overlays == ("a", "b")
 
+    def test_generator_overlays_is_not_silently_emptied(self):
+        # Codex review: same _canonical_tuple gap as DigestedItems.items --
+        # a one-shot generator was fully consumed by the validation pass
+        # before sorted(s, ...) ran, silently discarding the caller's
+        # actual overlays.
+        contract = ContractConfig(
+            mode=ContractMode.PUBLIC, overlays=(x for x in ["b", "a"])
+        )
+        assert contract.overlays == ("a", "b")
+
     def test_raw_string_pack_element_is_rejected(self):
         # packs: tuple[ImmutableIdentity, ...] isn't runtime-enforced per
         # element -- a bare slug would otherwise crash with AttributeError
@@ -829,6 +839,15 @@ class TestDigestedItems:
         variants = DigestedItems(items=["linux-x86_64", "windows-msvc"], sha256="abc")
         assert variants.items == ("linux-x86_64", "windows-msvc")
         assert variants.sha256 == "abc"
+
+    def test_generator_items_is_not_silently_emptied(self):
+        # Codex review: the validation comprehension previously consumed a
+        # one-shot iterable (e.g. a generator expression) in full, so the
+        # subsequent tuple(s)/sorted(s, ...) build ran against an already-
+        # exhausted iterator and silently returned no items instead of the
+        # caller's actual ones.
+        variants = DigestedItems(sha256="abc", items=(x for x in ["a", "b"]))
+        assert variants.items == ("a", "b")
 
     def test_same_item_names_different_digest_are_distinguishable(self):
         # The whole point: identical item names, different source content.

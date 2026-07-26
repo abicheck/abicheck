@@ -127,6 +127,21 @@ class TestNormalizeMangledName:
     def test_guard_variable_special_name_is_accepted(self) -> None:
         assert normalize_mangled_name("_ZGVfoo", None) == "_ZGVfoo"
 
+    def test_bare_special_name_prefix_without_operand_is_rejected(self) -> None:
+        # Codex review: every <special-name> production (vtable/VTT/
+        # typeinfo/typeinfo-name/thread-local-init/thread-local-wrapper)
+        # requires an operand (a type or source-name) after its two-letter
+        # prefix -- a bare "_ZTV" was previously accepted outright despite
+        # having no operand at all and not being a complete encoding.
+        assert normalize_mangled_name("_ZTV", "_ZTV") is None
+        assert normalize_mangled_name("_ZTH", "_ZTH") is None
+
+    def test_bare_guard_variable_prefix_without_operand_is_rejected(self) -> None:
+        # Same gap, same fix, for the guard-variable/reference-temporary
+        # prefix: "_ZGV" alone has no name to guard and is not a complete
+        # encoding either.
+        assert normalize_mangled_name("_ZGV", "_ZGV") is None
+
     def test_nested_name_is_accepted(self) -> None:
         assert (
             normalize_mangled_name("_ZN6Widget8getValueEv", None)
