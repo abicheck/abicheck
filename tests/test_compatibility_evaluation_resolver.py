@@ -118,13 +118,29 @@ class TestConflictingFieldValues:
         assert exc_info.value.field_name == "contract.mode"
         assert len(exc_info.value.candidates) == 2
 
-    def test_conflict_at_a_lower_tier_than_the_winner_does_not_raise(self):
-        # The winning tier (run_recipe) is unambiguous; a conflict among
-        # project_config candidates never gets reached.
+    def test_conflict_in_a_shadowed_lower_tier_still_raises(self):
+        # ADR-049 D7's same-layer-conflict rule isn't scoped to only the
+        # winning tier: a run_recipe value resolves the field, but the
+        # conflicting project_config candidates underneath it must still be
+        # caught now, not silently exposed later if run_recipe is removed.
         candidates = [
             _candidate(SelectorLayer.RUN_RECIPE, ContractMode.PUBLIC),
             _candidate(SelectorLayer.PROJECT_CONFIG, ContractMode.ALL),
             _candidate(SelectorLayer.PROJECT_CONFIG, ContractMode.EXPORTS),
+        ]
+        with pytest.raises(ConflictingFieldValuesError) as exc_info:
+            resolve_field("contract.mode", candidates, default=_default())
+        assert exc_info.value.field_name == "contract.mode"
+        assert {c.layer for c in exc_info.value.candidates} == {
+            SelectorLayer.PROJECT_CONFIG
+        }
+
+    def test_equivalent_duplicates_in_a_shadowed_lower_tier_do_not_raise(self):
+        # A shadowed tier with equal (not conflicting) values is fine.
+        candidates = [
+            _candidate(SelectorLayer.RUN_RECIPE, ContractMode.PUBLIC),
+            _candidate(SelectorLayer.PROJECT_CONFIG, ContractMode.ALL),
+            _candidate(SelectorLayer.PROJECT_CONFIG, ContractMode.ALL),
         ]
         value, prov = resolve_field("contract.mode", candidates, default=_default())
         assert value is ContractMode.PUBLIC

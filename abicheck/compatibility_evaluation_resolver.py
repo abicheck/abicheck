@@ -155,10 +155,13 @@ def resolve_field(
     arbitrary but deterministic choice among genuinely equivalent inputs
     (D7 "equivalent duplicates... report the winning selected-by chain").
 
-    Raises :class:`ConflictingFieldValuesError` if two candidates in the
-    winning tier disagree, and :class:`LegacyAliasConflictError` if an
-    explicit CLI/API value disagrees with a legacy-alias value for the same
-    field, unless ``require_legacy_alias_agreement=False``.
+    Raises :class:`ConflictingFieldValuesError` if two candidates *at the
+    same precedence tier* disagree -- checked for every populated tier, not
+    only the winning one, since a shadowed layer's contradiction must not
+    surface later merely because a higher-precedence override is removed --
+    and :class:`LegacyAliasConflictError` if an explicit CLI/API value
+    disagrees with a legacy-alias value for the same field, unless
+    ``require_legacy_alias_agreement=False``.
     """
     if default.layer is not SelectorLayer.BUILT_IN_DEFAULT:
         raise ValueError(
@@ -181,13 +184,21 @@ def resolve_field(
             ):
                 raise LegacyAliasConflictError(field_name, explicit[0], legacy[0])
 
+    winner: FieldCandidate | None = None
     for tier in _PRECEDENCE_TIERS:
         tier_candidates = [c for c in all_candidates if c.layer in tier]
         if not tier_candidates:
             continue
+        # ADR-049 D7's "contradictory values at the same selector layer are
+        # usage errors" is not scoped to only the winning tier: a shadowed
+        # layer's internal conflict must still be caught now, not silently
+        # exposed later if the higher-precedence override is ever removed.
         if len({c.value for c in tier_candidates}) > 1:
             raise ConflictingFieldValuesError(field_name, tier_candidates)
-        winner = tier_candidates[0]
+        if winner is None:
+            winner = tier_candidates[0]
+
+    if winner is not None:
         return winner.value, winner.provenance
 
     raise AssertionError(  # pragma: no cover - default always matches a tier
