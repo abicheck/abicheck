@@ -1625,6 +1625,13 @@ def test_profile_compile_overlay_rejects_whitespace_injection_in_abi_macros() ->
         "--config=evil.cfg",
         "--config-system-dir=/tmp/evil",
         "--config-user-dir=/tmp/evil",
+        "-Xpreprocessor",
+        "-Xassembler",
+        "-Xlinker",
+        "-Wp,-fplugin=./evil.so",
+        "-Wa,--defsym,evil=1",
+        "-Wl,-plugin=./evil.dso",
+        "-Wl,--plugin=./evil.dso",
     ],
 )
 def test_profile_compile_overlay_rejects_dangerous_args(dangerous_arg: str) -> None:

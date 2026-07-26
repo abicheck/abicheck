@@ -442,34 +442,58 @@ class BundleSpec:
 
 
 #: Flags that reach a compiler frontend's own plugin/response-file/spec-
-#: substitution/config-file machinery rather than an ABI-relevant compile
-#: axis. Each is a single whitespace-free atom (so ``_safe_profile_atom``'s
-#: smuggling check alone does not reject it) that either loads arbitrary
-#: code into the compiler process
-#: (``-Xclang``/``-load``/``-fplugin=``/``-fpass-plugin=``), re-expands
-#: attacker-controlled file content into more argv (``@response-file``,
-#: Clang's ``--config``/``--config=<file>`` — a "configuration file" of
-#: additional command-line options, including ``-fplugin=``, so leaving it
-#: unblocked would let it re-smuggle back in everything else this denylist
-#: rejects; the ``--config`` prefix below also catches
-#: ``--config-system-dir=``/``--config-user-dir=``, which redirect where an
-#: implicit/explicit config file is looked up), or substitutes the
-#: compiler driver's own trusted built-in command line for one read from
-#: disk (``-specs=``/``--specs=`` -- GCC's driver accepts both spellings,
-#: translating the GNU-style ``--specs`` long-option form to ``-specs``
-#: internally, so both must be blocked -- and ``-wrapper``).
+#: substitution/config-file/subprocess-forwarding machinery rather than an
+#: ABI-relevant compile axis. Each is a single whitespace-free atom (so
+#: ``_safe_profile_atom``'s smuggling check alone does not reject it) that
+#: falls into one of four families:
+#:
+#: - loads arbitrary code directly into the compiler process
+#:   (``-Xclang``/``-load``/``-fplugin=``/``-fpass-plugin=``);
+#: - re-expands attacker-controlled file content into more argv
+#:   (``@response-file``; Clang's ``--config``/``--config=<file>`` -- a
+#:   "configuration file" of additional command-line options, including
+#:   ``-fplugin=``, so leaving it unblocked would let it re-smuggle back in
+#:   everything else this denylist rejects; the ``--config`` prefix below
+#:   also catches ``--config-system-dir=``/``--config-user-dir=``, which
+#:   redirect where an implicit/explicit config file is looked up);
+#: - substitutes the compiler driver's own trusted built-in command line
+#:   for one read from disk (``-specs=``/``--specs=`` -- GCC's driver
+#:   accepts both spellings, translating the GNU-style ``--specs``
+#:   long-option form to ``-specs`` internally, so both must be blocked --
+#:   and ``-wrapper``); or
+#: - **forwards its entire payload verbatim into a different subprocess**
+#:   (preprocessor/assembler/linker), which can smuggle any of the above
+#:   past a prefix check on the *outer* atom alone: GCC's ``-Wa,``/
+#:   ``-Wp,``/``-Wl,`` pass their comma-joined payload straight to the
+#:   assembler/preprocessor/linker (confirmed via ``gcc --help``) --
+#:   ``-Wp,-fplugin=./evil.so`` reaches cc1 and loads the plugin exactly as
+#:   a bare ``-fplugin=`` would, and ``-Wl,-plugin=./evil.dso`` loads an
+#:   LTO linker plugin the same way (confirmed via ``ld --help``); Clang's
+#:   separate-argument equivalents ``-Xpreprocessor``/``-Xassembler``/
+#:   ``-Xlinker`` are the same mechanism as the already-blocked
+#:   ``-Xclang``, so blocking the forwarding flag itself (its target is a
+#:   separate, otherwise-inert atom) is sufficient, same as ``-Xclang``.
+#:
 #: ``profiles.<id>.compile.args`` is documented (this module's docstring,
 #: ``ProfileCompileSpec``'s own docstring) as a "normalized extra args"
 #: escape hatch for ABI-relevant flags an auto-discovered, untrusted
 #: ``.abicheck.yml`` may declare — never an executable-code path. Checked as
-#: an exact match or a prefix (for the ``=``-joined spellings) against each
-#: ``args`` atom; case-sensitive, matching how compiler CLIs themselves
-#: parse these flags. (Codex review, PR #639: the initial denylist omitted
-#: ``--config``, which could reintroduce a blocked ``-fplugin=`` argument
-#: via a config file, and omitted the ``--specs`` double-dash spelling of
-#: ``-specs``, which GCC accepts identically.)
+#: an exact match or a prefix (for the ``=``-/``,``-joined spellings)
+#: against each ``args`` atom; case-sensitive, matching how compiler CLIs
+#: themselves parse these flags. This denylist targets the *delivery
+#: mechanism* (a flag whose whole job is loading code or re-expanding more
+#: argv), not every dangerous flag those mechanisms could carry -- a new
+#: subprocess-forwarding mechanism found later belongs here as another
+#: blocked prefix, not as a growing list of the individual flags it could
+#: smuggle. (Codex review, PR #639: the initial denylist
+#: omitted ``--config``, the ``--specs`` double-dash spelling of
+#: ``-specs``, and the whole ``-Wa,``/``-Wp,``/``-Wl,``/``-Xpreprocessor``/
+#: ``-Xassembler``/``-Xlinker`` subprocess-forwarding family.)
 _DANGEROUS_ARG_PREFIXES = (
     "-Xclang",
+    "-Xpreprocessor",
+    "-Xassembler",
+    "-Xlinker",
     "-load",
     "-fplugin=",
     "-fplugin-arg-",
@@ -480,6 +504,9 @@ _DANGEROUS_ARG_PREFIXES = (
     "--specs",
     "-wrapper",
     "--config",
+    "-Wa,",
+    "-Wp,",
+    "-Wl,",
     "@",
 )
 

@@ -440,9 +440,28 @@ Pick the right home:
   boundary gap in `profiles.<id>.compile.args`: the existing whitespace-
   smuggling check (`_safe_profile_atom`) rejected one YAML scalar expanding
   into multiple argv tokens, but not a single, whitespace-free dangerous
-  atom (`-Xclang`, `-load`, `-fplugin=`, `-fpass-plugin=`, `-specs=`,
-  `-wrapper`, `@response-file`) — each now individually rejected. Still
-  **not** implemented, and out of scope for that fix (each needs its own
+  atom. `_DANGEROUS_ARG_PREFIXES` (`project_targets.py`) now blocks four
+  families of these: direct code-loading flags (`-Xclang`, `-load`,
+  `-fplugin=`, `-fpass-plugin=`), file/argv re-expansion (`@response-file`,
+  Clang's `--config`/`--config=`), driver command-line substitution
+  (`-specs=`/`--specs=`, `-wrapper`), and — added across two follow-up
+  review rounds on the same PR, since each is the same underlying
+  "opaque subprocess-forwarding" mechanism as the others — GCC's
+  `-Wa,`/`-Wp,`/`-Wl,` (comma-joined payload passed straight to the
+  assembler/preprocessor/linker; `-Wp,-fplugin=./evil.so` reaches cc1 the
+  same as a bare `-fplugin=`, `-Wl,-plugin=./evil.dso` loads an LTO linker
+  plugin) and Clang's `-Xpreprocessor`/`-Xassembler`/`-Xlinker`
+  (separate-argument equivalent of `-Xclang`). This denylist is
+  necessarily reactive to the delivery *mechanism*, not exhaustive over
+  every dangerous flag a mechanism could carry — a real fix for the
+  whack-a-mole shape of this (an allowlist of known-safe ABI flags instead
+  of a denylist of known-dangerous ones) was suggested during review but
+  deliberately not done here: `args` is documented as a general escape
+  hatch for ABI-relevant flags this codebase cannot enumerate a priori
+  (GCC/Clang/MSVC each have their own vocabulary), and a strict allowlist
+  would need that vocabulary built out first — its own scoped project, not
+  a reactive expansion of this fix. Still **not** implemented, and out of
+  scope for that fix (each needs its own
   scoped design, not a drive-by extension of the same narrow correction):
   a real toolchain-identity probe that validates a resolved `binding`'s
   actual compiler family/version/target against the profile's declared
