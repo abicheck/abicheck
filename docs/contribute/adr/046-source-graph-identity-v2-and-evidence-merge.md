@@ -688,6 +688,19 @@ single change.
      without any of those six modules being touched — the risky part of the
      original D4 sketch never had to happen for this scoped version to
      deliver real value.
+  3. **Open research question (not yet answered): is the full
+     `GraphNode.id`-generation migration still needed at all?** Every known
+     current consumer of stable cross-version identity (impact/proof-path
+     linking via ADR-048's `CanonicalIdentity`) is already served by the
+     alias layer above without touching `GraphNode.id`. Before scheduling
+     the six-module lockstep rewrite in item 2, the concrete gap it would
+     close needs to be named explicitly — e.g. a producer that needs a
+     *single* id without alias indirection, or a performance case where
+     resolving through `aliases` on every lookup is measurably too slow.
+     Absent a named consumer with that requirement, the honest status of
+     this item may be "not planned" rather than "deferred", the same
+     distinction ADR-052 draws between its own still-open items and the
+     ones it explicitly closed as out of scope.
 - `tests/test_entity_resolver.py`: `EntityResolver.resolve` resolves a USR to
   its canonical id, falls back to a real mangled name then a normalized
   qualified-name signature when no USR is available (`entity_identity`'s own

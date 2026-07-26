@@ -1,7 +1,7 @@
-# ADR-052: Unified Impact Assessment Model (G29 Phase 3, slices 1-8)
+# ADR-052: Unified Impact Assessment Model (G29 Phase 3, slices 1-9)
 
 **Date:** 2026-07-22
-**Status:** Accepted — slices 1-8 implemented. Slice 6 (G29 Phase 3
+**Status:** Accepted — slices 1-9 implemented. Slice 6 (G29 Phase 3
 follow-up) closed two items this ADR originally left open: `--format junit`
 now renders `--report-mode root-cause` (additive `rootCauseId`/`rootCause`
 attributes on each `<failure>`, not a restructured `<testcase>` tree — see
@@ -12,14 +12,18 @@ attributes on each `<failure>`, not a restructured `<testcase>` tree — see
 Slice 7 (G29 Phase 3 follow-up) closed the remaining item: `root_cause_id`/
 `root_cause_display`/`impact_group_id` now exist on `ImpactAssessment`,
 computed report-wide and passed into `assess_change` as a plain parameter —
-see "Slice 7" below. Slice 8 (G29 Phase 3 follow-up) delivers the D2
-direction flip as a deliberately *scoped* subset — one producer
-(`internal_leak.py`'s two leak-finding builders) constructs `ImpactAssessment`
-directly and `assess_change` reuses its evidence fields, verified safe by a
-pipeline-ordering audit; the remaining four producer modules named in D2's
-original decision (`post_processing.MarkReachability` especially, the
-suppression-safety-critical one) are **not** migrated — see "Slice 8" below
-for the full scoping rationale.
+see "Slice 7" below. Slices 8-9 (G29 Phase 3 follow-up) deliver the D2
+direction flip as a deliberately *scoped* subset — two producers
+(`internal_leak.py`'s two leak-finding builders, Slice 8; `appcompat.py`'s
+one consumer-overlay builder, Slice 9) construct `ImpactAssessment` directly
+and `assess_change` reuses their evidence fields, each verified safe by its
+own pipeline-ordering/purity audit; the remaining three producers named in
+D2's original decision (`post_processing.MarkReachability` especially, the
+suppression-safety-critical one; `source_graph_findings.py`'s nine
+construction sites; and `suppression.py`, whose own role in D2 turned out to
+need clarification — see "Deliberately not implemented this slice") are
+**not** migrated — see "Slice 8"/"Slice 9" below for the full scoping
+rationale.
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 3's own
 "needs its own ADR" gate — [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s
@@ -766,6 +770,35 @@ Instead, this slice delivers a **verifiably safe, narrower** version:
   simulated later suppression pass untouched while `decision` correctly
   reflects it.
 
+## Slice 9 — D2 direction flip, second producer (G29 Phase 3 follow-up)
+
+Migrates `appcompat.py`'s single `CONSUMER_REQUIRED_SYMBOL_REMOVED` overlay
+construction (`scope_diff_to_app`) the same way Slice 8 migrated
+`internal_leak.py`'s two builders — chosen next because, like Slice 8's
+targets, it is a single, well-isolated construction site rather than the
+nine-site sweep `source_graph_findings.py` would need (see "Deliberately not
+implemented this slice" below for why that one stays open).
+
+- `overlay_change.impact_assessment = assess_change(overlay_change)` is set
+  immediately after `make_change(ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+  ...)` constructs it, before `suppression.evaluate(overlay_change)` runs.
+- **Verified safe, not assumed**: `Suppression.evaluate`/`matches`/
+  `would_withhold`/`would_withhold_unknown_reachability` (`suppression.py`)
+  are confirmed pure reads of the `Change` passed in — none assigns to it —
+  so nothing between the cache write and any later `assess_change()` read
+  touches `overlay_change`'s evidence fields. `_build_suppression_overreach_change`
+  (`post_processing.py`), which `scope_diff_to_app` calls on a withheld
+  match, builds a *different* `Change` (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`)
+  that sets no reachability fields of its own — left uncached, matching
+  Slice 8's own precedent of only caching a finding that actually carries
+  evidence.
+- `tests/test_appcompat.py::test_consumer_required_symbol_removed_carries_impact_assessment`:
+  mirrors `test_internal_leak.py`'s cache-assertion pattern —
+  `assess_change(overlay) == overlay.impact_assessment`.
+- **Three producers now remain unmigrated**: `source_graph_findings.py`,
+  `post_processing.MarkReachability`, and the still-unclear `suppression.py`
+  case (see below) — down from four after Slice 8.
+
 ## Deliberately not implemented this slice
 
 Per the "ship each phase independently" mitigation this initiative committed
@@ -786,22 +819,68 @@ remaining four tiers):
   rather than added as permanently-`None` fields.
 - **The full D2 direction flip** (every flat `Change` field becoming a
   derived view over `ImpactAssessment`, across all five producer modules
-  D2's decision text names) — still not attempted in full; Slice 8 (above)
-  delivers a verifiably safe, single-producer subset instead of forcing the
-  whole flip through in one pass. `post_processing.MarkReachability`
-  specifically — several performance-sensitive graph walks under active
-  suppression-safety guarantees (ADR-044) — remains untouched, the same
-  risk class this ADR's own D2 section originally flagged.
-  `source_graph_findings.py`/`suppression.py`/`appcompat.py` are likewise
-  unmigrated. Attempting all five in one pass would still be exactly the
-  kind of rushed, high-blast-radius change the "needs its own ADR/scoped
-  design pass" bar (this ADR's own header, ADR-046 D4, and CLAUDE.md "M1-3")
-  exists to prevent — a real regression to any of the remaining four would
-  risk suppression correctness, not just this reporting layer. Each
-  remaining producer is its own follow-up slice, migrated only once the
-  same kind of pipeline-ordering safety audit Slice 8 did for
-  `internal_leak.py` has been done for it specifically — a real audit, not
-  an assumption carried over from a different module's safety proof.
+  D2's decision text names) — still not attempted in full; Slices 8-9
+  (above) deliver a verifiably safe, two-producer subset instead of forcing
+  the whole flip through in one pass. Attempting all five in one pass would
+  still be exactly the kind of rushed, high-blast-radius change the "needs
+  its own ADR/scoped design pass" bar (this ADR's own header, ADR-046 D4,
+  and CLAUDE.md "M1-3") exists to prevent — a real regression to any of the
+  remaining three would risk suppression correctness, not just this
+  reporting layer. Each remaining producer is its own follow-up slice,
+  migrated only once the same kind of pipeline-ordering safety audit Slice 8
+  did for `internal_leak.py` has been done for it specifically — a real
+  audit, not an assumption carried over from a different module's safety
+  proof. Per-producer status, refined by direct code inspection rather than
+  carried forward from the original decision text unchanged:
+  - **`source_graph_findings.py`** — not one construction site like
+    `internal_leak.py`/`appcompat.py`, but **nine**:
+    `_mapping_drift_findings`, `_public_reachability_findings` (two),
+    `_generated_public_closure_findings`, `_call_reachability_findings`,
+    `_include_graph_drift_findings`, `_build_option_reach_findings`,
+    `_internal_dependency_findings`, `_target_dependency_findings`,
+    `_symbol_owner_findings`. Each needs its own check for whether anything
+    downstream of `diff_source_graph_findings()` (in particular, whether its
+    output changes flow through `post_processing.DEFAULT_PIPELINE` before
+    reaching a report) still mutates evidence fields after construction,
+    before caching is safe — a bigger audit than Slice 8/9's single-site
+    ones, plausibly worth a shared `_finalize_finding(change)` helper
+    invoked at the end of all nine instead of nine independent edits.
+  - **`post_processing.MarkReachability`** — mutates existing `Change`
+    objects in place (not a constructor site), via four separate graph
+    walks (`compute_leak_paths`/`compute_call_graph_leak_paths` on old and
+    new) plus `ScopeOrigin.PUBLIC_HEADER` logic, and only runs at all when
+    `ctx.suppression.needs_reachability_evidence()`. **Open question,
+    unresolved**: `impact.engine.assess_change` is already a pure read view
+    that performs no graph traversal of its own (module docstring) — the
+    expensive walks this step performs are not duplicated by
+    `assess_change`, cached or not. What caching here would actually save
+    is re-building the `ImpactAssessment`/`GraphProofPath` object (proof-path
+    formatting in particular) on every `assess_change()` call for the same
+    `Change` — worth doing only if a single `compare` run actually calls
+    `assess_change` more than once per `Change` (e.g. rendering JSON and
+    SARIF from the same `DiffResult` in one process; `reporter.py` alone has
+    three separate call sites — `_leaf_entry`, a suppressed-changes entry
+    builder, and the main JSON entry builder — though normally each
+    `Change` only ever passes through one of the three, since they render
+    disjoint change-list memberships). This needs to be measured before
+    deciding whether `MarkReachability` caching is worth its
+    suppression-safety risk at all, not assumed the way Slice 8's
+    performance rationale was for `internal_leak.py`.
+  - **`suppression.py`** — direct inspection found **no** `Change(...)`
+    construction inside this module at all; it only *reads*
+    `public_reachable`/`reachability_state` for rule matching. The one
+    diagnostic `Change` construction near this area
+    (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`, `_build_suppression_overreach_change`)
+    actually lives in `post_processing.py`, not `suppression.py`, and sets
+    no reachability fields to cache in the first place (see Slice 9 above).
+    **This ADR's own D2 decision text naming `suppression.py` as a producer
+    needs a follow-up clarification pass** — either it meant this
+    `post_processing.py` diagnostic function, or it meant the Slice 2 audit-
+    trail (`FindingDecision`/`SuppressionAudit`) surface instead of
+    `impact_assessment` caching at all, or the original text was simply
+    imprecise about which module owns the construction site. Resolve this
+    with a documentation-only pass through the original decision text before
+    scheduling any code change here.
 - **The full `RootCauseCorrelator` correlation across consumer-overlay
   findings that don't share a `caused_by_type` today** — Slices 3-5 shipped
   the `caused_by_type`-based first cut (JSON, markdown/text, and SARIF
