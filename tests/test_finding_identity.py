@@ -81,6 +81,26 @@ class TestNormalizeMangledName:
     def test_vtable_special_name_is_accepted(self) -> None:
         assert normalize_mangled_name("_ZTV6Widget", None) == "_ZTV6Widget"
 
+    def test_thread_local_init_special_name_is_accepted(self) -> None:
+        # CodeRabbit review: "TH" (thread-local initialization function) is
+        # a real Itanium production that was missing from the original
+        # letter set.
+        assert normalize_mangled_name("_ZTH3str", None) == "_ZTH3str"
+
+    def test_unverified_special_name_letters_are_rejected(self) -> None:
+        # CodeRabbit review: "F"/"J" had no corresponding Itanium
+        # <special-name> production and were dropped rather than guessed at.
+        assert normalize_mangled_name("_ZTFfoo", None) is None
+        assert normalize_mangled_name("_ZTJfoo", None) is None
+
+    def test_oversized_source_name_length_prefix_does_not_raise(self) -> None:
+        # CodeRabbit review: a crafted mangled name with a huge digit-prefix
+        # (untrusted ELF/DWARF/PE symbol-table input) must degrade to None,
+        # never raise -- Python's int() rejects digit strings past
+        # sys.get_int_max_str_digits() (~4300 by default).
+        huge = "_Z" + "9" * 5000 + "abc"
+        assert normalize_mangled_name(huge, None) is None
+
     def test_guard_variable_special_name_is_accepted(self) -> None:
         assert normalize_mangled_name("_ZGVfoo", None) == "_ZGVfoo"
 
@@ -518,22 +538,42 @@ class TestResolveChangeIdentity:
         assert dwarf.tier == IDENTITY_TIER_NORMALIZED
         assert dwarf.primary_id == ast.primary_id
 
-    def test_dwarf_ast_equivalent_field_removed_kinds_collide(self) -> None:
-        dwarf = resolve_change_identity(
-            Change(
-                kind=ChangeKind.STRUCT_FIELD_REMOVED,
-                symbol="MyStruct",
-                description="field 'x' removed (DWARF)",
-            )
-        )
-        ast = resolve_change_identity(
+    def test_field_level_equivalent_kinds_are_not_collapsed(self) -> None:
+        # Codex review: unlike the two whole-type pairs above,
+        # STRUCT_FIELD_REMOVED/TYPE_FIELD_REMOVED are deliberately NOT
+        # normalized into a shared category -- diff_types.py's AST-side
+        # TYPE_FIELD_REMOVED uses a bare parent-type symbol (field name only
+        # in description), so collapsing by category+symbol alone would
+        # make two DIFFERENT fields of the same struct (e.g. "MyStruct::x"
+        # removed vs. "MyStruct::y" removed, both reported with
+        # symbol="MyStruct") collide with each other -- a real fact loss,
+        # not just a missed DWARF/AST dedup. Kept as separate kinds (no
+        # collision at all) is the safe default until a reliable per-field
+        # discriminator exists.
+        field_x_removed = resolve_change_identity(
             Change(
                 kind=ChangeKind.TYPE_FIELD_REMOVED,
                 symbol="MyStruct",
                 description="field 'x' removed (AST)",
             )
         )
-        assert dwarf.primary_id == ast.primary_id
+        field_y_removed = resolve_change_identity(
+            Change(
+                kind=ChangeKind.TYPE_FIELD_REMOVED,
+                symbol="MyStruct",
+                description="field 'y' removed (AST)",
+            )
+        )
+        assert field_x_removed.primary_id != field_y_removed.primary_id
+
+        dwarf = resolve_change_identity(
+            Change(
+                kind=ChangeKind.STRUCT_FIELD_REMOVED,
+                symbol="MyStruct::x",
+                description="field 'x' removed (DWARF)",
+            )
+        )
+        assert dwarf.primary_id != field_x_removed.primary_id
 
     def test_type_name_resembling_a_mangling_is_not_treated_as_canonical(self) -> None:
         # Codex review: a type literally named "_Zebra" structurally passes

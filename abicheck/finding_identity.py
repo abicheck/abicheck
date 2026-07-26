@@ -137,6 +137,16 @@ _ITANIUM_OPERATOR_CODES = frozenset(
 
 _SOURCE_NAME_LENGTH_RE = re.compile(r"\A[0-9]+")
 
+#: A real Itanium ``<source-name>`` length prefix is never remotely close to
+#: this many digits (it would claim a billion-plus-byte identifier). Bounds
+#: the digit run *before* ``int()`` sees it -- Python raises ``ValueError``
+#: converting a digit string longer than ``sys.get_int_max_str_digits()``
+#: (~4300 by default since 3.11/3.10.7+, CVE-2020-10735 mitigation), and
+#: this module's snapshot data (an ELF/DWARF/PE symbol table) is untrusted
+#: input a crafted binary could shape (CodeRabbit review) -- an uncaught
+#: ValueError here must not be how that gets rejected.
+_MAX_SOURCE_NAME_LENGTH_DIGITS = 9
+
 
 def _valid_source_name(rest: str) -> bool:
     """Whether a leading ``<source-name>`` production (``<number>``
@@ -154,7 +164,10 @@ def _valid_source_name(rest: str) -> bool:
     """
     m = _SOURCE_NAME_LENGTH_RE.match(rest)
     assert m is not None  # only called when rest[0].isdigit()
-    declared_len = int(m.group())
+    digits = m.group()
+    if len(digits) > _MAX_SOURCE_NAME_LENGTH_DIGITS:
+        return False
+    declared_len = int(digits)
     identifier = rest[m.end() :]
     return len(identifier) >= declared_len
 
@@ -192,8 +205,14 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
     if rest[0] == "L" and len(rest) > 1 and rest[1].isdigit():
         # GCC internal-linkage prefix (_ZL7g_count) + <source-name>
         return _valid_source_name(rest[1:])
-    if rest[0] == "T" and len(rest) > 1 and rest[1] in "VITSFWJ":
-        # <special-name>: vtable/typeinfo/typename/VTT/...
+    if rest[0] == "T" and len(rest) > 1 and rest[1] in "VITSHW":
+        # <special-name>: vtable(V)/VTT(T)/typeinfo(I)/typeinfo-name(S)/
+        # thread-local-init(H)/thread-local-wrapper(W). Previously included
+        # unverified "F"/"J" (CodeRabbit review: no corresponding Itanium
+        # production found for either) -- dropped rather than guessed at,
+        # matching this module's ambiguity-safe bias (a real production
+        # this set is missing only degrades to NORMALIZED, never a wrong
+        # promotion the other way).
         return True
     if rest[0] == "G" and len(rest) > 1 and rest[1] in "VR":
         # guard variable / reference temporary
@@ -468,9 +487,29 @@ def _is_symbol_level_kind(kind_value: str) -> bool:
 #: sync with the two mappings this generalizes:
 #: ``_deduplicate_cross_detector``'s local ``_DEDUP_CATEGORIES``
 #: (rich-vs-L0 function/variable add/remove, symbol-version-node pairs) and
-#: module-level ``_DWARF_TO_AST_EQUIV`` (DWARF ``struct_*``/AST ``type_*``
-#: pairs for the same type -- e.g. ``STRUCT_SIZE_CHANGED``/
-#: ``TYPE_SIZE_CHANGED``, Codex review).
+#: module-level ``_DWARF_TO_AST_EQUIV``'s two *whole-type* pairs
+#: (``STRUCT_SIZE_CHANGED``/``TYPE_SIZE_CHANGED``,
+#: ``STRUCT_ALIGNMENT_CHANGED``/``TYPE_ALIGNMENT_CHANGED``) -- safe to
+#: collapse because ``symbol`` names the whole type on both sides, with no
+#: field-level substructure to lose.
+#:
+#: Deliberately excludes ``_DWARF_TO_AST_EQUIV``'s three *field-level*
+#: pairs (``STRUCT_FIELD_OFFSET_CHANGED``/``STRUCT_FIELD_REMOVED``/
+#: ``STRUCT_FIELD_TYPE_CHANGED`` vs. their ``TYPE_FIELD_*`` counterparts):
+#: the DWARF side field-qualifies ``symbol`` (``"Point::x"``,
+#: ``diff_platform.py``), but the AST side does not (``symbol="Point"``,
+#: the field name only in ``description`` via ``detail=fname``,
+#: ``diff_types.py``) -- collapsing these to a bare category would make
+#: two *different* AST-side field findings on the same struct (``Point::x``
+#: vs. ``Point::y``) collide with each other, not just with their DWARF
+#: counterpart (Codex review: caught exactly this for
+#: ``TYPE_FIELD_OFFSET_CHANGED``). Safely fixing this needs a real
+#: per-field discriminator this module doesn't
+#: have a reliable source for (the two detectors don't encode field
+#: identity in a common field) -- left as the conservative default
+#: (full kind/old/new/description discriminator, no cross-detector
+#: collision for these three kinds) rather than a fix that risks losing a
+#: distinct field-level fact, matching this module's ambiguity-safe bias.
 _EQUIVALENT_CHANGE_CATEGORIES = {
     "func_removed": "func_removal",
     "func_removed_elf_only": "func_removal",
@@ -483,12 +522,6 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     "type_size_changed": "type_size_change",
     "struct_alignment_changed": "type_alignment_change",
     "type_alignment_changed": "type_alignment_change",
-    "struct_field_offset_changed": "type_field_offset_change",
-    "type_field_offset_changed": "type_field_offset_change",
-    "struct_field_removed": "type_field_removal",
-    "type_field_removed": "type_field_removal",
-    "struct_field_type_changed": "type_field_type_change",
-    "type_field_type_changed": "type_field_type_change",
 }
 
 
