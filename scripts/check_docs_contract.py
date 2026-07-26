@@ -75,18 +75,15 @@ _ALLOWED_DOC_TYPES = frozenset(
 _ALLOWED_LEVELS = frozenset({"beginner", "intermediate", "advanced", "expert"})
 _ALLOWED_LIFECYCLES = frozenset({"active", "migration", "historical"})
 
-# Generated or non-prose trees excluded from the duplicate-paragraph scan —
-# their content is either machine-generated (drift is caught by that
-# generator's own --check) or structurally repetitive by design (per-case
-# pages sharing a template).
-_DUPLICATE_SCAN_EXCLUDE_PREFIXES = (
-    "examples/case",
-    "examples/by-verdict/",
-    "examples/by-category/",
-    "reference/detector-spec.md",
-    "reference/github-action-inputs.md",
-    "schemas/",
-)
+# Non-prose trees excluded from the duplicate-paragraph scan that don't
+# carry the generated-file marker comment (see _has_generated_marker below,
+# which is the primary/generic exclusion mechanism) -- structurally
+# repetitive by design (per-case pages sharing a template) rather than
+# machine-generated. Kept as a narrow backstop, not the main mechanism: a
+# hard-coded prefix list silently goes stale when a generated tree moves
+# (this one did, from examples/ to reference/examples/ in ADR-051 Stage 4,
+# which is why _has_generated_marker is now checked unconditionally too).
+_DUPLICATE_SCAN_EXCLUDE_PREFIXES = ()
 _DUPLICATE_SCAN_EXCLUDE_NAMES = frozenset({"CLAUDE.md", "AGENTS.md"})
 
 _MIN_DUPLICATE_WORDS = 40
@@ -887,6 +884,8 @@ def _iter_duplicate_scan_files() -> list[Path]:
         if path.name in _DUPLICATE_SCAN_EXCLUDE_NAMES:
             continue
         if any(rel.startswith(prefix) for prefix in _DUPLICATE_SCAN_EXCLUDE_PREFIXES):
+            continue
+        if _has_generated_marker(path):
             continue
         files.append(path)
     return files
