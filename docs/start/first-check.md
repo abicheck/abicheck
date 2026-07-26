@@ -72,7 +72,7 @@ available** (e.g. libraries built with `-g`, like the ones above), falling back 
 prints a warning, since less evidence means a weaker analysis that may miss
 type/signature ABI breaks. See [How much evidence do you need?](#how-much-evidence-do-you-need)
 below and [Evidence & Detectability](../learn/evidence-and-detectability.md) for the
-full L0–L4 model.
+full L0–L5 model.
 
 ## How much evidence do you need?
 
@@ -83,7 +83,7 @@ and source context catches the facts that never reach the binary at all
 (macros, default-argument values, uninstantiated templates). Each source is
 additive — more evidence only ever finds more, never hides an artifact-proven
 break. Run `abicheck dump libfoo.so --dry-run` to see which layers abicheck
-found for a binary. For the full model, the exact `L0`–`L4` layer table, and a
+found for a binary. For the full model, the exact `L0`–`L5` layer table, and a
 worked example, see [Evidence & Detectability](../learn/evidence-and-detectability.md)
 and [What Each Level Sees](../learn/what-each-level-sees.md).
 
