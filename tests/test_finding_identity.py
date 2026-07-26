@@ -837,6 +837,31 @@ class TestResolveChangeIdentity:
             != resolve_change_identity(blue).primary_id
         )
 
+    def test_func_deleted_collapses_across_castxml_and_dwarf(self) -> None:
+        # Codex review: diff_symbols._detect_newly_deleted_functions emits
+        # FUNC_DELETED (castxml is_deleted attribute) or FUNC_DELETED_DWARF
+        # (DWARF DW_AT_deleted) for the same symbol/callable->deleted
+        # transition -- which kind you get depends only on which evidence
+        # source observed the deletion, not on a different underlying event.
+        castxml_side = Change(
+            kind=ChangeKind.FUNC_DELETED,
+            symbol=_ITANIUM_MANGLED,
+            description="Function deleted",
+            old_value="callable",
+            new_value="deleted",
+        )
+        dwarf_side = Change(
+            kind=ChangeKind.FUNC_DELETED_DWARF,
+            symbol=_ITANIUM_MANGLED,
+            description="Function deleted (DWARF)",
+            old_value="callable",
+            new_value="deleted",
+        )
+        assert (
+            resolve_change_identity(castxml_side).primary_id
+            == resolve_change_identity(dwarf_side).primary_id
+        )
+
     def test_method_access_changed_is_canonical(self) -> None:
         # Codex review: two overloaded methods undergoing the same access
         # transition must not collapse onto one primary id via a shared

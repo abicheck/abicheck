@@ -130,6 +130,16 @@ class FieldCandidate:
                 "FieldCandidate.provenance must be a ValueProvenance, not "
                 f"{self.provenance!r}."
             )
+        # The `value: Hashable` annotation isn't runtime-enforced -- an
+        # untyped adapter passing a decoded list/dict was previously
+        # accepted outright, and resolve_field() would later crash inside
+        # its set comprehensions with "TypeError: unhashable type" even
+        # with only one candidate, instead of the deliberate configuration
+        # error this constructor exists to produce (Codex review).
+        if not isinstance(self.value, Hashable):
+            raise TypeError(
+                f"FieldCandidate.value must be hashable, not {self.value!r}."
+            )
 
     @property
     def layer(self) -> SelectorLayer:

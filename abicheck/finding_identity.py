@@ -687,6 +687,15 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     "enum_member_value_changed": "enum_member_value_changed",
     "enum_member_removed": "enum_member_removed",
     "enum_last_member_value_changed": "enum_last_member_value_changed",
+    # diff_symbols._detect_newly_deleted_functions emits FUNC_DELETED
+    # (castxml is_deleted attribute) or FUNC_DELETED_DWARF (DWARF
+    # DW_AT_deleted) for the same symbol/callable->deleted transition --
+    # which kind you get depends only on which evidence source (header
+    # analysis vs. binary DWARF) observed the deletion, the same
+    # evidence-tier-producer variance every other pair in this map
+    # normalizes (Codex review).
+    "func_deleted": "func_deletion",
+    "func_deleted_dwarf": "func_deletion",
 }
 
 

@@ -261,6 +261,19 @@ class TestFieldCandidateLayerProperty:
         with pytest.raises(TypeError, match=r"FieldCandidate\.provenance"):
             FieldCandidate(provenance={}, value=ContractMode.PUBLIC)  # type: ignore[arg-type]
 
+    def test_unhashable_value_is_rejected(self):
+        # Codex review: the `value: Hashable` annotation isn't
+        # runtime-enforced -- an untyped adapter passing a decoded list/dict
+        # was previously accepted outright, and resolve_field() would later
+        # crash inside its set comprehensions with "TypeError: unhashable
+        # type" even with only one candidate, instead of the deliberate
+        # configuration error this constructor exists to produce.
+        with pytest.raises(TypeError, match=r"FieldCandidate\.value"):
+            FieldCandidate(
+                provenance=ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI),
+                value=["public"],  # type: ignore[arg-type]
+            )
+
 
 class TestRunProfileFieldScoping:
     # ADR-049 D7 scopes RUN_PROFILE precedence to "execution fields only"
