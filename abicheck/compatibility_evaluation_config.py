@@ -462,6 +462,15 @@ class GateConfig:
                 f"{self.preset!r} -- same replay-exactness gap as "
                 "CompatibilityPolicyConfig.base (ADR-049 D6)."
             )
+        if not isinstance(self.severity, SeverityConfig):
+            raise TypeError(
+                "GateConfig.severity must be a SeverityConfig, not "
+                f"{self.severity!r} -- the `severity: SeverityConfig` "
+                "annotation isn't runtime-enforced, so an untyped adapter "
+                "could otherwise pass a raw mapping/string through to a "
+                "config that downstream gate evaluation expects to call "
+                "level_for_kind()/has_errors() on."
+            )
         object.__setattr__(
             self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)
         )

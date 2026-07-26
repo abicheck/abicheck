@@ -544,6 +544,14 @@ class TestGateConfigExitCodeScheme:
         with pytest.raises(TypeError, match="GateConfig.preset"):
             GateConfig(preset="strict_gate")  # type: ignore[arg-type]
 
+    def test_raw_mapping_severity_is_rejected(self):
+        # severity: SeverityConfig isn't runtime-enforced -- an untyped
+        # adapter passing a raw mapping/string would freeze a config that
+        # downstream gate evaluation expects to call
+        # level_for_kind()/has_errors() on.
+        with pytest.raises(TypeError, match="GateConfig.severity"):
+            GateConfig(severity={"addition": "error"})  # type: ignore[arg-type]
+
 
 class TestDigestedItems:
     # ADR-049 D6: variants/explicit_scope are persisted as {items, sha256},
