@@ -305,6 +305,43 @@ def _stdlib_type_unreferenced_stays_filtered() -> tuple[AbiSnapshot, AbiSnapshot
     return old, new
 
 
+def _stdlib_internal_owner_method_stays_filtered() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # Codex review, fresh evidence: CastXML/direct-clang record a method's
+    # own Function.name bare ("touch", never "__gnu_cxx::Node::touch"), so
+    # the fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES) guard cannot
+    # catch a retained, seemingly-public method whose *owner* is itself a
+    # stdlib-internal class -- owner_class_of correctly recovers the
+    # qualified "__gnu_cxx::Node" owner via the mangled fallback, and
+    # without also checking that recovered owner against the stdlib
+    # prefixes, layout churn on the internal owner class itself must not
+    # be reported as a public break.
+    old = _snap(
+        "1",
+        functions=[
+            Function(
+                name="touch",
+                mangled="_ZN9__gnu_cxx4Node5touchEv",
+                return_type="void",
+                params=[],
+            )
+        ],
+        types=[RecordType(name="__gnu_cxx::Node", kind="class", size_bits=64)],
+    )
+    new = _snap(
+        "2",
+        functions=[
+            Function(
+                name="touch",
+                mangled="_ZN9__gnu_cxx4Node5touchEv",
+                return_type="void",
+                params=[],
+            )
+        ],
+        types=[RecordType(name="__gnu_cxx::Node", kind="class", size_bits=128)],
+    )
+    return old, new
+
+
 def _internal_record_field_stdlib_churn_stays_filtered() -> tuple[
     AbiSnapshot, AbiSnapshot
 ]:
@@ -814,6 +851,11 @@ CORPUS: list[Case] = [
         True,
         _internal_record_field_stdlib_churn_stays_filtered,
     ),
+    Case(
+        "stdlib_internal_owner_method_stays_filtered",
+        True,
+        _stdlib_internal_owner_method_stays_filtered,
+    ),
     # enum reachability + pointer/opaque precision — internal-noise polarity.
     Case("internal_enum_value_changed", True, _internal_enum_value_changed),
     Case("internal_enum_member_removed", True, _internal_enum_member_removed),
@@ -1275,6 +1317,7 @@ CASE_CATEGORY: dict[str, str] = {
     "internal_record_field_stdlib_churn_stays_filtered": "stdlib-direct-reference",
     "public_stdlib_type_used_directly_layout_changed": "stdlib-direct-reference",
     "public_std_string_typedef_alias_layout_changed": "stdlib-direct-reference",
+    "stdlib_internal_owner_method_stays_filtered": "stdlib-direct-reference",
     # versioned-symbol scheme / multi-.so bundle
     "versioned_scheme_internal_churn": "versioned-scheme",
     "bundle_sibling_soname_churn": "versioned-scheme",

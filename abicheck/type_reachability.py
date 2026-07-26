@@ -498,7 +498,17 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     never repeats ``Foo`` in its own return/parameter types, so without
     also seeding :func:`abicheck.diff_cxx_rules.owner_class_of` the
     previous version never queued ``Foo`` at all — a genuine layout break
-    in one of its fields would be silently missed), or transitively
+    in one of its fields would be silently missed. That recovered owner is
+    itself checked against ``STDLIB_TYPE_NAMESPACE_PREFIXES`` before being
+    scanned, the same way ``fn.name`` already is (Codex review, fresh
+    evidence): CastXML/direct-clang record a method's own ``Function.name``
+    bare (e.g. ``"touch"``, never ``"__gnu_cxx::Node::touch"``), so the
+    existing ``fn.name.startswith(...)`` guard cannot catch a retained,
+    seemingly-public method whose *owner* is itself a stdlib-internal class
+    (e.g. libstdc++'s ``__gnu_cxx::Node``) — without this second check,
+    `owner_class_of` correctly recovering that qualified owner and handing
+    it straight to `_scan` would mark the stdlib class itself as directly
+    referenced, unfiltering purely internal toolchain churn), or transitively
     through another already-reachable record's fields/bases (Codex review,
     fresh evidence: the previous version scanned *every* non-stdlib
     record's fields unconditionally, so a purely internal,
@@ -599,7 +609,7 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
         for param in fn.params:
             _scan(param.type)
         owner = owner_class_of(fn)
-        if owner is not None:
+        if owner is not None and not owner.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
             _scan(owner)
 
     for var in snapshot.variables:

@@ -1453,3 +1453,58 @@ class TestNonStdlibTypedefBareAlias:
         unchanged, which the `c != key` filter must exclude)."""
         index = _typedef_spelling_targets({"Alias": "Foo"}, frozenset())
         assert index == {"Alias": "Foo"}
+
+
+class TestStdlibOwnerNotSeededAsReferenced:
+    def test_bare_named_method_on_stdlib_internal_owner_stays_filtered(self) -> None:
+        """Codex review, fresh evidence: CastXML/direct-clang record a
+        method's own Function.name bare ("touch", never
+        "__gnu_cxx::Node::touch"), so the existing fn.name.startswith(...)
+        guard cannot catch a retained, seemingly-public method whose owner
+        is itself a stdlib-internal class -- owner_class_of correctly
+        recovers the qualified "__gnu_cxx::Node" owner via the mangled
+        fallback, and without also checking that recovered owner against
+        the stdlib prefixes, it would be scanned and marked directly
+        referenced, unfiltering purely internal toolchain churn."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="touch",
+                    mangled="_ZN9__gnu_cxx4Node5touchEv",
+                    return_type="void",
+                    params=[],
+                )
+            ],
+            types=[RecordType(name="__gnu_cxx::Node", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_bare_named_method_on_genuine_non_stdlib_owner_still_seeds_it(
+        self,
+    ) -> None:
+        """Guard against over-correcting: a bare-named method whose real
+        owner is a genuine non-stdlib class must still seed that owner as
+        reachable."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="touch",
+                    mangled="_ZN3Foo5touchEv",
+                    return_type="void",
+                    params=[],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})

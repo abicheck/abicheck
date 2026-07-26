@@ -342,3 +342,21 @@
   existing collision guard applied to this new candidate source, and a
   guard against registering a spurious duplicate entry for an
   already-bare key.
+- **`type_reachability.py`'s owner-class seeding could mark a purely
+  internal stdlib class as directly referenced** (Codex review, fresh
+  evidence): CastXML/direct-clang record a method's own `Function.name`
+  bare (e.g. `"touch"`, never `"__gnu_cxx::Node::touch"`), so the existing
+  `fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)` guard cannot catch
+  a retained, seemingly-public method whose *owner* is itself a
+  stdlib-internal class (e.g. libstdc++'s `__gnu_cxx::Node`) —
+  `owner_class_of()` correctly recovers that qualified owner via its
+  mangled-name fallback, and handing it straight to `_scan()` without a
+  second check marked the stdlib class itself as directly referenced,
+  unfiltering purely internal toolchain churn as a public break. Fixed by
+  also checking the recovered owner against
+  `STDLIB_TYPE_NAMESPACE_PREFIXES` before scanning it, mirroring the
+  existing `fn.name` guard. New regression tests (positive and negative)
+  plus a new FP-rate corpus case
+  (`stdlib_internal_owner_method_stays_filtered`, `stdlib-direct-reference`
+  category) reproducing the exact scenario; gate stays 0 FP/0 FN (32
+  cases).
