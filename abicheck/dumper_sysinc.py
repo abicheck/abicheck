@@ -148,12 +148,27 @@ def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
     to the symlink's *target* directory at the OS level (``realpath``
     semantics), not the symlink's own location, so lexical collapsing alone
     can misjudge which directory an unresolved ``../``-bearing path actually
-    denotes. Classifying ``os.path.realpath(d)`` instead of the raw ``d``
-    here — safe and cheap since ``Path(d).is_dir()`` (short-circuiting
-    ``and``, evaluated first) has already confirmed ``d`` exists — makes the
-    decision symlink-correct for the one path that matters at runtime, while
-    :func:`_is_gnu_compiler_resource_dir` itself stays pure/string-only and
-    testable against synthetic paths that don't exist on disk (Codex review).
+    denotes. Classifying ``os.path.realpath(d)`` in *addition to* the raw
+    ``d`` — safe and cheap since ``Path(d).is_dir()`` (short-circuiting
+    ``and``, evaluated first) has already confirmed ``d`` exists — catches
+    that case (Codex review).
+
+    Neither check alone is sufficient, so a path is dropped if *either*
+    flags it (never AND): a terminal symlink — the canonical, no-``..``
+    ``.../lib/gcc/<triple>/<ver>/include`` path itself is a symlink to
+    storage physically outside any ``lib/gcc`` hierarchy — is exactly the
+    opposite failure from the ``../``-walk-back case above. There
+    ``realpath`` corrects a lexical false negative (a real GCC-internal dir
+    that lexical collapsing alone would wrongly keep); here ``realpath``
+    alone would introduce a false negative of its own, losing the lexical
+    evidence that GCC itself names this its resource dir regardless of what
+    the symlink ultimately resolves to, and clang would get fed GCC's
+    incompatible intrinsics headers found via that resolved location
+    (Codex review, round 2 — confirmed with a real symlink where the raw
+    classifier returns ``True`` and a realpath-only classifier would have
+    returned ``False``). :func:`_is_gnu_compiler_resource_dir` itself stays
+    pure/string-only and testable against synthetic paths that don't exist
+    on disk either way.
 
     Bounded by the tighter of its own 15s cap and the active deadline, and
     process-group-safe on timeout, same as the main clang/castxml subprocess
@@ -184,7 +199,11 @@ def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
     return [
         d
         for d in _parse_gnu_include_search_dirs(proc.stderr or "")
-        if Path(d).is_dir() and not _is_gnu_compiler_resource_dir(os.path.realpath(d))
+        if Path(d).is_dir()
+        and not (
+            _is_gnu_compiler_resource_dir(d)
+            or _is_gnu_compiler_resource_dir(os.path.realpath(d))
+        )
     ]
 
 

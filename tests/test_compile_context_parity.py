@@ -572,6 +572,49 @@ def test_probe_gnu_system_includes_resolves_symlink_before_classifying(
     assert out == []
 
 
+def test_probe_gnu_system_includes_drops_terminal_symlinked_resource_dir(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Codex review (PR #643, round 2): the opposite symlink hazard from the
+    # walk-back case above. Here the reported path has no '..' at all -- it
+    # IS the canonical '.../lib/gcc/<triple>/<ver>/include' resource path --
+    # but that exact directory is itself a symlink to storage physically
+    # outside any lib/gcc hierarchy (e.g. a distro that stores GCC's
+    # intrinsics headers in a shared location). realpath() alone would
+    # resolve past the lib/gcc evidence and wrongly classify this as safe to
+    # keep, feeding clang GCC's incompatible intrinsics headers. The raw,
+    # lexically-normalized path must still be checked and win.
+    from abicheck import dumper_sysinc
+
+    base = tmp_path / "base"
+    external_storage = base / "external_storage" / "gcc13_include"
+    external_storage.mkdir(parents=True)
+    canonical_resource_dir = base / "lib" / "gcc" / "x86_64-linux-gnu" / "13"
+    canonical_resource_dir.mkdir(parents=True)
+    terminal_symlink = canonical_resource_dir / "include"
+    terminal_symlink.symlink_to(external_storage, target_is_directory=True)
+
+    reported = str(terminal_symlink)
+    # Sanity check the fixture actually exercises the hazard: the raw path
+    # lexically matches the resource-dir shape, but its realpath doesn't.
+    assert dumper_sysinc._is_gnu_compiler_resource_dir(reported) is True
+    assert (
+        dumper_sysinc._is_gnu_compiler_resource_dir(os.path.realpath(reported)) is False
+    )
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc, "_parse_gnu_include_search_dirs", lambda s: [reported]
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    # This is GCC's own named resource dir regardless of where it's
+    # symlinked to -- must be dropped, not kept.
+    assert out == []
+
+
 def test_buildconfig_compile_frontend_case_insensitive() -> None:
     from abicheck.buildsource.inline import BuildConfig
 
