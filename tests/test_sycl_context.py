@@ -218,6 +218,26 @@ def test_fused_select_ambiguous_stops_at_second_match_without_further_scan() -> 
         decode_and_select_frontend_context(stdout, stderr, "device")
 
 
+def test_fused_select_ambiguous_second_match_never_parsed_or_joined() -> None:
+    """P1 (Codex review, fourth round): the SECOND matching document's mere
+    existence -- known purely from stderr's positional kind info -- is
+    already enough to raise AstContextAmbiguousError; it must never be
+    json.loads-parsed OR have its chunks joined into one string. Proven by
+    making the second (ambiguous) document itself malformed: if it were
+    parsed, this would raise SnapshotError instead of
+    AstContextAmbiguousError."""
+    stdout = (
+        '{"kind": "TranslationUnitDecl", "inner": []}\n'
+        "{,}"  # the second matching (device) document -- never parsed
+    )
+    stderr = (
+        ' "clang" -cc1 -triple spir64 -fsycl-is-device foo\n'
+        ' "clang" -cc1 -triple spir64_x86_64 -fsycl-is-device foo\n'
+    )
+    with pytest.raises(AstContextAmbiguousError, match="spir64"):
+        decode_and_select_frontend_context(stdout, stderr, "device")
+
+
 def test_fused_select_rejects_truncated_document() -> None:
     stdout = '{"kind": "TranslationUnitDecl", "inner": ['  # truncated
     with pytest.raises(SnapshotError, match="truncated or malformed"):
@@ -568,6 +588,17 @@ def test_from_path_rejects_bracket_balanced_but_invalid_json(tmp_path: Path) -> 
     ast_path.write_text("{,}", encoding="utf-8")
     with pytest.raises(SnapshotError, match="truncated or malformed"):
         decode_and_select_frontend_context_from_path(ast_path, "", "host")
+
+
+def test_fused_select_rejects_malformed_sole_match() -> None:
+    """Distinct from the non-matching/extra-document malformed cases above:
+    here the ONLY document actually correlates (positionally) with the
+    requested kind, so it must still reach json.loads via the "confirmed
+    match" branch, not the "extra document" branch -- and a bracket-
+    balanced-but-invalid body is still rejected."""
+    stderr = ' "clang" -cc1 -triple x86_64-unknown-linux-gnu -fsycl-is-host foo\n'
+    with pytest.raises(SnapshotError, match="truncated or malformed"):
+        decode_and_select_frontend_context("{,}", stderr, "host")
 
 
 def test_from_path_rejects_document_count_mismatch(tmp_path: Path) -> None:

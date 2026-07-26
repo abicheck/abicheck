@@ -358,34 +358,64 @@ def _select_from_document_stream(
     itself be multi-GB (a device build can emit several offload-target
     passes).
 
-    A document is only ``json.loads``-parsed into a dict when its
-    correlated invocation's *kind* matches *requested_kind*, or when it has
-    no correlated invocation at all (an "extra" beyond *stderr*'s own count,
-    whose kind can't be known -- must still be validated so a genuinely
-    malformed extra document is reported directly instead of only via the
-    less-specific count-mismatch check below). A definitely-non-matching
-    document's kind is known positionally from *stderr* alone, before its
-    text is even looked at -- computed here as ``invocations`` and handed to
-    :func:`_iter_json_documents` as *want_text* so it never even joins that
-    document's chunks into one string, let alone parses it (P1, Codex
-    review, twice): without this, a non-matching multi-GB pass's full text
-    (and then its dict) would be built and briefly live in memory *at the
-    same time* as an already-selected multi-GB match's dict.
+    A document is only ``json.loads``-parsed into a dict when it is the
+    FIRST document whose correlated invocation's *kind* matches
+    *requested_kind*, or when it has no correlated invocation at all (an
+    "extra" beyond *stderr*'s own count, whose kind can't be known -- must
+    still be validated so a genuinely malformed extra document is reported
+    directly instead of only via the less-specific count-mismatch check
+    below). Both a definitely-non-matching document's kind AND whether a
+    match has already been found are known positionally/incrementally from
+    *stderr* and this function's own ``found_match`` state, before a
+    document's text is even looked at -- reflected in the *want_text*
+    callback handed to :func:`_iter_json_documents`, so neither a
+    non-matching document NOR a second (or later) same-kind one ever gets
+    joined into one string, let alone parsed (P1, Codex review, four
+    rounds: (1) skip ``json.loads`` for a non-matching document, (2) skip
+    joining its chunks too, not just parsing, (3) discard its chunks
+    incrementally while scanning, not just skip the final join, (4) this
+    round -- a second matching document's mere *existence* is already
+    enough to raise :class:`abicheck.errors.AstContextAmbiguousError` using
+    only its target string from ``invocations``, so it must never be
+    materialized at all, not even to build the dict this function then
+    immediately discards). Without this, a non-matching or redundant
+    multi-GB pass's full text (and then its dict) would be built and
+    briefly live in memory *at the same time* as an already-selected
+    multi-GB match's dict.
     """
     invocations = list(_CC1_INVOCATION_RE.finditer(stderr))
+    found_match = False
 
     def _want_text(doc_index: int) -> bool:
-        return (
-            doc_index >= len(invocations)
-            or invocations[doc_index].group("kind") == requested_kind
-        )
+        if doc_index >= len(invocations):
+            return True
+        if invocations[doc_index].group("kind") != requested_kind:
+            return False
+        # A second (or later) same-kind document is never actually needed --
+        # its mere existence, known purely from *stderr* positionally, is
+        # already enough to raise AstContextAmbiguousError below without
+        # ever looking at its content (P1, Codex review, fourth round: the
+        # first fix only stopped scanning past the ambiguity once detected,
+        # but detecting it still required fully joining+parsing the SECOND
+        # matching document first, even though only its target string --
+        # already available from `invocations` -- is ever used).
+        return not found_match
 
     first_match: FrontendContext | None = None
     doc_count = 0
     for doc_text in _iter_json_documents(read_more, _want_text):
         invocation = invocations[doc_count] if doc_count < len(invocations) else None
         kind = invocation.group("kind") if invocation is not None else None
-        if invocation is None or kind == requested_kind:
+        if kind == requested_kind:
+            assert invocation is not None
+            if found_match:
+                assert first_match is not None
+                raise AstContextAmbiguousError(
+                    f"2+ AST contexts share kind={requested_kind!r} "
+                    f"(targets: {[first_match.target, invocation.group('target')]!r}) "
+                    "-- no implicit tiebreaker; narrow the request to a "
+                    "specific target."
+                )
             assert doc_text is not None
             try:
                 doc = json.loads(doc_text)
@@ -394,21 +424,23 @@ def _select_from_document_stream(
                     "DPC++ frontend produced a truncated or malformed AST "
                     f"document stream: {exc}"
                 ) from exc
-            if kind == requested_kind:
-                assert invocation is not None
-                if first_match is None:
-                    first_match = FrontendContext(
-                        kind=requested_kind,
-                        target=invocation.group("target"),
-                        ast=doc,
-                    )
-                else:
-                    raise AstContextAmbiguousError(
-                        f"2+ AST contexts share kind={requested_kind!r} "
-                        f"(targets: {[first_match.target, invocation.group('target')]!r}) "
-                        "-- no implicit tiebreaker; narrow the request to a "
-                        "specific target."
-                    )
+            first_match = FrontendContext(
+                kind=requested_kind, target=invocation.group("target"), ast=doc
+            )
+            found_match = True
+        elif invocation is None:
+            # An "extra" document beyond stderr's own count -- kind can't be
+            # known, so it must still be validated directly (a genuinely
+            # malformed extra document is reported here, not only via the
+            # less-specific count-mismatch check below).
+            assert doc_text is not None
+            try:
+                json.loads(doc_text)
+            except json.JSONDecodeError as exc:
+                raise SnapshotError(
+                    "DPC++ frontend produced a truncated or malformed AST "
+                    f"document stream: {exc}"
+                ) from exc
         doc_count += 1
     if doc_count != len(invocations):
         raise SnapshotError(

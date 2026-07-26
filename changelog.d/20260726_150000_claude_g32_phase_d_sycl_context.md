@@ -273,3 +273,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   positional invocation list, same as before) — an unwanted document now
   costs at most one chunk's worth of memory to scan past, not its own full
   size (Codex review, third round).
+- `sycl_context._select_from_document_stream`'s ambiguity path still fully
+  `json.loads`-parsed a SECOND same-kind document before raising
+  `AstContextAmbiguousError`, even though only its target string (already
+  available from `stderr`'s positional invocation list) is ever used in the
+  error — a second multi-GB matching pass was still built and briefly live
+  alongside the first match's already-selected dict just to be immediately
+  discarded. The `want_text` callback is now stateful: a same-kind document
+  is only materialized when no match has been confirmed yet, so a second
+  (or later) one is never joined or parsed at all, mirroring how a
+  definitely-non-matching document is already skipped (Codex review,
+  fourth round).
