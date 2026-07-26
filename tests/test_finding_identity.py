@@ -265,6 +265,14 @@ class TestNormalizeMangledName:
         assert normalize_mangled_name("_ZSaIcE", None) == "_ZSaIcE"
         assert normalize_mangled_name("_ZS_", None) == "_ZS_"
 
+    def test_invalid_single_letter_substitution_is_rejected(self) -> None:
+        # Codex review, fresh evidence, round 2: only Sa/Sb/Sd/Si/So/Ss are
+        # real complete single-letter abbreviations -- any other lowercase
+        # letter (e.g. "_ZSx") is not a real Itanium substitution at all,
+        # but previously matched the fallback outright regardless of which
+        # letter followed "S".
+        assert normalize_mangled_name("_ZSx", "_ZSx") is None
+
     def test_numbered_substitution_without_terminator_is_rejected(self) -> None:
         # Codex review, fresh evidence: a numbered substitution's <seq-id>
         # (base-36: digits then uppercase letters) is ALWAYS followed by a
@@ -1025,6 +1033,33 @@ class TestResolveChangeIdentity:
             symbol="libfoo.so",
             description="The new snapshot's ... found 1 record(s): Baz.",
             affected_symbols=["Baz"],
+        )
+        old_identity = resolve_change_identity(old_side)
+        new_identity = resolve_change_identity(new_side)
+        assert old_identity.primary_id != new_identity.primary_id
+
+    def test_header_binary_context_mismatch_same_evidence_different_side_stays_distinct(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence, round 3: the previous fix left one
+        # residual gap -- when old-side and new-side happen to report the
+        # exact SAME mismatched-record set, sorted affected_symbols alone
+        # can't tell them apart. description's stable lead-in ("The
+        # old/new snapshot's...") is the only place Change carries which
+        # side a finding is about; extracting just that fixed prefix
+        # (immune to the sampled-name-order issue, since it's never part
+        # of the order-dependent five-name sample) closes the gap.
+        old_side = Change(
+            kind=ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+            symbol="libfoo.so",
+            description="The old snapshot's ... found 2 record(s): Foo, Bar.",
+            affected_symbols=["Foo", "Bar"],
+        )
+        new_side = Change(
+            kind=ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+            symbol="libfoo.so",
+            description="The new snapshot's ... found 2 record(s): Foo, Bar.",
+            affected_symbols=["Foo", "Bar"],
         )
         old_identity = resolve_change_identity(old_side)
         new_identity = resolve_change_identity(new_side)

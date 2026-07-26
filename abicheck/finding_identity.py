@@ -369,7 +369,15 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
             m = _BASE36_SEQ_ID_RE.match(rest[1:])
             assert m is not None  # guarded by isdigit()/isupper() above
             return rest[1 + m.end() :].startswith("_")
-        return True
+        # Only Sa/Sb/Sd/Si/So/Ss are real complete single-letter
+        # abbreviations (allocator/basic_string/basic_iostream/
+        # basic_istream/basic_ostream/string); S_ is the separate bare
+        # back-reference-0 production (handled here too since it isn't a
+        # digit/uppercase seq-id). Any other lowercase letter (e.g.
+        # "_ZSx") is not a real Itanium substitution at all, but
+        # previously matched this fallback outright regardless of which
+        # letter followed "S" (Codex review, fresh evidence, round 2).
+        return rest[1] == "_" or rest[1] in "abdios"
     # Two <operator-name> codes are not complete by themselves the way the
     # other 47 are: "cv" (conversion operator) requires a following
     # <type>, and "li" (C++11 literal operator) requires a following
@@ -795,13 +803,27 @@ _ALWAYS_BATCH_SHAPED_KIND_SLUGS = frozenset(
 #: -- :func:`_change_discriminator` sorts it for these kinds instead of
 #: using ``description``, so two orderings of the *same* set still collide
 #: (fixing the original order-sensitivity report) while two *different*
-#: sets (e.g. the old-side vs. new-side case) reliably do not. The one
-#: residual gap this doesn't close: if both sides happen to have the exact
-#: same mismatched-record set, they still share a primary_id -- accepted as
-#: this heuristic's documented boundary, the same ambiguity-safe bias as
-#: everywhere else in this module, rather than inventing a synthetic
-#: "which side" marker this ``Change`` has no real field for.
+#: sets (e.g. the old-side vs. new-side case) reliably do not. The residual
+#: gap when both sides happen to have the exact same mismatched-record set
+#: (Codex review, fresh evidence, round 2) is closed too:
+#: :data:`_MISMATCH_SIDE_RE` extracts the side word from ``description``'s
+#: stable, fixed-wording lead-in ("The old/new snapshot's...") -- unlike
+#: the order-dependent five-name sample later in that same string, this
+#: prefix never varies for a given side, so it's safe to fold into the
+#: discriminator without reintroducing the original order-sensitivity bug.
 _STRUCTURED_EVIDENCE_KIND_SLUGS = frozenset({"header_binary_context_mismatch"})
+
+#: Matches ``diff_layout_coherence.py``'s ``_mismatch_change`` description
+#: lead-in ("The old snapshot's ..." / "The new snapshot's ...") -- the
+#: ONLY place ``Change`` carries which snapshot side a
+#: ``header_binary_context_mismatch`` finding is about, since ``side`` is
+#: never passed as ``old_value``/``new_value`` (both left ``None``) or any
+#: other structured field. Anchored to this specific detector's exact,
+#: hand-verified wording (not a general free-text heuristic) -- a
+#: description that doesn't match this prefix (a future producer, a
+#: hand-built test ``Change``) degrades ``side`` to ``""``, this module's
+#: usual ambiguity-safe fallback.
+_MISMATCH_SIDE_RE = re.compile(r"\AThe (old|new) snapshot's")
 
 
 def _is_batch_shaped_change(change: Change, kind_value: str) -> bool:
@@ -952,10 +974,16 @@ def _change_discriminator(
     # finding's complete mismatched-record set as structured data (unlike
     # description's order-dependent five-name sample) -- sorting it makes
     # the discriminator order-independent while still varying whenever the
-    # actual evidence differs (see _STRUCTURED_EVIDENCE_KIND_SLUGS).
+    # actual evidence differs (see _STRUCTURED_EVIDENCE_KIND_SLUGS). The
+    # side prefix (extracted via _MISMATCH_SIDE_RE, itself immune to the
+    # sampled-order issue) keeps an old-side and new-side finding distinct
+    # even when they happen to report the exact same mismatched-record set
+    # (Codex review, fresh evidence, round 2).
     if kind_value in _STRUCTURED_EVIDENCE_KIND_SLUGS:
         evidence = ",".join(sorted(change.affected_symbols or ()))
-        return f"evidence:{evidence}"
+        side_match = _MISMATCH_SIDE_RE.match(change.description or "")
+        side = side_match.group(1) if side_match else ""
+        return f"evidence:{side}:{evidence}"
     parts = [
         kind_value,
         _stringify_change_value(change.old_value),
