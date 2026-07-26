@@ -430,6 +430,19 @@ class AssuranceConfig:
 
     require_evidence: bool = True
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.require_evidence, bool):
+            raise TypeError(
+                "AssuranceConfig.require_evidence must be a bool, not "
+                f"{self.require_evidence!r} -- the `require_evidence: bool` "
+                "annotation isn't runtime-enforced, so an untyped manifest/"
+                "API adapter could otherwise pass a truthy non-bool (e.g. "
+                '"false") through construction unnoticed, and the assurance '
+                "evaluator would then treat an explicitly disabled "
+                "requirement as enabled, making a run unexpectedly not "
+                "checkable (Codex review)."
+            )
+
 
 @dataclass(frozen=True)
 class CompatibilityPolicyConfig:

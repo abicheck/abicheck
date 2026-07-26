@@ -656,15 +656,25 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     contract).
     """
     kind_value = str(getattr(change.kind, "value", change.kind))
-    qn = change.qualified_name or change.symbol or ""
+    is_batch = _is_batch_shaped_change(change, kind_value)
+    # A batch-shaped finding's `symbol` is an arbitrary sample (the
+    # alphabetically-first affected export), not a real entity this finding
+    # is "about" -- using it for `qn`/aliases/the REDUCED-tier basis, not
+    # only for CANONICAL mangled-name promotion, would still let the
+    # identity change whenever the sampled export changes and could still
+    # collide with an unrelated finding that genuinely owns that symbol
+    # (Codex review: the CANONICAL-only guard left this same leak at the
+    # NORMALIZED tier and in the `symbol`/`relsrc` aliases). `entity_symbol`
+    # is `None` for a batch-shaped change so every downstream identity/alias
+    # below naturally omits the sample instead of needing its own check.
+    entity_symbol = None if is_batch else change.symbol
+    qn = change.qualified_name or entity_symbol or ""
     discriminator = _change_discriminator(change, kind_value)
     sig = f"sig:{qn}\x1f{discriminator}"
-    rel = source_relative_identity(change.source_location or "", change.symbol or "")
+    rel = source_relative_identity(change.source_location or "", entity_symbol or "")
 
     real_mangled = None
-    if _is_symbol_level_kind(kind_value) and not _is_batch_shaped_change(
-        change, kind_value
-    ):
+    if _is_symbol_level_kind(kind_value) and not is_batch:
         real_mangled = normalize_mangled_name(change.symbol, change.qualified_name)
 
     # Every alias below is qualified with `discriminator`, matching `primary`/
@@ -678,8 +688,8 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     aliases: list[str] = []
     if real_mangled:
         aliases.append(f"mangled:{real_mangled}\x1f{discriminator}")
-    if change.symbol:
-        aliases.append(f"symbol:{change.symbol}\x1f{discriminator}")
+    if entity_symbol:
+        aliases.append(f"symbol:{entity_symbol}\x1f{discriminator}")
     if change.qualified_name:
         aliases.append(f"qualified:{change.qualified_name}\x1f{discriminator}")
     aliases.append(sig)
@@ -694,7 +704,7 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
         return FindingIdentity(sig, IDENTITY_TIER_NORMALIZED, tuple(aliases))
 
     basis = "\x1f".join(
-        str(x) for x in (change.symbol, discriminator, change.source_location) if x
+        str(x) for x in (entity_symbol, discriminator, change.source_location) if x
     )
     digest = hashlib.sha256(f"synthetic\x00{basis}".encode()).hexdigest()[:32]
     synthetic = f"synthetic:sha256:{digest}"

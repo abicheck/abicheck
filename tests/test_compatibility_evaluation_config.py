@@ -121,7 +121,7 @@ class TestConstruction:
         # base: ImmutableIdentity isn't runtime-enforced -- an untyped
         # service/manifest adapter passing a bare slug through would freeze
         # a config that can't support exact replay.
-        with pytest.raises(TypeError, match="CompatibilityPolicyConfig.base"):
+        with pytest.raises(TypeError, match=r"CompatibilityPolicyConfig\.base"):
             CompatibilityPolicyConfig(base="strict_abi")  # type: ignore[arg-type]
 
     def test_raw_string_pack_element_is_rejected(self):
@@ -156,7 +156,7 @@ class TestContractConfigUnresolvedBehavior:
         # untyped adapter passing a typo'd string (or the enum's own string
         # value) must still be rejected, matching the CompatibilityPolicyConfig
         # overrides Verdict check.
-        with pytest.raises(TypeError, match="ContractConfig.mode"):
+        with pytest.raises(TypeError, match=r"ContractConfig\.mode"):
             ContractConfig(mode="public")  # type: ignore[arg-type]
 
     def test_overlays_order_does_not_affect_equality(self):
@@ -345,7 +345,7 @@ class TestEvidenceProviderRequirement:
         # AttributeError in _provider_sort_key's canonicalization instead
         # of failing validation cleanly at construction.
         with pytest.raises(
-            TypeError, match="EvidenceProviderRequirement.implementation"
+            TypeError, match=r"EvidenceProviderRequirement\.implementation"
         ):
             EvidenceProviderRequirement(
                 capability="headers",
@@ -359,7 +359,7 @@ class TestEvidenceProviderRequirement:
         # silently accepted and could raise TypeError when mixed with real
         # bool entries during _provider_sort_key's canonical sort, instead
         # of failing validation cleanly at construction.
-        with pytest.raises(TypeError, match="EvidenceProviderRequirement.required"):
+        with pytest.raises(TypeError, match=r"EvidenceProviderRequirement\.required"):
             EvidenceProviderRequirement(
                 capability="headers",
                 required="false",  # type: ignore[arg-type]
@@ -390,6 +390,20 @@ class TestEvidenceProviderRequirement:
         )
         assert isinstance(evidence.providers, tuple)
         assert evidence.providers[0].capability == "active_ast"
+
+
+class TestAssuranceConfig:
+    def test_default_requires_evidence(self):
+        assert AssuranceConfig().require_evidence is True
+
+    def test_raw_string_require_evidence_is_rejected(self):
+        # require_evidence: bool isn't runtime-enforced -- an untyped
+        # manifest/API adapter passing a truthy non-bool string (e.g.
+        # "false") would otherwise be silently accepted, and the assurance
+        # evaluator would treat an explicitly disabled requirement as
+        # enabled.
+        with pytest.raises(TypeError, match=r"AssuranceConfig\.require_evidence"):
+            AssuranceConfig(require_evidence="false")  # type: ignore[arg-type]
 
 
 class TestImmutableIdentityRequiresDigest:
@@ -595,7 +609,7 @@ class TestGateConfigExitCodeScheme:
     def test_raw_string_preset_is_rejected(self):
         # Same class of gap as CompatibilityPolicyConfig.base: preset:
         # ImmutableIdentity | None isn't runtime-enforced.
-        with pytest.raises(TypeError, match="GateConfig.preset"):
+        with pytest.raises(TypeError, match=r"GateConfig\.preset"):
             GateConfig(preset="strict_gate")  # type: ignore[arg-type]
 
     def test_raw_mapping_severity_is_rejected(self):
@@ -603,7 +617,7 @@ class TestGateConfigExitCodeScheme:
         # adapter passing a raw mapping/string would freeze a config that
         # downstream gate evaluation expects to call
         # level_for_kind()/has_errors() on.
-        with pytest.raises(TypeError, match="GateConfig.severity"):
+        with pytest.raises(TypeError, match=r"GateConfig\.severity"):
             GateConfig(severity={"addition": "error"})  # type: ignore[arg-type]
 
     def test_raw_string_pack_element_is_rejected(self):

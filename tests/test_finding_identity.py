@@ -483,7 +483,26 @@ class TestResolveChangeIdentity:
             new_value="1 GNU_UNIQUE export(s)",
         )
         identity = resolve_change_identity(change)
-        assert identity.tier == IDENTITY_TIER_NORMALIZED
+        assert identity.tier == IDENTITY_TIER_REDUCED
+
+    def test_batch_gnu_unique_sample_is_not_in_qn_or_aliases_either(self) -> None:
+        # Codex review, round 2: the first fix only guarded CANONICAL
+        # (mangled-name) promotion -- the sampled symbol was still leaking
+        # into the NORMALIZED-tier `qn`/`sig` and the `symbol:`/`relsrc:`
+        # aliases, so the identity still changed whenever the sorted sample
+        # changed and could still collide with an unrelated finding that
+        # genuinely owns that symbol. Neither the primary id nor any alias
+        # may mention the sampled symbol at all.
+        change = Change(
+            kind=ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
+            symbol=_ITANIUM_MANGLED,
+            description="1 GNU_UNIQUE export(s)",
+            old_value="(no GNU_UNIQUE exports)",
+            new_value="1 GNU_UNIQUE export(s)",
+        )
+        identity = resolve_change_identity(change)
+        assert _ITANIUM_MANGLED not in identity.primary_id
+        assert all(_ITANIUM_MANGLED not in alias for alias in identity.aliases)
 
     def test_per_symbol_gnu_unique_transition_is_still_canonical(self) -> None:
         # Regression guard: _check_binding_change's genuine per-symbol
