@@ -84,6 +84,33 @@ def test_tu_merge_error_is_a_snapshot_error():
 
 
 # ---------------------------------------------------------------------------
+# Mixed AST producers across TUs (HETEROGENEOUS_ABI_CONTEXT)
+# ---------------------------------------------------------------------------
+
+
+def test_merge_fragments_raises_on_mixed_ast_producers():
+    # --ast-frontend auto's per-TU fallback can land one TU on castxml and
+    # another on clang within the same manifest even though the manifest's
+    # own declared compiler/target is uniform -- dumper.py trusts a single
+    # representative ast_producer for the whole merged snapshot (gating
+    # DWARF layout backfill), so a genuine mix must be rejected rather than
+    # silently mislabeled.
+    a = TuFragment(tu_name="a", ast_producer="castxml")
+    b = TuFragment(tu_name="b", ast_producer="clang")
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == HETEROGENEOUS_ABI_CONTEXT
+    assert excinfo.value.tu_names == ("a", "b")
+
+
+def test_merge_fragments_allows_uniform_ast_producer():
+    a = TuFragment(tu_name="a", ast_producer="clang")
+    b = TuFragment(tu_name="b", ast_producer="clang")
+    merged = merge_fragments([a, b])
+    assert merged.ast_producer == "clang"
+
+
+# ---------------------------------------------------------------------------
 # Determinism: merge is independent of fragment processing order
 # ---------------------------------------------------------------------------
 
@@ -209,6 +236,22 @@ def test_merge_fragments_function_unions_default_argument_across_tus():
     )
     merged = merge_fragments([a, b])
     assert merged.functions[0].params[0].default == "0"
+
+
+def test_merge_fragments_function_reconciles_differing_parameter_names():
+    # void f(int value); vs void f(int n); -- parameter names are not part
+    # of a C/C++ function's type, so this is a routine compatible
+    # redeclaration, not a conflict.
+    a = TuFragment(
+        tu_name="a",
+        functions=(_fn("f", "_Z1fi", params=[Param(name="value", type="int")]),),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(_fn("f", "_Z1fi", params=[Param(name="n", type="int")]),),
+    )
+    merged = merge_fragments([a, b])
+    assert len(merged.functions) == 1
 
 
 def test_merge_fragments_prefers_public_header_provenance():

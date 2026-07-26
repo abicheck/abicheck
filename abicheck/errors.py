@@ -136,10 +136,12 @@ class TuMergeError(SnapshotError):
       entity disagree in a way that isn't a forward-declaration/definition
       pair, a plain redeclaration, or a default-argument-only difference
       (e.g. differing return type, layout, or calling convention).
-    - ``"HETEROGENEOUS_ABI_CONTEXT"`` — reserved for a mixed compile
-      context across TUs; unreachable today, since ``dump_manifest.py``'s
-      parse-time single-profile-per-manifest rule already rejects that
-      before any TU is even extracted (D3).
+    - ``"HETEROGENEOUS_ABI_CONTEXT"`` — the manifest's *declared*
+      compiler/target is uniform (``dump_manifest.py``'s parse-time rule
+      already guarantees that, D3), but the TUs were extracted by
+      different AST producers -- e.g. ``--ast-frontend auto``'s per-TU
+      fallback landed one TU on castxml and another on clang within the
+      same manifest.
 
     These are extraction-time conflict codes, not
     :class:`~abicheck.checker_policy.ChangeKind` members, despite reading

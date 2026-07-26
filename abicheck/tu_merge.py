@@ -42,13 +42,14 @@ comparability gate as a clean side. It is therefore correctly outside the
 same reasoning already applied to ``IncompatibleSnapshotSchemaError`` (D1)
 and ``DumpDepthNotSatisfiedError``.
 
-``HETEROGENEOUS_ABI_CONTEXT`` is reserved but unreachable today:
-``dump_manifest.py``'s parse-time rule already rejects a manifest declaring
-different compilers/target triples across its TUs before any TU is even
-extracted (D3), so every :class:`~abicheck.tu_fragment.TuFragment` this
-module ever sees was produced by the same toolchain by construction. It
-exists only so a future relaxation of that parse-time rule has somewhere
-to report the conflict without inventing a new error shape.
+``HETEROGENEOUS_ABI_CONTEXT`` fires when the *declared* compiler/target is
+uniform (``dump_manifest.py``'s parse-time rule already guarantees that,
+D3) but the TUs were nonetheless *extracted* by different AST producers --
+``--ast-frontend auto`` falls back to a different backend independently per
+TU, so one TU can land on castxml while another falls back to clang within
+the same manifest (Codex review, PR #635). ``merge_fragments`` checks every
+contributing fragment's ``ast_producer`` for exactly this before merging
+any entities.
 
 **Determinism**: merge is deterministic regardless of the order fragments
 are passed in — a required property (shuffled TU-processing order must
@@ -123,6 +124,36 @@ def merge_fragments(
     # Fixed, content-derived order (tu_name, never the caller's own sequence
     # order) -- see this module's own "Determinism" docstring section.
     ordered = sorted(fragments, key=lambda f: f.tu_name)
+
+    # HETEROGENEOUS_ABI_CONTEXT's real trigger (Codex review, PR #635):
+    # dump_manifest.py's parse-time rule only rejects a manifest that
+    # *declares* different compilers/target triples across its TUs -- it
+    # says nothing about `--ast-frontend auto`'s per-TU fallback, which
+    # picks castxml/clang independently for each TU at extraction time. A
+    # manifest with two TUs, one falling back to clang while the other
+    # stays on castxml, would otherwise merge fine and silently stamp the
+    # whole snapshot with just one representative fragment's ast_producer
+    # -- which `resolve_header_ast_result`/`dumper.py` then trusts globally
+    # (`is_clang` gates DWARF layout backfill/coherence for every
+    # declaration, not just the representative fragment's own). Reject
+    # that mix outright rather than let a wrong-producer assumption leak
+    # into layout backfill for declarations that didn't actually come from
+    # the representative producer.
+    producers = {f.ast_producer for f in ordered}
+    if len(producers) > 1:
+        raise TuMergeError(
+            "translation units were extracted by different AST producers "
+            f"({sorted(producers)!r}) -- likely --ast-frontend auto falling "
+            "back to a different backend for only some TUs (see "
+            "--allow-ast-frontend-fallback). A manifest-driven dump requires "
+            "every TU to share one AST producer, the same way it already "
+            "requires one compiler/target triple, since downstream layout "
+            "backfill/coherence logic trusts a single producer for the "
+            "whole merged snapshot.",
+            code=HETEROGENEOUS_ABI_CONTEXT,
+            entity_key=("manifest", "ast_producer"),
+            tu_names=tuple(f.tu_name for f in ordered),
+        )
 
     header_segs, dir_segs, have_public_set = build_public_set(
         list(public_header_paths), list(public_header_dirs)
@@ -458,11 +489,19 @@ def _merge_functions(
             and pa.default != pb.default
         ):
             return None
+    # Parameter *names* are not part of a C/C++ function's type -- `void
+    # f(int value);` and `void f(int n);` are the identical declaration,
+    # redeclared with cosmetically different names (both castxml and clang
+    # preserve whatever the header spells) -- so they're blanked here
+    # alongside `default`, the same "not ABI-relevant, don't let it block a
+    # routine cross-TU redeclaration" treatment (Codex review, PR #635).
+    # The merged declaration still keeps *a*'s own parameter names (via
+    # `pa` below), not blanked ones -- only the *comparison* ignores them.
     a_bare = _blank_provenance(
-        replace(a, params=[replace(p, default=None) for p in a.params])
+        replace(a, params=[replace(p, name="", default=None) for p in a.params])
     )
     b_bare = _blank_provenance(
-        replace(b, params=[replace(p, default=None) for p in b.params])
+        replace(b, params=[replace(p, name="", default=None) for p in b.params])
     )
     if a_bare != b_bare:
         return None
