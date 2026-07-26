@@ -1,0 +1,118 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""ADR-050 D3/D4 (G32 Phase B/C) — the ``TuFragment``/``MergedTuFragments``
+shapes and ``entity_key``, the cross-TU identity both the per-TU dump loop
+(``dumper_manifest.py``) and the real compatible merge (``tu_merge.py``)
+build on.
+
+Lives in its own leaf module — importing only :mod:`abicheck.model` — so
+``dumper_manifest.py`` and ``tu_merge.py`` can each depend on these shapes
+without forming a ``dumper_manifest -> tu_merge -> dumper_manifest`` import
+cycle: ``dumper_manifest.py`` calls into ``tu_merge.merge_fragments``, and
+``tu_merge.py`` needs these same dataclasses, so neither of those two
+modules can be the one that *defines* them without the other importing
+back. ``dumper_manifest.py`` re-exports the names from here for backward
+compatibility — existing ``from abicheck.dumper_manifest import
+TuFragment`` call sites (tests included) keep working unchanged.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from .model import EnumType, Function, RecordType, Variable
+
+
+@dataclass(frozen=True)
+class TuFragment:
+    """One translation unit's own header-AST parse, normalized to plain
+    model entities (not raw AST) -- ADR-050 D3's "each producing a
+    normalized ``TuFragment``".
+
+    ``ast_producer``/``ast_toolchain``/``ast_fallback_reason``/
+    ``ast_toolchain_supported``/``ast_toolchain_unsupported_reasons`` mirror
+    the same per-parser provenance fields ``dumper._dump_elf``/``_dump_pe``/
+    ``_dump_macho`` already stamp onto a single-TU ``AbiSnapshot`` -- kept
+    per-fragment here (not just on the merged result) since a future
+    heterogeneous-toolchain diagnostic (D4's ``HETEROGENEOUS_ABI_CONTEXT``)
+    needs each TU's own value to compare, even though D3's own parse-time
+    rule already forces one compiler/target per manifest today.
+    """
+
+    tu_name: str
+    functions: tuple[Function, ...] = ()
+    variables: tuple[Variable, ...] = ()
+    types: tuple[RecordType, ...] = ()
+    enums: tuple[EnumType, ...] = ()
+    typedefs: dict[str, str] = field(default_factory=dict)
+    constants: dict[str, str] = field(default_factory=dict)
+    ast_producer: str = "castxml"
+    ast_toolchain: dict[str, str] = field(default_factory=dict)
+    ast_fallback_reason: str | None = None
+    ast_toolchain_supported: bool | None = None
+    ast_toolchain_unsupported_reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class MergedTuFragments:
+    """The merged result across every contributing TU's :class:`TuFragment`
+    -- entity lists/dicts folded via :func:`abicheck.tu_merge.merge_fragments`
+    (ADR-050 D4), plus one representative fragment's AST provenance (see
+    that function's own docstring for why using any single contributing
+    fragment's provenance is correct, not just convenient, under D3's own
+    single-compiler-per-manifest rule).
+    """
+
+    functions: tuple[Function, ...]
+    variables: tuple[Variable, ...]
+    types: tuple[RecordType, ...]
+    enums: tuple[EnumType, ...]
+    typedefs: dict[str, str]
+    constants: dict[str, str]
+    ast_producer: str
+    ast_toolchain: dict[str, str]
+    ast_fallback_reason: str | None
+    ast_toolchain_supported: bool | None
+    ast_toolchain_unsupported_reasons: tuple[str, ...]
+
+
+def entity_key(kind: str, name: str) -> tuple[str, str]:
+    """The cross-TU identity a duplicate is detected against.
+
+    Deliberately just ``(kind, name)`` -- for a :class:`Function`/
+    :class:`Variable`, *name* is its mangled linker symbol (already
+    excludes return type for every C++ mangling scheme this repo targets,
+    and equals the plain name for C, which has no mangling); for a
+    :class:`RecordType`/:class:`EnumType`/a typedef/a constant, *name* is
+    the model's own (already possibly namespace-qualified) ``name``/dict
+    key. ADR-050 D4's own text is explicit that ``entity_key`` "deliberately
+    excludes return type" for exactly this reason -- folding it in would
+    turn a same-TU return-type edit into an unrelated add+remove pair
+    instead of one detected change, so this helper never looks at
+    ``return_type``/``type`` at all.
+    """
+    return (kind, name)
+
+
+def fragment_entity_keys(fragment: TuFragment) -> list[tuple[str, str]]:
+    """Every ``entity_key`` *fragment* contributes, across all six kinds."""
+    keys: list[tuple[str, str]] = []
+    keys.extend(entity_key("function", fn.mangled) for fn in fragment.functions)
+    keys.extend(entity_key("variable", var.mangled) for var in fragment.variables)
+    keys.extend(entity_key("type", rt.name) for rt in fragment.types)
+    keys.extend(entity_key("enum", en.name) for en in fragment.enums)
+    keys.extend(entity_key("typedef", name) for name in fragment.typedefs)
+    keys.extend(entity_key("constant", name) for name in fragment.constants)
+    return keys

@@ -39,6 +39,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -53,12 +54,16 @@ from abicheck.dumper_manifest import (
     run_tu_fragment,
     run_tu_loop,
 )
-from abicheck.errors import SnapshotError, ValidationError
-from abicheck.model import EnumType, Function, RecordType, Variable
+from abicheck.errors import SnapshotError, TuMergeError, ValidationError
+from abicheck.model import EnumType, Function, Param, RecordType, TypeField, Variable
 
 
-def _fn(name: str, mangled: str | None = None) -> Function:
-    return Function(name=name, mangled=mangled or name, return_type="void")
+def _fn(
+    name: str, mangled: str | None = None, params: list[Param] | None = None
+) -> Function:
+    return Function(
+        name=name, mangled=mangled or name, return_type="void", params=params or []
+    )
 
 
 def _var(name: str, mangled: str | None = None) -> Variable:
@@ -117,25 +122,102 @@ def test_merge_concatenates_every_entity_kind():
     assert merged.constants == {"MAX": "100"}
 
 
-def test_merge_raises_on_duplicate_function_across_tus():
+def test_merge_reconciles_identical_function_redeclaration_across_tus():
+    # ADR-050 D4: a plain redeclaration (identical decl in two TUs) is a
+    # trivial merge, not a conflict -- Phase B's placeholder used to reject
+    # any repeat outright; Phase C's real merge folds this into one entry.
     a = TuFragment(tu_name="a", functions=(_fn("foo", "_Z3fooi"),))
     b = TuFragment(tu_name="b", functions=(_fn("foo", "_Z3fooi"),))
-    with pytest.raises(SnapshotError, match="redeclares function '_Z3fooi'"):
+    merged = merge_tu_fragments([a, b])
+    assert [fn.name for fn in merged.functions] == ["foo"]
+
+
+def test_merge_unions_default_argument_only_difference_across_tus():
+    # ADR-050 D4's other named trivial-merge case: a difference confined to
+    # a parameter's default argument merges rather than conflicts, and the
+    # merged declaration keeps whichever side actually had the default.
+    param_no_default = Param(name="n", type="int")
+    param_with_default = replace(param_no_default, default="0")
+    a = TuFragment(
+        tu_name="a", functions=(_fn("foo", "_Z3fooi", params=[param_no_default]),)
+    )
+    b = TuFragment(
+        tu_name="b", functions=(_fn("foo", "_Z3fooi", params=[param_with_default]),)
+    )
+    merged = merge_tu_fragments([a, b])
+    assert len(merged.functions) == 1
+    assert merged.functions[0].params[0].default == "0"
+
+
+def test_merge_raises_on_genuinely_conflicting_function_across_tus():
+    # Same entity_key (mangled name excludes return type), but the two TUs
+    # disagree on the return type itself -- a genuine ODR conflict, not a
+    # forward-decl/definition or default-argument-only difference.
+    a = TuFragment(
+        tu_name="a",
+        functions=(replace(_fn("compute", "_Z7computei"), return_type="int"),),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(replace(_fn("compute", "_Z7computei"), return_type="double"),),
+    )
+    with pytest.raises(TuMergeError) as excinfo:
         merge_tu_fragments([a, b])
+    assert excinfo.value.code == "INCONSISTENT_DECLARATION"
+    assert excinfo.value.entity_key == ("function", "_Z7computei")
 
 
-def test_merge_raises_on_duplicate_type_across_tus():
+def test_merge_reconciles_identical_type_redeclaration_across_tus():
     a = TuFragment(tu_name="a", types=(_record("Point"),))
     b = TuFragment(tu_name="b", types=(_record("Point"),))
-    with pytest.raises(SnapshotError, match="redeclares type 'Point'"):
+    merged = merge_tu_fragments([a, b])
+    assert [t.name for t in merged.types] == ["Point"]
+
+
+def test_merge_reconciles_forward_declaration_and_definition_across_tus():
+    # ADR-050 D4's canonical trivial-merge case: a forward declaration
+    # (is_opaque, no fields) in one TU paired with the full definition in
+    # another merges to the definition.
+    forward = RecordType(name="Point", kind="struct", is_opaque=True)
+    definition = RecordType(
+        name="Point",
+        kind="struct",
+        fields=[TypeField(name="x", type="int"), TypeField(name="y", type="int")],
+    )
+    a = TuFragment(tu_name="a", types=(forward,))
+    b = TuFragment(tu_name="b", types=(definition,))
+    merged = merge_tu_fragments([a, b])
+    assert len(merged.types) == 1
+    assert merged.types[0] == definition
+
+
+def test_merge_raises_on_genuinely_conflicting_type_across_tus():
+    a = TuFragment(
+        tu_name="a", types=(RecordType(name="Point", kind="struct", size_bits=64),)
+    )
+    b = TuFragment(
+        tu_name="b", types=(RecordType(name="Point", kind="struct", size_bits=128),)
+    )
+    with pytest.raises(TuMergeError) as excinfo:
         merge_tu_fragments([a, b])
+    assert excinfo.value.code == "INCONSISTENT_DECLARATION"
+    assert excinfo.value.entity_key == ("type", "Point")
 
 
-def test_merge_raises_on_duplicate_typedef_across_tus():
+def test_merge_reconciles_identical_typedef_across_tus():
     a = TuFragment(tu_name="a", typedefs={"size_type": "unsigned long"})
     b = TuFragment(tu_name="b", typedefs={"size_type": "unsigned long"})
-    with pytest.raises(SnapshotError, match="redeclares typedef 'size_type'"):
+    merged = merge_tu_fragments([a, b])
+    assert merged.typedefs == {"size_type": "unsigned long"}
+
+
+def test_merge_raises_on_conflicting_typedef_value_across_tus():
+    a = TuFragment(tu_name="a", typedefs={"size_type": "unsigned long"})
+    b = TuFragment(tu_name="b", typedefs={"size_type": "unsigned int"})
+    with pytest.raises(TuMergeError) as excinfo:
         merge_tu_fragments([a, b])
+    assert excinfo.value.code == "INCONSISTENT_DECLARATION"
+    assert excinfo.value.entity_key == ("typedef", "size_type")
 
 
 def test_merge_does_not_raise_on_duplicate_within_a_single_fragment():
@@ -321,7 +403,7 @@ def test_run_tu_loop_optional_tu_failure_is_skipped():
     assert {fn.name for fn in merged.functions} == {"b"}
 
 
-def test_run_tu_loop_raises_on_duplicate_entity_across_tus():
+def test_run_tu_loop_reconciles_identical_entity_across_tus():
     calls: list = []
 
     def _stub(headers, extra_includes, **kwargs):
@@ -329,7 +411,31 @@ def test_run_tu_loop_raises_on_duplicate_entity_across_tus():
         return _StubParser(functions=(_fn("shared", "_Z6sharedv"),))
 
     tus = (_tu("a", "a.h"), _tu("b", "b.h"))
-    with pytest.raises(SnapshotError, match="redeclares function"):
+    merged = run_tu_loop(
+        tus,
+        header_ast_parser=_stub,
+        roots=[Path("a.h"), Path("b.h")],
+        backend="auto",
+        compiler="c++",
+        exported_dynamic=set(),
+        exported_static=set(),
+    )
+    assert [fn.name for fn in merged.functions] == ["shared"]
+
+
+def test_run_tu_loop_raises_on_genuinely_conflicting_entity_across_tus():
+    def _stub(headers, extra_includes, **kwargs):
+        # Return a different return_type per TU, keyed off which header this
+        # invocation is for -- a genuine cross-TU conflict, unlike the
+        # identical-redeclaration case above.
+        tu_marker = str(headers[0])
+        return_type = "int" if tu_marker.endswith("a.h") else "double"
+        return _StubParser(
+            functions=(replace(_fn("shared", "_Z6sharedv"), return_type=return_type),)
+        )
+
+    tus = (_tu("a", "a.h"), _tu("b", "b.h"))
+    with pytest.raises(TuMergeError) as excinfo:
         run_tu_loop(
             tus,
             header_ast_parser=_stub,
@@ -339,6 +445,7 @@ def test_run_tu_loop_raises_on_duplicate_entity_across_tus():
             exported_dynamic=set(),
             exported_static=set(),
         )
+    assert excinfo.value.code == "INCONSISTENT_DECLARATION"
 
 
 def test_run_tu_loop_empty_tus_returns_empty_merge():
@@ -386,7 +493,9 @@ def test_run_tu_loop_real_clang_backend_merges_two_translation_units(tmp_path):
     assert merged.ast_producer == "clang"
 
 
-def test_run_tu_loop_real_clang_backend_raises_on_duplicate_across_tus(tmp_path):
+def test_run_tu_loop_real_clang_backend_merges_identical_redeclaration_across_tus(
+    tmp_path,
+):
     if shutil.which("clang") is None:
         pytest.skip("clang is required for the real-backend dumper_manifest test")
     from abicheck.dumper import _header_ast_parser
@@ -400,7 +509,35 @@ def test_run_tu_loop_real_clang_backend_raises_on_duplicate_across_tus(tmp_path)
         _tu("tu_a", str(header_a)),
         _tu("tu_b", str(header_b)),
     )
-    with pytest.raises(SnapshotError, match="redeclares function"):
+    merged = run_tu_loop(
+        tus,
+        header_ast_parser=_header_ast_parser,
+        roots=[header_a, header_b],
+        backend="clang",
+        compiler="c++",
+        exported_dynamic={"shared_fn"},
+        exported_static=set(),
+    )
+    assert [fn.name for fn in merged.functions] == ["shared_fn"]
+
+
+def test_run_tu_loop_real_clang_backend_raises_on_genuinely_conflicting_across_tus(
+    tmp_path,
+):
+    if shutil.which("clang") is None:
+        pytest.skip("clang is required for the real-backend dumper_manifest test")
+    from abicheck.dumper import _header_ast_parser
+
+    header_a = tmp_path / "a.h"
+    header_a.write_text("int shared_fn(int a, int b);\n")
+    header_b = tmp_path / "b.h"
+    header_b.write_text("double shared_fn(int a, int b);\n")
+
+    tus = (
+        _tu("tu_a", str(header_a)),
+        _tu("tu_b", str(header_b)),
+    )
+    with pytest.raises(TuMergeError) as excinfo:
         run_tu_loop(
             tus,
             header_ast_parser=_header_ast_parser,
@@ -410,6 +547,7 @@ def test_run_tu_loop_real_clang_backend_raises_on_duplicate_across_tus(tmp_path)
             exported_dynamic={"shared_fn"},
             exported_static=set(),
         )
+    assert excinfo.value.code == "INCONSISTENT_DECLARATION"
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +680,9 @@ class TestDumpWithManifest:
                 dump_manifest=self._manifest(tmp_path),
             )
 
-    def test_dump_manifest_duplicate_across_tus_raises(self, tmp_path: Path):
+    def test_dump_manifest_merges_identical_redeclaration_across_tus(
+        self, tmp_path: Path
+    ):
         if not (_have("clang") and _have("gcc")):
             pytest.skip("clang and gcc are required for this end-to-end test")
         header_a = tmp_path / "a.h"
@@ -566,7 +706,43 @@ class TestDumpWithManifest:
                 TranslationUnit(name="tu_b", forced_includes=(header_b,)),
             ),
         )
-        with pytest.raises(SnapshotError, match="redeclares function"):
+        snapshot = dump(
+            so,
+            [],
+            version="1.0",
+            compiler="cc",
+            header_backend="clang",
+            dump_manifest=manifest,
+        )
+        assert [fn.name for fn in snapshot.functions] == ["shared_fn"]
+
+    def test_dump_manifest_raises_on_genuinely_conflicting_across_tus(
+        self, tmp_path: Path
+    ):
+        if not (_have("clang") and _have("gcc")):
+            pytest.skip("clang and gcc are required for this end-to-end test")
+        header_a = tmp_path / "a.h"
+        header_a.write_text("int shared_fn(int a, int b);\n")
+        header_b = tmp_path / "b.h"
+        header_b.write_text("double shared_fn(int a, int b);\n")
+        src = tmp_path / "lib.c"
+        src.write_text("int shared_fn(int a, int b) { return a + b; }\n")
+        so = tmp_path / "liblib.so"
+        subprocess.run(
+            ["gcc", "-shared", "-fPIC", "-o", str(so), str(src)],
+            check=True,
+            capture_output=True,
+        )
+        manifest = DumpManifest(
+            base_dir=tmp_path,
+            compiler="cc",
+            roots=(header_a, header_b),
+            translation_units=(
+                TranslationUnit(name="tu_a", forced_includes=(header_a,)),
+                TranslationUnit(name="tu_b", forced_includes=(header_b,)),
+            ),
+        )
+        with pytest.raises(TuMergeError) as excinfo:
             dump(
                 so,
                 [],
@@ -575,6 +751,7 @@ class TestDumpWithManifest:
                 header_backend="clang",
                 dump_manifest=manifest,
             )
+        assert excinfo.value.code == "INCONSISTENT_DECLARATION"
 
 
 @pytest.mark.skipif(
