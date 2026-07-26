@@ -207,3 +207,18 @@
   colliding record would let a signature naming one of them wrongly walk
   an unrelated internal record's fields too, misattributing its own
   implementation-only churn as publicly reachable.
+- **`type_reachability.py`'s reachability closure now also seeds public
+  variables and resolves typedef aliases** (Codex review, fresh evidence):
+  (1) an exported public `Variable` (e.g. `Foo global`) is now a
+  reachability root the same way a public function is — the closure
+  previously only walked `snapshot.functions`, so a public global variable
+  of a non-stdlib record type never seeded that record at all. (2) a
+  signature/field type string spelled with a user-defined typedef alias
+  (e.g. a public function returning `Alias` where `snapshot.typedefs` maps
+  `"Alias"` to `"Foo"`) is now resolved to its target and scanned in turn,
+  mirroring `surface.py`'s own reachability closure — the alias's target
+  is a plain type-string substitution already present in
+  `snapshot.typedefs`, distinct from the still-unresolved, harder gap of a
+  signature spelled with a *stdlib* alias like `std::string` (which names
+  a compiler-internal alias with no reverse mapping back to the owning
+  `RecordType` in any current model field).

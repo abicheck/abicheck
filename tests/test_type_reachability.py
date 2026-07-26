@@ -24,6 +24,7 @@ from abicheck.model import (
     RecordType,
     ScopeOrigin,
     TypeField,
+    Variable,
     Visibility,
 )
 from abicheck.type_reachability import (
@@ -838,3 +839,189 @@ class TestOwnerClassSeedingAndAmbiguousAliases:
             ],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
+class TestPublicVariablesAndTypedefResolution:
+    def test_public_variable_seeds_its_record_type(self) -> None:
+        """Codex review, fresh evidence: an exported public variable (e.g.
+        Foo global) is a reachability root the same way a public function
+        is -- the scan originally only walked snapshot.functions."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api")],
+            variables=[
+                Variable(
+                    name="global_foo",
+                    mangled="global_foo",
+                    type="Foo",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_hidden_variable_does_not_seed_its_record_type(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api")],
+            variables=[
+                Variable(
+                    name="internal_foo",
+                    mangled="internal_foo",
+                    type="Foo",
+                    visibility=Visibility.HIDDEN,
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_private_origin_variable_does_not_seed_its_record_type(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api")],
+            variables=[
+                Variable(
+                    name="internal_foo",
+                    mangled="internal_foo",
+                    type="Foo",
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_typedef_alias_in_signature_resolves_to_its_record_target(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: a public function returning
+        "Alias" where snapshot.typedefs maps "Alias" -> "Foo" must resolve
+        to Foo, mirroring surface.py's own reachability closure."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="Alias")],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        snap.typedefs = {"Alias": "Foo"}
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_no_typedefs_means_no_typedef_pattern_compiled(self) -> None:
+        """Guard against a regression in the typedef_pattern-is-None short
+        circuit when a snapshot has no typedefs at all."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", params=[Param(name="s", type="std::string")])],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_typedef_not_matched_is_not_resolved_twice(self) -> None:
+        """A typedef alias reached from two different declarations must
+        only be resolved once -- covers the resolved_typedefs de-dup set."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("first", return_type="Alias"),
+                _fn("second", return_type="Alias"),
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        snap.typedefs = {"Alias": "Foo"}
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_variable_scan_breaks_once_everything_already_found(self) -> None:
+        """Once every stdlib candidate is found via functions, the variable
+        loop must not scan any variables at all -- covers its top-of-loop
+        early-exit break."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", params=[Param(name="s", type="std::string")])],
+            variables=[
+                Variable(
+                    name="global_foo",
+                    mangled="global_foo",
+                    type="Foo",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_stdlib_namespaced_variable_is_never_the_referencing_side(self) -> None:
+        """Mirrors the stdlib-function exclusion: a variable whose own name
+        is stdlib-namespaced must not count as a referencing declaration."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api")],
+            variables=[
+                Variable(
+                    name="std::internal_global",
+                    mangled="std_internal_global",
+                    type="Foo",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()

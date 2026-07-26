@@ -309,7 +309,23 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     ``origin`` is ``ScopeOrigin.PRIVATE_HEADER``/``SYSTEM_HEADER``/
     ``GENERATED`` — linkage and origin are independent axes (ADR-024 D1),
     so a function only ever declared in a private/system/generated header
-    is rejected here too, before its signature is ever scanned.
+    is rejected here too, before its signature is ever scanned. A public
+    ``Variable`` is seeded the same way (Codex review, fresh evidence: a
+    ``compute_public_surface()``-style closure already treats public
+    variables as type roots, but this scan originally only walked
+    ``snapshot.functions`` — a public exported global like ``Foo global``
+    never seeded ``Foo`` at all).
+
+    A signature/field type string spelled with a user-defined typedef alias
+    (e.g. a public function returning ``Alias`` where ``snapshot.typedefs``
+    maps ``"Alias"`` to ``"Foo"``) is resolved to its target and scanned in
+    turn (Codex review, fresh evidence: ``surface.py``'s own reachability
+    closure does the same) — this is a different, already-solvable case
+    from the typedef-*aliased stdlib type* gap noted below (``std::string``
+    naming its own alias with no reverse mapping back to the owning
+    ``RecordType``): here the alias's target is a plain type-string
+    substitution already present in ``snapshot.typedefs``, nothing needs
+    inventing.
 
     A non-stdlib record's own fields are only consulted once that record
     itself is confirmed reachable from a public root — by direct mention in
@@ -369,10 +385,20 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     reached_records: set[str] = set()
     worklist: list[str] = []
 
+    typedef_targets: dict[str, str] = dict(snapshot.typedefs)
+    typedef_pattern = (
+        _compile_spelling_pattern(typedef_targets) if typedef_targets else None
+    )
+    resolved_typedefs: set[str] = set()
+
     def _scan(type_string: str) -> None:
         """Record every stdlib/non-stdlib identity *type_string* names;
         newly-reached non-stdlib records are queued for their own fields to
-        be walked in turn."""
+        be walked in turn. Also follows a typedef alias to its own target
+        (Codex review, fresh evidence: ``surface.py``'s own reachability
+        closure does the same), so a public signature spelled with a
+        user-defined alias name still reaches the record it actually
+        names."""
         if not type_string:
             return
         for match in pattern.finditer(type_string):
@@ -386,6 +412,12 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
                 ):
                     reached_records.add(identity)
                     worklist.append(identity)
+        if typedef_pattern is not None:
+            for match in typedef_pattern.finditer(type_string):
+                alias = match.group(0)
+                if alias not in resolved_typedefs:
+                    resolved_typedefs.add(alias)
+                    _scan(typedef_targets[alias])
 
     for fn in snapshot.functions:
         if not remaining:
@@ -402,6 +434,17 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
         owner = owner_class_of(fn)
         if owner is not None:
             _scan(owner)
+
+    for var in snapshot.variables:
+        if not remaining:
+            break
+        if var.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
+            continue
+        if var.visibility != Visibility.PUBLIC:
+            continue
+        if var.origin in _NON_PUBLIC_ORIGINS:
+            continue
+        _scan(var.type)
 
     while worklist and remaining:
         rec = non_stdlib_records[worklist.pop()]
