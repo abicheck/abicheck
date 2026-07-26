@@ -592,6 +592,21 @@ def _is_batch_shaped_change(change: Change, kind_value: str) -> bool:
 #: (full kind/old/new/description discriminator, no cross-detector
 #: collision for these three kinds) rather than a fix that risks losing a
 #: distinct field-level fact, matching this module's ambiguity-safe bias.
+#:
+#: The three enum entries (self-mapped: same kind on both sides, not a
+#: kind pair) mirror ``diff_filtering._dedup_enum_same_kind``'s own
+#: ``(kind, symbol)`` dedup key exactly (Codex review): its AST detector
+#: (``diff_types.py``) uses the registry description template with no
+#: embedded values, while its DWARF detector (``diff_platform.py``) passes
+#: a bespoke ``description`` embedding ``"({old} → {new})"`` -- the same
+#: "one logical event, two detectors' own wording" shape as the kind-pair
+#: entries above, just sharing one kind slug instead of two. Both
+#: detectors populate ``old_value``/``new_value`` identically
+#: (``str(old_val)``/``str(new_val)``), so only ``description`` actually
+#: needed dropping, but collapsing the full discriminator (like every
+#: other entry here) matches ``_dedup_enum_same_kind``'s own key precisely
+#: rather than assuming every current and future producer of these kinds
+#: populates old/new consistently.
 _EQUIVALENT_CHANGE_CATEGORIES = {
     "func_removed": "func_removal",
     "func_removed_elf_only": "func_removal",
@@ -604,10 +619,15 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     "type_size_changed": "type_size_change",
     "struct_alignment_changed": "type_alignment_change",
     "type_alignment_changed": "type_alignment_change",
+    "enum_member_value_changed": "enum_member_value_changed",
+    "enum_member_removed": "enum_member_removed",
+    "enum_last_member_value_changed": "enum_last_member_value_changed",
 }
 
 
-def _change_discriminator(change: Change, kind_value: str) -> str:
+def _change_discriminator(
+    change: Change, kind_value: str, *, include_description: bool = True
+) -> str:
     """The part of a finding's identity that tells it apart from another
     finding sharing the same symbol.
 
@@ -620,18 +640,27 @@ def _change_discriminator(change: Change, kind_value: str) -> str:
     alone, ignoring the detector-specific kind/old/new/description text, or
     this identity could never actually perform the rich/L0 reconciliation
     it is meant to drive once wired in (Codex review).
+
+    ``include_description=False`` additionally drops ``description`` alone
+    (keeping ``old_value``/``new_value``) -- used by
+    :func:`resolve_change_identity` for a batch-shaped change whose
+    ``description`` embeds the arbitrary sampled symbol via its
+    ``description_template`` (``diff_platform_elf_symbols.py``'s
+    ``_check_gained_gnu_unique``: ``"Symbol binding became GNU_UNIQUE:
+    {name} ..."`` where ``name`` is the sample). Clearing
+    ``entity_symbol`` alone (see :func:`resolve_change_identity`) is not
+    enough, since ``description`` still varies with the sample even
+    though ``old_value``/``new_value`` do not (Codex review: verified
+    changing only the sampled export still produced a different synthetic
+    primary id).
     """
     category = _EQUIVALENT_CHANGE_CATEGORIES.get(kind_value)
     if category is not None:
         return f"category:{category}"
-    return "\x1f".join(
-        (
-            kind_value,
-            change.old_value or "",
-            change.new_value or "",
-            change.description or "",
-        )
-    )
+    parts = [kind_value, change.old_value or "", change.new_value or ""]
+    if include_description:
+        parts.append(change.description or "")
+    return "\x1f".join(parts)
 
 
 def resolve_change_identity(change: Change) -> FindingIdentity:
@@ -669,7 +698,14 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     # below naturally omits the sample instead of needing its own check.
     entity_symbol = None if is_batch else change.symbol
     qn = change.qualified_name or entity_symbol or ""
-    discriminator = _change_discriminator(change, kind_value)
+    # A batch-shaped change's `description` embeds the same arbitrary
+    # sample as `symbol` (Codex review, round 2 on this same finding) --
+    # `entity_symbol` alone isn't enough to make the identity
+    # sample-independent, since `discriminator` (used in `sig`, every
+    # alias, and the REDUCED-tier synthetic basis) would still vary.
+    discriminator = _change_discriminator(
+        change, kind_value, include_description=not is_batch
+    )
     sig = f"sig:{qn}\x1f{discriminator}"
     rel = source_relative_identity(change.source_location or "", entity_symbol or "")
 

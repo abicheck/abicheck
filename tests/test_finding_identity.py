@@ -504,6 +504,39 @@ class TestResolveChangeIdentity:
         assert _ITANIUM_MANGLED not in identity.primary_id
         assert all(_ITANIUM_MANGLED not in alias for alias in identity.aliases)
 
+    def test_batch_gnu_unique_identity_is_stable_when_the_sample_changes(self) -> None:
+        # Codex review, round 3: the prior two tests used a generic
+        # description ("1 GNU_UNIQUE export(s)") that doesn't reproduce the
+        # real producer's shape -- _check_gained_gnu_unique's actual
+        # make_change() call formats the sampled symbol into `description`
+        # via the registry template ("Symbol binding became GNU_UNIQUE:
+        # {name} -- inhibits dlclose() on this library"), which `entity_symbol`
+        # alone doesn't strip from `discriminator`. Reproducing that exact
+        # shape and changing only the sampled export must not change the
+        # resolved identity at all.
+        description_template = (
+            "Symbol binding became GNU_UNIQUE: {name} "
+            "-- inhibits dlclose() on this library"
+        )
+        first = Change(
+            kind=ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
+            symbol=_ITANIUM_MANGLED,
+            description=description_template.format(name=_ITANIUM_MANGLED),
+            old_value="(no GNU_UNIQUE exports)",
+            new_value="1 GNU_UNIQUE export(s)",
+        )
+        second = Change(
+            kind=ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
+            symbol="_ZN3FooC1Ev",
+            description=description_template.format(name="_ZN3FooC1Ev"),
+            old_value="(no GNU_UNIQUE exports)",
+            new_value="1 GNU_UNIQUE export(s)",
+        )
+        first_identity = resolve_change_identity(first)
+        second_identity = resolve_change_identity(second)
+        assert first_identity.primary_id == second_identity.primary_id
+        assert first_identity.tier == IDENTITY_TIER_REDUCED
+
     def test_per_symbol_gnu_unique_transition_is_still_canonical(self) -> None:
         # Regression guard: _check_binding_change's genuine per-symbol
         # SYMBOL_BINDING_BECAME_UNIQUE emission -- a real SymbolBinding value
@@ -533,6 +566,56 @@ class TestResolveChangeIdentity:
         )
         identity = resolve_change_identity(change)
         assert identity.tier == IDENTITY_TIER_CANONICAL
+
+    def test_enum_member_value_changed_collapses_across_ast_and_dwarf_wording(
+        self,
+    ) -> None:
+        # Codex review: diff_filtering._dedup_enum_same_kind already
+        # collapses ENUM_MEMBER_VALUE_CHANGED/ENUM_MEMBER_REMOVED/
+        # ENUM_LAST_MEMBER_VALUE_CHANGED findings by (kind, symbol) alone --
+        # diff_types.py's AST detector uses the bare registry description
+        # template while diff_platform.py's DWARF detector passes a bespoke
+        # description embedding "(old -> new)". Both must resolve to the
+        # same identity or this module could never actually perform that
+        # same reconciliation once wired in.
+        ast_side = Change(
+            kind=ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+            symbol="Color::RED",
+            description="Enum member value changed",
+            old_value="1",
+            new_value="2",
+        )
+        dwarf_side = Change(
+            kind=ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+            symbol="Color::RED",
+            description="Enum member value changed: Color::RED (1 → 2)",
+            old_value="1",
+            new_value="2",
+        )
+        ast_identity = resolve_change_identity(ast_side)
+        dwarf_identity = resolve_change_identity(dwarf_side)
+        assert ast_identity.primary_id == dwarf_identity.primary_id
+
+    def test_enum_member_removed_on_a_different_symbol_does_not_collapse(self) -> None:
+        # Regression guard: the same-kind category collapse must still
+        # discriminate by symbol -- two different enum members must not
+        # collide just because they share ENUM_MEMBER_REMOVED.
+        red = Change(
+            kind=ChangeKind.ENUM_MEMBER_REMOVED,
+            symbol="Color::RED",
+            description="removed",
+            old_value="1",
+        )
+        blue = Change(
+            kind=ChangeKind.ENUM_MEMBER_REMOVED,
+            symbol="Color::BLUE",
+            description="removed",
+            old_value="3",
+        )
+        assert (
+            resolve_change_identity(red).primary_id
+            != resolve_change_identity(blue).primary_id
+        )
 
     def test_method_access_changed_is_canonical(self) -> None:
         # Codex review: two overloaded methods undergoing the same access
