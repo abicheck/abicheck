@@ -61,7 +61,7 @@ class TestNormalizeMangledName:
         msvc = "?foo@@YAHH@Z"
         assert normalize_mangled_name(msvc, "foo") == msvc
 
-    def test_itanium_prefixed_garbage_that_fails_to_demangle_is_rejected(self) -> None:
+    def test_itanium_prefixed_garbage_with_invalid_characters_is_rejected(self) -> None:
         assert normalize_mangled_name("_Znotreallymangled!!", "notreallymangled!!") is None
 
     def test_neither_prefix_is_rejected(self) -> None:
@@ -69,6 +69,21 @@ class TestNormalizeMangledName:
 
     def test_none_input_is_rejected(self) -> None:
         assert normalize_mangled_name(None, "foo") is None
+
+    def test_does_not_require_an_external_demangler(self, monkeypatch) -> None:
+        # Regression guard (Codex review): identity must be deterministic and
+        # host-independent, so this must never shell out to c++filt/cxxfilt --
+        # a demangler being unavailable must not silently change the tier a
+        # symbol resolves to.
+        import abicheck.demangle as demangle_module
+
+        def _boom(symbol: str) -> str | None:
+            raise AssertionError(
+                "normalize_mangled_name must not call an external demangler"
+            )
+
+        monkeypatch.setattr(demangle_module, "demangle", _boom)
+        assert normalize_mangled_name(_ITANIUM_MANGLED, "foo") == _ITANIUM_MANGLED
 
 
 class TestNormalizedSignature:
@@ -154,7 +169,10 @@ class TestResolveFunctionIdentity:
         identity = resolve_function_identity(func)
         assert identity.tier == IDENTITY_TIER_NORMALIZED
 
-    def test_param_types_feed_the_signature(self) -> None:
+    def test_param_types_feed_the_signature_for_non_extern_c_functions(self) -> None:
+        # No real mangling (e.g. a DWARF-only snapshot) but genuinely
+        # overloadable (is_extern_c=False, the default) -- param types must
+        # disambiguate.
         one_param = Function(
             name="foo",
             mangled="foo",
@@ -170,6 +188,30 @@ class TestResolveFunctionIdentity:
         assert resolve_function_identity(one_param).primary_id != resolve_function_identity(
             two_params
         ).primary_id
+
+    def test_extern_c_identity_is_stable_across_a_parameter_change(self) -> None:
+        # Codex review: diff_symbols._diff_functions matches extern "C"
+        # functions by name alone (C has no overloading), regardless of a
+        # parameter-list change between old and new. The identity used to
+        # drive that same matching must not fragment on a param diff.
+        before = Function(
+            name="foo",
+            mangled="foo",
+            return_type="int",
+            is_extern_c=True,
+            params=[Param(name="x", type="int")],
+        )
+        after = Function(
+            name="foo",
+            mangled="foo",
+            return_type="int",
+            is_extern_c=True,
+            params=[Param(name="x", type="int"), Param(name="y", type="char")],
+        )
+        before_identity = resolve_function_identity(before)
+        after_identity = resolve_function_identity(after)
+        assert before_identity.tier == IDENTITY_TIER_NORMALIZED
+        assert before_identity.primary_id == after_identity.primary_id
 
     def test_overloads_sharing_a_bare_name_are_distinguished_by_mangling(self) -> None:
         overload_a = Function(name="foo", mangled="_Z3fooi", return_type="int")
@@ -201,7 +243,30 @@ class TestResolveChangeIdentity:
         )
         identity = resolve_change_identity(change)
         assert identity.tier == IDENTITY_TIER_CANONICAL
-        assert identity.primary_id == f"mangled:{_ITANIUM_MANGLED}"
+        assert identity.primary_id.startswith(f"mangled:{_ITANIUM_MANGLED}\x1f")
+
+    def test_canonical_id_distinguishes_two_findings_on_the_same_symbol(self) -> None:
+        # Codex review: FUNC_RETURN_CHANGED and FUNC_PARAMS_CHANGED on the
+        # same mangled function must not collapse onto one dedup key.
+        return_changed = resolve_change_identity(
+            Change(
+                kind=ChangeKind.FUNC_RETURN_CHANGED,
+                symbol=_ITANIUM_MANGLED,
+                description="return type changed",
+                qualified_name="foo",
+            )
+        )
+        params_changed = resolve_change_identity(
+            Change(
+                kind=ChangeKind.FUNC_PARAMS_CHANGED,
+                symbol=_ITANIUM_MANGLED,
+                description="param 0 type changed",
+                qualified_name="foo",
+            )
+        )
+        assert return_changed.tier == IDENTITY_TIER_CANONICAL
+        assert params_changed.tier == IDENTITY_TIER_CANONICAL
+        assert return_changed.primary_id != params_changed.primary_id
 
     def test_type_level_change_degrades_to_normalized(self) -> None:
         change = Change(

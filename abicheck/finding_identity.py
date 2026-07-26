@@ -59,10 +59,9 @@ when the corresponding input field is actually present.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-
-from . import demangle
 
 if TYPE_CHECKING:
     from .checker_types import Change
@@ -112,27 +111,38 @@ def is_real_mangled_name(mangled_name: str | None, plain_name: str | None) -> bo
     return bool(mangled_name) and mangled_name != plain_name
 
 
+#: Structural (no external tool) check that *mangled_name* has the shape of
+#: an Itanium mangled name: ``_Z`` followed by the restricted character set
+#: Itanium mangling actually uses (matches ``demangle._MANGLED_TOKEN_RE``'s
+#: character class, anchored to the whole string here rather than scanning
+#: free text for embedded tokens).
+_ITANIUM_MANGLED_RE = re.compile(r"\A_Z[A-Za-z0-9_$]+\Z")
+
+
 def normalize_mangled_name(
     mangled_name: str | None, plain_name: str | None
 ) -> str | None:
     """Return *mangled_name* if it is a real, verifiable mangled name, else
     ``None`` -- never a guess.
 
-    Reuses :mod:`abicheck.demangle` (Itanium ``_Z...``) to confirm the
-    string actually demangles to something different from itself. MSVC
-    ``?``-prefixed manglings have no demangler in this codebase, so they
-    are accepted on the prefix convention alone (best-effort, matches how
-    the rest of the codebase treats MSVC-mangled names it cannot
-    independently demangle).
+    Deliberately does NOT call :func:`abicheck.demangle.demangle`: that
+    function needs the optional ``cxxfilt`` package or a ``c++filt``
+    binary, and this identity is meant to be deterministic and
+    host-independent (the same input snapshot must resolve to the same
+    identity for reconciliation/replay regardless of which machine runs
+    the comparison) -- a mangled name that only degrades to the NORMALIZED
+    tier on a host with no demangler installed would silently change
+    identity across CI runners or between a contributor's laptop and CI.
+    Itanium ``_Z...`` and MSVC ``?...`` manglings are therefore both
+    accepted on their prefix + character-set convention alone
+    (best-effort, matches how the rest of the codebase already treats
+    MSVC-mangled names it cannot independently demangle).
     """
     if not is_real_mangled_name(mangled_name, plain_name):
         return None
     assert mangled_name is not None  # for type-checkers; guarded above
     if mangled_name.startswith("_Z"):
-        demangled = demangle.demangle(mangled_name)
-        if demangled and demangled != mangled_name:
-            return mangled_name
-        return None
+        return mangled_name if _ITANIUM_MANGLED_RE.match(mangled_name) else None
     if mangled_name.startswith("?"):
         return mangled_name
     return None
@@ -213,8 +223,20 @@ def resolve_function_identity(func: Function) -> FindingIdentity:
     ``diff_symbols._diff_functions`` already keys its old/new maps and
     extern-C name fallback by; this resolves the identical precedence as
     one documented, tested primitive instead of the inline logic there.
+
+    Parameter types feed the NORMALIZED-tier signature only for functions
+    that are NOT ``extern "C"`` -- C has no overload resolution, so a
+    changed parameter list is a *modification* of the one function named
+    ``func.name``, the same entity, not a different overload. Folding
+    param types into an extern-C function's identity would give the old
+    and new declarations different primary ids on a parameter-type change
+    and break the existing name-based extern-C match
+    ``diff_symbols._diff_functions`` relies on (Codex review). A
+    non-extern-C function with no real mangling (e.g. a DWARF-only
+    snapshot) can genuinely be overloaded, so param types still
+    disambiguate there.
     """
-    param_types = tuple(p.type for p in func.params)
+    param_types = () if func.is_extern_c else tuple(p.type for p in func.params)
     return resolve_symbol_identity(
         mangled=func.mangled,
         name=func.name,
@@ -247,11 +269,26 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     (matching how ``extern "C"`` producers report the two as equal). A
     type-level change's ``symbol`` is a type name, not a mangling, so it
     never passes that check and correctly degrades to the NORMALIZED tier.
+
+    Unlike :func:`resolve_function_identity`/:func:`resolve_variable_identity`
+    (which identify one *entity*, so a bare mangled name is already
+    unambiguous), this identifies one *finding* -- two distinct findings
+    routinely share a symbol (e.g. ``FUNC_RETURN_CHANGED`` and
+    ``FUNC_PARAMS_CHANGED`` both on ``foo``). The change's kind/old/new
+    value/description are therefore folded into ``primary_id`` at every
+    tier, including CANONICAL, mirroring the discriminator
+    ``reporter_markdown._finding_id`` already established as the minimal
+    set that disambiguates one finding from another on the same symbol
+    (Codex review: a bare ``mangled:<symbol>`` canonical id would collapse
+    unrelated findings and violate this module's stated dedup-key
+    contract).
     """
     kind_value = str(getattr(change.kind, "value", change.kind))
     qn = change.qualified_name or change.symbol or ""
     sig = normalized_signature(
-        qn, kind_value, (change.old_value or "", change.new_value or "")
+        qn,
+        kind_value,
+        (change.old_value or "", change.new_value or "", change.description or ""),
     )
     rel = source_relative_identity(change.source_location or "", change.symbol or "")
 
@@ -268,14 +305,23 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
         aliases.append(f"relsrc:{rel}")
 
     if real_mangled:
-        primary = f"mangled:{real_mangled}"
+        primary = f"mangled:{real_mangled}\x1f{sig}"
         return FindingIdentity(primary, IDENTITY_TIER_CANONICAL, tuple(aliases))
 
     if qn:
         return FindingIdentity(sig, IDENTITY_TIER_NORMALIZED, tuple(aliases))
 
     basis = "\x1f".join(
-        str(x) for x in (change.symbol, kind_value, change.source_location) if x
+        str(x)
+        for x in (
+            change.symbol,
+            kind_value,
+            change.source_location,
+            change.old_value,
+            change.new_value,
+            change.description,
+        )
+        if x
     )
     digest = hashlib.sha256(f"synthetic\x00{basis}".encode()).hexdigest()[:32]
     synthetic = f"synthetic:sha256:{digest}"
