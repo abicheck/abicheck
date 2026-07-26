@@ -40,11 +40,13 @@ abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
 
 > **No `castxml`?** The command above will fail with `castxml not found`. Either
 > [install castxml](install.md#requirements), or run the same comparison
-> in binary-only mode by dropping the header flags — it still catches the removed
-> symbol from the ELF/DWARF metadata:
+> without headers by dropping the header flags — since these libraries were
+> built with `-g`, abicheck still picks up their DWARF debug info and catches
+> the removed symbol from that (falling back further to symbols-only only if
+> no debug info is present):
 >
 > ```bash
-> abicheck compare libv1.so libv2.so   # binary-only fallback, no castxml needed
+> abicheck compare libv1.so libv2.so   # headerless, DWARF-aware fallback, no castxml needed
 > ```
 
 For your own library:
