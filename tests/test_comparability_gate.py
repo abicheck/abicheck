@@ -1134,3 +1134,123 @@ def test_gate_scope_carve_out_declines_instead_of_crashing_on_malformed_scope_fi
     )
     with pytest.raises(ScopeMismatchError):
         check_contracts_comparable(old, new)
+
+
+def test_gate_rejects_unknown_scope_delta_even_with_equal_known_fields():
+    # Codex review, PR #641 follow-up (third P1): the scope carve-out's
+    # `all(...)` only ever checks SCOPE_FIELD_KEYS -- so a contract
+    # carrying an extra scope_fields key this build doesn't recognize (a
+    # newer schema field) was invisible to it. If "headers"/
+    # "public_header_dirs" happened to be equal (or additive), the whole
+    # scope_fingerprint mismatch was wrongly waived without ever examining
+    # the unrecognized field.
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-old",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h"]),
+                "public_header_dirs": json.dumps([]),
+                "future_scope": "old",
+            },
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-new",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h"]),
+                "public_header_dirs": json.dumps([]),
+                "future_scope": "new",
+            },
+        )
+    )
+    with pytest.raises(ScopeMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_rejects_unknown_scope_delta_even_with_additive_known_fields():
+    # Same as above, but with headers growing additively -- the unknown
+    # field must still block the carve-out even when the known fields
+    # alone would have been waived.
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-old",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h"]),
+                "public_header_dirs": json.dumps([]),
+                "future_scope": "old",
+            },
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-new",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h", "c.h"]),
+                "public_header_dirs": json.dumps([]),
+                "future_scope": "new",
+            },
+        )
+    )
+    with pytest.raises(ScopeMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_scope_field_additive_superset_declines_on_non_string_list_members():
+    # Codex review, PR #641 follow-up (second P2): valid JSON can decode to
+    # a list whose members aren't plain strings (e.g. a dict) -- downstream
+    # `in _SCOPE_SINGLE_ENTRY_SENTINELS`/`set(...)` checks require hashable
+    # strings, so this must decline rather than raise TypeError.
+    assert not _scope_field_is_additive_superset(
+        json.dumps([{}]), json.dumps(["a.h"])
+    )
+    assert not _scope_field_is_additive_superset(
+        json.dumps(["a.h"]), json.dumps([{}])
+    )
+
+
+def test_header_sequence_additive_reorder_free_declines_on_non_string_list_members():
+    assert not _header_sequence_is_additive_reorder_free(
+        json.dumps([{}]), json.dumps(["a.h", "b.h"])
+    )
+
+
+def test_include_sequence_additive_owned_growth_declines_on_non_string_outer_members():
+    assert not _include_sequence_is_additive_owned_growth(
+        json.dumps([{}]), json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
+    )
+
+
+def test_gate_scope_carve_out_declines_instead_of_crashing_on_non_string_scope_field():
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-old",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps([{}]),
+                "public_header_dirs": json.dumps([]),
+            },
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-new",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h"]),
+                "public_header_dirs": json.dumps([]),
+            },
+        )
+    )
+    with pytest.raises(ScopeMismatchError):
+        check_contracts_comparable(old, new)

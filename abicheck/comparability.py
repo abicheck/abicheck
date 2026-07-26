@@ -198,8 +198,8 @@ def _header_sequence_is_additive_reorder_free(
     """
     if old_value is None or new_value is None:
         return False
-    old_list = _json_load_list(old_value)
-    new_list = _json_load_list(new_value)
+    old_list = _json_load_str_list(old_value)
+    new_list = _json_load_str_list(new_value)
     if old_list is None or new_list is None:
         return False
     if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
@@ -253,8 +253,8 @@ def _include_sequence_is_additive_owned_growth(
         return False
     if old_value == new_value:
         return True
-    old_slots = _json_load_list(old_value)
-    new_slots = _json_load_list(new_value)
+    old_slots = _json_load_str_list(old_value)
+    new_slots = _json_load_str_list(new_value)
     if old_slots is None or new_slots is None:
         return False
     if len(old_slots) != len(new_slots):
@@ -262,8 +262,6 @@ def _include_sequence_is_additive_owned_growth(
     for old_slot, new_slot in zip(old_slots, new_slots):
         if old_slot == new_slot:
             continue
-        if not (isinstance(old_slot, str) and isinstance(new_slot, str)):
-            return False
         old_idx, _, old_rest = old_slot.partition(":")
         new_idx, _, new_rest = new_slot.partition(":")
         if old_idx != new_idx:
@@ -989,6 +987,33 @@ def _json_load_list(value: str) -> list[Any] | None:
     return decoded if isinstance(decoded, list) else None
 
 
+def _json_load_str_list(value: str) -> list[str] | None:
+    """Like :func:`_json_load_list`, but additionally requires every
+    element to be a ``str`` (Codex review, PR #641 follow-up, second P2).
+
+    Valid JSON can decode to a list whose *members* aren't the plain string
+    identities this module's ``"headers"``/``"header_sequence"``/
+    ``include_sequence``-slot fields always are in a real
+    :func:`compute_extraction_contract` output -- e.g. a syntactically
+    valid ``scope_fields["headers"] = "[{}]"`` decodes fine as
+    :func:`_json_load_list` returns ``[{}]``, but every caller of that
+    field then immediately does something that requires its elements to be
+    hashable strings (``in _SCOPE_SINGLE_ENTRY_SENTINELS``, ``set(...)``
+    membership/superset checks) -- a ``dict`` element there raises
+    ``TypeError: unhashable type: 'dict'`` instead of the clean decline
+    :func:`_json_load_list` alone was meant to guarantee. Validating shape
+    all the way down to the element type, not just the outer list, closes
+    that gap the same way :func:`_json_load_list` closed the JSON-syntax
+    one. Not used for ``include_sequence``'s inner owned-pairs list, whose
+    elements are themselves pairs, not plain strings -- that decode already
+    guards its own ``tuple(p)`` conversion with a ``try``/``except``.
+    """
+    decoded = _json_load_list(value)
+    if decoded is None:
+        return None
+    return decoded if all(isinstance(item, str) for item in decoded) else None
+
+
 def _scope_field_is_additive_superset(
     old_value: str | None, new_value: str | None
 ) -> bool:
@@ -1029,8 +1054,8 @@ def _scope_field_is_additive_superset(
         return False
     if old_value == new_value:
         return True
-    old_list = _json_load_list(old_value)
-    new_list = _json_load_list(new_value)
+    old_list = _json_load_str_list(old_value)
+    new_list = _json_load_str_list(new_value)
     if old_list is None or new_list is None:
         return False
     if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
@@ -1159,6 +1184,14 @@ def check_contracts_comparable(
     still raises, same as any *non*-superset mismatch (a removal, a rename,
     or a disjoint set) — this carve-out only ever *widens* what counts as
     comparable, never narrows the cases the gate still correctly refuses.
+    Also rejects an **unknown** ``scope_fields`` key outside
+    :data:`SCOPE_FIELD_KEYS` that differs (Codex review, PR #641 follow-up,
+    third P1) — checked independently of and before this carve-out, the
+    same reasoning as the profile side's ``unknown_differing`` check below:
+    the ``all(...)`` here only ever examines :data:`SCOPE_FIELD_KEYS`, so a
+    contract carrying a field this build doesn't recognize was invisible to
+    it, and could be silently waived through if ``headers``/
+    ``public_header_dirs`` happened to be equal or additive.
 
     **Header-sequence-growth carve-out (PR #641 follow-up, third round):**
     waiving the scope mismatch above is not sufficient on its own — adding a
@@ -1274,6 +1307,23 @@ def check_contracts_comparable(
         and old_contract.scope_fingerprint is not None
         and new_contract.scope_fingerprint is not None
         and old_contract.scope_fingerprint != new_contract.scope_fingerprint
+    ):
+        # A differing scope_fields key OUTSIDE SCOPE_FIELD_KEYS entirely --
+        # a newer schema field this build doesn't recognize -- must also
+        # block the additive-only carve-out below, for the identical reason
+        # as the profile side's unknown_differing check (Codex review, PR
+        # #641 follow-up, third P1): the carve-out's `all(...)` below only
+        # ever checks SCOPE_FIELD_KEYS, so an unrecognized field's delta was
+        # invisible to it -- if headers/public_header_dirs happened to be
+        # equal or additive, the whole scope mismatch was wrongly waived
+        # without ever examining the unrecognized field.
+        scope_unknown_differing = {
+            k
+            for k in set(old_contract.scope_fields) | set(new_contract.scope_fields)
+            if k not in SCOPE_FIELD_KEYS
+            and old_contract.scope_fields.get(k, "")
+            != new_contract.scope_fields.get(k, "")
+        }
         # Additive-only header-set carve-out (PR #641 follow-up, pvxs scan
         # F8) -- see check_contracts_comparable's own docstring. Gated into
         # the *condition* itself, not a `return None` inside the block
@@ -1282,23 +1332,23 @@ def check_contracts_comparable(
         # release that both adds a header AND changes an unrelated
         # extraction-profile field (compiler flags, macros, include order)
         # must still be caught by that check, not silently waved through.
-        and not all(
+        if scope_unknown_differing or not all(
             _scope_field_is_additive_superset(
                 old_contract.scope_fields.get(key),
                 new_contract.scope_fields.get(key),
             )
             for key in SCOPE_FIELD_KEYS
-        )
-    ):
-        reason = (
-            "old and new snapshots do not cover the same declared surface "
-            "(scope_fingerprint mismatch) — the comparison is not "
-            "comparable. This commonly means a manifest/CLI-flag drift "
-            "between the two extraction runs, not a real API change."
-        )
-        if diagnostic:
-            return ComparabilityMismatch(kind="scope", reason=reason)
-        raise ScopeMismatchError(reason)
+        ):
+            reason = (
+                "old and new snapshots do not cover the same declared "
+                "surface (scope_fingerprint mismatch) — the comparison is "
+                "not comparable. This commonly means a manifest/CLI-flag "
+                "drift between the two extraction runs, not a real API "
+                "change."
+            )
+            if diagnostic:
+                return ComparabilityMismatch(kind="scope", reason=reason)
+            raise ScopeMismatchError(reason)
 
     if (
         old_contract is not None

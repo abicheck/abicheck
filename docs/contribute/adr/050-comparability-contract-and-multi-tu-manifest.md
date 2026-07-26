@@ -1819,6 +1819,52 @@ and one gate-level end-to-end test confirming a malformed scope field
 raises `ScopeMismatchError` rather than crashing. Full fast unit suite
 green, mypy/ruff clean.
 
+**A seventh review pass** (Codex, one P1, one P2) found the sixth pass's
+own fixes each had one more gap, symmetric to ones already closed:
+
+- **The scope-side carve-out had the identical unknown-field gap the
+  profile side's `unknown_differing` check had just closed.** The scope
+  carve-out's `all(...)` only ever checks `SCOPE_FIELD_KEYS`
+  (`headers`/`public_header_dirs`), so a contract carrying an extra
+  `scope_fields` key this build doesn't recognize (a newer schema field)
+  was invisible to it — if the two known fields happened to be equal or
+  additive, the whole `scope_fingerprint` mismatch was silently waived
+  without ever examining the unrecognized field. Confirmed by direct repro:
+  equal known fields plus `future_scope: "old"` → `"new"` returned `None`
+  (comparable). Fixed with a `scope_unknown_differing` set, computed the
+  same way as the profile side's `unknown_differing` and checked before
+  the additive-superset carve-out is trusted; its presence is
+  unconditionally fatal.
+- **The malformed-JSON fix from the sixth pass validated only the outer
+  list shape, not its elements.** `_json_load_list` (added last round)
+  correctly rejects non-JSON and non-list values, but a syntactically
+  valid list with non-scalar members (e.g. `scope_fields["headers"] =
+  "[{}]"`) decodes fine as `[{}]` — every caller then immediately does
+  something requiring hashable strings (`in
+  _SCOPE_SINGLE_ENTRY_SENTINELS`, `set(...)` membership/superset checks),
+  and a `dict` element there raises `TypeError: unhashable type: 'dict'`
+  instead of the clean decline the previous round's fix was meant to
+  guarantee. Fixed with a new `_json_load_str_list` helper (an
+  `_json_load_list` result additionally validated to be all-`str`), used
+  everywhere a plain string-identity list is expected
+  (`_scope_field_is_additive_superset`,
+  `_header_sequence_is_additive_reorder_free`, and
+  `_include_sequence_is_additive_owned_growth`'s outer per-slot decode —
+  which also let this round remove that function's now-redundant manual
+  `isinstance(..., str)` guard, added ad hoc in the sixth pass before this
+  shared helper existed). `include_sequence`'s inner owned-pairs decode
+  (a list of pairs, not plain strings) keeps using the generic
+  `_json_load_list`, since its `tuple(p)`/set-construction step already
+  had its own `try`/`except TypeError` guard from the sixth pass.
+
+New regression tests: two gate-level tests for the unknown-scope-delta
+case (equal known fields, and known fields growing additively — both
+proven to fail without the fix), one direct unit test per affected carve-out
+helper pinning the non-string-list-member decline, and one gate-level
+end-to-end test confirming a non-string scope field member declines
+cleanly rather than raising `TypeError`. Full fast unit suite green,
+mypy/ruff clean.
+
 ### D3. Manifest and real multi-TU dump
 
 New `abicheck/dump_manifest.py`: a strict YAML parser (unknown fields are
