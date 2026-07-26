@@ -534,9 +534,66 @@ own newly-added warning had just introduced:
 New regression tests: `test_gate_additive_header_set_carve_out_ignores_unchanged_single_dir_sentinel`
 (the exact real directory-based F8 shape, proven to fail without the fix)
 and `test_scope_field_additive_superset_true_for_unchanged_single_entry_sentinel`
-(the pure-function-level pin). Full fast unit suite green, mypy/ruff clean
-— this is the final state of all three fixes (scope, header-sequence,
-unchanged-field handling) as of this branch.
+(the pure-function-level pin). Full fast unit suite green, mypy/ruff clean.
+
+**A thirteenth review pass** (`chatgpt-codex-connector`) found the header-
+sequence fix above still didn't reach the real *production* invocation
+shape, plus a second, more general structural gap in how carve-outs
+compose:
+
+- The production `dump` path (`cli_dump_helpers.py`) calls
+  `resolve_inferred_header_roots`, auto-adding the header-owning directory
+  as a declared include — so the real `-H old=<dir> -H new=<dir>`
+  invocation changes `profile_fields["include_sequence"]` too, not just
+  `header_sequence`. Confirmed by direct repro calling
+  `resolve_inferred_header_roots` itself (not a hand-built contract that
+  skips it, to match the exact production code path):
+  `differing = {"header_sequence", "include_sequence"}`, and the
+  header-sequence carve-out alone declined because `include_sequence` was
+  also present — `check_contracts_comparable` still raised
+  `ProfileMismatchError` for the real F8 CLI shape even after the previous
+  round's fix. Added a fourth carve-out
+  (`_include_sequence_is_additive_owned_growth`): a mismatch confined to
+  `include_sequence` doesn't raise when every differing slot's owned
+  `"hdrs:..."` token is itself a pure superset growth; a slot-count change,
+  an `"ext:"`/`"label:"` slot differing, or a `<single-header>` sentinel
+  still raise.
+- **A more general gap: carve-outs didn't compose.** Each required
+  `differing` to match its own static field-set *in full* — so a release
+  combining two independently-sanctioned deltas (adding a header **and**
+  making a corroborated C++-standard raise) produced
+  `differing = {"header_sequence", "language_standard"}`, matching neither
+  carve-out alone, and still raised even though each half was individually
+  fine. Confirmed by direct repro before any fix. Restructured the profile
+  check into one composing loop: each carve-out claims and verifies only
+  the subset of `differing` it understands, narrowing a shared
+  `unexplained` set; the pair is comparable once nothing remains
+  unexplained. The four carve-outs' field-sets are mutually disjoint, so
+  this changes no single carve-out's own safety invariants — only which
+  *combinations* of independently-safe deltas are now recognized together.
+- **One further gap found during this investigation, deliberately
+  documented as a known limitation, not fixed:** a header added *outside*
+  the old side's common ancestor directory shifts the common root every
+  remaining `headers` identity is computed relative to, so even the
+  existing headers' identity strings change shape and the carve-out
+  correctly declines (a safe hard-fail, not a silently wrong verdict) —
+  genuinely outside the real pvxs F8 scenario, which adds its header
+  *within* the existing common directory. Closing this properly needs a
+  cross-snapshot root computation `compute_extraction_contract`'s current
+  one-side-at-a-time design doesn't support, which is its own ADR-level
+  design call, not a fifth drive-by carve-out. `--diagnostic-comparison`
+  remains the correct workaround.
+
+New regression tests: one gate-level end-to-end test reproducing the real
+production invocation shape via `resolve_inferred_header_roots` itself
+(proven to fail with `ProfileMismatchError` without the fix), one
+composing-carve-outs end-to-end test, seven direct unit tests of
+`_include_sequence_is_additive_owned_growth`, and one test pinning the
+common-root-shift limitation as an accepted, still-correctly-raising case.
+Full fast unit suite green, mypy/ruff clean, 98% branch coverage on
+`comparability.py` — this is the final state of all four carve-outs
+(scope, header-sequence, unchanged-field handling, include-sequence, and
+their composition) as of this branch.
 
 ```yaml
 # .github/workflows/abi.yml (for epics-base/pvxs)

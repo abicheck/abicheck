@@ -210,6 +210,76 @@ def _header_sequence_is_additive_reorder_free(
     return filtered == old_list
 
 
+# The only profile_fields key the include-sequence-owned-growth carve-out
+# (PR #641 follow-up, fourth round -- Codex review) is allowed to treat as
+# non-fatal: `resolve_inferred_header_roots` (cli_dump_helpers.py) auto-adds
+# a header-owning include directory, whose slot token in `include_sequence`
+# encodes the declared-header set IT owns (`_slot_token_for_ancestor`) --
+# so a pure header addition changes this token too, independently of
+# `header_sequence`. The real F8 CLI shape (`-H old=<dir> -H new=<dir>`)
+# hits exactly this: both `header_sequence` and `include_sequence` differ
+# together, and the header-sequence-growth carve-out alone (which only ever
+# considered `differing <= _HEADER_SEQUENCE_FIELDS`) declined to apply
+# because `include_sequence` was also in `differing`.
+_INCLUDE_SEQUENCE_FIELDS = frozenset({"include_sequence"})
+
+_OWNED_HEADER_TOKEN_PREFIX = "hdrs:"
+_OWNED_HEADER_SINGLE_SENTINEL = "hdrs:<single-header>"
+
+
+def _include_sequence_is_additive_owned_growth(
+    old_value: str | None, new_value: str | None
+) -> bool:
+    """Whether *new_value* (``profile_fields["include_sequence"]``, a
+    json-encoded list of ``"<slot-index>:<token>"`` strings) differs from
+    *old_value* only in an OWNED-root ``"hdrs:..."`` token growing to
+    include newly-added headers, in the same additive-only sense
+    :func:`_scope_field_is_additive_superset` already applies to the scope
+    ``"headers"`` field.
+
+    Declines (returns False) for any slot whose token isn't the owned
+    ``"hdrs:"`` form (an ``"ext:"``/``"label:"`` slot differing is real,
+    unrelated profile drift this carve-out has no business waiving), whose
+    header list collapsed to the ``<single-header>`` sentinel (no real
+    per-header identity to verify a superset against, mirroring the
+    scope-side carve-out's own sentinel handling), or whose slot *count*
+    changed (a different ``-I``/``--header`` topology, not merely a header
+    addition within an existing one).
+    """
+    if old_value is None or new_value is None:
+        return False
+    if old_value == new_value:
+        return True
+    old_slots: list[str] = json.loads(old_value)
+    new_slots: list[str] = json.loads(new_value)
+    if len(old_slots) != len(new_slots):
+        return False
+    for old_slot, new_slot in zip(old_slots, new_slots):
+        if old_slot == new_slot:
+            continue
+        old_idx, _, old_rest = old_slot.partition(":")
+        new_idx, _, new_rest = new_slot.partition(":")
+        if old_idx != new_idx:
+            return False
+        if (
+            old_rest == _OWNED_HEADER_SINGLE_SENTINEL
+            or new_rest == _OWNED_HEADER_SINGLE_SENTINEL
+        ):
+            return False
+        if not (
+            old_rest.startswith(_OWNED_HEADER_TOKEN_PREFIX)
+            and new_rest.startswith(_OWNED_HEADER_TOKEN_PREFIX)
+        ):
+            return False
+        old_pairs = json.loads(old_rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
+        new_pairs = json.loads(new_rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
+        old_owned = {tuple(p) for p in old_pairs}
+        new_owned = {tuple(p) for p in new_pairs}
+        if not new_owned >= old_owned:
+            return False
+    return True
+
+
 @dataclass(frozen=True)
 class IncludeDir:
     """One declared ``-I`` search-path entry, in the order it was declared
@@ -1028,6 +1098,47 @@ def check_contracts_comparable(
     header's macros/pragmas resolve) still raises, same as any other
     profile drift this carve-out doesn't cover.
 
+    **Include-sequence-owned-growth carve-out (PR #641 follow-up, fourth
+    round):** the real ``-H old=<dir> -H new=<dir>`` F8 invocation changes
+    ``profile_fields["include_sequence"]`` too, not just
+    ``header_sequence`` — the production dump path
+    (``resolve_inferred_header_roots``, ``cli_dump_helpers.py``) auto-adds
+    the header-owning directory as a declared include, and that slot's own
+    token encodes the declared-header set it owns
+    (:func:`_slot_token_for_ancestor`). A ``profile_fingerprint`` mismatch
+    confined to ``include_sequence`` does not raise when every differing
+    slot's owned ``"hdrs:..."`` token is itself a pure superset growth (see
+    :func:`_include_sequence_is_additive_owned_growth`) — an ``"ext:"``/
+    ``"label:"`` slot differing, a slot count change, or either side
+    collapsing to the ``<single-header>`` sentinel all still raise, the
+    same conservative defaults as the other carve-outs.
+
+    **Carve-outs compose (PR #641 follow-up, fourth round):** a release
+    combining two independently-sanctioned deltas — e.g. adding a header
+    *and* making a corroborated C++-standard raise — has a ``differing``
+    set that matches neither carve-out's static field-set on its own
+    (``{"header_sequence", "language_standard"}`` is a subset of neither
+    :data:`_HEADER_SEQUENCE_FIELDS` nor :data:`_BUILD_CONTEXT_FIELDS`
+    alone). Each carve-out therefore claims and verifies only the subset of
+    ``differing`` it understands, narrowing an ``unexplained`` working set;
+    the pair is comparable once nothing remains unexplained, not only when
+    one carve-out's field-set covers the whole mismatch by itself. The four
+    carve-outs' field-sets are mutually disjoint, so application order
+    never matters.
+
+    **Known, accepted limitation, not a correctness bug (PR #641
+    follow-up, fourth round):** a header added *outside* the old side's
+    common ancestor directory shifts the common root every remaining
+    ``headers`` identity is computed relative to (see
+    :func:`compute_extraction_contract`), so even the *existing* headers'
+    identity strings change shape (``"a.h"`` → ``"foo/a.h"``) and the
+    additive-superset check correctly declines — this still raises
+    ``ScopeMismatchError`` rather than silently producing a wrong verdict,
+    exactly the same safe default as every other case these carve-outs
+    don't cover. Out of scope for this round: the real F8 scenario adds a
+    header *within* the existing common directory, which this decline does
+    not affect (see the "real directory-based F8 scenario" regression test).
+
     ``diagnostic=True`` (ADR-050's ``--diagnostic-comparison`` escape hatch)
     downgrades a hard-fail into a :class:`ComparabilityMismatch` descriptor
     returned to the caller instead of raised — the one sanctioned way to
@@ -1083,10 +1194,25 @@ def check_contracts_comparable(
             for k in PROFILE_FIELD_KEYS
             if old_fields.get(k, "") != new_fields.get(k, "")
         }
-        if differing and differing <= _PLATFORM_IDENTITY_FIELDS:
+        # Each carve-out below claims and verifies only the subset of
+        # `differing` it actually understands, removing exactly those
+        # fields from `unexplained` -- carve-outs COMPOSE (Codex review, PR
+        # #641 follow-up, fourth round): a release combining two
+        # independently-sanctioned deltas (e.g. a header addition AND a
+        # corroborated C++-standard raise) must not raise just because
+        # neither carve-out's static field-set covers `differing` in full
+        # on its own. The four carve-outs' field-sets
+        # (_PLATFORM_IDENTITY_FIELDS/_BUILD_CONTEXT_FIELDS/
+        # _HEADER_SEQUENCE_FIELDS/_INCLUDE_SEQUENCE_FIELDS) are mutually
+        # disjoint, so processing order never matters -- each only ever
+        # narrows `unexplained`, never re-adds to it.
+        unexplained = set(differing)
+
+        platform_candidate = unexplained & _PLATFORM_IDENTITY_FIELDS
+        if platform_candidate:
             old_components = _binary_platform_components(old)
             new_components = _binary_platform_components(new)
-            # Every field in `differing` must itself map to a binary-derived
+            # Every candidate field must itself map to a binary-derived
             # component present on BOTH sides AND genuinely differing on
             # that same field (Codex review, PR #624) -- not just "some"
             # component of the platform identity differs somewhere. A field
@@ -1120,13 +1246,12 @@ def check_contracts_comparable(
                         return any_component_differs
                     return old_components[field] != new_components[field]
 
-                if all(_field_verified(field) for field in differing):
-                    return None  # genuine cross-architecture compare; diff_platform.py handles it
-        if (
-            differing
-            and differing <= _BUILD_CONTEXT_FIELDS
-            and _build_context_corroborated(old, new)
-        ):
+                if all(_field_verified(field) for field in platform_candidate):
+                    # genuine cross-architecture compare; diff_platform.py handles it
+                    unexplained -= platform_candidate
+
+        build_candidate = unexplained & _BUILD_CONTEXT_FIELDS
+        if build_candidate and _build_context_corroborated(old, new):
             # Build-context carve-out (Codex review, PR #624 follow-up --
             # examples/case98_cxx_standard_floor_raised's real CI failure):
             # a raised C++-standard floor or a build-derived macro delta
@@ -1137,21 +1262,32 @@ def check_contracts_comparable(
             # gating it into a generic not_comparable first would only
             # discard that finding instead of letting the more specific
             # detector classify it correctly.
-            return None
-        if (
-            differing
-            and differing <= _HEADER_SEQUENCE_FIELDS
-            and _header_sequence_is_additive_reorder_free(
-                old_fields.get("header_sequence"), new_fields.get("header_sequence")
-            )
+            unexplained -= build_candidate
+
+        header_seq_candidate = unexplained & _HEADER_SEQUENCE_FIELDS
+        if header_seq_candidate and _header_sequence_is_additive_reorder_free(
+            old_fields.get("header_sequence"), new_fields.get("header_sequence")
         ):
             # Header-sequence-growth carve-out (PR #641 follow-up, third
             # round) -- see check_contracts_comparable's own docstring.
+            unexplained -= header_seq_candidate
+
+        include_seq_candidate = unexplained & _INCLUDE_SEQUENCE_FIELDS
+        if include_seq_candidate and _include_sequence_is_additive_owned_growth(
+            old_fields.get("include_sequence"), new_fields.get("include_sequence")
+        ):
+            # Include-sequence-owned-growth carve-out (PR #641 follow-up,
+            # fourth round) -- see check_contracts_comparable's own
+            # docstring.
+            unexplained -= include_seq_candidate
+
+        if not unexplained:
             return None
+
         reason = (
             "old and new snapshots were extracted under different compile "
             f"contexts (profile_fingerprint mismatch; differing fields: "
-            f"{', '.join(sorted(differing)) or 'unknown'}) — the comparison "
+            f"{', '.join(sorted(unexplained))}) — the comparison "
             "is not comparable."
         )
         if diagnostic:

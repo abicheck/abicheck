@@ -1655,6 +1655,67 @@ original F8 fix was supposed to achieve but, until this round, never
 actually did for a snapshot pair that also carries `profile_fingerprint`
 (i.e. ran the L2 frontend, the ordinary case for a real header-AST dump).
 
+**A fourth round (Codex review) found that the header-sequence fix above
+still didn't reach the real production invocation shape, plus a second,
+more general structural gap in how carve-outs compose.**
+
+The production `dump` path (`cli_dump_helpers.py`) calls
+`resolve_inferred_header_roots` to auto-add the header-owning directory as
+a declared include, so a real `-H old=<dir> -H new=<dir>` invocation
+changes `profile_fields["include_sequence"]` too — that auto-added slot's
+own token encodes the declared-header set it owns
+(`_slot_token_for_ancestor`). Confirmed by direct repro reproducing the
+*exact* production code path (calling `resolve_inferred_header_roots`
+itself, not just hand-building a contract that skips it): `differing =
+{"header_sequence", "include_sequence"}`, and the header-sequence carve-out
+alone — which only ever considered `differing <= _HEADER_SEQUENCE_FIELDS`
+— declined because `include_sequence` was also present, so
+`check_contracts_comparable` still raised `ProfileMismatchError` for the
+real F8 CLI shape even after the previous round's fix. A fourth carve-out,
+`_include_sequence_is_additive_owned_growth`, closes this the same way as
+`header_sequence`: a mismatch confined to `include_sequence` doesn't raise
+when every differing slot's owned `"hdrs:..."` token is itself a pure
+superset growth — an `"ext:"`/`"label:"` slot differing, a slot-count
+change, or a `<single-header>` sentinel on either side all still raise.
+
+The second, more general gap this round found: **carve-outs didn't
+compose.** Each carve-out required `differing <= its own static field-set`
+in full — so a release combining two *independently already-sanctioned*
+deltas (e.g. adding a header *and* making a corroborated C++-standard
+raise) produced `differing = {"header_sequence", "language_standard"}`, a
+set matching *neither* carve-out's field-set on its own, and still raised
+even though each half was individually fine. Confirmed by direct repro
+before any fix. Restructured the profile check from four independent
+"does `differing` match this exact field-set" tests into one composing
+loop: each carve-out claims and verifies only the subset of `differing` it
+understands, narrowing a shared `unexplained` working set; the pair is
+comparable once nothing remains unexplained. The four carve-outs' field-sets
+(`_PLATFORM_IDENTITY_FIELDS`/`_BUILD_CONTEXT_FIELDS`/`_HEADER_SEQUENCE_FIELDS`/
+`_INCLUDE_SEQUENCE_FIELDS`) are mutually disjoint, so this restructuring
+changes no single carve-out's own verification logic or safety
+invariants — it only widens *which combinations* of independently-safe
+deltas are recognized together, never weakens what counts as "safe" for
+any one field.
+
+**One further gap surfaced during this investigation, deliberately left as
+a documented limitation, not fixed:** a header added *outside* the old
+side's common ancestor directory (e.g. existing headers under
+`include/foo/`, a new one under a sibling `include/bar/`) shifts the common
+root every remaining `headers` identity is computed relative to
+(`compute_extraction_contract`), so even the *existing* headers' identity
+strings change shape (`"a.h"` → `"foo/a.h"`) and the additive-superset
+check correctly declines. This is the conservative, safe failure mode — a
+real hard-fail, never a silently wrong verdict — for a case genuinely
+outside the real pvxs F8 scenario, which adds its new header *within* the
+existing common directory. Closing it properly would mean re-deriving one
+side's header identities relative to a root chosen with knowledge of the
+*other* side (a cross-snapshot computation `compute_extraction_contract`'s
+current one-side-at-a-time design doesn't support), which is exactly the
+kind of `comparability.py`-internals redesign this file's own conventions
+flag as needing its own ADR treatment, not a fifth drive-by carve-out
+appended to an already four-deep list. `--diagnostic-comparison` remains
+the correct workaround.
+
 ### D3. Manifest and real multi-TU dump
 
 New `abicheck/dump_manifest.py`: a strict YAML parser (unknown fields are

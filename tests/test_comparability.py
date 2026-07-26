@@ -24,12 +24,14 @@ from abicheck.comparability import (
     ComparabilityMismatch,
     IncludeDir,
     _header_sequence_is_additive_reorder_free,
+    _include_sequence_is_additive_owned_growth,
     _scope_field_is_additive_superset,
     check_contracts_comparable,
     compute_extraction_contract,
 )
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
+from abicheck.header_utils import resolve_inferred_header_roots
 from abicheck.macho_metadata import MachoMetadata
 from abicheck.model import AbiSnapshot, ExtractionContract
 from abicheck.pe_metadata import PeMetadata
@@ -1472,6 +1474,189 @@ def test_header_sequence_additive_reorder_free_declines_on_single_header_sentine
 def test_header_sequence_additive_reorder_free_declines_on_none():
     assert not _header_sequence_is_additive_reorder_free(None, json.dumps(["a.h"]))
     assert not _header_sequence_is_additive_reorder_free(json.dumps(["a.h"]), None)
+
+
+# ---------------------------------------------------------------------------
+# _include_sequence_is_additive_owned_growth (PR #641 follow-up, fourth
+# round): resolve_inferred_header_roots (cli_dump_helpers.py) auto-adds a
+# header-owning include directory, whose slot token in include_sequence
+# encodes the declared-header set IT owns -- so a pure header addition
+# changes this field too, independently of header_sequence.
+# ---------------------------------------------------------------------------
+
+
+def _hdrs_slot(idx: int, pairs: list[tuple[str, str]]) -> str:
+    return f"{idx}:hdrs:{json.dumps(sorted(pairs))}"
+
+
+def test_include_sequence_additive_owned_growth_true_for_pure_append():
+    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
+    new = json.dumps(
+        [_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")])]
+    )
+    assert _include_sequence_is_additive_owned_growth(old, new)
+
+
+def test_include_sequence_additive_owned_growth_true_when_unchanged():
+    same = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
+    assert _include_sequence_is_additive_owned_growth(same, same)
+
+
+def test_include_sequence_additive_owned_growth_false_for_removal():
+    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
+    new = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
+    assert not _include_sequence_is_additive_owned_growth(old, new)
+
+
+def test_include_sequence_additive_owned_growth_false_for_non_owned_slot_drift():
+    # An "ext:" (external, non-owned) slot differing is real, unrelated
+    # profile drift -- this carve-out has no business waiving it.
+    old = json.dumps(["0:ext:" + "a" * 16])
+    new = json.dumps(["0:ext:" + "b" * 16])
+    assert not _include_sequence_is_additive_owned_growth(old, new)
+
+
+def test_include_sequence_additive_owned_growth_false_for_slot_count_change():
+    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
+    new = json.dumps(
+        [_hdrs_slot(0, [("a.h", "a.h")]), "1:ext:" + "a" * 16]
+    )
+    assert not _include_sequence_is_additive_owned_growth(old, new)
+
+
+def test_include_sequence_additive_owned_growth_false_for_single_header_sentinel():
+    old = json.dumps(["0:hdrs:<single-header>"])
+    new = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
+    assert not _include_sequence_is_additive_owned_growth(old, new)
+
+
+def test_include_sequence_additive_owned_growth_declines_on_none():
+    some = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
+    assert not _include_sequence_is_additive_owned_growth(None, some)
+    assert not _include_sequence_is_additive_owned_growth(some, None)
+
+
+def test_include_sequence_additive_owned_growth_true_when_one_slot_unchanged():
+    # Multi-slot case: slot 0 (an external, non-owned dir) is byte-identical
+    # on both sides; only slot 1 (the owned root) grows. The per-slot
+    # equality short-circuit must let the unchanged slot through without
+    # re-parsing it.
+    old = json.dumps(["0:ext:" + "a" * 16, _hdrs_slot(1, [("a.h", "a.h")])])
+    new = json.dumps(
+        ["0:ext:" + "a" * 16, _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])]
+    )
+    assert _include_sequence_is_additive_owned_growth(old, new)
+
+
+def test_include_sequence_additive_owned_growth_false_for_index_mismatch():
+    # A malformed/reordered slot list (index labels don't line up
+    # positionally) can never be safely verified.
+    old = json.dumps(["0:hdrs:[[\"a.h\", \"a.h\"]]"])
+    new = json.dumps(["1:hdrs:[[\"a.h\", \"a.h\"], [\"b.h\", \"b.h\"]]"])
+    assert not _include_sequence_is_additive_owned_growth(old, new)
+
+
+def test_gate_handles_the_real_directory_based_f8_scenario_end_to_end(tmp_path):
+    # Codex review (PR #641 follow-up, fourth round): the real production
+    # dump path (cli_dump_helpers.py) calls resolve_inferred_header_roots,
+    # which auto-adds the header-owning directory as a declared include --
+    # so the real `-H old=<dir> -H new=<dir>` F8 invocation changes BOTH
+    # header_sequence AND include_sequence together. Confirmed by direct
+    # repro before any fix: this raised ProfileMismatchError because the
+    # header-sequence-growth carve-out alone only ever considered
+    # `differing <= _HEADER_SEQUENCE_FIELDS`, and include_sequence being
+    # also in `differing` meant it declined.
+    old_dir = tmp_path / "old" / "include"
+    new_dir = tmp_path / "new" / "include"
+    a1 = _write(old_dir / "a.h", "int f(void);\n")
+    b1 = _write(old_dir / "b.h", "int g(void);\n")
+    a2 = _write(new_dir / "a.h", "int f(void);\n")
+    b2 = _write(new_dir / "b.h", "int g(void);\n")
+    c2 = _write(new_dir / "c.h", "int h(void);\n")
+    old_headers = [a1, b1]
+    new_headers = [a2, b2, c2]
+    old_inc_extra, _ = resolve_inferred_header_roots(old_headers, [])
+    new_inc_extra, _ = resolve_inferred_header_roots(new_headers, [])
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            declared_headers=old_headers,
+            declared_includes=[IncludeDir(p) for p in old_inc_extra],
+            public_header_dirs=[old_dir],
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            declared_headers=new_headers,
+            declared_includes=[IncludeDir(p) for p in new_inc_extra],
+            public_header_dirs=[new_dir],
+        )
+    )
+    assert old.contract.profile_fields["include_sequence"] != new.contract.profile_fields[
+        "include_sequence"
+    ]
+    assert check_contracts_comparable(old, new) is None  # must not raise either error
+
+
+def test_gate_composes_header_addition_with_corroborated_build_context_change(
+    tmp_path,
+):
+    # Codex review (PR #641 follow-up, fourth round): a release that both
+    # adds a header AND makes a corroborated build-context change (e.g.
+    # gnu++17 -> gnu++20) has `differing = {"header_sequence",
+    # "language_standard"}` -- a set matching NEITHER carve-out's static
+    # field-set on its own, even though each delta is independently
+    # sanctioned. The two carve-outs must compose: each claims and
+    # verifies its own subset of `differing`, and the pair is comparable
+    # only once nothing remains unexplained.
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    c2 = _write(tmp_path / "v2" / "c.h", "int h(void);\n")
+    old = _snap(
+        compute_extraction_contract(
+            declared_headers=[a, b], l2_frontend_ran=True, language_standard="gnu++17"
+        ),
+        parsed_with_build_context=True,
+    )
+    new = _snap(
+        compute_extraction_contract(
+            declared_headers=[a2, b2, c2],
+            l2_frontend_ran=True,
+            language_standard="gnu++20",
+        ),
+        parsed_with_build_context=True,
+    )
+    assert check_contracts_comparable(old, new) is None  # must not raise either error
+
+
+def test_gate_still_raises_when_a_new_header_lands_outside_the_old_common_root(
+    tmp_path,
+):
+    # Known, accepted limitation (Codex review, PR #641 follow-up, fourth
+    # round), NOT a correctness bug: the scope "headers" field's identity
+    # strings are computed relative to a common root derived independently
+    # per side. A header added OUTSIDE the old side's common ancestor
+    # directory (e.g. existing headers under include/foo/, new one under a
+    # sibling include/bar/) shifts the common root upward, so the EXISTING
+    # headers' own identity strings change shape too (["a.h","b.h"] ->
+    # ["foo/a.h","foo/b.h"]) even though nothing was removed or renamed.
+    # This is the conservative, SAFE failure mode (a real hard-fail, never
+    # a silently wrong verdict) for a case genuinely outside the real pvxs
+    # F8 scenario (which adds a header in the SAME directory as the
+    # existing ones) -- --diagnostic-comparison remains the correct
+    # workaround, same as any other case this carve-out declines.
+    a = _write(tmp_path / "include" / "foo" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "include" / "foo" / "b.h", "int g(void);\n")
+    a2 = _write(tmp_path / "v2" / "include" / "foo" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "include" / "foo" / "b.h", "int g(void);\n")
+    c2 = _write(tmp_path / "v2" / "include" / "bar" / "c.h", "int h(void);\n")
+    old = _snap(compute_extraction_contract(declared_headers=[a, b]))
+    new = _snap(compute_extraction_contract(declared_headers=[a2, b2, c2]))
+    with pytest.raises(ScopeMismatchError):
+        check_contracts_comparable(old, new)
 
 
 def test_gate_raises_profile_mismatch_error_on_profile_drift(tmp_path):
