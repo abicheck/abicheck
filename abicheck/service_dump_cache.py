@@ -150,8 +150,17 @@ def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
     ``headers`` is every declared root, plus every translation unit's own
     ``forced_includes``, plus the manifest's own ``public_header_paths``
     (deduplicated, first-declared order); ``includes`` is every TU's own
-    ``-I`` search directory (deduplicated, first-declared order) plus the
-    manifest's ``public_header_dirs``. This only feeds
+    ``-I`` search directory, plus the manifest's ``public_header_dirs``,
+    plus each declared header's own *implicit* parent-directory include
+    root (:func:`abicheck.header_utils._implicit_header_includes` — the same
+    "a declared header's own directory is implicitly searchable via
+    quote-includes, with no ``-I`` needed" rule ADR-050 D1 already
+    documents, and the identical helper the legacy CLI path's own
+    :func:`abicheck.header_utils.resolve_inferred_header_roots` uses) — a
+    header force-included with no matching TU ``includes``/manifest
+    ``public_header_dirs`` entry can still quote-include an unnamed sibling
+    support header from that same directory, and that sibling's own content
+    must still bust the cache (Codex review, PR #636). This only feeds
     :func:`abicheck.snapshot_cache._cache_key`'s *content* hashing (so an
     edit to any file a manifest-driven dump could actually read busts the
     cache -- including a ``public_header_paths`` entry that names neither a
@@ -162,6 +171,8 @@ def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
     content walk over these same paths cannot see it at all: renaming a TU,
     or flipping ``contributes_to_abi``, changes nothing here hashes.
     """
+    from .header_utils import _implicit_header_includes
+
     seen_headers: set[Path] = set()
     headers: list[Path] = []
     for h in dump_manifest.roots:
@@ -186,6 +197,10 @@ def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
                 seen_includes.add(entry.path)
                 includes.append(entry.path)
     for d in dump_manifest.public_header_dirs:
+        if d not in seen_includes:
+            seen_includes.add(d)
+            includes.append(d)
+    for d in _implicit_header_includes(headers):
         if d not in seen_includes:
             seen_includes.add(d)
             includes.append(d)

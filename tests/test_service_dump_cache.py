@@ -563,6 +563,12 @@ class TestManifestCachePaths:
         assert [str(h.name) for h in headers] == ["a.h", "b.h"]
 
     def test_dedups_an_include_dir_repeated_across_tus(self, tmp_path):
+        # roots: [a.h]'s own implicit parent-directory root (manifest_dir --
+        # a real, existing directory, since the _manifest() helper creates
+        # it) also lands in `includes` alongside `vendor` (see
+        # test_implicit_header_parent_dir_folds_into_includes below), so this
+        # asserts the repeated `vendor` entry specifically dedups to one
+        # occurrence rather than asserting the list's total length.
         manifest = self._manifest(
             tmp_path,
             "roots: [a.h]\ntranslation_units:\n"
@@ -570,7 +576,8 @@ class TestManifestCachePaths:
             "  - name: tu_b\n    forced_includes: [a.h]\n    includes: [vendor]\n",
         )
         _headers, includes = _manifest_cache_paths(manifest)
-        assert len(includes) == 1
+        vendor = manifest.translation_units[0].includes[0].path
+        assert includes.count(vendor) == 1
 
     def test_public_header_dirs_fold_into_includes(self, tmp_path):
         manifest = self._manifest(
@@ -579,7 +586,7 @@ class TestManifestCachePaths:
             "translation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
         )
         _headers, includes = _manifest_cache_paths(manifest)
-        assert includes == list(manifest.public_header_dirs)
+        assert manifest.public_header_dirs[0] in includes
 
     def test_public_header_dir_already_an_include_is_not_duplicated(self, tmp_path):
         manifest = self._manifest(
@@ -589,7 +596,41 @@ class TestManifestCachePaths:
             "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [vendor]\n",
         )
         _headers, includes = _manifest_cache_paths(manifest)
-        assert len(includes) == 1
+        vendor = manifest.public_header_dirs[0]
+        assert includes.count(vendor) == 1
+
+    def test_implicit_header_parent_dir_folds_into_includes(self, tmp_path):
+        # Codex review, PR #636: a header force-included with no matching
+        # TU `includes`/manifest `public_header_dirs` entry can still
+        # quote-include an unnamed sibling from its own directory (ADR-050
+        # D1's "a declared header's own parent directory is implicitly
+        # project-owned, no -I needed" rule) -- that directory must still be
+        # walked for content changes.
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        _headers, includes = _manifest_cache_paths(manifest)
+        assert manifest.base_dir in includes
+
+    def test_implicit_header_parent_dir_already_a_tu_include_is_not_duplicated(
+        self, tmp_path
+    ):
+        # The implicit parent-dir root is only found for a directory that
+        # actually exists on disk (_implicit_header_includes's own
+        # .is_dir() guard), so this test needs the real directory present,
+        # unlike the sibling tests above that only reference bare filenames
+        # under the always-created manifest_dir root itself.
+        (tmp_path / "manifest_dir" / "include").mkdir(parents=True)
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [include/foo.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [include/foo.h]\n"
+            "    includes: [include]\n",
+        )
+        _headers, includes = _manifest_cache_paths(manifest)
+        include_dir = manifest.translation_units[0].includes[0].path
+        assert includes.count(include_dir) == 1
 
     def test_public_header_paths_fold_into_headers(self, tmp_path):
         manifest = self._manifest(
@@ -690,6 +731,42 @@ class TestCachedRunDumpManifest:
             fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=manifest
         )
         header.write_text("int f(void);\nint g(void);\n", encoding="utf-8")
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=manifest
+        )
+        assert len(calls) == 2
+
+    def test_implicit_sibling_header_edit_invalidates_manifest_cache(self, tmp_path):
+        # Codex review, PR #636: a header force-included with no matching TU
+        # `includes` entry or manifest `public_header_dirs` can still
+        # quote-include an unnamed sibling support header from its own
+        # directory -- the same "a declared header's own parent directory is
+        # implicitly project-owned, no -I needed" rule ADR-050 D1 documents
+        # for profile_fingerprint, needed here too so the cache key doesn't
+        # under-count exactly the same way. The legacy CLI path already
+        # covers this via header_utils.resolve_inferred_header_roots.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        include_dir = tmp_path / "manifest_dir" / "include"
+        include_dir.mkdir(parents=True)
+        (include_dir / "foo.h").write_text('#include "detail.h"\nint f(void);\n')
+        detail = include_dir / "detail.h"
+        detail.write_text("struct detail { int x; };\n")
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [include/foo.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [include/foo.h]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=manifest
+        )
+        detail.write_text("struct detail { int x; int y; };\n")
         cached_run_dump(
             fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=manifest
         )

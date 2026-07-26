@@ -525,6 +525,14 @@ def manifest_tu_scope_field(dump_manifest: Any) -> str:
         }
         for tu in dump_manifest.translation_units
     ]
+    # Sorted by name -- the manifest declares a SET of translation units,
+    # identified by their (parse-time-enforced-unique) name, not by list
+    # position (ADR-050 D1: "the set of translation units (by name, not by
+    # list position)... reordering two independent TU entries... must not
+    # change the fingerprint"). Each TU's own internal forced_includes/
+    # includes order is preserved above and stays order-sensitive -- only
+    # the outer TU-to-TU ordering is canonicalized (Codex review, PR #636).
+    tus.sort(key=lambda t: t["name"])
     return json.dumps(tus)
 
 

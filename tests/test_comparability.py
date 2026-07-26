@@ -1178,6 +1178,53 @@ def test_manifest_scope_fingerprint_differs_when_tu_renamed(tmp_path):
     assert old_c.scope_fingerprint != new_c.scope_fingerprint
 
 
+def test_manifest_scope_fingerprint_ignores_tu_declaration_order(tmp_path):
+    # Codex review, PR #636: ADR-050 D1 -- "the set of translation units (by
+    # name, not by list position)... reordering two independent TU entries...
+    # must not change the fingerprint." Two manifests declaring the identical
+    # TUs in swapped YAML order must fingerprint identically.
+    old = _manifest(
+        tmp_path,
+        "roots: [a.h, b.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n"
+        "  - name: tu_b\n    forced_includes: [b.h]\n",
+    )
+    new = _manifest(
+        tmp_path,
+        "roots: [a.h, b.h]\ntranslation_units:\n"
+        "  - name: tu_b\n    forced_includes: [b.h]\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n",
+    )
+    old_c = compute_extraction_contract(
+        declared_headers=list(old.roots), manifest_tu_scope=manifest_tu_scope_field(old)
+    )
+    new_c = compute_extraction_contract(
+        declared_headers=list(new.roots), manifest_tu_scope=manifest_tu_scope_field(new)
+    )
+    assert old_c.scope_fingerprint == new_c.scope_fingerprint
+
+
+def test_manifest_scope_fingerprint_still_orders_includes_within_one_tu(tmp_path):
+    # The companion invariant: canonicalizing the OUTER TU order must not
+    # accidentally also canonicalize (e.g. sort) a single TU's own INTERNAL
+    # includes/forced_includes order, which stays genuinely order-sensitive
+    # (ADR-050 D1: "reordering includes *within* one TU... must" change the
+    # fingerprint) -- already covered by
+    # test_manifest_scope_fingerprint_differs_when_includes_reordered, this
+    # asserts the same property survives the outer-order fix specifically.
+    old = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [vendor, extra]\n",
+    )
+    new = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [extra, vendor]\n",
+    )
+    assert manifest_tu_scope_field(old) != manifest_tu_scope_field(new)
+
+
 def test_manifest_scope_fingerprint_differs_when_includes_reordered(tmp_path):
     old = _manifest(
         tmp_path,
