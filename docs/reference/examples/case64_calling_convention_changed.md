@@ -10,13 +10,13 @@
 | **Detected `ChangeKind`s** | `calling_convention_changed` |
 | **Source files** | `examples/case64_calling_convention_changed/` |
 
-**Category:** Function ABI | **Verdict:** BREAKING
+**Category:** Function ABI | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-The functions `vector_dot` and `vector_scale` change from the default System V
-AMD64 calling convention to `__attribute__((ms_abi))` (Microsoft x64 convention).
-This changes which CPU registers carry function parameters and return values:
+`vector_dot`/`vector_scale` switch from the default System V AMD64 calling
+convention to `__attribute__((ms_abi))` (Microsoft x64 convention), which
+puts parameters in different registers:
 
 | | System V ABI (v1) | Microsoft x64 ABI (v2) |
 |---|---|---|
@@ -24,28 +24,12 @@ This changes which CPU registers carry function parameters and return values:
 | Float args | `xmm0`–`xmm7` | `xmm0`–`xmm3` |
 | Callee-saved | `rbx`, `rbp`, `r12`–`r15` | `rbx`, `rbp`, `rdi`, `rsi`, `r12`–`r15` |
 
-A caller compiled against v1 passes `a` in `rdi`, `b` in `rsi`, `len` in `edx`.
-The v2 function reads `a` from `rcx`, `b` from `rdx`, `len` from `r8d` — getting
-whatever stale values those registers happen to hold.
+A caller compiled against v1 passes `a` in `rdi`, `b` in `rsi`, `len` in
+`edx`. The v2 function reads `a` from `rcx`, `b` from `rdx`, `len` from
+`r8d` — whatever stale values those registers happen to hold. Recompilation
+against v2 is mandatory.
 
-## Why this matters
-
-Calling conventions define the **fundamental contract** between caller and callee:
-- Which registers hold which parameters
-- How the return value is passed back
-- Who saves/restores which registers (caller-saved vs callee-saved)
-- Stack alignment requirements
-
-When this contract is violated, the function operates on completely wrong data.
-The result is either garbage output, a segfault (if a pointer parameter is wrong),
-or silent data corruption.
-
-This is particularly dangerous in math/compute libraries where:
-- Performance-sensitive code may switch conventions for platform interop
-- The library "works fine" when rebuilt from source — the bug only manifests with
-  pre-compiled consumers
-
-## Code diff
+## Old/new diff
 
 ```c
 /* v1: default System V AMD64 calling convention */
@@ -56,11 +40,51 @@ __attribute__((ms_abi))
 double vector_dot(const double *a, const double *b, int len);
 ```
 
-## Real Failure Demo
+## abicheck command
+
+```bash
+clang -shared -fPIC -g v1.c -o libfoo_v1.so
+clang -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- calling_convention_changed: Calling convention changed: vector_dot (normal -> unknown(0xc1))
+  > Function calling convention changed; registers/stack usage differs, call crashes.
+- calling_convention_changed: Calling convention changed: vector_scale (normal -> unknown(0xc1))
+  > Function calling convention changed; registers/stack usage differs, call crashes.
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's `DW_AT_calling_convention` attribute on the
+subprogram DIE records the convention directly, so debug info alone (no
+public headers) is enough. **Toolchain note:** GCC does not emit
+`DW_AT_calling_convention` for `__attribute__((ms_abi))` — compiling both
+sides with GCC produces `NO_CHANGE` (a real false negative, not a fixture
+bug); Clang does emit the attribute and abicheck reports `BREAKING` as
+expected. The command above builds with Clang for exactly that reason.
+
+## Why abicheck catches it
+
+abicheck reads each function's `DW_AT_calling_convention` value from DWARF
+and compares it between versions; ms_abi and the default System V
+convention encode to different DWARF constants, so the change is visible
+without any header/AST evidence — when the compiler emits the attribute at
+all (see the toolchain note above).
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
 **Scenario:** compile app against v1, swap in v2 `.so` without recompile.
+(GCC is used here since the calling-convention mismatch itself is a runtime
+register-passing issue, independent of which compiler emits the DWARF
+attribute abicheck reads.)
 
 ```bash
 # Build old library + app
@@ -78,41 +102,33 @@ gcc -shared -fPIC -g v2.c -o libfoo.so
 # → WRONG RESULT: calling convention mismatch — parameters passed in wrong registers!
 ```
 
-**Why CRITICAL:** The v2 function expects pointer parameters in `rcx`/`rdx`
-(ms_abi) but receives them in `rdi`/`rsi` (sysv_abi). The function reads from
-registers that hold stale values (typically zero), producing garbage results.
-With different register contents this could also cause a segfault if the stale
-value is dereferenced as a pointer.
+**Why CRITICAL:** the v2 function expects pointer parameters in `rcx`/`rdx`
+(ms_abi) but receives them in `rdi`/`rsi` (System V) — it reads from
+registers holding stale (typically zero) values, producing garbage results.
+With different register contents this could also segfault if a stale value
+is dereferenced as a pointer.
 
-## How to fix
+## Safe redesign
 
-Never change the calling convention of an exported function. If a new convention
-is needed:
+Never change the calling convention of an exported function. If a new
+convention is needed, add a new symbol (`vector_dot_fast()`), keep the old
+entry point as a thin forwarding wrapper, or ship a separate library with a
+migration guide.
 
-1. **Add a new symbol**: `vector_dot_fast()` with the new convention
-2. **Use a wrapper**: keep the old entry point as a thin wrapper that forwards to
-   the optimized implementation
-3. **Version the API**: provide `libmath_v2.so` with the new convention and a
-   migration guide
+**Real-world example:** the Windows ecosystem has dealt with this
+extensively — `__stdcall` vs `__cdecl` vs `__fastcall` vs `__vectorcall`
+have caused countless DLL compatibility issues, which is why the Win32 API
+froze on `__stdcall` specifically. Wine must carefully match calling
+conventions between Linux System V and Windows ms_abi for every thunked
+function — getting even one wrong causes the exact crash demonstrated here.
 
-## Real-world example
+## Cross-tool comparison
 
-The Windows ecosystem has dealt with this extensively: `__stdcall` vs `__cdecl`
-vs `__fastcall` vs `__vectorcall` have caused countless DLL compatibility issues.
-The Win32 API froze on `__stdcall` specifically to prevent this class of break.
-
-Wine (the Windows compatibility layer) must carefully match calling conventions
-between Linux System V and Windows ms_abi for every thunked function — getting
-even one wrong causes the exact crash demonstrated here.
-
-Intel's Math Kernel Library (MKL) uses `__cdecl` for its public API but internally
-uses `__vectorcall` for SIMD-heavy routines — the public entry points are thin
-wrappers that preserve the calling convention contract.
-
-## abicheck detection
-
-abicheck detects this as `calling_convention_changed` (BREAKING) by comparing
-DWARF `DW_AT_calling_convention` attributes between the two binary versions.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 

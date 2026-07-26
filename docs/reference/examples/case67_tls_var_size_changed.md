@@ -127,6 +127,8 @@ type) between the two library versions.
 
 - `CMakeLists.txt`
 - `app.c`
+- `libfoo_v1.so`
+- `libfoo_v2.so`
 - `v1.c`
 - `v1.h`
 - `v2.c`

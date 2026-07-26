@@ -2,55 +2,121 @@
 
 **Category:** Struct Layout | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-A `long priority` field is added to a self-referential linked-list `Node` struct.
-On 64-bit systems, the existing padding is consumed and `sizeof(Node)` grows from
-**16 → 24 bytes**. Because `node_sum()` accepts `Node` **by value**, the size is
-directly part of the ABI calling convention — callers compiled against v1 pass
-a 16-byte struct on the stack while the v2 function expects 24 bytes.
+`Node` — a self-referential linked-list struct (`struct Node { ...;
+struct Node *next; }`) — gains a `long priority` field. On 64-bit systems
+this consumes existing padding and grows `sizeof(Node)` from 16 to 24
+bytes, shifting `next`'s offset from 8 to 16. Because `node_sum()` takes
+`Node` **by value**, the struct's size and layout are part of the calling
+convention itself: a caller compiled against v1 pushes a 16-byte argument
+that v2's `node_sum()` reads as a 24-byte one. Recompilation is mandatory.
 
-## Why abidiff catches it
-
-abidiff reports `Added_Non_Virtual_Member_Variable` and exits **4**.
-abicheck detects: `TYPE_SIZE_CHANGED` (Node: 16→24 bytes).
-
-## Code diff
+## Old/new diff
 
 | v1.h | v2.h |
 |------|------|
-| `struct Node { int data; int flags; struct Node *next; }` | `struct Node { int data; int flags; long priority; struct Node *next; }` |
-| `int node_sum(Node n);` — by value, 16 bytes | `int node_sum(Node n);` — by value, 24 bytes |
+| `struct Node { int data; int flags; struct Node *next; };` | `struct Node { int data; int flags; long priority; struct Node *next; };` |
+| `int node_sum(Node n);` — 16 bytes by value | `int node_sum(Node n);` — 24 bytes by value |
 
-## Real Failure Demo
-
-**Severity: 🔴 CRITICAL**
-
-**Scenario:** compile app against v1, run with v2 `.so` — stack corruption due to by-value size mismatch.
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
 
-abidw --out-file v1.abi libv1.so
-abidw --out-file v2.abi libv2.so
-abidiff v1.abi v2.abi
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: Node (128 -> 192 bits)
+  > Old code allocates or copies the type with the old size; heap/stack
+    corruption, out-of-bounds access.
+  Affected symbols: node_create, node_free, node_sum
+- type_field_offset_changed: Field offset changed: Node::next (64 -> 128 bits)
+  > Old code reads/writes fields at stale offsets; silent data corruption.
+  Affected symbols: node_create, node_free, node_sum
+
+Additions:
+- type_field_added_compatible: Field added: Node::priority
+  > Field appended without changing existing offsets; old code works
+    but won't initialize the new field.
+  Affected symbols: node_create, node_free, node_sum
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's struct-layout info (`DW_TAG_structure_type`
+size + member offsets) is enough to detect the size change and the
+resulting offset shift of `next`, even though `Node` is self-referential;
+no public headers required.
+
+## Why abicheck catches it
+
+DWARF represents a self-referential struct's `next` member as a pointer
+type pointing back at the same `DW_TAG_structure_type` DIE — the cycle
+doesn't prevent DWARF (or abicheck's type-graph walk) from recording that
+type's own byte size and each member's offset, which is all the size/offset
+comparison needs; abicheck compares them directly from debug info in both
+versions.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** app builds a `Node` with v1's 16-byte layout, passes it by
+value to `node_sum()`, then the library is swapped for v2 without
+recompiling the app.
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g v1.c -o libfoo.so
+gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → node_sum = 13
+# → expected = 13
+# → exit 0
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g v2.c -o libfoo.so
+./app
+# → node_sum = 1222879984
+# → expected = 13
+# → CORRUPTION: Node by-value ABI changed (sizeof/layout mismatch)
+# → exit 1
+```
+
+**Why CRITICAL:** the app still passes a 16-byte `Node` (its `data`,
+`flags`, and `next` fields, per v1's layout), but v2's `node_sum()` reads
+that same argument as a 24-byte `Node` — treating bytes that are actually
+part of `next`'s pointer value as the new `priority` field. The result is
+silently wrong arithmetic with no crash, from a struct that never even
+looked ABI-sensitive because of its self-referential shape.
+
+## Safe redesign
+
+Avoid passing structs by value across a public API boundary — pass a
+pointer instead (`int node_sum(const Node *n)`), where only the pointer
+size (stable) crosses the ABI boundary. If by-value semantics are
+required, hide the struct behind an opaque handle, or bump the SONAME when
+its layout changes.
+
+**Real-world example:** linked-list/tree node structs that started small
+and by-value "for performance" are a classic source of this bug — once the
+node type is used in even one by-value function signature, every field
+addition becomes an ABI break, not just an internal detail.
+
+## Cross-tool comparison
+
+`abidiff` also catches this (`Added_Non_Virtual_Member_Variable` on a
+cyclic type):
+
+```bash
+abidw --out-file v1.xml libv1.so
+abidw --out-file v2.xml libv2.so
+abidiff v1.xml v2.xml
 echo "exit: $?"   # → 4 (TYPE_SIZE_CHANGED)
 ```
-
-## Reproduce manually
-
-```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so
-abidw --headers-dir . --out-file v1.abi libv1.so
-abidw --headers-dir . --out-file v2.abi libv2.so
-abidiff v1.abi v2.abi
-```
-
-## How to fix
-
-Avoid by-value passing of structs in public API:
-1. **Pass by pointer** — `int node_sum(const Node *n)` — pointer size is stable.
-2. **Opaque handle** — hide `Node` behind a typedef to an incomplete struct.
-3. **Version bump** — if by-value semantics are required, bump SONAME.

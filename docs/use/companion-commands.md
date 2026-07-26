@@ -64,11 +64,11 @@ Some of the old companion functionality survives as a **command**:
 
 The CLI surface today has five core per-library analysis commands
 (`compare`, `compat`, `deps`, `dump`, `scan`) plus project-orchestration
-commands (`aggregate`, `build-output`, `plan`, `project-targets`,
-`run-plan`) that compose those five across a multi-target project — neither
-group is part of the companion-command consolidation this page describes;
-see the [CLI Reference](../reference/cli-reference.md) for the full command
-tree.
+commands — `aggregate` and the `project` group (`project plan`/`project
+validate`/`project validate-build`, ADR-054) — that compose those five
+across a multi-target project — neither group is part of the
+companion-command consolidation this page describes; see the
+[CLI Reference](../reference/cli-reference.md) for the full command tree.
 
 ### `deps tree`
 

@@ -1,32 +1,19 @@
 # Case 66: Language Linkage Changed (extern "C" removed)
 
-**Category:** Function ABI | **Verdict:** BREAKING
+**Category:** Function ABI | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-The `extern "C"` wrapper is removed from the public header. In v1, functions are
-exported with **C linkage** — the symbol name in the `.dynsym` table is exactly
-`parse_config`. In v2, functions use **C++ linkage** — the exported symbol name
-is mangled to something like `_Z12parse_configPKc`.
+The `extern "C"` wrapper is removed from the public header. In v1, functions
+export with C linkage — the `.dynsym` name is exactly `parse_config`. In v2,
+the same functions use C++ linkage, so the exported name is mangled to
+`_Z12parse_configPKc`. Any consumer (C or C++) linked against v1 has
+recorded the unmangled name as the symbol it needs; when v2 is loaded, that
+name doesn't exist and the dynamic linker fails to resolve it. The source
+still compiles fine against v2's headers — only the binary symbol table
+changes — so this break is easy to miss without an ABI diff.
 
-Any consumer (C or C++) that was linked against v1 has recorded `parse_config`
-(unmangled) as the needed symbol. When v2 is loaded, that symbol doesn't exist —
-the dynamic linker fails with "undefined symbol".
-
-## Why this matters
-
-`extern "C"` is the standard mechanism for C++ libraries to provide a C-compatible
-ABI. It suppresses C++ name mangling, making symbols accessible from C code and
-stable across different C++ compilers/versions. Removing it is equivalent to
-renaming every affected function.
-
-This break is particularly insidious because:
-- The **source code compiles fine** with the new headers (C++ callers don't notice)
-- The function **signatures are identical** — same name, same parameters
-- The break is only visible in the **binary symbol table** (`nm -D`)
-- C consumers cannot call the function at all (mangled names aren't valid C identifiers)
-
-## Code diff
+## Old/new diff
 
 ```cpp
 // v1.h — C linkage (symbol: "parse_config")
@@ -38,11 +25,49 @@ extern "C" {
 int parse_config(const char *path);
 ```
 
-## Real Failure Demo
+## abicheck command
+
+```bash
+g++ -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- func_language_linkage_changed: Language linkage changed: validate_config
+  (extern "C" -> C++)
+  > Language linkage changed (extern "C" <-> C++); the mangled symbol name
+    changes, so old binaries reference a symbol that no longer exists under
+    that name.
+- func_language_linkage_changed: Language linkage changed: parse_config
+  (extern "C" -> C++)
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the exported-symbol table alone shows the unmangled
+name disappear and a demangled-equivalent mangled name appear in its place;
+abicheck's mangled/unmangled reconciliation reports this as a linkage
+change rather than an unrelated add+remove, with no debug info or headers
+required.
+
+## Why abicheck catches it
+
+abicheck demangles each exported C++ symbol and, when a v1 unmangled name
+and a v2 mangled name demangle to the same underlying function signature, it
+reports `func_language_linkage_changed` instead of a plain
+`func_removed`/`func_added` pair — turning what would otherwise look like an
+unrelated symbol swap into the actual linkage-change root cause.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-**Scenario:** compile C app against v1, swap in v2 `.so` without recompile.
+**Scenario:** compile a C app against v1, swap in v2 `.so` without recompile.
 
 ```bash
 # Build v1 (extern "C") and app
@@ -55,50 +80,47 @@ gcc -g app.c -L. -lparser -Wl,-rpath,. -o app
 # Verify v1 exports unmangled names
 nm -D libparser.so | grep parse_config
 # → T parse_config
-# → T validate_config
 
 # Build v2 (no extern "C")
 g++ -shared -fPIC -g v2.cpp -o libparser.so
 
 # Verify v2 exports mangled names
-nm -D libparser.so | grep parse_config
+nm -D libparser.so | grep config
 # → T _Z12parse_configPKc
 # → T _Z15validate_configPKc
 
 ./app
-# → ./app: symbol lookup error: ./app: undefined symbol: parse_config
+# → ./app: symbol lookup error: ./app: undefined symbol: validate_config
 ```
 
-**Why CRITICAL:** The unmangled symbol `parse_config` no longer exists in v2's
-dynamic symbol table. The C++ mangled version `_Z12parse_configPKc` is there,
-but the pre-linked binary doesn't know about it. Process killed at load time.
+**Why CRITICAL:** neither unmangled name (`parse_config`, `validate_config`)
+exists in v2's dynamic symbol table anymore — only their C++-mangled
+equivalents do. The dynamic linker resolves the app's needed symbols eagerly
+at load time and fails on whichever one it processes first (`validate_config`
+here); the process is killed before `main()` ever runs.
 
-## How to fix
+## Safe redesign
 
-Always maintain `extern "C"` for public C-compatible APIs:
+Always keep a public C-compatible API inside `extern "C"` — treat it as a
+public contract, not an implementation detail. Keep the public header pure
+C and provide a separate C++ header for C++-only consumers, and enforce it
+in CI with a check that every public `.dynsym` symbol matches the expected
+unmangled name list (`nm -D libfoo.so | grep -v '^_Z'`).
 
-1. **Keep the extern "C" block**: this is a public API contract, not an implementation detail
-2. **Use a C header**: keep the public header as pure C (`parser.h`) and use a
-   separate C++ header for C++ consumers
-3. **Enforce with CI**: add a check that all public `.dynsym` symbols match expected
-   names (e.g., `nm -D libparser.so | grep -v '^_Z'` should list all public functions)
+**Real-world example:** this commonly happens during "modernization"
+refactors when a C library is rewritten in C++ and a developer removes
+`extern "C"` without realizing downstream C consumers (and pre-built C++
+binaries) depend on the unmangled names. libpng, zlib, and SQLite all
+maintain `extern "C"` blocks specifically to preserve their C ABI contract
+even when compiled as C++.
 
-## Real-world example
+## Cross-tool comparison
 
-This commonly happens during "modernization" refactors when a C library is
-rewritten in C++. The developer removes `extern "C"` thinking "we're C++ now"
-without realizing that all downstream C consumers (and pre-built C++ binaries)
-depend on the unmangled names.
-
-libpng, zlib, and SQLite all maintain `extern "C"` blocks specifically to
-ensure their C ABI contract is preserved even when compiled as C++.
-
-## abicheck detection
-
-abicheck detects this as `func_language_linkage_changed` (BREAKING) by
-comparing symbol names in the dynamic symbol table — the unmangled name
-disappears and a mangled name appears, which is flagged as a linkage change
-rather than a simple removal + addition.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 

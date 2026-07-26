@@ -28,9 +28,9 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case26_union_field_added](../case26_union_field_added.md) | Union Field Added | 🔴 BREAKING | Breaking |
 | [case28_typedef_opaque](../case28_typedef_opaque.md) | Typedef and Opaque Type Changes | 🔴 BREAKING | Breaking |
 | [case30_field_qualifiers](../case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🔴 BREAKING | Breaking |
-| [case33_pointer_level](../case33_pointer_level.md) | - Pointer Level Change | 🔴 BREAKING | Breaking |
-| [case36_anon_struct](../case36_anon_struct.md) | - Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
-| [case37_base_class](../case37_base_class.md) | - Base Class Changes | 🔴 BREAKING | Breaking |
+| [case33_pointer_level](../case33_pointer_level.md) | Pointer Level Change | 🔴 BREAKING | Breaking |
+| [case36_anon_struct](../case36_anon_struct.md) | Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
+| [case37_base_class](../case37_base_class.md) | Base Class Changes | 🔴 BREAKING | Breaking |
 | [case38_virtual_methods](../case38_virtual_methods.md) | Virtual Method Changes | 🔴 BREAKING | Breaking |
 | [case39_var_const](../case39_var_const.md) | Variable Const Change | 🔴 BREAKING | Breaking |
 | [case40_field_layout](../case40_field_layout.md) | Field Layout Changes | 🔴 BREAKING | Breaking |

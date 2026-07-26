@@ -273,7 +273,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [12](case12_function_removed/README.md) | Function Removed from Shared Library | Breaking | 🔴 BREAKING |
 | [13](case13_symbol_versioning/README.md) | Symbol Versioning Script | Quality | 🟢 COMPATIBLE |
 | [14](case14_cpp_class_size/README.md) | C++ Class Size Change | Breaking | 🔴 BREAKING |
-| [15](case15_noexcept_change/README.md) | `noexcept` Changed | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [15](case15_noexcept_change/README.md) | `noexcept` Removed | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [16](case16_inline_to_non_inline/README.md) | Inline → Non-inline (ODR / Symbol Appearance) | Addition | 🟢 COMPATIBLE |
 | [17](case17_template_abi/README.md) | Template Instantiation ABI Change | Breaking | 🔴 BREAKING |
 | [18](case18_dependency_leak/README.md) | Dependency ABI Leak | Breaking | 🔴 BREAKING (bad practice) |
@@ -292,11 +292,11 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [30](case30_field_qualifiers/README.md) | Field Qualifier Changes (const, volatile) | Breaking | 🔴 BREAKING |
 | [31](case31_enum_rename/README.md) | Enum Member Rename | API Break | 🟠 API_BREAK |
 | [32](case32_param_defaults/README.md) | Parameter Default Value Changes (C++) | API Break | 🟠 API_BREAK |
-| [33](case33_pointer_level/README.md) | - Pointer Level Change | Breaking | 🔴 BREAKING |
+| [33](case33_pointer_level/README.md) | Pointer Level Change | Breaking | 🔴 BREAKING |
 | [34](case34_access_level/README.md) | Access Level Changed | API Break | 🟠 API_BREAK |
-| [35](case35_field_rename/README.md) | - Field Rename | API Break | 🟠 API_BREAK |
-| [36](case36_anon_struct/README.md) | - Anonymous Struct/Union Change | Breaking | 🔴 BREAKING |
-| [37](case37_base_class/README.md) | - Base Class Changes | Breaking | 🔴 BREAKING |
+| [35](case35_field_rename/README.md) | Field Rename | API Break | 🟠 API_BREAK |
+| [36](case36_anon_struct/README.md) | Anonymous Struct/Union Change | Breaking | 🔴 BREAKING |
+| [37](case37_base_class/README.md) | Base Class Changes | Breaking | 🔴 BREAKING |
 | [38](case38_virtual_methods/README.md) | Virtual Method Changes | Breaking | 🔴 BREAKING |
 | [39](case39_var_const/README.md) | Variable Const Change | Breaking | 🔴 BREAKING |
 | [40](case40_field_layout/README.md) | Field Layout Changes | Breaking | 🔴 BREAKING |

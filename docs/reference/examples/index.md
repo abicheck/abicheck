@@ -66,7 +66,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case12_function_removed](case12_function_removed.md) | Function Removed from Shared Library | 🔴 BREAKING | Breaking |
 | [case13_symbol_versioning](case13_symbol_versioning.md) | Symbol Versioning Script | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case14_cpp_class_size](case14_cpp_class_size.md) | C++ Class Size Change | 🔴 BREAKING | Breaking |
-| [case15_noexcept_change](case15_noexcept_change.md) | `noexcept` Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case15_noexcept_change](case15_noexcept_change.md) | `noexcept` Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case16_inline_to_non_inline](case16_inline_to_non_inline.md) | Inline → Non-inline (ODR / Symbol Appearance) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case17_template_abi](case17_template_abi.md) | Template Instantiation ABI Change | 🔴 BREAKING | Breaking |
 | [case18_dependency_leak](case18_dependency_leak.md) | Dependency ABI Leak | 🔴 BREAKING | Breaking |
@@ -85,11 +85,11 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case30_field_qualifiers](case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🔴 BREAKING | Breaking |
 | [case31_enum_rename](case31_enum_rename.md) | Enum Member Rename | 🟠 API_BREAK | API Break |
 | [case32_param_defaults](case32_param_defaults.md) | Parameter Default Value Changes (C++) | 🟠 API_BREAK | API Break |
-| [case33_pointer_level](case33_pointer_level.md) | - Pointer Level Change | 🔴 BREAKING | Breaking |
+| [case33_pointer_level](case33_pointer_level.md) | Pointer Level Change | 🔴 BREAKING | Breaking |
 | [case34_access_level](case34_access_level.md) | Access Level Changed | 🟠 API_BREAK | API Break |
-| [case35_field_rename](case35_field_rename.md) | - Field Rename | 🟠 API_BREAK | API Break |
-| [case36_anon_struct](case36_anon_struct.md) | - Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
-| [case37_base_class](case37_base_class.md) | - Base Class Changes | 🔴 BREAKING | Breaking |
+| [case35_field_rename](case35_field_rename.md) | Field Rename | 🟠 API_BREAK | API Break |
+| [case36_anon_struct](case36_anon_struct.md) | Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
+| [case37_base_class](case37_base_class.md) | Base Class Changes | 🔴 BREAKING | Breaking |
 | [case38_virtual_methods](case38_virtual_methods.md) | Virtual Method Changes | 🔴 BREAKING | Breaking |
 | [case39_var_const](case39_var_const.md) | Variable Const Change | 🔴 BREAKING | Breaking |
 | [case40_field_layout](case40_field_layout.md) | Field Layout Changes | 🔴 BREAKING | Breaking |

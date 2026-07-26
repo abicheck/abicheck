@@ -10,38 +10,65 @@
 | **Detected `ChangeKind`s** | `field_bitfield_changed` |
 | **Source files** | `examples/case63_bitfield_changed/` |
 
-**Category:** Type Layout | **Verdict:** BREAKING
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-The `mode` bitfield in `RegMap` is widened from 3 bits to 5 bits. This shifts
-every subsequent bitfield (`channel`, `priority`, `reserved`) to different bit
-positions within the same 32-bit word. Any consumer compiled against the v1
-layout reads `priority` from the wrong bits, getting a corrupt value.
+The `mode` bitfield in `RegMap` widens from 3 bits to 5 bits. `sizeof(RegMap)`
+stays 4 bytes — there's no alignment padding between bitfields sharing a
+storage unit — but every subsequent bitfield (`channel`, `priority`,
+`reserved`) shifts to different bit positions. A consumer compiled against
+v1 reads `priority` from the old bit range and gets a value from the middle
+of an unrelated field: no crash, no diagnostic, just a silently wrong number.
+Recompilation against v2 is mandatory.
 
-## Why this matters
-
-Bitfields are widely used in hardware register maps, network protocol headers,
-and compact flag structs. Unlike regular struct fields where padding can absorb
-small changes, **every bit position after the widened field shifts**. There is
-no alignment padding between bitfields within the same storage unit.
-
-This is especially dangerous because:
-- `sizeof(RegMap)` does **not** change (still 4 bytes) — naive size checks pass
-- The struct looks "compatible" at the symbol level — same functions, same names
-- The corruption is **silent**: wrong values, no crash, no diagnostic
-
-## Code diff
+## Old/new diff
 
 | Field | v1 (bits) | v2 (bits) | Change |
 |-------|-----------|-----------|--------|
 | `enable` | 0 | 0 | unchanged |
-| `mode` | 1-3 (3 bits) | 1-5 (5 bits) | **widened +2 bits** |
-| `channel` | 4-7 | 6-9 | **shifted +2** |
-| `priority` | 8-15 | 10-17 | **shifted +2** |
-| `reserved` | 16-31 (16 bits) | 18-31 (14 bits) | **shrunk -2 bits** |
+| `mode` | 1-3 (3 bits) | 1-5 (5 bits) | widened +2 bits |
+| `channel` | 4-7 | 6-9 | shifted +2 |
+| `priority` | 8-15 | 10-17 | shifted +2 |
+| `reserved` | 16-31 (16 bits) | 18-31 (14 bits) | shrunk -2 bits |
 
-## Real Failure Demo
+## abicheck command
+
+```bash
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_field_offset_changed: Field offset changed: RegMap::channel (4 -> 6 bits)
+  > Old code reads/writes fields at stale offsets; silent data corruption.
+- type_field_offset_changed: Field offset changed: RegMap::priority (8 -> 10 bits)
+- type_field_offset_changed: Field offset changed: RegMap::reserved (16 -> 18 bits)
+- field_bitfield_changed: Bitfield layout changed: RegMap::mode (bits=3 -> bits=5)
+  > Bit-field width or offset changed; old code reads/writes wrong bits.
+- field_bitfield_changed: Bitfield layout changed: RegMap::reserved (bits=16 -> bits=14)
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's `DW_AT_bit_size`/`DW_AT_bit_offset` (or
+`DW_AT_data_bit_offset`) attributes on each bitfield member record the exact
+bit layout for both versions; no public headers needed.
+
+## Why abicheck catches it
+
+abicheck compares each struct member's bit width and bit offset from DWARF
+directly. Because `sizeof(RegMap)` doesn't change and the member names and
+declared types (`uint32_t`) are identical, only the bit-level DWARF
+attributes distinguish v1 from v2 — a check that requires debug info, since
+plain symbol-table or type-name comparison would report no change at all.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
@@ -55,6 +82,7 @@ gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
 # → mode     = 2 (expected 2)
 # → channel  = 5 (expected 5)
 # → priority = 128 (expected 128)
+# → raw word = 0x00008055
 
 # Swap in new library (no recompile)
 gcc -shared -fPIC -g v2.c -o libfoo.so
@@ -62,37 +90,39 @@ gcc -shared -fPIC -g v2.c -o libfoo.so
 # → mode     = 2 (expected 2)
 # → channel  = 4 (expected 5)
 # → priority = 1 (expected 128)
-# → CORRUPTION: bitfield layout mismatch
+# → raw word = 0x00020145
+# → CORRUPTION: bitfield layout mismatch — app reads v1 bit positions but
+#    library wrote v2 bit positions!
 ```
 
-**Why CRITICAL:** The v2 library writes `priority=128` into bits 10-17, but the
-app (compiled against v1) reads bits 8-15 — extracting a completely different
-value. No crash occurs; the data is silently wrong. In a hardware register
-context, this could program the wrong DMA priority, causing system instability.
+**Why CRITICAL:** v2's `regmap_init()` writes `priority=128` into bits
+10-17, but the app (compiled against v1) reads bits 8-15 — extracting a
+completely different value. No crash occurs; the data is silently wrong. In
+a hardware register context, this could program the wrong DMA priority,
+causing system instability.
 
-## How to fix
+## Safe redesign
 
-Never change bitfield widths in a public struct. If more bits are needed:
+Never change bitfield widths in a public struct. If more bits are needed,
+consume them from an existing `reserved` field instead of widening a field
+that shifts everything after it, ship a new struct version
+(`RegMapV2`), or hide the register layout entirely behind accessor
+functions.
 
-1. **Use the reserved field**: consume bits from `reserved` without shifting others
-2. **Add a new struct version**: `RegMapV2` with the wider field
-3. **Use an opaque handle**: hide the register layout behind accessor functions
+**Real-world example:** the Linux kernel's `iphdr` (IP header) structure
+uses bitfields for version and IHL — any width change there would corrupt
+every packet parsed by userspace tools like `tcpdump` that embed the struct
+layout at compile time. The Windows `BITMAPINFOHEADER` uses bitfields for
+color masks; driver compatibility across Windows versions depends on those
+widths staying frozen.
 
-## Real-world example
+## Cross-tool comparison
 
-Linux kernel `iphdr` (IP header) structure uses bitfields for version and IHL.
-Any change to these widths would corrupt every network packet parsed by
-userspace tools like `tcpdump` that embed the struct layout at compile time.
-
-The Windows `BITMAP` info header uses bitfields for color masks — driver
-compatibility across Windows versions depends on these widths being frozen.
-
-## abicheck detection
-
-abicheck detects this as `field_bitfield_changed` (BREAKING) by comparing
-DWARF `DW_AT_bit_size` / `DW_AT_bit_offset` attributes between the two
-versions. Even though `sizeof` doesn't change, the per-field bit layout
-difference is caught.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 

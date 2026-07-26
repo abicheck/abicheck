@@ -12,8 +12,8 @@ inputs:
       Operation mode. The Action exposes five analysis modes, mirroring
       abicheck's five core per-library CLI commands (compare/dump/scan/
       deps tree/deps compare — ADR-043; the CLI additionally has
-      project-orchestration commands like `aggregate` and `run-plan` that
-      this Action does not expose as separate modes):
+      project-orchestration commands like `aggregate` and `project plan`
+      (ADR-054) that this Action does not expose as separate modes):
       "compare" (default) compares two ABI surfaces — old-library/new-library
       may be single binaries/snapshots OR directories/packages, in which case
       abicheck fans out to a per-library comparison automatically (no separate
