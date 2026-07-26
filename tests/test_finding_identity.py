@@ -331,11 +331,12 @@ class TestNormalizeMangledName:
         assert normalize_mangled_name("_ZSt9abc", "_ZSt9abc") is None
 
     def test_other_std_substitution_abbreviations_stay_accepted(self) -> None:
-        # Sa/Sb/Sd/Si/So/Ss (each a complete named substitution) and
-        # numbered back-references (S_) are unaffected by the "St"
-        # special-case -- they're complete on their own.
+        # Sa/Sb/Sd/Si/So/Ss (each a complete, context-free named
+        # substitution) are unaffected by the "St" special-case -- they're
+        # complete on their own and don't reference any earlier table
+        # entry, unlike numbered back-references (see
+        # test_numbered_substitution_is_rejected_at_top_level below).
         assert normalize_mangled_name("_ZSaIcE", None) == "_ZSaIcE"
-        assert normalize_mangled_name("_ZS_", None) == "_ZS_"
 
     def test_invalid_single_letter_substitution_is_rejected(self) -> None:
         # Codex review, fresh evidence, round 2: only Sa/Sb/Sd/Si/So/Ss are
@@ -353,9 +354,18 @@ class TestNormalizeMangledName:
         assert normalize_mangled_name("_ZS0", "_ZS0") is None
         assert normalize_mangled_name("_ZSA", "_ZSA") is None
 
-    def test_numbered_substitution_with_terminator_is_accepted(self) -> None:
-        assert normalize_mangled_name("_ZS0_i", None) == "_ZS0_i"
-        assert normalize_mangled_name("_ZSA_i", None) == "_ZSA_i"
+    def test_numbered_substitution_is_rejected_at_top_level(self) -> None:
+        # Codex review, fresh evidence, round 8: a numbered substitution
+        # (and bare "S_") always references an EARLIER substitution-table
+        # entry, but this function only ever validates the FIRST
+        # production of a top-level encoding, where no such entry can
+        # exist yet -- a well-formed "S0_"/"SA_"/"S_" here is a
+        # context-free reference to nothing, so even a well-terminated
+        # spelling must still fall back to the NORMALIZED tier rather
+        # than being promoted to canonical.
+        assert normalize_mangled_name("_ZS_", "_ZS_") is None
+        assert normalize_mangled_name("_ZS0_i", "_ZS0_i") is None
+        assert normalize_mangled_name("_ZSA_i", "_ZSA_i") is None
 
     def test_extern_c_bare_name_is_rejected(self) -> None:
         assert normalize_mangled_name("foo", "foo") is None

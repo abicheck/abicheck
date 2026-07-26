@@ -151,10 +151,6 @@ _ITANIUM_OPERATOR_CODES = frozenset(
 
 _SOURCE_NAME_LENGTH_RE = re.compile(r"\A[0-9]+")
 
-#: Itanium ``<seq-id>``: base-36 (digits then uppercase letters), used only
-#: by the numbered-substitution production ``S <seq-id> _``.
-_BASE36_SEQ_ID_RE = re.compile(r"\A[0-9A-Z]+")
-
 #: A real Itanium ``<source-name>`` length prefix is never remotely close to
 #: this many digits (it would claim a billion-plus-byte identifier). Bounds
 #: the digit run *before* ``int()`` sees it -- Python raises ``ValueError``
@@ -412,24 +408,32 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
             # evidence, round 3).
             return len(rest) > 2 and _operand_looks_valid(rest[2:])
         if rest[1].isdigit() or (rest[1].isalpha() and rest[1].isupper()):
-            # Numbered substitution: <seq-id> ::= [0-9A-Z]+, ALWAYS
-            # followed by a literal terminating "_" (e.g. "S0_", "SA_") --
-            # unlike the single-letter abbreviations (Sa/Sb/Sd/Si/So/Ss)
-            # or bare "S_", which are already complete. "_ZS0" has the
-            # seq-id digit but no terminator and is not a complete
-            # encoding (Codex review, fresh evidence).
-            m = _BASE36_SEQ_ID_RE.match(rest[1:])
-            assert m is not None  # guarded by isdigit()/isupper() above
-            return rest[1 + m.end() :].startswith("_")
+            # A numbered substitution (<seq-id> ::= [0-9A-Z]+, ALWAYS
+            # followed by a literal terminating "_", e.g. "S0_", "SA_")
+            # references an EARLIER substitution-table entry -- one only
+            # populated by <name>/<type> productions already emitted
+            # earlier in the SAME encoding. This function validates only
+            # the FIRST production of a top-level <encoding>, where no
+            # such entry can exist yet: a well-formed "S0_"/"SA_" here is
+            # a context-free reference to nothing, never a valid first
+            # production, regardless of whether its own terminator is
+            # present (Codex review, fresh evidence, round 8; previously
+            # only the missing-terminator shape "_ZS0"/"_ZSA" was
+            # rejected, while the well-formed-but-context-free "_ZS0_"
+            # still passed).
+            return False
         # Only Sa/Sb/Sd/Si/So/Ss are real complete single-letter
         # abbreviations (allocator/basic_string/basic_iostream/
-        # basic_istream/basic_ostream/string); S_ is the separate bare
-        # back-reference-0 production (handled here too since it isn't a
-        # digit/uppercase seq-id). Any other lowercase letter (e.g.
-        # "_ZSx") is not a real Itanium substitution at all, but
+        # basic_istream/basic_ostream/string) that don't need any prior
+        # context -- they denote fixed, well-known components, unlike a
+        # numbered back-reference. Bare "S_" (back-reference-0) has the
+        # exact same "no earlier entry can exist yet" problem as the
+        # numbered case above and is rejected for the same reason (Codex
+        # review, fresh evidence, round 8). Any other lowercase letter
+        # (e.g. "_ZSx") is not a real Itanium substitution at all, but
         # previously matched this fallback outright regardless of which
         # letter followed "S" (Codex review, fresh evidence, round 2).
-        return rest[1] == "_" or rest[1] in "abdios"
+        return rest[1] in "abdios"
     # Two <operator-name> codes are not complete by themselves the way the
     # other 47 are: "cv" (conversion operator) requires a following
     # <type>, and "li" (C++11 literal operator) requires a following
