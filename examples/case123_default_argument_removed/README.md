@@ -1,45 +1,120 @@
-# Case 123 — Default Argument Removed
+# Case 123: Default Argument Removed
 
-**Verdict:** 🟠 API_BREAK
-**abicheck verdict: API_BREAK** (with headers) / **NO_CHANGE** (object/ELF-only)
+**Category:** Modern C/C++ Contract | **Verdict:** 🟠 API_BREAK
 
-## What changes
+## Verdict and consumer impact
 
-| Version | Declaration |
-|---------|-------------|
-| v1 | `int connect(const char *host, int timeout_ms = 5000);` |
-| v2 | `int connect(const char *host, int timeout_ms);` |
+`v1`'s `netcfg::connect(const char *host, int timeout_ms = 5000)` has a
+default value for `timeout_ms`; `v2` removes it. The mangled symbol is
+identical — default-argument values don't participate in name mangling — so
+an already-compiled binary keeps linking and running against either `.so`
+unchanged. But any *source* that relies on the default, e.g.
+`connect("example.org")`, no longer compiles against `v2.h`
+(`too few arguments to function`). This is a pure source/API break: existing
+binaries are unaffected, but recompiling against the new headers breaks
+existing call sites.
 
-The default value for `timeout_ms` is removed. The **mangled symbol is identical**
-(default arguments do not participate in name mangling).
+## Old/new diff
 
-## What breaks
+| v1.h | v2.h |
+|------|------|
+| `int connect(const char *host, int timeout_ms = 5000);` | `int connect(const char *host, int timeout_ms);` |
 
-Any caller that relied on the default — `connect("example.org")` — no longer
-compiles against v2 (`too few arguments to function`). Already-compiled binaries
-keep linking and running. A pure source/API break. See `app.cpp`.
+## abicheck command
 
-## Why this case exists — invisible to object analysis
-
-Default-argument values live only in the **declaration** (the header). They are
-not encoded in the symbol name, DWARF, or anywhere in the object file — the v1
-and v2 `.so` are ABI-identical. abicheck detects this **only in header mode**,
-where castxml exposes the `default="5000"` attribute (`ChangeKind`
-`param_default_value_removed`). In object/DWARF mode it reports `NO_CHANGE`.
-
-(Changing a default value rather than removing it is reported as the
-compatible-but-behavioural `param_default_value_changed`; *adding* a default is
-source-compatible and not flagged.)
-
-## Reproduce manually
 ```bash
 g++ -shared -fPIC -g v1.cpp -o libnet_v1.so
 g++ -shared -fPIC -g v2.cpp -o libnet_v2.so
 abicheck compare libnet_v1.so libnet_v2.so \
-    --header old=v1.h --header new=v2.h   # → API_BREAK (param_default_value_removed)
-abicheck compare libnet_v1.so libnet_v2.so # → NO_CHANGE (object-only)
+  --header old=v1.h --header new=v2.h \
+  --ast-frontend clang --gcc-path "$(command -v clang)"
 ```
 
-## How to fix
-Keep the default, or add an overload (`connect(host)` forwarding to
-`connect(host, 5000)`) so existing call sites keep compiling.
+## Expected abicheck finding
+
+```text
+Verdict: API_BREAK (exit 2)
+
+- param_default_value_removed: Parameter default removed: connect param
+  timeout_ms (5000)
+```
+
+Without headers (`abicheck compare libnet_v1.so libnet_v2.so`, no `-H`), the
+same two `.so` files compare as `NO_CHANGE` (exit 0) — the default value
+lives only in the declaration, not anywhere in the object file, confirmed by
+running that exact command in this environment.
+
+## Minimum evidence
+
+`min_evidence: L2` — a default-argument value exists only in the
+**declaration** (the header); it is not encoded in the mangled symbol name,
+DWARF, or anywhere else in the compiled object, so object/DWARF comparison
+alone (L0/L1) cannot see it — both `.so` files really are ABI-identical.
+castxml is the documented default header/AST backend and exposes the
+`default="5000"` attribute on the `<Argument>` element; this environment
+used the supported alternative Clang AST frontend (`--ast-frontend clang`)
+since castxml itself isn't installed here, and it surfaces the same removed
+default. This case is scoped to Linux in `ground_truth.json`: castxml on
+macOS/Homebrew is documented not to emit that `default=` attribute at all,
+so the detection is platform-dependent on the header/AST backend used, not
+on this Clang-frontend substitution specifically.
+
+## Why abicheck catches it
+
+The header AST parser records each parameter's `default` attribute from the
+declaration. abicheck's diff (`param_default_value_removed`/
+`param_default_value_changed`) compares that attribute between the two
+sides' declarations for the same function; removing it entirely (rather than
+changing its value) is reported as an API break because call sites that
+relied on omitting the argument stop compiling.
+
+## Runtime failure demonstration
+
+**Severity: source-level, not a runtime crash.** Existing binaries are
+unaffected — the mangled symbol and the object code are identical — so
+there's no "swap the library, watch it crash" scenario. The break shows up
+at compile time instead:
+
+```bash
+# A pre-built binary keeps working against either .so, unchanged:
+g++ -std=c++17 app.cpp -I. -L. -lnet -Wl,-rpath,. -o app   # built against v1.h
+./app
+# → rc=5000
+# (swap libnet.so for the v2 build, no recompile — still fine:)
+./app
+# → rc=5000
+
+# But recompiling app.cpp against v2.h fails outright:
+g++ -std=c++17 -DUSE_V2 app.cpp -I. -L. -lnet -Wl,-rpath,. -o app
+# → error: too few arguments to function 'int netcfg::connect(const char*, int)'
+#   note: declared here
+#   int connect(const char *host, int timeout_ms);
+```
+
+**Why this matters even though nothing crashes:** a library that only ships
+binary compatibility checks (or none) would call this release safe, but any
+downstream project that recompiles from source — the normal path for most
+consumers — breaks immediately at the call site.
+
+## Safe redesign
+
+Keep the default, or add a forwarding overload
+(`int connect(const char *host) { return connect(host, 5000); }`) so
+existing call sites keep compiling against the new header. Changing a
+default's *value* rather than removing it is the compatible-but-behavioral
+`param_default_value_changed` instead; adding a new default to a parameter
+that didn't have one is source-compatible and isn't flagged at all.
+
+**Real-world example:** libraries tightening an API by "making callers be
+explicit" about a previously-defaulted parameter (timeouts, buffer sizes,
+flags) hit this every time — it reads as a quality improvement but is a
+breaking source change for every caller that used the default.
+
+## Cross-tool comparison
+
+`abidw`/`abidiff`/`abi-compliance-checker` are not installed in this
+environment. Default-argument values aren't part of the binary ABI at all,
+so a pure `abidw`/`abidiff` DWARF comparison would be expected to report
+`NO_CHANGE` here — the same result this case's own object-only abicheck run
+produced — since neither tool has a header/AST-level default-argument check
+comparable to abicheck's `param_default_value_removed`.
