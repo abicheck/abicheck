@@ -10,109 +10,89 @@
 | **Detected `ChangeKind`s** | `symbol_elf_visibility_changed` |
 | **Source files** | `examples/case51_protected_visibility/` |
 
-**Category:** ELF / Policy | **Verdict:** 🟢 COMPATIBLE
+**Category:** Quality | **Verdict:** 🟢 COMPATIBLE
 
-## What changes
+## Verdict and consumer impact
 
-| Version | `hook_point` ELF visibility |
-|---------|---------------------------|
-| v1 | `STV_DEFAULT` — interposable via LD_PRELOAD or other .so |
-| v2 | `STV_PROTECTED` — prevents interposition for references from within the defining shared object; does not affect external symbol resolution |
+Existing binaries that call `hook_point()` keep working unmodified — the symbol
+is still exported and resolves normally for external callers. The only effect
+is on **interposition**: with `STV_PROTECTED`, the library's own internal calls
+to `hook_point()` always bind to its local definition, even under `LD_PRELOAD`.
+Tooling that relies on overriding `hook_point()` from outside the library (sanitizers,
+profilers, mocks) silently stops intercepting calls made *from within* the library.
 
-## Why this is NOT a binary ABI break
+## Old/new diff
 
-The symbol `hook_point` is still **exported and resolvable** in both versions.
-Existing binaries that call `hook_point` will find it and get correct results.
-No calling convention, type layout, or signature changes.
+| old/lib.c | new/lib.c |
+|-----------|-----------|
+| `int hook_point(int x) { return x * 2; }` (DEFAULT visibility) | `__attribute__((visibility("protected")))`<br>`int hook_point(int x) { return x * 2; }` |
 
-abicheck classifies this as **COMPATIBLE** because:
-- The symbol remains in `.dynsym` and is resolvable.
-- Function signature and behavior are unchanged.
-- Standard callers (via PLT/GOT) are unaffected.
-
-## What it does affect
-
-- **Interposition is broken**: `LD_PRELOAD`-based tooling (sanitizers, profilers,
-  mock libraries) that overrides `hook_point` will no longer intercept calls
-  **made from within the library itself**. The library's own `compute()` will
-  always call its local `hook_point`, ignoring any preloaded override.
-- **Plugin/hook systems**: if consumers relied on overriding `hook_point` to
-  customize library behavior, that contract is silently broken.
-- **`-Bsymbolic` similarity**: PROTECTED visibility has similar semantics to
-  linking with `-Bsymbolic` — internal references bind directly.
-
-## Code diff
-
-```diff
- /* v1: DEFAULT — interposable */
--int hook_point(int x) { return x * 2; }
-+__attribute__((visibility("protected")))
-+int hook_point(int x) { return x * 2; }
-```
-
-## How to reproduce
+## abicheck command
 
 ```bash
-# Build both versions
-gcc -shared -fPIC -g old/lib.c -Iold -o libv1.so
-gcc -shared -fPIC -g new/lib.c -Inew -o libv2.so
-
-# Check visibility
-readelf --dyn-syms libv1.so | grep hook_point
-# → DEFAULT  hook_point
-readelf --dyn-syms libv2.so | grep hook_point
-# → PROTECTED hook_point
-
-# Run abicheck
-python3 -m abicheck.cli dump libv1.so -o /tmp/v1.json
-python3 -m abicheck.cli dump libv2.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → COMPATIBLE (visibility metadata change noted)
+gcc -shared -fPIC -g old/lib.c -Iold -o libfoo_v1.so
+gcc -shared -fPIC -g new/lib.c -Inew -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
 
-**Severity: INFORMATIONAL**
+```text
+Verdict: COMPATIBLE (exit 0)
 
-**Scenario:** app calls `compute(5)`. Both versions return 11 — no runtime difference
-for normal callers. The difference only surfaces with LD_PRELOAD interposition.
+- symbol_elf_visibility_changed: ELF visibility changed: hook_point (default -> protected)
+  > Symbol still exported and resolvable; intra-library calls to hook_point
+    no longer honor LD_PRELOAD/interposition.
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — ELF symbol visibility (`STV_DEFAULT` vs `STV_PROTECTED`)
+is recorded directly in `.dynsym`; no debug info or headers needed to see the
+change. (`-g` above is only there so DWARF-aware confidence is reported.)
+
+## Why abicheck catches it
+
+abicheck reads each symbol's `st_other` visibility byte from the ELF dynamic
+symbol table and diffs it between versions — a pure L0 ELF fact, independent
+of DWARF or headers.
+
+## Runtime failure demonstration
+
+**Severity: INFORMATIONAL** — no observable effect on existing binaries.
 
 ```bash
-# Build old lib + app
+# Build old library + app
 gcc -shared -fPIC -g old/lib.c -Iold -o libfoo.so
 gcc -g app.c -Iold -L. -lfoo -Wl,-rpath,. -o app
 ./app
 # → hook_point(5) = 10
 # → compute(5)    = 11
 
-# Swap in new lib (PROTECTED hook_point)
+# Swap in new library (no recompile)
 gcc -shared -fPIC -g new/lib.c -Inew -o libfoo.so
 ./app
 # → hook_point(5) = 10  ← same result
 # → compute(5)    = 11  ← same result
-
-# But with LD_PRELOAD override, behavior differs:
-# v1: LD_PRELOAD hook overrides both direct calls AND calls from compute()
-# v2: LD_PRELOAD hook overrides direct calls but NOT calls from within the library
 ```
 
-**Why INFORMATIONAL:** Normal operation is identical. The concern is that
-interposition-dependent workflows (profiling, mocking, hot-patching) are
-silently broken for library-internal call paths.
+Normal callers see identical output before and after the swap. The change
+only surfaces for `LD_PRELOAD`-based interposition of `hook_point()`, where
+v2's library-internal call from `compute()` no longer honors the preloaded
+override — a policy concern, not an ABI break.
 
-## Why runtime is COMPATIBLE (matches verdict)
+## Safe redesign
 
-PROTECTED symbols are still exported and resolved normally for external callers.
-The only behavioral change is in intra-library call resolution: the library
-always uses its own definition, preventing interposition. For standard consumers
-this is transparent.
+If interposition of an internal helper is a supported extension point,
+document it explicitly and keep the symbol `STV_DEFAULT`. If protected
+visibility is intentional (performance, hardening), call it out in release
+notes so profiling/mocking tooling that depends on interposition isn't
+surprised.
 
-## Real-world example
-
-GCC's `-fno-semantic-interposition` flag assumes interposed implementations have
-the same semantics — showing that interposition is part of the ELF semantic model.
-Libraries that change from DEFAULT to PROTECTED visibility should document this
-as an interposition policy change.
+**Real-world example:** GCC's `-fno-semantic-interposition` makes the same
+trade-off at compiler-flag granularity — assuming interposed implementations
+are semantically equivalent so intra-TU calls can bind directly, trading
+interposability for codegen freedom.
 
 ## References
 

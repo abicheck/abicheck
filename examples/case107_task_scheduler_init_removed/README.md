@@ -80,7 +80,8 @@ g++ -shared -fPIC -g v2.cpp -o libfoo.so
 #   _ZN5mylib19task_scheduler_initD1Ev
 
 # Source rebuild against the v2 header also fails because the class is gone.
-g++ -std=c++17 -I. -DINCLUDE_V2 -c app.cpp -o app.o  # (swap app's #include to v2.h)
+# app.cpp includes v2.h instead of v1.h when INCLUDE_V2 is defined.
+g++ -std=c++17 -I. -DINCLUDE_V2 -c app.cpp -o app.o
 # → error: 'task_scheduler_init' is not a member of 'mylib'
 ```
 

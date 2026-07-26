@@ -66,8 +66,13 @@ You can also pass a header **directory** (recursive scan for `*.h`, `*.hpp`, ...
 abicheck compare libfoo.so.1 libfoo.so.2 -H include/
 ```
 
-If no headers are provided for ELF inputs, abicheck falls back to **symbols-only** mode
-and prints a warning (weaker analysis: may miss type/signature ABI breaks).
+If no headers are provided for ELF inputs, abicheck uses **DWARF debug info if
+available** (e.g. libraries built with `-g`, like the ones above), falling back to
+**symbols-only** mode only when no debug info can be found either — either way it
+prints a warning, since less evidence means a weaker analysis that may miss
+type/signature ABI breaks. See [How much evidence do you need?](#how-much-evidence-do-you-need)
+below and [Evidence & Detectability](../learn/evidence-and-detectability.md) for the
+full L0–L4 model.
 
 ## How much evidence do you need?
 
