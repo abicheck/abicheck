@@ -179,6 +179,54 @@ def test_merge_fragments_leaves_intra_fragment_duplicates_untouched():
 
 
 # ---------------------------------------------------------------------------
+# static-linkage functions are scoped by TU, not folded/conflicted across TUs
+# ---------------------------------------------------------------------------
+
+
+def test_merge_fragments_keeps_distinct_static_helpers_from_different_tus():
+    # Two unrelated TUs each declaring their own private
+    # `static void helper(int)` can mangle to the identical `_ZL...`-style
+    # spelling (it never needs cross-TU uniqueness -- the symbol never
+    # leaves its own object file), but they are two distinct, TU-local
+    # entities, not the same declaration redeclared. Differing here (return
+    # type) would previously raise a false INCONSISTENT_DECLARATION.
+    a = TuFragment(
+        tu_name="a",
+        functions=(_fn("helper", "_ZL6helperi", is_static=True, return_type="int"),),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(_fn("helper", "_ZL6helperi", is_static=True, return_type="double"),),
+    )
+    merged = merge_fragments([a, b])
+    assert len(merged.functions) == 2
+    assert {fn.return_type for fn in merged.functions} == {"int", "double"}
+
+
+def test_merge_fragments_reconciles_identical_static_helper_within_one_tu():
+    # A single TU's own static helper repeated (the ordinary intra-fragment
+    # tolerance) still merges/dedupes normally -- the TU-scoping fix must
+    # not turn every static function into a permanent 1-per-TU passthrough
+    # that bypasses the "declaration + redeclaration" trivial merge.
+    fragment = TuFragment(
+        tu_name="a",
+        functions=(_fn("helper", "_ZL6helperi", is_static=True),),
+    )
+    merged = merge_fragments([fragment])
+    assert len(merged.functions) == 1
+
+
+def test_merge_fragments_still_merges_non_static_functions_across_tus():
+    # Sanity check that the TU-scoping only applies to static-linkage
+    # functions -- an ordinary externally-linked redeclaration across TUs
+    # still merges into one entity as before.
+    a = TuFragment(tu_name="a", functions=(_fn("f", "_Z1fv"),))
+    b = TuFragment(tu_name="b", functions=(_fn("f", "_Z1fv"),))
+    merged = merge_fragments([a, b])
+    assert len(merged.functions) == 1
+
+
+# ---------------------------------------------------------------------------
 # Empty / single-fragment base cases, directly against tu_merge (not just
 # the dumper_manifest.merge_tu_fragments alias already covered elsewhere)
 # ---------------------------------------------------------------------------

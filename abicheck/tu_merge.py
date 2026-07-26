@@ -99,6 +99,30 @@ class _Provenanced(Protocol):
 _T = TypeVar("_T", bound=_Provenanced)
 
 
+def _function_key(tu_name: str, fn: Function) -> tuple[str, str]:
+    """``entity_key`` for a :class:`Function`, scoped by TU for
+    internal-linkage declarations.
+
+    A ``static`` function's mangled spelling (Itanium's ``_ZL...`` local-
+    linkage marker) is **not** unique across translation units the way an
+    externally-linked symbol's is -- it never needs to be, since the symbol
+    never leaves its own TU's object file. Two unrelated TUs can each
+    declare their own private ``static void helper(int)`` and get the
+    identical mangled string, even though they are two distinct,
+    TU-local entities, not redeclarations of "the same" function (Codex
+    review, PR #635 round 5). Keying only on ``fn.mangled`` would either
+    silently fold them into one (discarding one TU's declaration) or raise
+    a false ``INCONSISTENT_DECLARATION`` the moment they happen to differ.
+    Folding ``tu_name`` into the key for a ``static`` function makes it
+    trivially TU-scoped -- it can only ever collide with *itself* (the
+    same TU's own repeat, already tolerated by :func:`_merge_group`'s
+    same-TU-extras handling), never with another TU's unrelated static
+    helper.
+    """
+    name = fn.mangled if not fn.is_static else f"{tu_name}::{fn.mangled}"
+    return entity_key("function", name)
+
+
 def merge_fragments(
     fragments: Sequence[TuFragment],
     *,
@@ -178,7 +202,7 @@ def merge_fragments(
     functions = _flatten(
         _merge_group(
             ((f.tu_name, fn) for f in ordered for fn in f.functions),
-            key_fn=lambda fn: entity_key("function", fn.mangled),
+            key_fn=_function_key,
             merge_fn=partial(
                 _merge_functions,
                 header_segs=header_segs,
@@ -190,7 +214,7 @@ def merge_fragments(
     variables = _flatten(
         _merge_group(
             ((f.tu_name, var) for f in ordered for var in f.variables),
-            key_fn=lambda var: entity_key("variable", var.mangled),
+            key_fn=lambda _tu, var: entity_key("variable", var.mangled),
             merge_fn=partial(
                 _merge_variables,
                 header_segs=header_segs,
@@ -210,7 +234,7 @@ def merge_fragments(
             # unset (global-scope types, or a producer that never captured
             # it), matching every other merge key's "None means unknown,
             # don't invent structure" convention.
-            key_fn=lambda rt: entity_key("type", rt.qualified_name or rt.name),
+            key_fn=lambda _tu, rt: entity_key("type", rt.qualified_name or rt.name),
             merge_fn=partial(
                 _merge_types,
                 header_segs=header_segs,
@@ -225,7 +249,7 @@ def merge_fragments(
             # Same bare-name-collision fix as RecordType above (Codex
             # review, PR #635) -- EnumType.name is likewise bare, with the
             # namespace in qualified_name.
-            key_fn=lambda en: entity_key("enum", en.qualified_name or en.name),
+            key_fn=lambda _tu, en: entity_key("enum", en.qualified_name or en.name),
             merge_fn=partial(
                 _merge_enums,
                 header_segs=header_segs,
@@ -276,13 +300,18 @@ def merge_fragments(
 def _merge_group(
     items: Iterable[tuple[str, _T]],
     *,
-    key_fn: Callable[[_T], tuple[str, str]],
+    key_fn: Callable[[str, _T], tuple[str, str]],
     merge_fn: Callable[[_T, _T], _T | None],
 ) -> dict[tuple[str, str], tuple[_T, ...]]:
-    """Group *items* (``(tu_name, entity)`` pairs) by ``key_fn(entity)`` and
-    fold each group's candidates through *merge_fn*, raising
+    """Group *items* (``(tu_name, entity)`` pairs) by ``key_fn(tu_name,
+    entity)`` and fold each group's candidates through *merge_fn*, raising
     :class:`~abicheck.errors.TuMergeError` the moment two candidates from
     *different* TUs for the same key don't merge.
+
+    *key_fn* receives ``tu_name`` alongside the entity so a caller can fold
+    TU identity into the key itself when an entity's identity is inherently
+    TU-scoped (e.g. a ``static``-linkage function's mangled name -- see the
+    ``functions`` call site in :func:`merge_fragments`).
 
     A single TU's own parser output may legitimately repeat a key (e.g. two
     destructors both falling back to castxml's synthesized no-mangled-name
@@ -301,7 +330,7 @@ def _merge_group(
     """
     by_key: dict[tuple[str, str], list[tuple[str, _T]]] = {}
     for tu_name, entity in items:
-        by_key.setdefault(key_fn(entity), []).append((tu_name, entity))
+        by_key.setdefault(key_fn(tu_name, entity), []).append((tu_name, entity))
 
     merged: dict[tuple[str, str], tuple[_T, ...]] = {}
     for key, candidates in by_key.items():
