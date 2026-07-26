@@ -142,6 +142,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   on its own to erase a hand-picked timing margin, while the old
   C-level-dominated cost was largely unaffected by the same tracing (Codex
   review).
+- `service_header_scoped._try_header_scoped_dump`'s broad `except Exception`
+  (which exists to fall back to export-table mode when a PE/Mach-O header
+  backend is merely unavailable) also caught `AstContextMissingError`/
+  `AstContextAmbiguousError` — both only ever raised in response to a
+  non-`"host"` `--frontend-context` request (there is no `"device"`
+  default), so catching them here silently discarded an explicit device-
+  context request's failure and succeeded anyway with `--header`/
+  `--include` ignored. Now re-raises both, mirroring this same function's
+  existing `deadline.DeadlineExceeded` propagation for the identical reason
+  (Codex review).
 - `AbiSnapshot.frontend_context_kind` was added without bumping
   `serialization.SCHEMA_VERSION` — every other purely-additive snapshot
   field from v9 onward (including this same PR's own `dwarf_layout_

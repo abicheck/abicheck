@@ -1217,6 +1217,49 @@ class TestHeaderScopedInferredRoots:
                     "macho", tmp_path / "x.dylib", [umb], [], "1.0", "c++"
                 )
 
+    def test_explicit_device_context_failure_propagates_not_swallowed(
+        self, tmp_path
+    ):
+        # Codex review: AstContextMissingError/AstContextAmbiguousError only
+        # ever come from a NON-"host" --frontend-context request (ADR-050
+        # D5) -- there is no "device" default, so seeing either here always
+        # means the user's explicit device-context request failed. The
+        # broad `except Exception` below (which exists to fall back to
+        # export-table mode when a header backend is merely unavailable)
+        # must not also swallow this and silently succeed with --header/
+        # --include ignored, exactly the same reasoning as the
+        # DeadlineExceeded test above.
+        from abicheck.errors import AstContextMissingError
+        from abicheck.service import _try_header_scoped_dump
+        from abicheck.service_scan import CompileContext
+
+        root, umb = self._umbrella(tmp_path)
+
+        def raises_ast_context_missing(
+            path, headers, extra_includes, version, compiler, **k
+        ):
+            raise AstContextMissingError("no AST context with kind='device'")
+
+        cc = CompileContext(frontend_context="device")
+
+        with patch("abicheck.dumper._dump_pe", raises_ast_context_missing):
+            with pytest.raises(AstContextMissingError):
+                _try_header_scoped_dump(
+                    "pe", tmp_path / "x.dll", [umb], [], "1.0", "c++", compile=cc
+                )
+
+        with patch("abicheck.dumper._dump_macho", raises_ast_context_missing):
+            with pytest.raises(AstContextMissingError):
+                _try_header_scoped_dump(
+                    "macho",
+                    tmp_path / "x.dylib",
+                    [umb],
+                    [],
+                    "1.0",
+                    "c++",
+                    compile=cc,
+                )
+
 
 class TestDumpPe:
     def test_no_machine_raises(self, tmp_path):
