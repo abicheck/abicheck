@@ -688,6 +688,24 @@ identical to its `root_causes[].root_cause_id` in JSON root-cause mode or
 its `properties.rootCauseId` in SARIF root-cause mode, for the same report —
 no format can disagree.
 
+**Correction (G29 Phase 3, review finding, same PR as Slices 8-9 above)**:
+that "no format can disagree" claim didn't hold for one case at ship time —
+`_add_changes_block` (default/full JSON) and `_to_json_leaf` (`--report-mode
+leaf`) built their `root_cause_lookup_for_changes` scoped only to
+`result.changes`, unlike `_to_json_root_cause`, `sarif.to_sarif`, and
+`junit_report._build_testsuite`, which all fold `result.scoped_only_changes`'
+`caused_by_type` values in too (the scoped-gate fold-in appends these
+findings *after* the main report is otherwise built). A finding in
+`result.changes` correlating only via a scoped-only overlay's
+`caused_by_type` silently lost its `impact_assessment.root_cause_id` in full
+and leaf mode while still getting one in root-cause mode, SARIF, and JUnit —
+dormant in practice (no shipped scoped-only producer sets `caused_by_type`
+yet) but a real latent inconsistency. Fixed by factoring the fold-in into a
+shared `reporter._scoped_only_extra_causes` helper and wiring it into all
+three JSON call sites; `tests/test_reporter.py::TestImpactAssessmentRootCause::
+test_correlates_via_a_scoped_only_changes_caused_by_type`/
+`test_leaf_mode_also_correlates_via_scoped_only_changes` cover it.
+
 `tests/test_impact_model.py`/`abicheck/impact/engine.py`'s own tests cover
 `assess_change`'s new parameter directly;
 `tests/test_reporter.py::TestImpactAssessmentRootCause` and

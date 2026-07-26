@@ -286,8 +286,14 @@ def _to_json_leaf(
     # `changes` (not type_changes/non_type_changes separately) so a
     # TYPE_* change and a non-type change sharing a root cause still get
     # the same root_cause_id, matching --report-mode root-cause's own
-    # whole-`changes`-scoped grouping.
-    _rc_lookup = root_cause_lookup_for_changes(changes)
+    # whole-`changes`-scoped grouping. extra_causes folds in
+    # scoped_only_changes the same way _to_json_root_cause does (review
+    # finding) -- without it, a leaf-mode finding correlating only via a
+    # scoped-only overlay's caused_by_type silently lost its
+    # impact_assessment.root_cause_id, disagreeing with root-cause/SARIF/JUnit.
+    _rc_lookup = root_cause_lookup_for_changes(
+        changes, extra_causes=_scoped_only_extra_causes(result, show_only)
+    )
 
     effective_policy = result.policy or "strict_abi"
     eff_sets = result._effective_kind_sets()
@@ -464,6 +470,39 @@ def _add_entries_to_root_causes(
     d["root_cause_count"] = len(root_causes)
 
 
+def _scoped_only_extra_causes(
+    result: DiffResult, show_only: str | None
+) -> frozenset[str]:
+    """``caused_by_type`` values from ``result.scoped_only_changes``, filtered
+    by the same ``--show-only`` as the caller's own ``changes`` list (G29
+    Phase 3 follow-up, review finding).
+
+    The scoped-gate (``--used-by``/``--required-symbol``) fold-in in
+    ``cli_compare_fold.py`` appends scoped-only changes to a report *after*
+    a JSON serializer has already built its root-cause lookup — without
+    folding their ``caused_by_type`` into the grouping here too, a change in
+    ``changes`` that only correlates via one of those later-appended
+    findings would be locked into its own singleton group, contradicting
+    ``sarif.to_sarif``/``junit_report._build_testsuite``'s identical
+    computation (both already fold this in). Shared by every JSON mode that
+    calls :func:`~abicheck.reporter_markdown.root_cause_lookup_for_changes`
+    — not just ``--report-mode root-cause`` — so a finding's
+    ``impact_assessment.root_cause_id`` can't diverge from its
+    ``root_causes[].root_cause_id``/SARIF/JUnit sibling depending on which
+    report mode rendered it.
+    """
+    scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
+    if show_only and scoped_only:
+        scoped_only = apply_show_only(
+            scoped_only,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+    return frozenset(c.caused_by_type for c in scoped_only if c.caused_by_type)
+
+
 def _to_json_root_cause(
     result: DiffResult,
     indent: int = 2,
@@ -505,20 +544,9 @@ def _to_json_root_cause(
     # of those later-appended findings would already be locked into its own
     # singleton group by the time the fold-in tries to join it, contradicting
     # SARIF's identical grouping (computed in one pass, so it doesn't have
-    # this two-phase gap). Filtered by the same --show-only as `changes`
-    # above, mirroring sarif.to_sarif's identical computation.
-    scoped_only_for_causes = list(getattr(result, "scoped_only_changes", ()) or ())
-    if show_only and scoped_only_for_causes:
-        scoped_only_for_causes = apply_show_only(
-            scoped_only_for_causes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-    extra_causes = frozenset(
-        c.caused_by_type for c in scoped_only_for_causes if c.caused_by_type
-    )
+    # this two-phase gap). See _scoped_only_extra_causes for the shared
+    # computation every other JSON mode now uses too.
+    extra_causes = _scoped_only_extra_causes(result, show_only)
 
     # Build each finding's dict exactly once; group the same dict objects by
     # key so `changes` (flat, backward-compatible -- every existing report
@@ -826,9 +854,20 @@ def _add_changes_block(
     changes: list[Change],
     effective_policy: str,
     eff_sets: KindSets | None,
+    show_only: str | None = None,
 ) -> None:
-    """Add changes list and optional redundant-count / pattern-modulations fields."""
-    _rc_lookup = root_cause_lookup_for_changes(changes)
+    """Add changes list and optional redundant-count / pattern-modulations fields.
+
+    *show_only* folds ``result.scoped_only_changes``' ``caused_by_type``
+    values into the root-cause grouping the same way ``_to_json_root_cause``
+    does (review finding) -- without it, a finding here correlating only via
+    a scoped-only overlay silently lost its
+    ``impact_assessment.root_cause_id``, disagreeing with root-cause mode,
+    SARIF, and JUnit for the identical finding.
+    """
+    _rc_lookup = root_cause_lookup_for_changes(
+        changes, extra_causes=_scoped_only_extra_causes(result, show_only)
+    )
     d["changes"] = [
         _change_to_dict(
             c,
@@ -920,7 +959,7 @@ def to_json(
             policy_file=result.policy_file,
         )
 
-    _add_changes_block(d, result, changes, effective_policy, eff_sets)
+    _add_changes_block(d, result, changes, effective_policy, eff_sets, show_only)
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)

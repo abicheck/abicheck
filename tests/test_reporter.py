@@ -692,6 +692,42 @@ class TestImpactAssessmentRootCause:
         d = json.loads(to_json(r))
         assert all("impact_assessment" not in c for c in d["changes"])
 
+    def test_correlates_via_a_scoped_only_changes_caused_by_type(self):
+        """Review finding: a change in result.changes whose only correlation
+        signal is a scoped-only overlay's own caused_by_type (not another
+        entry in result.changes itself) must still get impact_assessment.
+        root_cause_id in full mode -- matching --report-mode root-cause,
+        SARIF, and JUnit, which already fold scoped_only_changes into their
+        own root-cause grouping (see reporter._scoped_only_extra_causes)."""
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        scoped_only_overlay = Change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, "pub_entry",
+            "required by consumer", caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root])
+        r.scoped_only_changes = (scoped_only_overlay,)  # type: ignore[attr-defined]
+        d = json.loads(to_json(r))  # report_mode defaults to "full"
+        assert d["changes"][0]["impact_assessment"]["root_cause_display"] == (
+            "ns::internal::helper"
+        )
+
+    def test_leaf_mode_also_correlates_via_scoped_only_changes(self):
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        scoped_only_overlay = Change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, "pub_entry",
+            "required by consumer", caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root])
+        r.scoped_only_changes = (scoped_only_overlay,)  # type: ignore[attr-defined]
+        d = json.loads(to_json(r, report_mode="leaf"))
+        assert d["changes"][0]["impact_assessment"]["root_cause_display"] == (
+            "ns::internal::helper"
+        )
+
     def test_matches_root_cause_mode_id(self):
         # Cross-check: the unconditional impact_assessment id must equal
         # --report-mode root-cause's own root_cause_id for the same root.
