@@ -21,14 +21,19 @@ where the *build* emits source facts as it compiles instead.
   [Source-Scan Depth § Obtaining a compile database](../../use/scan-levels.md#obtaining-a-compile-database-without-a-full-build).
 - `clang` on the runner. On the latest published release (`@v0.5.0`, used
   below), the Action's only installer is the legacy `install-deps: true`
-  path, which already installs clang alongside castxml — no extra input
-  needed. On a newer pin (`dependency-source` and its `conda-forge-clang20`
-  value are not in `@v0.5.0` — see the note on the `check-target` example
-  below), the default `dependency-source: conda-forge` does **not** install
-  clang; pin `dependency-source: conda-forge-clang20` (or `system`, or
-  install clang yourself) instead. Without clang, the run silently degrades
-  to L0–L2 evidence instead of failing; check the `layers`/coverage output
-  to confirm L4 actually ran. See
+  path — on an apt-based Linux runner (e.g. `ubuntu-latest`) this installs
+  clang alongside castxml, no extra input needed; on macOS, clang comes
+  from the runner's preinstalled Xcode toolchain rather than from
+  `install-deps` itself; on Windows, this path installs neither castxml nor
+  clang, so a Windows runner needs one installed manually before L4 replay
+  will run. On a newer pin (`dependency-source` and its
+  `conda-forge-clang20` value are not in `@v0.5.0` — see the note on the
+  `check-target` example below), the default `dependency-source: conda-forge`
+  does **not** install clang on Linux/macOS either; pin
+  `dependency-source: conda-forge-clang20` (or `system`, or install clang
+  yourself) instead. Without clang, the run silently degrades to L0–L2
+  evidence instead of failing; check the `layers`/coverage output to
+  confirm L4 actually ran. See
   [GitHub Action: dependency-source](../../use/github-action.md).
 - For a PR run: `fetch-depth: 0` on checkout, so the base ref is available to
   seed the diff scope.

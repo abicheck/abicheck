@@ -41,9 +41,13 @@ However, the depth of analysis depends on the **host platform** and whether head
 > **"Full" means implemented capability, not CI-proven maturity.** The table
 > above tracks two booleans (symbol diff, type/param diff) per host/format —
 > it does not encode how much automated validation backs a "Full" cell, or
-> which toolchain you used to get there. On Windows in particular, "Full"
-> covers both MinGW (validated in CI, still marked Experimental) and MSVC
-> (untested in CI) with the same cell — see
+> which toolchain you used to get there. The Windows PE "Full" type/param
+> cell nominally means the `castxml` + `cl.exe` header-AST path (see
+> Dependency Summary below); neither Windows CI lane actually exercises that
+> path: the required `cross-platform-e2e` lane runs `compare` on MinGW-built
+> DLLs without headers or castxml (symbol/DWARF data only), and the
+> non-blocking `windows-msvc` lane validates MSVC+PDB debug-info parsing, not
+> the castxml+`cl.exe` header route either. See
 > [Validation status](#validation-status-what-is-actually-exercised-in-ci)
 > and the [Windows Toolchain Support Matrix](#windows-toolchain-support-matrix)
 > below before relying on a specific toolchain in production.
