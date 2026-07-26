@@ -190,15 +190,15 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case140_empty_base_optimization_lost](case140_empty_base_optimization_lost.md) | Empty Base Optimization Lost (base subobject moved) | 🔴 BREAKING | Breaking |
 | [case141_versioned_symbol_scheme](case141_versioned_symbol_scheme.md) | Versioned-Symbol Scheme (library-wide rename) | 🔴 BREAKING | Breaking |
 | [case142_vtable_slot_count_binary_only](case142_vtable_slot_count_binary_only.md) | Vtable Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
-| [case143_audit_accidental_export](case143_audit_accidental_export.md) | Accidental export (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case144_audit_private_header_leak](case144_audit_private_header_leak.md) | Private header leak (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case145_audit_unversioned_export](case145_audit_unversioned_export.md) | Unversioned export under a versioning scheme (audit, pure L0) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case146_audit_rtti_for_internal](case146_audit_rtti_for_internal.md) | RTTI exported for an internal type (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case147_scan_depth_ladder](case147_scan_depth_ladder.md) | Depth ladder: the same input answered at three depths | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case148_xcheck_header_build_mismatch](case148_xcheck_header_build_mismatch.md) | Header build-context mismatch (cross-source flagship) | 🟠 API_BREAK | API Break |
-| [case149_xcheck_odr_variant](case149_xcheck_odr_variant.md) | ODR type variant (cross-source, L4 layout ↔ layout) | 🟠 API_BREAK | API Break |
-| [case150_xcheck_export_public_pair](case150_xcheck_export_public_pair.md) | Bidirectional export ↔ declaration pair | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case151_xcheck_provider_matrix](case151_xcheck_provider_matrix.md) | Provider-agreement matrix (corroboration grows with evidence) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case143_audit_accidental_export](case143_audit_accidental_export.md) | Accidental Export (Single-Release Audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case144_audit_private_header_leak](case144_audit_private_header_leak.md) | Private Header Leak (Single-Release Audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case145_audit_unversioned_export](case145_audit_unversioned_export.md) | Unversioned Export Under a Versioning Scheme (Audit, Pure L0) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case146_audit_rtti_for_internal](case146_audit_rtti_for_internal.md) | RTTI Exported for an Internal Type (Single-Release Audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case147_scan_depth_ladder](case147_scan_depth_ladder.md) | Depth Ladder — the Same Input Answered at Increasing Depth | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case148_xcheck_header_build_mismatch](case148_xcheck_header_build_mismatch.md) | Header Build-Context Mismatch (Cross-Source Flagship) | 🟠 API_BREAK | API Break |
+| [case149_xcheck_odr_variant](case149_xcheck_odr_variant.md) | ODR Type Variant (Cross-Source, L4 Layout ↔ Layout) | 🟠 API_BREAK | API Break |
+| [case150_xcheck_export_public_pair](case150_xcheck_export_public_pair.md) | Bidirectional Export ↔ Declaration Pair | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case151_xcheck_provider_matrix](case151_xcheck_provider_matrix.md) | Provider-Agreement Matrix (Corroboration Grows With Evidence) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case152_enum_size_flag_flip](case152_enum_size_flag_flip.md) | _enum_size_flag_flip — Enum-size flag flip (`-fshort-enums`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case153_struct_packing_flip](case153_struct_packing_flip.md) | _struct_packing_flip — Struct-packing mode flip (`-fpack-struct`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case154_lto_mode_flip](case154_lto_mode_flip.md) | _lto_mode_flip — LTO mode flip (`-flto`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
@@ -227,7 +227,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case178_unnamed_type_in_public_abi](case178_unnamed_type_in_public_abi.md) | Unnamed Type Leaks Into the Public ABI | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case179_cet_protection_weakened](case179_cet_protection_weakened.md) | CET Protection Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case180_symbol_binding_lost_unique](case180_symbol_binding_lost_unique.md) | Symbol Binding Lost GNU_UNIQUE | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case181_xcheck_public_to_internal_dependency](case181_xcheck_public_to_internal_dependency.md) | Public API reaches an internal declaration | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case181_xcheck_public_to_internal_dependency](case181_xcheck_public_to_internal_dependency.md) | Public API Reaches an Internal Declaration | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case182_accidental_export_removed_still_breaking](case182_accidental_export_removed_still_breaking.md) | Accidental Export Removed — Still Breaking Under Public-Header Scoping | 🔴 BREAKING | Breaking |
 | [case183_internal_version_node_churn](case183_internal_version_node_churn.md) | Internal ELF symbol-version node churn | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case184_internal_enum_churn_scoped](case184_internal_enum_churn_scoped.md) | Internal Enum Churn, Scoped Out by Private-Header Origin | ✅ NO_CHANGE | No Change |
@@ -236,9 +236,9 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case187_public_struct_private_field_type](case187_public_struct_private_field_type.md) | Public Struct Field Retyped to an Internal Type | 🔴 BREAKING | Breaking |
 | [case188_public_class_private_base_class](case188_public_class_private_base_class.md) | Public Class Gains a Private Base Class | 🔴 BREAKING | Breaking |
 | [case189_public_function_private_parameter_type](case189_public_function_private_parameter_type.md) | Public Function Parameter Retyped to an Internal Type | 🔴 BREAKING | Breaking |
-| [case190_public_inline_function_references_internal_constant](case190_public_inline_function_references_internal_constant.md) | _public_inline_function_references_internal_constant — Public inline function newly reads an internal constant | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case190_public_inline_function_references_internal_constant](case190_public_inline_function_references_internal_constant.md) | Public Inline Function References Internal Constant | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case191_header_only_graph_field_type](case191_header_only_graph_field_type.md) | Public Struct Gains a Field of a Private Type (Header-Only Graph) | 🔴 BREAKING | Breaking |
-| [case192_call_graph_break_survives_suppression](case192_call_graph_break_survives_suppression.md) | Call-graph-reachable break survives a broad internal-namespace suppression | 🔴 BREAKING | Breaking |
-| [case193_ordinary_exported_fn_call_not_reachable](case193_ordinary_exported_fn_call_not_reachable.md) | An ordinary exported function's internal call is not public-reachable | 🔴 BREAKING | Breaking |
-| [case194_header_graph_rename_reconciled](case194_header_graph_rename_reconciled.md) | _header_graph_rename_reconciled — Internal dependency target renamed, safely reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case195_header_graph_ambiguous_rename_not_reconciled](case195_header_graph_ambiguous_rename_not_reconciled.md) | _header_graph_ambiguous_rename_not_reconciled — Ambiguous simultaneous rename, correctly NOT reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case192_call_graph_break_survives_suppression](case192_call_graph_break_survives_suppression.md) | Call-Graph-Reachable Break Survives Suppression | 🔴 BREAKING | Breaking |
+| [case193_ordinary_exported_fn_call_not_reachable](case193_ordinary_exported_fn_call_not_reachable.md) | Ordinary Exported Function's Internal Call Is Not Public-Reachable | 🔴 BREAKING | Breaking |
+| [case194_header_graph_rename_reconciled](case194_header_graph_rename_reconciled.md) | Internal Dependency Target Renamed, Safely Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case195_header_graph_ambiguous_rename_not_reconciled](case195_header_graph_ambiguous_rename_not_reconciled.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |

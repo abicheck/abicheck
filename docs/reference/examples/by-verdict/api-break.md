@@ -18,8 +18,8 @@ _17 case(s)._ [← back to all examples](../index.md)
 | [case123_default_argument_removed](../case123_default_argument_removed.md) | Default Argument Removed | 🟠 API_BREAK | API Break |
 | [case124_header_constant_value_changed](../case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
 | [case125_class_became_final](../case125_class_became_final.md) | Class Became `final` | 🟠 API_BREAK | API Break |
-| [case148_xcheck_header_build_mismatch](../case148_xcheck_header_build_mismatch.md) | Header build-context mismatch (cross-source flagship) | 🟠 API_BREAK | API Break |
-| [case149_xcheck_odr_variant](../case149_xcheck_odr_variant.md) | ODR type variant (cross-source, L4 layout ↔ layout) | 🟠 API_BREAK | API Break |
+| [case148_xcheck_header_build_mismatch](../case148_xcheck_header_build_mismatch.md) | Header Build-Context Mismatch (Cross-Source Flagship) | 🟠 API_BREAK | API Break |
+| [case149_xcheck_odr_variant](../case149_xcheck_odr_variant.md) | ODR Type Variant (Cross-Source, L4 Layout ↔ Layout) | 🟠 API_BREAK | API Break |
 | [case156_public_macro_removed](../case156_public_macro_removed.md) | _public_macro_removed — Public macro removed | 🟠 API_BREAK | API Break |
 | [case157_inline_function_removed](../case157_inline_function_removed.md) | Inline Function Removed | 🟠 API_BREAK | API Break |
 | [case158_public_typedef_removed](../case158_public_typedef_removed.md) | Public Typedef Removed | 🟠 API_BREAK | API Break |

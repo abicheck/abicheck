@@ -1,38 +1,88 @@
-# case143 — Accidental export (single-release audit)
+# Case 143: Accidental Export (Single-Release Audit)
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-check:** `exported_not_public` ·
-**Mode:** single-release audit (no baseline) · **Evidence tier:** L2
+**Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
-## What it demonstrates
+## Verdict and consumer impact
 
-A function compiled with default visibility but **never declared in a public
-header** is an *accidental export*: it ships in the dynamic symbol table, so
-consumers can bind to it, yet it is not part of the documented API. abicheck
-finds this from **one artifact, with no previous release to diff against**.
+This is a **single-release audit** (ADR-035 "G20" corpus): there is no v1/v2
+pair to diff, just one build's evidence checked against itself. abicheck's
+verdict is `COMPATIBLE` — nothing here is a break today — but the audit flags
+an advisory ABI-hygiene finding: `debug_dump()` ships with default ELF
+visibility (so it's in the dynamic symbol table, and any consumer can `dlsym`
+or link against it) yet it is never declared in a public header. Whoever
+maintains this library believes `debug_dump()` is private and free to change
+or remove at will; in reality it's already load-bearing ABI for anyone who
+found it in `nm -D libdemo.so`. The fix belongs in *this* release, not after
+a consumer files a breakage report against a "private" function.
 
-## Why no single source sees it
+## What this snapshot contains
 
-| Source | What it sees alone |
-|--------|--------------------|
-| Binary export table (L0) | `_Z6renderv`, `_Z11debug_dumpv` — both look like ordinary exports |
-| Public-header AST (L2) | declares only `render()` |
-| **Combination** | `debug_dump()` is exported but undeclared → `EXPORTED_NOT_PUBLIC` |
+`snapshot.abi.json` is a single, hand-built `AbiSnapshot` (via
+`scripts/gen_g20_fixtures.py`) representing one build of `libdemo.so`, with
+both its ELF export table and its public-header AST baked in:
 
-The cross-check needs **both** the binary exports *and* the public-header decls;
-neither in isolation can tell an accidental export from an intentional one.
+| Source in the snapshot | What it records |
+|---|---|
+| Binary export table (L0, `elf.symbols`) | `_Z6renderv` (`render`), `_Z11debug_dumpv` (`debug_dump`) — both exported with default visibility |
+| Public-header AST (L2, `functions[].origin`) | `render` has `origin: public_header`; `debug_dump` has `origin: export_only` — it was found in the binary but never declared in any header abicheck was pointed at |
 
-## Reproduce
+## abicheck command
 
 ```bash
-abicheck scan --binary libdemo.so -H include/ --audit
+abicheck scan snapshot.abi.json
 ```
 
-The committed `snapshot.abi.json` carries the same L0 + L2 provenance a live
-`scan --audit` would dump, so `tests/test_g20_catalog.py` validates the finding
-compiler-free.
+## Expected abicheck finding
 
-## Fix
+```text
+Verdict: COMPATIBLE (exit 0)
 
-Add `debug_dump` to the version script's local block (or mark it
-`__attribute__((visibility("hidden")))`) — or, if it is meant to be public,
-declare it in an installed header.
+crosscheck:exported_not_public present   binary exports ↔ public headers: 1 of 2
+  export(s) undocumented (1 accounted as documented API / compiler artifact);
+  by reason: undeclared_export=1
+
+ABI-hygiene catalog (intra-version, advisory)
+  [warning] exported_not_public: 1
+```
+
+## Minimum evidence
+
+`min_evidence: L2` — the binary export table alone (L0) cannot distinguish an
+intentional export from an accidental one; the public-header AST (L2) is what
+supplies the "documented API" side of the comparison. Only the combination of
+the two lets abicheck tell them apart.
+
+## Why abicheck catches it
+
+`exported_not_public` is a **cross-source check**, not a plain diff: abicheck
+reconciles the ELF dynamic-symbol table against the set of declarations
+reachable from the public headers it was pointed at (`binary_exports` and
+`public_header_ast`, per `provider_assertions`). A symbol present in one set
+and absent from the other is what makes the finding — neither source alone
+can see it, since the export table has no notion of "public" and the header
+AST has no notion of "actually shipped in this binary."
+
+## Why this matters for a real release
+
+An accidental export looks free to change because nothing declares it —
+until a downstream consumer discovers it via `nm`/`dlsym`, starts depending
+on it, and a later "just delete this internal helper" cleanup turns into a
+real `func_removed` break for that consumer. Catching it at audit time, on
+the release that introduced it, is strictly cheaper than catching it after
+someone downstream has already linked against it.
+
+## Safe redesign
+
+Either mark the symbol hidden so it never reaches the export table
+(`__attribute__((visibility("hidden")))`, or add it to the version script's
+`local:` block), or, if it's genuinely meant to be public, declare it in an
+installed header so the audit no longer flags it and the contract is
+explicit.
+
+## Cross-tool comparison
+
+`exported_not_public` is a cross-source check unique to abicheck's audit
+mode — it reconciles two artifacts of the *same* build (export table vs.
+public-header AST) rather than diffing two releases, which is outside what
+`abidiff`/`abi-compliance-checker` do (they compare two ABI dumps against
+each other, not a binary against its own headers).

@@ -1,31 +1,100 @@
-# case150 — Bidirectional export ↔ declaration pair
+# Case 150: Bidirectional Export ↔ Declaration Pair
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-checks:** `exported_not_public` +
-`public_not_exported` · **Mode:** single-release audit · **Evidence tier:** L2
+**Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
-## What it demonstrates
+## Verdict and consumer impact
 
-The L0-exports ↔ L2-decls contract has **two** failure directions, and this case
-trips both at once:
+Single-release audit: one build's evidence checked against itself, no
+baseline. abicheck's verdict is `COMPATIBLE` — the ABI hasn't broken — but
+the audit flags two advisory findings that are the two failure directions
+of the same L0-exports ↔ L2-decls contract:
 
 | Direction | Symptom | Cross-check |
-|-----------|---------|-------------|
-| exported, undeclared | `internal()` is in the export table but no public header declares it | `EXPORTED_NOT_PUBLIC` |
-| declared, unexported | `public_api()` is declared in `include/demo/api.h` but a `static` definition kept it out of the export table | `PUBLIC_NOT_EXPORTED` |
+|-----------|---------|--------------|
+| exported, undeclared | `internal()` is in the binary's export table but no public header declares it | `exported_not_public` |
+| declared, unexported | `public_api()` is declared in `include/demo/api.h`, but a stray `static` kept its definition out of the export table | `public_not_exported` |
 
-Each direction needs both sources: the binary export set *and* the public-header
-declaration set. The bidirectional pair shows the cross-check is symmetric — it
-catches the API promising more than the ABI delivers **and** the ABI shipping
-more than the API documents.
+A consumer reading only the public headers believes `public_api()` is
+callable — it isn't, the symbol doesn't exist in the `.so`. A consumer
+poking at the exported symbol table finds `internal()` — nothing documents
+it, so any layout or behavior change to it is invisible in the public API
+surface. Both are contract mismatches between what the library documents
+and what it ships, and this case trips both directions in one build.
 
-## Reproduce
+## What this snapshot contains
+
+`snapshot.abi.json` is a single, hand-built `AbiSnapshot` for one build of
+`libdemo.so`, carrying both the binary's export table and the public-header
+declaration set:
+
+| Source in the snapshot | What it records |
+|---|---|
+| Binary export table (L0, `elf.symbols`) | `_Z8internalv` (`internal`) exported with default visibility; `_Z10public_apiv` (`public_api`) absent |
+| Public-header AST (L2, `functions[]`) | `public_api` declared in the public header; `internal` not declared anywhere public |
+
+## abicheck command
 
 ```bash
-abicheck scan --binary libdemo.so -H include/ --audit
+abicheck scan snapshot.abi.json
 ```
 
-## Fix
+## Expected abicheck finding
 
-- `internal()`: hide it (version-script `local:` / hidden visibility) or declare it.
-- `public_api()`: remove the stray `static`, or drop the declaration from the
-  public header if it was never meant to ship.
+```text
+Coverage
+  crosscheck:exported_not_public present   binary exports ↔ public headers: 1 of 1 export(s) undocumented (0 accounted as documented API / compiler artifact); by reason: undeclared_export=1
+  crosscheck:public_not_exported present   public headers ↔ binary exports: 1 declaration(s) with an export obligation the binary does not satisfy
+
+ABI-hygiene catalog (intra-version, advisory)
+  [warning] exported_not_public: 1
+  [warning] public_not_exported: 1
+
+Verdict: COMPATIBLE (exit 0)
+```
+
+## Minimum evidence
+
+`min_evidence: L2` — the binary export table (L0) alone sees only which
+symbols exist, with no notion of what's "public"; the public-header AST
+(L2) is what supplies the declared-API boundary that `exported_not_public`
+and `public_not_exported` cross-check the export table against.
+
+## Why abicheck catches it
+
+Each direction needs both sources: the binary export set *and* the
+public-header declaration set. `exported_not_public` flags an export with
+no matching public declaration; `public_not_exported` flags a public
+declaration with no matching export. Neither check can fire from either
+source alone — the export table has no notion of "declared", and the
+header AST has no notion of "exported" — the cross-check is what makes the
+mismatch visible, in both directions symmetrically.
+
+## Why this matters for a real release
+
+`internal()` shipping in the export table without a public declaration
+means the maintainer can change or remove it without warning — but some
+consumer, reading the `.so`'s symbol table directly (common with `dlsym`
+or reverse-engineered bindings), may already depend on it as if it were
+stable. `public_api()` being documented but absent from the exports is the
+opposite failure: any consumer that follows the header and calls it gets a
+link error the moment they try, not a silent bug — but it means the
+library's own documented contract doesn't match what it ships, caught here
+before a consumer files that bug report.
+
+## Safe redesign
+
+- `internal()`: hide it (version-script `local:` scoping or hidden
+  visibility) or add a public declaration for it if it's genuinely meant to
+  be callable.
+- `public_api()`: remove the stray `static` so the definition is actually
+  exported, or drop the declaration from the public header if it was never
+  meant to ship.
+
+## Cross-tool comparison
+
+The `exported_not_public` / `public_not_exported` pair is a cross-source
+check unique to abicheck's audit mode — it reconciles a build's own export
+table against its own public-header declaration set within the *same*
+build, which isn't something `abidiff`/`abi-compliance-checker` do (they
+diff two ABI dumps against each other, not a binary's exports against its
+own headers).

@@ -33,6 +33,6 @@ _29 case(s)._ [← back to all examples](../index.md)
 | [case179_cet_protection_weakened](../case179_cet_protection_weakened.md) | CET Protection Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case180_symbol_binding_lost_unique](../case180_symbol_binding_lost_unique.md) | Symbol Binding Lost GNU_UNIQUE | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case183_internal_version_node_churn](../case183_internal_version_node_churn.md) | Internal ELF symbol-version node churn | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case190_public_inline_function_references_internal_constant](../case190_public_inline_function_references_internal_constant.md) | _public_inline_function_references_internal_constant — Public inline function newly reads an internal constant | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case194_header_graph_rename_reconciled](../case194_header_graph_rename_reconciled.md) | _header_graph_rename_reconciled — Internal dependency target renamed, safely reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case195_header_graph_ambiguous_rename_not_reconciled](../case195_header_graph_ambiguous_rename_not_reconciled.md) | _header_graph_ambiguous_rename_not_reconciled — Ambiguous simultaneous rename, correctly NOT reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case190_public_inline_function_references_internal_constant](../case190_public_inline_function_references_internal_constant.md) | Public Inline Function References Internal Constant | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case194_header_graph_rename_reconciled](../case194_header_graph_rename_reconciled.md) | Internal Dependency Target Renamed, Safely Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case195_header_graph_ambiguous_rename_not_reconciled](../case195_header_graph_ambiguous_rename_not_reconciled.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |

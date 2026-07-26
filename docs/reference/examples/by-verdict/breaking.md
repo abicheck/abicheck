@@ -112,5 +112,5 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case188_public_class_private_base_class](../case188_public_class_private_base_class.md) | Public Class Gains a Private Base Class | 🔴 BREAKING | Breaking |
 | [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type.md) | Public Function Parameter Retyped to an Internal Type | 🔴 BREAKING | Breaking |
 | [case191_header_only_graph_field_type](../case191_header_only_graph_field_type.md) | Public Struct Gains a Field of a Private Type (Header-Only Graph) | 🔴 BREAKING | Breaking |
-| [case192_call_graph_break_survives_suppression](../case192_call_graph_break_survives_suppression.md) | Call-graph-reachable break survives a broad internal-namespace suppression | 🔴 BREAKING | Breaking |
-| [case193_ordinary_exported_fn_call_not_reachable](../case193_ordinary_exported_fn_call_not_reachable.md) | An ordinary exported function's internal call is not public-reachable | 🔴 BREAKING | Breaking |
+| [case192_call_graph_break_survives_suppression](../case192_call_graph_break_survives_suppression.md) | Call-Graph-Reachable Break Survives Suppression | 🔴 BREAKING | Breaking |
+| [case193_ordinary_exported_fn_call_not_reachable](../case193_ordinary_exported_fn_call_not_reachable.md) | Ordinary Exported Function's Internal Call Is Not Public-Reachable | 🔴 BREAKING | Breaking |

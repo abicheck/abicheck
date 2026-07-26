@@ -402,15 +402,15 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [140](case140_empty_base_optimization_lost/README.md) | Empty Base Optimization Lost (base subobject moved) | Breaking | 🔴 BREAKING |
 | [141](case141_versioned_symbol_scheme/README.md) | Versioned-Symbol Scheme (library-wide rename) | Breaking | 🔴 BREAKING (bad practice) |
 | [142](case142_vtable_slot_count_binary_only/README.md) | Vtable Slot Count Changed (detected from a stripped binary) | Breaking | 🔴 BREAKING |
-| [143](case143_audit_accidental_export/README.md) | Accidental export (single-release audit) | Quality | 🟢 COMPATIBLE (bad practice) |
-| [144](case144_audit_private_header_leak/README.md) | Private header leak (single-release audit) | Quality | 🟢 COMPATIBLE (bad practice) |
-| [145](case145_audit_unversioned_export/README.md) | Unversioned export under a versioning scheme (audit, pure L0) | Quality | 🟢 COMPATIBLE (bad practice) |
-| [146](case146_audit_rtti_for_internal/README.md) | RTTI exported for an internal type (single-release audit) | Quality | 🟢 COMPATIBLE (bad practice) |
-| [147](case147_scan_depth_ladder/README.md) | Depth ladder: the same input answered at three depths | Quality | 🟢 COMPATIBLE (bad practice) |
-| [148](case148_xcheck_header_build_mismatch/README.md) | Header build-context mismatch (cross-source flagship) | API Break | 🟠 API_BREAK |
-| [149](case149_xcheck_odr_variant/README.md) | ODR type variant (cross-source, L4 layout ↔ layout) | API Break | 🟠 API_BREAK |
-| [150](case150_xcheck_export_public_pair/README.md) | Bidirectional export ↔ declaration pair | Quality | 🟢 COMPATIBLE (bad practice) |
-| [151](case151_xcheck_provider_matrix/README.md) | Provider-agreement matrix (corroboration grows with evidence) | Quality | 🟢 COMPATIBLE (bad practice) |
+| [143](case143_audit_accidental_export/README.md) | Accidental Export (Single-Release Audit) | Quality | 🟢 COMPATIBLE (bad practice) |
+| [144](case144_audit_private_header_leak/README.md) | Private Header Leak (Single-Release Audit) | Quality | 🟢 COMPATIBLE (bad practice) |
+| [145](case145_audit_unversioned_export/README.md) | Unversioned Export Under a Versioning Scheme (Audit, Pure L0) | Quality | 🟢 COMPATIBLE (bad practice) |
+| [146](case146_audit_rtti_for_internal/README.md) | RTTI Exported for an Internal Type (Single-Release Audit) | Quality | 🟢 COMPATIBLE (bad practice) |
+| [147](case147_scan_depth_ladder/README.md) | Depth Ladder — the Same Input Answered at Increasing Depth | Quality | 🟢 COMPATIBLE (bad practice) |
+| [148](case148_xcheck_header_build_mismatch/README.md) | Header Build-Context Mismatch (Cross-Source Flagship) | API Break | 🟠 API_BREAK |
+| [149](case149_xcheck_odr_variant/README.md) | ODR Type Variant (Cross-Source, L4 Layout ↔ Layout) | API Break | 🟠 API_BREAK |
+| [150](case150_xcheck_export_public_pair/README.md) | Bidirectional Export ↔ Declaration Pair | Quality | 🟢 COMPATIBLE (bad practice) |
+| [151](case151_xcheck_provider_matrix/README.md) | Provider-Agreement Matrix (Corroboration Grows With Evidence) | Quality | 🟢 COMPATIBLE (bad practice) |
 | [152](case152_enum_size_flag_flip/README.md) | _enum_size_flag_flip — Enum-size flag flip (`-fshort-enums`) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [153](case153_struct_packing_flip/README.md) | _struct_packing_flip — Struct-packing mode flip (`-fpack-struct`) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [154](case154_lto_mode_flip/README.md) | _lto_mode_flip — LTO mode flip (`-flto`) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
@@ -439,7 +439,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [178](case178_unnamed_type_in_public_abi/README.md) | Unnamed Type Leaks Into the Public ABI | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [179](case179_cet_protection_weakened/README.md) | CET Protection Weakened | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [180](case180_symbol_binding_lost_unique/README.md) | Symbol Binding Lost GNU_UNIQUE | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [181](case181_xcheck_public_to_internal_dependency/README.md) | Public API reaches an internal declaration | Quality | 🟢 COMPATIBLE (bad practice) |
+| [181](case181_xcheck_public_to_internal_dependency/README.md) | Public API Reaches an Internal Declaration | Quality | 🟢 COMPATIBLE (bad practice) |
 | [182](case182_accidental_export_removed_still_breaking/README.md) | Accidental Export Removed — Still Breaking Under Public-Header Scoping | Breaking | 🔴 BREAKING (bad practice) |
 | [183](case183_internal_version_node_churn/README.md) | Internal ELF symbol-version node churn | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [184](case184_internal_enum_churn_scoped/README.md) | Internal Enum Churn, Scoped Out by Private-Header Origin | No Change | ✅ NO_CHANGE |
@@ -448,12 +448,12 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [187](case187_public_struct_private_field_type/README.md) | Public Struct Field Retyped to an Internal Type | Breaking | 🔴 BREAKING (bad practice) |
 | [188](case188_public_class_private_base_class/README.md) | Public Class Gains a Private Base Class | Breaking | 🔴 BREAKING (bad practice) |
 | [189](case189_public_function_private_parameter_type/README.md) | Public Function Parameter Retyped to an Internal Type | Breaking | 🔴 BREAKING (bad practice) |
-| [190](case190_public_inline_function_references_internal_constant/README.md) | _public_inline_function_references_internal_constant — Public inline function newly reads an internal constant | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [190](case190_public_inline_function_references_internal_constant/README.md) | Public Inline Function References Internal Constant | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [191](case191_header_only_graph_field_type/README.md) | Public Struct Gains a Field of a Private Type (Header-Only Graph) | Breaking | 🔴 BREAKING (bad practice) |
-| [192](case192_call_graph_break_survives_suppression/README.md) | Call-graph-reachable break survives a broad internal-namespace suppression | Breaking | 🔴 BREAKING |
-| [193](case193_ordinary_exported_fn_call_not_reachable/README.md) | An ordinary exported function's internal call is not public-reachable | Breaking | 🔴 BREAKING |
-| [194](case194_header_graph_rename_reconciled/README.md) | _header_graph_rename_reconciled — Internal dependency target renamed, safely reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [195](case195_header_graph_ambiguous_rename_not_reconciled/README.md) | _header_graph_ambiguous_rename_not_reconciled — Ambiguous simultaneous rename, correctly NOT reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [192](case192_call_graph_break_survives_suppression/README.md) | Call-Graph-Reachable Break Survives Suppression | Breaking | 🔴 BREAKING |
+| [193](case193_ordinary_exported_fn_call_not_reachable/README.md) | Ordinary Exported Function's Internal Call Is Not Public-Reachable | Breaking | 🔴 BREAKING |
+| [194](case194_header_graph_rename_reconciled/README.md) | Internal Dependency Target Renamed, Safely Reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [195](case195_header_graph_ambiguous_rename_not_reconciled/README.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 <!-- END GENERATED: case-index -->
 
 ---

@@ -1,51 +1,37 @@
-# case195_header_graph_ambiguous_rename_not_reconciled — Ambiguous simultaneous rename, correctly NOT reconciled
+# Case 195: Ambiguous Simultaneous Rename, Correctly Not Reconciled
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Finding:** `public_api_internal_dependency_added` (×2) · **Evidence tier:** L5
+**Category:** Risk (Source Graph / Reconciliation) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
-> This case ships a hand-built pair of evidence-model fixtures (`old.json` +
-> `new.json`) instead of compiled `v1`/`v2` binaries, so the corpus is
-> validated compiler-free by `tests/test_l3l4l5_examples.py`. See
-> [`scripts/gen_l3l4l5_examples.py`](../../scripts/gen_l3l4l5_examples.py).
-
-## What it demonstrates
-
-The deliberate counter-example to
-[case194](../case194_header_graph_rename_reconciled/README.md): when G31
-Phase B's graph reconciliation (ADR-048) genuinely *cannot* tell two
-declarations apart, it must refuse to guess — never resolve on ambiguous
-evidence.
+## Verdict and consumer impact
 
 A public struct `demo::Config2` has **two** sibling private field-type
-dependencies, `demo::detail::RawA` and `demo::detail::RawB` (both declared
-in the same private header). In the next version, both are renamed
-simultaneously — `RawA` → `RawX`, `RawB` → `RawY`.
+dependencies, `demo::detail::RawA` and `demo::detail::RawB`, both declared in
+the same private header. In v2, both are renamed simultaneously —
+`RawA` → `RawX`, `RawB` → `RawY`. This is the deliberate counter-example to
+[case194](../case194_header_graph_rename_reconciled/README.md): when
+abicheck's graph reconciliation genuinely cannot tell two declarations
+apart, it must refuse to guess. Consumers see no hard break either way —
+both are internal types — but a reviewer relying on abicheck's rename
+explanations should know the tool stays silent here rather than risk
+reporting a wrong pairing.
 
-Neither of B2's non-canonical-id match tiers can safely resolve this:
+## Old/new diff
 
-- **Alias match** fails because every alias (qualified name, normalized
-  signature, source-relative identity) changed on both renamed nodes.
-- **Structural-context match** fails too, and for a more interesting
-  reason: `TYPE_HAS_FIELD_TYPE` edges carry no per-field discriminator
-  beyond `role: "field"`, so *both* old nodes (and *both* new nodes) occupy
-  the **identical** structural position — "the sole field-type target of
-  `demo::Config2`, role `field`" describes two different old nodes
-  equally well. The reconciler correctly detects this collision and
-  refuses to pick a pairing (see `graph_reconcile.py`'s
-  `_structural_context` docstring and `tests/test_graph_reconcile.py`'s
-  `test_ambiguous_rename_does_not_reconcile`).
+| v1 (conceptual) | v2 (conceptual) |
+|------|------|
+| `struct Config2 { detail::RawA a; detail::RawB b; };` | `struct Config2 { detail::RawX a; detail::RawY b; };` |
 
-The alternative — guessing a pairing anyway (e.g. "first old wins first
-new") — would be exactly the false-positive-by-arbitrary-choice class of
-bug ADR-045 fixed for flat old/new type matching, generalized here to graph
-nodes. So **no** `declaration_renamed` finding is produced for either pair.
+This case ships a hand-built pair of evidence-model fixtures (`old.json` /
+`new.json`, `SourceGraphSummary` objects) instead of compiled `v1`/`v2`
+sources. See
+[`scripts/gen_l3l4l5_examples.py`](../../scripts/gen_l3l4l5_examples.py).
 
-The raw structural diff still does its job independently: since neither
-`RawX` nor `RawY` shares a node id with anything in the old graph, both are
-reported as genuinely new — `public_api_internal_dependency_added` fires
-twice (once per newly-reached internal type), the conservative, correct
-outcome when identity cannot be safely established.
+## abicheck command
 
-## How to reproduce
+There is no compiled binary or header pair to point `abicheck compare` at —
+the fixture is a raw `SourceGraphSummary`, the same evidence object
+`dump --sources`/`--build-info` would embed inside a real snapshot. The
+reproducible command runs abicheck's source-graph diff function directly:
 
 ```bash
 python3 -c "
@@ -56,19 +42,74 @@ new = SourceGraphSummary.from_dict(json.load(open('new.json')))
 for c in diff_source_graph_findings(old, new):
     print(c.kind.value, c.symbol, c.old_value, '->', c.new_value)
 "
-# public_api_internal_dependency_added demo::Config2 no internal dependency -> reaches 2 internal decl(s)/type(s)
 ```
 
-## Sibling cases
+## Expected abicheck finding
 
-- [case194_header_graph_rename_reconciled](../case194_header_graph_rename_reconciled/README.md) — the matching positive case: an unambiguous single rename that *does* reconcile.
-- [case160_public_api_internal_dep_added](../case160_public_api_internal_dep_added/README.md) — the `public_api_internal_dependency_added` mechanism this case's finding shares.
+```text
+public_api_internal_dependency_added demo::Config2 no internal dependency -> reaches 2 internal decl(s)/type(s)
+```
 
-## How to fix
+`public_api_internal_dependency_added` fires twice (once per newly-reached
+internal type — `RawX` and `RawY`). No `declaration_renamed` finding is
+produced for either pair — the conservative, correct outcome when identity
+cannot be safely established.
+
+## Minimum evidence
+
+`min_evidence: L5` — attempting (and correctly declining) to reconcile the
+two renamed nodes requires the derived source graph's structural-context
+matching (G31 Phase B, ADR-048). No lower evidence tier carries graph node
+identity at all.
+
+## Why abicheck catches it
+
+`abicheck.buildsource.graph_reconcile` tries the same two match tiers as
+case194. Alias matching fails because every alias (qualified name,
+normalized signature, source-relative identity) changed on both renamed
+nodes. Structural-context matching fails too, for a more interesting reason:
+`TYPE_HAS_FIELD_TYPE` edges carry no per-field discriminator beyond
+`role: "field"`, so *both* old nodes — and *both* new nodes — occupy the
+identical structural position ("the sole field-type target of
+`demo::Config2`, role `field`" describes two different nodes equally well).
+The reconciler detects this collision and refuses to pick a pairing rather
+than guess (see `graph_reconcile.py`'s `_structural_context` docstring and
+`tests/test_graph_reconcile.py`'s `test_ambiguous_rename_does_not_reconcile`).
+The raw diff still reports both `RawX` and `RawY` as genuinely new internal
+dependencies, since neither shares a node id with anything in the old graph.
+
+## Runtime failure demonstration
+
+There's no `app.c` here and no crash to demonstrate — both renamed types are
+legitimately internal, and this case is entirely about what abicheck's
+reconciliation step does and doesn't claim. The real-world scenario is the
+same CI job as case194, but here it correctly avoids putting a specific
+"RawA was renamed to RawX" claim into a PR comment when the evidence can't
+actually support which old name maps to which new one — guessing (e.g.
+"first old wins first new") would be exactly the false-positive-by-
+arbitrary-choice class of bug ADR-045 fixed for flat type matching,
+generalized here to graph nodes.
+
+## Safe redesign
 
 No fix needed for the finding itself — the two internal types are
 legitimately internal. If a downstream reviewer wants clearer provenance
-across renames, avoid renaming multiple sibling internal dependencies of
-the same public entry in the same release, or keep them structurally
+across renames, avoid renaming multiple sibling internal dependencies of the
+same public entry in the same release, or keep them structurally
 distinguishable (e.g. different declaring files) so evidence-based
 reconciliation has something unambiguous to key on.
+
+**Real-world example:** a bulk rename pass (e.g. an automated refactoring
+tool renaming several sibling internal types in one commit) is exactly the
+scenario where a rename-reconciliation heuristic must know when to stay
+silent rather than mis-pair two unrelated declarations.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` operate on compiled binaries and debug
+info; neither has an equivalent to abicheck's source-graph reconciliation
+machinery, so this ambiguity-detection behavior — and the deliberate
+refusal to guess — is unique to abicheck's L5 build-source evidence layer
+(ADR-045, ADR-048). Contrast with
+[case194](../case194_header_graph_rename_reconciled/README.md), the matching
+positive case where an unambiguous single rename does reconcile.
