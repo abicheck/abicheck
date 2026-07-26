@@ -2,60 +2,115 @@
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-A nested "leaf" struct `Leaf` gains a new `int z` field, growing from **4 → 8 bytes**.
-`Leaf` is embedded (not pointed to) inside `Container`, so `Container::flags` shifts
-from offset 8 to offset 16. The public API only takes `Container*` — no by-value
-`Leaf` in function signatures — but the size change propagates through the embedding.
+The nested "leaf" struct `Leaf` gains a new `int z` field, growing from 4 to
+8 bytes. `Leaf` is embedded (not pointed to) inside `Container`, so
+`Container::flags` shifts from offset 8 to offset 16. The public API only
+ever takes `Container*` — no by-value `Leaf` appears in any signature — but
+the size change still propagates through the embedding. A caller compiled
+against v1 allocates `Container` at the old size and offsets; passing that
+struct into a v2 build reads `flags` from the wrong bytes. Recompilation
+against v2 is mandatory.
 
-Callers compiled against v1 allocate `Container` with the old layout: passing such
-a struct to a v2 function causes `flags` to be read at the wrong offset.
-
-## Why abidiff catches it
-
-abidiff reports `Leaf_Type_Change` / `TYPE_SIZE_CHANGED` and exits **4**.
-abicheck detects: `TYPE_SIZE_CHANGED` on `Leaf` (4→8 bytes) propagates to `Container`.
-
-## Code diff
+## Old/new diff
 
 | v1.h | v2.h |
 |------|------|
 | `typedef struct Leaf { short x; short y; } Leaf;` — 4 bytes | `typedef struct Leaf { short x; short y; int z; } Leaf;` — 8 bytes |
 | `Container { int id; Leaf position; int flags; }` — `flags` at offset 8 | `Container { int id; Leaf position; int flags; }` — `flags` at offset 16 |
 
-## Real Failure Demo
-
-**Severity: 🔴 CRITICAL — silent wrong-field reads**
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so
-
-abidw --out-file v1.abi libv1.so
-abidw --out-file v2.abi libv2.so
-abidiff v1.abi v2.abi
-echo "exit: $?"   # → 4 (TYPE_SIZE_CHANGED on Leaf → Container)
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Reproduce manually
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: Leaf (32 -> 64 bits)
+  > Old code allocates or copies the type with the old size; heap/stack
+    corruption, out-of-bounds access.
+  Affected symbols: container_flags, container_get_pos, container_init
+- type_size_changed: Size changed: Container (96 -> 128 bits)
+  Affected symbols: container_flags, container_get_pos, container_init
+- type_field_offset_changed: Field offset changed: Container::flags (64 -> 96 bits)
+  > Old code reads/writes fields at stale offsets; silent data corruption.
+
+Additions:
+- type_field_added_compatible: Field added: Leaf::z
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's struct-layout info (`DW_TAG_structure_type`
+size and member offsets) for both `Leaf` and `Container` is enough to see the
+size grow and `flags` shift; no public headers required.
+
+## Why abicheck catches it
+
+abicheck reads the DWARF member list and byte offsets of every struct in
+both snapshots, including structs only ever reached indirectly through
+embedding in another type. It flags `Leaf`'s own size change and then, from
+`Container`'s member offsets, the resulting shift in `Container::flags` — the
+propagation falls straight out of comparing offsets, no special-casing needed.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL — silent wrong-field reads**
+
+**Scenario:** app allocates a `Wrapped { Container c; int guard; }` with v1
+layout; a v2 `container_init()` writes past the old `Container` boundary into
+`guard`.
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so
-abidw --headers-dir . --out-file v1.abi libv1.so
-abidw --headers-dir . --out-file v2.abi libv2.so
-abidiff v1.abi v2.abi
+# Build old library + app
+gcc -shared -fPIC -g v1.c -o libfoo.so
+gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → pos=(11,22) flags=0 guard=0x12345678
+# → expected: pos=(11,22) flags=0 guard=0x12345678
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g v2.c -o libfoo.so
+./app
+# → pos=(11,22) flags=0 guard=0x0
+# → expected: pos=(11,22) flags=0 guard=0x12345678
+# → CORRUPTION: nested leaf layout changed and overwrote caller memory
 ```
 
-## How to fix
+**Why CRITICAL:** v2's `container_init()` writes `Leaf::z` and `flags` using
+the new (larger) `Container` layout, spilling past the 12-byte allocation the
+app reserved for `Container` under v1 and zeroing the adjacent `guard` field
+— a classic silent struct-embedding overflow.
 
-1. **Pimpl on Leaf** — replace embedded `Leaf` with `Leaf*` (pointer to incomplete type); size is pointer-stable.
-2. **Add field without breaking**: only possible if there is tail padding in the struct — verify with `pahole`.
-3. **SONAME bump** if embedding is required and the field is necessary.
+## Safe redesign
 
-## Real-world pattern
+Replace the embedded `Leaf` with a pointer to an incomplete type (Pimpl) so
+`Container`'s size stays pointer-stable regardless of `Leaf`'s internals; if
+embedding is required, only add fields into pre-existing tail padding
+(verify with `pahole`) or bump the SONAME.
 
-TBB's `tbb::task_arena` was embedded in some library public headers. When TBB changed
-`task_arena`'s internal layout, all consumers of those libraries were broken — same
-propagation mechanism as this case. See `case18_dependency_leak` for the external-library variant.
+**Real-world example:** TBB's `tbb::task_arena` was embedded in some
+library public headers. When TBB changed `task_arena`'s internal layout, all
+consumers of those libraries broke — the same propagation-through-embedding
+mechanism as this case. See `case18_dependency_leak` for the
+external-library variant.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+echo "exit: $?"   # → 4
+```
+
+> **Note on abidiff:** libabigail reports this as a `Leaf_Type_Change` that
+> propagates into `Container`'s size, exit code **4** — the same conclusion
+> abicheck reaches from the same DWARF layout evidence.
