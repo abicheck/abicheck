@@ -32,8 +32,9 @@ values; `learn/evidence-and-detectability.md` owns the full mental model
 (including the `--depth` dial and the deprecated-axes appendix);
 `learn/what-each-level-sees.md` owns one worked example walking the same
 model level-by-level; `use/scan-levels.md` owns the practical `--depth`
-choice. `getting-started.md` and `start/choose-your-workflow.md` may
-each carry a short summary that links back — not a second explanation.
+choice. `getting-started.md`, `start/first-check.md`, and
+`start/choose-your-workflow.md` may each carry a short summary that links
+back — not a second explanation.
 
 `docs/_meta/topics.yaml` makes this split machine-checkable instead of a
 convention only documented in prose (see "Topic ownership registry" below).
@@ -47,8 +48,10 @@ than their directory would suggest; keep links pointing at the real file
 path, not the nav position.
 
 - `index.md` — home / landing page.
-- `start/` — first-contact onboarding: `getting-started.md` (navigated as
-  the first page of the User Guide) and the worked real-world example
+- `start/` — first-contact onboarding: `getting-started.md` is a short hub
+  (navigated as the first page of the User Guide) linking to `install.md`,
+  `first-check.md`, and `first-report.md` — one question each (install, run
+  a check, read the result) — plus the worked real-world example
   (`start/real-world-example.md`). New user, first five minutes.
 - `learn/` — the narrative/conceptual track: verdicts, the evidence model,
   architecture, and `abi-api-handling.md` (the consolidated ABI/API handling

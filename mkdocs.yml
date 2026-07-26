@@ -36,6 +36,9 @@ nav:
   - User Guide:
     - Start Here:
       - Getting Started: start/getting-started.md
+      - Install abicheck: start/install.md
+      - Run Your First Check: start/first-check.md
+      - Understand Your First Report: start/first-report.md
       - Choose Your Workflow: start/choose-your-workflow.md
       - 'Worked Example: Real Library': start/real-world-example.md
       - 'Scanning a Conda-Forge Package': start/scanning-conda-packages.md

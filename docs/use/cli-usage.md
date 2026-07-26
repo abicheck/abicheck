@@ -319,5 +319,5 @@ For the internal pipeline and module map (dumper → checker → resolver → re
 see the [Codebase Overview](../contribute/codebase-overview.md) and the
 [Architecture](../learn/architecture.md) concept page. For the runtime
 dependencies (Python 3.10+, castxml, pyelftools, …) and per-platform setup, see
-[Getting Started](../start/getting-started.md#requirements).
+[Install abicheck](../start/install.md#requirements).
 

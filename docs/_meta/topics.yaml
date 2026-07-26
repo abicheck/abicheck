@@ -45,7 +45,7 @@ topics:
     task_pages:
       - use/scan-levels.md
     allowed_summaries:
-      - start/getting-started.md
+      - start/first-check.md
       - start/choose-your-workflow.md
       - use/tool-modes.md
       - learn/architecture.md
@@ -60,7 +60,7 @@ topics:
       - use/ci-gating.md
       - use/severity.md
     allowed_summaries:
-      - start/getting-started.md
+      - start/first-report.md
 
   baseline-lifecycle:
     canonical_page: use/baseline-management.md
