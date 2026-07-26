@@ -427,17 +427,36 @@ Pick the right home:
   can be slotted into CRITICAL/HIGH without restructuring, but there is
   only one maintainer today — don't read the tiering as "these are reviewed
   by different people," it isn't, yet.
-- **Toolchain-profile compiler-family rendering — narrowly fixed, not the
-  full execution contract.** An external audit found `run_plan.py`'s
+- **Toolchain-profile compiler-family rendering — audited, `args` trust
+  boundary hardened; the `-stdlib=`/`--target=` "fix" itself was wrong and
+  has been reverted.** An external audit found `run_plan.py`'s
   `_compose_gcc_options()` composing `-stdlib=`/`--target=` unconditionally
   for any `profiles.<id>.compile` overlay, even when
   `compile.compiler_family: gcc` — both are Clang-driver-only spellings a
-  real GCC binary rejects (confirmed against GCC 14.2). That specific
-  correctness bug is fixed: those two flags are now omitted whenever
-  `compiler_family` resolves to a GCC family name (case-insensitive
-  `gcc`/`g++`/`gnu`); `clang` and an unset `compiler_family` (the
-  pre-existing default) are unaffected. The same audit flagged a real trust-
-  boundary gap in `profiles.<id>.compile.args`: the existing whitespace-
+  real GCC binary rejects (confirmed against GCC 14.2), so an early pass
+  dropped both whenever `compiler_family` resolved to a GCC family name. A
+  later review round found that fix backwards: the composed string this
+  function returns is **never actually fed to a literal GCC binary
+  anywhere in this pipeline** — `--ast-frontend` only has
+  `auto`/`castxml`/`clang`/`hybrid` (no `gcc`); castxml's own frontend is
+  always its internal bundled Clang (`--castxml-cc-<id>` selects an
+  *emulation* mode, not a literal execution path); and the direct-clang
+  backend's `_resolve_clang_bin` (`dumper_clang.py`) explicitly rejects a
+  `gcc-path` that isn't clang-family and falls back to host
+  `clang`/`clang++`. Since the real consumer is always Clang, dropping
+  `--target=` actively broke cross-compilation-target correctness for the
+  direct-clang backend — it was the *only* signal available there to steer
+  parsing away from the host architecture (no "probe the real compiler"
+  auto-discovery step exists on that path the way castxml has one), so a
+  GCC-family profile with an explicit `target:` would silently have its
+  headers parsed for the runner's architecture instead. Reverted:
+  `_compose_gcc_options()` emits `-stdlib=`/`--target=` unconditionally
+  again, same as before the original audit, with both the change and the
+  reasoning for reverting it recorded in the function's own docstring so a
+  future reader doesn't rediscover and re-"fix" the same false positive.
+  The same original audit flagged a real trust-boundary gap in
+  `profiles.<id>.compile.args`, which is unaffected by this revert and
+  stays fixed: the existing whitespace-
   smuggling check (`_safe_profile_atom`) rejected one YAML scalar expanding
   into multiple argv tokens, but not a single, whitespace-free dangerous
   atom. `_DANGEROUS_ARG_PREFIXES` (`project_targets.py`) now blocks four
@@ -483,21 +502,11 @@ Pick the right home:
   hatch for ABI-relevant flags this codebase cannot enumerate a priori
   (GCC/Clang/MSVC each have their own vocabulary), and a strict allowlist
   would need that vocabulary built out first — its own scoped project, not
-  a reactive expansion of this fix. A fourth review round caught a
-  correctness gap the family-aware `_compose_gcc_options()` fix itself
-  introduced: a GCC profile that sets only `stdlib`/`target` (both dropped
-  by the filter, nothing else configured) used to compose to plain `""`,
-  indistinguishable downstream from "no `compile:` overlay at all" —
-  `check-project.yml`'s matrix step does `gcc-options: ${{
-  matrix.compile_gcc_options || inputs.gcc-options }}`, and GitHub Actions
-  expression truthiness treats `""` the same as an absent property, so the
-  empty result silently fell back to the workflow-global `gcc-options`,
-  which in a mixed GCC/Clang matrix can carry exactly the Clang-only flags
-  this filtering exists to keep off the GCC cell — reintroducing the bug
-  through the workflow fallback instead of the function. Fixed by returning
-  a single space instead: truthy for that `||` check, yet inert once
-  actually used as argv (`shlex.split(" ") == []`, same as
-  `shlex.split("")`). Still **not** implemented, and out of
+  a reactive expansion of this fix. (A fourth review round briefly caught a
+  correctness gap in a since-reverted sentinel the family-aware
+  `_compose_gcc_options()` fix needed — moot now that the fix itself is
+  reverted, see above; not detailed here since it no longer applies to any
+  code that ships.) Still **not** implemented, and out of
   scope for that fix (each needs its own
   scoped design, not a drive-by extension of the same narrow correction):
   a real toolchain-identity probe that validates a resolved `binding`'s

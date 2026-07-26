@@ -37,24 +37,19 @@
   reconstitutes the exact blocked flag once the composed string is
   re-split. Found and confirmed during review with a `shlex.split()`
   round-trip demonstration; regression-tested the same way.
-- **`run-plan generate`'s composed `compile_gcc_options` no longer emits
-  `-stdlib=`/`--target=` for a profile declaring `compile.compiler_family:
-  gcc`.** Both are Clang-driver-only spellings a real GCC binary rejects
-  (confirmed against GCC 14.2). `compiler_family: clang` and an unset
-  `compiler_family` (the pre-existing default, still consumed by castxml's
-  own Clang-based emulation frontend either way) are unaffected.
-- **Fixed a correctness gap the GCC-family fix above itself introduced:** a
-  GCC profile setting only `stdlib`/`target` (both dropped by the filter,
-  nothing else configured) used to compose to plain `""`, indistinguishable
-  downstream from "no `compile:` overlay at all." `check-project.yml`'s
-  matrix step does `gcc-options: ${{ matrix.compile_gcc_options ||
-  inputs.gcc-options }}`, and GitHub Actions expression truthiness treats
-  `""` the same as an absent property, so the empty result silently fell
-  back to the workflow-global `gcc-options` — reintroducing the exact
-  Clang-only flags this filtering exists to keep off a GCC cell, in a mixed
-  GCC/Clang matrix. `_compose_gcc_options` now returns a single space
-  instead in that specific case: truthy for the `||` fallback check, yet
-  inert once actually used as argv (`shlex.split(" ") == []`).
+- **`run-plan generate`'s composed `compile_gcc_options` briefly stopped
+  emitting `-stdlib=`/`--target=` for `compile.compiler_family: gcc`
+  profiles, then that change was reverted as incorrect.** The original
+  reasoning (a real GCC binary rejects both, confirmed against GCC 14.2)
+  was true but never applicable: this composed string is never actually
+  fed to a literal GCC binary anywhere in this pipeline (every
+  `--ast-frontend` — `castxml`/`clang`/`hybrid` — routes through Clang;
+  there is no `gcc` frontend). Since the real consumer is always Clang,
+  dropping `--target=` broke real cross-compilation-target correctness for
+  the direct-clang backend, which has no other way to steer header parsing
+  away from the host architecture. Reverted to unconditional emission
+  regardless of `compiler_family`, with the full history recorded in
+  `_compose_gcc_options`'s own docstring.
 - **`profiles.<id>.compile.args` also rejects `--castxml-cc-` now.** A
   second `--castxml-cc-<id> <path>` occurrence appended after abicheck's
   own trusted pair might look like it could replace the verified compiler

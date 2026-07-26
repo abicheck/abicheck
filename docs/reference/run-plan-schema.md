@@ -96,21 +96,22 @@ dicts can forward each field through with no renaming.
 | `bundle_members` | `kind: bundle` | Member target ids. |
 | `member_binary_patterns` | `kind: bundle` | Member target id → that member's own `binary_pattern`, so a caller can stage a member-binaries directory without re-reading `.abicheck.yml`. |
 | `compile_gcc_path` | this cell's profile declares `compile.binding` *and* `--toolchain-bindings` was given | That binding, resolved to an exact executable path — forwarded as `check-target`'s `gcc-path` input. Empty (field omitted) when the profile has no `compile:` overlay, declares no `binding`, or `--toolchain-bindings` was omitted/the binding wasn't found in it — a caller then falls back to its own global `gcc-path`. |
-| `compile_gcc_options` | this cell's profile's `compile` overlay sets any of `standard`/`stdlib`/`target`/`abi_macros`/`args` | Those axes composed into one space-joined extra-flags string (`-std=<standard> -stdlib=<stdlib> --target=<target> -D<macro>[=<value>] ... <args...>`, macros sorted by name, `args` appended verbatim last) — forwarded as `check-target`'s `gcc-options` input. **`-stdlib=`/`--target=` are omitted when `compile.compiler_family` is `gcc`** (P0 toolchain-profile-rendering audit): both are Clang-driver spellings a real GCC binary rejects, confirmed against GCC 14.2. Left unfiltered for `compiler_family: clang` (both are native Clang flags) or an unset `compiler_family` (the pre-existing default, still forwarded to castxml's own Clang-based emulation frontend, which tolerates both regardless of emulated family). **If that filtering drops every field the profile actually set** (e.g. only `stdlib`/`target` declared, both dropped, nothing else configured), the value is a single space (`" "`) rather than `""` — `check-project.yml`'s matrix step does `gcc-options: ${{ matrix.compile_gcc_options \|\| inputs.gcc-options }}`, and GitHub Actions expression truthiness treats `""` the same as an absent property, so a plain empty string would silently fall back to the workflow-global `gcc-options` (which, in a mixed GCC/Clang matrix, can carry exactly the Clang-only flags this filtering exists to keep off the GCC cell). `" "` is truthy for that fallback check yet inert once actually used as argv (`shlex.split(" ") == []`, same as `shlex.split("")`). A profile whose overlay sets nothing family-filterable at all (e.g. only `binding`) still composes to plain `""` — there is nothing to protect from the fallback in that case, so the pre-existing "no override, use the workflow global" behavior is unchanged. |
+| `compile_gcc_options` | this cell's profile's `compile` overlay sets any of `standard`/`stdlib`/`target`/`abi_macros`/`args` | Those axes composed into one space-joined extra-flags string (`-std=<standard> -stdlib=<stdlib> --target=<target> -D<macro>[=<value>] ... <args...>`, macros sorted by name, `args` appended verbatim last) — forwarded as `check-target`'s `gcc-options` input. Not filtered by `compile.compiler_family`: the composed string is always consumed by a Clang-based frontend in this pipeline (castxml's internal bundled Clang, or the direct-clang backend), never a literal GCC binary, so `-stdlib=`/`--target=` are emitted regardless of the declared family — see `_compose_gcc_options`'s own docstring for why an earlier attempt to drop them for `compiler_family: gcc` was reverted. |
 
 **`profiles.<id>.compile` reaches the cell (P1 toolchain-profile audit).**
 [`project-targets-schema.md`'s `profiles:`](project-targets-schema.md#profiles)
 section documents the overlay itself; this generator is the "run-plan
-consumer" its `binding` field's docs promised. `compiler_family` selects a
-toolchain through `binding` (there is no separate "pick a family" flag to
-forward) and — since the P0 audit above — narrowly gates `-stdlib=`/
-`--target=` in `compile_gcc_options`; it is not yet a full family-specific
-argv resolver (no MSVC `/std:`/`/D` spellings, no profile-specific
-frontend). `compiler_version` is validated shape-wise by `project-targets
-validate` but still not projected anywhere — it is a *constraint* (e.g.
-`">=14.0,<15"`), not a value; verifying a resolved binding's actual version
-against it needs a real toolchain-identity probe, which stays out of this
-pure, no-subprocess module by design.
+consumer" its `binding` field's docs promised. `compiler_family`/
+`compiler_version` are validated shape-wise by `project-targets validate`
+but **not** projected into `compile_gcc_path`/`compile_gcc_options` —
+`compiler_family` only selects a toolchain through `binding` (there is no
+separate "pick a family" flag to forward; the composed `compile_gcc_options`
+string is always consumed by a Clang-based frontend in this pipeline, never
+a literal GCC binary, so there is nothing correct for `compiler_family` to
+gate there), and `compiler_version` is a *constraint* (e.g. `">=14.0,<15"`),
+not a value; verifying a resolved binding's actual version against it needs
+a real toolchain-identity probe, which stays out of this pure, no-subprocess
+module by design.
 
 **No build-output paths are carried through.** `build-output.json` is used
 purely as an existence/membership oracle here — the candidate artifact a

@@ -747,35 +747,36 @@ class TestProfileCompileOverlayProjection:
         assert check.compile_gcc_options == "-std=gnu++20"
 
 
-class TestComposeGccOptionsFamilyAware:
-    """P0 toolchain-profile-rendering audit: an explicit ``compiler_family:
-    gcc`` must not emit ``-stdlib=``/``--target=`` -- Clang-driver spellings
-    a real GCC binary rejects (confirmed against GCC 14.2 manually; see
-    AGENTS.md's "Known gaps" entry, "Toolchain-profile compiler-family
-    rendering", and tests/fixtures/run_plan/toolchain_matrix/README.md)."""
+class TestComposeGccOptionsNotFamilyAware:
+    """Regression guard for the revert documented in `_compose_gcc_options`'s
+    own docstring: a P0 audit round briefly dropped `-stdlib=`/`--target=`
+    for `compiler_family: gcc`, reasoning a real GCC binary rejects both
+    (true) -- but a later review round found the composed string is never
+    actually fed to a literal GCC binary anywhere in this pipeline (only
+    ever to Clang: castxml's internal frontend, or the direct-clang
+    backend's `_resolve_clang_bin`, which rejects a non-clang-family
+    `gcc-path` and falls back to host clang), and that dropping `--target=`
+    broke real cross-compilation-target correctness for the direct-clang
+    backend (no other signal steers it away from the host architecture).
+    Reverted; `compiler_family` must not affect this function's output."""
 
     _compose = staticmethod(_compose_gcc_options)
 
     def _spec(self, **kw: object) -> ProfileCompileSpec:
         return ProfileCompileSpec(**kw)  # type: ignore[arg-type]
 
-    def test_gcc_family_omits_stdlib_and_target(self) -> None:
+    def test_gcc_family_still_emits_stdlib_and_target(self) -> None:
         spec = self._spec(
             compiler_family="gcc",
             standard="gnu++17",
             stdlib="libstdc++",
             target="x86_64-linux-gnu",
         )
-        assert self._compose(spec) == "-std=gnu++17"
+        assert self._compose(spec) == (
+            "-std=gnu++17 -stdlib=libstdc++ --target=x86_64-linux-gnu"
+        )
 
-    def test_gcc_family_matching_is_case_insensitive(self) -> None:
-        spec = self._spec(compiler_family="GCC", stdlib="libstdc++")
-        # Not "" -- stdlib was set and filtered, so this is the explicit-
-        # empty-override sentinel (see test_gcc_family_filtered_to_nothing_
-        # returns_truthy_sentinel below), not "no override was declared".
-        assert self._compose(spec) == " "
-
-    def test_clang_family_keeps_stdlib_and_target(self) -> None:
+    def test_clang_family_emits_stdlib_and_target(self) -> None:
         spec = self._spec(
             compiler_family="clang",
             standard="gnu++20",
@@ -786,9 +787,7 @@ class TestComposeGccOptionsFamilyAware:
             "-std=gnu++20 -stdlib=libc++ --target=x86_64-linux-gnu"
         )
 
-    def test_unset_family_keeps_prior_default_behaviour(self) -> None:
-        """Backward compat: with no compiler_family declared at all, the
-        (castxml-consumed) output is unchanged from before this audit."""
+    def test_unset_family_emits_stdlib_and_target(self) -> None:
         spec = self._spec(
             standard="gnu++17", stdlib="libstdc++", target="x86_64-linux-gnu"
         )
@@ -804,56 +803,21 @@ class TestComposeGccOptionsFamilyAware:
             abi_macros={"FOO": "1"},
             args=["-fno-rtti"],
         )
-        assert self._compose(spec) == "-std=gnu++17 -DFOO=1 -fno-rtti"
-
-    def test_gcc_family_filtered_to_nothing_returns_truthy_sentinel(self) -> None:
-        """A GCC profile that declares ONLY stdlib/target (both dropped by
-        the family filter, no standard/abi_macros/args left standing) must
-        NOT compose to plain "" -- check-project.yml's matrix step does
-        `gcc-options: ${{ matrix.compile_gcc_options || inputs.gcc-options }}`,
-        and GHA expression truthiness treats "" the same as an absent
-        property, so an empty result would silently fall back to the
-        workflow-global gcc-options -- reintroducing the exact Clang-only
-        flags this filtering exists to keep off a GCC cell, in a mixed
-        GCC/Clang matrix where the global default targets the Clang cell
-        (Codex review follow-up on the family-aware fix)."""
-        spec = self._spec(
-            compiler_family="gcc", stdlib="libstdc++", target="x86_64-linux-gnu"
+        assert self._compose(spec) == (
+            "-std=gnu++17 -stdlib=libstdc++ -DFOO=1 -fno-rtti"
         )
-        result = self._compose(spec)
-        assert result != ""
-        assert result.strip() == ""  # inert: shlex.split(result) == []
-        import shlex
 
-        assert shlex.split(result) == []
-
-    def test_gcc_family_filtered_to_nothing_sentinel_is_truthy_in_to_dict(self) -> None:
-        """The sentinel must actually survive RunPlanCheck.to_dict()'s own
-        truthiness-gated `if self.compile_gcc_options:` -- confirming the
-        JSON key (and therefore the GHA matrix property) is present, not
-        omitted, for this cell."""
-        check = RunPlanCheck(
-            compile_gcc_options=_compose_gcc_options(
-                ProfileCompileSpec(compiler_family="gcc", stdlib="libstdc++")
-            )
-        )
-        assert "compile_gcc_options" in check.to_dict()
-
-    def test_no_fields_set_at_all_still_returns_empty_string(self) -> None:
-        """Distinct from the sentinel case above: a compile: overlay that
-        sets nothing family-filterable at all (e.g. only `binding`) has
-        nothing to signal an "explicit empty override" for, so it stays
-        plain "" -- to_dict() omits the key and the existing "no override,
-        use the workflow global" fallback behavior is unchanged."""
+    def test_no_fields_set_at_all_returns_empty_string(self) -> None:
         spec = self._spec(compiler_family="gcc", binding="gcc14")
         assert self._compose(spec) == ""
 
-    def test_non_gcc_family_never_produces_the_sentinel(self) -> None:
-        """The sentinel is specific to fields the GCC-family filter dropped
-        -- an empty Clang/unset-family spec (nothing set at all) has no
-        filtered field either, so it's still plain ""."""
-        assert self._compose(self._spec(compiler_family="clang")) == ""
-        assert self._compose(self._spec()) == ""
+    def test_gcc_family_target_only_still_emitted(self) -> None:
+        """The specific correctness case a review round caught: a
+        GCC-family profile with only `target:` set (used with the
+        direct-clang backend, which has no other way to steer parsing away
+        from the host architecture) must still emit --target=."""
+        spec = self._spec(compiler_family="gcc", target="aarch64-linux-gnu")
+        assert self._compose(spec) == "--target=aarch64-linux-gnu"
 
 
 class TestToolchainMatrixFixtureExample:
@@ -894,10 +858,7 @@ class TestToolchainMatrixFixtureExample:
 
         gcc = by_profile["linux-gcc14"]
         assert gcc.compile_gcc_path == "/opt/gcc-14.2.0/bin/g++"
-        # compiler_family: gcc drops -stdlib= (Clang-only spelling, P0
-        # toolchain-profile-rendering audit) even though .abicheck.yml
-        # declares compile.stdlib: libstdc++ -- see this fixture's README.
-        assert gcc.compile_gcc_options == "-std=gnu++17"
+        assert gcc.compile_gcc_options == "-std=gnu++17 -stdlib=libstdc++"
 
         clang = by_profile["linux-clang20"]
         assert clang.compile_gcc_path == "/opt/llvm-20/bin/clang++"
@@ -927,7 +888,10 @@ class TestToolchainMatrixFixtureExample:
         assert result.exit_code == 0, result.output
         data = json.loads(result.stdout)
         by_profile = {c["profile_id"]: c for c in data["checks"]}
-        assert by_profile["linux-gcc14"]["compile_gcc_options"] == "-std=gnu++17"
+        assert (
+            by_profile["linux-gcc14"]["compile_gcc_options"]
+            == "-std=gnu++17 -stdlib=libstdc++"
+        )
         assert (
             by_profile["linux-clang20"]["compile_gcc_options"]
             == "-std=gnu++20 -stdlib=libc++ -DMATRIXDEMO_ABI_V2=1 -fno-rtti"

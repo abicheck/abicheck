@@ -52,7 +52,7 @@ compiler context:
   "check_id": "libmatrixdemo@linux-gcc14#release-contract@headers",
   "profile_id": "linux-gcc14",
   "compile_gcc_path": "/opt/gcc-14.2.0/bin/g++",
-  "compile_gcc_options": "-std=gnu++17"
+  "compile_gcc_options": "-std=gnu++17 -stdlib=libstdc++"
 },
 {
   "check_id": "libmatrixdemo@linux-clang20#release-contract@headers",
@@ -61,15 +61,6 @@ compiler context:
   "compile_gcc_options": "-std=gnu++20 -stdlib=libc++ -DMATRIXDEMO_ABI_V2=1 -fno-rtti"
 }
 ```
-
-Note `linux-gcc14`'s `compile.stdlib: libstdc++` (in `.abicheck.yml`) does
-**not** appear in its rendered `compile_gcc_options`: `-stdlib=` is a
-Clang-driver spelling a real GCC binary rejects, so `_compose_gcc_options`
-(P0 toolchain-profile-rendering audit) omits it whenever `compiler_family:
-gcc` is declared — unlike `linux-clang20`, where `-stdlib=libc++` is correct
-Clang syntax and is kept. `compile.stdlib` is still valid/round-trippable
-config either way; only its projection into this GCC-family cell's argv
-changes.
 
 `check-project.yml` forwards `compile_gcc_path`/`compile_gcc_options` as
 that cell's `gcc-path`/`gcc-options` inputs (ahead of the workflow's own
