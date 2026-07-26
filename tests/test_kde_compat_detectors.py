@@ -611,6 +611,18 @@ class TestItaniumScopeParser:
                      return_type="ns::Bar", visibility=Visibility.PUBLIC)
         assert owner_class_of(f) == "ns::Foo"
 
+    def test_bare_conversion_operator_with_qualified_target_falls_through(self):
+        # CodeRabbit review: a bare-recorded conversion operator (no owning-
+        # class prefix) can still carry a qualified target with its own
+        # "::" (e.g. "operator ns::Bar") -- the "::operator " marker isn't
+        # present (no owner precedes "operator"), so naively rsplit-ting at
+        # the last "::" would wrongly treat the target's own qualification
+        # as the owner/member boundary, returning junk like "operator ns"
+        # instead of falling through to the mangled-name recovery.
+        f = Function(name="operator ns::Bar", mangled="_ZNK3FoocvN2ns3BarEEv",
+                     return_type="ns::Bar", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) == "Foo"
+
     @pytest.mark.parametrize("mangled", [
         "foo",            # not Itanium-mangled (C symbol)
         "_ZN1C99barEv",   # length runs past the string (malformed)

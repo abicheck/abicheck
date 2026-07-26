@@ -507,6 +507,40 @@ def _compile_spelling_pattern(spellings: Collection[str]) -> re.Pattern[str] | N
     )
 
 
+def _finditer_allow_nested(
+    pattern: re.Pattern[str], text: str, start: int = 0, end: int | None = None
+) -> list[re.Match[str]]:
+    """Every match of *pattern* in ``text[start:end]``, including one nested
+    strictly inside another match's own span (Codex review, fresh evidence):
+    plain ``.finditer()`` only returns *non-overlapping* matches, continuing
+    its search from the end of each match — so when one candidate's spelling
+    is a substring of another's own registered spelling (e.g. ``"std::string"``
+    inside ``"std::vector<std::string>"``, or a non-stdlib ``"Inner"`` inside
+    ``"Wrapper<Inner>"``), the alternation's longest-first ordering matches
+    the *outer* candidate first, consuming the whole span, and the inner one
+    is never independently reported even though it is directly present in
+    the signature text. Splitting stdlib vs. non-stdlib into two independent
+    patterns (an earlier fix) only solved *cross*-index masking — two
+    candidates from the *same* index (both stdlib, or both non-stdlib
+    records) can still mask each other this way.
+
+    Recurses into ``text[m.start() + 1 : m.end()]`` for every match found —
+    a strictly narrower window than the match itself, so recursion always
+    terminates — to catch a shorter candidate embedded anywhere inside it,
+    at any nesting depth (not just one level).
+    """
+    if end is None:
+        end = len(text)
+    matches: list[re.Match[str]] = []
+    for m in pattern.finditer(text, start, end):
+        matches.append(m)
+        if m.end() - m.start() > 1:
+            matches.extend(
+                _finditer_allow_nested(pattern, text, m.start() + 1, m.end())
+            )
+    return matches
+
+
 def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     """Stdlib/runtime-namespaced :class:`RecordType` names in *snapshot* that
     are directly referenced by a **public**, non-stdlib function's
@@ -695,19 +729,19 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
         names."""
         if not type_string:
             return
-        for match in stdlib_pattern.finditer(type_string):
+        for match in _finditer_allow_nested(stdlib_pattern, type_string):
             for identity in stdlib_index.get(match.group(0), ()):
                 if identity in remaining:
                     referenced.add(identity)
                     remaining.discard(identity)
         if record_pattern is not None:
-            for match in record_pattern.finditer(type_string):
+            for match in _finditer_allow_nested(record_pattern, type_string):
                 for identity in record_index.get(match.group(0), ()):
                     if identity not in reached_records:
                         reached_records.add(identity)
                         worklist.append(identity)
         if typedef_pattern is not None:
-            for match in typedef_pattern.finditer(type_string):
+            for match in _finditer_allow_nested(typedef_pattern, type_string):
                 alias = match.group(0)
                 if alias not in resolved_typedefs:
                     resolved_typedefs.add(alias)
@@ -718,16 +752,16 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
             break
         if fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
             continue
+        if fn.visibility != Visibility.PUBLIC:
+            continue
+        if fn.origin in _NON_PUBLIC_ORIGINS:
+            continue
         qualified_fn = itanium_qualified_name(fn.mangled) or msvc_qualified_name(
             fn.mangled
         )
         if qualified_fn is not None and qualified_fn.startswith(
             STDLIB_TYPE_NAMESPACE_PREFIXES
         ):
-            continue
-        if fn.visibility != Visibility.PUBLIC:
-            continue
-        if fn.origin in _NON_PUBLIC_ORIGINS:
             continue
         _scan(fn.return_type)
         for param in fn.params:
@@ -746,16 +780,16 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
             break
         if var.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
             continue
+        if var.visibility != Visibility.PUBLIC:
+            continue
+        if var.origin in _NON_PUBLIC_ORIGINS:
+            continue
         qualified_var = itanium_qualified_name(var.mangled) or msvc_qualified_name(
             var.mangled
         )
         if qualified_var is not None and qualified_var.startswith(
             STDLIB_TYPE_NAMESPACE_PREFIXES
         ):
-            continue
-        if var.visibility != Visibility.PUBLIC:
-            continue
-        if var.origin in _NON_PUBLIC_ORIGINS:
             continue
         _scan(var.type)
 

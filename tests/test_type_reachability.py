@@ -1339,6 +1339,93 @@ class TestNestedStdlibSpellingWithinNonStdlibWrapperIdentity:
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
 
 
+class TestNestedMatchesWithinTheSameSpellingIndex:
+    """Codex review, fresh evidence: splitting stdlib vs. non-stdlib into
+    two independent patterns (the earlier wrapper-identity fix) only solves
+    *cross*-index masking. Two candidates from the *same* index (both
+    stdlib, or both non-stdlib records) can still mask each other the same
+    way -- a plain non-overlapping .finditer() pass matches the longer
+    alternative first and never independently notices a shorter candidate
+    nested entirely inside that match's own span."""
+
+    def test_stdlib_type_nested_inside_another_stdlib_type_is_found(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("use_vec", return_type="std::vector<std::string>")],
+            types=[
+                RecordType(name="std::vector<std::string>", kind="class"),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {"std::vector<std::string>", "std::string"}
+        )
+
+    def test_non_stdlib_record_nested_inside_another_non_stdlib_record_is_found(
+        self,
+    ) -> None:
+        """The identical masking mechanism inside record_pattern: a public
+        signature naming "Wrapper<Inner>" must still queue "Inner" itself
+        for its own field walk, not just the outer wrapper identity."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("use_wrapper", return_type="Wrapper<Inner>")],
+            types=[
+                RecordType(name="Wrapper<Inner>", kind="class"),
+                RecordType(
+                    name="Inner",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_typedef_key_nested_inside_another_typedef_key_is_resolved(self) -> None:
+        """The same masking mechanism inside typedef_pattern: a public
+        signature naming "Wrapper<Bar>" (itself an unrelated typedef key)
+        must still resolve the nested "Bar" typedef key to its own target,
+        not just whatever "Wrapper<Bar>" itself resolves to."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("use_alias", return_type="Wrapper<Bar>")],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        snap.typedefs = {"Wrapper<Bar>": "irrelevant_target", "Bar": "Foo"}
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_single_character_match_does_not_attempt_further_recursion(self) -> None:
+        """Guard/coverage: a matched candidate spelling of length 1 (e.g. a
+        genuine single-letter class name) must not attempt a nested
+        recursive search inside itself -- there is no room for a shorter
+        candidate to be embedded in a single character."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("use_a", return_type="A")],
+            types=[
+                RecordType(
+                    name="A",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
 class TestNonStdlibBareAliasCollisionWithStdlibStrippedSpelling:
     def test_non_stdlib_signature_spellings_includes_bare_alias(self) -> None:
         """Codex review, fresh evidence: a non-stdlib record's own full

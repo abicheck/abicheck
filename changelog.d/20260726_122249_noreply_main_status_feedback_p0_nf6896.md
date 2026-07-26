@@ -584,3 +584,33 @@
   New regression tests cover the parser directly and an end-to-end
   `directly_referenced_stdlib_types` case. Full suite green, 100% module
   coverage, FP-rate gate stays 0 FP/0 FN.
+- **A nested candidate spelling could still mask another one within the
+  same spelling index, even after the earlier cross-index split**
+  (Codex review, fresh evidence): `.finditer()` only returns non-overlapping
+  matches, so when one registered spelling is itself a substring of
+  another's in the *same* index (`"std::string"` inside
+  `"std::vector<std::string>"`, both stdlib; a non-stdlib `"Inner"` inside
+  `"Wrapper<Inner>"`; and, found while fixing this, the identical mechanism
+  in typedef-key matching too), the longest-first alternation matches the
+  outer candidate first and the inner one — though directly present in the
+  text — is never independently reported. Fixed with one shared
+  `_finditer_allow_nested()` helper (used at all three call sites) that
+  recurses into each match's own span to catch a shorter candidate nested
+  anywhere inside it, at any depth — verified against the existing
+  large-corpus performance regression guard to confirm this doesn't
+  reintroduce the quadratic cost the single-pattern rewrite eliminated.
+  Also fixed a narrower gap in the conversion-operator owner recovery
+  itself (CodeRabbit review): a bare-recorded conversion operator can still
+  carry a qualified target (`"operator ns::Bar"`, no owning-class prefix),
+  which neither the `"::operator "` marker nor the unqualified-bare check
+  caught, so the naive `rsplit` fallback still produced junk like
+  `"operator ns"` — fixed by detecting the `"operator "` prefix the same
+  way the already-fixed unqualified case is. Also reordered the cheap
+  visibility/origin filters ahead of mangled-name parsing in both the
+  function and variable reachability loops (CodeRabbit review) — a pure
+  perf reordering, no behavior change, since a rejected declaration now
+  skips the structural parse entirely instead of paying for a discarded
+  result. New regression tests cover all three nested-index cases, the
+  single-character-match edge case, and the qualified-target conversion
+  operator directly. Full suite green, 100% module coverage, FP-rate gate
+  stays 0 FP/0 FN.

@@ -1092,8 +1092,53 @@ Once a root command genuinely clears the bar above, pick the right home:
   conversion operator's embedded `std::string` field is no longer
   filtered.
 
+  **An eleventh finding pointed at a masking mechanism the earlier
+  cross-index split didn't fully close.** Splitting `_spelling_index()`
+  into independent `stdlib_index`/`record_index` patterns (an earlier
+  fix) solved masking *between* the two indices — a non-stdlib wrapper's
+  identity embedding a stdlib type's spelling verbatim. It did not solve
+  the identical masking *within* either index (Codex review, fresh
+  evidence): `.finditer()` only returns non-overlapping matches, so when
+  one candidate's registered spelling is itself a substring of another
+  candidate's spelling *in the same index* (e.g. `"std::string"` inside
+  `"std::vector<std::string>"`, both stdlib; or a non-stdlib `"Inner"`
+  inside `"Wrapper<Inner>"`), the longest-first alternation matches the
+  outer candidate first, consumes the whole span, and the search
+  continues from the end of that match — so the inner one, though
+  directly present in the text, is never independently reported.
+  Confirmed empirically for both the stdlib and non-stdlib cases (and, on
+  further investigation while fixing this, the identical mechanism in
+  `typedef_pattern`'s typedef-key matching too — a third, independently
+  confirmed instance of the same root cause). Fixed with a single new
+  helper, `_finditer_allow_nested()`, used at all three call sites: for
+  every match found, it recurses into `text[m.start()+1 : m.end()]` — a
+  strictly narrower window, so recursion terminates — to catch a shorter
+  candidate embedded anywhere inside it, at any nesting depth, not just
+  one level. Kept as one shared helper rather than three inline copies
+  since all three loops have the exact same masking mechanism. Verified
+  against the existing large-corpus performance regression guard
+  (`test_many_unreferenced_stdlib_candidates_scan_efficiently`) to confirm
+  this doesn't reintroduce the quadratic candidate-by-candidate cost the
+  single-pattern rewrite was originally built to eliminate — the extra
+  recursive search only runs when a match is actually found (rare in the
+  common case), bounded by nesting depth, not candidate count.
+
+  **A twelfth finding closed a narrower gap in the conversion-operator
+  owner fix itself (tenth finding, above).** The `"::operator "`-marker
+  fix only detects a conversion operator when an *owner* precedes the
+  marker; a bare-recorded conversion operator (no owning-class prefix at
+  all, per the tenth finding) can still carry a *qualified target* with
+  its own `"::"` — e.g. `"operator ns::Bar"`, no `"Foo::"` prefix — and
+  for that shape neither the marker (there's no owner text before
+  `"operator"`) nor the previous unqualified-bare check applied, so the
+  naive `rsplit` fallback still ran and returned junk like `"operator
+  ns"` (CodeRabbit review). Confirmed empirically: constructing exactly
+  this input shape reproduced the bad `"operator ns"` result before the
+  fix. Fixed by checking for the `"operator "` prefix the same way the
+  already-fixed unqualified case is detected, falling through to
+  mangled-name recovery for both shapes uniformly.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
-  `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a
   std:: record that set names, instead of blanket-filtering every std::

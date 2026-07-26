@@ -433,12 +433,29 @@ def owner_class_of(f: Function) -> str | None:
     Tried second, after Itanium: the two schemes are mutually exclusive by
     their leading-byte convention (``_Z``/``__Z`` vs. ``?``), so trying both
     in sequence is unambiguous and costs nothing on the common Itanium path.
+
+    A bare-recorded conversion operator (no owning-class prefix at all, the
+    shape CastXML/direct-clang actually produce — confirmed elsewhere in this
+    module) can still carry a qualified *target* type with its own ``"::"``
+    (e.g. ``"operator ns::Bar"``, no ``"Foo::"`` prefix) when the underlying
+    ``name`` attribute itself preserves that qualification (CodeRabbit
+    review): the ``"::operator "`` marker isn't present (there's no owner
+    before ``"operator"``), so the naive ``rsplit`` fallback would wrongly
+    treat the target's own ``"::"`` as the owner/member boundary, returning
+    junk like ``"operator ns"``. Detected the same way the bare, unqualified
+    ``"operator Bar"`` case already is — checking for the ``"operator "``
+    prefix — so both fall through to the mangled-name recovery below instead.
     """
     if "::" in f.name:
         marker_idx = f.name.find("::operator ")
         if marker_idx != -1:
             return f.name[:marker_idx]
-        return f.name.rsplit("::", 1)[0]
+        if not f.name.startswith("operator "):
+            return f.name.rsplit("::", 1)[0]
+        # Bare-recorded conversion operator with a qualified target
+        # ("operator ns::Bar") -- the only "::" belongs to the target type,
+        # not an owner/member boundary; fall through to mangled-name
+        # recovery for the real owner.
     comps = itanium_scope_components(f.mangled) or msvc_scope_components(f.mangled)
     if not comps or len(comps) < 2:
         return None
