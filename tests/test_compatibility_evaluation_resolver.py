@@ -337,7 +337,7 @@ class TestDetectPackConflicts:
                     (_pack("qt_kde_cpp"), {"func_removed": Verdict.COMPATIBLE}),
                 ]
             )
-        assert exc_info.value.change_kind == "func_removed"
+        assert exc_info.value.field_name == "func_removed"
         assert len(exc_info.value.contributors) == 2
 
     def test_conflict_report_is_order_independent(self):
@@ -348,7 +348,7 @@ class TestDetectPackConflicts:
         for ordering in ([a, b], [b, a]):
             with pytest.raises(PackConflictError) as exc_info:
                 detect_pack_conflicts(ordering)
-            assert exc_info.value.change_kind == "func_removed"
+            assert exc_info.value.field_name == "func_removed"
 
     def test_explicit_override_resolves_the_conflict(self):
         # D8 composition order: explicit override > selected packs > base
@@ -397,4 +397,29 @@ class TestDetectPackConflicts:
                     ),
                 ]
             )
-        assert exc_info.value.change_kind == "func_removed"
+        assert exc_info.value.field_name == "func_removed"
+
+    def test_conflicts_on_non_changekind_fields_are_detected_too(self):
+        # D8's rule is "the same field OR ChangeKind" -- a contract/gate
+        # pack's own field assignments conflict the same way a policy
+        # pack's ChangeKind overrides do; this function doesn't special-case
+        # ChangeKind slugs, so any string-keyed field works identically.
+        with pytest.raises(PackConflictError) as exc_info:
+            detect_pack_conflicts(
+                [
+                    (_pack("security_hardening"), {"exit_code_scheme": "severity"}),
+                    (_pack("release_governance"), {"exit_code_scheme": "legacy"}),
+                ]
+            )
+        assert exc_info.value.field_name == "exit_code_scheme"
+        assert len(exc_info.value.contributors) == 2
+
+    def test_explicit_override_resolves_a_non_changekind_conflict_too(self):
+        result = detect_pack_conflicts(
+            [
+                (_pack("security_hardening"), {"exit_code_scheme": "severity"}),
+                (_pack("release_governance"), {"exit_code_scheme": "legacy"}),
+            ],
+            explicit_overrides={"exit_code_scheme": "severity"},
+        )
+        assert result is None
