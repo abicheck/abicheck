@@ -88,6 +88,13 @@ _CUSTOMIZATION_POINT_CODES = (
 )
 _LIBRARY_OWNED_ROOTS = ("4pvxs6client6ConfigEvE", "N6mylib5inner3fooEvE", "3fooEvE")
 _ENTITY_SUFFIXES = ("5cache", "1x", "9__unused")
+# libc++'s versioned inline ABI namespace (Codex review, PR #641 follow-up,
+# fifth round): libc++ wraps its entire standard-library implementation in
+# an inline namespace between the "St"/"3std" substitution and the actual
+# class/function name -- "__1" in mainline libc++, "__ndk1" on Android NDK.
+# Only relevant for the St/3std markers (the ones libc++ actually wraps);
+# "" (no inline namespace) covers the plain GCC/libstdc++ shape.
+_LIBCXX_INLINE_NAMESPACES = ("", "3__1", "6__ndk1")
 
 
 @st.composite
@@ -121,16 +128,24 @@ def _stdlib_local_name(draw: st.DrawFn) -> tuple[str, bool]:
     # customization-point exclusion to draw here.
     is_customizable_root = marker in ("St", "3std")
     wants_customization = is_customizable_root and draw(st.booleans())
+    inline_ns = (
+        draw(st.sampled_from(_LIBCXX_INLINE_NAMESPACES)) if is_customizable_root else ""
+    )
 
     prefix = "_Z" + "Z" * (1 + extra_zs)
     n_part = "N" if has_n else ""
 
     if wants_customization:
         cp = draw(st.sampled_from(_CUSTOMIZATION_POINT_CODES))
-        mangled = f"{prefix}{n_part}{quals}{ref}{marker}{cp}I6MyTypeEclERKS0_E{suffix}"
+        mangled = (
+            f"{prefix}{n_part}{quals}{ref}{marker}{inline_ns}{cp}I6MyTypeEclERKS0_E{suffix}"
+        )
         expected = False
     else:
-        mangled = f"{prefix}{n_part}{quals}{ref}{marker}6vectorIiSaIiEE9push_backERKiE{suffix}"
+        mangled = (
+            f"{prefix}{n_part}{quals}{ref}{marker}{inline_ns}"
+            f"6vectorIiSaIiEE9push_backERKiE{suffix}"
+        )
         expected = True
     return mangled, expected
 

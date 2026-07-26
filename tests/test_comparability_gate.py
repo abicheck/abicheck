@@ -1346,3 +1346,77 @@ def test_gate_rejects_opaque_scope_mismatch_in_diagnostic_mode_too():
     result = check_contracts_comparable(old, new, diagnostic=True)
     assert isinstance(result, ComparabilityMismatch)
     assert result.kind == "scope"
+
+
+def test_gate_rejects_unknown_profile_delta_present_empty_vs_absent():
+    # Codex review, PR #641 follow-up (fifth P1): `.get(k, "")` conflates
+    # "key absent entirely" with "key present with an empty string value"
+    # -- a newer-schema field added on only one side with an empty value
+    # (`future_profile: ""` vs. no key at all) compared "" == "" and was
+    # wrongly invisible to unknown_differing, even when combined with an
+    # otherwise-legitimate, corroborated header_sequence growth.
+    old_fields = {
+        "header_sequence": json.dumps(["a.h", "b.h"]),
+        "future_profile": "",
+    }
+    new_fields = {
+        "header_sequence": json.dumps(["a.h", "b.h", "c.h"]),
+        # future_profile absent entirely on this side
+    }
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint="p-old",
+            scope_fingerprint="s-old",
+            profile_fields=old_fields,
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h"]),
+                "public_header_dirs": json.dumps([]),
+            },
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint="p-new",
+            scope_fingerprint="s-new",
+            profile_fields=new_fields,
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h", "c.h"]),
+                "public_header_dirs": json.dumps([]),
+            },
+        )
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_rejects_unknown_scope_delta_present_empty_vs_absent():
+    # headers grows additively (a genuinely recognized, otherwise-waivable
+    # delta) so scope_differing is non-empty and the opaque-mismatch check
+    # alone wouldn't catch this -- isolating the empty-vs-absent gap in
+    # scope_unknown_differing specifically.
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-old",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h"]),
+                "public_header_dirs": json.dumps([]),
+                "future_scope": "",
+            },
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-new",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h", "c.h"]),
+                "public_header_dirs": json.dumps([]),
+                # future_scope absent entirely on this side
+            },
+        )
+    )
+    with pytest.raises(ScopeMismatchError):
+        check_contracts_comparable(old, new)

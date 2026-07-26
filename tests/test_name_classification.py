@@ -146,6 +146,14 @@ def test_is_stdlib_local_name_symbol_nested_but_user_owned_false() -> None:
         # class): std::common_type<A, A>::f() -- a program-defined partial
         # specialization of another standard customization-point template.
         "_ZZNSt11common_typeIJ1AS0_EE1fEvE1x",
+        # Codex review, PR #641 follow-up (fifth round): under libc++, the
+        # entire standard library lives in a versioned inline namespace
+        # (`__1` in mainline libc++) between the `St` substitution and the
+        # actual class name -- a user specialization of std::hash<X> there
+        # mangles as `_ZZNKSt3__14hashI1XEclERKS1_E4salt` (`3__1` = the
+        # inline-namespace component), which the exclusion regex must still
+        # recognize even though it doesn't match the bare GCC shape.
+        "_ZZNKSt3__14hashI1XEclERKS1_E4salt",
     ],
 )
 def test_is_stdlib_local_name_symbol_user_specialized_customization_point_false(

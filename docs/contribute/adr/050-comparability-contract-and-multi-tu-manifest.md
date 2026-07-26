@@ -1908,6 +1908,54 @@ fix), and two gate-level tests for the opaque scope mismatch (raise mode
 and diagnostic mode, both proven to fail without the fix). Full fast unit
 suite green, mypy/ruff clean.
 
+**A ninth review pass** (Codex, one P1, one P2) found one more gap in the
+`unknown_differing`/`scope_unknown_differing` checks, plus an unrelated
+gap in the customization-point allowlist regex:
+
+- **`.get(k, "")` conflated "key absent" with "key present, empty
+  value."** Both unknown-field checks fall back to `""` for a missing
+  key, matching every other field-presence check in this module — but for
+  *these* checks specifically, that means a newer-schema field added on
+  only one side with an empty value (`{"future_scope": ""}` vs. no key at
+  all) compares `"" == ""` and stays invisible, even when combined with an
+  otherwise-legitimate, corroborated delta (additive `header_sequence`/
+  `headers` growth). Confirmed by direct repro before any fix: this exact
+  shape returned `None` (comparable) on both the profile and scope sides.
+  Fixed with a module-level `_FIELD_ABSENT = object()` sentinel, distinct
+  from every valid field value, used as the `.get()` fallback in both
+  checks instead of `""`.
+- **The customization-point allowlist regex didn't account for libc++'s
+  inline ABI namespace.** libc++ wraps its entire standard-library
+  implementation in a versioned inline namespace (`__1` in mainline
+  libc++, `__ndk1` on Android NDK) between the `St`/`3std` substitution
+  and the actual class name — so a user specialization of `std::hash<X>`
+  under libc++ mangles as `_ZZNKSt3__14hashI1XEclERKS1_E4salt` rather than
+  the bare GCC/libstdc++ shape `_USER_SPECIALIZABLE_STD_TEMPLATE_RE`
+  originally expected. `_STDLIB_LOCAL_NAME_RE` still matched the `St`
+  prefix (classifying the symbol as stdlib-owned) while the exclusion
+  regex missed it entirely, so a real user-owned regression under libc++
+  was wrongly suppressed. Fixed by inserting an optional, non-greedy
+  `(?:\d+__[A-Za-z0-9_]+?)?` between the substitution and the
+  customization-point alternation — non-greedy specifically, since a
+  greedy quantifier would consume into the customization-point name
+  itself (`3__1` followed directly by `4hash` reads as one contiguous
+  word-character run) and the engine needs to backtrack to the shortest
+  split that still matches. Verified this doesn't spuriously match
+  ordinary (non-customization-point) stdlib types under the same inline
+  namespace (`std::__1::vector<...>` still correctly classifies as
+  stdlib-owned, not excluded).
+
+New regression tests: one gate-level test per side for the empty-vs-absent
+gap (both proven to fail without the fix — the scope one specifically
+constructed with `headers` also growing additively, so the already-fixed
+opaque-scope-mismatch check from the previous pass doesn't coincidentally
+mask this one), one parametrized case for the libc++ example in
+`test_name_classification.py`, and the Hypothesis grammar suite
+(`test_name_classification_properties.py`) extended with an optional
+libc++ inline-namespace component so the property test covers this shape
+generatively, not just the one hand-picked example. Full fast unit suite
+green, mypy/ruff clean.
+
 ### D3. Manifest and real multi-TU dump
 
 New `abicheck/dump_manifest.py`: a strict YAML parser (unknown fields are

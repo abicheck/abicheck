@@ -125,6 +125,19 @@ from typing import Any
 from .errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
 from .model import AbiSnapshot, ExtractionContract
 
+# A sentinel distinct from every valid profile_fields/scope_fields value
+# (Codex review, PR #641 follow-up, fifth P1) -- used as the `.get()`
+# fallback when checking whether an unrecognized field key differs between
+# two contracts. Using `""` as that fallback (as every other comparison in
+# this module does, where an absent recognized field really does mean "no
+# value") conflates "key absent entirely" with "key present with an empty
+# string value": a newer-schema field added on only one side with an empty
+# value (`{"future_scope": ""}` vs. no key at all) compares `"" == ""` and
+# is wrongly invisible to the unknown-field checks below, even though the
+# key's very presence is exactly the kind of schema drift they exist to
+# catch.
+_FIELD_ABSENT = object()
+
 # Named sub-components hashed into profile_fingerprint / scope_fingerprint,
 # also stored verbatim in ExtractionContract.profile_fields/scope_fields so a
 # mismatch can be attributed to a specific field instead of an opaque hash.
@@ -1295,7 +1308,17 @@ def check_contracts_comparable(
     field-dict keys) that actually differs; its presence is unconditionally
     fatal, regardless of what the carve-outs above conclude about the
     recognized fields, since no carve-out here understands an unrecognized
-    key's semantics well enough to vouch for it.
+    key's semantics well enough to vouch for it. Both ``unknown_differing``
+    here and ``scope_unknown_differing`` above compare each key via
+    ``.get(k, _FIELD_ABSENT)`` rather than ``.get(k, "")`` (Codex review, PR
+    #641 follow-up, fifth P1): the empty-string fallback would conflate "key
+    absent entirely" with "key present with an empty string value" — a
+    newer-schema field added on only one side with an empty value (e.g.
+    ``{"future_profile": ""}`` vs. no key at all) would otherwise compare
+    ``"" == ""`` and stay invisible to these checks even though the key's
+    very presence is exactly the schema drift they exist to catch.
+    :data:`_FIELD_ABSENT` is a sentinel object distinct from every valid
+    field value, so presence and absence are never conflated.
 
     **Carve-outs compose (PR #641 follow-up, fourth round):** a release
     combining two independently-sanctioned deltas — e.g. adding a header
@@ -1352,8 +1375,8 @@ def check_contracts_comparable(
             k
             for k in set(old_contract.scope_fields) | set(new_contract.scope_fields)
             if k not in SCOPE_FIELD_KEYS
-            and old_contract.scope_fields.get(k, "")
-            != new_contract.scope_fields.get(k, "")
+            and old_contract.scope_fields.get(k, _FIELD_ABSENT)
+            != new_contract.scope_fields.get(k, _FIELD_ABSENT)
         }
         # Which recognized SCOPE_FIELD_KEYS actually differ -- an entirely
         # empty set here (Codex review, PR #641 follow-up, fourth P1) means
@@ -1433,7 +1456,7 @@ def check_contracts_comparable(
             k
             for k in set(old_fields) | set(new_fields)
             if k not in PROFILE_FIELD_KEYS
-            and old_fields.get(k, "") != new_fields.get(k, "")
+            and old_fields.get(k, _FIELD_ABSENT) != new_fields.get(k, _FIELD_ABSENT)
         }
         # Each carve-out below claims and verifies only the subset of
         # `differing` it actually understands, removing exactly those
