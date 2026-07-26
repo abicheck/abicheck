@@ -209,6 +209,31 @@ def _valid_source_name(rest: str) -> bool:
     return _source_name_end(rest) is not None
 
 
+def _operand_looks_valid(operand: str) -> bool:
+    """Whether *operand* (the content directly after a two-letter
+    ``<special-name>``/guard-variable prefix, e.g. ``"6Widget"`` in
+    ``TV6Widget``) is not an obviously-invalid digit-prefixed
+    ``<source-name>``.
+
+    These operands can be an arbitrarily complex ``<type>`` or ``<name>``
+    production -- fully validating them is exactly the unbounded
+    full-grammar case this module deliberately doesn't attempt (see
+    :func:`_looks_like_itanium_encoding`'s docstring). But when the
+    operand happens to start with a digit, no other Itanium production
+    starts that way, so it can ONLY be a ``<source-name>`` -- that
+    narrower case IS fully checkable, and ``_ZTV0`` (Codex review, fresh
+    evidence: the operand ``"0"`` is neither a valid type encoding nor a
+    positive-length source name, but the earlier length-only check
+    accepted it anyway) previously slipped through with no operand
+    validation at all. A non-digit-prefixed operand (a builtin-type
+    letter code, a nested-name, ...) is accepted outright -- the unbounded
+    case, preserving this module's ambiguity-safe bias.
+    """
+    if not operand[0].isdigit():
+        return True
+    return _source_name_end(operand) is not None
+
+
 def _looks_like_itanium_encoding(rest: str) -> bool:
     """Whether *rest* (``mangled_name`` with the ``_Z`` prefix and any
     clone suffix already stripped) plausibly starts a real Itanium
@@ -278,13 +303,15 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
         # promotion the other way). `len(rest) > 2`, not `> 1`: every one of
         # these productions requires an operand (a type or source-name)
         # after the two-letter prefix -- a bare "_ZTV" has no such operand
-        # and is not a complete encoding (Codex review).
-        return True
+        # and is not a complete encoding (Codex review). The operand
+        # itself is then checked by _operand_looks_valid for the narrower
+        # digit-prefixed case (Codex review, fresh evidence: "_ZTV0").
+        return _operand_looks_valid(rest[2:])
     if rest[0] == "G" and len(rest) > 2 and rest[1] in "VR":
         # guard variable / reference temporary -- same "requires an operand
         # after the two-letter prefix" reasoning as <special-name> above; a
         # bare "_ZGV" is not a complete encoding either.
-        return True
+        return _operand_looks_valid(rest[2:])
     if rest[0] == "S" and len(rest) > 1 and (rest[1].isalnum() or rest[1] == "_"):
         # substitution-abbreviated std:: name
         return True

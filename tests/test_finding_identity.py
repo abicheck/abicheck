@@ -124,6 +124,19 @@ class TestNormalizeMangledName:
         assert normalize_mangled_name("_ZTFfoo", None) is None
         assert normalize_mangled_name("_ZTJfoo", None) is None
 
+    def test_special_name_with_invalid_digit_operand_is_rejected(self) -> None:
+        # Codex review, fresh evidence: "_ZTV0" passed the earlier
+        # length-only operand check (len(rest) > 2), but the operand "0"
+        # is neither a valid type encoding nor a positive-length source
+        # name -- a real Itanium <source-name> can never declare a
+        # zero-byte identifier.
+        assert normalize_mangled_name("_ZTV0", "_ZTV0") is None
+
+    def test_guard_variable_with_invalid_digit_operand_is_rejected(self) -> None:
+        # Same gap, same fix, for the guard-variable/reference-temporary
+        # prefix.
+        assert normalize_mangled_name("_ZGV0", "_ZGV0") is None
+
     def test_oversized_source_name_length_prefix_does_not_raise(self) -> None:
         # CodeRabbit review: a crafted mangled name with a huge digit-prefix
         # (untrusted ELF/DWARF/PE symbol-table input) must degrade to None,
