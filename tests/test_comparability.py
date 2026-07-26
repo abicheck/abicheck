@@ -1348,6 +1348,37 @@ def test_manifest_scope_fingerprint_external_absolute_path_ignores_checkout_dept
     assert shallow_c.scope_fingerprint == deep_c.scope_fingerprint
 
 
+def test_manifest_tu_scope_field_handles_base_dir_ending_in_separator():
+    # CodeRabbit review, PR #636: a base_dir that already ends in a path
+    # separator (a filesystem root "/" or a Windows drive root "C:\\") must
+    # not gain a second one -- "//"/"C:\\\\" would never prefix-match any
+    # real child path string, so a path genuinely under such a root-level
+    # checkout would be misclassified as "external" and fingerprinted as an
+    # absolute string instead of being properly relativized.
+    from abicheck.dump_manifest import IncludeEntry, TranslationUnit
+
+    class _FakeManifest:
+        def __init__(self, base_dir, translation_units):
+            self.base_dir = base_dir
+            self.translation_units = translation_units
+
+    manifest = _FakeManifest(
+        base_dir=Path("/"),
+        translation_units=(
+            TranslationUnit(
+                name="tu_a",
+                forced_includes=(Path("/a.h"),),
+                includes=(IncludeEntry(path=Path("/vendor")),),
+            ),
+        ),
+    )
+    data = json.loads(manifest_tu_scope_field(manifest))
+    # A path genuinely under base_dir="/" must relativize (no leading "/"),
+    # not fall through to the "external absolute path" branch.
+    assert data[0]["forced_includes"] == ["a.h"]
+    assert data[0]["includes"][0]["path"] == "vendor"
+
+
 def test_manifest_tu_scope_field_falls_back_on_cross_drive_relpath_error(
     tmp_path, monkeypatch
 ):

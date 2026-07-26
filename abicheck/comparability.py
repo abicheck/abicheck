@@ -515,7 +515,15 @@ def manifest_tu_scope_field(dump_manifest: Any) -> str:
     # down to the same shape as an unrelated absolute path, discarding the
     # one signal that distinguishes them (Codex review, PR #636).
     _base_dir_str = str(dump_manifest.base_dir)
-    _base_dir_prefix = _base_dir_str + os.sep
+    # A base_dir that already ends in a separator (a filesystem root "/" or
+    # a Windows drive root "C:\") must not gain a second one here -- "//" or
+    # "C:\\" would never prefix-match any real child path string, so every
+    # path under such a root-level checkout would be misclassified as
+    # "external" and fingerprinted as an absolute, checkout-depth-dependent
+    # path instead of being properly relativized (CodeRabbit review).
+    _base_dir_prefix = (
+        _base_dir_str if _base_dir_str.endswith(os.sep) else _base_dir_str + os.sep
+    )
 
     def _rel(p: Path) -> str:
         p_str = str(p)

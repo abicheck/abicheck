@@ -73,6 +73,13 @@ def test_dpcpp_ast_dump_is_two_concatenated_json_documents() -> None:
             break
         doc, end = decoder.raw_decode(raw, pos)
         docs.append(doc)
+        if len(docs) == 1:
+            # The inter-doc whitespace skip above must not mask a genuine
+            # separator: the fixture's defining property is that the two
+            # documents are truly back-to-back with nothing between them
+            # (CodeRabbit review) -- a newline-delimited stream would still
+            # pass without this assertion.
+            assert raw[end] == "{", "documents must be directly concatenated"
         pos = end
     assert len(docs) == 2
     assert all(doc["kind"] == "TranslationUnitDecl" for doc in docs)

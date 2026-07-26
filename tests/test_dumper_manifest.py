@@ -528,6 +528,11 @@ def test_run_tu_fragments_cancels_pending_futures_promptly_on_required_failure(
     from abicheck.errors import SnapshotError
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+    # _tu_jobs clamps an explicit ABICHECK_TU_JOBS override by available
+    # memory too -- without this, a memory-constrained runner would silently
+    # fall back to the sequential (jobs<=1) path, making this pool-specific
+    # cancellation test either vacuously pass or hang (CodeRabbit review).
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
 
     cancel_called = threading.Event()
     orig_cancel = Future.cancel
@@ -599,6 +604,12 @@ def test_run_tu_fragments_propagates_active_deadline_into_pool_workers(monkeypat
     from abicheck.dumper_manifest import _run_tu_fragments
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+    # Same reasoning as the cancellation test above: without this, a
+    # memory-constrained runner would silently take the serial path, where
+    # deadline propagation is trivial (same thread) rather than genuinely
+    # exercising with_deadline_ts re-establishment across the pool boundary
+    # (CodeRabbit review).
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
 
     seen_remaining: dict[str, float | None] = {}
 
