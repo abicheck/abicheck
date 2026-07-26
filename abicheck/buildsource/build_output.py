@@ -42,10 +42,12 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .build_evidence import BuildEvidence
 from .inputs_pack import is_inputs_pack, load_inputs_manifest, read_source_facts
+from .link_attribution import attribute_sources_to_targets, normalize_source_path
 
 #: Schema discriminator stamped into every ``build-output.json`` (ADR-047 §2).
 BUILD_OUTPUT_SCHEMA = "abicheck.build-output/v1"
@@ -53,19 +55,26 @@ BUILD_OUTPUT_SCHEMA = "abicheck.build-output/v1"
 #: The manifest filename inside an ``abicheck-build/`` directory.
 BUILD_OUTPUT_MANIFEST_NAME = "build-output.json"
 
-#: The only ``evidence.projection`` value P1's validator accepts. ``"inferred"``
-#: is schema-reserved for P2's TU->link-unit->DSO attribution (ADR-047 §2) --
-#: accepting it here today would let an unattributed, build-wide pack validate
-#: as legitimate per-target evidence before the safety mechanism that would
-#: justify trusting it exists.
+#: A hand-asserted, per-target-exclusive evidence pack (ADR-047 §2): the
+#: build itself claims this pack belongs to exactly this target. Validated by
+#: :func:`_declared_evidence_sharing_issues` -- the pack's path must not be
+#: shared with any other ``"declared"`` target.
 DECLARED_PROJECTION = "declared"
 
+#: An automatically-derived association from a (possibly shared, possibly
+#: build-wide) evidence pack via real TU->link-unit->DSO attribution data
+#: (ADR-053 D4) -- validated by :func:`_inferred_evidence_projection_issues`,
+#: which re-derives the attribution and confirms it actually ties at least
+#: one TU to the target, rather than trusting the claim. Unlike
+#: ``"declared"``, sharing one physical pack across several ``"inferred"``
+#: targets is the whole point, not an error.
+INFERRED_PROJECTION = "inferred"
+
 #: Every enum value the schema recognizes for ``evidence.projection``, so the
-#: validator can tell "not declared" (fails, but is a known future value) from
-#: "not a real projection value at all" (also fails, but is a different kind
-#: of mistake) -- both produce a validation error today; kept as a named
-#: constant so P2 has one place to extend when ``"inferred"`` is implemented.
-KNOWN_PROJECTIONS = frozenset({"declared", "inferred"})
+#: validator can tell "not a recognized projection value at all" (a hard
+#: error regardless of which) apart from the two real ones, each validated by
+#: its own function above.
+KNOWN_PROJECTIONS = frozenset({DECLARED_PROJECTION, INFERRED_PROJECTION})
 
 
 def _opt_str(value: Any, default: str = "") -> str:
@@ -130,20 +139,36 @@ class BuildOutputProfile:
 class BuildOutputEvidence:
     """A target's L3/L4/L5 evidence pointer (ADR-047 §2).
 
-    ``projection`` is the field the P1.1 validator gates on: ``"declared"``
-    means the build itself asserted this evidence pack belongs to exactly
-    this target (e.g. per-target compile-DB filtering, or a wrapper invoked
-    once per link step); ``"inferred"`` would mean abicheck derived the
-    association from a build-wide pack, which needs P2's attribution work
-    and is rejected by this validator until then.
+    ``projection`` is the field the validator gates on: ``"declared"`` means
+    the build itself asserted this evidence pack belongs to exactly this
+    target (e.g. per-target compile-DB filtering, or a wrapper invoked once
+    per link step) — the pack's path must not be shared with any other
+    ``"declared"`` target. ``"inferred"`` means abicheck derived the
+    association automatically from a (possibly build-wide, possibly shared)
+    pack via ``attribution_path``'s TU->link-unit->DSO attribution data
+    (ADR-053 D4) — validated by re-deriving the same attribution and
+    confirming it actually ties at least one of the pack's TUs to this
+    target, rather than trusting the claim.
     """
 
     kind: str = ""  # e.g. "source-facts"
     path: str = ""  # relative to the build-output root
-    projection: str = ""  # "declared" | "inferred" (only "declared" validates)
+    projection: str = ""  # "declared" | "inferred"
+    #: build-output-root-relative path to a JSON-serialized ``BuildEvidence``
+    #: (``BuildEvidence.to_dict()``'s own shape) proving the TU->link-unit->
+    #: DSO attribution an ``"inferred"`` claim needs (ADR-053 D4). Ignored
+    #: for ``"declared"``.
+    attribution_path: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"kind": self.kind, "path": self.path, "projection": self.projection}
+        d: dict[str, Any] = {
+            "kind": self.kind,
+            "path": self.path,
+            "projection": self.projection,
+        }
+        if self.attribution_path:
+            d["attribution_path"] = self.attribution_path
+        return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> BuildOutputEvidence:
@@ -151,6 +176,7 @@ class BuildOutputEvidence:
             kind=_opt_str(d.get("kind")),
             path=_opt_str(d.get("path")),
             projection=_opt_str(d.get("projection")),
+            attribution_path=_opt_str(d.get("attribution_path")),
         )
 
 
@@ -493,25 +519,136 @@ def _binary_issues(
 
 
 def _evidence_projection_issues(target: BuildOutputTarget) -> list[str]:
+    """Reject any ``evidence.projection`` value outside the known set.
+
+    ``"declared"``'s and ``"inferred"``'s own real validation live in
+    :func:`_declared_evidence_sharing_issues`/
+    :func:`_inferred_evidence_projection_issues` respectively — both run
+    unconditionally over every target from :func:`validate_build_output`,
+    each filtering to its own projection value. This function only catches
+    the third case: neither, an outright unrecognized value.
+    """
     evidence = target.evidence
-    if evidence is None:
+    if evidence is None or evidence.projection in KNOWN_PROJECTIONS:
         return []
-    if evidence.projection != DECLARED_PROJECTION:
-        if evidence.projection == "inferred":
-            return [
-                f"target {target.id!r}: evidence.projection is 'inferred', "
-                "which P1's build-output.json validator does not accept — "
-                "the TU->link-unit->DSO attribution needed to trust an "
-                "inferred association is G30 P2, not built yet (ADR-047 §2/"
-                "§9). A build-wide pack may only feed a build-wide source "
-                "audit or a per-target header-depth check until then, never "
-                "a per-target effective_depth: source claim."
-            ]
-        return [
-            f"target {target.id!r}: evidence.projection is "
-            f"{evidence.projection!r}; must be {DECLARED_PROJECTION!r}."
-        ]
-    return []
+    return [
+        f"target {target.id!r}: evidence.projection is "
+        f"{evidence.projection!r}; must be one of {sorted(KNOWN_PROJECTIONS)}."
+    ]
+
+
+def _inferred_evidence_projection_issues(
+    root: Path, targets: list[BuildOutputTarget]
+) -> list[str]:
+    """Validate every ``"inferred"`` target by re-deriving its attribution.
+
+    ADR-053 D4: unlike ``"declared"``, two ``"inferred"`` targets sharing one
+    physical ``evidence.path`` pack is not itself an error — that is the
+    entire point of ``"inferred"``, safely and automatically splitting one
+    build-wide pack. What must hold instead is that re-running
+    :func:`~.link_attribution.attribute_sources_to_targets` over the
+    declared ``attribution_path`` genuinely ties at least one of the pack's
+    own TUs to *this* target — an inferred claim that resolves to zero
+    matching TUs is a silent, invisible degradation (the pack contributes
+    nothing to this target's evidence, but nothing says so) and is therefore
+    a hard error, not a warning.
+    """
+    issues: list[str] = []
+    for t in targets:
+        if t.evidence is None or t.evidence.projection != INFERRED_PROJECTION:
+            continue
+        evidence = t.evidence
+        pack_path = _resolve_under_root(root, evidence.path)
+        if pack_path is None:
+            issues.append(
+                f"target {t.id!r}: evidence.path {evidence.path!r} is "
+                "absolute or escapes the build-output directory."
+            )
+            continue
+        if not is_inputs_pack(pack_path):
+            issues.append(
+                f"target {t.id!r}: evidence.path {evidence.path!r} is not "
+                "a readable abicheck_inputs pack (no manifest.json declaring "
+                "kind: abicheck_inputs)."
+            )
+            continue
+        if not evidence.attribution_path:
+            issues.append(
+                f"target {t.id!r}: evidence.projection is 'inferred' but no "
+                "evidence.attribution_path is set — an inferred claim needs "
+                "a TU->link-unit->DSO attribution source to derive from "
+                "(ADR-053 D4), not just an assertion."
+            )
+            continue
+        attribution_file = _resolve_under_root(root, evidence.attribution_path)
+        if attribution_file is None:
+            issues.append(
+                f"target {t.id!r}: evidence.attribution_path "
+                f"{evidence.attribution_path!r} is absolute or escapes the "
+                "build-output directory."
+            )
+            continue
+        if not attribution_file.is_file():
+            issues.append(
+                f"target {t.id!r}: evidence.attribution_path "
+                f"{evidence.attribution_path!r} does not exist (expected a "
+                f"file at {attribution_file})."
+            )
+            continue
+        try:
+            with attribution_file.open(encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (OSError, ValueError) as exc:
+            issues.append(
+                f"target {t.id!r}: evidence.attribution_path "
+                f"{evidence.attribution_path!r} could not be read as JSON: {exc}."
+            )
+            continue
+        if not isinstance(raw, dict):
+            issues.append(
+                f"target {t.id!r}: evidence.attribution_path "
+                f"{evidence.attribution_path!r} is not a JSON object."
+            )
+            continue
+        evidence_model = BuildEvidence.from_dict(raw)
+        attribution = attribute_sources_to_targets(evidence_model)
+        manifest = load_inputs_manifest(pack_path)
+        diagnostics: list[str] = []
+        tus = read_source_facts(pack_path, manifest, diagnostics=diagnostics)
+        # link_attribution's link-unit-graph channel identifies a target with
+        # no target_id on its LinkUnit (the Make case, ADR-053 D2 -- Make has
+        # no semantic target concept to attach an id to) by
+        # output://{basename of target.binary} instead of target://{t.id}
+        # (see attribute_sources_to_targets's own docstring). Accept either
+        # identity here, or a Make-derived attribution would always resolve
+        # to zero matches and hard-fail validation.
+        expected_identities = {f"target://{t.id}"}
+        if t.binary:
+            # normalize_source_path first (backslash -> forward slash), not a
+            # raw PurePosixPath(t.binary).name -- link_attribution.py builds
+            # this identity the same way (normalize_source_path(lu.output)
+            # before taking .name), and a Windows-style t.binary would
+            # otherwise never match: PurePosixPath treats a backslash as an
+            # ordinary character, not a separator, so .name would return the
+            # whole string instead of just the basename (code review finding).
+            expected_identities.add(
+                f"output://{PurePosixPath(normalize_source_path(t.binary)).name}"
+            )
+        matched = sum(
+            1
+            for tu in tus
+            if attribution.get(normalize_source_path(tu.source), frozenset())
+            & expected_identities
+        )
+        if matched == 0:
+            issues.append(
+                f"target {t.id!r}: evidence.projection is 'inferred', but "
+                f"re-deriving attribution from {evidence.attribution_path!r} "
+                f"ties none of evidence.path {evidence.path!r}'s TUs to any "
+                f"of {sorted(expected_identities)!r} — this inferred claim "
+                "would silently contribute nothing to this target's evidence."
+            )
+    return issues
 
 
 def _declared_evidence_sharing_issues(
@@ -641,5 +778,6 @@ def validate_build_output(root: Path | str) -> BuildOutputValidationReport:
         report.errors.extend(_evidence_projection_issues(target))
 
     report.errors.extend(_declared_evidence_sharing_issues(root, build_output.targets))
+    report.errors.extend(_inferred_evidence_projection_issues(root, build_output.targets))
 
     return report

@@ -238,6 +238,84 @@ def test_ingest_links_source_facts_into_l4_surface(tmp_path: Path) -> None:
     assert "foo" in names
 
 
+# -- attribution-filtered ingest (ADR-053 D3) --------------------------------
+
+
+def test_ingest_without_attribution_keeps_every_tu(tmp_path: Path) -> None:
+    """Omitting attribution/expected_target_id (the default) is unchanged
+    behavior -- both TUs from a two-source pack are kept regardless of which
+    target either belongs to."""
+    pack = _write_inputs_pack(
+        tmp_path,
+        [
+            _tu("foo", mangled="_Z3foov", source="src/foo.cpp"),
+            _tu("bar", mangled="_Z3barv", source="src/bar.cpp"),
+        ],
+    )
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 2
+
+
+def test_ingest_with_attribution_filters_to_expected_target(tmp_path: Path) -> None:
+    pack = _write_inputs_pack(
+        tmp_path,
+        [
+            _tu("foo", mangled="_Z3foov", source="src/foo.cpp"),
+            _tu("bar", mangled="_Z3barv", source="src/bar.cpp"),
+        ],
+    )
+    attribution = {
+        "src/foo.cpp": frozenset({"target://libfoo"}),
+        "src/bar.cpp": frozenset({"target://libbar"}),
+    }
+    ingested = ingest_inputs_pack(
+        pack, attribution=attribution, expected_target_id="target://libfoo"
+    )
+    assert ingested.tu_count == 1
+    surface = ingested.pack.source_abi
+    assert surface is not None
+    names = {e.qualified_name for e in surface.reachable_declarations}
+    assert names == {"foo"}
+    # The exclusion note is intentional-scoping information, not a lossy-read
+    # diagnostic (CodeRabbit review, PR #632) -- it must NOT flip a fully
+    # successful projected ingest's status to "partial", so it lives in the
+    # extractor's `detail` string, not in `diagnostics`/status computation.
+    assert not ingested.diagnostics
+    extractor = ingested.pack.manifest.extractors[0]
+    assert extractor.status == "ok"
+    assert "1 TU(s) excluded by attribution scoping" in extractor.detail
+
+
+def test_ingest_with_attribution_drops_unknown_source(tmp_path: Path) -> None:
+    """Fail-safe: a source absent from the attribution mapping entirely
+    (unknown to both link_attribution channels) is dropped, exactly like one
+    attributed to a different target -- never kept on "no signal = safe"."""
+    pack = _write_inputs_pack(
+        tmp_path, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")]
+    )
+    ingested = ingest_inputs_pack(
+        pack, attribution={}, expected_target_id="target://libfoo"
+    )
+    assert ingested.tu_count == 0
+
+
+def test_ingest_with_attribution_keeps_source_shared_between_targets(
+    tmp_path: Path,
+) -> None:
+    """A source legitimately shared between two DSOs (compiled once, linked
+    into both) must be kept for either target's expected_target_id, not
+    just one — the attribution set is a membership test, not exclusivity."""
+    pack = _write_inputs_pack(
+        tmp_path, [_tu("foo", mangled="_Z3foov", source="src/foo.cpp")]
+    )
+    attribution = {"src/foo.cpp": frozenset({"target://libfoo", "target://libbar"})}
+    for expected in ("target://libfoo", "target://libbar"):
+        ingested = ingest_inputs_pack(
+            pack, attribution=attribution, expected_target_id=expected
+        )
+        assert ingested.tu_count == 1
+
+
 def test_ingest_marks_call_type_graph_coverage_from_complete_source_edges(
     tmp_path: Path,
 ) -> None:

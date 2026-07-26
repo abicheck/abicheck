@@ -19,6 +19,26 @@ libraries (not synthetic fixtures), used to drive planning and improvement.
   alignment false positives, and a castxml-missing error that hid the clang
   fallback; documents the public-header-scoping requirement and a drop-in CI
   workflow replacing pvxs's ACC-based `abi-diff.sh`.
+- `g30-pilot-validation-2026-07.md` — **G30 pilot validation (mixed scope):**
+  the G30 plan's "Pilot validation plan" executed for real — PVXS
+  (real-upstream `epics-base/pvxs`) re-run through the full check-project.yml
+  flow (config validate → build-output validate → run-plan → baseline
+  resolve → analysis compare), and the Make pilot via that same real
+  EPICS/PVXS build; the CMake, Bazel, package(`.deb`), and
+  cross-compiled(aarch64) minimal pilots exercise a synthetic in-repo
+  `libdemo` fixture instead of a second real-upstream project (the Bazel
+  pilot additionally re-validates this PR's own ADR-053 TU→DSO attribution
+  against a real, live `bazel aquery` capture). The Intel `icpx`/oneAPI
+  vendor-toolchain pilot installed cleanly and validated real icpx-compiled
+  binaries + real SYCL device-code compilation; MSVC/PDB remains genuinely
+  blocked (no redistributable Linux path to `cl.exe`). Found and fixed two
+  real product bugs: a `dump`-vs-`compare` `public_header_dirs`
+  scope-fingerprint mismatch that spuriously raised `ScopeMismatchError` for
+  the baseline-then-live-candidate pattern the G30 pipeline relies on
+  (`dumper.dump()`'s new `scope_header_dirs` parameter, decoupled from
+  ADR-015 provenance tagging); and a `sycl_metadata.py` UR-adapter
+  detection gap that silently rejected real, current Intel oneAPI 2026.1
+  UR adapters as invalid.
 - `REPORT.md` — earlier curated-matrix validation report (false-positive catalog)
 - `DESIGN_ANALYSIS.md` — code-level root cause + architectural fix per false
   positive. FP-1/FP-2 are fixed in `abicheck/model.py` + `abicheck/diff_types.py`;

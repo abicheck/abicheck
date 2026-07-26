@@ -643,6 +643,73 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
     assert "populated" not in events  # follow_deps was False
 
 
+def test_perform_elf_dump_folds_header_dir_into_scope_header_dirs(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """G30 pilot validation regression (validation/
+    g30-pilot-validation-2026-07.md): a directory passed via -H/--header must
+    be threaded through to dump()'s scope_header_dirs (via split_public_
+    header_inputs, the same helper `compare` uses) -- not just its expanded
+    per-file listing -- so the resulting contract's scope_fingerprint agrees
+    with a live compare-side extraction of the identical header set."""
+    so = tmp_path / "lib.so"
+    include_dir = tmp_path / "include"
+    include_dir.mkdir()
+    hdr = include_dir / "api.h"
+    hdr.write_text("int api(void);", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    def _fake_dump(**kwargs):  # noqa: ANN003, ANN202
+        captured.update(kwargs)
+        return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", _fake_dump)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so,
+        (include_dir,),
+        (),
+        "1.0",
+        "c",
+        None,
+        None,
+        None,
+        (),  # gcc_path/prefix/options/option_tokens
+        None,
+        True,  # sysroot, nostdinc
+        False,
+        None,  # dwarf_only, effective_debug_format
+        (),
+        (),  # public_headers, public_header_dirs
+        None,  # effective_compile_db
+        False,
+        (),
+        "",  # follow_deps, search_paths, ld_library_path
+        None,
+        None,
+        False,  # git_tag, build_id, no_git
+        None,
+        None,
+        None,
+        None,
+        False,
+        "off",  # output..collect_mode
+        _expand,
+        _populate,
+        _stamp,
+        _write,
+        compile_db_context_matched=False,
+    )
+
+    assert captured["scope_header_dirs"] == [include_dir]
+    # No --public-header-dir was given -- provenance-tagging inputs stay
+    # untouched (ADR-015 opt-in unaffected).
+    assert captured["public_header_dirs"] == []
+
+
 def test_perform_elf_dump_does_not_stamp_build_context_for_dwarf_only(
     tmp_path: Path, monkeypatch
 ) -> None:

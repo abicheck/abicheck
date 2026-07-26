@@ -132,6 +132,7 @@ class TestSchemaRoundTrip:
                         kind="source-facts",
                         path="evidence/abicheck_inputs",
                         projection="declared",
+                        attribution_path="evidence/attribution.json",
                     ),
                 )
             ],
@@ -534,7 +535,12 @@ class TestBinaryValidation:
 
 
 class TestEvidenceProjection:
-    def test_inferred_projection_is_hard_failure(self, tmp_path: Path) -> None:
+    def test_inferred_projection_without_attribution_path_is_hard_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-053 D4: "inferred" needs a real attribution_path to derive
+        from -- asserting the projection alone (no attribution source) must
+        still fail, distinctly from the old "P2 not built" wording."""
         root = tmp_path / "abicheck-build"
         root.mkdir()
         digest = _binary(root, "artifacts/lib/libfoo.so")
@@ -560,7 +566,7 @@ class TestEvidenceProjection:
         )
         report = validate_build_output(root)
         assert not report.ok
-        assert any("P2" in e for e in report.errors)
+        assert any("no evidence.attribution_path is set" in e for e in report.errors)
 
     def test_unknown_projection_value_is_hard_failure(self, tmp_path: Path) -> None:
         root = tmp_path / "abicheck-build"
@@ -588,7 +594,473 @@ class TestEvidenceProjection:
         )
         report = validate_build_output(root)
         assert not report.ok
-        assert any("must be 'declared'" in e for e in report.errors)
+        assert any("must be one of" in e for e in report.errors)
+
+
+def _write_attribution(root: Path, rel: str, evidence: object) -> None:
+    """Write a ``BuildEvidence.to_dict()``-shaped JSON at *root/rel*."""
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(evidence.to_dict()))
+
+
+class TestInferredEvidenceProjection:
+    """ADR-053 D4: unlike 'declared', 'inferred' is validated by re-deriving
+    real TU->link-unit->DSO attribution from evidence.attribution_path, not
+    by asserted exclusivity — including the defining case 'declared' can
+    never pass: two targets safely sharing one physical evidence.path."""
+
+    def _evidence(self) -> object:
+        from abicheck.buildsource.build_evidence import (
+            BuildEvidence,
+            Target,
+            TargetKind,
+        )
+
+        return BuildEvidence(
+            targets=[
+                Target(
+                    id="target://libfoo",
+                    kind=TargetKind.SHARED_LIBRARY,
+                    source_files=["src/foo.cpp"],
+                    dependencies=["target://common"],
+                ),
+                Target(
+                    id="target://common",
+                    kind=TargetKind.STATIC_LIBRARY,
+                    source_files=["src/common.cpp"],
+                ),
+                Target(
+                    id="target://libbar",
+                    kind=TargetKind.SHARED_LIBRARY,
+                    source_files=["src/bar.cpp"],
+                ),
+            ]
+        )
+
+    def test_single_target_inferred_projection_passes(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        pack_dir = root / "evidence" / "abicheck_inputs"
+        (pack_dir / "source_facts").mkdir(parents=True)
+        (pack_dir / "manifest.json").write_text(json.dumps({"kind": "abicheck_inputs"}))
+        (pack_dir / "source_facts" / "tu0.jsonl").write_text(
+            json.dumps({"tu_id": "cu://src/foo.cpp", "source": "src/foo.cpp"}) + "\n"
+        )
+        _write_attribution(root, "evidence/attribution.json", self._evidence())
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/abicheck_inputs",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert report.ok, report.errors
+
+    def test_make_style_link_unit_attribution_with_no_target_id_passes(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-053 D2: Make link units carry no ``target_id`` (Make has no
+        semantic target graph) — ``attribute_sources_to_targets`` identifies
+        them as ``output://{basename}`` instead. The validator must accept
+        that identity too, not just ``target://{t.id}``, or every Make-
+        derived 'inferred' claim would resolve to zero matches and hard-fail
+        (CodeRabbit review, PR #632)."""
+        from abicheck.buildsource.build_evidence import (
+            BuildEvidence,
+            CompileUnit,
+            LinkUnit,
+        )
+
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        pack_dir = root / "evidence" / "abicheck_inputs"
+        (pack_dir / "source_facts").mkdir(parents=True)
+        (pack_dir / "manifest.json").write_text(json.dumps({"kind": "abicheck_inputs"}))
+        (pack_dir / "source_facts" / "tu0.jsonl").write_text(
+            json.dumps({"tu_id": "cu://src/foo.cpp", "source": "src/foo.cpp"}) + "\n"
+        )
+        # No target_id anywhere (the Make case, ADR-053 D2): link_attribution's
+        # link-unit channel walks LinkUnit.inputs back to CompileUnit.output
+        # and, absent a target_id, identifies the terminal link unit as
+        # output://{basename}.
+        evidence = BuildEvidence(
+            compile_units=[
+                CompileUnit(id="cu://src/foo.cpp", source="src/foo.cpp", output="src/foo.o"),
+            ],
+            link_units=[
+                LinkUnit(
+                    id="link://libfoo.so",
+                    output="libfoo.so",
+                    kind="shared_library",
+                    inputs=["src/foo.o"],
+                ),
+            ],
+        )
+        _write_attribution(root, "evidence/attribution.json", evidence)
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/abicheck_inputs",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert report.ok, report.errors
+
+    def test_make_style_attribution_with_backslash_binary_path_passes(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression pin (code review, PR #632): the output://{basename}
+        identity built from ``t.binary`` must normalize backslashes the same
+        way ``link_attribution.py`` normalizes ``LinkUnit.output`` before
+        taking the basename, or a Windows-style ``t.binary`` never matches --
+        ``PurePosixPath`` treats a bare backslash as an ordinary character,
+        not a separator, so an un-normalized ``.name`` would return the
+        whole string instead of just the basename."""
+        from abicheck.buildsource.build_evidence import (
+            BuildEvidence,
+            CompileUnit,
+            LinkUnit,
+        )
+
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        binary_rel = "artifacts\\lib\\libfoo.so"
+        digest = _binary(root, binary_rel)
+        pack_dir = root / "evidence" / "abicheck_inputs"
+        (pack_dir / "source_facts").mkdir(parents=True)
+        (pack_dir / "manifest.json").write_text(json.dumps({"kind": "abicheck_inputs"}))
+        (pack_dir / "source_facts" / "tu0.jsonl").write_text(
+            json.dumps({"tu_id": "cu://src/foo.cpp", "source": "src/foo.cpp"}) + "\n"
+        )
+        evidence = BuildEvidence(
+            compile_units=[
+                CompileUnit(id="cu://src/foo.cpp", source="src/foo.cpp", output="src/foo.o"),
+            ],
+            link_units=[
+                LinkUnit(
+                    id="link://libfoo.so",
+                    output="libfoo.so",
+                    kind="shared_library",
+                    inputs=["src/foo.o"],
+                ),
+            ],
+        )
+        _write_attribution(root, "evidence/attribution.json", evidence)
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": binary_rel,
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/abicheck_inputs",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {binary_rel: f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert report.ok, report.errors
+
+    def test_shared_pack_across_two_inferred_targets_passes(self, tmp_path: Path) -> None:
+        """The defining case 'declared' rejects outright: two targets
+        pointing at the SAME physical evidence.path, both 'inferred' — must
+        pass, since automatically splitting one build-wide pack is the
+        entire point (unlike 'declared', where this is a hard failure)."""
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest_foo = _binary(root, "artifacts/lib/libfoo.so")
+        digest_bar = _binary(root, "artifacts/lib/libbar.so", content=b"bar-content")
+        pack_dir = root / "evidence" / "abicheck_inputs"
+        (pack_dir / "source_facts").mkdir(parents=True)
+        (pack_dir / "manifest.json").write_text(json.dumps({"kind": "abicheck_inputs"}))
+        for i, source in enumerate(["src/foo.cpp", "src/common.cpp", "src/bar.cpp"]):
+            (pack_dir / "source_facts" / f"tu{i}.jsonl").write_text(
+                json.dumps({"tu_id": f"cu://{source}", "source": source}) + "\n"
+            )
+        _write_attribution(root, "evidence/attribution.json", self._evidence())
+        evidence_block = {
+            "kind": "source-facts",
+            "path": "evidence/abicheck_inputs",
+            "projection": "inferred",
+            "attribution_path": "evidence/attribution.json",
+        }
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": evidence_block,
+                        },
+                        {
+                            "id": "libbar",
+                            "binary": "artifacts/lib/libbar.so",
+                            "evidence": evidence_block,
+                        },
+                    ],
+                    "digests": {
+                        "artifacts/lib/libfoo.so": f"sha256:{digest_foo}",
+                        "artifacts/lib/libbar.so": f"sha256:{digest_bar}",
+                    },
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert report.ok, report.errors
+
+    def test_inferred_projection_attributing_to_nothing_fails(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libbaz.so")
+        pack_dir = root / "evidence" / "abicheck_inputs"
+        (pack_dir / "source_facts").mkdir(parents=True)
+        (pack_dir / "manifest.json").write_text(json.dumps({"kind": "abicheck_inputs"}))
+        (pack_dir / "source_facts" / "tu0.jsonl").write_text(
+            json.dumps({"tu_id": "cu://src/unrelated.cpp", "source": "src/unrelated.cpp"})
+            + "\n"
+        )
+        _write_attribution(root, "evidence/attribution.json", self._evidence())
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libbaz",
+                            "binary": "artifacts/lib/libbaz.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/abicheck_inputs",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libbaz.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any("ties none of" in e for e in report.errors)
+
+    def test_missing_attribution_path_file_fails(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        _write_pack(root, "evidence/abicheck_inputs", library="libfoo")
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/abicheck_inputs",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/does-not-exist.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any("does not exist" in e for e in report.errors)
+
+    def test_escaping_attribution_path_is_rejected(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        _write_pack(root, "evidence/abicheck_inputs", library="libfoo")
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/abicheck_inputs",
+                                "projection": "inferred",
+                                "attribution_path": "/etc/passwd",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any("escapes the build-output directory" in e for e in report.errors)
+
+    def test_inferred_evidence_path_escaping_is_rejected(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "/etc/passwd",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any(
+            "evidence.path" in e and "absolute or escapes" in e for e in report.errors
+        )
+
+    def test_inferred_evidence_path_not_a_pack_is_rejected(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        (root / "evidence" / "not-a-pack").mkdir(parents=True)
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/not-a-pack",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any("not a readable abicheck_inputs pack" in e for e in report.errors)
+
+    def test_malformed_attribution_json_fails(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        _write_pack(root, "evidence/abicheck_inputs", library="libfoo")
+        (root / "evidence" / "attribution.json").write_text("{not valid json")
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/abicheck_inputs",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any("could not be read as JSON" in e for e in report.errors)
+
+    def test_attribution_json_not_object_fails(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        _write_pack(root, "evidence/abicheck_inputs", library="libfoo")
+        (root / "evidence" / "attribution.json").write_text(json.dumps([1, 2, 3]))
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/abicheck_inputs",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any("is not a JSON object" in e for e in report.errors)
 
 
 class TestDeclaredEvidenceSharingScope:

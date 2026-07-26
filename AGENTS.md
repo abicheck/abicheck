@@ -373,17 +373,34 @@ Pick the right home:
 
 ## Known gaps — acknowledged remaining work
 
-- **Depth contract, CLI vs. API/MCP** (CLAUDE.md "M1-6"): PR #601 (open) adds
-  a hard-fail `DumpDepthNotSatisfiedError` when an explicit `dump --depth`
-  isn't actually reached — but only at the CLI entry point (`cli.py` /
-  `cli_dump_helpers.py`). `action/run.sh` already propagates that (or any
-  other) nonzero `dump` exit code as an Action failure unconditionally — no
-  fix needed there. The gap is `abicheck/service.py`'s `ScanRequest`/
-  `run_scan_subprocess` and `abicheck/mcp_server.py`'s MCP tools (see
-  `_validate_public_depth`'s docstring): neither enforces the same
-  requested-vs-achieved check, so a Python-API caller or an MCP-driven agent
-  passing an explicit `depth=` can silently get a shallower-tier result. Once
-  PR #601 merges, extend the same check to those two call paths.
+- **Depth contract, CLI vs. API/MCP — re-investigated for G30, closed as
+  stale, not implemented (CLAUDE.md "M1-6").** This entry previously said PR
+  #601 (which adds a hard-fail `DumpDepthNotSatisfiedError` when an explicit
+  `dump --depth` isn't actually reached, in `cli.py`/`cli_dump_helpers.py`)
+  was still open, and that `abicheck/service.py`'s `ScanRequest`/
+  `run_scan_subprocess` and `abicheck/mcp_server.py`'s MCP tools needed the
+  same check extended to them once it merged. PR #601 merged 2026-07-19.
+  Re-checking what "extend the same check" would actually mean turned up two
+  separate findings, both closing this gap rather than giving it new code:
+  1. `check_requested_depth_satisfied` (the strict gate PR #601 added) is
+     called from exactly one place, `cli._write_snapshot_output` — reached
+     only by the `dump` command and one `cli_buildsource.py` snapshot-writing
+     helper. Neither `service.py`'s `run_dump`/`resolve_input` nor the
+     `abi_dump` MCP tool accept a `depth`/`sources`/`build-info` parameter at
+     all (confirmed by reading both) — there is no service.py/MCP surface
+     that promises a depth-qualified persisted snapshot for this gate to
+     extend to.
+  2. The only place a caller *can* pass an explicit `depth=` through
+     `service.py`/MCP is `ScanRequest`/`abi_scan`/`abi_estimate` — and
+     `service_scan.run_scan`, the CLI `scan` command
+     (`cli_scan.py`), and the MCP `abi_scan` tool all call the exact same
+     `scan_engine.run_scan_core`, so they already share one evidence-contract
+     implementation (`_check_scan_evidence_contract`'s pinned-depth
+     `_EvidenceContractError`, ADR-037 D5) — there was never a CLI-vs-API/MCP
+     disparity on the `scan` side to close, before or after PR #601.
+  `_validate_public_depth`'s docstring in `mcp_server.py` carried the same
+  stale "PR #601 open, tracked as remaining work" wording and was corrected
+  alongside this entry.
 
 - **Action pinning is deliberately partial, not a full sweep.** Third-party
   GitHub Actions in `.github/workflows/agentready.yml`, `ci.yml` (the

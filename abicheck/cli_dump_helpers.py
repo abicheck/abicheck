@@ -1300,6 +1300,16 @@ def perform_elf_dump(
     """
     compiler = "cc" if lang == "c" else "c++"
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
+    # ADR-050 D1 follow-up (G30 pilot validation, validation/
+    # g30-pilot-validation-2026-07.md): fold -H/--header's own directory
+    # arguments into the extraction contract's scope (not just
+    # public_header_dirs/apply_provenance's opt-in flags), matching
+    # `compare`'s own --header handling (cli_resolve._resolve_compare_
+    # snapshots, via the same split_public_header_inputs helper) -- so a
+    # `dump --header <dir>` baseline and a live `compare --header <dir>`
+    # candidate of the identical header set agree on scope_fingerprint
+    # instead of spuriously raising ScopeMismatchError.
+    #
     # P3: auto-add the public-header roots so a -H umbrella resolves its own
     # relative includes without a separate -I. resolve_inferred_header_roots
     # picks the search bucket: plain -I (high priority, so an umbrella that pulls
@@ -1308,7 +1318,13 @@ def perform_elf_dump(
     # so generated/shim headers from -p/--gcc-options keep priority, but still
     # above the standard system dirs) when the compile context supplies its own
     # includes — see its docstring.
-    from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
+    from .header_utils import (
+        deferred_token_dirs,
+        resolve_inferred_header_roots,
+        split_public_header_inputs,
+    )
+
+    _, scope_header_dirs = split_public_header_inputs(list(headers)) if headers else ([], [])
 
     inc_extra, deferred = (
         resolve_inferred_header_roots(
@@ -1370,6 +1386,7 @@ def perform_elf_dump(
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
             extra_hash_dirs=deferred_dirs,
+            scope_header_dirs=scope_header_dirs,
             debug_info_path=debug_info_path,
             dump_manifest=dump_manifest,
             extra_include_labels=include_labels,

@@ -25,9 +25,19 @@ Supports two plugin interface generations:
 
 - **PI (Plugin Interface)**: ``libpi_*.so``, entry point ``piPluginInit``,
   symbols prefixed ``pi``.  Used by DPC++ through ~2024.
-- **UR (Unified Runtime)**: ``libur_adapter_*.so``, entry point
-  ``urAdapterGet``, symbols prefixed ``ur``.  Successor to PI in newer
-  DPC++ releases.
+- **UR (Unified Runtime)**: ``libur_adapter_*.so``, symbols prefixed
+  ``ur``.  Successor to PI in newer DPC++ releases. Two UR export shapes
+  exist and are both recognized here: an older generation exporting
+  per-verb entry points directly (``urAdapterGet``, ``urPlatformGet``,
+  ``urDeviceGet``, ...) and the current generation (verified against a
+  real Intel oneAPI 2026.1 install, G30 pilot validation —
+  ``validation/g30-pilot-validation-2026-07.md``) exporting only one
+  function-pointer-table getter per API category (``urGetAdapterProcAddrTable``,
+  ``urGetPlatformProcAddrTable``, ``urGetDeviceProcAddrTable``, ...) —
+  individual per-verb symbols are no longer exported at all in that shape,
+  so the loader resolves real entry points indirectly through these
+  tables. ``urGetAdapterProcAddrTable`` plays the current generation's
+  validity-marker role that ``urAdapterGet`` plays for the older one.
 
 Both interfaces use the same detection approach: glob for plugin libraries,
 parse ``.dynsym`` via pyelftools, match symbol patterns.  No SYCL compiler
@@ -82,7 +92,18 @@ PI_REQUIRED_ENTRYPOINTS: frozenset[str] = frozenset({
     "piEventRelease",
 })
 
-# Well-known UR entry points that must be present for a valid UR adapter.
+# The validity-marker entry point for each of the two UR export shapes
+# (module docstring): the older per-verb-symbol generation, and the current
+# function-pointer-table-getter generation. A UR plugin is valid if EITHER
+# is present -- accepting only one would silently reject the other real,
+# currently-shipping generation as "not a valid UR adapter".
+_UR_LEGACY_ENTRYPOINT = "urAdapterGet"
+_UR_TABLE_ENTRYPOINT = "urGetAdapterProcAddrTable"
+
+# Well-known UR entry points that must be present for a valid *legacy*
+# (per-verb-symbol) UR adapter -- does not apply to the current
+# function-pointer-table generation, which exports none of these directly
+# (see module docstring).
 UR_REQUIRED_ENTRYPOINTS: frozenset[str] = frozenset({
     "urAdapterGet",
     "urAdapterRelease",
@@ -246,7 +267,16 @@ def _detect_ur_version_from_symbols(symbols: list[str]) -> str:
     """Heuristic UR version detection from exported symbol set.
 
     UR versions are detected by presence of landmark entry points
-    added in each release.
+    added in each release. Only applies to the older, per-verb-symbol UR
+    generation (module docstring) -- the landmark symbols this checks for
+    (``urBindlessImages*``, ``urVirtualMem*``, ``urCommandBuffer*``,
+    ``urAdapterGet``) are never exported at all by the current
+    function-pointer-table generation (real Intel oneAPI 2026.1 adapters
+    export only ``urGet<Category>ProcAddrTable`` getters, verified during
+    the G30 pilot validation). That generation's static table-getter set is
+    always fully present regardless of the adapter's actual UR release, so
+    there is no honest per-release landmark to key off for it -- this
+    deliberately returns "" (unknown) for it rather than guess.
 
     Returns empty string if version cannot be determined.
     """
@@ -263,7 +293,7 @@ def _detect_ur_version_from_symbols(symbols: list[str]) -> str:
         return "0.9"
     if has_cmd_buffer:
         return "0.8"
-    if "urAdapterGet" in symbols:
+    if _UR_LEGACY_ENTRYPOINT in symbols:
         return "0.7"
     return ""
 
@@ -297,8 +327,16 @@ def parse_sycl_plugin(so_path: Path) -> SyclPluginInfo | None:
     if ur_match:
         plugin_name = ur_match.group(1)
         entry_points = _extract_plugin_symbols(so_path, _UR_SYMBOL_RE)
-        if "urAdapterGet" not in entry_points:
-            log.warning("Plugin %s missing urAdapterGet — not a valid UR adapter", so_path)
+        if (
+            _UR_LEGACY_ENTRYPOINT not in entry_points
+            and _UR_TABLE_ENTRYPOINT not in entry_points
+        ):
+            log.warning(
+                "Plugin %s missing both %s and %s — not a valid UR adapter",
+                so_path,
+                _UR_LEGACY_ENTRYPOINT,
+                _UR_TABLE_ENTRYPOINT,
+            )
             return None
         return SyclPluginInfo(
             name=plugin_name,

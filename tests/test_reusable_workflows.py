@@ -502,7 +502,9 @@ class TestCheckProjectArtifactNaming:
         )
         run = sanitize["run"]
         assert "hashlib.sha256" in run
-        assert sanitize["env"]["CHECK_ID"] == "${{ steps.run.outputs.check-id }}"
+        assert sanitize["env"]["CHECK_ID"] == (
+            "${{ steps.run.outputs.check-id || steps.precheck.outputs.check-id }}"
+        )
 
         upload = next(s for s in steps if s.get("name") == "Upload report")
         assert upload["with"]["name"] == (
@@ -559,10 +561,16 @@ class TestCheckProjectArtifactNaming:
             s for s in steps if s.get("name") == "Sanitize check-id for artifact name"
         )
         upload = next(s for s in steps if s.get("name") == "Upload report")
+        # Either "Run check-target" or the pre-check operational-error
+        # envelope step produced the report -- exactly one runs per matrix
+        # cell (issue #628).
         assert (
             sanitize.get("if")
             == upload.get("if")
-            == ("always() && steps.run.outputs.report-path != ''")
+            == (
+                "always() && (steps.run.outputs.report-path != '' || "
+                "steps.precheck.outputs.report-path != '')"
+            )
         )
 
 
@@ -625,6 +633,147 @@ class TestCheckProjectClearsReportsDirBeforeAggregateDownload:
         assert names.index("Clear reports staging before download") < names.index(
             "Download every check report"
         )
+
+
+class TestPreCheckOperationalErrorReport:
+    """issue #628 (G30 P1.4 known gap, plan doc round-5/round-8/round-9
+    addenda): a candidate-resolution failure or a required build-output
+    download failure used to end the matrix job with no report at all for
+    `aggregate` to see. The fix reuses
+    actions/check-target/report_envelope.py's own `--mode operational-error`
+    directly (the same script check-target's own run.sh drives for a real
+    resolve-baseline failure), so neither of report_envelope.py's own logic
+    nor check-target's input surface needed to change."""
+
+    def test_build_output_download_has_no_continue_on_error(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        dl = next(s for s in steps if s.get("name") == "Download build-output artifact")
+        assert dl.get("id") == "download_build_output"
+        assert "continue-on-error" not in dl
+
+    def test_candidate_resolution_has_continue_on_error(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        resolver = next(
+            s for s in steps if s.get("name") == "Resolve candidate binary/binaries"
+        )
+        assert resolver.get("continue-on-error") is True
+
+    def test_precheck_step_exists_and_is_gated_on_either_prior_failure(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        precheck = next(
+            s
+            for s in steps
+            if s.get("name") == "Synthesize pre-check operational-error report"
+        )
+        assert precheck["id"] == "precheck"
+        condition = precheck["if"]
+        assert "always()" in condition
+        assert "steps.download_build_output.outcome == 'failure'" in condition
+        assert "steps.candidate.outcome == 'failure'" in condition
+
+    def test_precheck_step_reuses_report_envelope_py_operational_error_mode(
+        self,
+    ) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        precheck = next(
+            s
+            for s in steps
+            if s.get("name") == "Synthesize pre-check operational-error report"
+        )
+        run = precheck["run"]
+        assert "report_envelope.py" in run
+        assert "--mode operational-error" in run
+        assert "--resolve-outcome \"ambiguous\"" in run
+
+    def test_run_check_target_gated_on_candidate_success(self) -> None:
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["if"] == "steps.candidate.outcome == 'success'"
+
+    def test_step_ordering(self) -> None:
+        data = _load(CHECK_PROJECT)
+        names = _step_names(data["jobs"]["check"])
+        assert (
+            names.index("Download build-output artifact")
+            < names.index("Resolve candidate binary/binaries")
+            < names.index("Synthesize pre-check operational-error report")
+            < names.index("Run check-target")
+            < names.index("Sanitize check-id for artifact name")
+            < names.index("Upload report")
+        )
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "The actual reusable workflow only ever runs on runs-on: "
+            "ubuntu-latest -- this test exercises that real Linux bash "
+            "behavior."
+        ),
+    )
+    def test_precheck_script_writes_a_valid_operational_error_report_end_to_end(
+        self, tmp_path: Path
+    ) -> None:
+        """Extract the real precheck script and run it via bash -c (exactly
+        as the runner does), pointed at the real report_envelope.py through
+        the same relative `.check-project-src/` layout the job checks out,
+        confirming the emitted report-path/exit-code/check-id outputs and
+        that the underlying report.json is a valid operational-error
+        envelope."""
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        precheck = next(
+            s
+            for s in steps
+            if s.get("name") == "Synthesize pre-check operational-error report"
+        )
+        script = precheck["run"]
+
+        repo_root = Path(__file__).resolve().parents[1]
+        src_dir = tmp_path / ".check-project-src"
+        src_dir.mkdir()
+        (src_dir / "actions").symlink_to(repo_root / "actions", target_is_directory=True)
+
+        github_output = tmp_path / "github_output"
+        github_output.write_text("")
+        env = {
+            **os.environ,
+            "MATRIX_NAME": "libfoo",
+            "MATRIX_PROFILE_ID": "linux-x86_64",
+            "MATRIX_BASELINE_CHANNEL": "accepted-main",
+            "MATRIX_REQUESTED_DEPTH": "headers",
+            "MATRIX_GATE_MODE": "deferred",
+            "PROJECT": "abicheck/abicheck",
+            "HEAD_SHA": "deadbeef",
+            "BASE_REF": "main",
+            "ACTION_VERSION": "abicheck/abicheck@main",
+            "BUILD_OUTPUT_FAILED": "false",
+            "GITHUB_OUTPUT": str(github_output),
+        }
+        result = subprocess.run(
+            ["bash", "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True
+        )
+        assert result.returncode == 1, result.stderr  # operational errors fail the step
+
+        output_lines = dict(
+            line.split("=", 1)
+            for line in github_output.read_text().splitlines()
+            if "=" in line
+        )
+        assert output_lines["check-id"] == (
+            "libfoo@linux-x86_64#accepted-main@headers"
+        )
+        assert output_lines["report-path"] == "precheck-report.json"
+        assert "exit-code" not in output_lines  # grep -v'd out, like run.sh's own pattern
+
+        report = json.loads((tmp_path / "precheck-report.json").read_text())
+        assert report["verdict"] == "ERROR"
+        assert report["operational_errors"][0]["kind"] == "ambiguous"
+        assert "resolution failed for 'libfoo'" in report["operational_errors"][0]["message"]
 
 
 class TestBaselineRequiredAndCandidateBuildOutputForwarded:
