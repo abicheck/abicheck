@@ -119,13 +119,16 @@ def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
     walk to reuse as-is, rather than teaching that function a second,
     manifest-specific file-discovery mechanism.
 
-    ``headers`` is every declared root plus every translation unit's own
-    ``forced_includes`` (deduplicated, first-declared order); ``includes``
-    is every TU's own ``-I`` search directory (deduplicated, first-declared
-    order) plus the manifest's ``public_header_dirs``. This only feeds
+    ``headers`` is every declared root, plus every translation unit's own
+    ``forced_includes``, plus the manifest's own ``public_header_paths``
+    (deduplicated, first-declared order); ``includes`` is every TU's own
+    ``-I`` search directory (deduplicated, first-declared order) plus the
+    manifest's ``public_header_dirs``. This only feeds
     :func:`abicheck.snapshot_cache._cache_key`'s *content* hashing (so an
     edit to any file a manifest-driven dump could actually read busts the
-    cache) — the manifest's own *structural* identity (TU names/order/
+    cache -- including a ``public_header_paths`` entry that names neither a
+    root nor any TU's forced-include, e.g. a provenance-only header) — the
+    manifest's own *structural* identity (TU names/order/
     ``required``/``contributes_to_abi``/``project_owned``) is a separate,
     additional ``extra``-key input (see :func:`cached_run_dump`), since a
     content walk over these same paths cannot see it at all: renaming a TU,
@@ -142,6 +145,10 @@ def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
             if h not in seen_headers:
                 seen_headers.add(h)
                 headers.append(h)
+    for h in dump_manifest.public_header_paths:
+        if h not in seen_headers:
+            seen_headers.add(h)
+            headers.append(h)
 
     seen_includes: set[Path] = set()
     includes: list[Path] = []
@@ -155,6 +162,17 @@ def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
             seen_includes.add(d)
             includes.append(d)
     return headers, includes
+
+
+def _manifest_public_headers(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
+    """``(public_header_paths, public_header_dirs)`` from *dump_manifest*,
+    typed ``Any`` (like :func:`_manifest_cache_paths`) so callers whose own
+    ``dump_manifest`` parameter is the untyped ``object | None`` this module
+    otherwise uses don't need an unsound cast just to read these two fields.
+    """
+    return list(dump_manifest.public_header_paths), list(
+        dump_manifest.public_header_dirs
+    )
 
 
 def _dump_cache_extra_key(
@@ -417,6 +435,21 @@ def cached_run_dump(
         _cache_headers, _cache_includes = _manifest_cache_paths(dump_manifest)
         _manifest_extra = manifest_tu_scope_field(dump_manifest)
         _uses_ast = True
+        # dumper.dump() itself replaces the caller-supplied public_headers/
+        # public_header_dirs with the manifest's own public_header_paths/
+        # public_header_dirs for provenance/contract purposes whenever a
+        # manifest is given (dumper.py's `effective_public_headers`) -- the
+        # cache key must classify the same way, or two manifests differing
+        # only in `public_header_paths`/`public_header_dirs` (a real
+        # provenance/ScopeOrigin-affecting difference `dumper.py` acts on)
+        # would hash identically and silently share a cached snapshot whose
+        # declarations were classified public/private under the *other*
+        # manifest's provenance set (Codex review, PR #636).
+        _extra_public_headers: list[Path] | None
+        _extra_public_header_dirs: list[Path] | None
+        _extra_public_headers, _extra_public_header_dirs = _manifest_public_headers(
+            dump_manifest
+        )
     else:
         # The dump pipeline independently infers an umbrella header's include
         # root; fold the same roots into the whole-snapshot key so transitive
@@ -428,13 +461,15 @@ def cached_run_dump(
         _cache_includes = _includes + _inferred_roots
         _manifest_extra = ""
         _uses_ast = bool(_headers)
+        _extra_public_headers = public_headers
+        _extra_public_header_dirs = public_header_dirs
 
     def _build_extra() -> str:
         base = _dump_cache_extra_key(
             binary_fmt,
             header_backend,
-            public_headers,
-            public_header_dirs,
+            _extra_public_headers,
+            _extra_public_header_dirs,
             lang,
             uses_ast=_uses_ast,
         )

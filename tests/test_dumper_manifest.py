@@ -535,6 +535,41 @@ def test_tu_jobs_clamped_by_available_memory(monkeypatch):
     assert _tu_jobs(1000) == 2  # 6 GiB / 3.0 GiB-per-worker default == 2
 
 
+def test_tu_jobs_invalid_env_falls_back_to_serial(monkeypatch):
+    from abicheck.dumper_manifest import _tu_jobs
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "not-a-number")
+    assert _tu_jobs(100) == 1
+
+
+def test_tu_jobs_explicit_env_clamped_by_oversubscription_ceiling(monkeypatch, caplog):
+    import logging
+
+    from abicheck.dumper_manifest import _tu_jobs
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "64")
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
+    monkeypatch.setattr(dm_os, "cpu_count", lambda: 4)
+    with caplog.at_level(logging.WARNING):
+        jobs = _tu_jobs(100)
+    assert jobs == 8  # max(8, 2*4)
+    assert any("oversubscription" in r.message for r in caplog.records)
+
+
+def test_tu_jobs_explicit_env_clamped_by_available_memory(monkeypatch, caplog):
+    import logging
+
+    from abicheck.dumper_manifest import _tu_jobs
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "8")
+    monkeypatch.delenv("ABICHECK_TU_JOB_MEM_GIB", raising=False)
+    monkeypatch.setattr(dm_process_resources, "available_mem_gib", lambda: 6.0)
+    with caplog.at_level(logging.WARNING):
+        jobs = _tu_jobs(100)
+    assert jobs == 2  # 6 GiB / 3.0 GiB-per-worker default == 2, below the ceiling
+    assert any("OOM" in r.message for r in caplog.records)
+
+
 def test_run_tu_loop_reconciles_identical_entity_across_tus():
     calls: list = []
 

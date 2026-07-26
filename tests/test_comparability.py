@@ -1269,6 +1269,32 @@ def test_manifest_scope_fingerprint_matches_across_mount_points(tmp_path):
     assert old_c.scope_fingerprint == new_c.scope_fingerprint
 
 
+def test_manifest_tu_scope_field_falls_back_on_cross_drive_relpath_error(
+    tmp_path, monkeypatch
+):
+    # A genuinely cross-drive Windows path makes os.path.relpath raise
+    # ValueError (no relative form exists) -- manifest_tu_scope_field must
+    # fall back to the resolved absolute path rather than propagate the
+    # error (mirroring dumper_contract._manifest_declared_includes's
+    # identical handling).
+    manifest = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [vendor]\n",
+    )
+
+    def _raise_value_error(*_args, **_kwargs):
+        raise ValueError("cross-drive path")
+
+    monkeypatch.setattr(os.path, "relpath", _raise_value_error)
+    field = manifest_tu_scope_field(manifest)
+    data = json.loads(field)
+    assert data[0]["forced_includes"] == [str((manifest.base_dir / "a.h").resolve())]
+    assert data[0]["includes"][0]["path"] == str(
+        (manifest.base_dir / "vendor").resolve()
+    )
+
+
 def test_legacy_scope_fingerprint_unaffected_by_translation_units_field(tmp_path):
     # A plain, non-manifest declared_headers call (no manifest_tu_scope
     # given) must still leave scope_fingerprint driven only by the header

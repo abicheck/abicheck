@@ -125,7 +125,7 @@ def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
         False, None, False, (), "",
     )
     assert len(calls) == 2
-    (old_version, old_start, old_end), (new_version, new_start, new_end) = calls
+    (old_version, _old_start, old_end), (new_version, new_start, _new_end) = calls
     assert old_version == "old" and new_version == "new"
     # The second call must not have started before the first one finished --
     # true concurrency (a shared ThreadPoolExecutor) would let new_start fall
