@@ -695,6 +695,29 @@ def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypat
         )
 
 
+def test_header_ast_parser_explicit_castxml_rejects_device_context(
+    tmp_path, monkeypatch
+):
+    """ADR-050 D5 (G32 Phase D): an explicit --ast-frontend castxml with a
+    non-"host" frontend_context fails immediately -- castxml has no SYCL/
+    DPC++ context concept at all, so it must never silently hand back an
+    ordinary castxml dump the caller could mistake for device-derived."""
+    from abicheck import dumper
+    from abicheck.dumper import _header_ast_parser
+    from abicheck.errors import AstContextMissingError
+
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+
+    with pytest.raises(AstContextMissingError, match="castxml"):
+        _header_ast_parser(
+            [Path("a.h")],
+            [],
+            backend="castxml",
+            frontend_context="device",
+            **_ast_parser_kwargs(tmp_path),
+        )
+
+
 def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkeypatch):
     """A castxml failure that is NOT a toolchain-version signature (e.g. a bad
     header) re-raises — fallback is reserved for the recoverable case."""

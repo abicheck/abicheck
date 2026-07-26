@@ -57,7 +57,12 @@ from abicheck.dumper_manifest import (
     run_tu_fragment,
     run_tu_loop,
 )
-from abicheck.errors import SnapshotError, TuMergeError, ValidationError
+from abicheck.errors import (
+    AstContextMissingError,
+    SnapshotError,
+    TuMergeError,
+    ValidationError,
+)
 from abicheck.model import EnumType, Function, Param, RecordType, TypeField, Variable
 
 
@@ -1022,6 +1027,26 @@ class TestDumpWithManifest:
                 compiler="cc",
                 header_backend="hybrid",
                 dump_manifest=self._manifest(tmp_path),
+            )
+
+    def test_dump_rejects_device_frontend_context_for_hybrid(self, tmp_path: Path):
+        """ADR-050 D5 (G32 Phase D, Codex review): `dump()`'s own hybrid
+        recursion (`run_hybrid_dump`, used by direct Python-API callers) does
+        not forward `frontend_context` to either of its two recursive
+        castxml/clang sub-dumps -- a `frontend_context="device"` request
+        would otherwise silently default both to "host" and hand back an
+        ordinary host snapshot the caller could mistake for device-derived.
+        Rejected before the hybrid dispatch, with no compiler needed since
+        the check fires before any subprocess/binary access."""
+        with pytest.raises(AstContextMissingError, match="hybrid"):
+            dump(
+                tmp_path / "nonexistent.so",
+                [],
+                [],
+                version="1.0",
+                compiler="c++",
+                header_backend="hybrid",
+                frontend_context="device",
             )
 
     def test_dump_manifest_merges_identical_redeclaration_across_tus(

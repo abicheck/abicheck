@@ -66,3 +66,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   document (including every one the caller was about to discard) up front —
   a real memory-multiplication risk for a DPC++ header, whose per-pass AST
   dump can itself reach multi-GB size (Codex review).
+- `dumper.dump()`'s own hybrid recursion (`--ast-frontend hybrid`, used by
+  direct Python-API callers) did not forward `frontend_context` to either
+  of its two recursive castxml/clang sub-dumps, so a `frontend_context=
+  "device"` request silently defaulted both to `"host"` instead of failing
+  — hybrid merges castxml+clang and castxml has no device-context concept,
+  so this combination is now rejected explicitly before the hybrid
+  dispatch (Codex review).

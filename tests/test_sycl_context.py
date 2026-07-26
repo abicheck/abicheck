@@ -220,3 +220,10 @@ def test_fused_select_does_not_retain_non_matching_document_ast() -> None:
     selected = decode_and_select_frontend_context(stdout, stderr, "host")
     assert selected.ast == {"kind": "TranslationUnitDecl", "small": "host-payload"}
     assert "huge" not in selected.ast
+
+
+def test_fused_select_tolerates_trailing_whitespace_after_last_document() -> None:
+    stdout = '{"kind": "TranslationUnitDecl", "inner": []}\n\n  '
+    stderr = ' "clang" -cc1 -triple x86_64-unknown-linux-gnu -fsycl-is-host foo\n'
+    selected = decode_and_select_frontend_context(stdout, stderr, "host")
+    assert selected.kind == "host"

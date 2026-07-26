@@ -756,9 +756,8 @@ def _header_ast_parser(
                 fallback_reason=fallback_reason,
             ),
         )
-        # ADR-050 D5: resolved SYCL kind, None for an ordinary clang dump.
-        # Read by dumper_contract._attach_extraction_contract, mirroring
-        # _abicheck_ast_toolchain.
+        # ADR-050 D5: resolved SYCL kind, None for a plain clang dump --
+        # read by dumper_contract._attach_extraction_contract.
         setattr(stamped, "_abicheck_frontend_context_kind", resolved_kind)
         return stamped
 
@@ -1372,6 +1371,17 @@ def dump(
             raise ValidationError(
                 "dump_manifest is not yet supported with the 'hybrid' AST "
                 "frontend; pass an explicit --ast-frontend castxml/clang."
+            )
+        if frontend_context != "host":
+            # ADR-050 D5 (Codex review): hybrid merges castxml+clang, and
+            # castxml has no device-context concept -- reject explicitly
+            # rather than silently forwarding no frontend_context to
+            # run_hybrid_dump's two recursive calls below (both would
+            # default to "host", returning an ordinary host snapshot).
+            raise AstContextMissingError(
+                f"--frontend-context {frontend_context!r} requires the "
+                "clang header backend (--ast-frontend clang); 'hybrid' "
+                "merges castxml+clang and has no device-context semantics."
             )
         from .dumper_hybrid import run_hybrid_dump
 
