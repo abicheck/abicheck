@@ -181,6 +181,13 @@ class TestContractConfigUnresolvedBehavior:
         with pytest.raises(TypeError, match="ImmutableIdentity"):
             ContractConfig(mode=ContractMode.PUBLIC, packs=("rust_c_ffi",))
 
+    def test_scalar_string_overlays_is_rejected(self):
+        # Codex review: a bare str passed where a collection is expected
+        # (overlays="api") iterates into characters ("a", "p", "i") instead
+        # of raising, silently selecting the wrong contract roots.
+        with pytest.raises(TypeError, match="bare str"):
+            ContractConfig(mode=ContractMode.PUBLIC, overlays="api")
+
 
 class TestImmutability:
     def test_top_level_is_frozen(self):
@@ -429,6 +436,29 @@ class TestImmutableIdentityRequiresDigest:
         # the same replay-exactness guarantee sha256 already carries.
         with pytest.raises(ValueError, match=r"ImmutableIdentity\.id"):
             ImmutableIdentity(id="", version=1, sha256="abc123")
+
+    def test_non_string_id_is_rejected(self):
+        # Codex review: construction previously checked only truthiness, so
+        # a non-str id was silently accepted -- combining it with a
+        # correctly typed sibling revision of the same pack later crashes
+        # _pack_sort_key's canonical sort comparing incompatible types.
+        with pytest.raises(TypeError, match=r"ImmutableIdentity\.id"):
+            ImmutableIdentity(id=123, version=1, sha256="abc123")  # type: ignore[arg-type]
+
+    def test_non_int_version_is_rejected(self):
+        with pytest.raises(TypeError, match=r"ImmutableIdentity\.version"):
+            ImmutableIdentity(id="strict_abi", version="1", sha256="abc123")  # type: ignore[arg-type]
+
+    def test_bool_version_is_rejected(self):
+        # bool is a subclass of int -- must still be rejected, since a
+        # version of True/False has no meaningful ordering against a real
+        # integer version.
+        with pytest.raises(TypeError, match=r"ImmutableIdentity\.version"):
+            ImmutableIdentity(id="strict_abi", version=True, sha256="abc123")  # type: ignore[arg-type]
+
+    def test_non_string_sha256_is_rejected(self):
+        with pytest.raises(TypeError, match=r"ImmutableIdentity\.sha256"):
+            ImmutableIdentity(id="strict_abi", version=1, sha256=123)  # type: ignore[arg-type]
 
 
 class TestPackVersionedIdentity:
@@ -696,6 +726,13 @@ class TestDigestedItems:
         backward = SurfaceConfig(internal_namespaces=("impl", "detail"))
         assert forward == backward
         assert forward.internal_namespaces == ("detail", "impl")
+
+    def test_scalar_string_internal_namespaces_is_rejected(self):
+        # Same class of gap as ContractConfig.overlays: a bare str
+        # (internal_namespaces="detail") would otherwise iterate into
+        # characters instead of raising.
+        with pytest.raises(TypeError, match="bare str"):
+            SurfaceConfig(internal_namespaces="detail")
 
 
 class TestSuppressionConfigDigest:

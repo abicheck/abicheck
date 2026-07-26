@@ -93,7 +93,21 @@ def _canonical_tuple(
     review) -- the same annotations-aren't-runtime-enforced gap as this
     module's other ``isinstance`` checks, but for collection elements
     rather than a single field.
+
+    A bare ``str``/``bytes`` is rejected outright, regardless of
+    ``element_type``: passed where a collection is expected (e.g.
+    ``ContractConfig(overlays="api")``), Python iterates it into individual
+    characters (``("a", "i")``) rather than raising, silently selecting the
+    wrong contract roots or namespace hints instead of failing validation
+    (Codex review).
     """
+    if isinstance(s, (str, bytes)):
+        raise TypeError(
+            f"Expected a sequence of items, not a bare {type(s).__name__} "
+            f"{s!r} -- iterating a string/bytes value yields individual "
+            "characters, not the intended elements; wrap a single value in "
+            "a list/tuple explicitly."
+        )
     if element_type is not None:
         invalid = [item for item in s if not isinstance(item, element_type)]
         if invalid:
@@ -209,6 +223,23 @@ class ImmutableIdentity:
     sha256: str
 
     def __post_init__(self) -> None:
+        # Construction previously checked only truthiness, so e.g.
+        # ImmutableIdentity(id="pack", version="1", sha256=123) was accepted
+        # outright -- an untyped manifest/service adapter's malformed replay
+        # metadata would then crash _pack_sort_key with TypeError while
+        # comparing a str version/digest against an int one from a
+        # correctly-typed sibling revision of the same pack, instead of
+        # failing validation cleanly here (Codex review).
+        if not isinstance(self.id, str):
+            raise TypeError(f"ImmutableIdentity.id must be a str, not {self.id!r}.")
+        if not isinstance(self.version, int) or isinstance(self.version, bool):
+            raise TypeError(
+                f"ImmutableIdentity.version must be an int, not {self.version!r}."
+            )
+        if not isinstance(self.sha256, str):
+            raise TypeError(
+                f"ImmutableIdentity.sha256 must be a str, not {self.sha256!r}."
+            )
         if not self.id:
             raise ValueError(
                 "ImmutableIdentity.id must be non-empty (ADR-049 D6): a "
