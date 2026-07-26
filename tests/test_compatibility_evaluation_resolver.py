@@ -493,6 +493,21 @@ class TestDetectPackConflicts:
         )
         assert result is None
 
+    def test_non_immutable_identity_pack_identity_is_rejected(self):
+        # Codex review: a future untyped pack-manifest adapter supplying a
+        # bare/decoded identity (e.g. a plain str) instead of
+        # ImmutableIdentity was previously accepted outright at ingestion --
+        # a non-conflicting assignment would silently pass, while an actual
+        # conflict crashed inside PackConflictError's identity.id/.version
+        # access with an uncontextualized AttributeError instead of the
+        # promised pack-conflict usage error.
+        with pytest.raises(TypeError, match="detect_pack_conflicts"):
+            detect_pack_conflicts(
+                [
+                    ("rust_c_ffi", {"exit_code_scheme": "severity"}),  # type: ignore[list-item]
+                ]
+            )
+
     def test_non_mapping_explicit_overrides_is_rejected(self):
         # Codex review: the `Mapping[str, Hashable]` annotation isn't
         # runtime-enforced -- an untyped pack adapter passing a plain

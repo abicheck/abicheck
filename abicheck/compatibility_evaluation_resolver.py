@@ -400,6 +400,18 @@ def detect_pack_conflicts(
         )
     by_field: dict[str, list[tuple[ImmutableIdentity, Hashable]]] = {}
     for identity, assignments in pack_assignments:
+        # A future untyped pack-manifest adapter supplying a bare/decoded
+        # identity (e.g. a plain str) instead of ImmutableIdentity was
+        # previously accepted outright at ingestion -- a non-conflicting
+        # assignment would silently pass, while an actual conflict crashed
+        # inside PackConflictError's `identity.id`/`identity.version`
+        # access with an uncontextualized AttributeError instead of the
+        # promised pack-conflict usage error (Codex review).
+        if not isinstance(identity, ImmutableIdentity):
+            raise TypeError(
+                "detect_pack_conflicts: every pack identity must be an "
+                f"ImmutableIdentity, not {identity!r}."
+            )
         for field_name, value in assignments.items():
             # A non-str field/ChangeKind-slug key (e.g. an untyped pack
             # adapter supplying {2: "legacy"}) previously reached
