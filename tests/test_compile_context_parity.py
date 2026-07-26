@@ -463,6 +463,38 @@ def test_probe_gnu_system_includes_bounded_by_local_cap_not_full_scan_budget(
         # A trailing segment after 'include'/'include-fixed' breaks the exact
         # end-of-path shape -- this is not the resource dir itself either.
         ("/usr/lib/gcc/x86_64-linux-gnu/13/include/nested", False),
+        # Homebrew's packaged GCC nests an extra 'current' alias segment and
+        # a second literal 'gcc' segment: its build is configured with
+        # --libdir=<prefix>/lib/gcc/current, and GCC's own build script
+        # always appends gcc/<target>/<version> beneath whatever libdir it
+        # is given (confirmed against a real Homebrew GCC install; Codex
+        # review, PR #643, round 6).
+        (
+            "/opt/homebrew/Cellar/gcc/14.2.0/lib/gcc/current/gcc/"
+            "aarch64-apple-darwin23/14/include-fixed",
+            True,
+        ),
+        (
+            "/opt/homebrew/Cellar/gcc/14.2.0/lib/gcc/current/gcc/"
+            "aarch64-apple-darwin23/14/include",
+            True,
+        ),
+        # The alias segment's value isn't checked -- only its structural
+        # position between the two 'gcc' segments -- so a differently-named
+        # alias (not literally "current") still matches the same shape.
+        (
+            "/opt/homebrew/Cellar/gcc/14.2.0/lib/gcc/14/gcc/"
+            "aarch64-apple-darwin23/14/include",
+            True,
+        ),
+        # The nested shape still requires a genuine 'gcc'/'gcc-cross' pair at
+        # both positions -- an unrelated intervening segment structure with
+        # only one real 'gcc' occurrence must not match.
+        (
+            "/opt/homebrew/Cellar/gcc/14.2.0/lib/gcc/current/notgcc/"
+            "aarch64-apple-darwin23/14/include",
+            False,
+        ),
     ],
 )
 def test_is_gnu_compiler_resource_dir(path: str, expected: bool) -> None:
@@ -497,6 +529,42 @@ def test_probe_gnu_system_includes_drops_gcc_resource_dir(
     )
     out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
     assert out == [str(libstdcxx), str(libc)]  # gcc resource dir filtered out
+
+
+def test_probe_gnu_system_includes_drops_homebrew_nested_gcc_resource_dir(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Homebrew's packaged GCC reports its resource dir as
+    # .../lib/gcc/current/gcc/<triple>/<ver>/include[-fixed] (confirmed
+    # against a real Homebrew GCC install; Codex review, PR #643, round 6).
+    # This must be dropped like any other GCC resource dir, not kept.
+    from abicheck import dumper_sysinc
+
+    libstdcxx = tmp_path / "include" / "c++" / "13"
+    homebrew_gcc_res = (
+        tmp_path
+        / "lib"
+        / "gcc"
+        / "current"
+        / "gcc"
+        / "aarch64-apple-darwin23"
+        / "14"
+        / "include-fixed"
+    )
+    for d in (libstdcxx, homebrew_gcc_res):
+        d.mkdir(parents=True, exist_ok=True)
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc,
+        "_parse_gnu_include_search_dirs",
+        lambda s: [str(homebrew_gcc_res), str(libstdcxx)],
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    assert out == [str(libstdcxx)]  # Homebrew's nested gcc resource dir filtered out
 
 
 def test_probe_gnu_system_includes_keeps_unresolved_walk_back_libstdcxx(

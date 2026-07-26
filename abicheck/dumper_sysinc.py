@@ -135,16 +135,42 @@ def _is_gnu_compiler_resource_dir(path: str) -> bool:
     directory the kernel would open, which is the caller's job when it wants
     that guarantee (:func:`_probe_gnu_system_includes` does, since it already
     knows *path* exists there).
+
+    Also matches Homebrew's packaged GCC layout, which nests an *extra*
+    alias segment and a second ``gcc``/``gcc-cross`` segment:
+    ``.../lib{,32,64,x32}/gcc[-cross]/current/gcc[-cross]/<triple>/<ver>/
+    include[-fixed]`` (confirmed against a real Homebrew GCC install: its
+    build is configured with ``--libdir=<prefix>/lib/gcc/current``, and
+    GCC's own build script always appends ``gcc/<target>/<version>`` beneath
+    whatever libdir it is given, regardless of prefix — so the literal
+    ``gcc`` segment reappears a second time, with Homebrew's version-alias
+    ``current`` sitting between the two occurrences; Codex review, PR #643,
+    round 6). The alias segment's value is not checked (only its structural
+    position between the two ``gcc`` segments) — genuinely arbitrary,
+    Homebrew just always spells it ``current`` in practice — so this stays a
+    *structural* shape match, not a hardcoded special case for that one
+    string, and does not loosen the leaf/gcc-segment checks that keep a
+    merely-nested libstdc++ dir (round 3) excluded.
     """
     parts = Path(os.path.normpath(path)).parts
-    if len(parts) < 5:
-        return False
-    multilib, gcc_segment, _triple, _ver, leaf = parts[-5:]
-    return (
-        leaf in ("include", "include-fixed")
-        and gcc_segment in _GNU_COMPILER_RESOURCE_SEGMENTS
-        and multilib in _GNU_MULTILIB_DIRS
-    )
+    if len(parts) >= 5:
+        multilib, gcc_segment, _triple, _ver, leaf = parts[-5:]
+        if (
+            leaf in ("include", "include-fixed")
+            and gcc_segment in _GNU_COMPILER_RESOURCE_SEGMENTS
+            and multilib in _GNU_MULTILIB_DIRS
+        ):
+            return True
+    if len(parts) >= 7:
+        multilib, gcc_segment, _alias, gcc_segment2, _triple, _ver, leaf = parts[-7:]
+        if (
+            leaf in ("include", "include-fixed")
+            and gcc_segment2 in _GNU_COMPILER_RESOURCE_SEGMENTS
+            and gcc_segment in _GNU_COMPILER_RESOURCE_SEGMENTS
+            and multilib in _GNU_MULTILIB_DIRS
+        ):
+            return True
+    return False
 
 
 def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:

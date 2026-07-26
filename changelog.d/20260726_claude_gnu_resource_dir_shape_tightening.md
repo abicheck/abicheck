@@ -20,4 +20,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `lib{,32,64,x32}/gcc[-cross]/<triple>/<ver>/include[-fixed]`, exactly five
   trailing segments — instead of a bare adjacency scan, so only the literal
   resource dir (or `include-fixed`) matches, not anything merely living
-  inside the same subtree.
+  inside the same subtree. Also recognizes Homebrew's packaged GCC, which
+  nests an *extra* alias segment and a second literal `gcc` segment —
+  `.../lib{,32,64,x32}/gcc[-cross]/current/gcc[-cross]/<triple>/<ver>/
+  include[-fixed]` — since its build is configured with
+  `--libdir=<prefix>/lib/gcc/current` and GCC's own build script always
+  appends `gcc/<target>/<version>` beneath whatever libdir it is given,
+  regardless of prefix (confirmed against a real Homebrew GCC install;
+  Codex review, PR #643, round 6). Without this, that nested shape fell
+  through both the classic 5-segment check and the earlier over-broad
+  adjacency scan, so Homebrew's own resource dir was wrongly kept and fed
+  to clang as `-isystem`, breaking the parse on GCC-only builtins.
