@@ -804,6 +804,15 @@ def test_build_clang_header_command_cpp_and_c(tmp_path: Path) -> None:
         ("clang", ["-fsycl"], False),
         ("clang++", ["-fsycl"], False),
         ("/usr/bin/clang-18", ["-fsycl"], False),
+        # The clang driver applies -fsycl/-fno-sycl last-flag-wins like any
+        # other toggle (confirmed via `clang++ -fsycl -fno-sycl -###`, which
+        # emits a single ordinary host -cc1, no device pass). A later
+        # -fno-sycl means SYCL is not actually enabled, so nothing needs
+        # pinning to a single pass (Codex review, PR #643, round 5).
+        ("icpx", ["-fsycl", "-fno-sycl"], False),
+        ("icpx", ["-fno-sycl", "-fsycl"], True),
+        ("icpx", ["-fsycl", "-fno-sycl", "-fsycl"], True),
+        ("icpx", ["-fno-sycl"], False),
     ],
 )
 def test_needs_sycl_host_only(cc_bin: str, tokens: list[str], expected: bool) -> None:
@@ -836,6 +845,17 @@ def test_build_clang_header_command_respects_explicit_sycl_device_only(
         agg,
         force_cpp=True,
         gcc_options="-fsycl -fsycl-device-only",
+    )
+    assert "-fsycl-host-only" not in cmd
+
+
+def test_build_clang_header_command_respects_later_fno_sycl(tmp_path: Path) -> None:
+    # A later -fno-sycl disables SYCL under the driver's last-flag-wins
+    # semantics -- appending -fsycl-host-only anyway would tack a SYCL-only
+    # selector onto a non-SYCL compile (Codex review, PR #643, round 5).
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "icpx", "gnu", [], agg, force_cpp=True, gcc_options="-fsycl -fno-sycl"
     )
     assert "-fsycl-host-only" not in cmd
 

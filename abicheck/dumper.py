@@ -210,12 +210,28 @@ def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
     either with "unknown argument" (Codex review, PR #643: verified against a
     real clang 17/18 install). Appending the flag unconditionally would turn
     a working ``--gcc-path clang`` + ``-fsycl`` parse into a hard failure.
+
+    A plain ``"-fsycl" in tokens`` membership check is not enough: the clang
+    driver applies ``-fsycl``/``-fno-sycl`` last-flag-wins, like any other
+    toggle flag (confirmed with ``clang++ -fsycl -fno-sycl -###``, which
+    emits one ordinary host ``-cc1`` invocation, no device pass). A caller
+    passing ``-fsycl -fno-sycl`` through ``--gcc-options`` has SYCL
+    *disabled* overall, so appending ``-fsycl-host-only`` would tack a
+    SYCL-only selector onto a non-SYCL compile — at best a no-op, at worst
+    rejected by the driver as contradictory (Codex review, PR #643, round
+    5). The *last* occurrence of either flag decides the effective state.
     """
-    return (
-        _is_intel_sycl_driver(cc_bin)
-        and "-fsycl" in tokens
-        and not ("-fsycl-host-only" in tokens or "-fsycl-device-only" in tokens)
-    )
+    if not _is_intel_sycl_driver(cc_bin):
+        return False
+    if "-fsycl-host-only" in tokens or "-fsycl-device-only" in tokens:
+        return False
+    sycl_enabled = False
+    for tok in tokens:
+        if tok == "-fsycl":
+            sycl_enabled = True
+        elif tok == "-fno-sycl":
+            sycl_enabled = False
+    return sycl_enabled
 
 
 def _build_clang_header_command(

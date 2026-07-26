@@ -30,7 +30,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   "unknown argument" — appending the flag unconditionally would have turned
   a working `--gcc-path clang` + `-fsycl` parse into a guaranteed failure
   (Codex review, PR #643, caught after an initial version of this fix keyed
-  only on `-fsycl`'s presence). Also improved `_parse_clang_ast_result`'s
+  only on `-fsycl`'s presence). The gate also tracks the *effective* SYCL
+  state rather than a bare membership check: the clang driver applies
+  `-fsycl`/`-fno-sycl` last-flag-wins like any other toggle (confirmed with
+  `clang++ -fsycl -fno-sycl -###`, which emits one ordinary host `-cc1`, no
+  device pass), so `--gcc-options "-fsycl -fno-sycl"` has SYCL disabled
+  overall and must not get `-fsycl-host-only` appended either — that would
+  tack a SYCL-only selector onto a non-SYCL compile (Codex review, PR #643,
+  round 5). Also improved `_parse_clang_ast_result`'s
   JSON error message to name this class of cause (multiple `-cc1` passes
   from one compile, e.g. an unpinned `-fsycl` on an Intel driver, or an
   OpenMP/CUDA offload target flag) instead of a bare byte-offset, for any
