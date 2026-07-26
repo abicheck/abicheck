@@ -868,3 +868,58 @@ class TestSuppressionConfigDigest:
             _minimal_config(
                 suppressions={"rules": ["ignore-internal-symbol"], "sha256": "abc"}  # type: ignore[arg-type]
             )
+
+
+class TestCompatibilityEvaluationConfigSectionValidation:
+    # Codex review: an untyped manifest/API adapter passing a decoded
+    # mapping for a required section (e.g. contract={"mode": "public"})
+    # previously constructed successfully -- the supposedly-typed, frozen
+    # config would retain a caller-owned mutable dict, and a consumer using
+    # cfg.contract.mode would fail with AttributeError instead of a clear
+    # construction-time error.
+    @pytest.mark.parametrize(
+        "section_name",
+        ["contract", "evidence", "surface", "assurance", "policy", "gate"],
+    )
+    def test_raw_mapping_section_is_rejected(self, section_name: str) -> None:
+        with pytest.raises(
+            TypeError, match=rf"CompatibilityEvaluationConfig\.{section_name}"
+        ):
+            _minimal_config(**{section_name: {}})
+
+    def test_all_real_sections_construct(self) -> None:
+        cfg = _minimal_config()
+        assert isinstance(cfg.contract, ContractConfig)
+        assert isinstance(cfg.evidence, EvidenceConfig)
+        assert isinstance(cfg.surface, SurfaceConfig)
+        assert isinstance(cfg.assurance, AssuranceConfig)
+        assert isinstance(cfg.policy, CompatibilityPolicyConfig)
+        assert isinstance(cfg.gate, GateConfig)
+
+
+class TestCompatibilityEvaluationConfigProvenanceValidation:
+    # Codex review: _frozen_mapping only protects the outer mapping --
+    # provenance={"contract.mode": {}} previously constructed successfully,
+    # leaving a non-ValueProvenance entry that a receipt consumer expecting
+    # .layer/.reference attribute access would fail on.
+    def test_non_value_provenance_entry_is_rejected(self) -> None:
+        with pytest.raises(
+            TypeError, match=r"CompatibilityEvaluationConfig\.provenance values"
+        ):
+            _minimal_config(provenance={"contract.mode": {}})
+
+    def test_non_string_provenance_key_is_rejected(self) -> None:
+        with pytest.raises(
+            TypeError, match=r"CompatibilityEvaluationConfig\.provenance keys"
+        ):
+            _minimal_config(
+                provenance={123: ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI)}
+            )
+
+    def test_real_provenance_entries_construct(self) -> None:
+        cfg = _minimal_config(
+            provenance={
+                "contract.mode": ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI)
+            }
+        )
+        assert cfg.provenance["contract.mode"].layer is SelectorLayer.EXPLICIT_CLI

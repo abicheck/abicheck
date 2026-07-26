@@ -710,6 +710,27 @@ class CompatibilityEvaluationConfig:
     provenance: Mapping[str, ValueProvenance] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        # An untyped manifest/API adapter supplying a decoded mapping for
+        # any required section (e.g. contract={"mode": "public"}) was
+        # previously accepted as-is instead of the real dataclass -- the
+        # supposedly-typed, frozen config could then retain a caller-owned
+        # mutable dict, and a consumer using `cfg.contract.mode` would fail
+        # with AttributeError instead of a clear construction-time error
+        # (Codex review).
+        for section_name, section_type in (
+            ("contract", ContractConfig),
+            ("evidence", EvidenceConfig),
+            ("surface", SurfaceConfig),
+            ("assurance", AssuranceConfig),
+            ("policy", CompatibilityPolicyConfig),
+            ("gate", GateConfig),
+        ):
+            value = getattr(self, section_name)
+            if not isinstance(value, section_type):
+                raise TypeError(
+                    f"CompatibilityEvaluationConfig.{section_name} must be a "
+                    f"{section_type.__name__}, not {value!r}."
+                )
         # An untyped manifest/API adapter supplying the decoded suppression
         # block as a raw mapping was previously accepted and retained as-is
         # instead of a SuppressionConfig -- the supposedly-immutable config
@@ -724,4 +745,21 @@ class CompatibilityEvaluationConfig:
                 "CompatibilityEvaluationConfig.suppressions must be a "
                 f"SuppressionConfig or None, not {self.suppressions!r}."
             )
+        # An untyped adapter supplying a raw provenance value (e.g.
+        # provenance={"contract.mode": {}}) was previously accepted by
+        # _frozen_mapping, which only protects the outer mapping and does
+        # not check what's inside it -- receipt consumers expecting
+        # `.layer`/`.reference` attribute access on each entry would then
+        # get the wrong interface (Codex review).
+        for key, prov_value in self.provenance.items():
+            if not isinstance(key, str):
+                raise TypeError(
+                    "CompatibilityEvaluationConfig.provenance keys must be "
+                    f"str, not {key!r}."
+                )
+            if not isinstance(prov_value, ValueProvenance):
+                raise TypeError(
+                    "CompatibilityEvaluationConfig.provenance values must be "
+                    f"ValueProvenance, not {prov_value!r}."
+                )
         object.__setattr__(self, "provenance", _frozen_mapping(self.provenance))
