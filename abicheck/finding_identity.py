@@ -288,6 +288,17 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
     if rest[0] == "S" and len(rest) > 1 and (rest[1].isalnum() or rest[1] == "_"):
         # substitution-abbreviated std:: name
         return True
+    # Two <operator-name> codes are not complete by themselves the way the
+    # other 47 are: "cv" (conversion operator) requires a following
+    # <type>, and "li" (C++11 literal operator) requires a following
+    # <source-name> for its suffix identifier -- a bare "_Zcv"/"_Zli" is a
+    # legal C export name, not a complete encoding, but previously matched
+    # `rest[:2] in _ITANIUM_OPERATOR_CODES` outright with no operand check
+    # at all, the same "requires an operand after the prefix" gap already
+    # fixed for <special-name>/guard-variable above (Codex review, fresh
+    # evidence).
+    if rest[:2] in ("cv", "li"):
+        return len(rest) > 2
     return rest[:2] in _ITANIUM_OPERATOR_CODES
 
 

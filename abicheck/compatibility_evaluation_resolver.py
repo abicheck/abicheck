@@ -308,8 +308,21 @@ def resolve_field(
     ]
     shadowed_legacy: FieldCandidate | None = None
     if explicit_candidates and legacy_candidates:
-        explicit_values = {c.value for c in explicit_candidates}
-        legacy_values = {c.value for c in legacy_candidates}
+        # Same runtime-type-blind collision _value_identity_key documents
+        # for the same-tier/pack-conflict checks: if the explicit candidate
+        # itself carries an unnormalized raw value equal to a typed legacy
+        # candidate (e.g. explicit="public" vs. legacy=ContractMode.PUBLIC),
+        # plain equality treated that as agreement, and the winner-selection
+        # loop below then returns the explicit tier's own value verbatim --
+        # the malformed raw string -- since EXPLICIT_CLI always wins
+        # precedence regardless of this check. Comparing type-aware here
+        # instead surfaces that malformed explicit input as the intended
+        # LegacyAliasConflictError (Codex review, fresh evidence: this
+        # module's front ends are documented to construct FieldCandidate
+        # from already-normalized values, so a raw spelling reaching here
+        # is itself the adapter bug this check exists to catch).
+        explicit_values = {_value_identity_key(c.value) for c in explicit_candidates}
+        legacy_values = {_value_identity_key(c.value) for c in legacy_candidates}
         if (
             len(explicit_values) == 1
             and len(legacy_values) == 1

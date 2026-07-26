@@ -94,6 +94,21 @@ class TestNormalizeMangledName:
         # so the encoding-start check must not reject it.
         assert normalize_mangled_name("_Znwm", None) == "_Znwm"
 
+    def test_bare_conversion_and_literal_operator_codes_are_rejected(self) -> None:
+        # Codex review, fresh evidence: unlike the other 47 <operator-name>
+        # two-letter codes, "cv" (conversion operator) requires a
+        # following <type> and "li" (C++11 literal operator) requires a
+        # following <source-name> for its suffix -- a bare "_Zcv"/"_Zli" is
+        # a legal C export name, not a complete encoding, but previously
+        # matched `rest[:2] in _ITANIUM_OPERATOR_CODES` outright with no
+        # operand check.
+        assert normalize_mangled_name("_Zcv", "_Zcv") is None
+        assert normalize_mangled_name("_Zli", "_Zli") is None
+
+    def test_conversion_operator_with_operand_is_accepted(self) -> None:
+        # operator int() const -- "cv" followed by its target <type> "i".
+        assert normalize_mangled_name("_Zcvi", None) == "_Zcvi"
+
     def test_vtable_special_name_is_accepted(self) -> None:
         assert normalize_mangled_name("_ZTV6Widget", None) == "_ZTV6Widget"
 

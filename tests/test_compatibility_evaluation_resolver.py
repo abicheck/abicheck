@@ -193,6 +193,22 @@ class TestLegacyAliasConflict:
         assert exc_info.value.explicit.value is ContractMode.PUBLIC
         assert exc_info.value.legacy.value is ContractMode.ALL
 
+    def test_equal_but_differently_typed_explicit_and_legacy_raise(self):
+        # Codex review, fresh evidence: if the explicit candidate itself
+        # carries an unnormalized raw value equal to a typed legacy
+        # candidate, plain equality previously treated that as agreement
+        # -- but EXPLICIT_CLI always wins precedence regardless, so the
+        # resolver would return the malformed raw explicit value verbatim
+        # instead of raising the LegacyAliasConflictError this comparison
+        # exists to catch.
+        candidates = [
+            _candidate(SelectorLayer.LEGACY_ALIAS, ContractMode.PUBLIC),
+            _candidate(SelectorLayer.EXPLICIT_CLI, "public"),
+        ]
+        with pytest.raises(LegacyAliasConflictError) as exc_info:
+            resolve_field("contract.mode", candidates, default=_default())
+        assert exc_info.value.field_name == "contract.mode"
+
     def test_disagreement_is_tolerated_when_agreement_not_required(self):
         # ADR-049 D7: the --policy/--policy-file compatibility exception --
         # --policy-file (explicit_cli) keeps winning over a disagreeing
