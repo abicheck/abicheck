@@ -17,19 +17,39 @@ so the embedded `"file"` path stays a stable, repo-relative `header.h`
 rather than a throwaway absolute path. It parses as one JSON document (a
 single `TranslationUnitDecl`).
 
-**Known gap, not fabricated:** Phase 0 also calls for "a real captured
-DPC++/`clang -ast-dump=json` multi-document output fixture ... from an
-actual `icpx`/DPC++ invocation, not synthesized" — the concatenated
-host+device document stream Phase D's stream parser is meant to be designed
-against. No `icpx`/`dpcpp`/Intel oneAPI toolchain is available in this
-environment (only stock `clang`/`clang++`/`gcc`/`g++`), and Phase 0's own
-point is "don't build a stream parser against a guessed format; capture the
-real thing first" — synthesizing a fake multi-document stream here would
-violate exactly the principle this phase exists to uphold, so it is
-deliberately left uncaptured rather than faked. **This fixture must be
-captured on a host with a real DPC++ toolchain before Phase D's stream
-parser design starts**; `plain_clang/ast_dump.json` above stands in only as
-the single-document contrast case in the meantime.
+**Real DPC++ multi-document capture (Phase 0's gap, closed):**
+`dpcpp/header.h` is the same tiny `Point`/`add` shape as `plain_clang/header.h`
+above (deliberately no `<sycl/sycl.hpp>` include — pulling in the real SYCL
+runtime header balloons a single capture to multi-gigabyte AST dumps, and
+`-fsycl` splits into a host + device compilation pass regardless of whether
+the translation unit contains an actual offloaded kernel, so the tiny header
+alone is enough to produce a genuine multi-document stream). `dpcpp/ast_dump.json`
+is a **real**, unedited `icpx -fsycl -x c++ -std=c++17 -fsyntax-only -Xclang
+-ast-dump=json -v header.h` capture (Intel oneAPI DPC++/C++ Compiler
+2026.1.0, installed from `apt.repos.intel.com`'s `intel-oneapi-compiler-dpcpp-cpp`
+package — see the compiler's own `--version` banner reproduced in
+`dpcpp/compiler_invocation.log`), captured from inside this directory for
+the same stable-relative-path reason as Fixture 1. Unlike Fixture 1, this
+is genuinely **two** concatenated `TranslationUnitDecl` JSON documents on
+stdout with no separator between them (`...}{...`) — a real
+document-boundary-detection problem, not a guessed format.
+
+`dpcpp/compiler_invocation.log` is the same invocation's **stderr** (`-v`
+diagnostic output), captured separately from stdout. This is not incidental
+noise: the raw AST JSON documents carry no `kind`/`target` field of their
+own (`-ast-dump=json`'s output is ordinary clang AST-dump JSON, unaware of
+the driver-level host/device split), so **`kind` and `target` for each
+document must be correlated from the driver's own `-cc1 ... -triple <T>
+... -fsycl-is-(host|device)` invocation lines on stderr, in the same order
+the corresponding document appears on stdout** — confirmed against this
+capture: the first stdout document corresponds to the first stderr `-cc1`
+line (`-triple spir64-unknown-unknown ... -fsycl-is-device`, dominated by
+injected OpenCL/SPIR builtin types like `__ocl_image2d_ro_t`), and the
+second document to the second `-cc1` line (`-triple x86_64-unknown-linux-gnu
+... -fsycl-is-host`, ordinary host builtins). Both documents still declare
+the real `Point`/`add` from `header.h` at the tail of their `inner` list.
+Phase D's `sycl_context.py` decoder is designed against this exact,
+real correlation — not a guess at what DPC++ output "should" look like.
 
 ## Fixture 2 — ODR-safe merge pair and ODR-conflict pair
 
