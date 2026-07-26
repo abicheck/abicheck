@@ -105,13 +105,25 @@ _GNU_MULTILIB_DIRS = frozenset({"lib", "lib32", "lib64", "libx32"})
 def _is_gnu_compiler_resource_dir(path: str) -> bool:
     """True if *path* is a GCC compiler-internal include dir (not libstdc++/libc).
 
-    Matches the ``.../lib{,32,64,x32}/gcc[-cross]/<triple>/<ver>/include[-fixed]``
-    layout by looking for a multilib library segment (:data:`_GNU_MULTILIB_DIRS`)
-    immediately followed by ``gcc``/``gcc-cross``. The path is lexically
-    normalized (``os.path.normpath``) before splitting into parts: GCC and
-    Intel's icpx/icx report their ``-print-search-dirs``/``-v`` search paths
-    with the compiler's own install dir plus a literal ``../../../../`` walk
-    back up to the real location (e.g.
+    Matches the full ``.../lib{,32,64,x32}/gcc[-cross]/<triple>/<ver>/include
+    [-fixed]`` shape at the *end* of the path — the multilib segment
+    (:data:`_GNU_MULTILIB_DIRS`) immediately followed by ``gcc``/``gcc-cross``,
+    then exactly a ``<triple>`` and a ``<ver>`` segment, then a final
+    ``include``/``include-fixed`` segment — rather than merely scanning for a
+    multilib+``gcc`` pair anywhere in the path. A scan-anywhere check
+    over-matches: a real libstdc++/libc dir can legitimately live *underneath*
+    a ``lib/gcc/...`` tree without being GCC's own resource dir itself (e.g.
+    ``.../lib/gcc/<triple>/<ver>/include/c++/<ver>`` — real ``std::`` headers
+    a distro nests inside its GCC install, not GCC's own intrinsics/builtins
+    dir), and would be wrongly dropped, starving clang of real stdlib headers
+    (Codex review, PR #643, round 3). Requiring the exact trailing shape
+    means only the literal resource dir itself (or ``include-fixed``) matches,
+    not anything merely nested inside the same ``lib/gcc`` subtree.
+
+    The path is lexically normalized (``os.path.normpath``) before splitting
+    into parts: GCC and Intel's icpx/icx report their ``-print-search-dirs``/
+    ``-v`` search paths with the compiler's own install dir plus a literal
+    ``../../../../`` walk back up to the real location (e.g.
     ``/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13``, which is
     really ``/usr/include/c++/13`` — genuine libstdc++, not a GCC-internal
     resource dir). Splitting the *unresolved* string into parts would still
@@ -125,10 +137,14 @@ def _is_gnu_compiler_resource_dir(path: str) -> bool:
     knows *path* exists there).
     """
     parts = Path(os.path.normpath(path)).parts
-    for prev, cur in zip(parts, parts[1:]):
-        if cur in _GNU_COMPILER_RESOURCE_SEGMENTS and prev in _GNU_MULTILIB_DIRS:
-            return True
-    return False
+    if len(parts) < 5:
+        return False
+    multilib, gcc_segment, _triple, _ver, leaf = parts[-5:]
+    return (
+        leaf in ("include", "include-fixed")
+        and gcc_segment in _GNU_COMPILER_RESOURCE_SEGMENTS
+        and multilib in _GNU_MULTILIB_DIRS
+    )
 
 
 def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:

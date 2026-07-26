@@ -452,6 +452,16 @@ def test_probe_gnu_system_includes_bounded_by_local_cap_not_full_scan_budget(
         # back to the same resource path (not walked all the way out).
         ("/usr/lib/gcc/x86_64-linux-gnu/13/./include", True),
         ("/usr/lib/gcc/x86_64-linux-gnu/13/sub/../include-fixed", True),
+        # A real libstdc++ dir merely NESTED inside a lib/gcc/<triple>/<ver>
+        # tree (not the resource dir itself) must stay False: a scan for "any
+        # multilib+gcc pair" over-matches every descendant of that tree, not
+        # just the literal .../include[-fixed] resource dir (Codex review, PR
+        # #643, round 3).
+        ("/opt/lib/gcc/toolchain/13/include/c++/13", False),
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/include/c++/13", False),
+        # A trailing segment after 'include'/'include-fixed' breaks the exact
+        # end-of-path shape -- this is not the resource dir itself either.
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/include/nested", False),
     ],
 )
 def test_is_gnu_compiler_resource_dir(path: str, expected: bool) -> None:
@@ -538,27 +548,46 @@ def test_probe_gnu_system_includes_resolves_symlink_before_classifying(
     # symlink's *target* directory, not the symlink's own location. Build a
     # case where that distinction changes the classification: the reported
     # path's literal segments walk (lexically) all the way out of lib/gcc to
-    # what looks like a plain 'include' dir, but 'triple/13' is actually a
-    # symlink two levels *deeper* than a real version dir would be, so the
-    # same four '../' hops only physically escape back to 'lib/gcc/include'
-    # -- still inside GCC's own resource tree, not real system libstdc++.
+    # a location with no GCC-resource shape at all, but 'triple/13' is
+    # actually a symlink four levels *deeper* than a real version dir would
+    # be, so the same four '../' hops physically land back on a sibling
+    # '.../13.2.0/include-fixed' -- a real GCC resource dir, not system
+    # libstdc++ (the shape-tightening from round 3 of this same review means
+    # the landing spot must itself match the full resource-dir shape, not
+    # merely sit somewhere under lib/gcc).
     from abicheck import dumper_sysinc
 
     base = tmp_path / "base"
-    real_target = base / "lib" / "gcc" / "x86_64-linux-gnu" / "13.2.0" / "sub1" / "sub2"
+    real_target = (
+        base
+        / "lib"
+        / "gcc"
+        / "x86_64-linux-gnu"
+        / "13.2.0"
+        / "extra1"
+        / "extra2"
+        / "extra3"
+        / "extra4"
+    )
     real_target.mkdir(parents=True)
     symlinked_ver = base / "lib" / "gcc" / "x86_64-linux-gnu" / "13"
     symlinked_ver.symlink_to(real_target, target_is_directory=True)
     # Where the four '../' hops *physically* land, starting from real_target:
-    # sub2 -> sub1 -> 13.2.0 -> x86_64-linux-gnu -> gcc, then include/c++/13.
-    physically_resolved = base / "lib" / "gcc" / "include" / "c++" / "13"
+    # extra4 -> extra3 -> extra2 -> extra1 -> 13.2.0, then include-fixed.
+    physically_resolved = (
+        base / "lib" / "gcc" / "x86_64-linux-gnu" / "13.2.0" / "include-fixed"
+    )
     physically_resolved.mkdir(parents=True)
 
-    reported = str(symlinked_ver / ".." / ".." / ".." / ".." / "include" / "c++" / "13")
+    reported = str(symlinked_ver / ".." / ".." / ".." / ".." / "include-fixed")
     # Sanity check the fixture actually exercises the symlink hazard: lexical
     # normpath must disagree with realpath, or this test proves nothing.
     assert os.path.normpath(reported) != os.path.realpath(reported)
     assert os.path.realpath(reported) == str(physically_resolved)
+    assert dumper_sysinc._is_gnu_compiler_resource_dir(reported) is False
+    assert (
+        dumper_sysinc._is_gnu_compiler_resource_dir(os.path.realpath(reported)) is True
+    )
 
     class _P:
         stderr = "ignored"
@@ -613,6 +642,50 @@ def test_probe_gnu_system_includes_drops_terminal_symlinked_resource_dir(
     # This is GCC's own named resource dir regardless of where it's
     # symlinked to -- must be dropped, not kept.
     assert out == []
+
+
+def test_probe_gnu_system_includes_keeps_libstdcxx_symlinked_under_lib_gcc(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Codex review (PR #643, round 3): a real libstdc++ dir reported by a
+    # plain, no-'..' path (no lib/gcc trace at all in the raw string) can be
+    # a symlink whose *target* happens to be physically stored underneath a
+    # lib/gcc/<triple>/<ver> tree -- e.g. a distro nesting real std:: headers
+    # inside its GCC install rather than GCC's own intrinsics dir. Before the
+    # round-3 shape fix, realpath(d) would see the lib/gcc pair anywhere in
+    # that resolved path and wrongly drop this real libstdc++ dir; the
+    # trailing shape must be checked precisely (ends in a bare
+    # include/include-fixed after exactly <triple>/<ver>, not merely
+    # "somewhere under lib/gcc").
+    from abicheck import dumper_sysinc
+
+    base = tmp_path / "base"
+    real_target = (
+        base / "opt" / "lib" / "gcc" / "toolchain" / "13" / "include" / "c++" / "13"
+    )
+    real_target.mkdir(parents=True)
+    reported_dir = base / "opt" / "include" / "c++" / "13"
+    reported_dir.parent.mkdir(parents=True)
+    reported_dir.symlink_to(real_target, target_is_directory=True)
+
+    reported = str(reported_dir)
+    # Sanity check the fixture actually exercises the hazard: the realpath
+    # does sit under a lib/gcc tree, but not in the exact resource shape.
+    assert dumper_sysinc._is_gnu_compiler_resource_dir(reported) is False
+    assert (
+        dumper_sysinc._is_gnu_compiler_resource_dir(os.path.realpath(reported)) is False
+    )
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc, "_parse_gnu_include_search_dirs", lambda s: [reported]
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    # A real libstdc++ dir -- must be kept, not dropped.
+    assert out == [reported]
 
 
 def test_buildconfig_compile_frontend_case_insensitive() -> None:
