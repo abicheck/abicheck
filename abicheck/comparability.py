@@ -504,7 +504,6 @@ def manifest_tu_scope_field(dump_manifest: Any) -> str:
     type hint (this module has no other reason to depend on it); only
     ``.base_dir``/``.translation_units`` are read, structurally.
     """
-    base = _resolved(dump_manifest.base_dir)
     # The literal, UN-resolved base_dir string -- dump_manifest.py's own
     # _resolve_path() builds every relative-in-YAML path as exactly
     # `base_dir / raw`, so its str() always carries this exact prefix
@@ -538,8 +537,21 @@ def manifest_tu_scope_field(dump_manifest: Any) -> str:
             # differently. Keep it as the resolved absolute path instead,
             # which is already checkout-depth-independent by construction.
             return str(_resolved(p))
+        # Lexical normalization only (os.path.normpath), never real
+        # filesystem resolution: a relative-declared path whose lexical
+        # structure crosses a symlink (e.g. a checkout-local `vendor ->
+        # /opt/sdk`, or that symlink's real target being relocated/
+        # versioned per checkout) must not have the symlink followed
+        # before computing the relative form -- two checkouts declaring
+        # the identical `vendor/api.h` must fingerprint identically
+        # regardless of what `vendor` actually resolves to on either
+        # host. `.resolve()` follows symlinks as well as collapsing
+        # `..`/`.`; `os.path.normpath` collapses `..`/`.` purely
+        # lexically, with no filesystem access at all (Codex review).
         try:
-            return os.path.relpath(_resolved(p), base)
+            return os.path.relpath(
+                os.path.normpath(p_str), os.path.normpath(_base_dir_str)
+            )
         except ValueError:
             return str(_resolved(p))
 

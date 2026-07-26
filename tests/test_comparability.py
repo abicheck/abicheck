@@ -1316,6 +1316,39 @@ def test_manifest_scope_fingerprint_matches_across_mount_points(tmp_path):
     assert old_c.scope_fingerprint == new_c.scope_fingerprint
 
 
+def test_manifest_scope_fingerprint_ignores_symlink_target_and_checkout_depth(
+    tmp_path,
+):
+    # Codex review, PR #636: a relative-declared manifest path that
+    # traverses a symlink (e.g. a checkout-local `vendor -> /opt/sdk`) must
+    # not have that symlink followed before computing the relative form --
+    # .resolve() would climb a `../` distance to the symlink's REAL target
+    # that depends on how deeply THIS checkout happens to be nested, even
+    # though the manifest itself only ever declares the lexical `vendor`.
+    sdk_target = tmp_path / "sdk"
+    sdk_target.mkdir()
+    body = (
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [vendor]\n"
+    )
+    shallow_base = tmp_path / "checkout1" / "manifest_dir"
+    deep_base = tmp_path / "checkout2" / "nested" / "much" / "deeper" / "manifest_dir"
+    shallow_base.mkdir(parents=True)
+    deep_base.mkdir(parents=True)
+    (shallow_base / "vendor").symlink_to(sdk_target, target_is_directory=True)
+    (deep_base / "vendor").symlink_to(sdk_target, target_is_directory=True)
+    shallow = parse_manifest(body, base_dir=shallow_base, source="<shallow>")
+    deep = parse_manifest(body, base_dir=deep_base, source="<deep>")
+    shallow_c = compute_extraction_contract(
+        declared_headers=list(shallow.roots),
+        manifest_tu_scope=manifest_tu_scope_field(shallow),
+    )
+    deep_c = compute_extraction_contract(
+        declared_headers=list(deep.roots), manifest_tu_scope=manifest_tu_scope_field(deep)
+    )
+    assert shallow_c.scope_fingerprint == deep_c.scope_fingerprint
+
+
 def test_manifest_scope_fingerprint_external_absolute_path_ignores_checkout_depth(
     tmp_path,
 ):
