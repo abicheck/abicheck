@@ -164,7 +164,14 @@ duplication, not a structural ownership conflict):
   manual (non-generated) pages — usually a sign one of them should be a
   summary-with-link instead of a second explanation;
 - a page other than a `terminology.yaml` term's registered `canonical_page`
-  appearing to define that term itself (see "Terminology registry" below).
+  appearing to define that term itself (see "Terminology registry" below);
+- a manual, non-generated page (outside `contribute/adr/`, `contribute/plans/`,
+  `contribute/archive/`, and pages with `lifecycle: migration`/`historical`
+  front matter — all inherently historical/planning records) containing an
+  in-progress status phrase such as "being updated in parallel", "currently
+  being implemented", "work in progress", or `TBD`/`TODO:` — this class of
+  claim is true only until the described work ships, then goes stale with
+  nothing else to catch it; a hit needs a human read, not an automatic fix.
 
 ## Terminology registry
 

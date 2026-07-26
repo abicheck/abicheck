@@ -1360,3 +1360,73 @@ def test_check_duplicate_term_definitions_ignores_mere_mention(
     terms = {"ABI": {"canonical_page": "owner.md", "short_definition": "x"}}
     dc._check_duplicate_term_definitions(f, terms)
     assert f.warnings == []
+
+
+def test_stale_process_language_flags_in_progress_claim(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "page.md").write_text(
+        "# Page\n\nSee [Foo](foo.md) (being updated in parallel).\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_stale_process_language(f)
+    assert len(f.warnings) == 1
+    assert "page.md" in f.warnings[0][1]
+    assert "being updated in parallel" in f.warnings[0][1]
+
+
+def test_stale_process_language_ignores_ordinary_temporary_usage(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """'temporary' alone is ordinary technical vocabulary ('temporary
+    directory', 'temporary override') -- only whole-phrase patterns fire, so
+    routine usage is never flagged."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "page.md").write_text(
+        "# Page\n\nWrites output to a temporary directory before the "
+        "temporary override is applied.\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_stale_process_language(f)
+    assert f.warnings == []
+
+
+def test_stale_process_language_ignores_code_fences(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "page.md").write_text(
+        "# Page\n\n```text\n# TODO: this is illustrative example text\n```\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_stale_process_language(f)
+    assert f.warnings == []
+
+
+def test_stale_process_language_exempts_adr_and_plans_trees(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "contribute" / "adr").mkdir(parents=True)
+    (tmp_path / "contribute" / "adr" / "001-x.md").write_text(
+        "# ADR\n\nThis was TBD at the time of writing.\n", encoding="utf-8"
+    )
+    f = dc.Findings()
+    dc._check_stale_process_language(f)
+    assert f.warnings == []
+
+
+def test_stale_process_language_exempts_migration_lifecycle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "page.md").write_text(
+        "---\nlifecycle: migration\n---\n\n# Page\n\nTBD.\n", encoding="utf-8"
+    )
+    f = dc.Findings()
+    dc._check_stale_process_language(f)
+    assert f.warnings == []
