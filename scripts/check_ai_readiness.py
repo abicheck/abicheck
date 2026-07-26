@@ -702,7 +702,7 @@ def check_doc_count_sync(f: Findings) -> None:
             r"## Full-catalog benchmark \([^,]+, all (\d+) cases\)",
         ),
         (
-            DOCS / "getting-started.md",
+            DOCS / "start" / "first-check.md",
             "catalog size",
             n_catalog,
             r"repo includes (\d+) ABI scenario examples",

@@ -426,7 +426,9 @@ inputs:
       whatever's currently default; Linux-only, no clang, no bear),
       'conda-forge-clang20' (castxml + clang/clang++ 20.x instead of gcc —
       the one conda-forge source that provides clang, needed for L4 source-ABI
-      replay and L5 source graphs; Linux/macOS, no bear), 'system' (apt/Homebrew
+      replay and the clang-backed call/type/include-graph edges of L5 (the
+      structural L5 source graph itself still builds from L3 build evidence
+      alone, without clang); Linux/macOS, no bear), 'system' (apt/Homebrew
       + the pinned CastXML Superbuild — the previous default, still available;
       installs bear on Linux only — the macOS path installs only castxml via
       Homebrew and relies on Xcode's preinstalled clang, no bear), or 'none'

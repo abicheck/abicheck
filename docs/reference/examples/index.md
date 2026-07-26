@@ -127,16 +127,16 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case72_covariant_return_changed](case72_covariant_return_changed.md) | Covariant Return Type Changed | 🔴 BREAKING | Breaking |
 | [case73_typedef_underlying_changed](case73_typedef_underlying_changed.md) | Typedef Underlying Type Changed | 🔴 BREAKING | Breaking |
 | [case74_detail_base_class_changed](case74_detail_base_class_changed.md) | Internal `detail::` base class layout change leaks via public API | 🔴 BREAKING | Breaking |
-| [case75_detail_embedded_by_value](case75_detail_embedded_by_value.md) | Internal `detail::` impl struct embedded by value | 🔴 BREAKING | Breaking |
-| [case76_detail_pimpl_vtable_changed](case76_detail_pimpl_vtable_changed.md) | Internal `detail::` polymorphic base vtable change | 🔴 BREAKING | Breaking |
-| [case77_detail_templated_base_changed](case77_detail_templated_base_changed.md) | Internal `detail::` *templated* base class layout change | 🔴 BREAKING | Breaking |
-| [case78_task_arena_attach_tag](case78_task_arena_attach_tag.md) | task_arena::attach Tag Type Replaces Enum | 🔴 BREAKING | Breaking |
-| [case79_missing_template_instantiation](case79_missing_template_instantiation.md) | Missing template instantiation in shipped binary | 🔴 BREAKING | Breaking |
-| [case80_pimpl_shared_to_unique](case80_pimpl_shared_to_unique.md) | Pimpl alias changed from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
-| [case81_serialization_tag_reassigned](case81_serialization_tag_reassigned.md) | Serialization tag ID reassigned | 🔴 BREAKING | Breaking |
-| [case82_sycl_overload_set_removed](case82_sycl_overload_set_removed.md) | SYCL overload set removed (DPC++ build withdrawn) | 🔴 BREAKING | Breaking |
+| [case75_detail_embedded_by_value](case75_detail_embedded_by_value.md) | Internal `detail::` Struct Embedded by Value | 🔴 BREAKING | Breaking |
+| [case76_detail_pimpl_vtable_changed](case76_detail_pimpl_vtable_changed.md) | Internal `detail::` Polymorphic Base Vtable Change | 🔴 BREAKING | Breaking |
+| [case77_detail_templated_base_changed](case77_detail_templated_base_changed.md) | Internal `detail::` Templated Base Class Layout Change | 🔴 BREAKING | Breaking |
+| [case78_task_arena_attach_tag](case78_task_arena_attach_tag.md) | `task_arena::attach` Tag Type Replaces Enum | 🔴 BREAKING | Breaking |
+| [case79_missing_template_instantiation](case79_missing_template_instantiation.md) | Missing Template Instantiation in Shipped Binary | 🔴 BREAKING | Breaking |
+| [case80_pimpl_shared_to_unique](case80_pimpl_shared_to_unique.md) | Pimpl Alias Switched from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
+| [case81_serialization_tag_reassigned](case81_serialization_tag_reassigned.md) | Serialization Tag ID Reassigned | 🔴 BREAKING | Breaking |
+| [case82_sycl_overload_set_removed](case82_sycl_overload_set_removed.md) | SYCL Overload Set Removed (DPC++ Build Withdrawn) | 🔴 BREAKING | Breaking |
 | [case83_cpu_dispatch_isa_dropped](case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case85_internal_template_signature_changed](case85_internal_template_signature_changed.md) | internal function-template signature leaks via public API (BREAKING) | 🔴 BREAKING | Breaking |
+| [case85_internal_template_signature_changed](case85_internal_template_signature_changed.md) | Internal Template Signature Changed | 🔴 BREAKING | Breaking |
 | [case86_tag_struct_renamed](case86_tag_struct_renamed.md) | Tag struct renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |
 | [case87_default_template_arg_changed](case87_default_template_arg_changed.md) | Default template argument changed | 🔴 BREAKING | Breaking |
 | [case88_cpo_kind_changed](case88_cpo_kind_changed.md) | CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
@@ -144,8 +144,8 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case94_empty_tag_gained_state](case94_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |
 | [case95_allocator_nested_typedef_removed](case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
 | [case96_hidden_friend_removed](case96_hidden_friend_removed.md) | Hidden Friend Operator Removed | 🟠 API_BREAK | API Break |
-| [case97_api_depends_on_consumer_env](case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🔴 BREAKING | Breaking |
-| [case98_cxx_standard_floor_raised](case98_cxx_standard_floor_raised.md) | C++ standard floor raised (build-context risk) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case97_api_depends_on_consumer_env](case97_api_depends_on_consumer_env.md) | API Depends on Consumer Environment | 🔴 BREAKING | Breaking |
+| [case98_cxx_standard_floor_raised](case98_cxx_standard_floor_raised.md) | C++ Standard Floor Raised | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case99_experimental_graduated](case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case100_experimental_removed_without_replacement](case100_experimental_removed_without_replacement.md) | experimental:: removed without replacement (API break) | 🔴 BREAKING | Breaking |
 | [case101_inline_namespace_version_bumped](case101_inline_namespace_version_bumped.md) | inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |

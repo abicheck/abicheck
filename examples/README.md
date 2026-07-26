@@ -334,17 +334,17 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [72](case72_covariant_return_changed/README.md) | Covariant Return Type Changed | Breaking | 🔴 BREAKING |
 | [73](case73_typedef_underlying_changed/README.md) | Typedef Underlying Type Changed | Breaking | 🔴 BREAKING |
 | [74](case74_detail_base_class_changed/README.md) | Internal `detail::` base class layout change leaks via public API | Breaking | 🔴 BREAKING |
-| [75](case75_detail_embedded_by_value/README.md) | Internal `detail::` impl struct embedded by value | Breaking | 🔴 BREAKING |
-| [76](case76_detail_pimpl_vtable_changed/README.md) | Internal `detail::` polymorphic base vtable change | Breaking | 🔴 BREAKING |
-| [77](case77_detail_templated_base_changed/README.md) | Internal `detail::` *templated* base class layout change | Breaking | 🔴 BREAKING |
-| [78](case78_task_arena_attach_tag/README.md) | task_arena::attach Tag Type Replaces Enum | Breaking | 🔴 BREAKING |
-| [79](case79_missing_template_instantiation/README.md) | Missing template instantiation in shipped binary | Breaking | 🔴 BREAKING |
-| [80](case80_pimpl_shared_to_unique/README.md) | Pimpl alias changed from `shared_ptr` to `unique_ptr` | Breaking | 🔴 BREAKING |
-| [81](case81_serialization_tag_reassigned/README.md) | Serialization tag ID reassigned | Breaking | 🔴 BREAKING |
-| [82](case82_sycl_overload_set_removed/README.md) | SYCL overload set removed (DPC++ build withdrawn) | Breaking | 🔴 BREAKING |
+| [75](case75_detail_embedded_by_value/README.md) | Internal `detail::` Struct Embedded by Value | Breaking | 🔴 BREAKING |
+| [76](case76_detail_pimpl_vtable_changed/README.md) | Internal `detail::` Polymorphic Base Vtable Change | Breaking | 🔴 BREAKING |
+| [77](case77_detail_templated_base_changed/README.md) | Internal `detail::` Templated Base Class Layout Change | Breaking | 🔴 BREAKING |
+| [78](case78_task_arena_attach_tag/README.md) | `task_arena::attach` Tag Type Replaces Enum | Breaking | 🔴 BREAKING |
+| [79](case79_missing_template_instantiation/README.md) | Missing Template Instantiation in Shipped Binary | Breaking | 🔴 BREAKING |
+| [80](case80_pimpl_shared_to_unique/README.md) | Pimpl Alias Switched from `shared_ptr` to `unique_ptr` | Breaking | 🔴 BREAKING |
+| [81](case81_serialization_tag_reassigned/README.md) | Serialization Tag ID Reassigned | Breaking | 🔴 BREAKING |
+| [82](case82_sycl_overload_set_removed/README.md) | SYCL Overload Set Removed (DPC++ Build Withdrawn) | Breaking | 🔴 BREAKING |
 | [83](case83_cpu_dispatch_isa_dropped/README.md) | CPU-dispatch ISA family dropped | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [84](case84_bundle_soname_skew/README.md) | Multi-library bundle SONAME skew | Bundle | 🔵 BUNDLE (bad practice) |
-| [85](case85_internal_template_signature_changed/README.md) | internal function-template signature leaks via public API (BREAKING) | Breaking | 🔴 BREAKING |
+| [85](case85_internal_template_signature_changed/README.md) | Internal Template Signature Changed | Breaking | 🔴 BREAKING |
 | [86](case86_tag_struct_renamed/README.md) | Tag struct renamed (empty class re-mangling) | Breaking | 🔴 BREAKING |
 | [87](case87_default_template_arg_changed/README.md) | Default template argument changed | Breaking | 🔴 BREAKING |
 | [88](case88_cpo_kind_changed/README.md) | CPO kind changed (BREAKING) | Breaking | 🔴 BREAKING |
@@ -356,8 +356,8 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [94](case94_empty_tag_gained_state/README.md) | Empty Tag Gained State | Breaking | 🔴 BREAKING |
 | [95](case95_allocator_nested_typedef_removed/README.md) | Allocator Nested-Typedef Removed | Breaking | 🔴 BREAKING |
 | [96](case96_hidden_friend_removed/README.md) | Hidden Friend Operator Removed | API Break | 🟠 API_BREAK |
-| [97](case97_api_depends_on_consumer_env/README.md) | public API depends on consumer build environment (RISK) | Breaking | 🔴 BREAKING |
-| [98](case98_cxx_standard_floor_raised/README.md) | C++ standard floor raised (build-context risk) | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [97](case97_api_depends_on_consumer_env/README.md) | API Depends on Consumer Environment | Breaking | 🔴 BREAKING |
+| [98](case98_cxx_standard_floor_raised/README.md) | C++ Standard Floor Raised | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [99](case99_experimental_graduated/README.md) | experimental → stable graduation (compatible) | Addition | 🟢 COMPATIBLE |
 | [100](case100_experimental_removed_without_replacement/README.md) | experimental:: removed without replacement (API break) | Breaking | 🔴 BREAKING |
 | [101](case101_inline_namespace_version_bumped/README.md) | inline namespace version bumped (BREAKING) | Breaking | 🔴 BREAKING |

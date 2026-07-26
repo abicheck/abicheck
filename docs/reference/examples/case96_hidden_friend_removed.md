@@ -12,90 +12,112 @@
 
 **Category:** Source API contract | **Verdict:** 🟠 API_BREAK
 
-## What breaks
+## Verdict and consumer impact
 
-A non-member operator (`operator==`) was declared as a **hidden friend**
-inside the class body — i.e. as an in-class `friend` declaration with an
-inline definition. Hidden friends are findable only via [argument-dependent
-lookup (ADL)](https://en.cppreference.com/w/cpp/language/adl); they have
-no namespace-scope declaration that consumers can name. When the
-declaration is removed in v2, every consumer that wrote `a == b` against
-v1's header fails to compile against v2's. The library's `.so` is byte-
-identical (the inline friend never had a public symbol to remove), so the
-break is invisible to any binary-only diff tool.
+A non-member `operator==` was declared as a **hidden friend** — an in-class
+`friend` declaration with an inline definition, findable only via
+[argument-dependent lookup (ADL)](https://en.cppreference.com/w/cpp/language/adl).
+v2 removes the declaration. The library's `.so` is byte-identical (the
+inline friend never had an external symbol), so nothing breaks at link
+time — but every consumer that wrote `a == b` against v1's header fails to
+*compile* against v2's, because ADL no longer finds a viable `operator==`
+on `mylib::point`. Recompilation is not merely required, it's impossible
+without a source change at the call site.
 
-## Why this is a breaking change
+## Old/new diff
 
-Hidden friends are the idiomatic C++17+ way to declare ADL-only
-operators on a type (`operator==`, `operator<<`, `swap`, etc.) without
-polluting the surrounding namespace — an idiom used widely across C++
-libraries (for example oneTBB, oneDAL, Boost, and the standard library).
-Removing one looks like a
-"cosmetic header cleanup" that the maintainer believes is binary-safe —
-which it *is*, at the link layer. It's the source-recompile that explodes.
+| v1.h | v2.h |
+|------|------|
+| `friend bool operator==(const point& a, const point& b) { ... }` inside `point` | *(removed — no `operator==` at all)* |
 
-## How abicheck catches it
-
-New ChangeKind `HIDDEN_FRIEND_REMOVED` (API_BREAK). The dumper reads
-castxml's `befriending` attribute on the `Class` / `Struct` element —
-a whitespace-separated list of ids that point to the function elements
-that were declared as in-class `friend`. Each such function is marked
-`is_hidden_friend=True` in the snapshot. The diff scans for hidden
-friends present in v1 but absent in v2 and emits HIDDEN_FRIEND_REMOVED.
-
-The symmetric kind `HIDDEN_FRIEND_ADDED` is COMPATIBLE (pure addition;
-existing code keeps compiling, new operator only participates at call
-sites that trigger ADL).
-
-### Complementary findings on out-of-line friends
-
-If the hidden friend was *also* defined out-of-line (so it has a real
-exported symbol), removal additionally fires `FUNC_REMOVED` at the
-binary layer. Both findings are emitted — the API_BREAK reflects the
-source-level ADL break and the BREAKING reflects the link-level break.
-
-### Tri-state on `is_hidden_friend`
-
-DWARF-only snapshots and any snapshot produced by a dumper that predates
-this field set `is_hidden_friend=None`. The transition detector (in
-`_check_function_signature`) skips when either side is None, mirroring
-the explicit-ctor detector's handling of schema evolution.
-
-## Code diff
-
-| v1 | v2 |
-|----|------|
-| `friend bool operator==(...) { ... }` inside `point` | declaration removed |
-| `Class befriending="_34"` in castxml output | `befriending` attribute absent |
-| `a == b` compiles for any consumer | `a == b` fails to compile |
-
-## Real Failure Demo
-
-**Severity: API BREAK** (source-only — binaries keep linking)
+## abicheck command
 
 ```bash
-# v1 header, v1 .so: compiles and runs.
-g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
-./app   # → a == b → true (expect true)
-
-# v2 header, v2 .so: app.cpp does `bool eq = (a == b);`, which
-# resolves via ADL to the hidden friend `operator==` of `mylib::point`.
-# v2 removes the friend declaration; ADL has nothing to find, so the
-# same app.cpp source line no longer compiles:
-g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
-# → error: no match for 'operator==' (operand types are 'mylib::point'
-#          and 'mylib::point')
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libmylib_v1.so
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libmylib_v2.so
+abicheck compare libmylib_v1.so libmylib_v2.so \
+  --header old=v1.h --header new=v2.h --ast-frontend clang
 ```
 
-## How to fix
+## Expected abicheck finding
 
-- Keep the hidden friend (preferred) — it's an ADL contract that
-  downstream code relies on.
-- If you genuinely need to remove it, ship a deprecation cycle:
-  inline-define it to call a new explicit comparator (`equals(a, b)`)
-  for one release, then remove.
+```text
+Verdict: API_BREAK (exit 2)
+
+## Source-Level Breaks
+
+- hidden_friend_removed: Hidden friend declaration removed: operator==
+  > An in-class `friend` declaration (a 'hidden friend' — findable only
+    via ADL on one of its argument types) was removed. Inline hidden
+    friends never receive an external symbol, so the break is invisible
+    at the binary layer, but every consumer that wrote `a == b` fails to
+    compile against the new headers.
+```
+
+## Minimum evidence
+
+`min_evidence: L2` — the removed declaration never had an external symbol
+(it's an inline hidden friend), so neither the symbol table (L0) nor DWARF
+(L1) shows any difference between v1 and v2. Only the public-header AST
+records that `point` no longer befriends an `operator==`; castxml is the
+documented default AST backend for this (`--ast-frontend clang` is a
+supported alternative, used here since castxml isn't installed in this
+environment).
+
+## Why abicheck catches it
+
+The header-AST dumper reads castxml's (or, here, clang's) `befriending`
+attribute on the `Class`/`Struct` element — a list of function elements
+declared as in-class `friend`. Each is marked `is_hidden_friend=True` in
+the snapshot; the diff reports `hidden_friend_removed` for any hidden
+friend present in v1's header AST and absent from v2's.
+
+## Runtime failure demonstration
+
+**Severity: API BREAK** (source-only — the binaries themselves keep linking)
+
+```bash
+# Compile the consumer against v1's header — succeeds and runs.
+g++ -std=c++17 -I. app.cpp -L. -lmylib_v1 -Wl,-rpath,. -o app_v1
+./app_v1
+# → a == b → true (expect true)
+
+# Swap in v2's header (the same app.cpp source, no other change) — fails to compile:
+g++ -std=c++17 -I. app.cpp -L. -lmylib_v2 -Wl,-rpath,. -o app_v2
+# → app.cpp:19:18: error: no match for 'operator==' (operand types are
+#     'mylib::point' and 'mylib::point')
+```
+
+**Why API_BREAK not BREAKING:** there is no symbol to remove and no binary
+to relink — the `.so` files are layout-equivalent. The break is entirely at
+the source layer: `a == b` has no viable overload once the hidden friend
+declaration disappears, so the consumer cannot even be recompiled without
+editing the call site.
+
+## Safe redesign
+
+- Keep the hidden friend (preferred) — it's an ADL contract downstream code
+  relies on.
+- If it genuinely must go, ship a deprecation cycle: keep the inline friend
+  calling a new explicit comparator (`equals(a, b)`) for one release, then
+  remove.
 - Provide a free function at namespace scope as a migration path:
-  `bool operator==(const point&, const point&);` outside the class.
+  `bool operator==(const point&, const point&);` declared outside the class.
+
+**Real-world example:** the hidden-friend idiom is used widely for
+ADL-only operators (`operator==`, `operator<<`, `swap`) across C++
+libraries — oneTBB, oneDAL, Boost, and the standard library all rely on
+it to avoid polluting the surrounding namespace. Removing one during a
+"header cleanup" looks binary-safe (and is, at the link layer) but breaks
+every consumer's next rebuild.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` compare binaries (with optional DWARF);
+neither reads the header AST for in-class `friend` declarations, so both
+report **no change** here — the `.so` files really are layout-identical.
+This case is a pure header/API-contract break, which only an L2
+(header-aware) tool can see at all.
 
 ## References
 
