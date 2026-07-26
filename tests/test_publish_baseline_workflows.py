@@ -353,11 +353,14 @@ class TestAcceptedMainCacheKeyRotation:
 
 class TestBaselineLibrariesDerivation:
     """Both workflows derive actions/baseline's `libraries` input from
-    build-output.json via the same CLI command -- never a separate
+    build-output.json via the same library function call -- never a separate
     .abicheck.yml read (abicheck.buildsource.baseline_publish's own module
-    docstring)."""
+    docstring). Not a CLI command (ADR-054): `build-output baseline-libraries`
+    was a wire-format adapter for exactly this call site, not general
+    project-integration CLI surface, so both workflows call
+    `derive_baseline_libraries()` directly via `python3 -c`."""
 
-    def test_publish_baseline_calls_the_cli_command(self) -> None:
+    def test_publish_baseline_calls_the_library_function(self) -> None:
         data = _load(PUBLISH_BASELINE)
         steps = _steps(data["jobs"]["publish"])
         step = next(
@@ -365,9 +368,10 @@ class TestBaselineLibrariesDerivation:
             for s in steps
             if s.get("name") == "Derive baseline libraries from build-output.json"
         )
-        assert "abicheck build-output baseline-libraries" in step["run"]
+        assert "derive_baseline_libraries" in step["run"]
+        assert "abicheck build-output" not in step["run"]
 
-    def test_update_main_baseline_calls_the_cli_command(self) -> None:
+    def test_update_main_baseline_calls_the_library_function(self) -> None:
         data = _load(UPDATE_MAIN_BASELINE)
         steps = _steps(data["jobs"]["refresh"])
         step = next(
@@ -375,7 +379,8 @@ class TestBaselineLibrariesDerivation:
             for s in steps
             if s.get("name") == "Derive baseline libraries from build-output.json"
         )
-        assert "abicheck build-output baseline-libraries" in step["run"]
+        assert "derive_baseline_libraries" in step["run"]
+        assert "abicheck build-output" not in step["run"]
 
     def test_libraries_output_feeds_the_baseline_action_input(self) -> None:
         for path, job_name in (

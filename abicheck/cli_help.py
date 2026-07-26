@@ -59,7 +59,11 @@ _ROOT_COMMAND_PANELS: list[dict[str, object]] = [
     {"name": "Core analysis", "commands": ["dump", "compare", "scan", "deps"]},
     {
         "name": "Workflow composition",
-        "commands": ["aggregate", "build-output"],
+        "commands": ["aggregate"],
+    },
+    {
+        "name": "Project integration (advanced)",
+        "commands": ["project"],
     },
     {"name": "Legacy compatibility", "commands": ["compat"]},
 ]

@@ -351,7 +351,58 @@ split-out module over growing the parent toward the cap.
 
 ### Adding a new top-level command
 
-Pick the right home:
+**First, ask whether it should be a *root* command at all (ADR-043/ADR-054).**
+The public root surface is exactly `dump`, `compare`, `scan`, `deps`, `compat`,
+`aggregate`, `project` — and `tests/test_cli_root_surface.py` pins that set as
+an executable contract, so a new root registration fails CI until the test is
+updated too. Before adding one, a new root command must clear **every** one of
+these (ADR-054's admission bar — the same review that consolidated four
+G30/ADR-047 root groups, one added per artifact, back into the single
+`project` group below):
+
+1. It answers a stable, user-facing question — not "here is JSON artifact X,
+   let me expose the function that reads/writes it."
+2. Its operand is a domain object a user already thinks in terms of (a
+   binary, a set of reports, a project config) — not an internal pipeline
+   transport format (a manifest, a projection of another artifact).
+3. It is useful outside one specific CI Action's wire format. A command whose
+   whole job is "shape this JSON exactly how `actions/foo`'s one input
+   expects it" is a library function that Action/workflow calls directly
+   (`python3 -c "from abicheck.x import y; ..."`), not CLI surface — see
+   `abicheck/buildsource/baseline_publish.py`'s `derive_baseline_libraries()`
+   for the pattern (used by `publish-baseline.yml`/`update-main-baseline.yml`,
+   never a CLI command).
+4. It doesn't already fit naturally as an option or subcommand of an existing
+   durable operation (`--dry-run`, a new `<verb> <noun>` subcommand under an
+   existing group) — a second, parallel "preflight" vocabulary next to an
+   already-established one (`dump --dry-run`) is exactly the drift ADR-050's
+   `plan --dump-manifest` command caused before ADR-054 folded it back into
+   `dump --dump-manifest --dry-run`.
+5. It has a real, validated usage scenario beyond the PR that introduced it —
+   not just "this pipeline stage produces an artifact, so it should be
+   inspectable."
+6. Landing it means updating `tests/test_cli_root_surface.py`, this file,
+   `README.md`, and `docs/reference/cli-reference.md`
+   (`python scripts/gen_cli_reference.py`) in the *same* PR — a root surface
+   change with only the test updated (or only the code) is how ADR-043's
+   "nothing else is registered" invariant drifted from the actual command set
+   before (the CLI carried ten root commands while `README.md` still said
+   six).
+
+**If it's advanced multi-target/CI-integration surface that fails the "user
+already thinks in terms of this operand" bar (#2) on its own** — validating a
+project's `.abicheck.yml`, a `build-output.json`, or generating a run-plan —
+it almost certainly belongs as a new subcommand of the existing `project`
+group (`abicheck/cli_project.py`), not a new root command. `project` exists
+precisely to hold this class of operation: `project validate`,
+`project validate-build`, `project plan` are all "read one project-integration
+artifact, report on it" operations that share one advanced/opt-in namespace
+instead of each claiming root. Add `@project_group.command("your-verb")`
+there and extend `tests/test_cli_root_surface.py`'s existing assertions
+(which don't need to change, since `project`'s subcommand set isn't pinned
+the way the root set is) plus a `TestProjectYourVerbCli`-shaped test class.
+
+Once a root command genuinely clears the bar above, pick the right home:
 
 - **Small command (one function, no significant helpers)** — add to `cli.py` directly with `@main.command(...)`.
 - **Larger command or command group** — add as a sibling `abicheck/cli_<name>.py` module:

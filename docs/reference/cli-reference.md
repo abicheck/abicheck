@@ -27,6 +27,7 @@ Aggregate per-target ABI reports in REPORTS_DIR into one CI gate verdict.
 | Option | Required | Default | Description |
 |---|:--:|---|---|
 | `--manifest` | no | — | Expected-target manifest (JSON: {"targets": [{"id", "required"}]}). The single source of truth for which targets the matrix must produce — generate it in the plan job and feed the same file to both the matrix and this gate so they never drift. |
+| `--run-plan` | no | — | A project run-plan.json (from `abicheck project plan`), projected to the expected-target manifest shape internally -- an alternative to --manifest that skips the separate projection step. Each check's own check\_id becomes the expected target id, matching what `check-target` writes as every report's target\_id. |
 | `--expect` | no | — | Required target id(s), as an alternative to --manifest (repeatable / comma-separated). A required target with no report is unavailable and fails the coverage gate — never treated as compatible. |
 | `--optional` | no | — | Optional target id(s) (used with --expect): analyzed when present, but a missing one never fails the coverage gate. |
 | `--discovered-only` | no | `False` | Explicitly aggregate whatever reports are present, with NO coverage gate. Required to run without a manifest/--expect — because with no declared target set the gate cannot tell a missing required target from an intentionally absent one. |
@@ -34,46 +35,6 @@ Aggregate per-target ABI reports in REPORTS_DIR into one CI gate verdict.
 | `--on-missing-required` | no | `fail` | How an unavailable required target affects the exit code: 'fail' makes incomplete required coverage a gate failure (exit 1); 'warn' reports the gap but lets the per-target gate decisions alone decide. Choices: `fail`, `warn`. |
 | `--on-unexpected-target` | no | `include` | How a report for a target not in the expected set is handled: 'include' counts its real findings in the gate (but not in coverage); 'warn' surfaces it without gating; 'fail' fails the gate on any such target; 'ignore' drops it. Choices: `include`, `warn`, `fail`, `ignore`. |
 | `--format` | no | `text` | Output format for the aggregated result. Choices: `text`, `json`. |
-| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
-| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
-
-## `build-output`
-
-Validate a project-produced ``abicheck-build/`` directory.
-
-### `build-output baseline-libraries`
-
-Derive actions/baseline's ``libraries`` JSON input from DIRECTORY's build-output.json (G30 P1.6, ADR-047 §6/§8 S14 correction).
-
-**Arguments**
-
-| Name | Required | Description |
-|---|:--:|---|
-| `directory` | yes |  |
-
-**Options**
-
-| Option | Required | Default | Description |
-|---|:--:|---|---|
-| `--format` | no | `json` | Output format (json only today). Choices: `json`. |
-| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
-| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
-
-### `build-output validate`
-
-Validate DIRECTORY's build-output.json (ADR-047 §11.1).
-
-**Arguments**
-
-| Name | Required | Description |
-|---|:--:|---|
-| `directory` | yes |  |
-
-**Options**
-
-| Option | Required | Default | Description |
-|---|:--:|---|---|
-| `--format` | no | `text` | Output format for the validation report. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
@@ -360,24 +321,34 @@ Dump ABI snapshot of a shared library to JSON.
 | `--nostdinc`, `--no-nostdinc` | no | `False` | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
 | `--frontend-context` | no | `host` | Which AST context the L2 header frontend should target (ADR-050 D3/D5). Only 'host' is honored so far -- 'device' (e.g. a SYCL/DPC++ offload target) is rejected until the real device selector lands; declared now so a manifest's own frontend\_context field has a matching CLI counterpart for the legacy, non-manifest path. Choices: `host`, `device`. |
 
-## `plan`
+## `project`
 
-Parse and normalize a --dump-manifest document without extracting.
+Advanced multi-target project integration (ADR-047).
+
+### `project plan`
+
+Generate run-plan.json from CONFIG's targets:/bundles:/profiles: block.
+
+**Arguments**
+
+| Name | Required | Description |
+|---|:--:|---|
+| `config` | no |  |
 
 **Options**
 
 | Option | Required | Default | Description |
 |---|:--:|---|---|
-| `--dump-manifest` | yes | — | The --dump-manifest YAML document to parse and normalize. |
-| `--format` | no | `text` | Output format. Choices: `text`, `json`. |
+| `--build-output` | no | — | One contract profile's abicheck-build/ directory (containing build-output.json), as profile\_id=path/to/dir. Repeatable — pass one per profile referenced by CONFIG's checks:. |
+| `--project` | no | `` | Project identifier recorded in run-plan.json, e.g. owner/repo. |
+| `--head-sha` | no | `` | Candidate commit SHA recorded in run-plan.json. |
+| `--toolchain-bindings` | no | — | Path to a trusted toolchain-bindings file (schema abicheck.toolchain-bindings/v1). Every declared profiles.<id>.compile.binding is checked against it (an unresolvable binding is a generation error, same severity as an unresolvable build-output target); each resolved cell's compile\_gcc\_path is populated from it. Omitting this flag skips the check entirely and leaves compile\_gcc\_path empty on every cell — backward compatible, matching `project validate --toolchain-bindings`. |
+| `--allow-empty` | no | `False` | Accept a run-plan that resolves to zero checks (exit 0 instead of 1). Off by default: an empty run-plan silently skips every downstream matrix/aggregate step, so a consumer that doesn't add its own guard would report success having checked nothing. Pass this only for a deliberately empty bootstrap run (e.g. before any targets: are declared yet). |
+| `--format` | no | `json` | Output format for the generated run-plan. Choices: `json`, `text`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
-## `project-targets`
-
-Validate a project's target/bundle/profile/release-channel setup.
-
-### `project-targets validate`
+### `project validate`
 
 Validate CONFIG's targets:/bundles:/profiles:/baseline: block (ADR-047 §3).
 
@@ -396,49 +367,23 @@ Validate CONFIG's targets:/bundles:/profiles:/baseline: block (ADR-047 §3).
 | `--toolchain-bindings` | no | — | Path to a trusted toolchain-bindings file (schema abicheck.toolchain-bindings/v1) to additionally check every declared profiles.<id>.compile.binding against. Loaded only from this explicit path — never auto-discovered, per the untrusted-config trust boundary ProfileCompileSpec.binding documents. |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
-## `run-plan`
+### `project validate-build`
 
-Generate and project the multi-target CI run-plan (ADR-047 §4/§5).
-
-### `run-plan generate`
-
-Generate run-plan.json from CONFIG's targets:/bundles:/profiles: block.
+Validate DIRECTORY's build-output.json (ADR-047 §11.1).
 
 **Arguments**
 
 | Name | Required | Description |
 |---|:--:|---|
-| `config` | no |  |
+| `directory` | yes |  |
 
 **Options**
 
 | Option | Required | Default | Description |
 |---|:--:|---|---|
-| `--build-output` | no | — | One contract profile's abicheck-build/ directory (containing build-output.json), as profile\_id=path/to/dir. Repeatable — pass one per profile referenced by CONFIG's checks:. |
-| `--project` | no | `` | Project identifier recorded in run-plan.json, e.g. owner/repo. |
-| `--head-sha` | no | `` | Candidate commit SHA recorded in run-plan.json. |
-| `--toolchain-bindings` | no | — | Path to a trusted toolchain-bindings file (schema abicheck.toolchain-bindings/v1). Every declared profiles.<id>.compile.binding is checked against it (an unresolvable binding is a generation error, same severity as an unresolvable build-output target); each resolved cell's compile\_gcc\_path is populated from it. Omitting this flag skips the check entirely and leaves compile\_gcc\_path empty on every cell — backward compatible, matching `project-targets validate --toolchain-bindings`. |
-| `--format` | no | `json` | Output format for the generated run-plan. Choices: `json`, `text`. |
+| `--format` | no | `text` | Output format for the validation report. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
-
-### `run-plan to-aggregate-manifest`
-
-Project RUN_PLAN_JSON to `abicheck aggregate --manifest`'s wire shape.
-
-**Arguments**
-
-| Name | Required | Description |
-|---|:--:|---|
-| `run_plan_json` | yes |  |
-
-**Options**
-
-| Option | Required | Default | Description |
-|---|:--:|---|---|
-| `--head-sha` | no | — | Override run-plan.json's own head\_sha in the emitted manifest. |
-| `--format` | no | `json` | Output format for the emitted manifest. Choices: `json`. |
-| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
 
 ## `scan`
 

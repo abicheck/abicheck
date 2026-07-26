@@ -76,6 +76,17 @@ def _split_csv(values: tuple[str, ...]) -> list[str]:
     "this gate so they never drift.",
 )
 @click.option(
+    "--run-plan",
+    "run_plan_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="A project run-plan.json (from `abicheck project plan`), projected "
+    "to the expected-target manifest shape internally -- an alternative to "
+    "--manifest that skips the separate projection step. Each check's own "
+    "check_id becomes the expected target id, matching what `check-target` "
+    "writes as every report's target_id.",
+)
+@click.option(
     "--expect",
     "expect",
     multiple=True,
@@ -137,6 +148,7 @@ def _split_csv(values: tuple[str, ...]) -> list[str]:
 def aggregate_cmd(
     reports_dir: Path,
     manifest: Path | None,
+    run_plan_path: Path | None,
     expect: tuple[str, ...],
     optional: tuple[str, ...],
     discovered_only: bool,
@@ -151,7 +163,8 @@ def aggregate_cmd(
 
     REPORTS_DIR holds the per-target ``compare``/``scan`` JSON reports
     downloaded from the build matrix (one ``abi-report-<target>.json`` per
-    leg). Provide the expected-target set with ``--manifest`` (recommended) or
+    leg). Provide the expected-target set with ``--manifest``, ``--run-plan``
+    (recommended for a `project plan`-driven workflow), or
     ``--expect``/``--optional``; or opt into ``--discovered-only`` to aggregate
     whatever is present with no coverage gate.
 
@@ -163,7 +176,9 @@ def aggregate_cmd(
     """
     _setup_verbosity(verbose)
 
-    expected = _resolve_expected(manifest, expect, optional, discovered_only)
+    expected = _resolve_expected(
+        manifest, run_plan_path, expect, optional, discovered_only
+    )
 
     try:
         result = aggregate_reports_dir(
@@ -192,6 +207,7 @@ def aggregate_cmd(
 
 def _resolve_expected(
     manifest: Path | None,
+    run_plan_path: Path | None,
     expect: tuple[str, ...],
     optional: tuple[str, ...],
     discovered_only: bool,
@@ -199,12 +215,14 @@ def _resolve_expected(
     """Resolve the expected-target set from exactly one source, or usage error.
 
     Precedence is deliberately *exclusive*, not merging: ``--discovered-only``,
-    ``--manifest``, and ``--expect/--optional`` are three distinct ways to say
-    what the target set is, and combining them is ambiguous.
+    ``--manifest``, ``--run-plan``, and ``--expect/--optional`` are four
+    distinct ways to say what the target set is, and combining them is
+    ambiguous.
     """
     expect_list = _split_csv(expect)
     optional_list = _split_csv(optional)
     flags_given = bool(expect_list or optional_list)
+    sources_given = sum([manifest is not None, run_plan_path is not None, flags_given])
 
     if optional_list and not expect_list:
         # --optional is a modifier on --expect (a target set that is all
@@ -213,26 +231,46 @@ def _resolve_expected(
         raise click.UsageError("--optional requires at least one --expect target")
 
     if discovered_only:
-        if manifest is not None or flags_given:
+        if sources_given:
             raise click.UsageError(
-                "--discovered-only cannot be combined with --manifest/--expect/"
-                "--optional"
+                "--discovered-only cannot be combined with --manifest/"
+                "--run-plan/--expect/--optional"
             )
         return None
+    if sources_given > 1:
+        raise click.UsageError(
+            "--manifest, --run-plan, and --expect/--optional are mutually "
+            "exclusive expected-target sources"
+        )
     if manifest is not None:
-        if flags_given:
-            raise click.UsageError(
-                "--manifest cannot be combined with --expect/--optional"
-            )
         try:
             return ExpectedTargets.from_manifest_file(manifest)
         except AggregateError as exc:
             raise click.UsageError(str(exc)) from exc
+    if run_plan_path is not None:
+        from .buildsource.run_plan import RunPlan, to_aggregate_manifest
+
+        try:
+            raw = json.loads(run_plan_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise click.UsageError(f"cannot read {run_plan_path}: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise click.UsageError(f"{run_plan_path} must contain a JSON object.")
+        plan = RunPlan.from_dict(raw)
+        try:
+            return ExpectedTargets.from_manifest_data(to_aggregate_manifest(plan))
+        except AggregateError as exc:
+            raise click.UsageError(
+                f"{run_plan_path}: {exc} — an empty run-plan.json has no "
+                "targets to aggregate; regenerate it with `abicheck project "
+                "plan` (dropping --allow-empty), or aggregate with "
+                "--discovered-only instead"
+            ) from exc
     if flags_given:
         # from_lists only raises on an empty set, which flags_given rules out.
         return ExpectedTargets.from_lists(expect_list, optional_list)
     raise click.UsageError(
-        "no expected-target set: pass --manifest or --expect (the targets the "
-        "matrix must produce), or --discovered-only to aggregate whatever is "
-        "present with no coverage gate"
+        "no expected-target set: pass --manifest, --run-plan, or --expect "
+        "(the targets the matrix must produce), or --discovered-only to "
+        "aggregate whatever is present with no coverage gate"
     )

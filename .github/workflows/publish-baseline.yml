@@ -198,12 +198,30 @@ jobs:
           PROFILE_ID: ${{ matrix.profile_id }}
         run: |
           set -euo pipefail
-          # Deliberately not `set -e`-fatal on this one call: a report with
-          # errors (exit 1) still writes baseline-libraries.json, and the
-          # Python block below reads report['errors'] to print each one as
-          # its own ::error:: annotation -- a bare `set -e` failure here
-          # would only surface a generic non-zero exit with no detail.
-          abicheck build-output baseline-libraries "build-output/${PROFILE_ID}" -o baseline-libraries.json || true
+          # Not a CLI command (ADR-054: `build-output baseline-libraries` was
+          # a wire-format adapter for exactly this one call site, not general
+          # project-integration CLI surface) -- call the library function
+          # directly. Deliberately tolerant of a missing/malformed
+          # build-output.json (writes nothing, same as the former CLI call's
+          # `|| true`): a report with per-target errors still writes
+          # baseline-libraries.json (report['ok'] is False), and the Python
+          # block below reads report['errors'] to print each one as its own
+          # ::error:: annotation either way.
+          python3 -c "
+          import json
+          from pathlib import Path
+
+          from abicheck.buildsource.baseline_publish import derive_baseline_libraries
+          from abicheck.buildsource.build_output import load_build_output
+
+          directory = Path('build-output/${PROFILE_ID}')
+          try:
+              build_output = load_build_output(directory)
+          except (FileNotFoundError, ValueError):
+              raise SystemExit(0)
+          report = derive_baseline_libraries(build_output, directory)
+          Path('baseline-libraries.json').write_text(json.dumps(report.to_dict()))
+          "
           python3 -c "
           import json, sys
 

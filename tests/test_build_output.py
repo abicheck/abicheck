@@ -1271,12 +1271,12 @@ class TestDeclaredEvidenceSharingScope:
 
 
 class TestBuildOutputCLI:
-    """``abicheck build-output validate DIRECTORY`` (G30 P1.1)."""
+    """``abicheck project validate-build DIRECTORY`` (G30 P1.1, ADR-054)."""
 
     def _run(self, args):
         from abicheck.cli import main
 
-        return CliRunner().invoke(main, ["build-output", "validate", *args])
+        return CliRunner().invoke(main, ["project", "validate-build", *args])
 
     def _valid_dir(self, tmp_path: Path) -> Path:
         root = tmp_path / "abicheck-build"
@@ -1343,93 +1343,10 @@ class TestBuildOutputCLI:
         assert payload["ok"] is True
 
 
-class TestBuildOutputBaselineLibrariesCLI:
-    """``abicheck build-output baseline-libraries DIRECTORY`` (G30 P1.6)."""
-
-    def _run(self, args):
-        from abicheck.cli import main
-
-        return CliRunner().invoke(main, ["build-output", "baseline-libraries", *args])
-
-    def test_valid_dir_exits_0_and_lists_entries(self, tmp_path: Path) -> None:
-        root = tmp_path / "abicheck-build"
-        root.mkdir()
-        _binary(root, "artifacts/libfoo.so")
-        (root / "build-output.json").write_text(
-            json.dumps(
-                {
-                    "schema": BUILD_OUTPUT_SCHEMA,
-                    "targets": [{"id": "libfoo", "binary": "artifacts/libfoo.so"}],
-                }
-            )
-        )
-        res = self._run([str(root)])
-        assert res.exit_code == 0, res.output
-        payload = json.loads(res.output)
-        assert payload["ok"] is True
-        assert payload["entries"] == [
-            {"name": "libfoo", "artifact": str(root / "artifacts/libfoo.so")}
-        ]
-        assert payload["errors"] == []
-
-    def test_bundle_member_gets_stage_binary(self, tmp_path: Path) -> None:
-        root = tmp_path / "abicheck-build"
-        root.mkdir()
-        _binary(root, "artifacts/libfoo.so")
-        (root / "build-output.json").write_text(
-            json.dumps(
-                {
-                    "schema": BUILD_OUTPUT_SCHEMA,
-                    "targets": [
-                        {
-                            "id": "libfoo",
-                            "binary": "artifacts/libfoo.so",
-                            "bundle": "pvxs-release",
-                        }
-                    ],
-                    "bundles": [{"id": "pvxs-release", "targets": ["libfoo"]}],
-                }
-            )
-        )
-        res = self._run([str(root)])
-        assert res.exit_code == 0, res.output
-        payload = json.loads(res.output)
-        assert payload["entries"][0]["stage_binary"] is True
-
-    def test_missing_binary_exits_1(self, tmp_path: Path) -> None:
-        root = _build_output_dir(
-            tmp_path, targets=[{"id": "libfoo", "binary": "does-not-exist"}]
-        )
-        res = self._run([str(root)])
-        assert res.exit_code == 1
-        payload = json.loads(res.output)
-        assert payload["ok"] is False
-        assert payload["errors"]
-
-    def test_not_a_build_output_dir_is_usage_error(self, tmp_path: Path) -> None:
-        plain = tmp_path / "plain"
-        plain.mkdir()
-        res = self._run([str(plain)])
-        assert res.exit_code == 64
-
-    def test_nonexistent_dir_is_usage_error(self, tmp_path: Path) -> None:
-        res = self._run([str(tmp_path / "does-not-exist")])
-        assert res.exit_code != 0
-
-    def test_output_flag_writes_file(self, tmp_path: Path) -> None:
-        root = tmp_path / "abicheck-build"
-        root.mkdir()
-        _binary(root, "artifacts/libfoo.so")
-        (root / "build-output.json").write_text(
-            json.dumps(
-                {
-                    "schema": BUILD_OUTPUT_SCHEMA,
-                    "targets": [{"id": "libfoo", "binary": "artifacts/libfoo.so"}],
-                }
-            )
-        )
-        out_file = tmp_path / "libraries.json"
-        res = self._run([str(root), "-o", str(out_file)])
-        assert res.exit_code == 0, res.output
-        payload = json.loads(out_file.read_text())
-        assert payload["ok"] is True
+# NB: `abicheck build-output baseline-libraries` (G30 P1.6) is not public CLI
+# surface (ADR-054): it was a wire-format adapter for exactly one GitHub
+# Action's `libraries` input, not a general project-integration operation.
+# `derive_baseline_libraries()` stays a library function -- callers (the
+# `publish-baseline.yml`/`update-main-baseline.yml` reusable workflows) invoke
+# it directly via `python3 -c`. Its behavior is covered at the function level
+# by `tests/test_baseline_publish.py::TestDeriveBaselineLibraries`.
