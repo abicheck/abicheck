@@ -20,4 +20,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `EvidenceProviderRequirement.implementation` is required unconditionally
   (not only when `required=True`), matching D6's "every selected provider
   ... carries an immutable identity/version/digest" with no optional-provider
-  carve-out.
+  carve-out. `GateConfig.exit_code_scheme` validates against
+  `{"legacy", "severity"}` (ADR-037 D12's `"auto"` choice is a
+  resolution-time input, already resolved by the time an effective
+  `GateConfig` is constructed, so it's excluded here). `ValueProvenance`
+  gains `shadowed_legacy`, populated by the resolver's `--policy`/
+  `--policy-file` exception path to retain the suppressed legacy
+  candidate's provenance for audit/replay (D7).

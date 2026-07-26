@@ -43,15 +43,28 @@ not this leaf module's:
   error, **except** the documented ``--policy`` / ``--policy-file``
   compatibility rule, where the explicit option keeps winning --
   :class:`LegacyAliasConflictError`, suppressed by passing
-  ``require_legacy_alias_agreement=False``.
+  ``require_legacy_alias_agreement=False``. That exception's provenance
+  retains the shadowed legacy input (D7: "provenance records the
+  file-selected effective base and the shadowed ``--policy`` input") via
+  :attr:`~abicheck.compatibility_evaluation_config.ValueProvenance.shadowed_legacy`.
 
 "Equivalent duplicate values are accepted" (D7) falls out naturally:
 multiple candidates at the same precedence tier with the *same* value do
 not conflict.
+
+D7 also scopes ``RUN_PROFILE`` precedence to "execution fields only"
+(depth, format, budget, workflow) -- it does not apply to semantic fields
+like ``contract.mode`` or ``policy.base``. Since this module resolves one
+field at a time with no built-in notion of which fields are execution
+fields, the caller declares that per call via ``allow_run_profile``
+(default ``False``): a ``RUN_PROFILE`` candidate for a field that doesn't
+opt in is a caller bug, not a legitimate input, so it raises loudly rather
+than silently taking part in precedence.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 
@@ -152,6 +165,7 @@ def resolve_field(
     *,
     default: FieldCandidate,
     require_legacy_alias_agreement: bool = True,
+    allow_run_profile: bool = False,
 ) -> tuple[Hashable, ValueProvenance]:
     """Resolve one field's effective value and provenance.
 
@@ -162,14 +176,22 @@ def resolve_field(
     arbitrary but deterministic choice among genuinely equivalent inputs
     (D7 "equivalent duplicates... report the winning selected-by chain").
 
+    ``allow_run_profile`` must be ``True`` for execution fields (depth,
+    format, budget, workflow) -- D7 scopes ``RUN_PROFILE`` precedence to
+    those only. It defaults to ``False``; a ``RUN_PROFILE`` candidate
+    supplied for a field that hasn't opted in raises a plain ``ValueError``.
+
     Raises :class:`ConflictingFieldValuesError` if two candidates *at the
     same precedence tier* disagree -- checked for every populated tier, not
     only the winning one, since a shadowed layer's contradiction must not
     surface later merely because a higher-precedence override is removed --
     and :class:`LegacyAliasConflictError` if an explicit CLI/API value
     disagrees with a legacy-alias value for the same field, unless
-    ``require_legacy_alias_agreement=False``. Also raises a plain
-    ``ValueError`` if any candidate's layer is not covered by
+    ``require_legacy_alias_agreement=False`` (the documented
+    ``--policy``/``--policy-file`` exception, D7): in that case no error is
+    raised, and the winning provenance's ``shadowed_legacy`` records the
+    suppressed legacy candidate's provenance for audit/replay. Also raises a
+    plain ``ValueError`` if any candidate's layer is not covered by
     ``_PRECEDENCE_TIERS`` -- a resolver/enum mismatch, not a D7 usage error,
     but one that must fail loudly rather than silently dropping the
     candidate (``BUILT_IN_DEFAULT`` always matches some tier, so an unknown
@@ -193,19 +215,32 @@ def resolve_field(
                 "SelectorLayer gains a new member, or this candidate would "
                 "be silently dropped from resolution"
             )
+        if candidate.layer is SelectorLayer.RUN_PROFILE and not allow_run_profile:
+            raise ValueError(
+                f"{field_name}: RUN_PROFILE candidates are only valid for "
+                "execution fields -- ADR-049 D7 scopes run-profile precedence "
+                "to 'execution fields only' (depth, format, budget, workflow); "
+                "pass allow_run_profile=True when resolving one of those"
+            )
 
-    if require_legacy_alias_agreement:
-        explicit = [c for c in all_candidates if c.layer in _EXPLICIT_LAYERS]
-        legacy = [c for c in all_candidates if c.layer is SelectorLayer.LEGACY_ALIAS]
-        if explicit and legacy:
-            explicit_values = {c.value for c in explicit}
-            legacy_values = {c.value for c in legacy}
-            if (
-                len(explicit_values) == 1
-                and len(legacy_values) == 1
-                and explicit_values != legacy_values
-            ):
-                raise LegacyAliasConflictError(field_name, explicit[0], legacy[0])
+    explicit_candidates = [c for c in all_candidates if c.layer in _EXPLICIT_LAYERS]
+    legacy_candidates = [
+        c for c in all_candidates if c.layer is SelectorLayer.LEGACY_ALIAS
+    ]
+    shadowed_legacy: FieldCandidate | None = None
+    if explicit_candidates and legacy_candidates:
+        explicit_values = {c.value for c in explicit_candidates}
+        legacy_values = {c.value for c in legacy_candidates}
+        if (
+            len(explicit_values) == 1
+            and len(legacy_values) == 1
+            and explicit_values != legacy_values
+        ):
+            if require_legacy_alias_agreement:
+                raise LegacyAliasConflictError(
+                    field_name, explicit_candidates[0], legacy_candidates[0]
+                )
+            shadowed_legacy = legacy_candidates[0]
 
     winner: FieldCandidate | None = None
     for tier in _PRECEDENCE_TIERS:
@@ -222,7 +257,12 @@ def resolve_field(
             winner = tier_candidates[0]
 
     if winner is not None:
-        return winner.value, winner.provenance
+        provenance = winner.provenance
+        if shadowed_legacy is not None:
+            provenance = dataclasses.replace(
+                provenance, shadowed_legacy=shadowed_legacy.provenance
+            )
+        return winner.value, provenance
 
     raise AssertionError(  # pragma: no cover - default always matches a tier
         f"{field_name}: no candidate matched any precedence tier"

@@ -97,6 +97,11 @@ def _require_nonempty_digest(sha256: str, *, owner: str) -> None:
 # free-form text belonging to a not-yet-written resolver.
 _VALID_UNRESOLVED_BEHAVIORS = frozenset({"not_checkable", "warn"})
 
+# ADR-037 D12's exit-code scheme, minus "auto": cli.py's --exit-code-scheme
+# click.Choice is {"auto", "legacy", "severity"}, but "auto" is resolved to
+# one of the other two before an effective GateConfig is ever constructed.
+_VALID_EXIT_CODE_SCHEMES = frozenset({"legacy", "severity"})
+
 
 # --------------------------------------------------------------------------
 # D7: field-level provenance.
@@ -128,6 +133,15 @@ class ValueProvenance:
     the actual definition used for exact replay" -- a manifest can be
     revised under the same ``reference`` name, and only ``version`` (plus
     ``sha256``) can tell two revisions apart.
+
+    ``shadowed_legacy`` is populated only by the documented ``--policy`` /
+    ``--policy-file`` compatibility exception (D7): when
+    ``compatibility_evaluation_resolver.resolve_field`` is called with
+    ``require_legacy_alias_agreement=False`` and the legacy alias disagrees
+    with the explicit value, the explicit value still wins, but D7 requires
+    "provenance records the file-selected effective base and the shadowed
+    ``--policy`` input" -- this field carries that suppressed legacy
+    candidate's own provenance for audit/replay.
     """
 
     layer: SelectorLayer
@@ -138,6 +152,7 @@ class ValueProvenance:
     sha256: str | None = None
     field_location: str | None = None
     selected_by: tuple[SelectedByEntry, ...] = ()
+    shadowed_legacy: ValueProvenance | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "selected_by", _frozen_tuple(self.selected_by))
@@ -349,6 +364,14 @@ class GateConfig:
 
     ``severity`` reuses the existing :class:`~abicheck.severity.SeverityConfig`
     four-category model rather than inventing a second severity vocabulary.
+
+    ``exit_code_scheme`` validates against ``{"legacy", "severity"}`` --
+    ``"auto"`` (ADR-037 D12's third CLI-facing choice) is deliberately
+    excluded here: ``auto`` means "resolve to legacy or severity based on
+    whether a severity setting is in effect," and by the time a value
+    reaches this *effective*, already-resolved configuration that choice
+    must already be made (see ``cli.py``'s ``_announce_exit_scheme``: "auto
+    already resolved to legacy or severity by the time we get here").
     """
 
     exit_code_scheme: str = "severity"
@@ -357,6 +380,13 @@ class GateConfig:
     severity: SeverityConfig = field(default_factory=SeverityConfig)
 
     def __post_init__(self) -> None:
+        if self.exit_code_scheme not in _VALID_EXIT_CODE_SCHEMES:
+            raise ValueError(
+                f"GateConfig.exit_code_scheme must be one of "
+                f"{sorted(_VALID_EXIT_CODE_SCHEMES)} (ADR-037 D12; 'auto' is "
+                "a resolution-time choice, not a valid resolved value), got "
+                f"{self.exit_code_scheme!r}"
+            )
         object.__setattr__(
             self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)
         )

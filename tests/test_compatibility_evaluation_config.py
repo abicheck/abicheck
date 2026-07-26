@@ -207,6 +207,23 @@ class TestValueProvenance:
         assert v1.reference == v2.reference
         assert v1 != v2
 
+    def test_shadowed_legacy_defaults_to_none(self):
+        prov = ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI)
+        assert prov.shadowed_legacy is None
+
+    def test_shadowed_legacy_round_trips(self):
+        # ADR-049 D7's --policy/--policy-file exception: "provenance records
+        # the file-selected effective base and the shadowed --policy input."
+        legacy = ValueProvenance(layer=SelectorLayer.LEGACY_ALIAS, path="legacy.yml")
+        winner = ValueProvenance(
+            layer=SelectorLayer.EXPLICIT_CLI,
+            path="policy-file.yml",
+            shadowed_legacy=legacy,
+        )
+        assert winner.shadowed_legacy is not None
+        assert winner.shadowed_legacy.layer is SelectorLayer.LEGACY_ALIAS
+        assert winner.shadowed_legacy.path == "legacy.yml"
+
 
 class TestEvidenceProviderRequirement:
     def test_required_capability_with_pinned_implementation(self):
@@ -422,6 +439,28 @@ class TestGateSeverityDefault:
         # defaults already used elsewhere, not a second set of defaults.
         gate = GateConfig()
         assert gate.severity == SeverityConfig()
+
+
+class TestGateConfigExitCodeScheme:
+    # ADR-037 D12's CLI-facing --exit-code-scheme choice is {auto, legacy,
+    # severity}, but "auto" is a resolution-time choice already resolved to
+    # legacy/severity by the time an effective GateConfig is constructed
+    # (cli.py's _announce_exit_scheme docstring) -- so it's excluded here.
+    def test_default_is_severity(self):
+        gate = GateConfig()
+        assert gate.exit_code_scheme == "severity"
+
+    def test_legacy_is_accepted(self):
+        gate = GateConfig(exit_code_scheme="legacy")
+        assert gate.exit_code_scheme == "legacy"
+
+    def test_auto_is_rejected(self):
+        with pytest.raises(ValueError, match="exit_code_scheme"):
+            GateConfig(exit_code_scheme="auto")
+
+    def test_unsupported_value_is_a_value_error(self):
+        with pytest.raises(ValueError, match="exit_code_scheme"):
+            GateConfig(exit_code_scheme="severty")
 
 
 class TestDigestedItems:

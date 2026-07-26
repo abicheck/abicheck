@@ -52,11 +52,17 @@ class TestPrecedenceOrder:
         assert prov.layer is SelectorLayer.PROJECT_CONFIG
 
     def test_run_profile_beats_project_config(self):
+        # ADR-049 D7 scopes RUN_PROFILE precedence to execution fields
+        # (depth, format, budget, workflow) -- "scan.depth" stands in for one
+        # here, with allow_run_profile=True opting the field in. See
+        # TestRunProfileFieldScoping for the semantic-field rejection case.
         candidates = [
             _candidate(SelectorLayer.PROJECT_CONFIG, ContractMode.PUBLIC),
             _candidate(SelectorLayer.RUN_PROFILE, ContractMode.EXPORTS),
         ]
-        value, prov = resolve_field("contract.mode", candidates, default=_default())
+        value, prov = resolve_field(
+            "scan.depth", candidates, default=_default(), allow_run_profile=True
+        )
         assert value is ContractMode.EXPORTS
         assert prov.layer is SelectorLayer.RUN_PROFILE
 
@@ -65,7 +71,9 @@ class TestPrecedenceOrder:
             _candidate(SelectorLayer.RUN_PROFILE, ContractMode.EXPORTS),
             _candidate(SelectorLayer.RUN_RECIPE, ContractMode.PUBLIC),
         ]
-        value, prov = resolve_field("contract.mode", candidates, default=_default())
+        value, prov = resolve_field(
+            "scan.depth", candidates, default=_default(), allow_run_profile=True
+        )
         assert value is ContractMode.PUBLIC
         assert prov.layer is SelectorLayer.RUN_RECIPE
 
@@ -176,6 +184,42 @@ class TestLegacyAliasConflict:
         assert value is ContractMode.PUBLIC
         assert prov.layer is SelectorLayer.EXPLICIT_CLI
 
+    def test_tolerated_disagreement_preserves_shadowed_legacy_provenance(self):
+        # ADR-049 D7: "provenance records the file-selected effective base
+        # and the shadowed --policy input" -- the suppressed legacy
+        # candidate's own provenance must survive on the winner's record,
+        # not just its value being discarded.
+        legacy = _candidate(
+            SelectorLayer.LEGACY_ALIAS, ContractMode.ALL, path="legacy-policy.yml"
+        )
+        explicit = _candidate(
+            SelectorLayer.EXPLICIT_CLI, ContractMode.PUBLIC, path="policy-file.yml"
+        )
+        value, prov = resolve_field(
+            "policy.base",
+            [legacy, explicit],
+            default=_default(),
+            require_legacy_alias_agreement=False,
+        )
+        assert value is ContractMode.PUBLIC
+        assert prov.path == "policy-file.yml"
+        assert prov.shadowed_legacy is not None
+        assert prov.shadowed_legacy.layer is SelectorLayer.LEGACY_ALIAS
+        assert prov.shadowed_legacy.path == "legacy-policy.yml"
+
+    def test_agreeing_values_leave_shadowed_legacy_unset(self):
+        candidates = [
+            _candidate(SelectorLayer.LEGACY_ALIAS, ContractMode.PUBLIC),
+            _candidate(SelectorLayer.EXPLICIT_CLI, ContractMode.PUBLIC),
+        ]
+        _, prov = resolve_field(
+            "policy.base",
+            candidates,
+            default=_default(),
+            require_legacy_alias_agreement=False,
+        )
+        assert prov.shadowed_legacy is None
+
     def test_agreement_never_raises_regardless_of_flag(self):
         candidates = [
             _candidate(SelectorLayer.LEGACY_ALIAS, ContractMode.PUBLIC),
@@ -197,6 +241,44 @@ class TestFieldCandidateLayerProperty:
     def test_layer_reads_through_to_provenance(self):
         candidate = _candidate(SelectorLayer.RUN_RECIPE, ContractMode.PUBLIC)
         assert candidate.layer is SelectorLayer.RUN_RECIPE
+
+
+class TestRunProfileFieldScoping:
+    # ADR-049 D7 scopes RUN_PROFILE precedence to "execution fields only"
+    # (depth, format, budget, workflow) -- semantic fields like
+    # contract.mode/policy.base don't participate. allow_run_profile
+    # defaults to False, so a RUN_PROFILE candidate for a field that hasn't
+    # opted in is a caller bug, not a legitimate input.
+    def test_run_profile_candidate_rejected_by_default(self):
+        candidates = [_candidate(SelectorLayer.RUN_PROFILE, ContractMode.EXPORTS)]
+        with pytest.raises(ValueError, match="execution fields"):
+            resolve_field("contract.mode", candidates, default=_default())
+
+    def test_run_profile_candidate_rejected_even_when_shadowed(self):
+        # The check runs on every candidate up front, not just the winner --
+        # a shadowed RUN_PROFILE candidate is still a caller bug.
+        candidates = [
+            _candidate(SelectorLayer.EXPLICIT_CLI, ContractMode.PUBLIC),
+            _candidate(SelectorLayer.RUN_PROFILE, ContractMode.EXPORTS),
+        ]
+        with pytest.raises(ValueError, match="execution fields"):
+            resolve_field("contract.mode", candidates, default=_default())
+
+    def test_run_profile_candidate_allowed_with_opt_in(self):
+        candidates = [_candidate(SelectorLayer.RUN_PROFILE, ContractMode.EXPORTS)]
+        value, prov = resolve_field(
+            "scan.depth", candidates, default=_default(), allow_run_profile=True
+        )
+        assert value is ContractMode.EXPORTS
+        assert prov.layer is SelectorLayer.RUN_PROFILE
+
+    def test_fields_without_run_profile_candidates_are_unaffected_by_default(self):
+        # allow_run_profile's default only matters when a RUN_PROFILE
+        # candidate is actually present -- everything else resolves as before.
+        candidates = [_candidate(SelectorLayer.PROJECT_CONFIG, ContractMode.PUBLIC)]
+        value, prov = resolve_field("contract.mode", candidates, default=_default())
+        assert value is ContractMode.PUBLIC
+        assert prov.layer is SelectorLayer.PROJECT_CONFIG
 
 
 class TestUnknownSelectorLayer:
