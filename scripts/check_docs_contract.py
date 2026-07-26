@@ -142,6 +142,46 @@ def _strip_fenced_code(text: str) -> str:
     return "\n".join(out)
 
 
+def _blank_fenced_code(text: str) -> str:
+    """Line-count-preserving sibling of `_strip_fenced_code`: replaces each
+    line of a fenced code block with an empty line instead of deleting it,
+    so a match found in the surrounding prose still lands on its real
+    source line number (`_strip_fenced_code` shifts everything after a
+    stripped block upward, which is fine for the word-based duplicate scan
+    but wrong for a diagnostic that reports `path:line`)."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        m = _FENCE_OPEN_RE.match(lines[i])
+        if m is None:
+            out.append(lines[i])
+            i += 1
+            continue
+        fence = m.group(1)
+        out.append("")
+        i += 1
+        closer = re.compile(rf"^[ \t]{{0,3}}{fence[0]}{{{len(fence)},}}[ \t]*$")
+        while i < n and closer.match(lines[i]) is None:
+            out.append("")
+            i += 1
+        if i < n:
+            out.append("")  # closing fence line itself
+            i += 1
+    return "\n".join(out)
+
+
+def _blank_front_matter(text: str) -> str:
+    """Line-count-preserving sibling of `_strip_front_matter` — replaces the
+    front-matter block with the same number of blank lines instead of
+    deleting it, so line numbers of the text that follows stay accurate."""
+    m = _FRONT_MATTER_RE.match(text)
+    if not m:
+        return text
+    consumed = text[: m.end()]
+    return "\n" * consumed.count("\n") + text[m.end() :]
+
+
 class Findings:
     """Collects errors and warnings, grouped by check name (mirrors
     scripts/check_ai_readiness.py's Findings class for consistent output)."""
@@ -989,8 +1029,8 @@ def _check_stale_process_language(f: Findings) -> None:
             if lifecycle in _STALE_PROCESS_LANGUAGE_EXEMPT_LIFECYCLES:
                 continue
 
-        text = _strip_fenced_code(path.read_text(encoding="utf-8"))
-        text = _strip_front_matter(text)
+        text = _blank_fenced_code(path.read_text(encoding="utf-8"))
+        text = _blank_front_matter(text)
         for pattern in _STALE_PROCESS_LANGUAGE_PATTERNS:
             m = pattern.search(text)
             if m is None:

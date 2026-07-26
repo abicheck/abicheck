@@ -1430,3 +1430,33 @@ def test_stale_process_language_exempts_migration_lifecycle(
     f = dc.Findings()
     dc._check_stale_process_language(f)
     assert f.warnings == []
+
+
+def test_stale_process_language_reports_real_line_number(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Front matter and a preceding fenced code block must not shift the
+    reported line number -- a naive strip-and-recount (the original
+    implementation) undercounts by however many lines those blocks had,
+    pointing reviewers at the wrong place (PR #638 Codex review)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    lines = [
+        "---",
+        "lifecycle: active",
+        "---",
+        "",
+        "# Page",
+        "",
+        "```text",
+        "line one",
+        "line two",
+        "line three",
+        "```",
+        "",
+        "table row (work-in-progress in corners)",
+    ]
+    (tmp_path / "page.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    f = dc.Findings()
+    dc._check_stale_process_language(f)
+    assert len(f.warnings) == 1
+    assert "page.md:13:" in f.warnings[0][1]
