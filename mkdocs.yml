@@ -42,7 +42,6 @@ nav:
     - Everyday Use:
       - CLI Usage: use/cli-usage.md
       - Evidence, Build-Context & Debug Flags: use/dump-compare-flags.md
-      - Companion Commands: use/companion-commands.md
       - Source-Scan Depth: use/scan-levels.md
       - Producing Source Facts: use/producing-source-facts.md
       - Output Formats: use/output-formats.md
@@ -83,7 +82,7 @@ nav:
       - Tool Modes: use/tool-modes.md
       - Python API: use/python-api.md
       - MCP Integration: use/mcp-integration.md
-      - Upgrading to 0.5.0: use/migration-0.5.md
+      - Migrating to the Current CLI: use/companion-commands.md
       - Migrating from ABICC: use/from-abicc.md
       - Migrating from libabigail: use/from-libabigail.md
   # G30/ADR-047's scenario-first GitHub Actions integration model -- "which
@@ -575,7 +574,8 @@ plugins:
         user-guide/github-action.md: use/github-action.md
         user-guide/kernel-btf.md: use/kernel-btf.md
         user-guide/mcp-integration.md: use/mcp-integration.md
-        user-guide/migration-0.5.md: use/migration-0.5.md
+        user-guide/migration-0.5.md: use/companion-commands.md
+        use/migration-0.5.md: use/companion-commands.md
         user-guide/multi-binary.md: use/multi-binary.md
         user-guide/output-formats.md: use/output-formats.md
         user-guide/plugin-systems.md: use/plugin-systems.md
