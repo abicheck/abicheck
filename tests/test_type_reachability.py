@@ -1830,3 +1830,38 @@ class TestBareIdentityCollisionWithDerivedSuffix:
             frozenset(),
         )
         assert index["Alias"] == "Foo"
+
+    def test_within_namespace_bare_signature_does_not_misattribute_to_global_record(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: direct-clang's own "drop the
+        enclosing namespace" convention means a signature declared inside
+        namespace api can spell api::Inner bare as "Inner" too (not just
+        the earlier Outer::Inner-shaped partial qualification) -- merely
+        refusing to merge api::Inner's candidates into the pre-existing
+        record_index["Inner"] entry isn't enough, since that entry still
+        pointed at the unrelated global Inner record. A public api::f()
+        returning (bare-spelled) api::Inner must not have its std::
+        field misattributed to the unrelated global Inner's own field."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="api::f",
+                    mangled="_ZN3api1fEv",
+                    return_type="Inner",
+                    params=[],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Inner",
+                    kind="class",
+                    fields=[TypeField(name="v", type="std::vector<int>")],
+                ),
+                RecordType(name="Inner", kind="class", qualified_name="api::Inner"),
+                RecordType(name="std::vector<int>", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()

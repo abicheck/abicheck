@@ -918,6 +918,59 @@ Once a root command genuinely clears the bar above, pick the right home:
   target-set-per-spelling structure, resolving a spelling only when every
   contributing source agrees on exactly one target.
 
+  **A follow-up review round on the same fix found the removal above was
+  necessary but not sufficient.** Refusing to *merge* `"api::Inner"`'s
+  candidates into the pre-existing `record_index["Inner"]` entry still
+  left that entry pointing at the unrelated global `"Inner"` record
+  (Codex review, fresh evidence, confirmed with a minimal repro):
+  direct-clang's own "drop the enclosing namespace" convention (the same
+  mechanism `_namespace_suffix_spellings` models for the `Outer::Inner`
+  finding above) means a signature declared *inside* namespace `api` can
+  spell `api::Inner` bare as `"Inner"` too — not just a partially-qualified
+  form. A public `api::f()` returning (bare-spelled) `api::Inner` would
+  then have its `std::` field misattributed to the *unrelated* global
+  `Inner`'s own field instead of correctly failing to resolve. Fixed by
+  removing the colliding spelling from `record_index` entirely
+  (`record_index.pop(bare, None)`) rather than merely refusing to add the
+  other record's candidates to it — since the bare spelling is genuinely
+  ambiguous between both records, leaving it resolved to either one
+  (including the "already there by default" one) is the wrong outcome,
+  not just an incomplete fix.
+
+  **A separate, deeper finding on typedef keys, investigated and
+  deliberately not implemented this pass:** direct-clang's own
+  `parse_typedefs()` (`dumper_clang.py`) stores a typedef's bare
+  `node["name"]` as the `snapshot.typedefs` key — never the scope-joined
+  qualified form `_qualified()` uses for every other decl kind — so a
+  namespaced alias loses its namespace at the point the snapshot is
+  produced, not merely at the point this module reads it. Confirmed
+  empirically via a real `clang -ast-dump` on `namespace api { struct Foo
+  {}; using Alias = Foo; } api::Alias make();`: the `TypeAliasDecl`'s own
+  name is bare `Alias`, while the function's return type is printed fully
+  qualified `"api::Alias"` (a typedef reference is always spelled
+  qualified by clang's printer, unlike a plain class reference) — meaning
+  `snapshot.typedefs` ends up with `{"Alias": "Foo"}` while the real
+  signature spells `"api::Alias"`, the exact inverse of the
+  qualified-key/bare-signature shape `_typedef_spelling_targets` was built
+  to handle. Since suffix-stripping only ever produces a *shorter*
+  candidate from a key, it can never reconstruct a *longer*, more-qualified
+  spelling from an already-bare key — there is no string-level fix
+  possible in this module for this direction, only two heavier ones, both
+  out of scope for a drive-by extension here: (1) fixing
+  `dumper_clang.py`'s `parse_typedefs()` to store the qualified key
+  instead — a genuine, separate producer-side bug, but one whose blast
+  radius reaches every other consumer of `snapshot.typedefs` (typedef
+  diffing, `surface.py`'s own typedef-following in `_walk_type_closure`),
+  each needing its own re-verification against the FP-rate/mutation-score
+  gates before trusting a changed key shape; (2) a local reverse-namespace
+  guesser in this module (re-attaching every namespace prefix seen among
+  the snapshot's own record identities to a bare typedef key and hoping
+  one matches) — pure speculation with no way to verify which, if any,
+  namespace a given bare key actually belongs to, and a real risk of
+  fabricating new false-positive matches rather than closing a
+  false-negative gap. Left as a silent false negative — the same
+  conservative default this module already uses throughout.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a

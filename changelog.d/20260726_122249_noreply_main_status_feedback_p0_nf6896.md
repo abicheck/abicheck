@@ -474,3 +474,32 @@
   target. New regression tests cover both fixes (positive repro plus a
   guard that an agreeing exact-key/derived-suffix pair is still kept).
   Full suite green, 100% module coverage, FP-rate gate stays 0 FP/0 FN.
+- **A follow-up finding on the `"Inner"`/`"api::Inner"` collision guard
+  showed the earlier fix was necessary but not sufficient** (Codex
+  review, fresh evidence): refusing to *merge* the colliding record's
+  candidates into `record_index["Inner"]` still left that entry pointing
+  at the unrelated global `"Inner"` record. Since direct-clang's own
+  "drop the enclosing namespace" convention means a signature declared
+  *inside* namespace `api` can spell `api::Inner` bare as `"Inner"` too, a
+  public `api::f()` returning bare-spelled `api::Inner` would misattribute
+  its `std::` field to the unrelated global `Inner`'s own field. Fixed by
+  removing the colliding spelling from `record_index` entirely rather
+  than only refusing to merge in the other record's candidates. New
+  regression test covers the exact scenario. Full suite green, 100%
+  module coverage, FP-rate gate stays 0 FP/0 FN.
+- **A separate, deeper typedef-key gap investigated and deliberately not
+  implemented**: direct-clang's `parse_typedefs()` stores a typedef's
+  bare `node["name"]` (never the scope-joined qualified form used for
+  every other decl kind), so a namespaced alias loses its namespace at
+  snapshot-production time, not at this module's read time. Confirmed
+  empirically via a real `clang -ast-dump`: a namespaced `using Alias =
+  Foo` inside `namespace api` produces `snapshot.typedefs = {"Alias":
+  "Foo"}` while a real signature referencing it spells the fully-qualified
+  `"api::Alias"` — the inverse of the qualified-key/bare-signature shape
+  this module's existing typedef-suffix logic handles, and one no
+  string-level fix in this module can close (suffix-stripping only ever
+  shortens a key, it can't reconstruct a longer qualified spelling from
+  an already-bare one). Documented in `AGENTS.md`'s "Known gaps" as
+  needing either a producer-side fix in `dumper_clang.py` (its own
+  separate, broader-blast-radius change) or a speculative reverse-
+  namespace-guessing mechanism (real false-positive risk, not attempted).

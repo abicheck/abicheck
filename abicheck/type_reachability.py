@@ -355,9 +355,16 @@ def _spelling_index(
             # A derived suffix that collides with a *different* record's own
             # full identity (Codex review, fresh evidence: identities "Inner"
             # and "api::Inner" both present) is ambiguous the same way two
-            # colliding derived suffixes are -- record_index[bare] already
-            # holds that other record's own unambiguous self-entry, and must
-            # not be contaminated with this suffix's candidates.
+            # colliding derived suffixes are. Removing the spelling entirely
+            # (not just refusing to add the *other* record's candidates) is
+            # required, not merely safe (Codex review, fresh evidence):
+            # direct-clang's own "drop the enclosing namespace" convention
+            # (see _namespace_suffix_spellings) means a signature declared
+            # *inside* namespace api can spell api::Inner bare as "Inner"
+            # too, so leaving record_index["Inner"] pointing at the
+            # unrelated global Inner would misattribute that signature to
+            # the wrong record instead of leaving it correctly unresolved.
+            record_index.pop(bare, None)
             continue
         if len(ids) == 1:
             record_index.setdefault(bare, set()).update(ids)
