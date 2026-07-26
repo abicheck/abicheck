@@ -130,7 +130,7 @@
     "profile_matrix_entry": {
       "type": "object",
       "description": "Added in schema 1.1. One logical target's outcome across every profile that checked it.",
-      "required": ["base_target", "profiles", "affected_profiles", "incomplete_profiles", "verdict_by_profile"],
+      "required": ["base_target", "profiles", "affected_profiles", "incomplete_profiles", "unanalyzed_profiles", "verdict_by_profile"],
       "properties": {
         "base_target": {"type": "string"},
         "profiles": {
@@ -141,12 +141,17 @@
         "affected_profiles": {
           "type": "array",
           "items": {"type": "string"},
-          "description": "Subset of profiles whose worst analyzed verdict was neither NO_CHANGE nor COMPATIBLE."
+          "description": "Subset of profiles whose worst analyzed verdict was neither NO_CHANGE nor COMPATIBLE, or whose gate is blocking even though the verdict itself is compatible."
         },
         "incomplete_profiles": {
           "type": "array",
           "items": {"type": "string"},
-          "description": "Subset of profiles where at least one of that profile's checks (a base_target/profile pair can have more than one, at different baseline channels/requested depths) is unavailable -- no report arrived for it. A profile can be both affected and incomplete at once."
+          "description": "Subset of profiles where at least one of that profile's *required* checks (a base_target/profile pair can have more than one, at different baseline channels/requested depths) is unavailable -- no report arrived for it. An unavailable optional check does not set this. A profile can be both affected and incomplete at once."
+        },
+        "unanalyzed_profiles": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Subset of profiles with zero analyzed checks at all (every check for that profile is unavailable, required or optional) -- verdict_by_profile[pid] is null for these. Distinct from incomplete_profiles: a profile can have some analyzed result and still be incomplete, but a profile here has none at all, so it must never be described as clean."
         },
         "verdict_by_profile": {
           "type": "object",

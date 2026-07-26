@@ -32,14 +32,17 @@ from abicheck.type_reachability import (
 
 
 def _fn(
-    name: str, return_type: str = "void", params: list[Param] | None = None
+    name: str,
+    return_type: str = "void",
+    params: list[Param] | None = None,
+    visibility: Visibility = Visibility.PUBLIC,
 ) -> Function:
     return Function(
         name=name,
         mangled=name,
         return_type=return_type,
         params=params or [],
-        visibility=Visibility.PUBLIC,
+        visibility=visibility,
     )
 
 
@@ -214,3 +217,46 @@ class TestDirectlyReferencedStdlibTypes:
             ],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_hidden_function_signature_does_not_count_as_direct_reference(
+        self,
+    ) -> None:
+        """Codex review: a Visibility.HIDDEN function is retained in real
+        snapshots for cross-reference purposes but is not part of the
+        public ABI surface -- a stdlib type mentioned only in its
+        signature must not be treated as directly referenced, or wiring
+        this helper into a live detector would turn an internal
+        implementation signature into a stdlib ABI dependency."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "internal_helper",
+                    params=[Param(name="s", type="std::string")],
+                    visibility=Visibility.HIDDEN,
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_elf_only_function_signature_does_not_count_as_direct_reference(
+        self,
+    ) -> None:
+        """Same reasoning as the hidden-function case: ELF_ONLY means
+        exported-but-undeclared-in-headers, not part of the public header
+        API surface this helper models."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "undeclared_export",
+                    return_type="std::string",
+                    visibility=Visibility.ELF_ONLY,
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()

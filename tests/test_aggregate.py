@@ -800,6 +800,7 @@ class TestProfileMatrix:
                 "profiles": ["linux-clang20", "linux-gcc14"],
                 "affected_profiles": ["linux-gcc14"],
                 "incomplete_profiles": [],
+                "unanalyzed_profiles": [],
                 "verdict_by_profile": {
                     "linux-clang20": "COMPATIBLE",
                     "linux-gcc14": "BREAKING",
@@ -919,6 +920,46 @@ class TestProfileMatrix:
         (entry,) = r.profile_matrix
         assert entry.affected_profiles == ("linux-gcc14",)
         assert entry.verdict_by_profile["linux-gcc14"] == "COMPATIBLE"
+
+    def test_profile_matrix_never_calls_an_unanalyzed_optional_profile_clean(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: a profile with only unavailable *optional* checks
+        has verdict_by_profile[pid] is None, and both affected_profiles and
+        incomplete_profiles empty -- it must not be rendered/reported as
+        "clean", since it was never actually analyzed."""
+        analyzed = "libfoo@linux-gcc14#release@headers"
+        never_reports = "libfoo@windows-msvc#release@headers"  # optional
+        _write_report(tmp_path, analyzed, "COMPATIBLE")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(analyzed, optional=(never_reports,)),
+        )
+        (entry,) = r.profile_matrix
+        assert entry.unanalyzed_profiles == ("windows-msvc",)
+        assert entry.affected_profiles == ()
+        assert entry.incomplete_profiles == ()  # optional gap, not a coverage failure
+        assert entry.verdict_by_profile["windows-msvc"] is None
+        text = r.render_text()
+        assert "clean on linux-gcc14" in text
+        assert "no analyzed result on windows-msvc" in text
+        assert "clean on all checked profiles" not in text
+
+    def test_profile_matrix_all_unanalyzed_never_says_clean(
+        self, tmp_path: Path
+    ) -> None:
+        """Every profile for this target is unanalyzed (all optional,
+        none ever reported) -- the whole entry must say so, not "clean"."""
+        never_reports = "libfoo@windows-msvc#release@headers"
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(optional=(never_reports,)),
+        )
+        (entry,) = r.profile_matrix
+        assert entry.unanalyzed_profiles == ("windows-msvc",)
+        text = r.render_text()
+        assert "no analyzed result on any checked profile" in text
+        assert "clean" not in text.split("Profile matrix:")[1].split("Coverage:")[0]
 
 
 class TestAggregateCLI:

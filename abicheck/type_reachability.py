@@ -53,6 +53,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .model import Visibility
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:
@@ -108,8 +109,9 @@ def type_string_references_name(type_string: str, name: str) -> bool:
 
 def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     """Stdlib/runtime-namespaced :class:`RecordType` names in *snapshot* that
-    are directly referenced by a non-stdlib function's return/parameter type
-    or a non-stdlib :class:`RecordType`'s own field type.
+    are directly referenced by a **public**, non-stdlib function's
+    return/parameter type or a non-stdlib :class:`RecordType`'s own field
+    type.
 
     Returns the empty set when the snapshot carries no stdlib-namespaced
     types at all (the common case) — never an error. Deliberately a single,
@@ -118,6 +120,14 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     :func:`type_string_references_name`), so a stdlib type mentioned only
     inside another stdlib type's own template arguments (never surfacing in
     a non-stdlib declaration) is correctly excluded.
+
+    A ``Function`` whose ``visibility`` is not :attr:`Visibility.PUBLIC`
+    (``HIDDEN``/``ELF_ONLY``) is never itself the referencing side (Codex
+    review): a real snapshot can retain such a function for cross-reference
+    purposes even though it is not part of the public ABI surface this
+    helper is meant to model, and treating its signature as equivalent to a
+    public one would turn an internal implementation detail into a
+    stdlib-ABI dependency that isn't real.
     """
     stdlib_names = [
         t.name
@@ -140,6 +150,8 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
 
     for fn in snapshot.functions:
         if fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
+            continue
+        if fn.visibility != Visibility.PUBLIC:
             continue
         _scan(fn.return_type)
         for param in fn.params:

@@ -41,15 +41,25 @@
   (`severity.blocking`), not just its verdict — a `COMPATIBLE` report can
   still carry a policy-blocking gate (e.g. an `addition: error` policy), and
   a profile in that state is not "clean" just because nothing broke (Codex
-  review).
+  review). Each entry also gains `unanalyzed_profiles`: a profile with zero
+  analyzed checks at all (every check for it unavailable, whether required
+  or optional) is never described as "clean" — it was simply never checked,
+  so claiming otherwise would assert confidence the result doesn't have
+  (Codex review).
 - **`abicheck/type_reachability.py`**: a new, additive building block for
   status-review item 3 ("direct vs. transitive type reachability").
   `directly_referenced_stdlib_types()` computes, from a snapshot alone,
   which `std::`/`__gnu_cxx::`/etc. record types are directly referenced by a
-  non-stdlib function's signature or a non-stdlib type's own field — as
-  opposed to only reachable via deep template-instantiation internals
-  (`std::string::_Alloc_hider`, `std::_Rb_tree_node_base`) that the existing
-  whole-name-prefix filter (`is_non_abi_surface_type`) already correctly
-  treats as toolchain-artifact churn either way. Not yet wired into any live
-  detector — see `AGENTS.md`'s "Known gaps" for why retrofitting the ~15
-  existing call sites needs its own scoped, individually-verified follow-up.
+  **public**, non-stdlib function's signature or a non-stdlib type's own
+  field — as opposed to only reachable via deep template-instantiation
+  internals (`std::string::_Alloc_hider`, `std::_Rb_tree_node_base`) that the
+  existing whole-name-prefix filter (`is_non_abi_surface_type`) already
+  correctly treats as toolchain-artifact churn either way. A
+  `Visibility.HIDDEN`/`ELF_ONLY` function's signature does not count as a
+  reference (Codex review): such functions are retained in real snapshots
+  for cross-reference purposes but are not part of the public ABI surface
+  this helper models, and treating them the same as a public function would
+  turn an internal implementation signature into a stdlib ABI dependency
+  that isn't real. Not yet wired into any live detector — see `AGENTS.md`'s
+  "Known gaps" for why retrofitting the ~15 existing call sites needs its
+  own scoped, individually-verified follow-up.

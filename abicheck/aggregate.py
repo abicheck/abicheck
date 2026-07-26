@@ -450,6 +450,15 @@ class ProfileMatrixEntry:
     #: since a clean *completed* check plus a missing required one is a
     #: coverage gap, not "this profile is clean").
     incomplete_profiles: tuple[str, ...]
+    #: Subset of ``profiles`` with *zero* analyzed checks at all — every
+    #: check for that profile is unavailable (``verdict_by_profile[pid] is
+    #: None``). Distinct from ``incomplete_profiles`` (which can include a
+    #: profile that has SOME analyzed result): a profile here has none, so
+    #: it must never be described as "clean" (Codex review) — there is
+    #: nothing to be clean *about*. An optional-only gap here (no required
+    #: check for this profile at all) still lands here, since the ambiguity
+    #: is about the *verdict*, not the coverage gate.
+    unanalyzed_profiles: tuple[str, ...]
     #: profile -> worst analyzed verdict value, or ``None`` when *every*
     #: check for that profile is unavailable (no analyzed check at all).
     verdict_by_profile: dict[str, str | None]
@@ -460,6 +469,7 @@ class ProfileMatrixEntry:
             "profiles": list(self.profiles),
             "affected_profiles": list(self.affected_profiles),
             "incomplete_profiles": list(self.incomplete_profiles),
+            "unanalyzed_profiles": list(self.unanalyzed_profiles),
             "verdict_by_profile": dict(self.verdict_by_profile),
         }
 
@@ -623,7 +633,13 @@ class AggregateResult:
         whose analyzed verdict is compatible but whose gate is still
         blocking (e.g. an ``addition: error`` policy) is not "affected" by
         the verdict but is by the gate (Codex review) — either makes it
-        ``affected``.
+        ``affected``. A profile with *zero* analyzed checks at all (every
+        check unavailable, whether required or optional) lands in
+        ``unanalyzed_profiles`` instead of being silently folded into
+        "clean" (Codex review) — an optional-only profile that never
+        reported is not a coverage failure, but it was never actually
+        checked either, so calling it "clean" would claim confidence this
+        result does not have.
         """
         by_target: dict[str, dict[str, list[TargetReport]]] = {}
         for t in self.targets:
@@ -638,6 +654,7 @@ class AggregateResult:
             profiles = tuple(sorted(reports_by_profile))
             affected = []
             incomplete = []
+            unanalyzed = []
             verdict_by_profile: dict[str, str | None] = {}
             for pid in profiles:
                 reports = reports_by_profile[pid]
@@ -650,6 +667,7 @@ class AggregateResult:
                 ]
                 if not verdicts:
                     verdict_by_profile[pid] = None
+                    unanalyzed.append(pid)
                     continue
                 worst = max(verdicts, key=lambda v: _VERDICT_RANK[v])
                 verdict_by_profile[pid] = worst.value
@@ -664,6 +682,7 @@ class AggregateResult:
                     profiles=profiles,
                     affected_profiles=tuple(affected),
                     incomplete_profiles=tuple(incomplete),
+                    unanalyzed_profiles=tuple(unanalyzed),
                     verdict_by_profile=verdict_by_profile,
                 )
             )
@@ -702,16 +721,32 @@ class AggregateResult:
             lines.append("")
             lines.append("Profile matrix:")
             for entry in matrix:
+                unanalyzed = entry.unanalyzed_profiles
                 if entry.affected_profiles:
                     line = (
                         f"  {entry.base_target}: affected on "
                         f"{', '.join(entry.affected_profiles)} "
                         f"(checked on {', '.join(entry.profiles)})"
                     )
-                else:
+                elif not unanalyzed:
                     line = (
                         f"  {entry.base_target}: clean on all checked profiles "
                         f"({', '.join(entry.profiles)})"
+                    )
+                elif len(unanalyzed) < len(entry.profiles):
+                    # Some profiles are clean, others never produced an
+                    # analyzed result at all -- never call the latter
+                    # "clean" (Codex review).
+                    clean = [p for p in entry.profiles if p not in unanalyzed]
+                    line = (
+                        f"  {entry.base_target}: clean on {', '.join(clean)} "
+                        f"(checked on {', '.join(entry.profiles)}); "
+                        f"no analyzed result on {', '.join(unanalyzed)}"
+                    )
+                else:
+                    line = (
+                        f"  {entry.base_target}: no analyzed result on any "
+                        f"checked profile ({', '.join(entry.profiles)})"
                     )
                 if entry.incomplete_profiles:
                     line += (
