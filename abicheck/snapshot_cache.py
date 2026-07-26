@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "3"
+_SNAPSHOT_CACHE_VERSION: str = "4"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -74,6 +74,16 @@ _SNAPSHOT_CACHE_VERSION: str = "3"
 # file found there -- not just the directory's own path -- so a transitive
 # header edit invalidates the cache the same way editing an explicitly
 # passed header already does (Codex review).
+#
+# v4 (ADR-050 D1/D2): ``_cache_key`` stopped sorting the caller-given
+# ``headers``/``includes`` lists before hashing them. Order is a real,
+# load-bearing input -- the same "-I search-precedence order is a real
+# compile difference" rule ``comparability.py``'s ``profile_fingerprint``
+# already enforces for the gate -- so two dumps requesting the same
+# headers/includes in a different order can legitimately resolve to a
+# different snapshot; sorting collapsed them to the same key and let a warm
+# cache silently serve the wrong order's result. Bumped so an old,
+# order-collapsed cache entry is never replayed as if it were order-aware.
 
 
 def _get_cache_dir() -> Path:
@@ -156,7 +166,18 @@ def _cache_key(
     # stale snapshot. Directory-valued ``-H`` inputs and explicit include roots
     # contribute every header-like descendant reachable by the parser.
     hash_files: set[Path] = set()
-    for hdr in sorted(headers):
+    # ADR-050 D1/D2: *not* sorted — headers/includes order is real,
+    # load-bearing search-precedence/preprocessing order (the same "order is
+    # a real compile difference" rule comparability.py's profile_fingerprint
+    # already enforces), not cosmetic. Two dumps requesting the same
+    # headers/includes in a different order can legitimately resolve to a
+    # different snapshot (e.g. -I a -I b vs -I b -I a with a same-named
+    # header in both, or a macro one header defines before another is
+    # included) — sorting here would let a warm cache silently serve the
+    # wrong order's snapshot. `hash_files` (the transitively-discovered
+    # descendants of a directory input) stays a sorted set below: those are
+    # an unordered content aggregate, not a caller-ordered sequence.
+    for hdr in headers:
         h.update(str(hdr).encode())
         try:
             if hdr.is_dir():
@@ -165,7 +186,7 @@ def _cache_key(
                 hash_files.add(hdr)
         except OSError:
             h.update(b"UNREADABLE_HEADER_INPUT")
-    for inc in sorted(includes):
+    for inc in includes:
         h.update(str(inc).encode())
         try:
             hash_files.update(iter_cache_header_files(inc))

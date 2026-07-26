@@ -75,6 +75,32 @@ def _expect(*required: str, optional: tuple[str, ...] = ()) -> ExpectedTargets:
     return ExpectedTargets.from_lists(list(required), list(optional))
 
 
+def _write_not_comparable_report(
+    d: Path,
+    target_id: str,
+    *,
+    kind: str = "scope_mismatch",
+    message: str = "scope drift",
+    prefix: str = "abi-report-",
+) -> Path:
+    """A native compare/compare-release ADR-050 D2 not_comparable report:
+    a real JSON ``null`` for ``verdict`` (not merely an absent key) plus a
+    structured ``reason``. ``_write_report`` can't express this shape --
+    its own ``verdict`` param omits the key entirely when given ``None``."""
+    path = d / f"{prefix}{target_id}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "report_schema_version": "2.17",
+                "library": "libfoo.so",
+                "verdict": None,
+                "reason": {"kind": kind, "message": message},
+            }
+        )
+    )
+    return path
+
+
 class TestHelpers:
     @pytest.mark.parametrize(
         "name,expected",
@@ -291,6 +317,89 @@ class TestGateVsVerdict:
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, optional=(MACOS,)))
         assert r.exit_code() == 4
+
+
+class TestNotComparable:
+    """ADR-050 D2: a native compare/compare-release ``verdict: null`` report
+    (schema 2.17) must never be silently folded into the same "unavailable"
+    (coverage-gap-only, skippable) bucket a report that simply never arrived
+    gets — it is definitive evidence the comparison couldn't be trusted, not
+    an unknown, so it blocks unconditionally (CLAUDE.md M1-... / G32 Phase A)."""
+
+    def test_blocks_at_4_and_is_marked_analyzed(self, tmp_path: Path):
+        _write_not_comparable_report(tmp_path, LINUX)
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].analyzed
+        assert r.targets[0].compatibility_verdict == Verdict.BREAKING
+        assert r.exit_code() == 4
+        assert LINUX in r.blocking_targets
+        assert r.targets[0].gate is not None
+        assert r.targets[0].gate.blocking_categories == ("not_comparable",)
+        assert r.targets[0].reason is not None
+        assert "scope_mismatch" in r.targets[0].reason
+        assert "scope drift" in r.targets[0].reason
+
+    def test_blocks_even_under_warn(self, tmp_path: Path):
+        _write_not_comparable_report(tmp_path, LINUX)
+        _write_report(tmp_path, WINDOWS, "COMPATIBLE")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX, WINDOWS),
+            on_missing_required=OnMissingRequired.WARN,
+        )
+        assert r.exit_code() == 4
+
+    def test_blocks_on_optional_target(self, tmp_path: Path):
+        _write_not_comparable_report(tmp_path, MACOS)
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, optional=(MACOS,)))
+        assert r.exit_code() == 4
+
+    def test_blocks_unconditionally_in_discovered_only_mode(self, tmp_path: Path):
+        # discovered_only has no coverage axis at all (there is no expected
+        # set to detect a gap against) -- a not_comparable report must still
+        # fold into exit_code() here, since it is not a coverage concern.
+        _write_not_comparable_report(tmp_path, LINUX, kind="profile_mismatch")
+        r = aggregate_reports_dir(tmp_path, discovered_only=True)
+        assert r.discovered_only
+        assert r.exit_code() == 4
+        assert not r.passed
+
+    def test_profile_mismatch_kind_is_preserved(self, tmp_path: Path):
+        _write_not_comparable_report(
+            tmp_path, LINUX, kind="profile_mismatch", message="dep.h changed"
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert "profile_mismatch" in r.targets[0].reason
+        assert "dep.h changed" in r.targets[0].reason
+
+    def test_distinct_from_a_missing_report(self, tmp_path: Path):
+        # No report file at all for LINUX -- genuinely unavailable, still a
+        # *coverage* gap (advisory under warn), unlike not_comparable above.
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_missing_required=OnMissingRequired.WARN,
+        )
+        assert not r.targets[0].analyzed
+        assert r.targets[0].gate is None
+        assert r.exit_code() == 0
+
+    def test_render_text_shows_reason(self, tmp_path: Path):
+        _write_not_comparable_report(tmp_path, LINUX)
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        text = r.render_text()
+        assert "not_comparable" in text
+        assert "scope drift" in text
+
+    def test_to_dict_carries_reason_and_category(self, tmp_path: Path):
+        _write_not_comparable_report(tmp_path, LINUX)
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        d = r.to_dict()
+        target = d["targets"][0]
+        assert target["compatibility_verdict"] == "BREAKING"
+        assert target["gate"]["blocking_categories"] == ["not_comparable"]
+        assert "reason" in target
 
 
 class TestCoveragePolicy:

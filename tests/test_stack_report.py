@@ -101,6 +101,29 @@ class TestStackToJson:
         assert "stack_changes" in data
         assert data["stack_changes"][0]["change_type"] == "added"
 
+    def test_stack_change_not_comparable_reason_in_json(self):
+        # ADR-050 D2: a not_comparable dependency must be distinguishable in
+        # the JSON report from an ordinary abi_diff=None (unreadable file).
+        result = _make_result(
+            stack_changes=[
+                StackChange(
+                    library="libfoo.so", change_type="content_changed",
+                    not_comparable_reason="scope drift",
+                ),
+            ],
+        )
+        data = json.loads(stack_to_json(result))
+        sc = data["stack_changes"][0]
+        assert sc["not_comparable_reason"] == "scope drift"
+        assert sc["abi_verdict"] is None
+
+    def test_stack_change_no_not_comparable_reason_omitted_from_json(self):
+        result = _make_result(
+            stack_changes=[StackChange(library="libfoo.so", change_type="content_changed")],
+        )
+        data = json.loads(stack_to_json(result))
+        assert "not_comparable_reason" not in data["stack_changes"][0]
+
     def test_stack_change_findings_embedded_not_just_counts(self):
         """A content-changed library must embed which symbols broke, not just
         a bare count — verified defect: JSON only had `abi_breaking: N`, with
@@ -210,6 +233,20 @@ class TestStackToMarkdown:
         md = stack_to_markdown(_make_result(unresolved=[("/app", "libmissing.so")]))
         assert "Unresolved Libraries" in md
         assert "libmissing.so" in md
+
+    def test_not_comparable_stack_change_shown(self):
+        # ADR-050 D2: a not_comparable dependency renders distinctly from
+        # "unknown" (the pre-existing abi_diff=None label) and shows why.
+        md = stack_to_markdown(_make_result(
+            stack_changes=[
+                StackChange(
+                    library="libfoo.so", change_type="content_changed",
+                    not_comparable_reason="scope drift",
+                ),
+            ],
+        ))
+        assert "`not_comparable`" in md
+        assert "scope drift" in md
 
     def test_missing_symbols_section(self):
         md = stack_to_markdown(_make_result(

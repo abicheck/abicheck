@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-from abicheck.sarif import to_sarif, to_sarif_str
+from abicheck.sarif import to_sarif, to_sarif_not_comparable, to_sarif_str
 
 
 def _make_result(
@@ -1018,3 +1018,36 @@ class TestImpactAssessmentRootCause:
             for res in rc_doc["runs"][0]["results"]
         }
         assert full_ids == rc_ids
+
+
+class TestNotComparable:
+    """ADR-050 D2 -- the comparability-gate hard-fail path has no DiffResult
+    at all, so it gets its own dedicated renderer instead of to_sarif."""
+
+    def test_structure(self) -> None:
+        doc = to_sarif_not_comparable(
+            "libfoo.so.1", "1.0", "2.0", "scope_mismatch", "scope drift"
+        )
+        assert doc["version"] == "2.1.0"
+        run = doc["runs"][0]
+        assert run["results"] == []
+        invocation = run["invocations"][0]
+        assert invocation["executionSuccessful"] is False
+        assert invocation["exitCode"] == 16
+        notif = invocation["toolExecutionNotifications"][0]
+        assert notif["descriptor"]["id"] == "scope_mismatch"
+        assert notif["level"] == "error"
+        assert "scope drift" in notif["message"]["text"]
+        assert run["properties"]["notComparable"] is True
+        assert run["properties"]["abiVerdict"] is None
+        assert run["properties"]["reason"] == {
+            "kind": "scope_mismatch",
+            "message": "scope drift",
+        }
+
+    def test_json_serializable(self) -> None:
+        doc = to_sarif_not_comparable(
+            "libfoo.so.1", "1.0", "2.0", "profile_mismatch", "dep.h changed"
+        )
+        # Round-trips cleanly -- no non-JSON-serializable values snuck in.
+        assert json.loads(json.dumps(doc)) == doc

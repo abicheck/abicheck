@@ -1926,7 +1926,18 @@ class TestScopeDiffToAppWithSnapshots:
             == ReachabilityState.PROVEN_REACHABLE
         )
         assert overlay.impact_assessment.reachability_kind == "consumer_proven"
-        assert assess_change(overlay) == overlay.impact_assessment
+        # Mutate the flat fields *after* caching (as a later pipeline stage
+        # could) and confirm assess_change() still serves the cached
+        # evidence rather than silently re-deriving from the mutated flat
+        # fields -- with the flat fields unchanged, an implementation that
+        # ignored the cache entirely would produce an identical result, so
+        # this is the assertion that actually proves the cache is used.
+        overlay.public_reachable = False
+        overlay.reachability_state = ReachabilityState.UNKNOWN
+        reassessed = assess_change(overlay)
+        assert reassessed.public_reachable is True
+        assert reassessed.reachability_state == ReachabilityState.PROVEN_REACHABLE
+        assert reassessed.reachability_kind == "consumer_proven"
 
     def test_missing_symbol_covered_by_diff_change_gets_no_overlay(self, tmp_path):
         """The dedup case: a missing symbol already represented by a real

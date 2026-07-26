@@ -999,6 +999,48 @@ class TestAbiCompare:
             assert "new_value" in c
             assert "source_location" in c
 
+    def _make_mismatched_scope_pair(self, tmp_path: Path) -> tuple[Path, Path]:
+        """Two snapshots carrying real, deliberately-mismatched ExtractionContract
+        scope_fingerprints (ADR-050 D1/D2) -- old declares a.h/foo.h, new
+        declares a.h/bar.h, a genuine scope drift compute_extraction_contract
+        detects."""
+        from abicheck.comparability import compute_extraction_contract
+
+        a = tmp_path / "v1" / "a.h"
+        old_h = tmp_path / "v1" / "foo.h"
+        new_h = tmp_path / "v2" / "bar.h"
+        old_h.parent.mkdir(parents=True)
+        new_h.parent.mkdir(parents=True)
+        a.write_text("int g(void);\n")
+        old_h.write_text("int f(void);\n")
+        new_h.write_text("int f(void);\n")
+        old = AbiSnapshot(
+            library="libtest.so.1", version="1.0",
+            functions=[_pub_func("f", "_Z1fv")],
+            contract=compute_extraction_contract(declared_headers=[a, old_h]),
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1", version="2.0",
+            functions=[_pub_func("f", "_Z1fv")],
+            contract=compute_extraction_contract(declared_headers=[a, new_h]),
+        )
+        return self._make_pair(tmp_path, old, new)
+
+    def test_not_comparable_returns_dedicated_status(self, tmp_path: Path):
+        old_p, new_p = self._make_mismatched_scope_pair(tmp_path)
+        raw = abi_compare(str(old_p), str(new_p))
+        data = json.loads(raw)
+        assert data["status"] == "not_comparable"
+        assert "reason" in data
+        assert "verdict" not in data
+
+    def test_diagnostic_comparison_downgrades_mismatch(self, tmp_path: Path):
+        old_p, new_p = self._make_mismatched_scope_pair(tmp_path)
+        raw = abi_compare(str(old_p), str(new_p), diagnostic_comparison=True)
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        assert data["report"]["assurance"] == "none"
+
     def test_used_by_and_required_symbols_are_mutually_exclusive(
         self, tmp_path: Path
     ):

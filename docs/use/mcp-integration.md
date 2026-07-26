@@ -77,7 +77,12 @@ Add to `.cursor/mcp.json` or VS Code MCP settings:
 The MCP server exposes seven tools. All return JSON-encoded strings.
 
 **Response envelopes.** On failure, every tool returns the same error
-envelope: `{"status": "error", "error": "<message>"}`. On success the
+envelope: `{"status": "error", "error": "<message>"}`. `abi_compare` has one
+more envelope, `{"status": "not_comparable", "reason": "<message>"}` (ADR-050
+D2) — `old_input`/`new_input` were not extracted under a comparable
+profile/scope contract, so no verdict was produced; see
+[`diagnostic_comparison`](#abi_compare--compare-two-abi-surfaces) below to
+downgrade this into a tentative result instead. On success the
 shape differs by tool:
 
 | Tool | Success envelope |

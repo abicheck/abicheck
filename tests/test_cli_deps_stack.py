@@ -10,7 +10,7 @@ from click.testing import CliRunner
 from abicheck.binder import BindingStatus, SymbolBinding
 from abicheck.cli import main
 from abicheck.resolver import DependencyGraph, ResolvedDSO
-from abicheck.stack_checker import StackCheckResult, StackVerdict
+from abicheck.stack_checker import StackChange, StackCheckResult, StackVerdict
 
 # ---------------------------------------------------------------------------
 # Helpers — build synthetic data
@@ -70,6 +70,7 @@ def _make_result(
     risk_score: str = "low",
     baseline_env: str = "",
     candidate_env: str = "",
+    stack_changes: list[StackChange] | None = None,
 ) -> StackCheckResult:
     graph = _make_graph(binary)
     bindings = _make_bindings(binary)
@@ -84,7 +85,7 @@ def _make_result(
         bindings_baseline=bindings,
         bindings_candidate=bindings,
         missing_symbols=[],
-        stack_changes=[],
+        stack_changes=stack_changes if stack_changes is not None else [],
         risk_score=risk_score,
     )
 
@@ -354,6 +355,44 @@ class TestStackCheckCommand:
             "--format", "json",
         ])
         assert result.exit_code == 4
+
+    def test_stack_check_exit_5_not_comparable_dominates_fail(
+        self, tmp_path, env_dirs, monkeypatch
+    ):
+        # ADR-050 D2: a not_comparable dependency dominates the release-level
+        # rollup even when the rest of the stack computes to FAIL -- the
+        # comparison couldn't establish what changed for that library at all.
+        baseline, candidate = env_dirs
+        binary_rel = "usr/bin/myapp"
+
+        result_obj = _make_result(
+            binary_rel,
+            loadability=StackVerdict.PASS,
+            abi_risk=StackVerdict.FAIL,
+            risk_score="high",
+            baseline_env=str(baseline),
+            candidate_env=str(candidate),
+            stack_changes=[
+                StackChange(
+                    library="libbar.so",
+                    change_type="content_changed",
+                    not_comparable_reason="scope drift",
+                ),
+            ],
+        )
+        monkeypatch.setattr(
+            "abicheck.stack_checker.check_stack",
+            lambda *a, **kw: result_obj,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "deps", "compare", binary_rel,
+            "--old-root", str(baseline),
+            "--new-root", str(candidate),
+            "--format", "json",
+        ])
+        assert result.exit_code == 5
 
     def test_stack_check_exit_1_abi_risk_warn(self, tmp_path, env_dirs, monkeypatch):
         baseline, candidate = env_dirs

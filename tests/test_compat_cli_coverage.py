@@ -355,3 +355,39 @@ def test_check_logging_setup_failure_exits(tmp_path: Path):
     )
     assert result.exit_code == 6
     assert "setting up logging" in result.output
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# compat check — ADR-050 D2 comparability gate (exit 9)
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+def test_check_not_comparable_exits_9(tmp_path: Path, monkeypatch):
+    """A ProfileMismatchError/ScopeMismatchError from compare() routes through
+    _compat_fail to the one code the 3-11 range documented no meaning for
+    (ADR-050 D2) -- distinct from native compare's own exit 16."""
+    from abicheck.errors import ScopeMismatchError
+    from abicheck.serialization import save_snapshot
+
+    old_json = tmp_path / "old.json"
+    new_json = tmp_path / "new.json"
+    save_snapshot(AbiSnapshot(library="libfoo.so", version="1.0"), old_json)
+    save_snapshot(AbiSnapshot(library="libfoo.so", version="2.0"), new_json)
+
+    def _raise(*_a, **_kw):
+        raise ScopeMismatchError("scope drift")
+
+    monkeypatch.setattr("abicheck.compat.cli.compare", _raise)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "compat", "check",
+            "-lib", "libfoo",
+            "-old", str(old_json),
+            "-new", str(new_json),
+        ],
+    )
+    assert result.exit_code == 9
+    assert "comparing snapshots" in result.output
+    assert "scope drift" in result.output

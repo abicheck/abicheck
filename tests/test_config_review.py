@@ -577,6 +577,30 @@ class TestReleaseSeverityPolicyAndGlobal:
         )
         assert 'failures="1"' in xml_with_config
 
+    def test_format_release_junit_includes_not_comparable_library(self):
+        """ADR-050 D2: a `not_comparable` per-library entry (its own verdict
+        string, not folded into `ERROR`) must still contribute a testsuite
+        here -- before this fix, `error_libs` only matched `verdict ==
+        "ERROR"`, so a library that hit PROFILE_MISMATCH/SCOPE_MISMATCH
+        silently produced zero testsuites, disagreeing with the release's
+        own non-zero exit code."""
+        from abicheck.cli_compare_release_helpers import _format_release_junit
+
+        xml = _format_release_junit(
+            None,
+            None,
+            [
+                {
+                    "library": "libfoo.so",
+                    "verdict": "not_comparable",
+                    "reason": "scope_fingerprint mismatch",
+                }
+            ],
+        )
+        assert 'errors="1"' in xml
+        assert "libfoo.so" in xml
+        assert "scope_fingerprint mismatch" in xml
+
     def test_fold_matrix_break_raises_exit(self):
         from abicheck.cli_compare_release import _fold_release_global_severity
 

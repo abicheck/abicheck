@@ -37,6 +37,18 @@
           "evidence_tiers"
         ]
       }
+    },
+    {
+      "description": "Schema 2.17 (ADR-050 D2). A null verdict (the comparability gate rejected the pair) must always carry its reason -- the property being defined does not by itself make it required.",
+      "if": {
+        "properties": {
+          "verdict": { "type": "null" }
+        },
+        "required": ["verdict"]
+      },
+      "then": {
+        "required": ["reason"]
+      }
     }
   ],
   "properties": {
@@ -49,9 +61,34 @@
     "old_version": { "type": "string" },
     "new_version": { "type": "string" },
     "verdict": {
-      "type": "string",
-      "description": "The five real Verdict enum values for a computed compatibility comparison, plus two sentinel values for a report that never got that far: \"ERROR\" (an operational/infrastructure failure -- e.g. a library that failed to dump/extract/compare in the per-library release fan-out, or a resolve-baseline failure in actions/check-target; pre-dates check-target, see aggregate.py's _OPERATIONAL_ERROR_VERDICT) and \"NO_BASELINE\" (actions/check-target's bootstrap \"no baseline published yet\" advisory pass, ADR-047 §6 -- never a compatibility verdict). Only the five real values require the full compare-report shape below (see allOf); ERROR/NO_BASELINE reports carry whatever operational_errors/check_evidence_coverage context is available instead.",
-      "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", "ERROR", "NO_BASELINE"]
+      "type": ["string", "null"],
+      "description": "The five real Verdict enum values for a computed compatibility comparison, plus two sentinel values for a report that never got that far: \"ERROR\" (an operational/infrastructure failure -- e.g. a library that failed to dump/extract/compare in the per-library release fan-out, or a resolve-baseline failure in actions/check-target; pre-dates check-target, see aggregate.py's _OPERATIONAL_ERROR_VERDICT) and \"NO_BASELINE\" (actions/check-target's bootstrap \"no baseline published yet\" advisory pass, ADR-047 §6 -- never a compatibility verdict). Only the five real values require the full compare-report shape below (see allOf); ERROR/NO_BASELINE reports carry whatever operational_errors/check_evidence_coverage context is available instead. Schema 2.17 (ADR-050 D2): `null` is a third class -- the comparability precondition gate rejected the pair before any diff ran (old/new were not extracted under a comparable contract); see the sibling `reason` property, always present when `verdict` is `null`.",
+      "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", "ERROR", "NO_BASELINE", null]
+    },
+    "reason": {
+      "type": "object",
+      "description": "Schema 2.17 (ADR-050 D2). Present only when verdict is null: why old/new could not be compared. `kind` distinguishes which ExtractionContract fingerprint mismatched.",
+      "required": ["kind", "message"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["profile_mismatch", "scope_mismatch"]
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable explanation (the raised exception's message)."
+        }
+      }
+    },
+    "contract_coverage": {
+      "type": ["string", "null"],
+      "description": "Schema 2.17 (ADR-050 D2). Set to \"partial\" when exactly one side of an otherwise-successful comparison carried a given ExtractionContract fingerprint (profile or scope) and the other didn't -- e.g. a freshly-produced snapshot compared against a pre-ADR-050 stored baseline. Report-level metadata, never a Change/ChangeKind finding, so it cannot be reached by --severity-* promotion. Omitted (or null) when both sides had equal fingerprint coverage.",
+      "enum": ["partial", null]
+    },
+    "assurance": {
+      "type": ["string", "null"],
+      "description": "Schema 2.17 (ADR-050 D2). Set to \"none\" when this report was produced via --diagnostic-comparison after a genuine contract mismatch -- the diff ran anyway, but every finding shares the same reduced trust the mismatch implies. Omitted (or null) for an ordinary comparable diff.",
+      "enum": ["none", null]
     },
     "full_verdict": {
       "type": "string",
@@ -516,15 +553,15 @@
             "correlated_change_kind": { "type": "string" },
             "root_cause_id": {
               "type": "string",
-              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.17): a stable hash of this finding's root-cause grouping key -- the same computation `--report-mode root-cause`'s own `root_causes[].root_cause_id` uses, surfaced per-finding regardless of report_mode. Present only when this finding has a real correlation signal (a `caused_by_type`, or its own symbol is referenced by another finding's `caused_by_type`); absent for an uncorrelated singleton finding."
+              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.18): a stable hash of this finding's root-cause grouping key -- the same computation `--report-mode root-cause`'s own `root_causes[].root_cause_id` uses, surfaced per-finding regardless of report_mode. Present only when this finding has a real correlation signal (a `caused_by_type`, or its own symbol is referenced by another finding's `caused_by_type`); absent for an uncorrelated singleton finding."
             },
             "root_cause_display": {
               "type": "string",
-              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.17): the human-readable root paired with root_cause_id. Present iff root_cause_id is."
+              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.18): the human-readable root paired with root_cause_id. Present iff root_cause_id is."
             },
             "impact_group_id": {
               "type": "string",
-              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.17): currently always identical to root_cause_id -- a placeholder alias until Phase 6's RootCauseCorrelator gives it independent meaning (e.g. bucketing several distinct root causes under one broader consumer-visible event). Present iff root_cause_id is."
+              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.18): currently always identical to root_cause_id -- a placeholder alias until Phase 6's RootCauseCorrelator gives it independent meaning (e.g. bucketing several distinct root causes under one broader consumer-visible event). Present iff root_cause_id is."
             },
             "proof_path": {
               "type": "object",

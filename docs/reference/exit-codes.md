@@ -58,6 +58,7 @@ below.
 | `0` | `NO_CHANGE`, `COMPATIBLE`, or `COMPATIBLE_WITH_RISK` — no binary ABI break |
 | `2` | `API_BREAK` — source-level API break — recompilation required |
 | `4` | `BREAKING` — binary ABI break |
+| `16` | `not_comparable` (ADR-050 D2) — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced (`verdict: null` in `--format json`, with a `reason` object). Pass `--diagnostic-comparison` to force a tentative diff instead. |
 | `64` | Invalid invocation — bad arguments/options or an unreadable/unrecognised input, deliberately outside the `0/2/4` verdict space |
 
 > **⚠️ Exit `0` covers `NO_CHANGE`, `COMPATIBLE`, and `COMPATIBLE_WITH_RISK`.** If your pipeline needs
@@ -75,6 +76,7 @@ is computed from the severity configuration rather than the verdict:
 | `1` | Error-level findings in `addition` or `quality_issues` only |
 | `2` | Error-level findings in `potential_breaking` (but not `abi_breaking`) |
 | `4` | Error-level findings in `abi_breaking` |
+| `16` | `not_comparable` (ADR-050 D2) — the comparability gate hard-fails before severity classification ever runs, identical to the legacy scheme's `16`. |
 
 The highest applicable code wins. For example, if both `abi_breaking=error` and
 `quality_issues=error` have findings, the exit code is `4`.
@@ -147,6 +149,7 @@ below, plus a dedicated code for removed libraries:
 | `2` | Worst verdict is `API_BREAK` |
 | `4` | Worst verdict is `BREAKING`, **or** an operational `ERROR` (a library failed to dump/extract/compare) |
 | `8` | A library was removed between releases and `--fail-on-removed-library` is set. In the legacy scheme this is emitted only when no API/ABI verdict exit 2/4 **and no operational `ERROR` exit 4** already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. |
+| `16` | `not_comparable` (ADR-050 D2) — at least one library's OLD/NEW DSOs were not extracted under a comparable profile/scope contract. Takes precedence over **every** other outcome in the release, including `8` (removed-library) and a genuine `ERROR`: a not_comparable result means the comparison couldn't establish what changed at all, so it dominates in both the legacy and severity-aware schemes. Identical code to native `compare`'s own `16`. |
 
 On the release path the severity-aware code (`0/1/2/4`) replaces the
 verdict-based `2/4` mapping only when a severity *map* is actually in effect —
@@ -182,6 +185,7 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 | `2` | Source-level / API break (incl. `API_BREAK` cross-source findings) |
 | `4` | ABI break (from the `--against` comparison) |
 | `5` | `--budget` overflow — the time guard tripped (scope is never silently shrunk) |
+| `6` | `NOT_COMPARABLE` (ADR-050 D2) — `ARTIFACT` and `--against` were not extracted under a comparable profile/scope contract, so the comparison never ran (`diff.reason` in `--format json`). Distinct from `compat check`'s `9` and native `compare`'s `16` — every command maintains an independent exit-code scheme. |
 | `64` | Invalid invocation (bad arguments/options) |
 
 > Exit `5` is unique to `scan`: `--budget 15m` **fails** the run rather than
@@ -312,6 +316,7 @@ renamed from the old `--baseline`/`--candidate`).
 | `0` | `PASS` | Binary loads and no harmful ABI changes |
 | `1` | `WARN` | Binary loads but ABI risk detected in dependencies |
 | `4` | `FAIL` | Load failure or binary ABI break in dependencies |
+| `5` | — | `not_comparable` (ADR-050 D2) — at least one dependency's before/after DSOs were not extracted under a comparable profile/scope contract, so its per-library ABI diff never ran. Dominates `0`/`1`/`4`, the same "couldn't establish what changed" precedence the gate uses elsewhere. |
 | `64` | — | Invalid invocation (bad arguments/options) |
 
 `--dry-run` shows the old/new roots, resolved binary paths, and search order
@@ -349,7 +354,7 @@ Matches `abi-compliance-checker` exit codes (ABICC drop-in):
 | `1` | `BREAKING` (mirrors ABICC) |
 | `2` | `API_BREAK` (source-level break; non-verdict failures use extended codes below) |
 
-> Non-verdict/tool failures are classified via **Extended compat error codes (ABICC-style)** below (`3`, `4`, `5`, `6`, `7`, `8`, `10`, `11`).
+> Non-verdict/tool failures are classified via **Extended compat error codes (ABICC-style)** below (`3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`).
 
 ---
 
@@ -366,6 +371,7 @@ In `abicheck compat`, non-verdict failures are further classified where possible
 | `6` | Invalid compat configuration/input (descriptor, suppression, regex flags) |
 | `7` | Failed to write report/output artifact |
 | `8` | Dump/analysis pipeline failure |
+| `9` | `not_comparable` (ADR-050 D2) — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced. Distinct from native `compare`'s own `16` — the two commands maintain independent exit-code schemes. |
 | `10` | Generic internal/tool failure fallback |
 | `11` | Interrupted run |
 

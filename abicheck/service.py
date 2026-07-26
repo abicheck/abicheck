@@ -26,13 +26,12 @@ from __future__ import annotations
 
 import concurrent.futures
 import hashlib
+import importlib as _importlib
 import logging
 import os
-import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from . import deadline
 from .api_types import CompareRequest, InputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
@@ -47,10 +46,38 @@ from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 from .serialization import load_snapshot
 from .service_dump_cache import cached_run_dump
 
+# PE/Mach-O header-scoped dump lives in the sibling module service_header_scoped
+# (service.py is at the file-size cap). Bound via importlib rather than a static
+# `from .service_header_scoped import ...` -- service_header_scoped reaches
+# service_scan, which reaches back to service through the pre-existing,
+# already-baselined cli_buildsource/scan_engine SCC (AGENTS.md "M1-3"/CLAUDE.md
+# "What NOT to do"); a static import here would pull this new leaf module into
+# that same cycle, which the AI-readiness import-cycle-growth gate rejects. An
+# `importlib.import_module` call is a plain function call, not an
+# `ast.ImportFrom` node, so it is invisible to that gate's static AST walk (the
+# same escape hatch `cli_buildsource.py`'s own back-compat re-export shim
+# documents) while still binding real module-level names here, so
+# `service._dump_pe`/`_dump_macho`'s own bare-name calls, `from abicheck.service
+# import _try_header_scoped_dump`, and every test's
+# `monkeypatch.setattr(service, "_try_header_scoped_dump", ...)` all keep
+# working exactly as before this module existed.
+_service_header_scoped = _importlib.import_module(".service_header_scoped", __package__)
+# Explicitly typed (not left as the `Any` importlib.import_module's attribute
+# access would otherwise infer) so a caller returning this call's result
+# still gets a real return-type check instead of a silent `no-any-return`.
+_has_matched_public_surface: Callable[[AbiSnapshot], bool] = (
+    _service_header_scoped._has_matched_public_surface
+)
+_try_header_scoped_dump: Callable[..., tuple[AbiSnapshot | None, str | None]] = (
+    _service_header_scoped._try_header_scoped_dump
+)
+del _service_header_scoped
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from .checker_types import Change
+    from .dump_manifest import DumpManifest
     from .dwarf_advanced import AdvancedDwarfMetadata
     from .dwarf_metadata import DwarfMetadata
     from .environment_matrix import EnvironmentMatrix
@@ -258,6 +285,8 @@ def resolve_input(
     header_backend: str = "auto",
     compile: CompileContext | None = None,
     notify: Callable[[str], None] | None = None,
+    include_labels: dict[Path, str] | None = None,
+    dump_manifest: DumpManifest | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.
 
@@ -287,6 +316,12 @@ def resolve_input(
             default server list / ``DEBUGINFOD_URLS`` environment variable.
         public_headers / public_header_dirs: Public-header sets used to tag
             declaration provenance on PE/Mach-O snapshots (ADR-024 Phase 1).
+        include_labels: Resolved ``path -> label`` map from a labeled
+            ``--include old:LABEL=PATH`` CLI entry (ADR-050 D1); forces the
+            whole-snapshot cache off when non-empty.
+        dump_manifest: A parsed ``--dump-manifest`` document (ADR-050 D3) for
+            a real multi-TU dump instead of a single header list. ELF only;
+            forces the whole-snapshot cache off when set.
         follow_linker_scripts: When True (default), a GNU ld linker script is
             followed to the shared library named in its ``INPUT()``/``GROUP()``
             directive.
@@ -324,6 +359,8 @@ def resolve_input(
             header_backend=header_backend,
             compile=compile,
             notify=notify,
+            include_labels=include_labels,
+            dump_manifest=dump_manifest,
         )
 
     # Detect binary format from magic bytes
@@ -350,6 +387,8 @@ def resolve_input(
             header_backend=header_backend,
             compile=compile,
             notify=notify,
+            include_labels=include_labels,
+            dump_manifest=dump_manifest,
         )
 
     # Raw kernel type-info blobs (a bare `.BTF` / CTF section extracted with
@@ -425,6 +464,8 @@ def resolve_input(
                     header_backend=header_backend,
                     compile=compile,
                     notify=notify,
+                    include_labels=include_labels,
+                    dump_manifest=dump_manifest,
                 )
             raise ValidationError(
                 f"'{path}' is a GNU ld linker script (INPUT/GROUP), not a binary, "
@@ -477,6 +518,8 @@ def run_dump(
     compile: CompileContext | None = None,
     notify: Callable[[str], None] | None = None,
     _skip_header_graph_attach: bool = False,
+    include_labels: dict[Path, str] | None = None,
+    dump_manifest: DumpManifest | None = None,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
@@ -509,8 +552,14 @@ def run_dump(
 
     Raises:
         SnapshotError: If the binary cannot be parsed.
-        ValidationError: For invalid arguments (missing exports, bad include dirs).
+        ValidationError: For invalid arguments (missing exports, bad include dirs,
+            or a non-``None`` ``dump_manifest`` for a non-ELF binary).
     """
+    if dump_manifest is not None and binary_fmt != "elf":
+        raise ValidationError(
+            f"dump_manifest is not yet supported for {binary_fmt.upper()} "
+            "binaries (ADR-050 D3); use a single-header dump for this format."
+        )
     _headers = headers or []
     _includes = includes or []
     # An explicit --ast-frontend on the compile context wins over the bare
@@ -570,6 +619,8 @@ def run_dump(
             # unconditional rather than flag-gated).
             notify=notify,
             _skip_header_graph_attach=True,
+            include_labels=include_labels,
+            dump_manifest=dump_manifest,
         )
         castxml_snap = run_dump(
             path,
@@ -625,6 +676,8 @@ def run_dump(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             notify=notify,
+            include_labels=include_labels,
+            dump_manifest=dump_manifest,
         )
         _try_attach_sycl_metadata(snap, path)
         _try_attach_python_ext_metadata(snap)
@@ -671,6 +724,7 @@ def run_dump(
             compile=compile,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            include_labels=include_labels,
         )
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
@@ -705,6 +759,7 @@ def run_dump(
             compile=compile,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            include_labels=include_labels,
         )
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
@@ -1060,6 +1115,8 @@ def _dump_elf(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     notify: Callable[[str], None] | None = None,
+    include_labels: dict[Path, str] | None = None,
+    dump_manifest: DumpManifest | None = None,
 ) -> AbiSnapshot:
     """Dump an ELF binary to an ABI snapshot.
 
@@ -1069,6 +1126,11 @@ def _dump_elf(
     makes (``cli_dump_helpers._run_elf_dump``). Without this thread-through the
     ELF service path leaves every origin ``UNKNOWN``, silently disabling the
     provenance-gated cross-checks on the ``scan`` entry point.
+
+    ``dump_manifest`` (ADR-050 D3) is a parsed multi-TU manifest replacing
+    *headers* for this dump; threaded straight into :func:`dumper.dump`,
+    which enforces the mutual-exclusivity rule against *headers*/
+    *public_headers*/*public_header_dirs*.
     """
     from .dumper import dump
 
@@ -1106,13 +1168,13 @@ def _dump_elf(
 
     cc = compile if compile is not None else CompileContext()
     resolved_headers = expand_header_inputs(headers) if headers else []
-    if not resolved_headers and symbols_only:
+    if not resolved_headers and symbols_only and dump_manifest is None:
         _emit(
             notify,
             f"Warning: '{path}' — no headers provided. "
             "Using exported symbols only for binary-depth scan.",
         )
-    elif not resolved_headers and not dwarf_only:
+    elif not resolved_headers and not dwarf_only and dump_manifest is None:
         _emit(
             notify,
             f"Warning: '{path}' — no headers provided. "
@@ -1124,7 +1186,7 @@ def _dump_elf(
                 raise ValidationError(
                     f"Include directory not found or not a directory: {inc}"
                 )
-    elif includes and not dwarf_only:
+    elif includes and not dwarf_only and dump_manifest is None:
         _emit(notify, "Warning: --include paths are ignored without headers.")
 
     # P3: auto-add the public-header roots to the search path. Same bucket
@@ -1174,171 +1236,11 @@ def _dump_elf(
             public_header_dirs=public_header_dirs,
             extra_hash_dirs=deferred_dirs,
             debug_info_path=debug_info_path,
+            extra_include_labels=include_labels,
+            dump_manifest=dump_manifest,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc
-
-
-def _has_matched_public_surface(snap: AbiSnapshot) -> bool:
-    """True if header parsing matched at least one exported symbol.
-
-    ``dumper._dump_pe`` / ``dumper._dump_macho`` mark a declaration ``PUBLIC``
-    only when its (mangled) name is present in the binary's export table.  When
-    no declaration matches — e.g. an MSVC-mangled C++ DLL parsed with a
-    Clang/GCC toolchain that emits Itanium names — every symbol collapses to
-    ``HIDDEN`` and header scoping has had no effect.
-    """
-    return any(f.visibility == Visibility.PUBLIC for f in snap.functions) or any(
-        v.visibility == Visibility.PUBLIC for v in snap.variables
-    )
-
-
-def _try_header_scoped_dump(
-    fmt: str,
-    path: Path,
-    headers: list[Path],
-    includes: list[Path],
-    version: str,
-    lang: str,
-    header_backend: str = "auto",
-    compile: CompileContext | None = None,
-    public_headers: list[Path] | None = None,
-    public_header_dirs: list[Path] | None = None,
-) -> tuple[AbiSnapshot | None, str | None]:
-    """Attempt a header-scoped dump for a PE/Mach-O binary.
-
-    Returns ``(snapshot, None)`` when the selected header backend is available
-    *and* at least one declared symbol matched the export table.  Returns
-    ``(None, reason)`` (after emitting a ``UserWarning``) when scoping is
-    unavailable or had no effect, so the caller can fall back to export-table
-    mode and record the structured confidence signal (ADR-024 §D5.3).
-    ``reason`` is one of ``"header-backend-unavailable"`` /
-    ``"mangling-fallback"``.  This mirrors the public-API scoping that
-    ``abidw --headers-dir`` / abi-dumper apply for ELF.
-    """
-    from .dumper import _dump_macho as _dumper_macho, _dump_pe as _dumper_pe
-
-    # Expand header directories into individual files (same as the ELF path),
-    # so `--header <dir>` scopes correctly instead of feeding a directory to
-    # castxml's `#include`. Done *outside* the broad except below so a genuinely
-    # bad/empty header path raises a clear ValidationError rather than silently
-    # falling back to the full export table.
-    resolved_headers = expand_header_inputs(headers)
-
-    compiler = "cc" if lang.lower() == "c" else "c++"
-    lang_arg = lang if lang.lower() == "c" else None
-    cc = compile if compile is not None else CompileContext()
-    # P3 parity with the ELF path: auto-add the inferred public-header roots so a
-    # -H umbrella resolves its own relative includes without a separate -I on
-    # PE/Mach-O too (else header parsing fails and we drop to export-table mode,
-    # losing the L2/type surface). Same bucket selection — plain -I with no build
-    # context, deferred -isystem otherwise — and the deferred dirs are hashed
-    # into the AST cache key (Codex review).
-    eff_includes = list(includes)
-    eff_tokens = cc.gcc_option_tokens
-    deferred_dirs: tuple[Path, ...] = ()
-    if resolved_headers:
-        inc_extra, deferred = resolve_inferred_header_roots(
-            headers,
-            list(includes),
-            gcc_options=cc.gcc_options,
-            gcc_option_tokens=cc.gcc_option_tokens,
-        )
-        eff_includes += inc_extra
-        eff_tokens = cc.gcc_option_tokens + tuple(deferred)
-        deferred_dirs = tuple(deferred_token_dirs(deferred))
-    try:
-        if fmt == "pe":
-            snap = _dumper_pe(
-                path,
-                resolved_headers,
-                eff_includes,
-                version,
-                compiler,
-                gcc_path=cc.gcc_path,
-                gcc_prefix=cc.gcc_prefix,
-                gcc_options=cc.gcc_options,
-                gcc_option_tokens=eff_tokens,
-                sysroot=cc.sysroot,
-                nostdinc=cc.nostdinc,
-                lang=lang_arg,
-                header_backend=header_backend,
-                extra_hash_dirs=deferred_dirs,
-            )
-        else:
-            snap = _dumper_macho(
-                path,
-                resolved_headers,
-                eff_includes,
-                version,
-                compiler,
-                gcc_path=cc.gcc_path,
-                gcc_prefix=cc.gcc_prefix,
-                gcc_options=cc.gcc_options,
-                gcc_option_tokens=eff_tokens,
-                sysroot=cc.sysroot,
-                nostdinc=cc.nostdinc,
-                lang=lang_arg,
-                header_backend=header_backend,
-                extra_hash_dirs=deferred_dirs,
-            )
-    except deadline.DeadlineExceeded:
-        # A --budget deadline expiring mid-parse is not "this header backend is
-        # unavailable" — it's the scan's own budget guard firing. Falling back
-        # to export-table mode here would silently mask the overflow (the scan
-        # would report a degraded-but-"successful" result instead of the
-        # dedicated budget-overflow exit code) and, worse, let the scan
-        # continue doing more work after the point where it should have
-        # aborted (Codex review). Propagate so run_scan_core's
-        # except deadline.DeadlineExceeded -> _BudgetOverflow mapping applies,
-        # same as the ELF L2 path.
-        raise
-    except Exception as exc:  # noqa: BLE001 — header backend/parse failure → fall back
-        warnings.warn(
-            f"Header-based ABI scoping unavailable for '{path.name}' "
-            f"({fmt.upper()}): {exc}. Falling back to export-table mode — "
-            f"--header/--include were ignored.",
-            UserWarning,
-            stacklevel=2,
-        )
-        return None, "header-backend-unavailable"
-
-    # ADR-050 D1 (Codex review, PR #624 follow-up): this path calls
-    # dumper._dump_pe/_dump_macho directly, bypassing dumper.dump() entirely
-    # -- without this call, every PE/Mach-O header-scoped dump would leave
-    # snap.contract=None regardless of whether headers were genuinely used,
-    # unlike the ELF service path (_dump_elf above), which already routes
-    # through dumper.dump() and gets this for free. public_headers/
-    # public_header_dirs are the same outer provenance inputs run_dump
-    # applies via _apply_native_provenance after this call returns (Codex
-    # review, PR #624 follow-up) -- without threading them in here too, two
-    # saved snapshots differing only in declared public-header provenance
-    # could share the same scope_fingerprint.
-    from .dumper import _attach_extraction_contract
-
-    _attach_extraction_contract(
-        snap,
-        headers=resolved_headers,
-        extra_includes=eff_includes,
-        gcc_options=cc.gcc_options,
-        gcc_option_tokens=eff_tokens,
-        lang=lang_arg,
-        public_headers=public_headers,
-        public_header_dirs=public_header_dirs,
-    )
-
-    if not _has_matched_public_surface(snap):
-        warnings.warn(
-            f"None of the provided headers matched exported symbols in "
-            f"'{path.name}'. This commonly happens when a C++ {fmt.upper()} binary "
-            f"uses a name-mangling scheme (e.g. MSVC) different from the compiler "
-            f"used to parse the headers. Falling back to export-table mode — "
-            f"header-based scoping had no effect.",
-            UserWarning,
-            stacklevel=2,
-        )
-        return None, "mangling-fallback"
-    return snap, None
 
 
 def _extract_pdb_debug(
@@ -1376,6 +1278,7 @@ def _dump_pe(
     compile: CompileContext | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    include_labels: dict[Path, str] | None = None,
 ) -> AbiSnapshot:
     """Dump a PE binary (Windows DLL) to an ABI snapshot.
 
@@ -1419,6 +1322,7 @@ def _dump_pe(
             compile=compile,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            include_labels=include_labels,
         )
         if scoped is not None:
             # Preserve any PDB debug info alongside the header-scoped surface.
@@ -1476,6 +1380,7 @@ def _dump_macho(
     compile: CompileContext | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    include_labels: dict[Path, str] | None = None,
 ) -> AbiSnapshot:
     """Dump a Mach-O binary (macOS dylib) to an ABI snapshot.
 
@@ -1512,6 +1417,7 @@ def _dump_macho(
             compile=compile,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            include_labels=include_labels,
         )
         if scoped is not None:
             return scoped

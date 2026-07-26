@@ -89,11 +89,11 @@ model:
   audit for `internal_leak.py`, confirmation that `suppression.evaluate()` is
   a pure read for `appcompat.py`), with `assess_change` reusing that cached
   evidence while always recomputing `decision`/`root_cause_id` fresh.
-  **Three producers remain unmigrated, each for a documented reason** (see
-  ADR-052's "Deliberately not implemented this slice" for the full
-  per-producer detail, refined by direct code inspection rather than the
-  original decision text's assumption that all five producers were
-  comparably scoped):
+  **Two producer sites remain unmigrated, each for a documented reason**
+  (see ADR-052's "Deliberately not implemented this slice" for the full
+  detail, refined by direct code inspection rather than the original
+  decision text's assumption that all five named entries were comparably
+  scoped producers):
   - `source_graph_findings.py` has **nine** separate `Change(...)`
     construction sites (not one), each needing its own downstream-mutation
     check before caching is safe there — a materially bigger audit than
@@ -107,12 +107,14 @@ model:
     second `assess_change()` call for the same `Change`, which needs
     confirming actually happens (e.g. one `compare` run rendering both JSON
     and SARIF) before it's worth the risk.
-  - `suppression.py` turns out to contain **no** `Change(...)` construction
-    at all (confirmed by direct search) — the diagnostic construction near
-    it (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually lives in
-    `post_processing.py` and carries no reachability evidence to cache.
-    ADR-052's D2 decision text naming `suppression.py` needs its own
-    clarification pass before any code work is scheduled against it.
+
+  A third entry D2's original decision text named, `suppression.py`, turns
+  out to contain **no** `Change(...)` construction at all (confirmed by
+  direct search) — the diagnostic construction near it
+  (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually lives in
+  `post_processing.py` and carries no reachability evidence to cache. This
+  is a separate, unresolved documentation question (what `suppression.py`'s
+  named D2 role was actually meant to be), not a third producer to migrate.
 - **G29.3** (Phase 2, **D1-D6 all done, ADR-046**) — Graph core v2:
   relation/occurrence identity split (**done**), an evidence-preserving
   (order-independent) node/edge merge (**done**), a per-kind/per-role
@@ -392,7 +394,9 @@ uses) and passed into `assess_change` as a plain parameter, so
 `ImpactAssessment` itself stays a pure single-`Change` read view rather than
 gaining the ability to see whole-`DiffResult` context on its own.
 `impact_group_id` is currently always identical to `root_cause_id` — an
-alias, not yet a distinct concept. `REPORT_SCHEMA_VERSION` 2.16 → 2.17.
+alias, not yet a distinct concept. `REPORT_SCHEMA_VERSION` 2.16 → 2.18 (2.17
+went to ADR-050 D2's comparability-gate work instead, merged to `main` first
+— see `abicheck/schemas/__init__.py`'s version-history docstring).
 Slices 8-9 (G29 Phase 3 follow-up) then delivered the D2 direction flip as a
 deliberately *scoped* subset: `Change.impact_assessment` (new, additive
 field) is populated directly by two producers — `internal_leak.py`'s two
@@ -404,9 +408,9 @@ consumer-overlay builder (Slice 9), verified safe by confirming
 `suppression.evaluate()`/`matches()`/`would_withhold()` are pure reads of the
 `Change` passed in — with `impact.engine.assess_change` reusing the cached
 evidence for both while always recomputing `decision`/`root_cause_id` fresh.
-**Still open under this same ADR, now scoped by direct code inspection
-rather than the original decision text's five-symmetric-producers
-assumption**:
+**Two producer sites still open under this same ADR, now scoped by direct
+code inspection rather than the original decision text's
+five-symmetric-producers assumption**:
 - `source_graph_findings.py` — not one site, **nine** separate
   `Change(...)` construction sites across as many finding functions
   (`_mapping_drift_findings`, `_public_reachability_findings` ×2,
@@ -421,12 +425,15 @@ assumption**:
   see ADR-052's "Deliberately not implemented this slice" for the
   reasoning that needs a measurement, not an assumption, before this is
   scheduled.
-- `suppression.py` — direct search found no `Change(...)` construction in
-  this module; the nearby diagnostic (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`)
-  actually lives in `post_processing.py` and carries no reachability
-  evidence. D2's original text naming `suppression.py` needs a
-  documentation-only clarification pass before this is scheduled as code
-  work.
+
+A third entry the original decision text named, `suppression.py`, is a
+separate, unresolved documentation question rather than a third producer
+site: direct search found no `Change(...)` construction in this module at
+all; the nearby diagnostic (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually
+lives in `post_processing.py` and carries no reachability evidence. What
+D2's original text meant by naming `suppression.py` needs a
+documentation-only clarification pass before any code work is scheduled
+against it.
 
 Also still open: the full `RootCauseCorrelator`-based correlation across
 consumer-overlay findings with no `caused_by_type` link (Phase 6) — which is

@@ -184,17 +184,20 @@ from typing import Any
 #:       (slice 5, SARIF has no ``report_schema_version`` of its own) --
 #:       ``root_cause_id`` is a stable hash of the grouping key, not the
 #:       eventual G29 Phase 6 ``RootCauseCorrelator``'s own identifier
-#:       scheme. ``impact_assessment.proof_path`` also gained three additive
-#:       optional keys this version (ADR-046 D6/D1, ADR-052's
-#:       ``occurrence_id`` follow-up) that were left undocumented here until
-#:       a later audit caught the gap: ``alternative_paths`` (up to 3
-#:       runner-up candidate paths not selected as primary, each shaped like
-#:       ``proof_path`` itself minus these three keys), ``discarded_path_count``
-#:       (candidates beyond that cap), and ``occurrence_id`` (a hash over the
-#:       path's edges' own graph occurrences, independent of ``description``
-#:       text). All absent for the common single-candidate/no-occurrence-data
-#:       case.
-#:   2.17: ``impact_assessment`` gained three additive optional keys --
+#:       scheme.
+#:   2.17: ADR-050 D2 -- ``verdict`` gains a third class, ``null``, for a
+#:       comparability-gate hard-fail (old/new were not extracted under a
+#:       comparable ``ExtractionContract``; see ADR-050 D1). A ``null``-verdict
+#:       report carries a new ``reason`` object (``{kind, message}``,
+#:       ``kind`` one of ``"profile_mismatch"``/``"scope_mismatch"``) instead
+#:       of the full compare-report shape (``changes``/``summary``/etc. are
+#:       never populated, since the gate raises before any diff runs). Two
+#:       more additive optional top-level keys, present on an ordinary
+#:       completed comparison: ``contract_coverage`` (``"partial"`` when
+#:       only one side of the pair carried a given fingerprint) and
+#:       ``assurance`` (``"none"`` when the comparison only completed via
+#:       ``--diagnostic-comparison`` after a genuine mismatch).
+#:   2.18: ``impact_assessment`` gained three additive optional keys --
 #:       ``root_cause_id``, ``root_cause_display``, ``impact_group_id``
 #:       (G29 Phase 3 follow-up, ADR-052) -- the same 2.16 root-cause
 #:       grouping surfaced per-finding, independent of ``report_mode``
@@ -204,8 +207,17 @@ from typing import Any
 #:       root cause that names nothing but itself. ``impact_group_id`` is
 #:       currently always identical to ``root_cause_id`` -- a placeholder
 #:       alias until Phase 6's ``RootCauseCorrelator`` gives it independent
-#:       meaning.
-REPORT_SCHEMA_VERSION = "2.17"
+#:       meaning. Also documents, retroactively, three additive optional
+#:       keys on ``impact_assessment.proof_path`` that shipped in 2.16
+#:       (ADR-046 D6/D1, ADR-052's ``occurrence_id`` follow-up) but were left
+#:       undocumented here until this audit caught the gap:
+#:       ``alternative_paths`` (up to 3 runner-up candidate paths not
+#:       selected as primary, each shaped like ``proof_path`` itself minus
+#:       these three keys), ``discarded_path_count`` (candidates beyond that
+#:       cap), and ``occurrence_id`` (a hash over the path's edges' own graph
+#:       occurrences, independent of ``description`` text). All absent for
+#:       the common single-candidate/no-occurrence-data case.
+REPORT_SCHEMA_VERSION = "2.18"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -229,7 +241,15 @@ REPORT_SCHEMA_VERSION = "2.17"
 #:       ``action_version``, ``tool_version``), populated the same way by
 #:       ``actions/check-target`` (G30 P1.3) for a ``scan``-mode audit
 #:       check (ADR-047 S5).
-SCAN_SCHEMA_VERSION = "1.2"
+#: 1.3 — added the ``NOT_COMPARABLE`` ``verdict``/exit code ``6`` (ADR-050
+#:       D2): ``scan --against`` (via ``run_scan_core``'s
+#:       ``_run_baseline_compare`` call) now catches a genuine
+#:       ``ProfileMismatchError``/``ScopeMismatchError`` instead of letting
+#:       it propagate unhandled, setting ``diff.reason`` to the exception
+#:       message. Mirrors compare's 2.17 ``verdict: null``/``reason`` bump —
+#:       a new possible value a pre-1.3 ``scan`` consumer could never have
+#:       received before.
+SCAN_SCHEMA_VERSION = "1.3"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

@@ -17,13 +17,15 @@ direction flip as a deliberately *scoped* subset — two producers
 (`internal_leak.py`'s two leak-finding builders, Slice 8; `appcompat.py`'s
 one consumer-overlay builder, Slice 9) construct `ImpactAssessment` directly
 and `assess_change` reuses their evidence fields, each verified safe by its
-own pipeline-ordering/purity audit; the remaining three producers named in
-D2's original decision (`post_processing.MarkReachability` especially, the
-suppression-safety-critical one; `source_graph_findings.py`'s nine
-construction sites; and `suppression.py`, whose own role in D2 turned out to
-need clarification — see "Deliberately not implemented this slice") are
-**not** migrated — see "Slice 8"/"Slice 9" below for the full scoping
-rationale.
+own pipeline-ordering/purity audit; the remaining two producer sites named
+in D2's original decision (`post_processing.MarkReachability` especially,
+the suppression-safety-critical one; and `source_graph_findings.py`'s nine
+construction sites) are **not** migrated, and `suppression.py` — D2's
+original decision text also named it, but it turns out to construct no
+`Change` of its own — has an unresolved role that needs a documentation
+clarification pass rather than a migration (see "Deliberately not
+implemented this slice") — see "Slice 8"/"Slice 9" below for the full
+scoping rationale.
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 3's own
 "needs its own ADR" gate — [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s
@@ -795,9 +797,10 @@ implemented this slice" below for why that one stays open).
 - `tests/test_appcompat.py::test_consumer_required_symbol_removed_carries_impact_assessment`:
   mirrors `test_internal_leak.py`'s cache-assertion pattern —
   `assess_change(overlay) == overlay.impact_assessment`.
-- **Three producers now remain unmigrated**: `source_graph_findings.py`,
-  `post_processing.MarkReachability`, and the still-unclear `suppression.py`
-  case (see below) — down from four after Slice 8.
+- **Two producer sites now remain unmigrated**: `source_graph_findings.py`
+  and `post_processing.MarkReachability` — down from three after Slice 8.
+  `suppression.py`'s still-unclear D2 role (see below) is a separate,
+  unresolved documentation question, not a third producer to migrate.
 
 ## Deliberately not implemented this slice
 
@@ -824,14 +827,20 @@ remaining four tiers):
   the whole flip through in one pass. Attempting all five in one pass would
   still be exactly the kind of rushed, high-blast-radius change the "needs
   its own ADR/scoped design pass" bar (this ADR's own header, ADR-046 D4,
-  and CLAUDE.md "M1-3") exists to prevent — a real regression to any of the
-  remaining three would risk suppression correctness, not just this
-  reporting layer. Each remaining producer is its own follow-up slice,
-  migrated only once the same kind of pipeline-ordering safety audit Slice 8
-  did for `internal_leak.py` has been done for it specifically — a real
-  audit, not an assumption carried over from a different module's safety
-  proof. Per-producer status, refined by direct code inspection rather than
-  carried forward from the original decision text unchanged:
+  and CLAUDE.md "M1-3") exists to prevent — a real regression to either of
+  the two remaining producer sites would risk suppression correctness, not
+  just this reporting layer. Each remaining producer site is its own
+  follow-up slice, migrated only once the same kind of pipeline-ordering
+  safety audit Slice 8 did for `internal_leak.py` has been done for it
+  specifically — a real audit, not an assumption carried over from a
+  different module's safety proof. Status below, refined by direct code
+  inspection rather than carried forward from the original decision text
+  unchanged: two are genuine remaining producer sites
+  (`source_graph_findings.py`, `post_processing.MarkReachability`); the
+  third entry the original decision text named, `suppression.py`, turns out
+  not to be a producer at all (no `Change(...)` construction site exists in
+  it) — its own D2 role is a separate, unresolved documentation question,
+  not a third migration:
   - **`source_graph_findings.py`** — not one construction site like
     `internal_leak.py`/`appcompat.py`, but **nine**:
     `_mapping_drift_findings`, `_public_reachability_findings` (two),

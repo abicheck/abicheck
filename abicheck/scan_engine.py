@@ -74,6 +74,7 @@ from .cli_scan_helpers import (
     resolve_effective_allow_query,
     scan_pattern_roots,
 )
+from .errors import ProfileMismatchError, ScopeMismatchError
 from .schemas import SCAN_SCHEMA_VERSION
 
 if TYPE_CHECKING:
@@ -843,6 +844,7 @@ def run_scan_core(
     diff_summary: dict[str, Any] | None = None
     if baseline is not None and scan_mode is not ScanMode.AUDIT:
         _stage = time.monotonic()
+        not_comparable = False
         try:
             # A native --against library is parsed through the same L2 clang/
             # castxml header-AST path as the candidate (Codex review) — without
@@ -877,16 +879,30 @@ def run_scan_core(
                 "(header/build/source parse). Pin a shallower level or raise "
                 "the budget; a budget never silently shrinks the pinned scope."
             ) from exc
-        # A cross-check the maintainer promoted to `error` (D6) gates the exit
-        # even when the baseline diff itself is clean.
-        sev_exit = _crosscheck_severity_exit(cc.findings, severities)
-        if sev_exit > exit_code:
-            exit_code = sev_exit
-            # Keep the reported verdict in sync with the promoted exit code so a
-            # consumer keying off the verdict string isn't misled (Codex review).
-            # Only a non-breaking verdict is promoted — never downgrade a real
-            # BREAKING/API_BREAK from the artifact diff.
-            if verdict in ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"):
+        except (ProfileMismatchError, ScopeMismatchError) as exc:
+            # ADR-050 D2: the candidate and --against baseline were not
+            # extracted under a comparable profile/scope contract -- a hard
+            # gate result, not a soft-launch RISK finding, so it is never
+            # something a promoted cross-check finding (below) can soften or
+            # override.
+            not_comparable = True
+            verdict = "NOT_COMPARABLE"
+            exit_code = 6
+            diff_summary = {"reason": str(exc)}
+        if not not_comparable:
+            # A cross-check the maintainer promoted to `error` (D6) gates the exit
+            # even when the baseline diff itself is clean.
+            sev_exit = _crosscheck_severity_exit(cc.findings, severities)
+            if sev_exit > exit_code:
+                exit_code = sev_exit
+                # Keep the reported verdict in sync with the promoted exit code so a
+                # consumer keying off the verdict string isn't misled (Codex review).
+                # `_run_baseline_compare` ties exit_code to verdict exactly
+                # (BREAKING->4, API_BREAK->2, else->0), and `sev_exit` is at
+                # most 2, so `sev_exit > exit_code` only holds when
+                # exit_code was 0 -- i.e. verdict is already one of these
+                # three non-breaking values. Never downgrades a real
+                # BREAKING/API_BREAK from the artifact diff.
                 verdict = "API_BREAK"
         _record_stage("baseline_compare", _stage)
     else:

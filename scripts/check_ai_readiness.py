@@ -1151,6 +1151,15 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_debian_symbols",
                 "cli_doctor",
                 "cli_dump_helpers",
+                # `cli_dump_manifest` (ADR-050 D3, G32 Phase B) joins this SCC
+                # exactly like `cli_aggregate`/`cli_build_output`: its `plan`
+                # command reuses the shared `-v/--verbose` option via
+                # `cli_options.verbose_option` (module-load import), and
+                # `cli_options` is already a member — so `cli ->
+                # cli_dump_manifest -> cli_options -> ... -> cli` closes
+                # through already-member modules, not a new dependency
+                # direction. No init deadlock.
+                "cli_dump_manifest",
                 "cli_graph",
                 "cli_helpers_compare",
                 "cli_inputs",

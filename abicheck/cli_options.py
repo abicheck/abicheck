@@ -33,7 +33,9 @@ from .cli_params import (
     DEPTH_PARAM,
     POLICY_FILE_PARAM,
     SIDED_BUILD_INFO_PARAM,
+    SIDED_DUMP_MANIFEST_PARAM,
     SIDED_EXISTING_PATH_PARAM,
+    SIDED_INCLUDE_PATH_PARAM,
     SIDED_PATH_PARAM,
     SIDED_SOURCES_PARAM,
     SIDED_STR_PARAM,
@@ -70,6 +72,32 @@ def split_sided_paths(
     for side, path in pairs:
         {"both": both, "old": old_only, "new": new_only}[side].append(path)
     return tuple(both), tuple(old_only), tuple(new_only)
+
+
+def split_sided_include_paths(
+    triples: Sequence[tuple[str, Path, str | None]],
+) -> tuple[tuple[Path, ...], tuple[Path, ...], tuple[Path, ...], dict[Path, str]]:
+    """Like :func:`split_sided_paths`, but for ``--include``'s own
+    :class:`~abicheck.cli_params.SidedIncludePathParam` triples (ADR-050 D1):
+    also collects each entry's optional label into one ``path -> label`` map
+    spanning all three buckets.
+
+    A single combined map (not per-side) is correct because a label is a
+    *logical identity* the caller pairs across sides deliberately — the same
+    ``support`` label on both ``--include old:support=old/src --include
+    new:support=new/src`` — while the dict *keys* (each side's own resolved
+    ``Path``) stay naturally distinct per side. Downstream, the same map is
+    consulted when building either side's ``IncludeDir`` list.
+    """
+    both: list[Path] = []
+    old_only: list[Path] = []
+    new_only: list[Path] = []
+    labels: dict[Path, str] = {}
+    for side, path, label in triples:
+        {"both": both, "old": old_only, "new": new_only}[side].append(path)
+        if label is not None:
+            labels[path] = label
+    return tuple(both), tuple(old_only), tuple(new_only), labels
 
 
 def _split_sided_single(
@@ -148,11 +176,18 @@ def normalize_sided_options(kwargs: dict[str, object]) -> None:
         kwargs["headers"] = both
         kwargs["old_headers_only"] = old
         kwargs["new_headers_only"] = new
+    if "dump_manifest" in kwargs:
+        old_dm, new_dm = _split_sided_single(kwargs.pop("dump_manifest"))  # type: ignore[arg-type]
+        kwargs["old_dump_manifest"] = old_dm
+        kwargs["new_dump_manifest"] = new_dm
     if "include" in kwargs:
-        both, old, new = split_sided_paths(kwargs.pop("include"))  # type: ignore[arg-type]
+        both, old, new, labels = split_sided_include_paths(
+            kwargs.pop("include")  # type: ignore[arg-type]
+        )
         kwargs["includes"] = both
         kwargs["old_includes_only"] = old
         kwargs["new_includes_only"] = new
+        kwargs["include_labels"] = labels
     if "debug_root" in kwargs:
         both, old, new = split_sided_paths(kwargs.pop("debug_root"))  # type: ignore[arg-type]
         kwargs["debug_roots"] = both
@@ -212,6 +247,20 @@ def two_sided_input_options(func: F) -> F:
     inline.)
     """
     func = click.option(
+        "--dump-manifest",
+        "dump_manifest",
+        multiple=True,
+        type=SIDED_DUMP_MANIFEST_PARAM,
+        help="A strict YAML document describing multiple translation units to "
+        "compile and merge into one side's snapshot, instead of a single "
+        "-H/--header list (ADR-050 D3). Side-scoped: repeat the flag with an "
+        "'old='/'new=' prefix per side (e.g. --dump-manifest old=v1/abi.yml "
+        "--dump-manifest new=v2/abi.yml); a bare value applies to both. "
+        "Mutually exclusive with -H/--header for that side (declare the "
+        "public surface in the manifest's own base profile instead). ELF "
+        "only so far.",
+    )(func)
+    func = click.option(
         "--version",
         "version",
         multiple=True,
@@ -226,10 +275,15 @@ def two_sided_input_options(func: F) -> F:
         "--include",
         "include",
         multiple=True,
-        type=SIDED_PATH_PARAM,
+        type=SIDED_INCLUDE_PATH_PARAM,
         help="Extra include directory for castxml. Applies to both sides; scope "
         "to one side with an 'old='/'new=' prefix, repeating the flag per side "
-        "(e.g. --include old=inc1 --include new=inc2). Repeatable (ADR-040).",
+        "(e.g. --include old=inc1 --include new=inc2). Repeatable (ADR-040). "
+        "A labeled 'old:LABEL=PATH'/'new:LABEL=PATH' form (e.g. --include "
+        "old:support=old/src --include new:support=new/src) names a "
+        "side-specific support root under one shared logical identity, so a "
+        "genuine two-checkout compare doesn't spuriously PROFILE_MISMATCH on "
+        "it (ADR-050 D1).",
     )(func)
     func = click.option(
         "-H",
@@ -529,6 +583,18 @@ def compile_context_options(func: F) -> F:
     :class:`~abicheck.service_scan.CompileContext` kwargs exactly.
     """
     func = click.option(
+        "--frontend-context",
+        "frontend_context",
+        default="host",
+        show_default=True,
+        type=click.Choice(["host", "device"], case_sensitive=False),
+        help="Which AST context the L2 header frontend should target (ADR-050 "
+        "D3/D5). Only 'host' is honored so far -- 'device' (e.g. a SYCL/DPC++ "
+        "offload target) is rejected until the real device selector lands; "
+        "declared now so a manifest's own frontend_context field has a "
+        "matching CLI counterpart for the legacy, non-manifest path.",
+    )(func)
+    func = click.option(
         "--nostdinc/--no-nostdinc",
         "nostdinc",
         default=False,
@@ -738,6 +804,7 @@ def resolve_compile_context(
     includes: tuple[Path, ...],
     build_config: Path | None,
     sources: Path | None = None,
+    frontend_context: str = "host",
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Build the CLI :class:`CompileContext` and fold the config ``compile:`` block in.
 
@@ -748,7 +815,18 @@ def resolve_compile_context(
     source (so an explicitly-typed value — even a default-looking ``auto`` — beats
     a pinned config one). ``compare`` / ``dump`` / ``scan`` all call this so their
     L2 compile context cannot drift.
+
+    ``frontend_context`` (ADR-050 D3/D5) is validated here — the single choke
+    point all three commands share — rather than per-callback: only ``"host"``
+    is honored this phase (Phase D adds the real device/DPC++ selector), so a
+    ``"device"`` request is rejected loudly instead of silently extracted as
+    if it were host.
     """
+    if frontend_context != "host":
+        raise click.UsageError(
+            f"--frontend-context {frontend_context!r} is not supported yet "
+            "(ADR-050 D3/D5) — only 'host' is honored this phase."
+        )
     from .service_scan import CompileContext
 
     cli_ctx = CompileContext(
@@ -759,6 +837,7 @@ def resolve_compile_context(
         sysroot=sysroot,
         nostdinc=nostdinc,
         frontend=header_backend,
+        frontend_context=frontend_context,
     )
 
     def _explicit(param: str) -> bool:
@@ -1521,6 +1600,12 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "ADR-043: file form of --required-symbol (one symbol per line). Same "
         "per-run rationale."
     ),
+    "--diagnostic-comparison": (
+        "ADR-050 D2: downgrades a comparability-gate hard failure (mismatched "
+        "profile/scope ExtractionContract fingerprints) into a tentative diff "
+        "for this one invocation. Whether a given OLD/NEW pair happens to be "
+        "incomparable varies per run, not a stable project setting."
+    ),
     "--allow-unsupported-castxml": (
         "Explicitly permits proceeding with a CastXML build outside "
         "castxml_policy's supported version range for this one invocation "
@@ -1528,6 +1613,18 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "--allow-ast-frontend-fallback: an invocation-specific risk decision "
         "(exploratory-mode reproduction of a legacy toolchain), not a stable "
         "project default."
+    ),
+    "--dump-manifest": (
+        "ADR-050 D3: a real multi-translation-unit dump for one side, in "
+        "place of a single -H/--header list. Which side(s) need a manifest "
+        "(and which manifest) varies per comparison, not a stable project "
+        "setting."
+    ),
+    "--frontend-context": (
+        "ADR-050 D3/D5: which AST context the L2 header frontend should "
+        "target (host, or a future device/DPC++ selector). A per-run "
+        "extraction-target choice, not a stable project setting -- like "
+        "--ast-frontend."
     ),
 }
 
@@ -1742,4 +1839,6 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
     # plugin-check commands into compare).
     "used_by": "--used-by",
     "required_symbols": "--required-symbol",
+    # ADR-050 D2: the comparability gate's diagnostic escape hatch.
+    "diagnostic_comparison": "--diagnostic-comparison",
 }

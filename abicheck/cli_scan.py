@@ -430,7 +430,8 @@ def render_scan_dry_run(
         f"format: {fmt}",
         "dry-run exit codes: 0 valid, 1 requested depth not satisfiable, "
         "64 usage error (a real scan run's exit codes are 0 compatible, "
-        "2 API break, 4 ABI break, 5 budget overflow)",
+        "2 API break, 4 ABI break, 5 budget overflow, "
+        "6 not_comparable)",
     )
     try:
         req = ScanRequest(
@@ -661,6 +662,7 @@ def scan_cmd(
     gcc_option_tokens: tuple[str, ...] = (),
     sysroot: Path | None = None,
     nostdinc: bool = False,
+    frontend_context: str = "host",
 ) -> None:
     """Deterministic source-intelligence scan (classify → always-on tier → level).
 
@@ -677,6 +679,8 @@ def scan_cmd(
       2  source-level / API break (incl. API_BREAK cross-source findings)
       4  ABI break (from the --against comparison)
       5  --budget overflow
+      6  NOT_COMPARABLE (ADR-050 D2): ARTIFACT and --against were not
+         extracted under a comparable profile/scope contract
 
     \b
     Examples:
@@ -731,6 +735,7 @@ def scan_cmd(
         includes=tuple(includes),
         build_config=build_config,
         sources=sources,
+        frontend_context=frontend_context,
     )
     includes = includes_tuple
     binary = artifact
