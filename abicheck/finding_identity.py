@@ -480,6 +480,11 @@ _SYMBOL_LEVEL_KIND_SLUGS = frozenset(
         "template_return_type_changed",
         "tls_var_size_changed",
         "protected_visibility_changed",
+        # diff_platform_elf_symbols.py's alignment check passes the real
+        # exported data object's symbol (symbol=sym_name), the same shape
+        # as tls_var_size_changed/protected_visibility_changed above
+        # (Codex review).
+        "exported_object_alignment_reduced",
     }
 )
 

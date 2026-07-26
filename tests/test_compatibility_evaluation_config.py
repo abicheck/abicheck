@@ -188,6 +188,13 @@ class TestContractConfigUnresolvedBehavior:
         with pytest.raises(TypeError, match="bare str"):
             ContractConfig(mode=ContractMode.PUBLIC, overlays="api")
 
+    def test_non_string_overlays_element_is_rejected(self):
+        # Codex review: the scalar-string guard alone doesn't validate
+        # individual elements -- overlays=(123,) previously constructed
+        # successfully, silently installing an invalid root.
+        with pytest.raises(TypeError, match="str"):
+            ContractConfig(mode=ContractMode.PUBLIC, overlays=(123,))
+
 
 class TestImmutability:
     def test_top_level_is_frozen(self):
@@ -751,6 +758,13 @@ class TestDigestedItems:
         # characters instead of raising.
         with pytest.raises(TypeError, match="bare str"):
             SurfaceConfig(internal_namespaces="detail")
+
+    def test_non_string_internal_namespaces_element_is_rejected(self):
+        # Codex review: internal_namespaces=(123,) previously constructed
+        # successfully -- the integer would simply never match in
+        # internal_leak.is_internal_type instead of failing validation.
+        with pytest.raises(TypeError, match="str"):
+            SurfaceConfig(internal_namespaces=(123,))
 
 
 class TestSuppressionConfigDigest:

@@ -75,10 +75,9 @@ def _frozen_tuple(s: Sequence[_T], *, element_type: type[_T]) -> tuple[_T, ...]:
     passed where a collection is expected (e.g. ``DigestedItems(items=
     "linux-x86_64")``), Python would otherwise iterate it into individual
     characters instead of raising (Codex review). ``element_type`` is
-    required (unlike ``_canonical_tuple``'s optional one, which has call
-    sites both with and without it) since every current caller has a known
-    element type to validate against; it rejects any element that isn't an
-    instance, the same way ``_canonical_tuple``'s does.
+    required, same as ``_canonical_tuple``'s, since every current caller
+    has a known element type to validate against; it rejects any element
+    that isn't an instance, the same way ``_canonical_tuple``'s does.
     """
     if isinstance(s, (str, bytes)):
         raise TypeError(
@@ -99,7 +98,7 @@ def _canonical_tuple(
     s: Sequence[_T],
     *,
     key: Callable[[_T], Any],
-    element_type: type[_T] | None = None,
+    element_type: type[_T],
 ) -> tuple[_T, ...]:
     """Sort+dedupe an unordered selection into a stable, canonical tuple.
 
@@ -115,21 +114,26 @@ def _canonical_tuple(
     selecting it once. ``dict.fromkeys`` on the already-sorted sequence
     dedupes by equality while keeping the sorted order.
 
-    ``element_type``, when given, validates every element before *key* ever
-    runs: a bare pack slug (e.g. ``"rust_c_ffi"`` where an ``ImmutableIdentity``
-    is expected) would otherwise crash with ``AttributeError`` inside *key*
+    ``element_type`` validates every element before *key* ever runs: a bare
+    pack slug (e.g. ``"rust_c_ffi"`` where an ``ImmutableIdentity`` is
+    expected) would otherwise crash with ``AttributeError`` inside *key*
     (``identity.id``/``impl.sha256``) during canonicalization instead of
     failing validation cleanly at the actual construction site (Codex
     review) -- the same annotations-aren't-runtime-enforced gap as this
     module's other ``isinstance`` checks, but for collection elements
-    rather than a single field.
+    rather than a single field. Required, not optional (Codex review,
+    round 2: two ``tuple[str, ...]`` call sites -- ``ContractConfig.overlays``/
+    ``SurfaceConfig.internal_namespaces`` -- omitted it entirely, so
+    ``overlays=(123,)`` constructed successfully with an invalid root
+    instead of failing validation); every current caller has a known
+    element type, matching :func:`_frozen_tuple`'s required parameter of
+    the same name.
 
-    A bare ``str``/``bytes`` is rejected outright, regardless of
-    ``element_type``: passed where a collection is expected (e.g.
-    ``ContractConfig(overlays="api")``), Python iterates it into individual
-    characters (``("a", "i")``) rather than raising, silently selecting the
-    wrong contract roots or namespace hints instead of failing validation
-    (Codex review).
+    A bare ``str``/``bytes`` is rejected outright: passed where a collection
+    is expected (e.g. ``ContractConfig(overlays="api")``), Python iterates
+    it into individual characters (``("a", "i")``) rather than raising,
+    silently selecting the wrong contract roots or namespace hints instead
+    of failing validation (Codex review).
     """
     if isinstance(s, (str, bytes)):
         raise TypeError(
@@ -138,12 +142,11 @@ def _canonical_tuple(
             "characters, not the intended elements; wrap a single value in "
             "a list/tuple explicitly."
         )
-    if element_type is not None:
-        invalid = [item for item in s if not isinstance(item, element_type)]
-        if invalid:
-            raise TypeError(
-                f"Every element must be a {element_type.__name__}, not: {invalid!r}"
-            )
+    invalid = [item for item in s if not isinstance(item, element_type)]
+    if invalid:
+        raise TypeError(
+            f"Every element must be a {element_type.__name__}, not: {invalid!r}"
+        )
     return tuple(dict.fromkeys(sorted(s, key=key)))
 
 
@@ -363,7 +366,9 @@ class ContractConfig:
                 f"{self.unresolved!r}"
             )
         object.__setattr__(
-            self, "overlays", _canonical_tuple(self.overlays, key=lambda s: s)
+            self,
+            "overlays",
+            _canonical_tuple(self.overlays, key=lambda s: s, element_type=str),
         )
         object.__setattr__(
             self,
@@ -491,7 +496,9 @@ class SurfaceConfig:
         object.__setattr__(
             self,
             "internal_namespaces",
-            _canonical_tuple(self.internal_namespaces, key=lambda s: s),
+            _canonical_tuple(
+                self.internal_namespaces, key=lambda s: s, element_type=str
+            ),
         )
 
 

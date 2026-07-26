@@ -486,6 +486,21 @@ class TestResolveChangeIdentity:
         identity = resolve_change_identity(change)
         assert identity.tier == IDENTITY_TIER_CANONICAL
 
+    def test_exported_object_alignment_reduced_is_canonical(self) -> None:
+        # Codex review: diff_platform_elf_symbols.py's alignment check
+        # passes the real exported data object's symbol (symbol=sym_name),
+        # the same producer shape as TLS_VAR_SIZE_CHANGED/
+        # PROTECTED_VISIBILITY_CHANGED above -- omitting it fragments the
+        # same alignment finding across evidence tiers.
+        change = Change(
+            kind=ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED,
+            symbol=_ITANIUM_MANGLED,
+            description="alignment reduced",
+            qualified_name="ns::g_lookup_table",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_CANONICAL
+
     def test_version_node_label_resembling_a_mangling_is_not_canonical(self) -> None:
         # Codex review: diff_versioning.py's SYMBOL_VERSION_NODE_REMOVED
         # stores a version-node label (e.g. "GLIBC_2.17") in Change.symbol,
