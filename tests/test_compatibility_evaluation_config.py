@@ -364,6 +364,38 @@ class TestValueProvenance:
         with pytest.raises(TypeError, match=r"ValueProvenance\.shadowed_legacy"):
             ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, shadowed_legacy={})  # type: ignore[arg-type]
 
+    def test_raw_string_layer_is_rejected(self):
+        # Codex review: only shadowed_legacy/selected_by were validated --
+        # ValueProvenance's own scalar fields, including layer itself, were
+        # not, so a typo'd string could freeze into a receipt a consumer
+        # expects to call SelectorLayer attributes (e.g. .value) on.
+        with pytest.raises(TypeError, match=r"ValueProvenance\.layer"):
+            ValueProvenance(layer="explicit_cli")  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "field_name", ["source_kind", "reference", "path", "sha256", "field_location"]
+    )
+    def test_non_string_optional_field_is_rejected(self, field_name):
+        with pytest.raises(TypeError, match=rf"ValueProvenance\.{field_name}"):
+            ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, **{field_name: []})
+
+    def test_non_int_version_is_rejected(self):
+        with pytest.raises(TypeError, match=r"ValueProvenance\.version"):
+            ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, version="1")  # type: ignore[arg-type]
+
+    def test_bool_version_is_rejected(self):
+        with pytest.raises(TypeError, match=r"ValueProvenance\.version"):
+            ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, version=True)  # type: ignore[arg-type]
+
+    def test_none_optional_fields_construct(self):
+        prov = ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI)
+        assert prov.source_kind is None
+        assert prov.reference is None
+        assert prov.version is None
+        assert prov.path is None
+        assert prov.sha256 is None
+        assert prov.field_location is None
+
 
 class TestEvidenceProviderRequirement:
     def test_required_capability_with_pinned_implementation(self):

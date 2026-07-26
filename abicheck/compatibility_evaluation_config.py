@@ -281,6 +281,39 @@ class ValueProvenance:
     shadowed_legacy: ValueProvenance | None = None
 
     def __post_init__(self) -> None:
+        # An untyped manifest/API adapter constructing ValueProvenance(
+        # layer="explicit_cli", source_kind=[], sha256={}) was previously
+        # accepted outright -- only shadowed_legacy and selected_by were
+        # validated, not this object's own scalar fields -- so it would
+        # freeze into CompatibilityEvaluationConfig.provenance as a valid
+        # entry while retaining caller-owned mutable containers, and a
+        # receipt consumer expecting a real SelectorLayer or string digest
+        # would fail later, or silently serialize malformed replay metadata
+        # (Codex review).
+        if not isinstance(self.layer, SelectorLayer):
+            raise TypeError(
+                "ValueProvenance.layer must be a SelectorLayer member, not "
+                f"{self.layer!r}."
+            )
+        for field_name in (
+            "source_kind",
+            "reference",
+            "path",
+            "sha256",
+            "field_location",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and not isinstance(value, str):
+                raise TypeError(
+                    f"ValueProvenance.{field_name} must be a str or None, "
+                    f"not {value!r}."
+                )
+        if self.version is not None and (
+            not isinstance(self.version, int) or isinstance(self.version, bool)
+        ):
+            raise TypeError(
+                f"ValueProvenance.version must be an int or None, not {self.version!r}."
+            )
         # An untyped manifest/API adapter supplying shadowed_legacy as a raw
         # mapping (e.g. {}) was previously accepted outright -- only
         # selected_by was validated -- so the enclosing ValueProvenance
