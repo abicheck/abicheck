@@ -65,7 +65,7 @@ def test_optional_argument_is_marked_not_required():
     # positional, not render every argument identically.
     gen = _load_gen()
     content = gen.OUT_PATH.read_text(encoding="utf-8")
-    section = content.split("## `dump`", 1)[1].split("## `project-targets`", 1)[0]
+    section = content.split("## `dump`", 1)[1].split("## `project`", 1)[0]
     assert "| `so_path` | no |" in section
 
 

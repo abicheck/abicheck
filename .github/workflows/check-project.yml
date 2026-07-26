@@ -23,10 +23,11 @@ name: 'abicheck check-project'
 #             can fail this matrix job even though it already wrote a report,
 #             and a later step in a failed job is skipped by default unless
 #             it too carries an always-on condition.
-#   aggregate Projects run-plan.json to `aggregate --manifest`'s wire shape
-#             (using each check's own check_id, ADR-047 §5's required
-#             sub-task) and runs `abicheck aggregate` over every downloaded
-#             report. Runs with if: always() (never a bare needs: with no
+#   aggregate Runs `abicheck aggregate --run-plan run-plan.json` over every
+#             downloaded report -- `--run-plan` projects run-plan.json to the
+#             expected-target set internally (using each check's own
+#             check_id, ADR-047 §5's required sub-task), no separate
+#             projection step. Runs with if: always() (never a bare needs: with no
 #             if:) -- plain needs: semantics skip a dependent job when any
 #             matrix leg fails, and a skipped job reports success, which
 #             would silently green a branch-protection-required status past
@@ -93,7 +94,7 @@ on:
           toolchain-bindings file (schema abicheck.toolchain-bindings/v1,
           P1 toolchain-profile audit) resolving profiles.<id>.compile.binding
           logical ids to exact executable paths, forwarded to `abicheck
-          run-plan generate --toolchain-bindings`. Empty (default) skips
+          project plan --toolchain-bindings`. Empty (default) skips
           binding resolution entirely -- every cell's gcc-path stays this
           workflow's own gcc-path input, unchanged from before this option
           existed. A profile's compile.standard/stdlib/target/abi_macros/
@@ -352,9 +353,15 @@ jobs:
               args+=(--build-output "${profile_id}=${bo_dir}")
             done < <(find build-outputs -name build-output.json -print0)
           fi
-          abicheck run-plan generate "$CONFIG_PATH" \
+          # --allow-empty: `abicheck project plan` is fail-closed by default
+          # (ADR-054) -- an empty run-plan otherwise exits 1 here. This
+          # workflow already has its own, more specific empty-plan guard
+          # right below (the `no-checks` job, with a much more actionable
+          # error message than a bare CLI exit), so --allow-empty defers to
+          # that guard instead of stopping mid-script with a less helpful one.
+          abicheck project plan "$CONFIG_PATH" \
             --project "$PROJECT" --head-sha "$HEAD_SHA" \
-            "${args[@]}" -o run-plan.json
+            --allow-empty "${args[@]}" -o run-plan.json
           python3 -c "
           import json
           plan = json.load(open('run-plan.json'))
@@ -369,11 +376,12 @@ jobs:
           path: run-plan.json
 
   # ── Guard: a zero-check run-plan must not silently succeed ─────────────
-  # `abicheck run-plan generate` treats an empty checks[] as a WARNING, not
-  # an error (a config with no targets:/bundles: at all, or an implicit
-  # sweep that matched no downloaded profile, are both legitimate reasons it
-  # doesn't hard-fail on its own) -- but both `check` and `aggregate` below
-  # are gated on has-checks == 'true', so a run that resolves to zero checks
+  # `abicheck project plan` is fail-closed by default on an empty checks[]
+  # (ADR-054), but this step passes --allow-empty so it degrades to a
+  # WARNING here instead -- a config with no targets:/bundles: at all, or an
+  # implicit sweep that matched no downloaded profile, are both legitimate
+  # reasons not to hard-fail the plan step itself -- but both `check` and
+  # `aggregate` below are gated on has-checks == 'true', so a run that resolves to zero checks
   # skips both of them and this workflow reports success having gated
   # nothing. That is exactly the "a skipped job reports success" failure
   # mode this file's other if: always() placements exist to close (see the
@@ -803,7 +811,7 @@ jobs:
           lang: ${{ inputs.lang }}
           ast-frontend: ${{ inputs.ast-frontend }}
           # P1 toolchain-profile audit: this cell's profiles.<id>.compile
-          # overlay (run-plan generate --toolchain-bindings), when the
+          # overlay (project plan --toolchain-bindings), when the
           # profile declares one, takes precedence over these workflow-
           # global inputs -- the whole point of a per-profile compile
           # overlay is that it, not one shared flag set, drives that
@@ -973,11 +981,6 @@ jobs:
           pattern: '${{ inputs.report-artifact-prefix }}*'
           merge-multiple: true
 
-      - name: Project run-plan.json to an aggregate manifest
-        shell: bash
-        run: |
-          abicheck run-plan to-aggregate-manifest run-plan.json -o aggregate-manifest.json
-
       - name: Run aggregate
         id: aggregate
         shell: bash
@@ -985,13 +988,16 @@ jobs:
           ON_MISSING_REQUIRED: ${{ inputs.on-missing-required }}
           ON_UNEXPECTED_TARGET: ${{ inputs.on-unexpected-target }}
         run: |
+          # --run-plan projects run-plan.json to the expected-target set
+          # internally (ADR-054) -- no separate `run-plan to-aggregate-
+          # manifest` step needed.
           set +e
-          abicheck aggregate reports --manifest aggregate-manifest.json \
+          abicheck aggregate reports --run-plan run-plan.json \
             --on-missing-required "$ON_MISSING_REQUIRED" \
             --on-unexpected-target "$ON_UNEXPECTED_TARGET" \
             --format json -o aggregate-result.json
           code=$?
-          abicheck aggregate reports --manifest aggregate-manifest.json \
+          abicheck aggregate reports --run-plan run-plan.json \
             --on-missing-required "$ON_MISSING_REQUIRED" \
             --on-unexpected-target "$ON_UNEXPECTED_TARGET" \
             --format text

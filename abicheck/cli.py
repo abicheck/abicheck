@@ -814,6 +814,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 build_info_is_pack=(
                     is_pack_dir(build_info) or _is_inputs_pack_dir(build_info)
                 ),
+                dump_manifest=parsed_dump_manifest,
             )
         )
 
@@ -1939,11 +1940,8 @@ if __name__ == "__main__":
 
 from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_aggregate,  # noqa: F401  — registers aggregate
-    cli_build_output,  # noqa: F401  — registers build-output (validate)
     cli_buildsource,  # noqa: F401  — buildsource internals (no command of its own)
-    cli_dump_manifest,  # noqa: F401  — registers plan (--dump-manifest diagnostic)
-    cli_project_targets,  # noqa: F401  — registers project-targets (validate)
-    cli_run_plan,  # noqa: F401  — registers run-plan (generate, to-aggregate-manifest)
+    cli_project,  # noqa: F401  — registers project (validate, validate-build, plan)
     cli_scan,  # noqa: F401  — registers scan
     cli_stack,  # noqa: F401  — registers deps (tree, compare)
 )

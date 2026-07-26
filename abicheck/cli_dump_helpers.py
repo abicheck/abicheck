@@ -601,6 +601,7 @@ def render_dump_dry_run(
     compile_db_matched: bool | None = None,
     build_info_is_pack: bool = False,
     compile_db_reused_as_l3: bool = False,
+    dump_manifest: Any | None = None,
 ) -> Any:
     """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
 
@@ -645,6 +646,25 @@ def render_dump_dry_run(
     "--depth source has no path without --sources" and blocked even though
     the real (non-dry) run writes a valid source-depth snapshot from it.
 
+    ``dump_manifest`` (ADR-050 D3, folded from the former standalone ``plan
+    --dump-manifest`` diagnostic, ADR-054): a parsed
+    :class:`~abicheck.dump_manifest.DumpManifest` when ``--dump-manifest``
+    was given (mutually exclusive with ``headers``, enforced by the caller
+    before this function is reached). When present, this function reports
+    the manifest's translation units and its ``scope_fingerprint`` (ADR-050
+    D1) — computed from the manifest document alone, no compiler invocation
+    — the same information ``dump --dump-manifest FILE --dry-run`` now
+    covers standalone, without running castxml/clang. It never computes a
+    ``profile_fingerprint``: that fingerprint's ``-I`` component is a
+    ``-MD``-depfile digest that only exists once a real L2 extraction
+    actually runs. Text-only, like every other dry-run (ADR-043 D9,
+    ``--format`` is inert against ``--dry-run`` everywhere, not just here) —
+    the former standalone command's ``--format json``/``-o`` machine-readable
+    output has no CLI replacement; see ADR-054's D4 for the accepted
+    trade-off and the equivalent two-line Python snippet (calling
+    ``dump_manifest.load_manifest`` + ``comparability.compute_extraction_contract``
+    directly, the same two functions this branch itself calls below).
+
     A ``-p`` compile DB with no ``-H``, or a ``--debug-format``/``--dwarf``/
     ``--btf``/``--ctf`` selection against a PE/Mach-O binary, are genuine
     usage errors in the real run (``click.UsageError``/``BadParameter``,
@@ -666,6 +686,54 @@ def render_dump_dry_run(
         f"artifact: {so_path}" if so_path else "artifact: (none -- source-only dump)",
         f"headers: {', '.join(str(h) for h in headers)}" if headers else None,
     )
+    if dump_manifest is not None:
+        from .comparability import compute_extraction_contract
+
+        contract = compute_extraction_contract(
+            declared_headers=list(dump_manifest.roots),
+            public_header_paths=list(dump_manifest.public_header_paths),
+            public_header_dirs=list(dump_manifest.public_header_dirs),
+            l2_frontend_ran=False,
+        )
+        scope_fingerprint = contract.scope_fingerprint if contract is not None else None
+        manifest_lines = [
+            f"compiler: {dump_manifest.compiler}",
+            f"target: {dump_manifest.target or '(none)'}",
+            f"frontend_context: {dump_manifest.frontend_context}",
+            f"roots: {', '.join(str(p) for p in dump_manifest.roots)}",
+        ]
+        if dump_manifest.public_header_paths:
+            manifest_lines.append(
+                "public_header_paths: "
+                + ", ".join(str(p) for p in dump_manifest.public_header_paths)
+            )
+        if dump_manifest.public_header_dirs:
+            manifest_lines.append(
+                "public_header_dirs: "
+                + ", ".join(str(p) for p in dump_manifest.public_header_dirs)
+            )
+        for tu in dump_manifest.translation_units:
+            manifest_lines.append(
+                f"  tu: {tu.name} (required={tu.required}, "
+                f"contributes_to_abi={tu.contributes_to_abi})"
+            )
+            if tu.forced_includes:
+                manifest_lines.append(
+                    "      forced_includes: "
+                    + ", ".join(str(p) for p in tu.forced_includes)
+                )
+            if tu.includes:
+                inc_repr = ", ".join(
+                    f"{inc.path}{' [project_owned]' if inc.project_owned else ''}"
+                    for inc in tu.includes
+                )
+                manifest_lines.append(f"      includes: {inc_repr}")
+        manifest_lines.append(f"scope_fingerprint: {scope_fingerprint or '(none)'}")
+        manifest_lines.append(
+            "profile_fingerprint: (not computed -- requires a real L2 "
+            "extraction; run without --dry-run)"
+        )
+        result.add("Multi-TU manifest (--dump-manifest)", *manifest_lines)
     result.add(
         "Resolved depth and source scope",
         f"requested depth: {depth or '(auto)'}",
@@ -729,10 +797,24 @@ def render_dump_dry_run(
         "exit codes: 0 valid, 1 requested depth not satisfiable, 64 usage error",
     )
     if so_path is None and sources is None and build_info is None:
-        result.block(
-            "no artifact (SO_PATH) and no --sources/--build-info: dump has "
-            "nothing to analyze."
-        )
+        if dump_manifest is not None:
+            # A --dump-manifest-only dry run is a legitimate narrower
+            # preflight (ADR-050 D3/D1): validate the manifest and compute
+            # its scope_fingerprint before a real artifact even exists (the
+            # former standalone `plan --dump-manifest` command's whole
+            # purpose, ADR-054). It does not promise a same-flags real `dump`
+            # would succeed -- that still needs SO_PATH, since
+            # --dump-manifest extraction is only wired for real ELF dumps.
+            result.warn(
+                "no artifact (SO_PATH): the manifest above was parsed and "
+                "fingerprinted, but a real extraction additionally needs "
+                "SO_PATH (--dump-manifest is only wired for ELF binaries)."
+            )
+        else:
+            result.block(
+                "no artifact (SO_PATH) and no --sources/--build-info: dump has "
+                "nothing to analyze."
+            )
     if (
         depth is not None
         and depth != "binary"

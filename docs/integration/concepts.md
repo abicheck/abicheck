@@ -128,7 +128,7 @@ run can audit and project down to `abicheck aggregate`'s manifest shape.
 run to only the components a diff touched (e.g. in a monorepo, S25) is
 something the caller does externally, by conditionally skipping matrix
 cells or `check-project.yml` calls before this plan is generated, not
-something `run-plan generate` does for you. See the
+something `project plan` does for you. See the
 [Run Plan Schema](../reference/run-plan-schema.md).
 
 ## Report

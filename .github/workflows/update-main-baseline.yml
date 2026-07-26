@@ -231,7 +231,26 @@ jobs:
           PROFILE_ID: ${{ matrix.profile_id }}
         run: |
           set -euo pipefail
-          abicheck build-output baseline-libraries "build-output/${PROFILE_ID}" -o baseline-libraries.json || true
+          # Not a CLI command (ADR-054) -- call the library function
+          # directly, same as publish-baseline.yml's identical step
+          # (including the trailing `|| true`, matching the former CLI
+          # call's own blanket tolerance for any unexpected failure here).
+          python3 -c "
+          import json
+          import os
+          from pathlib import Path
+
+          from abicheck.buildsource.baseline_publish import derive_baseline_libraries
+          from abicheck.buildsource.build_output import load_build_output
+
+          directory = Path('build-output') / os.environ['PROFILE_ID']
+          try:
+              build_output = load_build_output(directory)
+          except (FileNotFoundError, ValueError):
+              raise SystemExit(0)
+          report = derive_baseline_libraries(build_output, directory)
+          Path('baseline-libraries.json').write_text(json.dumps(report.to_dict()))
+          " || true
           python3 -c "
           import json, sys
 

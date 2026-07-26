@@ -145,13 +145,11 @@ module = [
     "abicheck.cli_resolve",
     "abicheck.cli_aggregate",
     "abicheck.cli_appcompat",
-    "abicheck.cli_build_output",
     "abicheck.cli_compare_release",
     "abicheck.cli_debian_symbols",
     "abicheck.cli_baseline",
     "abicheck.cli_buildsource",
     "abicheck.cli_dump_helpers",
-    "abicheck.cli_dump_manifest",
     "abicheck.cli_graph",
     "abicheck.cli_inputs",
     "abicheck.cli_plugin",
@@ -171,15 +169,13 @@ disable_error_code = ["no-any-return", "misc"]
 # may be absent → ``import-untyped``). One block so the codes don't conflict.
 # ``cli_scan_baseline`` is the extracted ``--baseline``/``--estimate`` sub-flow
 # (same ``yaml`` + engine-``Any`` surface), so it shares the same relaxations.
-# ``cli_project_targets`` (G30 P1.5) reads ``.abicheck.yml`` directly for its
-# ``project-targets validate`` command, same ``yaml`` import.
-# ``cli_run_plan`` (G30 P1.4) reads ``.abicheck.yml`` directly for its
-# ``run-plan generate`` command, same ``yaml`` import.
+# ``cli_project`` (G30 P1.1/P1.4/P1.5, consolidated by ADR-054) reads
+# ``.abicheck.yml`` directly for its ``project validate``/``plan`` commands,
+# same ``yaml`` import.
 module = [
     "abicheck.cli_scan",
     "abicheck.cli_scan_baseline",
-    "abicheck.cli_project_targets",
-    "abicheck.cli_run_plan",
+    "abicheck.cli_project",
 ]
 disallow_untyped_decorators = false
 disable_error_code = ["no-any-return", "misc", "import-untyped"]

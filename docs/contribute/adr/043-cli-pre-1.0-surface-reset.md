@@ -12,6 +12,19 @@
   for why a sixth verb clears the ADR-037 D7 "different question / different
   operand shape" bar (it consumes *reports*, not binaries) rather than folding
   into `compare`.
+- **2026-07-26:** ADR-047's project-integration work (G30) grew the root
+  surface to **ten** commands one artifact at a time (`build-output`,
+  `project-targets`, `run-plan`, plus the ADR-050 `plan --dump-manifest`
+  diagnostic) — each individually justified at the time, but collectively the
+  exact drift this ADR's D1 exists to prevent: the root surface mirroring an
+  internal pipeline stage by stage instead of user-facing operations.
+  [ADR-054](054-cli-project-integration-surface-consolidation.md)
+  consolidates those four into one `project` group and folds the standalone
+  `plan` diagnostic into `dump --dry-run`, bringing the root surface to
+  **seven**: `dump`, `compare`, `scan`, `deps`, `compat`, `aggregate`,
+  `project`. See that ADR for the admission bar a future root command must
+  clear — D1's "nothing else is registered" invariant otherwise degrades
+  into "nothing else is registered, until the next artifact wants a verb."
 
 ---
 
@@ -82,13 +95,20 @@ the breaking cleanup now, in one pass, is cheaper than deprecating twice.
 > report-level fan-in gate. The "nothing else is registered / no hidden alias /
 > deleted commands are a usage error" invariants below are unchanged; only the
 > count and the explicit verb list grow by one.
+>
+> **Amended 2026-07-26 (ADR-054):** now **seven** — `project` (an advanced
+> multi-target project-integration group) was added, consolidating four
+> commands ADR-047 had grown one at a time (`build-output`, `project-targets`,
+> `run-plan`, and the standalone `plan` diagnostic) back down to one. See
+> [ADR-054](054-cli-project-integration-surface-consolidation.md).
 
 `dump`, `compare`, `scan`, `deps`, `compat` — plus `aggregate` per the D13
-amendment above. Nothing else is registered on the root `Click` group; nothing
-removed below leaves a hidden alias. Every deleted command produces the ordinary
-Click "No such command" usage error (exit 64) —
-indistinguishable from a typo. `deps` keeps its two subcommands (`tree`,
-`compare`); `pr-comment` moves **off** the public tree entirely (see D3).
+amendment and `project` per the ADR-054 amendment above. Nothing else is
+registered on the root `Click` group; nothing removed below leaves a hidden
+alias. Every deleted command produces the ordinary Click "No such command"
+usage error (exit 64) — indistinguishable from a typo. `deps` keeps its two
+subcommands (`tree`, `compare`); `pr-comment` moves **off** the public tree
+entirely (see D3).
 
 ### D2. `appcompat`/`plugin-check` fold into `compare` as scoping flags
 

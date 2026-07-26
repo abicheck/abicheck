@@ -797,8 +797,8 @@ class TestToolchainMatrixFixtureExample:
         result = CliRunner().invoke(
             main,
             [
-                "run-plan",
-                "generate",
+                "project",
+                "plan",
                 str(self._DIR / ".abicheck.yml"),
                 "--build-output",
                 f"linux-gcc14={bo_gcc14}",
@@ -853,8 +853,8 @@ class TestRunPlanGenerateCli:
         result = CliRunner().invoke(
             main,
             [
-                "run-plan",
-                "generate",
+                "project",
+                "plan",
                 str(config),
                 "--build-output",
                 f"linux={build_dir}",
@@ -872,13 +872,13 @@ class TestRunPlanGenerateCli:
         raw = json.loads(json.dumps(_LIBRARY_ONLY_RAW))
         raw["targets"]["libfoo"]["checks"][0]["profiles"] = ["linux"]
         config = _write_config(tmp_path, raw)
-        result = CliRunner().invoke(main, ["run-plan", "generate", str(config)])
+        result = CliRunner().invoke(main, ["project", "plan", str(config)])
         assert result.exit_code == 1
         assert "linux" in result.output
 
     def test_generate_exits_64_on_invalid_config(self, tmp_path: Path) -> None:
         config = _write_config(tmp_path, {"targets": {"libfoo": {"kind": "library"}}})
-        result = CliRunner().invoke(main, ["run-plan", "generate", str(config)])
+        result = CliRunner().invoke(main, ["project", "plan", str(config)])
         assert result.exit_code == 64
 
     def test_generate_exits_64_on_malformed_build_output_spec(
@@ -887,7 +887,7 @@ class TestRunPlanGenerateCli:
         config = _write_config(tmp_path, _LIBRARY_ONLY_RAW)
         result = CliRunner().invoke(
             main,
-            ["run-plan", "generate", str(config), "--build-output", "not-a-kv-pair"],
+            ["project", "plan", str(config), "--build-output", "not-a-kv-pair"],
         )
         assert result.exit_code == 64
 
@@ -914,8 +914,8 @@ class TestRunPlanGenerateCli:
         result = CliRunner().invoke(
             main,
             [
-                "run-plan",
-                "generate",
+                "project",
+                "plan",
                 str(config),
                 "--build-output",
                 f"linux={build_dir}",
@@ -939,8 +939,8 @@ class TestRunPlanGenerateCli:
         result = CliRunner().invoke(
             main,
             [
-                "run-plan",
-                "generate",
+                "project",
+                "plan",
                 str(config),
                 "--build-output",
                 f"linux={build_dir_1}",
@@ -958,8 +958,8 @@ class TestRunPlanGenerateCli:
         result = CliRunner().invoke(
             main,
             [
-                "run-plan",
-                "generate",
+                "project",
+                "plan",
                 str(config),
                 "--build-output",
                 f"linux={build_dir}",
@@ -981,8 +981,8 @@ class TestRunPlanGenerateCli:
         result = CliRunner().invoke(
             main,
             [
-                "run-plan",
-                "generate",
+                "project",
+                "plan",
                 str(config),
                 "--build-output",
                 f"linux={empty_dir}",
@@ -996,7 +996,7 @@ class TestRunPlanGenerateCli:
         config.write_text(
             "targets: [this is not, valid: yaml: at all", encoding="utf-8"
         )
-        result = CliRunner().invoke(main, ["run-plan", "generate", str(config)])
+        result = CliRunner().invoke(main, ["project", "plan", str(config)])
         assert result.exit_code == 64
 
     def test_generate_exits_64_when_config_is_not_a_mapping(
@@ -1004,8 +1004,47 @@ class TestRunPlanGenerateCli:
     ) -> None:
         config = tmp_path / ".abicheck.yml"
         config.write_text("- just\n- a\n- list\n", encoding="utf-8")
-        result = CliRunner().invoke(main, ["run-plan", "generate", str(config)])
+        result = CliRunner().invoke(main, ["project", "plan", str(config)])
         assert result.exit_code == 64
+
+    # ── --allow-empty (ADR-054: fail-closed by default on zero checks) ──────
+
+    def test_empty_run_plan_exits_one_by_default(self, tmp_path: Path) -> None:
+        config = _write_config(tmp_path, {"targets": {}})
+        result = CliRunner().invoke(main, ["project", "plan", str(config)])
+        assert result.exit_code == 1, result.output
+        assert "--allow-empty" in result.output
+        # The run-plan artifact is still emitted (an empty checks: list),
+        # even though the command signals failure via exit code.
+        assert '"checks": []' in result.stdout
+
+    def test_empty_run_plan_exits_zero_with_allow_empty(self, tmp_path: Path) -> None:
+        config = _write_config(tmp_path, {"targets": {}})
+        result = CliRunner().invoke(
+            main, ["project", "plan", str(config), "--allow-empty"]
+        )
+        assert result.exit_code == 0, result.output
+        assert '"checks": []' in result.stdout
+
+    def test_non_empty_run_plan_ignores_allow_empty(self, tmp_path: Path) -> None:
+        """--allow-empty only relaxes the zero-checks case -- a resolved,
+        non-empty run-plan is unaffected either way."""
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
+        result = CliRunner().invoke(
+            main,
+            [
+                "project",
+                "plan",
+                str(config),
+                "--build-output",
+                f"linux={build_dir}",
+                "--allow-empty",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert len(data["checks"]) == 1
 
 
 def _write_bindings_file(tmp_path: Path, bindings: dict) -> Path:
@@ -1052,8 +1091,8 @@ class TestRunPlanGenerateCliToolchainBindings:
         result = CliRunner().invoke(
             main,
             [
-                "run-plan",
-                "generate",
+                "project",
+                "plan",
                 str(config),
                 "--build-output",
                 f"gcc14={build_dir}",
@@ -1072,8 +1111,8 @@ class TestRunPlanGenerateCliToolchainBindings:
         result = CliRunner().invoke(
             main,
             [
-                "run-plan",
-                "generate",
+                "project",
+                "plan",
                 str(config),
                 "--build-output",
                 f"gcc14={build_dir}",
@@ -1092,8 +1131,8 @@ class TestRunPlanGenerateCliToolchainBindings:
         result = CliRunner().invoke(
             main,
             [
-                "run-plan",
-                "generate",
+                "project",
+                "plan",
                 str(config),
                 "--build-output",
                 f"gcc14={build_dir}",
@@ -1112,8 +1151,8 @@ class TestRunPlanGenerateCliToolchainBindings:
         result = CliRunner().invoke(
             main,
             [
-                "run-plan",
-                "generate",
+                "project",
+                "plan",
                 str(config),
                 "--build-output",
                 f"gcc14={build_dir}",
@@ -1124,81 +1163,11 @@ class TestRunPlanGenerateCliToolchainBindings:
         assert result.exit_code == 64
 
 
-class TestRunPlanToAggregateManifestCli:
-    def test_projects_run_plan_json_to_manifest(self, tmp_path: Path) -> None:
-        plan = RunPlan(
-            head_sha="deadbeef",
-            checks=[
-                RunPlanCheck(check_id="libfoo@linux#release@headers", required=True)
-            ],
-        )
-        run_plan_path = tmp_path / "run-plan.json"
-        run_plan_path.write_text(json.dumps(plan.to_dict()), encoding="utf-8")
-
-        result = CliRunner().invoke(
-            main, ["run-plan", "to-aggregate-manifest", str(run_plan_path)]
-        )
-        assert result.exit_code == 0, result.output
-        manifest = json.loads(result.stdout)
-        assert manifest["targets"] == [
-            {"id": "libfoo@linux#release@headers", "required": True}
-        ]
-
-    def test_head_sha_override(self, tmp_path: Path) -> None:
-        plan = RunPlan(head_sha="deadbeef", checks=[])
-        run_plan_path = tmp_path / "run-plan.json"
-        run_plan_path.write_text(json.dumps(plan.to_dict()), encoding="utf-8")
-
-        result = CliRunner().invoke(
-            main,
-            [
-                "run-plan",
-                "to-aggregate-manifest",
-                str(run_plan_path),
-                "--head-sha",
-                "cafef00d",
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.stdout)["head_sha"] == "cafef00d"
-
-    def test_malformed_json_is_a_usage_error(self, tmp_path: Path) -> None:
-        run_plan_path = tmp_path / "run-plan.json"
-        run_plan_path.write_text("not json", encoding="utf-8")
-        result = CliRunner().invoke(
-            main, ["run-plan", "to-aggregate-manifest", str(run_plan_path)]
-        )
-        assert result.exit_code == 64
-
-    def test_json_object_that_is_not_a_mapping_is_a_usage_error(
-        self, tmp_path: Path
-    ) -> None:
-        run_plan_path = tmp_path / "run-plan.json"
-        run_plan_path.write_text("[1, 2, 3]", encoding="utf-8")
-        result = CliRunner().invoke(
-            main, ["run-plan", "to-aggregate-manifest", str(run_plan_path)]
-        )
-        assert result.exit_code == 64
-
-    def test_output_file_option_writes_to_disk(self, tmp_path: Path) -> None:
-        plan = RunPlan(checks=[RunPlanCheck(check_id="a@b#c@d")])
-        run_plan_path = tmp_path / "run-plan.json"
-        run_plan_path.write_text(json.dumps(plan.to_dict()), encoding="utf-8")
-        out_path = tmp_path / "manifest.json"
-
-        result = CliRunner().invoke(
-            main,
-            [
-                "run-plan",
-                "to-aggregate-manifest",
-                str(run_plan_path),
-                "-o",
-                str(out_path),
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        manifest = json.loads(out_path.read_text(encoding="utf-8"))
-        assert manifest["targets"] == [{"id": "a@b#c@d", "required": True}]
+# NB: `abicheck run-plan to-aggregate-manifest` (the standalone CLI command)
+# is not public CLI surface anymore (ADR-054): it was a pure intermediate-
+# format conversion. Its logic is `to_aggregate_manifest()`, unit-tested
+# directly above (TestToAggregateManifest); the CLI-level entry point is now
+# `aggregate --run-plan`, covered in tests/test_aggregate.py::TestAggregateCLI.
 
 
 @pytest.mark.parametrize(

@@ -8,9 +8,9 @@ channels exist, and exactly which `{channel, depth, required, gate_mode}`
 checks run against each target (G30/ADR-047 §3).
 
 > **Status.** This page documents the schema and the
-> `abicheck project-targets validate` command shipped in G30 P1.5. The
+> `abicheck project validate` command shipped in G30 P1.5. The
 > run-plan generator that reads a validated block to fan out CI checks
-> (`abicheck run-plan generate`, `check-single.yml`/`check-project.yml`) is
+> (`abicheck project plan`, `check-single.yml`/`check-project.yml`) is
 > G30 P1.4 — see the [run-plan schema](run-plan-schema.md) and the
 > [reusable workflows reference](reusable-workflows.md). A project not using
 > G30's CI-integration primitives sees no behavior change at all from adding
@@ -65,7 +65,7 @@ baseline:
     accepted-main: {source: actions-cache, key_prefix: "abicheck-baseline-main"}
 ```
 
-`abicheck project-targets validate` — like the rest of `.abicheck.yml` —
+`abicheck project validate` — like the rest of `.abicheck.yml` —
 loads this via [PyYAML's `safe_load`](https://pyyaml.org/wiki/PyYAMLDocumentation#loading-yaml),
 so no custom YAML tags are ever evaluated.
 
@@ -134,7 +134,7 @@ This schema resolves it with two complementary mechanisms:
   the actual `(target, profile)` cells from each profile's own
   `build-output.json` `targets[]` list (only generating a cell where the
   target actually appears in that profile's declared targets), never from a
-  blind cross-product. `abicheck project-targets validate` cannot check that
+  blind cross-product. `abicheck project validate` cannot check that
   downstream behavior — it only validates that an explicit selector, when
   given, names real profile ids.
 
@@ -183,9 +183,9 @@ constraint string), `target` (a target triple), `standard`, `stdlib`,
 be a single whitespace-free atom — a `.abicheck.yml` found by auto-discovery
 is untrusted, and whitespace would let one YAML scalar smuggle multiple
 argv tokens. `standard`/`stdlib`/`target`/`abi_macros`/`args` reach `abicheck
-run-plan generate` (P1 toolchain-profile audit, closing this gap) as each
+project plan` (P1 toolchain-profile audit, closing this gap) as each
 resolved cell's composed `compile_gcc_options`; `binding` additionally
-reaches `compile_gcc_path`, but only when `run-plan generate
+reaches `compile_gcc_path`, but only when `project plan
 --toolchain-bindings <path>` resolves it (see below) — see
 [`run-plan-schema.md`'s `RunPlanCheck` fields](run-plan-schema.md#runplancheck-fields)
 for the exact composition rule and `reusable-workflows.md`'s "Shared
@@ -223,7 +223,7 @@ bindings:
   castxml07: /opt/conda/bin/castxml
 ```
 
-`abicheck project-targets validate --toolchain-bindings bindings.yml` checks
+`abicheck project validate --toolchain-bindings bindings.yml` checks
 that every declared `profiles.<id>.compile.binding` resolves against it,
 in addition to the ordinary validation checks below — a config author can
 catch a typo'd or undeclared binding id before CI runs. Omitting
@@ -249,7 +249,7 @@ scope for P0/P1 and not a valid `source` value here.
 
 ## Validation
 
-`abicheck project-targets validate [CONFIG]` (`CONFIG` defaults to
+`abicheck project validate [CONFIG]` (`CONFIG` defaults to
 `.abicheck.yml` in the current directory) checks, per ADR-047 §3:
 
 1. Every target's `kind`-specific required fields are set, and no
@@ -286,11 +286,11 @@ covers cross-reference/semantic issues on an already-well-formed block.
 ### CLI
 
 ```console
-$ abicheck project-targets validate .abicheck.yml
+$ abicheck project validate .abicheck.yml
 project-targets validation: .abicheck.yml
 OK — no errors.
 
-$ abicheck project-targets validate .abicheck.yml --format json
+$ abicheck project validate .abicheck.yml --format json
 {
   "ok": true,
   "errors": [],

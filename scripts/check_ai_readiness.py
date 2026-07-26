@@ -1135,14 +1135,6 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_aggregate",
                 "cli_appcompat",
                 "cli_baseline",
-                # `cli_build_output` (G30 P1.1) joins this SCC exactly like
-                # `cli_aggregate`: its `build-output validate` command reuses
-                # the shared `-o/--format` pair via `cli_options.output_options`
-                # (module-load import), and `cli_options` is already a member —
-                # so `cli -> cli_build_output -> cli_options -> ... -> cli`
-                # closes through already-member modules, not a new dependency
-                # direction. No init deadlock.
-                "cli_build_output",
                 "cli_buildsource",
                 "cli_buildsource_helpers",
                 "cli_compare_helpers",
@@ -1151,42 +1143,25 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_debian_symbols",
                 "cli_doctor",
                 "cli_dump_helpers",
-                # `cli_dump_manifest` (ADR-050 D3, G32 Phase B) joins this SCC
-                # exactly like `cli_aggregate`/`cli_build_output`: its `plan`
-                # command reuses the shared `-v/--verbose` option via
-                # `cli_options.verbose_option` (module-load import), and
-                # `cli_options` is already a member — so `cli ->
-                # cli_dump_manifest -> cli_options -> ... -> cli` closes
-                # through already-member modules, not a new dependency
-                # direction. No init deadlock.
-                "cli_dump_manifest",
                 "cli_graph",
                 "cli_helpers_compare",
                 "cli_inputs",
                 "cli_options",
                 "cli_plugin",
+                # `cli_project` (G30 P1.1/P1.4/P1.5, consolidated by ADR-054's
+                # CLI-organization review) joins this SCC exactly like the
+                # three former standalone groups it replaces
+                # (`cli_build_output`/`cli_project_targets`/`cli_run_plan`)
+                # did: its `project validate`/`validate-build`/`plan`
+                # commands reuse the shared `-o/--format` pair via
+                # `cli_options.output_options` (module-load import), and
+                # `cli_options` is already a member — so `cli -> cli_project
+                # -> cli_options -> ... -> cli` closes through already-member
+                # modules, not a new dependency direction. No init deadlock.
+                "cli_project",
                 "cli_pr_comment",
                 "cli_probe",
-                # `cli_project_targets` (G30 P1.5) joins this SCC exactly like
-                # `cli_build_output`/`cli_aggregate`: its `project-targets
-                # validate` command reuses the shared `-o/--format` pair via
-                # `cli_options.output_options` (module-load import), and
-                # `cli_options` is already a member — so `cli ->
-                # cli_project_targets -> cli_options -> ... -> cli` closes
-                # through already-member modules, not a new dependency
-                # direction. No init deadlock.
-                "cli_project_targets",
                 "cli_resolve",
-                # `cli_run_plan` (G30 P1.4) joins this SCC exactly like
-                # `cli_project_targets`/`cli_build_output`/`cli_aggregate`:
-                # its `run-plan generate`/`to-aggregate-manifest` commands
-                # reuse the shared `-o/--format` pair via
-                # `cli_options.output_options` (module-load import), and
-                # `cli_options` is already a member — so `cli ->
-                # cli_run_plan -> cli_options -> ... -> cli` closes through
-                # already-member modules, not a new dependency direction.
-                # No init deadlock.
-                "cli_run_plan",
                 "cli_scan",
                 "cli_scan_baseline",
                 "cli_stack",
