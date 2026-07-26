@@ -277,7 +277,17 @@ regression tests: `test_nested_stdlib_lambda_local_name_is_exempt` (the
 exact GCC example above) and `test_nested_library_owned_lambda_local_name_still_fires`
 (the same nesting shape, but rooted in a `pvxs::` function — must still
 fire). Full fast unit suite (19562 passed / 30 skipped / 4 xfailed),
-mypy/ruff clean — this is the final state of the fix.
+mypy/ruff clean.
+
+**A seventh review pass** (`chatgpt-codex-connector`) caught an
+inconsistency in the fifth pass's action-pinning fix: `actions/checkout` and
+`github/codeql-action/upload-sarif` were pinned, but `abicheck/abicheck@v0.4.0`
+in the same `security-events: write` job was left as a mutable tag — the
+identical risk applies regardless of which repository authors the action.
+Fixed by pinning it to the commit `v0.4.0` resolves to
+(`7bbc3ca44d7548bb52c73ef6af6b2476ce51549b`), with the same
+`# v0.4.0` audit comment convention as the other two — this is the final
+state of the fix.
 
 ## CI / GitHub Action integration — verified end-to-end
 
@@ -357,7 +367,7 @@ jobs:
         with: { fetch-depth: 0 }
       - name: Build old + new (EPICS Base + both pvxs refs, -g -Og)
         run: ./ci/build-two-refs.sh   # produces old/lib/<arch> and new/lib/<arch>
-      - uses: abicheck/abicheck@v0.4.0
+      - uses: abicheck/abicheck@7bbc3ca44d7548bb52c73ef6af6b2476ce51549b  # v0.4.0
         with:
           old-library: old/lib/linux-x86_64/${{ matrix.lib }}.so
           new-library: new/lib/linux-x86_64/${{ matrix.lib }}.so
