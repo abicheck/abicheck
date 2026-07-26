@@ -157,6 +157,40 @@ SO_PATH --dump-manifest FILE --dry-run` invocation reports; it only makes
 the manifest-only preflight (no `SO_PATH` at all) succeed instead of
 blocking, restoring the former standalone command's actual behavior.
 
+**Known gap, accepted rather than worked around: no machine-readable output.**
+The former `plan --dump-manifest --format json [-o FILE]` gave automation a
+JSON `{manifest, scope_fingerprint}` payload. `dump` has no `--format` option
+at all (its real-run output is always the snapshot JSON, with no text mode to
+switch away from), and `--dry-run` is universally text-only across *every*
+command that supports it (`compare --dry-run --format json` and `scan
+--dry-run --format json` also render plain text today, `--format` is silently
+inert against `--dry-run` everywhere, ADR-043 D9) — `--dry-run` also
+unconditionally rejects `-o`/`--output` (`reject_dry_run_with_output`: "a dry
+run performs no analysis and writes nothing"). Special-casing JSON output for
+just this one flag combination would reintroduce exactly the kind of
+narrow, parallel vocabulary this ADR exists to eliminate elsewhere; giving
+every dry-run a `--format json` mode is a real, defensible follow-up but a
+separate, general design question (which commands, what shape, does it
+apply to blockers/warnings too) that deserves its own review, not a rider on
+a CLI-reorganization PR. An automation that specifically needs the manifest
++ fingerprint as JSON without a compiler invocation can call the same two
+functions `render_dump_dry_run` does, directly:
+
+```python
+from pathlib import Path
+from abicheck.dump_manifest import load_manifest
+from abicheck.comparability import compute_extraction_contract
+
+manifest = load_manifest(Path("manifest.yaml"))
+contract = compute_extraction_contract(
+    declared_headers=list(manifest.roots),
+    public_header_paths=list(manifest.public_header_paths),
+    public_header_dirs=list(manifest.public_header_dirs),
+    l2_frontend_ran=False,
+)
+print(contract.scope_fingerprint if contract else None)
+```
+
 ### D5. `project plan` is fail-closed on an empty run-plan by default
 
 The former `run-plan generate` treated a run-plan that resolved to zero
@@ -244,6 +278,12 @@ the same way this ADR relocated three of the four commands it removed.
   behavior for that specific input combination (unlikely, since the
   standalone `plan` command already existed for exactly this case) would see
   a warning instead of an exit-1 block.
+- Negative (accepted): automation that consumed `plan --dump-manifest
+  --format json [-o FILE]`'s machine-readable output has no CLI-level
+  replacement — `dump --dry-run` is text-only, matching every other
+  command's dry-run (see D4). The two-line Python replacement in D4 covers
+  the same computation; a general `--dry-run --format json` capability is
+  deliberately left as a separate, future decision (GitHub review, PR #640).
 
 ## Relationship to existing ADRs
 
