@@ -832,7 +832,11 @@ def test_merge_fragments_type_unions_deprecated_from_opaque_forward_declaration(
     assert merged.types[0].fields == [TypeField(name="v", type="int")]
 
 
-def test_merge_fragments_type_raises_on_conflicting_deprecated_message():
+def test_merge_fragments_type_prefers_definitions_deprecated_message_over_forwards():
+    # Differing deprecated messages are not a conflict (Codex review, PR
+    # #635 round 13, verified empirically against GCC and Clang under
+    # -pedantic-errors) -- the definition (the structural winner here) is
+    # the merge's provenance representative, so its own message wins.
     forward = RecordType(
         name="X", kind="class", is_opaque=True, deprecated="old reason"
     )
@@ -844,10 +848,10 @@ def test_merge_fragments_type_raises_on_conflicting_deprecated_message():
     )
     a = TuFragment(tu_name="a", types=(forward,))
     b = TuFragment(tu_name="b", types=(definition,))
-    with pytest.raises(TuMergeError) as excinfo:
-        merge_fragments([a, b])
-    assert excinfo.value.code == INCONSISTENT_DECLARATION
-    assert excinfo.value.entity_key == ("type", "X")
+    merged = merge_fragments([a, b])
+    assert len(merged.types) == 1
+    assert merged.types[0].deprecated == "different reason"
+    assert merged.types[0].fields == [TypeField(name="v", type="int")]
 
 
 def test_merge_fragments_enum_unions_deprecated_from_forward_declaration():
@@ -910,17 +914,21 @@ def test_merge_fragments_function_unions_deprecated_across_ordinary_redeclaratio
     assert merged.functions[0].deprecated == "use new_api instead"
 
 
-def test_merge_fragments_function_raises_on_conflicting_deprecated_message():
+def test_merge_fragments_function_picks_deterministic_message_on_differing_deprecated():
+    # Differing deprecated messages are not a conflict (Codex review, PR
+    # #635 round 13) -- with no public-header context, `_more_public_of`
+    # deterministically prefers `a` (the tu_name-sorted-first side), so
+    # its message wins rather than raising.
     a = _fn("old_api", "_Z7old_apiv", deprecated="reason one")
     b = _fn("old_api", "_Z7old_apiv", deprecated="reason two")
-    with pytest.raises(TuMergeError) as excinfo:
-        merge_fragments(
-            [
-                TuFragment(tu_name="a", functions=(a,)),
-                TuFragment(tu_name="b", functions=(b,)),
-            ]
-        )
-    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    merged = merge_fragments(
+        [
+            TuFragment(tu_name="a", functions=(a,)),
+            TuFragment(tu_name="b", functions=(b,)),
+        ]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].deprecated == "reason one"
 
 
 def test_merge_fragments_function_unions_additive_contract_attribute():
@@ -1063,17 +1071,20 @@ def test_merge_fragments_variable_unions_deprecated_across_ordinary_redeclaratio
     assert merged.variables[0].deprecated == "use g_new instead"
 
 
-def test_merge_fragments_variable_raises_on_conflicting_deprecated_message():
+def test_merge_fragments_variable_picks_deterministic_message_on_differing_deprecated():
+    # Differing deprecated messages are not a conflict (Codex review, PR
+    # #635 round 13); `a` deterministically wins with no public-header
+    # context.
     a = _var("g_old", "g_old", deprecated="reason one")
     b = _var("g_old", "g_old", deprecated="reason two")
-    with pytest.raises(TuMergeError) as excinfo:
-        merge_fragments(
-            [
-                TuFragment(tu_name="a", variables=(a,)),
-                TuFragment(tu_name="b", variables=(b,)),
-            ]
-        )
-    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    merged = merge_fragments(
+        [
+            TuFragment(tu_name="a", variables=(a,)),
+            TuFragment(tu_name="b", variables=(b,)),
+        ]
+    )
+    assert len(merged.variables) == 1
+    assert merged.variables[0].deprecated == "reason one"
 
 
 def test_merge_fragments_type_unions_deprecated_across_two_full_definitions():
@@ -1099,7 +1110,10 @@ def test_merge_fragments_type_unions_deprecated_across_two_full_definitions():
     assert merged.types[0].deprecated == "old"
 
 
-def test_merge_fragments_type_raises_on_conflicting_deprecated_for_two_full_definitions():
+def test_merge_fragments_type_picks_deterministic_message_on_differing_deprecated_for_two_full_definitions():
+    # Differing deprecated messages are not a conflict (Codex review, PR
+    # #635 round 13); `a` deterministically wins with no public-header
+    # context.
     a_def = RecordType(
         name="X",
         kind="struct",
@@ -1112,14 +1126,14 @@ def test_merge_fragments_type_raises_on_conflicting_deprecated_for_two_full_defi
         fields=[TypeField(name="v", type="int")],
         deprecated="reason two",
     )
-    with pytest.raises(TuMergeError) as excinfo:
-        merge_fragments(
-            [
-                TuFragment(tu_name="a", types=(a_def,)),
-                TuFragment(tu_name="b", types=(b_def,)),
-            ]
-        )
-    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    merged = merge_fragments(
+        [
+            TuFragment(tu_name="a", types=(a_def,)),
+            TuFragment(tu_name="b", types=(b_def,)),
+        ]
+    )
+    assert len(merged.types) == 1
+    assert merged.types[0].deprecated == "reason one"
 
 
 def test_merge_fragments_type_opaque_kind_is_independent_of_tu_name_order():

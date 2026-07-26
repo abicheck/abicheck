@@ -564,22 +564,28 @@ def _merge_scalar_group(
     return merged
 
 
-def _union_optional_fact(a: str | None, b: str | None) -> tuple[bool, str | None]:
-    """Union an optional string fact (e.g. ``deprecated``) that must either
-    agree or have at most one side set, the same "at most one side commits
-    to a value" shape :func:`_merge_functions`'s ``default``-argument union
-    and :func:`_merge_variables`'s ``value`` union already give their own
-    optional facts.
+def _pick_deprecated(primary: _T, secondary: _T) -> str | None:
+    """Pick which side's ``deprecated`` message survives a merge -- prefer
+    *primary* (whichever side the caller already selected as the merge's
+    representative, e.g. via :func:`_more_public_of`) when it carries one,
+    otherwise fall back to *secondary*.
 
-    Returns ``(True, value)`` when compatible -- both ``None``, only one
-    side set, or both set to the identical value -- and ``(False, None)``
-    on a genuine conflict (two differing non-``None`` values), which the
-    caller must treat as an :class:`~abicheck.errors.TuMergeError`, not
-    silently prefer one side's fact over the other's.
+    Two TUs' redeclarations carrying *different* non-``None`` messages --
+    e.g. ``[[deprecated("a")]] void f();`` in one TU, ``[[deprecated("b")]]
+    void f();`` in another -- is **not** a conflict (Codex review, PR #635
+    round 13, verified empirically against both GCC and Clang compiling
+    exactly that pair under ``-pedantic-errors``: both accept it cleanly).
+    A deprecation message is additive diagnostic metadata, not part of a
+    declaration's type or an ODR-significant fact, unlike
+    ``contract_attributes``/calling-convention tokens
+    (:func:`_merge_contract_attributes`), which really can describe
+    genuinely incompatible ABI-relevant claims. There is therefore nothing
+    to reject here -- this never fails, unlike every other optional-fact
+    merge in this module.
     """
-    if a is not None and b is not None and a != b:
-        return False, None
-    return True, a if a is not None else b
+    return (
+        primary.deprecated if primary.deprecated is not None else secondary.deprecated
+    )
 
 
 #: Attribute families whose arguments are a *set* that legally accumulates
@@ -613,7 +619,9 @@ def _merge_contract_attributes(
     contributes no information and the other side's value (however
     incomplete) is kept as-is, the same "missing means unknown, defer to
     whichever side actually captured something" treatment
-    :func:`_union_optional_fact` gives every other optional fact here.
+    :func:`_merge_functions`'s ``default``-argument union and
+    :func:`_merge_variables`'s ``value`` union give their own optional
+    facts.
 
     Each token already carries its own arguments where relevant (e.g.
     ``nonnull(1)``, ``format(printf,1,2)`` -- see
@@ -684,13 +692,11 @@ def _blank_provenance(entity: _T) -> _T:
 
     ``deprecated`` gets the same treatment for the same reason: one TU
     seeing ``[[deprecated]]`` on an otherwise-identical redeclaration that
-    another TU sees without it is exactly as routine as differing
-    provenance, not a structural disagreement -- picking it up is a union,
-    not an equality requirement (Codex review, PR #635 round 8; every
-    caller of this function unions ``deprecated`` explicitly via
-    :func:`_union_optional_fact` afterwards, the same way
-    :func:`_with_more_public_provenance` already does for the
-    forward-declaration/definition case).
+    another TU sees without it -- or even a *different* message than
+    another TU sees (round 13) -- is exactly as routine as differing
+    provenance, never a structural disagreement -- every caller of this
+    function picks ``deprecated`` back explicitly via
+    :func:`_pick_deprecated` afterwards.
     """
     return replace(  # type: ignore[type-var]
         entity,
@@ -753,12 +759,13 @@ def _with_more_public_provenance(
     header_segs: list[tuple[str, ...]],
     dir_segs: list[tuple[str, ...]],
     have_public_set: bool,
-) -> _T | None:
+) -> _T:
     """Return *winner* -- the structurally-complete side of a forward-
     declaration/definition merge (:func:`_merge_types`/:func:`_merge_enums`)
     -- with its provenance possibly overridden from *other* (the forward
     declaration) when *other* classifies as more public, and its
-    ``deprecated`` unioned in from *other* when *winner* doesn't carry one.
+    ``deprecated`` picked via :func:`_pick_deprecated` (preferring whichever
+    side ends up as the provenance representative).
 
     :func:`_more_public_of` alone isn't enough here: unlike the
     already-identical-modulo-provenance case it's built for, *winner* and
@@ -779,16 +786,10 @@ def _with_more_public_provenance(
     undecorated private definition must not lose the deprecation -- picking
     *winner*'s fields wholesale, as before this fix, always did, since
     *winner* is the definition and definitions commonly carry no
-    ``[[deprecated]]`` of their own. Two differing non-``None``
-    ``deprecated`` values is a genuine conflict (returns ``None``, the same
-    treatment :func:`_merge_functions`'s conflicting-default-argument check
-    and :func:`_merge_variables`'s conflicting-value check already give
-    their own optional facts) rather than arbitrarily preferring one
-    message over the other.
+    ``[[deprecated]]`` of their own. Two differing non-``None`` messages are
+    not a conflict here either (round 13 -- see :func:`_pick_deprecated`),
+    so this function can no longer fail and returns ``_T`` unconditionally.
     """
-    ok, deprecated = _union_optional_fact(winner.deprecated, other.deprecated)
-    if not ok:
-        return None
     provenance_source = _more_public_of(
         winner,
         other,
@@ -796,6 +797,8 @@ def _with_more_public_provenance(
         dir_segs=dir_segs,
         have_public_set=have_public_set,
     )
+    provenance_fallback = other if provenance_source is winner else winner
+    deprecated = _pick_deprecated(provenance_source, provenance_fallback)
     merged = (
         winner
         if provenance_source is winner
@@ -832,15 +835,11 @@ def _merge_identical_modulo_provenance(
     otherwise-identical redeclaration is a union, not a disagreement, the
     same "ordinary redeclaration" case :func:`_with_more_public_provenance`
     already handles for the forward-declaration/definition pair (Codex
-    review, PR #635 round 8) -- so it must be unioned back in explicitly
-    here, rejecting a genuine conflict (two differing non-``None``
-    messages) the same way every other optional-fact union in this module
-    does.
+    review, PR #635 round 8) -- so it must be picked back explicitly here
+    via :func:`_pick_deprecated`; two differing non-``None`` messages are
+    not a conflict (round 13).
     """
     if _blank_provenance(a) != _blank_provenance(b):
-        return None
-    ok, deprecated = _union_optional_fact(a.deprecated, b.deprecated)
-    if not ok:
         return None
     winner = _more_public_of(
         a,
@@ -849,6 +848,8 @@ def _merge_identical_modulo_provenance(
         dir_segs=dir_segs,
         have_public_set=have_public_set,
     )
+    other = b if winner is a else a
+    deprecated = _pick_deprecated(winner, other)
     return (
         winner
         if winner.deprecated == deprecated
@@ -913,15 +914,6 @@ def _merge_functions(
     )
     if a_bare != b_bare:
         return None
-    # `deprecated` is blanked by `_blank_provenance` above (not required to
-    # match for an ordinary redeclaration -- only one TU's declaration may
-    # carry `[[deprecated]]`), so it must be unioned back in explicitly
-    # here, same treatment as `default` above (Codex review, PR #635 round
-    # 8): a genuine conflict (two differing non-`None` messages) is still
-    # rejected.
-    deprecated_ok, deprecated = _union_optional_fact(a.deprecated, b.deprecated)
-    if not deprecated_ok:
-        return None
     attrs_ok, contract_attributes = _merge_contract_attributes(
         a.contract_attributes, b.contract_attributes
     )
@@ -945,6 +937,11 @@ def _merge_functions(
     # purely from which TU happened to sort first (Codex review, PR #635
     # round 4).
     other = b if base is a else a
+    # `deprecated` is blanked by `_blank_provenance` above (not required to
+    # match for an ordinary redeclaration), and two differing non-`None`
+    # messages are not a conflict (Codex review, PR #635 round 13) -- see
+    # `_pick_deprecated`.
+    deprecated = _pick_deprecated(base, other)
     merged_params: list[Param] = [
         replace(
             p_base,
@@ -981,13 +978,6 @@ def _merge_variables(
     b_bare = _blank_provenance(replace(b, value=None))
     if a_bare != b_bare:
         return None
-    # Union `deprecated` the same way `value` above is unioned -- blanked by
-    # `_blank_provenance` for the equality check, so it must be restored
-    # explicitly here, rejecting a genuine conflict (Codex review, PR #635
-    # round 8).
-    deprecated_ok, deprecated = _union_optional_fact(a.deprecated, b.deprecated)
-    if not deprecated_ok:
-        return None
     value = a.value if a.value is not None else b.value
     base = _more_public_of(
         a,
@@ -996,6 +986,11 @@ def _merge_variables(
         dir_segs=dir_segs,
         have_public_set=have_public_set,
     )
+    other = b if base is a else a
+    # `deprecated` is blanked by `_blank_provenance` above (not required to
+    # match), and two differing non-`None` messages are not a conflict
+    # (Codex review, PR #635 round 13) -- see `_pick_deprecated`.
+    deprecated = _pick_deprecated(base, other)
     return replace(base, value=value, deprecated=deprecated)
 
 
