@@ -127,8 +127,12 @@ into every consumer binary already compiled against the previous header.
 
 ## Cross-tool comparison
 
-`abidiff`/ABICC can report the raw `field_renamed` on
-`detail::descriptor_impl` but have no mechanism to correlate it with a
-*public* inline accessor's header-emitted body — the internal-namespace
-rename would read as routine internal churn, with no indication that it's
-reachable from (and baked into) public consumer binaries.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+Not independently re-verified in this environment (`abidiff` unavailable
+here) — see case07's struct-layout case for a documented `abidiff`
+exit-code comparison on a related layout-change finding.

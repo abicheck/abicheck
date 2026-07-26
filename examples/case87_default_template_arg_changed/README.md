@@ -122,8 +122,12 @@ explicit instantiation that didn't override that argument.
 
 ## Cross-tool comparison
 
-`abidiff`/ABICC report the raw mangled-symbol add/remove but have no
-template-argument-aware correlation step — the finding reads as an
-unrelated function add+remove rather than "a default template argument
-changed", so the actual root cause (a one-line header edit) is not
-surfaced.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+Not independently re-verified in this environment (`abidiff` unavailable
+here) — see case02's parameter-type-change case for a documented `abidiff`
+exit-code comparison.

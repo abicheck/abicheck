@@ -109,8 +109,12 @@ or free of caller-visible instantiation churn across releases.
 
 ## Cross-tool comparison
 
-`abidiff`/ABICC report the raw symbol add/remove (`walk<float>` gone,
-`walk<double>` added) but have no mechanism to correlate an internal-namespace
-template's instantiation set with the public inline algorithm that leaks it —
-the finding would read as an unremarkable internal-namespace churn instead
-of a consumer-facing break.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+Not independently re-verified in this environment (`abidiff` unavailable
+here) — see case02's parameter-type-change case for a documented `abidiff`
+exit-code comparison.

@@ -104,8 +104,12 @@ symbol.
 
 ## Cross-tool comparison
 
-`abidiff`/ABICC can report the raw `TYPE_REMOVED`/`TYPE_ADDED` pair and the
-individual symbol changes, but have no mechanism to correlate an empty
-tag's disappearance with the re-mangled instantiation symbols that
-reference it — the two would show up as unrelated, easy-to-dismiss findings
-("just an internal type churn") rather than one clearly load-bearing rename.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+Not independently re-verified in this environment (`abidiff` unavailable
+here) — see case01's symbol-removal case for a documented `abidiff`
+exit-code comparison.
