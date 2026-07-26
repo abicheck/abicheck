@@ -22,8 +22,10 @@ it should read in CHANGELOG.md. Delete the other sections.
   `--ast-frontend auto`'s fallback behavior is described consistently
   (opt-in only, via `--allow-ast-frontend-fallback`); stale "being updated
   in parallel" placeholders and internal plan-tracking prose were removed;
-  the GitHub Action app-compatibility examples use the dedicated `used-by`
-  input instead of `extra-args`; and seven example-catalog READMEs
+  the GitHub Action app-compatibility examples keep the `extra-args:
+  '--used-by ...'` form (the dedicated `used-by` input postdates the
+  `v0.5.0` release these examples are pinned to) with a note pointing at
+  the newer input for a commit-SHA pin; and seven example-catalog READMEs
   (`case02`, `case07`-`case11`, `case14`) had their verdict banner corrected
   from a stale "ABI CHANGE" label to match their actual `BREAKING`
   ground-truth verdict.

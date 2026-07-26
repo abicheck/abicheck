@@ -2,45 +2,54 @@
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
-> **Note on abidiff 2.4.0:** Struct layout changes return exit **4** (not 12),
-> but the change is **semantically breaking** — all callers allocate the old size
-> and pass wrong-length data.
+## Verdict and consumer impact
 
-## What breaks
 Code compiled against v1 allocates `sizeof(Point) = 8` bytes. v2's `Point` is 12
 bytes. Stack/heap allocations are undersized; the `z` field reads/writes outside the
 allocated region. Any binary passing `Point` by value is broken without recompilation.
 
-## Why abidiff catches it
-Reports `type size changed from 64 to 96 (in bits)` and `1 data member insertion`.
-
-## Code diff
+## Old/new diff
 
 | v1.c | v2.c |
 |------|------|
 | `struct Point { int x; int y; };` | `struct Point { int x; int y; int z; };` |
 
-## Reproduce manually
+## abicheck command
+
 ```bash
 gcc -shared -fPIC -g v1.c -o libfoo_v1.so
 gcc -shared -fPIC -g v2.c -o libfoo_v2.so
-abidw --out-file v1.xml libfoo_v1.so
-abidw --out-file v2.xml libfoo_v2.so
-abidiff v1.xml v2.xml
-echo "exit: $?"   # → 4
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
-Never add fields to public structs. Use the opaque-pointer (PIMPL) idiom: expose
-`struct Point*` and allocate/free through library functions, so the struct layout
-is hidden from callers.
+## Expected abicheck finding
 
-## Real-world example
-The C standard library's `FILE*` is a classic opaque handle — callers never see
-the struct layout; all access is through `fopen`/`fread`/`fclose`. This pattern
-keeps the ABI stable across libc versions even as the internal `FILE` struct changes.
+```text
+Verdict: BREAKING (exit 4)
 
-## Real Failure Demo
+- type_size_changed: Size changed: Point (64 -> 96 bits)
+  > Old code allocates or copies the type with the old size;
+    heap/stack corruption, out-of-bounds access.
+  Affected symbols: get_x, init_point
+
+Additions:
+- type_field_added_compatible: Field added: Point::z
+  > Field appended without changing existing offsets; old code works
+    but won't initialize the new field.
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's struct-layout info (`DW_TAG_structure_type`
+size + member offsets) is enough to detect the size change; no public
+headers required.
+
+## Why abicheck catches it
+
+DWARF records each struct's total byte size and every member's offset for
+both versions; abicheck compares them directly from debug info.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
@@ -65,6 +74,30 @@ gcc -shared -fPIC -g v2.c -o libfoo.so
 **Why CRITICAL:** The v2 library writes a `z` field at byte offset 8, but the app only
 allocated 8 bytes for the struct. The canary variable on the stack is overwritten —
 a classic stack corruption that can corrupt control flow or cause silent data loss.
+
+## Safe redesign
+
+Never add fields to public structs. Use the opaque-pointer (PIMPL) idiom: expose
+`struct Point*` and allocate/free through library functions, so the struct layout
+is hidden from callers.
+
+**Real-world example:** the C standard library's `FILE*` is a classic
+opaque handle — callers never see the struct layout; all access is
+through `fopen`/`fread`/`fclose`. This pattern keeps the ABI stable
+across libc versions even as the internal `FILE` struct changes.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+echo "exit: $?"   # → 4
+```
+
+> **Note on abidiff 2.4.0:** Struct layout changes return exit **4** (not 12),
+> but the change is **semantically breaking** — all callers allocate the old size
+> and pass wrong-length data.
 
 ## References
 
