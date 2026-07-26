@@ -314,6 +314,27 @@ class TestResolveFunctionIdentity:
         assert before_identity.tier == IDENTITY_TIER_NORMALIZED
         assert before_identity.primary_id == after_identity.primary_id
 
+    def test_extern_c_identity_is_stable_across_evidence_tiers(self) -> None:
+        # Codex review: dwarf_snapshot.py scope-qualifies a namespaced
+        # extern "C" function's Function.name ("ns::foo"), while a
+        # symbols-only fallback snapshot of the SAME export has no scope
+        # info at all (Function.name == Function.mangled == "foo"). extern
+        # "C" linkage strips namespace qualification from the actual
+        # exported symbol, so func.mangled is the tier-independent anchor
+        # diff_symbols._diff_functions's primary mangled-key match already
+        # relies on -- this identity must agree, not fragment on func.name.
+        rich = Function(
+            name="ns::foo", mangled="foo", return_type="int", is_extern_c=True
+        )
+        l0_fallback = Function(
+            name="foo", mangled="foo", return_type="int", is_extern_c=True
+        )
+        rich_identity = resolve_function_identity(rich)
+        l0_identity = resolve_function_identity(l0_fallback)
+        assert rich_identity.tier == IDENTITY_TIER_NORMALIZED
+        assert l0_identity.tier == IDENTITY_TIER_NORMALIZED
+        assert rich_identity.primary_id == l0_identity.primary_id
+
     def test_const_qualifier_distinguishes_otherwise_identical_overloads(self) -> None:
         # Codex review: `void f()` vs `void f() const` share a name and an
         # (empty) param-type tuple when neither has a real mangling.
