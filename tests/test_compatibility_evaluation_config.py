@@ -382,6 +382,29 @@ class TestEvidenceProviderRequirement:
                 ),
             )
 
+    def test_non_string_capability_is_rejected(self):
+        # Codex review: capability=123 previously passed through unnoticed;
+        # combined with a normal string-named provider it crashes
+        # _provider_sort_key's canonical sort comparing int and str.
+        with pytest.raises(TypeError, match=r"EvidenceProviderRequirement\.capability"):
+            EvidenceProviderRequirement(
+                capability=123,  # type: ignore[arg-type]
+                required=True,
+                implementation=ImmutableIdentity(
+                    id="castxml", version=1, sha256="a" * 64
+                ),
+            )
+
+    def test_empty_string_capability_is_rejected(self):
+        with pytest.raises(TypeError, match=r"EvidenceProviderRequirement\.capability"):
+            EvidenceProviderRequirement(
+                capability="",
+                required=True,
+                implementation=ImmutableIdentity(
+                    id="castxml", version=1, sha256="a" * 64
+                ),
+            )
+
     def test_raw_string_provider_element_is_rejected(self):
         # EvidenceConfig.providers: tuple[EvidenceProviderRequirement, ...]
         # isn't runtime-enforced per element -- a bare object would
@@ -724,6 +747,16 @@ class TestDigestedItems:
         evidence = EvidenceConfig()
         assert evidence.variants is None
 
+    def test_raw_mapping_variants_is_rejected(self):
+        # Codex review: an untyped manifest adapter supplying the decoded
+        # variant block as a raw mapping was previously accepted and
+        # retained as-is instead of a DigestedItems -- the supposedly
+        # immutable config could then change when the caller mutates that
+        # mapping, and consumers expecting .sha256/.items attribute access
+        # would get the wrong interface.
+        with pytest.raises(TypeError, match=r"EvidenceConfig\.variants"):
+            EvidenceConfig(variants={"items": ["linux-x86_64"], "sha256": "abc"})  # type: ignore[arg-type]
+
     def test_evidence_config_distinguishes_no_source_from_selected_empty(self):
         no_source = EvidenceConfig()
         selected_empty = EvidenceConfig(variants=DigestedItems(sha256="empty-digest"))
@@ -734,6 +767,12 @@ class TestDigestedItems:
     def test_surface_config_explicit_scope_defaults_to_no_source_selected(self):
         surface = SurfaceConfig()
         assert surface.explicit_scope is None
+
+    def test_raw_mapping_explicit_scope_is_rejected(self):
+        # Same class of gap as EvidenceConfig.variants -- explicit_scope
+        # has the identical DigestedItems | None shape.
+        with pytest.raises(TypeError, match=r"SurfaceConfig\.explicit_scope"):
+            SurfaceConfig(explicit_scope={"items": ["Foo::bar"], "sha256": "abc"})  # type: ignore[arg-type]
 
     def test_surface_config_internal_namespaces_stay_a_plain_tuple(self):
         # ADR-049 D6's hints: {internal_namespaces: []} carries no digest,

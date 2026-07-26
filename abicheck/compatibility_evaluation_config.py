@@ -165,6 +165,19 @@ def _require_nonempty_digest(sha256: str, *, owner: str) -> None:
         )
 
 
+def _require_digested_items_or_none(value: object, *, owner: str, field: str) -> None:
+    # An untyped manifest adapter supplying the decoded variant/scope block
+    # as a raw mapping (e.g. {"items": [...], "sha256": "..."}) would
+    # otherwise be accepted and retained as-is instead of a DigestedItems --
+    # the supposedly-immutable config could then change when the caller
+    # mutates that mapping, and consumers expecting `.sha256`/`.items`
+    # attribute access would get the wrong interface (Codex review).
+    if value is not None and not isinstance(value, DigestedItems):
+        raise TypeError(
+            f"{owner}.{field} must be a DigestedItems or None, not {value!r}."
+        )
+
+
 # ADR-049 D9's unresolved_behavior is a closed, two-value vocabulary this
 # module owns outright (every worked example in the ADR uses exactly one of
 # these two strings) -- unlike e.g. ValueProvenance.source_kind, which is
@@ -407,6 +420,17 @@ class EvidenceProviderRequirement:
     implementation: ImmutableIdentity
 
     def __post_init__(self) -> None:
+        # A non-str or empty capability (e.g. capability=123) previously
+        # passed through unnoticed; combined with a normal string-named
+        # provider it would crash _provider_sort_key's canonical sort with
+        # "TypeError: '<' not supported between instances of 'int' and
+        # 'str'", and even a lone non-str/empty capability persists as an
+        # unusable evidence key (Codex review).
+        if not isinstance(self.capability, str) or not self.capability:
+            raise TypeError(
+                "EvidenceProviderRequirement.capability must be a "
+                f"non-empty str, not {self.capability!r}."
+            )
         if not isinstance(self.required, bool):
             raise TypeError(
                 "EvidenceProviderRequirement.required must be a bool, not "
@@ -453,6 +477,9 @@ class EvidenceConfig:
     variants: DigestedItems | None = None
 
     def __post_init__(self) -> None:
+        _require_digested_items_or_none(
+            self.variants, owner="EvidenceConfig", field="variants"
+        )
         object.__setattr__(
             self,
             "providers",
@@ -493,6 +520,9 @@ class SurfaceConfig:
     internal_namespaces: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        _require_digested_items_or_none(
+            self.explicit_scope, owner="SurfaceConfig", field="explicit_scope"
+        )
         object.__setattr__(
             self,
             "internal_namespaces",
