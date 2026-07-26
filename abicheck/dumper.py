@@ -533,9 +533,8 @@ def _clang_header_dump(
         except (ValueError, OSError):
             cached.unlink(missing_ok=True)
         else:
-            # The load itself can consume the rest of the budget on a huge
-            # cached AST; re-check before handing it to the AST walker
-            # (Codex review, PR #591, round 3).
+            # Loading a huge cached AST can consume the rest of the
+            # budget; re-check before handing it to the walker (Codex review).
             deadline.check()
             return _cached_result, resolved_kind
 
@@ -1036,9 +1035,8 @@ def _castxml_dump(
         if _cached_root is None:
             cached.unlink(missing_ok=True)
         else:
-            # The parse itself can consume the rest of the budget on a huge
-            # cached XML tree; re-check before handing it off (Codex review,
-            # PR #591, round 3).
+            # Parsing a huge cached tree can consume the rest of the budget;
+            # re-check before handing it off (Codex review).
             deadline.check()
             return cast(Element, _cached_root)
 
@@ -1117,11 +1115,9 @@ def _castxml_dump(
                 _atomic_write(cached, out_xml.read_bytes())
             except OSError as exc:
                 log.warning("Could not write castxml AST cache %s: %s", cached, exc)
-        # Re-reading the whole XML file (read_bytes) and writing the cache copy
-        # can itself consume real time on a huge fresh tree; re-check before
-        # handing the already-parsed root back to the caller, mirroring the
-        # pre-cache-write check in _validate_castxml_output (Codex review,
-        # PR #591, round 10).
+        # Re-reading/caching a huge fresh tree can itself consume real time;
+        # re-check before returning, mirroring _validate_castxml_output's
+        # pre-cache-write check (Codex review).
         deadline.check()
         return root
     finally:
@@ -1578,12 +1574,8 @@ def _dump_elf(
     ) = _elf_classify_symbols(elf_meta, exported_dynamic, library_name=so_path.name)
     # A DWARF metadata parse that finds real debug info leaves its open
     # DwarfSession in ``_dwarf_session_out`` so the snapshot build below can
-    # reuse the same DWARFInfo (and its warm DIE cache) rather than re-parsing
-    # every DIE from a second open (F5b). Metadata resolution and the snapshot
-    # attempt run inside the try; the finally closes any opened session on every
-    # exit path (including an exception during resolution), so no descriptor
-    # leaks. The built snapshot holds extracted model objects, not live DIE
-    # references, so closing after it is returned is safe.
+    # reuse the same DWARFInfo/DIE cache instead of re-parsing (F5b); the
+    # finally below closes it on every exit path, including exceptions.
     _dwarf_session_out: list[DwarfSession] = []
     # Auto-detect can resolve to BTF/CTF with debug_format still None (Codex review).
     _dwarf_format_out: list[str | None] = []
@@ -1651,9 +1643,8 @@ def _dump_elf(
                 dwarf_only_types,
                 profile_hint,
             )
-        # Built here (session still open): "auto" can fall back to clang internally
-        # (G16), so ast_result.is_clang is the only reliable signal (Codex review).
-        # N per-TU invocations for a dump_manifest, one flat parse otherwise (ADR-050 D3).
+        # Built here (session open): "auto" can fall back to clang (G16), so
+        # ast_result.is_clang is the only reliable signal (Codex review).
         from .dumper_manifest import resolve_header_ast_result
 
         ast_result = resolve_header_ast_result(
@@ -1677,18 +1668,27 @@ def _dump_elf(
             extra_hash_dirs=extra_hash_dirs,
             frontend_context=frontend_context,
         )
-        dwarf_layout_types = dwarf_layout_types_or_empty(
-            so_path,
-            elf_meta,
-            dwarf_meta,
-            dwarf_adv,
-            ast_result.is_clang,
-            symbols_only=symbols_only,
-            debug_presence_only=debug_presence_only,
-            debug_format=resolved_debug_format,
-            version=version,
-            language_profile=profile_hint,
-            session=dwarf_session,
+        # Host DWARF describes the host-compiled binary's own layout --
+        # meaningless for a SYCL/DPC++ device-target AST pass (a different
+        # architecture/ABI can have different sizes/offsets); backfilling
+        # by name would attach unrelated host data (Codex review).
+        _is_device_context = ast_result.frontend_context_kind == "device"
+        dwarf_layout_types = (
+            []
+            if _is_device_context
+            else dwarf_layout_types_or_empty(
+                so_path,
+                elf_meta,
+                dwarf_meta,
+                dwarf_adv,
+                ast_result.is_clang,
+                symbols_only=symbols_only,
+                debug_presence_only=debug_presence_only,
+                debug_format=resolved_debug_format,
+                version=version,
+                language_profile=profile_hint,
+                session=dwarf_session,
+            )
         )
     finally:
         for _sess in _dwarf_session_out:
@@ -1699,7 +1699,8 @@ def _dump_elf(
     )
     _dwarf_layout_coherence, _dwarf_layout_coherence_mismatches = (
         resolve_snapshot_layout_coherence(
-            is_clang_backend=ast_result.is_clang, coherence=_layout_coherence
+            is_clang_backend=ast_result.is_clang and not _is_device_context,
+            coherence=_layout_coherence,
         )
     )
 

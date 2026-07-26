@@ -526,6 +526,16 @@ def attach_clang_layout(
     """
     if snap.ast_producer not in ("clang", "hybrid") or not headers:
         return snap
+    if snap.frontend_context_kind == "device":
+        # The companion tool has no concept of a SYCL/DPC++ host/device AST
+        # context at all -- it just re-compiles *headers* with ordinary
+        # compiler flags, producing host-target layout. A device-context
+        # snapshot's records describe a genuinely different compilation
+        # target (e.g. SPIR64/a GPU ISA), which can have different sizes/
+        # alignment/offsets than the host build; backfilling from this
+        # tool's host-compiled output would silently attach unrelated
+        # layout data (Codex review).
+        return snap
     binary = find_layout_tool_bin()
     if binary is None:
         return snap

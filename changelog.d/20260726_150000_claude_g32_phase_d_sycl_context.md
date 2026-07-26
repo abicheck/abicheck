@@ -113,6 +113,22 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   itself fails after `os.replace()` already failed (only `_atomic_copy` had
   this test) — added, closing a Codecov-flagged patch-coverage gap (no
   behavior change).
+- `dumper._dump_elf` backfilled a device-context (SYCL/DPC++) snapshot's
+  header-parsed types with the *host* binary's own DWARF layout — DWARF
+  describes the host-compiled binary's actual memory layout, meaningless
+  for declarations parsed from a device-target AST pass, which can target
+  a genuinely different architecture/ABI (different sizes/alignment/
+  offsets). Now skips DWARF backfill entirely for a device-context dump,
+  and reports `dwarf_layout_coherence` as `None` ("not applicable"), not
+  `"unavailable"` (which would wrongly imply DWARF was consulted and
+  simply absent) (Codex review).
+- `clang_layout_tool.attach_clang_layout` (the optional G28 Phase 4 layout
+  companion tool) had the identical gap in a separate mechanism: it
+  re-compiles headers with ordinary flags (no concept of SYCL/DPC++ host/
+  device context at all), so it could backfill a device-context snapshot's
+  missing layout fields from its own host-compiled output. Now skips
+  entirely for a device-context snapshot, verified via a
+  `find_layout_tool_bin` spy that must never be reached (Codex review).
 - The native `dump` CLI command's ELF path (`cli_dump_helpers.
   perform_elf_dump`) bypasses `service.run_dump` (which already threads
   `compile.frontend_context` into `dumper.dump` for the `scan`/`compare`/

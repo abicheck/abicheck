@@ -524,6 +524,31 @@ class TestAttachClangLayout:
         result = attach_clang_layout(snap, [], [], lang=None, compile=None)
         assert result is snap
 
+    def test_noop_for_device_context_snapshot(self, tmp_path):
+        """Codex review, PR #636: the companion tool has no concept of a
+        SYCL/DPC++ host/device AST context -- it just re-compiles headers
+        with ordinary flags, producing host-target layout. Backfilling a
+        device-context snapshot's records from that host-compiled output
+        would silently attach unrelated layout data (a device target can
+        have different sizes/offsets than the host build), so this must
+        skip entirely rather than reach the tool at all -- verified via a
+        find_layout_tool_bin spy that must never be called.
+        """
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo { int a; };")
+        snap = AbiSnapshot(
+            library="lib",
+            version="1.0",
+            ast_producer="clang",
+            frontend_context_kind="device",
+        )
+        with patch(
+            "abicheck.clang_layout_tool.find_layout_tool_bin"
+        ) as mock_find_bin:
+            result = attach_clang_layout(snap, [header], [], lang=None, compile=None)
+        assert result is snap
+        mock_find_bin.assert_not_called()
+
     def test_noop_when_tool_unavailable(self, tmp_path):
         header = tmp_path / "a.h"
         header.write_text("struct Foo {};")
