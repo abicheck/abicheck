@@ -193,3 +193,17 @@
   Applying the suggested pointer-depth gate here would create exactly the
   false-negative risk that filter's own design note warns against, for a
   precision axis this module was never meant to duplicate.
+- **`type_reachability.py` reachability closure gains two more fixes**
+  (Codex review, fresh evidence): (1) a public *method*'s own owner
+  class/struct is now seeded as reachable too — a public member like
+  `void Foo::run()` never repeats `Foo` in its own return/parameter types,
+  so without also consulting `diff_cxx_rules.owner_class_of()` the
+  reachability closure never queued `Foo` at all, silently missing a
+  genuine layout break in one of `Foo`'s fields. (2) a non-stdlib record's
+  bare-trailing-segment alias (e.g. `Inner` for `api::Inner`) is now
+  dropped rather than recorded when it is ambiguous — shared by two or
+  more *distinct* non-stdlib records (e.g. `api::Inner` and
+  `detail::Inner` both reducing to bare `Inner`) — since queuing every
+  colliding record would let a signature naming one of them wrongly walk
+  an unrelated internal record's fields too, misattributing its own
+  implementation-only churn as publicly reachable.

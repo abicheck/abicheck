@@ -55,6 +55,7 @@ import re
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
+from .diff_cxx_rules import owner_class_of
 from .model import ScopeOrigin, Visibility
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
@@ -189,19 +190,6 @@ def _stripped_signature_spelling(identity: str) -> str | None:
     return None
 
 
-def _generic_spellings(identity: str) -> frozenset[str]:
-    """All spellings a *non*-stdlib record's *identity* might appear as in a
-    signature: itself, and (if namespace/enclosing-class-qualified) its
-    trailing segment after the last ``::`` — mirrors ``surface_graph.py``'s
-    own alias convention for exactly this case, since a non-stdlib record
-    carries no fixed, recognizable namespace prefix the way
-    ``STDLIB_TYPE_NAMESPACE_PREFIXES`` gives stdlib candidates."""
-    spellings = {identity}
-    if "::" in identity:
-        spellings.add(identity.rsplit("::", 1)[1])
-    return frozenset(spellings)
-
-
 def _spelling_index(
     stdlib_identities: list[str], non_stdlib_identities: frozenset[str]
 ) -> dict[str, frozenset[str]]:
@@ -220,10 +208,20 @@ def _spelling_index(
     signature naming that unrelated user type must not be misread as a
     direct stdlib reference — silently missing that stdlib candidate here
     (a false negative) is far safer than attributing an unrelated type's
-    layout change to it (a false positive). Multiple identities can
+    layout change to it (a false positive). Multiple *stdlib* identities can
     legitimately share one spelling (e.g. two distinct namespaces both
     reducing to the same bare form) — every one of them is recorded, not
     just the first.
+
+    A non-stdlib record's own bare-trailing-segment alias is dropped
+    instead of recorded when it is ambiguous — shared by two or more
+    *different* non-stdlib records (Codex review, fresh evidence: e.g.
+    ``api::Inner`` and ``detail::Inner`` both reducing to bare ``Inner``):
+    unlike the stdlib case above, queuing every colliding record here would
+    let a signature naming one of them wrongly walk an unrelated internal
+    record's fields too, misattributing its own implementation-only churn
+    as publicly reachable. Each record's own full identity is never
+    ambiguous this way and is always kept.
     """
     index: dict[str, set[str]] = {}
     for identity in stdlib_identities:
@@ -231,9 +229,18 @@ def _spelling_index(
         stripped = _stripped_signature_spelling(identity)
         if stripped is not None and stripped not in non_stdlib_identities:
             index.setdefault(stripped, set()).add(identity)
+
+    generic_bare: dict[str, set[str]] = {}
     for identity in non_stdlib_identities:
-        for spelling in _generic_spellings(identity):
-            index.setdefault(spelling, set()).add(identity)
+        index.setdefault(identity, set()).add(identity)
+        if "::" in identity:
+            bare = identity.rsplit("::", 1)[1]
+            generic_bare.setdefault(bare, set()).add(identity)
+    for bare, ids in generic_bare.items():
+        if len(ids) == 1:
+            index.setdefault(bare, set()).update(ids)
+        # else: ambiguous bare alias shared by distinct records -- drop.
+
     return {spelling: frozenset(ids) for spelling, ids in index.items()}
 
 
@@ -306,7 +313,13 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
 
     A non-stdlib record's own fields are only consulted once that record
     itself is confirmed reachable from a public root — by direct mention in
-    a public function's own signature, or transitively through another
+    a public function's own signature, by being that function's *owner*
+    class/struct for a member function (Codex review, fresh evidence: a
+    public method like ``void Foo::run()`` never repeats ``Foo`` in its own
+    return/parameter types, so without also seeding
+    :func:`abicheck.diff_cxx_rules.owner_class_of` the previous version
+    never queued ``Foo`` at all — a genuine layout break in one of its
+    fields would be silently missed), or transitively through another
     already-reachable record's fields (Codex review, fresh evidence: the
     previous version scanned *every* non-stdlib record's fields
     unconditionally, so a purely internal, never-actually-reachable record
@@ -315,6 +328,9 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     still make an unrelated stdlib type look directly referenced). A
     record's own ``origin`` being ``PRIVATE_HEADER``/``SYSTEM_HEADER``/
     ``GENERATED`` still excludes its fields from the walk, same as before.
+    See :func:`_spelling_index` for why an ambiguous bare alias shared by
+    two distinct non-stdlib records (Codex review, fresh evidence) is
+    dropped rather than queuing both.
     Deliberately does **not** also gate on pointer-vs-by-value use the way
     a first read might expect (an earlier review round raised this): this
     module intentionally mirrors ``surface.py``'s own documented ADR-024 §D3
@@ -383,6 +399,9 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
         _scan(fn.return_type)
         for param in fn.params:
             _scan(param.type)
+        owner = owner_class_of(fn)
+        if owner is not None:
+            _scan(owner)
 
     while worklist and remaining:
         rec = non_stdlib_records[worklist.pop()]

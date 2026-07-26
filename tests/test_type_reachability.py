@@ -740,3 +740,101 @@ class TestDirectlyReferencedStdlibTypesEdgeCases:
             ],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
+class TestOwnerClassSeedingAndAmbiguousAliases:
+    def test_public_member_function_seeds_its_owner_class(self) -> None:
+        """Codex review, fresh evidence: a public method like void
+        Foo::run() never repeats "Foo" in its own return/parameter types,
+        so Foo itself must be seeded as reachable via its owner class --
+        otherwise a genuine layout break in one of Foo's fields would be
+        silently missed."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="Foo::run",
+                    mangled="_ZN3Foo3runEv",
+                    return_type="void",
+                    params=[],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_free_function_has_no_owner_to_seed(self) -> None:
+        """A free function's owner_class_of is None -- must not error and
+        must not spuriously seed anything."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("free_function")],
+            types=[
+                RecordType(
+                    name="Unrelated",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_ambiguous_bare_alias_between_distinct_records_is_not_queued(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: two distinct non-stdlib records
+        (api::Inner and detail::Inner) both reducing to the bare alias
+        "Inner" must not let a signature naming one of them wrongly queue
+        the other -- unrelated implementation-only churn (here, the
+        detail::Inner sibling's std::string field) must not be reported as
+        publicly reachable just because of a name collision."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="Inner")],
+            types=[
+                RecordType(
+                    name="Inner",
+                    kind="class",
+                    qualified_name="api::Inner",
+                    fields=[TypeField(name="n", type="int")],
+                ),
+                RecordType(
+                    name="Inner",
+                    kind="class",
+                    qualified_name="detail::Inner",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_unambiguous_bare_alias_still_matches(self) -> None:
+        """Guard against over-correcting: a single record's own trailing
+        bare-segment alias must still work when there is no collision."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="Inner")],
+            types=[
+                RecordType(
+                    name="Inner",
+                    kind="class",
+                    qualified_name="api::Inner",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
