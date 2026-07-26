@@ -242,6 +242,24 @@ class TestNormalizeMangledName:
         # "_ZN1A1EE" -- namespace A, entity named "E", real terminator.
         assert normalize_mangled_name("_ZN1A1EE", None) == "_ZN1A1EE"
 
+    def test_nested_name_substitution_component_embedded_e_is_not_a_terminator(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence, round 5: "St" (the abbreviated
+        # std:: substitution) is itself a <prefix> component and must be
+        # followed by more encoding -- a loop that only skipped
+        # digit-prefixed components never started skipping here (since
+        # 'S' isn't a digit), so it fell back to the naive terminator
+        # scan. "_ZNSt1E" is incomplete: after "St", "1E" is a length-1
+        # <source-name> whose one-byte identifier IS "E", leaving no
+        # separate terminator (the complete form is "_ZNSt1EE").
+        assert normalize_mangled_name("_ZNSt1E", "_ZNSt1E") is None
+
+    def test_nested_name_with_substitution_and_source_name_is_accepted(self) -> None:
+        # "_ZNSt1EE" -- std:: substitution, entity named "E", real
+        # terminator (std::E).
+        assert normalize_mangled_name("_ZNSt1EE", None) == "_ZNSt1EE"
+
     def test_local_name_with_nothing_after_terminator_is_rejected(self) -> None:
         # Codex review, fresh evidence: unlike <nested-name> (complete once
         # its own terminator E is found), a <local-name> is

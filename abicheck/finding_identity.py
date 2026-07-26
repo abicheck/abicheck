@@ -306,7 +306,24 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
         # matching the single-component "_ZN0E"/"_ZN9abcE" fix (round 3).
         pos = 1
         consumed_any_component = False
-        while pos < len(rest) and rest[pos].isdigit():
+        while pos < len(rest):
+            if rest[pos : pos + 2] == "St":
+                # "St" (the abbreviated std:: substitution) is itself a
+                # <prefix> component that must be followed by more
+                # encoding (e.g. "_ZNSt1EE" = std::E) -- consuming just
+                # its two bytes without continuing the loop left a
+                # trailing digit-prefixed <source-name> exposed to the
+                # same embedded-terminator confusion the earlier fixes
+                # addressed: "_ZNSt1E" is incomplete ("1E" is a
+                # length-1 <source-name> whose identifier IS "E",
+                # leaving no separate terminator) but a digit-only loop
+                # never started skipping here since 'S' isn't a digit
+                # (Codex review, fresh evidence, round 5).
+                pos += 2
+                consumed_any_component = True
+                continue
+            if not rest[pos].isdigit():
+                break
             component_end = _source_name_end(rest[pos:])
             if component_end is None:
                 return False
