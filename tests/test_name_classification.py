@@ -24,6 +24,7 @@ from abicheck.name_classification import (
     is_abi_surface_type_name,
     is_compiler_internal_type,
     is_cxx_runtime_library,
+    is_local_name_symbol,
     is_local_rtti_symbol,
     is_non_abi_surface_type,
     is_rtti_symbol,
@@ -53,6 +54,24 @@ def test_local_rtti_detected(name: str) -> None:
 
 def test_non_local_rtti_not_flagged_local() -> None:
     assert not is_local_rtti_symbol("_ZTI4Base")
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "_ZZ4mainE1x",
+        "_ZZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames",
+    ],
+)
+def test_is_local_name_symbol_true(name: str) -> None:
+    assert is_local_name_symbol(name)
+
+
+@pytest.mark.parametrize("name", ["_ZN3Foo3barEv", "_ZTIZ4mainEUlvE_", "main", ""])
+def test_is_local_name_symbol_false(name: str) -> None:
+    # A local-RTTI symbol (_ZTIZ...) is a distinct production (typeinfo of a
+    # local type), not the bare local-name production this checks for.
+    assert not is_local_name_symbol(name)
 
 
 @pytest.mark.parametrize(

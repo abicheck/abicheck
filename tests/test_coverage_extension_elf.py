@@ -441,6 +441,20 @@ class TestObjectAlignmentReduced:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r), rtti
 
+    # Itanium <local-name>-production symbols (_ZZ...) denote an entity
+    # (typically a function-local `static`) declared inside a function body —
+    # never nameable by any header declaration. Their st_value-derived
+    # alignment is address-placement noise, same class of finding as the RTTI
+    # exemption above but a distinct mangling shape (observed live: a
+    # libstdc++ <regex> template instantiation's local static lookup table on
+    # a real pvxs binary, pvxs-main-scan-2026-07 validation).
+    def test_local_name_symbol_is_exempt(self):
+        sym = "_ZZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames"
+        old = _elf(symbols=[_obj(sym, alignment=512)])
+        new = _elf(symbols=[_obj(sym, alignment=128)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
+
     def test_real_mangled_data_object_still_fires(self):
         # The exemption is by RTTI prefix, not "looks mangled": a genuine
         # namespace-scoped global variable (_ZN…E, not _ZT*) is real data whose

@@ -1,0 +1,305 @@
+# PVXS full-version-matrix scan through latest `master` (2026-07-26)
+
+Follow-up to `pvxs-abi-validation-2026-07.md` (F1–F7) and
+`pvxs-abicheck-acceptance-2026-07-18.md` (FP-1–FP-3). Those two passes
+covered individual tag pairs and one hand-picked historical diff; this run
+does the **full pairwise version matrix** — every consecutive release plus
+the upstream repository's current tip — built from a real, from-scratch
+toolchain (the acceptance spike's "still owed" step) rather than resumed
+from a pre-existing checkout. It also verifies the abicheck **GitHub Action**
+end-to-end against real pvxs binaries, closing the "recommended CI
+integration" section of the first report from a paper design into a
+verified one.
+
+pvxs's default branch is named **`master`**, not `main` — "latest main" below
+means its tip, `cc7bc72dd7676c72871889c8586014947567ed1d` (2026-07-09), which
+is also the exact revision the acceptance spike named as its "new" side and
+is unchanged 17 days later (2026-07-26), i.e. still genuinely current.
+
+## Reproduction
+
+Toolchain: gcc/g++ 13.3.0, clang 18.1.3 (**no castxml** on this host — every
+header-AST parse below uses `--ast-frontend clang`), Python 3.11.15, 4 cores.
+`compiledb` (pip) substitutes for `bear` (not installed) to generate a compile
+database for the source-depth attempt.
+
+```sh
+apt-get install -y libevent-dev   # pvxs's UDP/TCP event loop dependency;
+                                   # not present by default on this image —
+                                   # its absence is a hard build failure
+                                   # (#error libevent not built with threading
+                                   # support), not an abicheck concern.
+
+git clone --branch R7.0.10 --depth 1 https://github.com/epics-base/epics-base
+make -C epics-base -j4                          # R7.0.10 — current latest tag
+                                                 # (previous runs used R7.0.8.1)
+
+git clone https://github.com/epics-base/pvxs
+cd pvxs && git fetch --tags
+for ref in 1.4.0 1.5.0 1.5.1 1.5.2 master; do
+  git worktree add --detach "../build-src/$ref" "$ref"
+  echo "EPICS_BASE=$PWD/../epics-base" > "../build-src/$ref/configure/RELEASE.local"
+  make -C "../build-src/$ref" CROSS_COMPILER_TARGET_ARCHS= \
+    OPT_CFLAGS='-g -Og' OPT_CXXFLAGS='-g -Og' ioc -j4
+done
+```
+
+All five builds succeeded cleanly (`rc=0`) once `libevent-dev` was installed,
+each yielding `libpvxs.so.<abi>` and `libpvxsIoc.so.<abi>` with DWARF.
+
+## Version matrix (L1+L2, public-header-scoped, `--ast-frontend clang`)
+
+| Pair | libpvxs | libpvxsIoc | Notes |
+|------|---------|------------|-------|
+| 1.4.0 → 1.5.0 | **API_BREAK** (11) | **BREAKING** (2 breaking / 14) | SONAME `libpvxs.so.1.4`→`.1.5`; real minor-release break |
+| 1.5.0 → 1.5.1 | COMPATIBLE_WITH_RISK (6) | COMPATIBLE_WITH_RISK (4) | Patch |
+| 1.5.1 → 1.5.2 | **BREAKING** (1 breaking / 10) | **BREAKING** (9 breaking / 29) | Patch — see "what the findings are" below |
+| 1.5.2 → master | **NOT_COMPARABLE** (both) | **NOT_COMPARABLE** (both) | New public header added upstream — see F8 |
+
+`1.5.1 → 1.5.2`'s single `libpvxs` break is `func_removed_elf_only` (an
+exported symbol genuinely absent from the new binary — real, not the
+`OperationBase` internal-header false positive the first report's F3
+documented; that one is a *field addition*, a different mechanism, and does
+not appear here because public-header scoping was active throughout this
+run). `libpvxsIoc`'s larger break/risk count is dominated by
+`symbol_leaked_from_dependency_changed` (13) — libstdc++/libgcc symbols that
+leaked into the public surface changing shape between builds, a library
+*quality* signal (fix: `-fvisibility=hidden`), not a real consumer-facing
+break — and `func_removed_elf_only` (9), genuinely removed exported symbols.
+Spot-checked several of the surviving `exported_object_alignment_reduced`
+findings on these three pairs (`cnt_PutOperationCache`, `linkGlobal`,
+`pvar_dset_devLoPDBQ2UTag`, …) — all are real namespace-scoped or EPICS
+device-support globals, not mangling artifacts, so they correctly still
+fire; the new exemption below (F9) does not touch them.
+
+## F8 (documented, not fixed): a new public header trips the scope-comparability gate
+
+**Symptom.** `compare 1.5.2-build/libpvxs.so master-build/libpvxs.so -H
+1.5.2-build/include -H master-build/include ...` exits `16` with no verdict:
+
+```
+Error: 'libpvxs.so.1.5' old='1.5.2' new='master' are not comparable: old and
+new snapshots do not cover the same declared surface (scope_fingerprint
+mismatch) — the comparison is not comparable. This commonly means a
+manifest/CLI-flag drift between the two extraction runs, not a real API
+change.
+```
+
+**Root cause.** Master added exactly one new file, `include/pvxs/json.h`
+(diffed the two `include/` trees directly to confirm — no other pair in the
+matrix above adds or removes a header). `abicheck/comparability.py`'s
+`scope_fingerprint` (ADR-050 D2) hashes the full *set* of declared public
+header files per side; a directory-based `-H old=<dir> -H new=<dir>` input
+expands to each side's actual header file list, so old (11 files) and new
+(12 files) fingerprint differently and the D2 gate — designed to catch
+"manifest/CLI-flag drift between two extraction runs" — hard-fails instead
+of producing a diff.
+
+**Why this is real friction, not a corner case.** A released library gaining
+a new public header between minor releases (a new feature getting its own
+header) is ordinary, common evolution — exactly the kind of change a
+"полноценный" (full/comprehensive) scan through a project's live tip needs to
+handle, not something to special-case around. Every *other* tag-to-tag pair
+in the pvxs history checked above kept an identical header set and never hit
+this, which is why neither of the two earlier validation passes (both capped
+at 1.5.2 or a single hand-picked historical diff) surfaced it — it only shows
+up once a scan genuinely reaches current `master`.
+
+**Confirmed workaround (ADR-050's sanctioned escape hatch).** `--diagnostic-comparison`
+forces the diff through, stamping `assurance: "none"` instead of silently
+upgrading confidence:
+
+```sh
+abicheck compare 1.5.2-build/libpvxs.so master-build/libpvxs.so \
+  -H old=1.5.2-build/include -H new=master-build/include \
+  --include old=<epics>/include ... --include new=<epics>/include ... \
+  --ast-frontend clang --diagnostic-comparison
+# → COMPATIBLE_WITH_RISK, 10 risk + 1 addition (after F9 below), assurance=none
+```
+
+The forced diff is sane: 7 `imported_symbol_added` findings for the new
+`yajl_*` C API calls `json.h` makes directly, `runpath_changed` (expected —
+each side built in its own separate tree), 2×`header_binary_context_mismatch`,
+and a `declaration_renamed` for an unrelated unnamed-enum reconciliation. No
+spurious breaking findings.
+
+**Not fixed here, because the fix is a genuine design call, not a drive-by
+patch.** The gate cannot locally distinguish "upstream added a real header"
+from "the caller's CLI/manifest drifted between two extraction runs" — both
+produce the identical symptom (a different declared header set). A principled
+fix (e.g. treating a strictly *additive* header-set change, new⊇old, as
+non-fatal and letting the ordinary diff engine report the new declarations as
+additions, while still hard-failing on removals/disjoint sets) is exactly the
+kind of `comparability.py`-internals change this repo's own conventions flag
+as needing an ADR or explicit maintainer sign-off before extending — the
+module's docstring already documents several deliberately-scoped carve-outs
+(platform-identity, build-context) added one at a time with their own Codex
+review passes, not a place for an unreviewed one-off. Filed here as a
+candidate follow-up ("additive-only header-set carve-out for
+`scope_fingerprint`"), with `--diagnostic-comparison` as the correct sanctioned
+workaround in the meantime — this *is* what "check that everything works"
+concluded: the tool doesn't silently produce a wrong verdict, it correctly
+refuses and tells the caller exactly how to proceed.
+
+## F9 (fixed): a second RTTI-shaped alignment false positive, found live
+
+Forcing the `1.5.2 → master` `libpvxs` diff (above) surfaced one more
+finding before the fix below:
+
+```
+exported_object_alignment_reduced | _ZZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames
+  Exported object alignment reduced: ... (512 → 128 bytes)
+```
+
+This is the exact same underlying bug class the first report's F2 fixed
+(`_check_object_alignment_reduced`'s address-derived alignment heuristic
+producing noise for a symbol no header can ever declare) but a **different
+mangling shape**: not an RTTI prefix (`_ZTV`/`_ZTI`/`_ZTS`/`_ZTT`), but the
+generic Itanium `<local-name>` production (`_ZZ...`) — here, a libstdc++
+`<regex>` template instantiation's function-local `static` lookup table. F2's
+existing exemption only covers the four RTTI prefixes, so it didn't catch
+this.
+
+**Fix** (`abicheck/name_classification.py`, `abicheck/diff_platform_elf_symbols.py`):
+added `LOCAL_NAME_PREFIX`/`is_local_name_symbol()` (any `_ZZ`-prefixed
+symbol — a local-name-production entity is by construction never named by a
+header declaration, so `_declared_alignment_bits` can never corroborate it,
+same reasoning as the RTTI exemption) and wired it into
+`_check_object_alignment_reduced` alongside the existing RTTI check.
+Deliberately **not** extended to `_check_symbol_size_change`: unlike
+address-derived alignment (an inferred heuristic), `st_size` is a direct,
+real symbol-table fact regardless of a symbol's scope, so a local-name
+symbol's size change stays meaningful signal there — the two detectors'
+exemption lists are allowed to diverge here for a reason, unlike the RTTI
+case where they're deliberately kept in sync (owned-elsewhere, not
+noise-in-source).
+
+Verified against the real pair: before the fix, `libpvxs 1.5.2 → master`
+(diagnostic-forced) reported 11 risk + 1 addition (12 total); after, 10 risk
++ 1 addition (11 total) — the exact spurious finding gone, verdict unchanged
+(`COMPATIBLE_WITH_RISK`). New regression tests: `tests/test_name_classification.py`
+(`test_is_local_name_symbol_true/false`), `tests/test_coverage_extension_elf.py::TestObjectAlignmentReduced::test_local_name_symbol_is_exempt`
+(uses the exact real mangled name from this run). Full fast unit suite
+(19532 passed / 30 skipped / 4 xfailed), `mypy abicheck/`, and
+`ruff check abicheck/ tests/` all clean after the change.
+
+## CI / GitHub Action integration — verified end-to-end
+
+The first report's "Recommended CI integration for pvxs" section was a
+hand-drafted `abi.yml` design, never run. This pass instead exercises the
+**real** composite Action scripts (`action/run.sh`, the same file
+`action.yml`'s `runs.steps` invokes) directly against the real pvxs 1.5.1 →
+1.5.2 `libpvxs.so` pair, simulating exactly what a GitHub Actions runner does
+(the same `INPUT_*`/`GITHUB_OUTPUT`/`GITHUB_STEP_SUMMARY` environment-variable
+contract `action.yml` sets up):
+
+```sh
+INPUT_MODE=compare \
+INPUT_OLD_LIBRARY=.../1.5.1/libpvxs.so.1.5 INPUT_NEW_LIBRARY=.../1.5.2/libpvxs.so.1.5 \
+INPUT_OLD_HEADER=.../1.5.1/include INPUT_NEW_HEADER=.../1.5.2/include \
+INPUT_INCLUDE="<epics-base include dirs, one per line>" \
+INPUT_AST_FRONTEND=clang INPUT_FORMAT=json INPUT_FAIL_ON_BREAKING=true \
+INPUT_ADD_JOB_SUMMARY=true \
+GITHUB_OUTPUT=... GITHUB_STEP_SUMMARY=... \
+bash action/run.sh
+```
+
+Result: `run.sh` assembled the exact `abicheck compare` invocation, ran it,
+and set `verdict=BREAKING`, `exit-code=4`, `report-path=...` in
+`$GITHUB_OUTPUT` — matching the direct-CLI verdict for the same pair — plus a
+correctly-rendered markdown Job Summary. This confirms the Action layer
+(input assembly, side-aware `--header`/`--include` flag construction, exit
+code mapping, job summary) works correctly against a real, non-trivial C++
+library, not just the synthetic fixtures `tests/fixtures/action/` and
+`.github/workflows/test-action.yml` already cover.
+
+**Recommended pvxs integration**, updated from the first report to reflect
+what this pass actually validated (`dependency-source: conda-forge`, this
+repo's current default, installs castxml + a matching gcc/g++ via pixi — a
+castxml-having runner was not available to test directly here, but
+`ast-frontend: clang` is confirmed as the correct fallback for a
+clang-only/no-castxml runner, which this whole validation pass ran under):
+
+```yaml
+# .github/workflows/abi.yml (for epics-base/pvxs)
+name: ABI check
+on:
+  pull_request:
+  push:
+    tags: ['*']
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  abi:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Build old + new (EPICS Base + both pvxs refs, -g -Og)
+        run: ./ci/build-two-refs.sh   # produces old/lib/<arch> and new/lib/<arch>
+      - uses: abicheck/abicheck@v0.4.0
+        with:
+          old-library: old/lib/linux-x86_64
+          new-library: new/lib/linux-x86_64
+          header: new/include
+          include: >-
+            ${{ env.EPICS_BASE }}/include
+            ${{ env.EPICS_BASE }}/include/os/Linux
+            ${{ env.EPICS_BASE }}/include/compiler/gcc
+          scope-public-headers: 'true'
+          fail-on-removed-library: 'true'
+          format: sarif
+          output-file: abi.sarif
+          # A release that adds a new public header (F8 above) needs
+          # extra-args: '--diagnostic-comparison' for that one PR, or the
+          # step correctly fails closed with a clear message instead of a
+          # wrong verdict — this is NOT something to blanket-set by default.
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with: { sarif_file: abi.sarif }
+```
+
+## L3–L5 source-depth scan on `master` — attempted, not completed (documented)
+
+`scan --depth source` on `libpvxs` (master, `--ast-frontend clang`,
+`compiledb`-generated 62-entry compile database — matching the first
+report's 61-CU count almost exactly, confirming the compile-DB scope itself
+was correct, not bloated) did **not** complete within a 3+ minute wall-clock
+budget on this 4-core host (RSS climbing past 4.9 GB before being killed);
+the first report's equivalent L2/L3/L4/L5 pass on 1.5.2 completed in 129 s,
+but that ran with **castxml**, not installed here. `--budget 3m` did not
+preempt the run either — the single expensive step (L4 source-ABI replay
+compiling/parsing each real `.cpp` TU via `clang -ast-dump=json`) appears to
+run past the wall-clock check point rather than yielding mid-step, so
+`--budget` bounds *between* phases, not inside one.
+
+**Not root-caused or fixed in this pass** — distinguishing "L4 replay via the
+clang frontend is inherently far more expensive per-TU than castxml on a
+real C++ template-heavy codebase" from "something is superlinear/pathological
+in this specific run" needs a dedicated profiling pass (the same kind of
+work the first report's F1/F5b did for the L1/L2 path), which is out of
+scope for this validation pass. Documented as a real, reproducible gap: a
+clang-only host (no castxml) cannot currently get a practical CI-budget L3–L5
+source scan on a library this size. Until profiled, the safe recommendation
+for a clang-only pvxs CI runner is to skip the `scan --depth source` job
+(keep `compare` for the L1/L2 release gate) or scope it with
+`--since`/`--changed-path` to just the PR's changed files rather than the
+whole library.
+
+## Status
+
+- **Fixed & tested in this branch:** F9 (a second, differently-mangled
+  RTTI-adjacent alignment false positive — Itanium local-name-production
+  symbols). Full fast unit suite green (19532 passed), mypy/ruff clean.
+- **Verified working, no code change needed:** the full 1.4.0→1.5.0→1.5.1→
+  1.5.2 tag-to-tag matrix (real, from-scratch EPICS Base R7.0.10 + pvxs
+  builds — the acceptance spike's "still owed" step); the abicheck GitHub
+  Action's real shell-script layer end-to-end against a real pvxs binary
+  pair; the `--diagnostic-comparison` escape hatch for F8.
+- **Documented, not fixed:** F8 (scope-comparability gate blocks a
+  new-header-added transition — needs an ADR-level carve-out design, not a
+  drive-by patch); the L3–L5 clang-frontend timing gap on `master` (needs a
+  dedicated profiling pass, likely mirroring F1/F5b's approach).
+- Binaries are not committed (per `validation/` convention); reproduce with
+  the commands above.

@@ -52,10 +52,12 @@ __all__ = [
     "ITANIUM_RTTI_PREFIXES",
     "RTTI_DATA_PREFIXES",
     "LOCAL_RTTI_PREFIXES",
+    "LOCAL_NAME_PREFIX",
     "STDLIB_RTTI_PREFIXES",
     "INTERNAL_NAMESPACE_COMPONENTS",
     "is_rtti_symbol",
     "is_local_rtti_symbol",
+    "is_local_name_symbol",
     "has_internal_namespace_component",
     "symbol_origin",
     "COMPILER_INTERNAL_TYPES",
@@ -94,6 +96,21 @@ RTTI_DATA_PREFIXES: tuple[str, ...] = ("_ZTV", "_ZTI", "_ZTS")
 # named in a public header, so the presence/absence of its typeinfo is
 # build-dependent churn, not a public-ABI break.
 LOCAL_RTTI_PREFIXES: tuple[str, ...] = ("_ZTIZ", "_ZTSZ", "_ZTVZ", "_ZTTZ")
+
+# The generic Itanium ``<local-name>`` production for a *variable* (as
+# opposed to LOCAL_RTTI_PREFIXES, which is the same production applied to a
+# type's RTTI): ``Z <function encoding> E <entity name>``, e.g. a function-
+# local ``static`` object mangles as ``_ZZ4mainE1x``. Unlike LOCAL_RTTI_PREFIXES
+# (four specific ``_ZT[IVST]Z`` combinations), a bare local variable/entity has
+# no preceding special-name marker, so the production appears immediately
+# after the leading ``_Z``. Such an entity is never named by any header
+# declaration (only the enclosing function's own signature is), so its
+# address-derived layout facts (alignment; see
+# diff_platform_elf_symbols._check_object_alignment_reduced) are
+# build-dependent linker-placement noise, not a declared ABI fact — observed
+# live on a real pvxs binary: a libstdc++ ``<regex>`` template instantiation's
+# local static table (``_ZZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEE...E12__classnames``).
+LOCAL_NAME_PREFIX = "_ZZ"
 
 # Length-prefixed Itanium namespace components (``<len><name>``) for the
 # conventional internal namespaces. Matching the length prefix avoids false
@@ -147,6 +164,13 @@ def is_rtti_symbol(name: str) -> bool:
 def is_local_rtti_symbol(name: str) -> bool:
     """Return True if *name* is RTTI for a function-local (unnameable) type."""
     return name.startswith(LOCAL_RTTI_PREFIXES)
+
+
+def is_local_name_symbol(name: str) -> bool:
+    """Return True if *name* is the Itanium ``<local-name>`` production — an
+    entity (typically a variable) declared inside a function body, never
+    nameable by any header declaration. See :data:`LOCAL_NAME_PREFIX`."""
+    return name.startswith(LOCAL_NAME_PREFIX)
 
 
 def has_internal_namespace_component(name: str) -> bool:
