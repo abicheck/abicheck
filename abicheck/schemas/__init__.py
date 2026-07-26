@@ -197,7 +197,17 @@ from typing import Any
 #:       only one side of the pair carried a given fingerprint) and
 #:       ``assurance`` (``"none"`` when the comparison only completed via
 #:       ``--diagnostic-comparison`` after a genuine mismatch).
-#:   2.18: ``impact_assessment`` gained three additive optional keys --
+#:   2.18: ``evidence_status`` gained a new enum member, ``"unattributed"``
+#:       (P0 evidence-provider audit) -- a finding whose kind is intrinsically
+#:       a BREAKING_KINDS member (would otherwise read ``"artifact_proven"``)
+#:       but whose comparison's ``evidence_tiers`` positively show no real
+#:       binary (ELF/PE/Mach-O/DWARF) was ever examined, e.g. a Python-API
+#:       caller comparing hand-built/loaded snapshots. Previously such a
+#:       finding always read ``"artifact_proven"`` purely from its kind,
+#:       regardless of what the comparison actually examined -- mirrors the
+#:       2.14 SONAME ``"not_determined"`` fix, applied to the per-finding
+#:       evidence label instead of the release recommendation. Additive.
+#:   2.19: ``impact_assessment`` gained three additive optional keys --
 #:       ``root_cause_id``, ``root_cause_display``, ``impact_group_id``
 #:       (G29 Phase 3 follow-up, ADR-052) -- the same 2.16 root-cause
 #:       grouping surfaced per-finding, independent of ``report_mode``
@@ -217,7 +227,7 @@ from typing import Any
 #:       cap), and ``occurrence_id`` (a hash over the path's edges' own graph
 #:       occurrences, independent of ``description`` text). All absent for
 #:       the common single-candidate/no-occurrence-data case.
-REPORT_SCHEMA_VERSION = "2.18"
+REPORT_SCHEMA_VERSION = "2.19"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

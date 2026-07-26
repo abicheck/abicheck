@@ -1,0 +1,51 @@
+# Toolchain-matrix reference fixture (P1 toolchain-profile audit, task #7's
+# run-plan compile-overlay wiring). Two contract profiles pin two distinct
+# real toolchains for the SAME target -- linux-gcc14 via a logical `binding`
+# resolved against toolchain-bindings.yml (same directory), linux-clang20
+# with an explicit dialect/ABI-macro/extra-arg overlay on top of its own
+# binding. `abicheck run-plan generate .abicheck.yml --toolchain-bindings
+# toolchain-bindings.yml --build-output ...` composes each profile's
+# `compile:` block into that cell's compile_gcc_path/compile_gcc_options --
+# see README.md in this directory for the full walkthrough and
+# tests/test_run_plan.py::TestToolchainMatrixFixtureExample for the
+# regression test loading this exact file.
+targets:
+  libmatrixdemo:
+    kind: library
+    binary_pattern: "build/libmatrixdemo*.so"
+    checks:
+      - channel: release-contract
+        depth: headers
+        required: true
+
+profiles:
+  linux-gcc14:
+    contract: true
+    os: linux
+    arch: x86_64
+    compile:
+      compiler_family: gcc
+      compiler_version: ">=14.0,<15"
+      standard: gnu++17
+      stdlib: libstdc++
+      binding: gcc14
+  linux-clang20:
+    contract: true
+    os: linux
+    arch: x86_64
+    compile:
+      compiler_family: clang
+      compiler_version: ">=20.0,<21"
+      standard: gnu++20
+      stdlib: libc++
+      binding: clang20
+      abi_macros:
+        MATRIXDEMO_ABI_V2: "1"
+      args:
+        - "-fno-rtti"
+
+baseline:
+  channels:
+    release-contract:
+      source: github-release
+      asset_pattern: "libmatrixdemo-linux-*.tar.gz"

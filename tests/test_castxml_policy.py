@@ -185,6 +185,36 @@ class TestCastxmlVersionCheckMessage:
         assert "CastXML of unknown version." in msg
 
 
+class TestProvenanceFields:
+    """CastxmlVersionCheck.provenance_fields() — the structured counterparts
+    to the raw combined ``version`` transcript, merged into a snapshot's
+    ``ast_toolchain`` (P1 toolchain-provenance audit)."""
+
+    def test_supported_version_yields_both_fields(self):
+        result = evaluate_castxml_version(_version_text("0.7.0", "18.1.8"))
+        fields = result.provenance_fields()
+        assert fields == {
+            "castxml_version": "0.7.0",
+            "castxml_bundled_clang_version": "18.1",
+        }
+
+    def test_unparseable_version_omits_castxml_version_key(self):
+        result = evaluate_castxml_version("garbage output, no version here")
+        fields = result.provenance_fields()
+        assert "castxml_version" not in fields
+        assert "castxml_bundled_clang_version" not in fields
+
+    def test_missing_clang_version_omits_only_that_key(self):
+        result = evaluate_castxml_version("castxml version 0.7.0\n")
+        fields = result.provenance_fields()
+        assert fields == {"castxml_version": "0.7.0"}
+
+    def test_clang_major_only_still_formats_minor_as_zero(self):
+        result = evaluate_castxml_version("castxml version 0.7.0\nclang version 18\n")
+        fields = result.provenance_fields()
+        assert fields["castxml_bundled_clang_version"] == "18.0"
+
+
 def test_min_castxml_clang_major_matches_dumper_probe_constant():
     # castxml_policy is the new canonical gate; dumper_castxml_probe's
     # advisory-note floor must stay in sync with it (both express the same

@@ -147,6 +147,9 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     # Evidence-coherence cross-checks (tests/test_crosscheck.py, AC-008/AC-009).
     ChangeKind.COMPILE_CONTEXT_CONFLICT,
     ChangeKind.SOURCE_SURFACE_DSO_MISMATCH,
+    # P0 evidence-coherence audit follow-up — DWARF-vs-header-AST layout
+    # backfill coherence (tests/test_diff_layout_coherence.py).
+    ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
     # Cross-implementation stdlib compatibility (tests/test_diff_stdlib_impl.py).
     ChangeKind.STDLIB_IMPLEMENTATION_CHANGED,
     ChangeKind.LIBCPP_ABI_VERSION_CHANGED,

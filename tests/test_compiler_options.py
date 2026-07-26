@@ -109,3 +109,49 @@ class TestLanguageStandardField:
         assert language_standard_field("c", None, ()) != language_standard_field(
             "c++", None, ()
         )
+
+    def test_resolved_standard_used_when_no_explicit_std(self) -> None:
+        # P0 evidence-provider audit: this is the exact gap the pre-existing
+        # docstring flagged as "deferred as a narrower follow-up" -- a
+        # heuristic-forced standard (gnu++20 from the requires/concept
+        # detector) with no explicit -std= must still be captured.
+        assert (
+            language_standard_field(None, None, (), resolved_standard="gnu++20")
+            == "gnu++20"
+        )
+
+    def test_resolved_standard_distinguishes_profiles_with_no_explicit_std(
+        self,
+    ) -> None:
+        """Two dumps of the same --lang, no explicit -std=, whose headers
+        triggered the C++20 heuristic on only one side must fingerprint
+        differently -- previously both silently resolved to None/lang-only
+        and were indistinguishable."""
+        assert language_standard_field(
+            "c++", None, (), resolved_standard=None
+        ) != language_standard_field("c++", None, (), resolved_standard="gnu++20")
+
+    def test_resolved_standard_combined_with_lang(self) -> None:
+        assert (
+            language_standard_field("c++", None, (), resolved_standard="gnu++20")
+            == "c++:gnu++20"
+        )
+
+    def test_resolved_standard_takes_priority_over_explicit_std(self) -> None:
+        # resolved_standard is the frontend's own final decision -- it wins
+        # even when an explicit -std= was also passed (the two should always
+        # agree in practice; resolved_standard is authoritative when given).
+        assert (
+            language_standard_field(
+                None, "-std=gnu++11", (), resolved_standard="gnu++20"
+            )
+            == "gnu++20"
+        )
+
+    def test_none_resolved_standard_falls_back_to_explicit(self) -> None:
+        # Backward compatible: a caller that hasn't threaded a resolved
+        # value through (or a non-header dump) keeps the old behaviour.
+        assert (
+            language_standard_field(None, "-std=gnu11", (), resolved_standard=None)
+            == "gnu11"
+        )

@@ -21,7 +21,7 @@ they are.
 ## What is abicheck?
 
 ABI compatibility checker for C/C++ shared libraries. Pure Python (3.10+).
-Detects 394 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
+Detects 395 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
 categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`).
 Drop-in replacement for abi-compliance-checker (ABICC).
 
@@ -203,7 +203,7 @@ cover the surrounding first-party trees this file doesn't detail.
 
 - `AbiSnapshot` (`model.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — single detected change with kind, severity, details
-- `ChangeKind` (`checker_policy.py`) — enum of 394 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
+- `ChangeKind` (`checker_policy.py`) — enum of 395 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
 - `Verdict` (`checker.py`) — overall comparison result (compatible/source_break/breaking)
 - `LibraryMetadata` (`checker.py`) — parsed library info
 
@@ -392,6 +392,12 @@ Pick the right home:
   mutable tag/branch — those five carry `security-events:write`,
   `pull-requests:write`, `contents:write`, or `id-token:write` (OIDC/PyPI
   Trusted Publishing), so a re-pointed tag there is a real supply-chain risk.
+  The root `action.yml` (the composite Action third-party repos consume
+  directly) is pinned the same way, for the same reason: its final step
+  conditionally runs `github/codeql-action/upload-sarif` under whatever
+  `security-events: write` permission the *consuming* workflow grants it, so
+  it carries the same blast radius as the elevated-permission workflows
+  above even though this repo's own CI doesn't invoke it with that scope.
   Other workflows (`test-action.yml`, `eval-suite.yml`, `performance.yml`,
   `realworld-validation.yml`, `dependency-review.yml`, and any future ones)
   still use tags — deliberately deferred, since they only run with

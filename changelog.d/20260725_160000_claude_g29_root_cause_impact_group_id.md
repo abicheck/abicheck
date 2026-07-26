@@ -21,5 +21,6 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   itself. `impact_group_id` is currently always identical to
   `root_cause_id` — a placeholder alias until Phase 6's
   `RootCauseCorrelator` gives it independent meaning. `report_schema_version`
-  2.16 → 2.18 (2.17 was claimed by ADR-050 D2's comparability-gate work,
-  merged to `main` first).
+  2.16 → 2.19 (2.17 and 2.18 were claimed by ADR-050 D2's comparability-gate
+  work and the P0 evidence-provider audit's `"unattributed"` status
+  respectively, both merged to `main` first).

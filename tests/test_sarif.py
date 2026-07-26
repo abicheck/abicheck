@@ -338,6 +338,23 @@ class TestResultContent:
         props = doc["runs"][0]["results"][0]["properties"]
         assert "evidenceStatus" not in props
 
+    def test_result_evidence_status_unattributed_without_binary_evidence(self) -> None:
+        # P0 evidence-provider audit: a comparison known to have never
+        # examined a real binary (evidence_tiers == ["header"]) must not
+        # claim "artifact_proven" in SARIF output either.
+        result = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
+        result.evidence_tiers = ["header"]
+        doc = to_sarif(result)
+        props = doc["runs"][0]["results"][0]["properties"]
+        assert props["evidenceStatus"] == "unattributed"
+
+    def test_result_evidence_status_artifact_proven_with_binary_evidence(self) -> None:
+        result = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
+        result.evidence_tiers = ["header", "elf"]
+        doc = to_sarif(result)
+        props = doc["runs"][0]["results"][0]["properties"]
+        assert props["evidenceStatus"] == "artifact_proven"
+
 
 # ---------------------------------------------------------------------------
 # Invocation / automation details

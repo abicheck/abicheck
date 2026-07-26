@@ -394,9 +394,11 @@ uses) and passed into `assess_change` as a plain parameter, so
 `ImpactAssessment` itself stays a pure single-`Change` read view rather than
 gaining the ability to see whole-`DiffResult` context on its own.
 `impact_group_id` is currently always identical to `root_cause_id` — an
-alias, not yet a distinct concept. `REPORT_SCHEMA_VERSION` 2.16 → 2.18 (2.17
-went to ADR-050 D2's comparability-gate work instead, merged to `main` first
-— see `abicheck/schemas/__init__.py`'s version-history docstring).
+alias, not yet a distinct concept. `REPORT_SCHEMA_VERSION` 2.16 → 2.19 (2.17
+and 2.18 went to ADR-050 D2's comparability-gate work and the P0
+evidence-provider audit's `"unattributed"` status respectively, both merged
+to `main` first — see `abicheck/schemas/__init__.py`'s version-history
+docstring).
 Slices 8-9 (G29 Phase 3 follow-up) then delivered the D2 direction flip as a
 deliberately *scoped* subset: `Change.impact_assessment` (new, additive
 field) is populated directly by two producers — `internal_leak.py`'s two

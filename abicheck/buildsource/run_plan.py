@@ -76,6 +76,29 @@ already-parsed objects in.
 module trusts ``depth``/``gate_mode``/``channel``/references are valid --
 the same "parsing alone isn't validation" split ``project_targets.py``'s
 own docstring documents for its caller.
+
+**The ``profiles.<id>.compile`` overlay reaches the generated cell** (P1
+toolchain-profile audit, closing the gap ``ProfileCompileSpec``'s own
+docstring flagged: "no run-plan generator/toolchain resolver lives here
+yet"). Each resolved cell whose profile declares a ``compile:`` overlay gets
+:attr:`RunPlanCheck.compile_gcc_options` -- a single composed extra-flags
+string (``-std=``/``-stdlib=``/``--target=``/``-D<macro>``/``args``, in that
+order, space-joined) a caller forwards verbatim as ``check-target``'s
+``gcc-options`` input. ``compile.binding`` (a logical id, e.g. ``"gcc14"``)
+resolves to :attr:`RunPlanCheck.compile_gcc_path` only when the caller
+passes an already-loaded *resolved_bindings* mapping to
+:func:`generate_run_plan` (this module stays pure -- loading the trusted
+``--toolchain-bindings`` file is the CLI layer's job, same split as
+``build_outputs`` above); with no mapping, or a binding id absent from it,
+``compile_gcc_path`` stays empty and a caller's own ``gcc-path``/global
+fallback applies. ``compiler_family``/``compiler_version`` are deliberately
+**not** projected into any forwarded field yet -- ``compiler_family``
+selects a toolchain only through ``binding`` (there is no separate "pick a
+family" invocation flag), and ``compiler_version`` is a *constraint* (e.g.
+``">=14.0,<15"``), not a value to pass through; verifying a resolved
+binding's actual version against it needs a real toolchain-identity probe
+(subprocess), which stays out of this module by design -- a documented gap,
+not an oversight.
 """
 
 from __future__ import annotations
@@ -90,6 +113,7 @@ from .project_targets import (
     TARGET_KIND_LIBRARY,
     BundleSpec,
     CheckSpec,
+    ProfileCompileSpec,
     ProjectTargetsConfig,
     TargetSpec,
 )
@@ -105,6 +129,35 @@ RUN_PLAN_KIND_BUNDLE = "bundle"
 
 def _opt_str(value: Any, default: str = "") -> str:
     return str(value) if isinstance(value, str) and value else default
+
+
+def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
+    """Compose ``compile_spec``'s standard/stdlib/target/abi_macros/args axes
+    into one space-joined extra-flags string, forwarded verbatim as
+    ``check-target``'s ``gcc-options`` input (P1 toolchain-profile audit).
+
+    Every atom was already whitespace-validated by
+    ``ProfileCompileSpec.from_dict`` (``_safe_profile_atom`` -- no argv
+    smuggling), so plain space-joining is safe here. A consequence of that
+    validation: no atom -- including an ``abi_macros`` value -- may itself
+    contain a space, since this function has no further escaping step to
+    fall back on. ``abi_macros`` are emitted sorted by name for
+    deterministic output; ``args`` are appended verbatim, in declared
+    order, last -- the operator's own explicit escape hatch wins over the
+    structured axes this function derives flags from.
+    """
+    parts: list[str] = []
+    if compile_spec.standard:
+        parts.append(f"-std={compile_spec.standard}")
+    if compile_spec.stdlib:
+        parts.append(f"-stdlib={compile_spec.stdlib}")
+    if compile_spec.target:
+        parts.append(f"--target={compile_spec.target}")
+    for name in sorted(compile_spec.abi_macros):
+        value = compile_spec.abi_macros[name]
+        parts.append(f"-D{name}={value}" if value else f"-D{name}")
+    parts.extend(compile_spec.args)
+    return " ".join(parts)
 
 
 @dataclass
@@ -149,6 +202,18 @@ class RunPlanCheck:
     #: ``binary_pattern``, so a caller can stage a member-binaries directory
     #: without re-reading ``.abicheck.yml``.
     member_binary_patterns: dict[str, str] = field(default_factory=dict)
+    #: This cell's profile's ``compile.binding``, resolved to an exact
+    #: executable path (P1 toolchain-profile audit) -- forwarded as
+    #: ``check-target``'s ``gcc-path`` input. Empty unless the profile
+    #: declares a ``binding`` AND :func:`generate_run_plan` was given a
+    #: *resolved_bindings* mapping that contains it.
+    compile_gcc_path: str = ""
+    #: This cell's profile's ``compile`` overlay, composed into one
+    #: extra-flags string (see :func:`_compose_gcc_options`) -- forwarded as
+    #: ``check-target``'s ``gcc-options`` input. Empty when the profile has
+    #: no ``compile:`` overlay, or the overlay sets none of
+    #: ``standard``/``stdlib``/``target``/``abi_macros``/``args``.
+    compile_gcc_options: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -175,6 +240,10 @@ class RunPlanCheck:
                 d["consumer_binary_pattern"] = self.consumer_binary_pattern
             if self.contract_file:
                 d["contract_file"] = self.contract_file
+        if self.compile_gcc_path:
+            d["compile_gcc_path"] = self.compile_gcc_path
+        if self.compile_gcc_options:
+            d["compile_gcc_options"] = self.compile_gcc_options
         return d
 
     @classmethod
@@ -203,6 +272,8 @@ class RunPlanCheck:
                 str(x) for x in (d.get("bundle_members") or []) if isinstance(x, str)
             ],
             member_binary_patterns=member_patterns,
+            compile_gcc_path=_opt_str(d.get("compile_gcc_path")),
+            compile_gcc_options=_opt_str(d.get("compile_gcc_options")),
         )
 
 
@@ -277,6 +348,25 @@ def _resolve_profile_ids(
     return [p.id for p in config.profiles.values() if p.contract], False
 
 
+def _compile_fields_for_profile(
+    config: ProjectTargetsConfig,
+    profile_id: str,
+    resolved_bindings: Mapping[str, str] | None,
+) -> tuple[str, str]:
+    """Returns ``(compile_gcc_path, compile_gcc_options)`` for *profile_id*
+    (P1 toolchain-profile audit) -- ``("", "")`` when the profile has no
+    ``compile:`` overlay, is unknown, or declares no ``binding``/no
+    resolvable-flags fields."""
+    profile = config.profiles.get(profile_id)
+    compile_spec = profile.compile if profile is not None else None
+    if compile_spec is None:
+        return "", ""
+    gcc_path = ""
+    if compile_spec.binding and resolved_bindings is not None:
+        gcc_path = resolved_bindings.get(compile_spec.binding, "")
+    return gcc_path, _compose_gcc_options(compile_spec)
+
+
 def _library_lookup_and_pattern(
     config: ProjectTargetsConfig, target: TargetSpec
 ) -> tuple[str, str]:
@@ -297,6 +387,7 @@ def _generate_target_checks(
     build_outputs: Mapping[str, BuildOutput],
     target: TargetSpec,
     report: RunPlanGenerationReport,
+    resolved_bindings: Mapping[str, str] | None = None,
 ) -> list[RunPlanCheck]:
     if target.bundle_only:
         # validate_project_targets already forbids a bundle_only target from
@@ -339,6 +430,9 @@ def _generate_target_checks(
                 # target -- not an error, that's the point of the sweep.
                 continue
             check_id = build_check_id(target.id, profile_id, check.channel, check.depth)
+            compile_gcc_path, compile_gcc_options = _compile_fields_for_profile(
+                config, profile_id, resolved_bindings
+            )
             out.append(
                 RunPlanCheck(
                     check_id=check_id,
@@ -362,6 +456,8 @@ def _generate_target_checks(
                         if target.kind != TARGET_KIND_LIBRARY
                         else ""
                     ),
+                    compile_gcc_path=compile_gcc_path,
+                    compile_gcc_options=compile_gcc_options,
                 )
             )
     return out
@@ -372,6 +468,7 @@ def _generate_bundle_checks(
     build_outputs: Mapping[str, BuildOutput],
     bundle: BundleSpec,
     report: RunPlanGenerationReport,
+    resolved_bindings: Mapping[str, str] | None = None,
 ) -> list[RunPlanCheck]:
     out: list[RunPlanCheck] = []
     for check in bundle.checks:
@@ -426,6 +523,9 @@ def _generate_bundle_checks(
                 for member in bundle.targets
                 if member in config.targets
             }
+            compile_gcc_path, compile_gcc_options = _compile_fields_for_profile(
+                config, profile_id, resolved_bindings
+            )
             out.append(
                 RunPlanCheck(
                     check_id=check_id,
@@ -439,6 +539,8 @@ def _generate_bundle_checks(
                     gate_mode=check.gate_mode,
                     bundle_members=list(bundle.targets),
                     member_binary_patterns=member_patterns,
+                    compile_gcc_path=compile_gcc_path,
+                    compile_gcc_options=compile_gcc_options,
                 )
             )
     return out
@@ -450,9 +552,21 @@ def generate_run_plan(
     *,
     project: str = "",
     head_sha: str = "",
+    resolved_bindings: Mapping[str, str] | None = None,
 ) -> tuple[RunPlan, RunPlanGenerationReport]:
     """Derive the ordered :class:`RunPlan` from *config* + each contract
     profile's parsed ``build-output.json`` (keyed by profile id).
+
+    *resolved_bindings* (P1 toolchain-profile audit) is an optional
+    already-loaded ``{binding_id: executable_path}`` mapping -- typically a
+    trusted ``toolchain_bindings.BindingsFile.bindings`` the caller loaded
+    itself (this module stays pure, no file I/O) -- used to resolve each
+    cell's profile's ``compile.binding`` into
+    :attr:`RunPlanCheck.compile_gcc_path`. With no mapping (the default), or
+    a binding id absent from it, that field stays empty and a caller's own
+    ``gcc-path``/global fallback applies; this is never an error at this
+    layer (the CLI wrapper's ``check_profile_bindings_resolve`` step is
+    where an operator opted into strict resolution surfaces one).
 
     Never raises for a structurally valid, pre-validated *config* --
     coverage gaps are reported via the returned
@@ -465,9 +579,17 @@ def generate_run_plan(
     report = RunPlanGenerationReport()
     checks: list[RunPlanCheck] = []
     for target in config.targets.values():
-        checks.extend(_generate_target_checks(config, build_outputs, target, report))
+        checks.extend(
+            _generate_target_checks(
+                config, build_outputs, target, report, resolved_bindings
+            )
+        )
     for bundle in config.bundles.values():
-        checks.extend(_generate_bundle_checks(config, build_outputs, bundle, report))
+        checks.extend(
+            _generate_bundle_checks(
+                config, build_outputs, bundle, report, resolved_bindings
+            )
+        )
     # check_id (target@profile#baseline_channel@depth) is the id
     # to_aggregate_manifest() projects into aggregate --manifest's targets[]
     # -- ExpectedTargets.from_manifest_data() rejects a duplicate id there.

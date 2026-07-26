@@ -221,7 +221,7 @@ class TestHeaderCvFactsReliableRoundTrip:
 
         snap = _make_snap()
         j = json.loads(snapshot_to_json(snap))
-        assert j["schema_version"] == SCHEMA_VERSION == 15
+        assert j["schema_version"] == SCHEMA_VERSION == 16
 
     def test_legacy_castxml_header_snapshot_loads_as_unreliable(self) -> None:
         d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
@@ -290,7 +290,7 @@ class TestHeaderCvFactsReliableRoundTrip:
         assert legacy.header_cv_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 15
+        assert reserialized["schema_version"] == 16
         assert reserialized["header_cv_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)

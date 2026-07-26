@@ -37,7 +37,7 @@ from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.checker_policy import (
     EvidenceStatus,
     ReachabilityState,
-    evidence_status_for_change,
+    evidence_status_for_result,
     impact_for,
     policy_for,
 )
@@ -251,7 +251,7 @@ def _result_for(
     the full-library verdict).
 
     *evidence_status_override*, when given, wins over the kind-derived
-    :func:`evidence_status_for_change` — mirrors ``reporter._change_to_dict``'s
+    :func:`evidence_status_for_result` — mirrors ``reporter._change_to_dict``'s
     own override, for a scoped-only finding (``PE_ORDINAL_RETARGETED``,
     ``CONSUMER_REQUIRED_SYMBOL_REMOVED``, ``CONSUMER_RUNTIME_LOAD_FAILED``)
     proven by the real consumer's own import table/execution, not by an
@@ -330,7 +330,9 @@ def _result_for(
     properties["reachabilityState"] = assessment.reachability_state.value
     if assessment.has_signal():
         properties["impactAssessment"] = assessment.to_dict()
-    evidence_status = evidence_status_override or evidence_status_for_change(change)
+    evidence_status = evidence_status_override or evidence_status_for_result(
+        change, result.evidence_tiers
+    )
     if evidence_status is not None:
         properties["evidenceStatus"] = evidence_status.value
     if root_cause is not None:

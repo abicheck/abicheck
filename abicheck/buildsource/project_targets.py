@@ -472,8 +472,10 @@ class ProfileCompileSpec:
     raw executable path/command. ``binding`` is a *logical* identifier (e.g.
     ``"gcc14"``) meant to be resolved against a separately-trusted toolchain
     bindings file (an explicit ``--config``/CI-managed source), not looked up
-    here — this module only validates shape, same as the rest of the file (no
-    run-plan generator/toolchain resolver lives here yet, G30 P1.4).
+    here — this module only validates shape, same as the rest of the file.
+    The resolver itself is :func:`~.run_plan.generate_run_plan`'s
+    *resolved_bindings* parameter (G30 P1.4); this dataclass stays the pure
+    parse/validate layer either way.
 
     All fields are optional and additive; an empty ``ProfileCompileSpec`` is
     indistinguishable from an absent ``compile:`` block.

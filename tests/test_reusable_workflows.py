@@ -652,6 +652,46 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
             "${{ steps.candidate.outputs.build-output }}"
         )
 
+    def test_run_check_target_prefers_per_cell_compile_overlay_over_global_inputs(
+        self,
+    ) -> None:
+        """P1 toolchain-profile audit: gcc-path/gcc-options get a per-cell
+        override from that cell's profiles.<id>.compile overlay
+        (run_plan.RunPlanCheck.compile_gcc_path/compile_gcc_options), falling
+        back to this workflow's own global gcc-path/gcc-options inputs when
+        the profile declares no overlay (backward compatible)."""
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["with"]["gcc-path"] == (
+            "${{ matrix.compile_gcc_path || inputs.gcc-path }}"
+        )
+        assert run_step["with"]["gcc-options"] == (
+            "${{ matrix.compile_gcc_options || inputs.gcc-options }}"
+        )
+        # gcc-prefix has no RunPlanCheck counterpart -- stays global-only.
+        assert run_step["with"]["gcc-prefix"] == "${{ inputs.gcc-prefix }}"
+
+    def test_toolchain_bindings_path_input_defaults_to_empty(self) -> None:
+        data = _load(CHECK_PROJECT)
+        inputs = data[True]["workflow_call"]["inputs"]
+        assert inputs["toolchain-bindings-path"]["default"] == ""
+        assert inputs["toolchain-bindings-path"]["type"] == "string"
+
+    def test_plan_step_forwards_toolchain_bindings_path_when_set(self) -> None:
+        """Generate run-plan.json's shell step must actually pass
+        --toolchain-bindings through to `abicheck run-plan generate` when
+        the workflow input is non-empty -- otherwise the input above would
+        be silently inert."""
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["plan"])
+        plan_step = next(s for s in steps if s.get("name") == "Generate run-plan.json")
+        assert (
+            plan_step["env"]["TOOLCHAIN_BINDINGS_PATH"]
+            == "${{ inputs.toolchain-bindings-path }}"
+        )
+        assert "--toolchain-bindings" in plan_step["run"]
+
     def test_build_output_artifact_is_downloaded_before_it_is_resolved(self) -> None:
         data = _load(CHECK_PROJECT)
         names = _step_names(data["jobs"]["check"])
