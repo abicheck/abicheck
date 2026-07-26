@@ -830,6 +830,36 @@ class TestResolveChangeIdentity:
         assert rich.tier == IDENTITY_TIER_NORMALIZED
         assert rich.primary_id == l0.primary_id
 
+    def test_equivalent_removal_kinds_collide_despite_qualified_name_skew(
+        self,
+    ) -> None:
+        # Codex review: a namespaced extern "C" removal's rich-evidence
+        # finding gets qualified_name="ns::foo" from _enrich_source_locations
+        # while the equivalent L0/ELF-only finding for the SAME event has no
+        # qualified_name at all (symbol="foo" only) -- preferring
+        # qualified_name for the NORMALIZED-tier basis would give the two
+        # _EQUIVALENT_CHANGE_CATEGORIES-collapsed findings different sig:
+        # primary ids even though the category discriminator itself already
+        # collapses them, defeating the collapse the same way the earlier
+        # entity-level extern-C fix addressed for declarations.
+        rich = resolve_change_identity(
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="foo",
+                description="foo removed (header no longer declares it)",
+                qualified_name="ns::foo",
+            )
+        )
+        l0 = resolve_change_identity(
+            Change(
+                kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
+                symbol="foo",
+                description="foo removed (ELF export gone)",
+            )
+        )
+        assert rich.tier == IDENTITY_TIER_NORMALIZED
+        assert rich.primary_id == l0.primary_id
+
     def test_dwarf_ast_equivalent_type_size_kinds_collide(self) -> None:
         # Codex review: diff_filtering._DWARF_TO_AST_EQUIV already treats
         # STRUCT_SIZE_CHANGED (DWARF) and TYPE_SIZE_CHANGED (AST) as one

@@ -707,7 +707,24 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     # is `None` for a batch-shaped change so every downstream identity/alias
     # below naturally omits the sample instead of needing its own check.
     entity_symbol = None if is_batch else change.symbol
-    qn = change.qualified_name or entity_symbol or ""
+    is_symbol_level = _is_symbol_level_kind(kind_value) and not is_batch
+    # For a symbol-level change, `entity_symbol` (the raw exported name) is
+    # the more tier-stable NORMALIZED-tier basis than `change.qualified_name`
+    # -- mirroring `resolve_symbol_identity`'s identical extern-C preference
+    # for entity identity. `_enrich_source_locations` scope-qualifies a
+    # namespaced extern "C" removal's `qualified_name` ("ns::foo") whenever a
+    # rich snapshot has the matching declaration, while the equivalent L0/
+    # ELF-only finding for the SAME event has no scope info to qualify with
+    # at all (`symbol="foo"`). Preferring `qualified_name` here would give
+    # the two `_EQUIVALENT_CHANGE_CATEGORIES`-collapsed findings (e.g. rich
+    # FUNC_REMOVED vs. L0 FUNC_REMOVED_ELF_ONLY) different `sig:`-based
+    # primary ids even after the discriminator itself collapses to one
+    # shared category, defeating the collapse (Codex review).
+    qn = (
+        entity_symbol
+        if is_symbol_level and entity_symbol
+        else change.qualified_name or entity_symbol or ""
+    )
     # A batch-shaped change's `description` embeds the same arbitrary
     # sample as `symbol` (Codex review, round 2 on this same finding) --
     # `entity_symbol` alone isn't enough to make the identity
@@ -720,7 +737,7 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     rel = source_relative_identity(change.source_location or "", entity_symbol or "")
 
     real_mangled = None
-    if _is_symbol_level_kind(kind_value) and not is_batch:
+    if is_symbol_level:
         real_mangled = normalize_mangled_name(change.symbol, change.qualified_name)
 
     # Every alias below is qualified with `discriminator`, matching `primary`/
