@@ -270,6 +270,26 @@ class TestNormalizeMangledName:
         # though "St" alone had completed the prefix.
         assert normalize_mangled_name("_ZNStE", "_ZNStE") is None
 
+    def test_nested_name_other_standard_substitution_embedded_e_is_not_a_terminator(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence, round 7: "Sa" (std::allocator) is
+        # a complete substitution on its own, unlike "St", but the loop
+        # only recognized the literal "St" -- so a trailing digit-prefixed
+        # <source-name> after any of the OTHER five standard
+        # substitutions (Sa/Sb/Sd/Si/So/Ss) was never skipped either.
+        # "_ZNSa1E" is incomplete: after "Sa", "1E" is a length-1
+        # <source-name> whose identifier IS "E", leaving no separate
+        # terminator (the complete form is "_ZNSa1EE").
+        assert normalize_mangled_name("_ZNSa1E", "_ZNSa1E") is None
+
+    def test_nested_name_with_other_substitution_and_source_name_is_accepted(
+        self,
+    ) -> None:
+        # "_ZNSa1EE" -- std::allocator substitution, entity named "E",
+        # real terminator.
+        assert normalize_mangled_name("_ZNSa1EE", None) == "_ZNSa1EE"
+
     def test_local_name_with_nothing_after_terminator_is_rejected(self) -> None:
         # Codex review, fresh evidence: unlike <nested-name> (complete once
         # its own terminator E is found), a <local-name> is
@@ -1116,6 +1136,30 @@ class TestResolveChangeIdentity:
         old_identity = resolve_change_identity(old_side)
         new_identity = resolve_change_identity(new_side)
         assert old_identity.primary_id != new_identity.primary_id
+
+    def test_header_binary_context_mismatch_comma_in_record_name_stays_distinct(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence, round 4: a comma join is not
+        # injective when a C++ record name itself contains a comma
+        # (common for template types, e.g. "A<int,int>") -- mismatch
+        # sets ("A,B", "C") and ("A", "B,C") previously both joined to
+        # "A,B,C", colliding two distinct evidence sets.
+        first = Change(
+            kind=ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+            symbol="libfoo.so",
+            description="The old snapshot's ... found 2 record(s): A,B, C.",
+            affected_symbols=["A,B", "C"],
+        )
+        second = Change(
+            kind=ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+            symbol="libfoo.so",
+            description="The old snapshot's ... found 2 record(s): A, B,C.",
+            affected_symbols=["A", "B,C"],
+        )
+        first_identity = resolve_change_identity(first)
+        second_identity = resolve_change_identity(second)
+        assert first_identity.primary_id != second_identity.primary_id
 
     def test_per_symbol_gnu_unique_transition_is_still_canonical(self) -> None:
         # Regression guard: _check_binding_change's genuine per-symbol

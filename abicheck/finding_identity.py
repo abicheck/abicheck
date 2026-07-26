@@ -308,29 +308,36 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
         consumed_any_component = False
         pending_prefix_only = False
         while pos < len(rest):
-            if rest[pos : pos + 2] == "St":
-                # "St" (the abbreviated std:: substitution) is itself a
-                # <prefix> component that must be followed by more
-                # encoding (e.g. "_ZNSt1EE" = std::E) -- consuming just
-                # its two bytes without continuing the loop left a
-                # trailing digit-prefixed <source-name> exposed to the
-                # same embedded-terminator confusion the earlier fixes
-                # addressed: "_ZNSt1E" is incomplete ("1E" is a
-                # length-1 <source-name> whose identifier IS "E",
-                # leaving no separate terminator) but a digit-only loop
-                # never started skipping here since 'S' isn't a digit
-                # (Codex review, fresh evidence, round 5). "St" on its
-                # own is not a complete component either -- "_ZNStE"
-                # leaves `pos` pointing straight at the 'E', which the
-                # terminator search then wrongly accepted as though
-                # "St" alone had completed the prefix (Codex review,
-                # fresh evidence, round 6). `pending_prefix_only` tracks
-                # that the most recent thing consumed was a bare "St"
-                # with nothing completing it yet, and is cleared as soon
-                # as a real component (a <source-name>) follows it.
+            if rest[pos] == "S" and pos + 1 < len(rest) and rest[pos + 1] in "tabdios":
+                # A standard substitution ("St" = std:: prefix; "Sa" /
+                # "Sb" / "Sd" / "Si" / "So" / "Ss" = the complete named
+                # substitutions, e.g. std::allocator/std::string) is
+                # itself a <prefix> component -- consuming just its two
+                # bytes without continuing the loop left a trailing
+                # digit-prefixed <source-name> exposed to the same
+                # embedded-terminator confusion the earlier fixes
+                # addressed: "_ZNSt1E" and "_ZNSa1E" are both incomplete
+                # ("1E" is a length-1 <source-name> whose identifier IS
+                # "E", leaving no separate terminator) but a loop that
+                # only recognized "St" literally -- or only digits --
+                # never started skipping here for the other five letters
+                # (Codex review, fresh evidence, round 7). "St"
+                # specifically abbreviates the std:: NAMESPACE PREFIX
+                # only, unlike the other five (each a complete named
+                # substitution on its own, matching the reasoning in the
+                # non-nested "S"-prefix branch below) -- "_ZNStE" leaves
+                # `pos` pointing straight at the 'E', which the
+                # terminator search then wrongly accepted as though "St"
+                # alone had completed the prefix (Codex review, fresh
+                # evidence, round 6). `pending_prefix_only` tracks that
+                # the most recent thing consumed was a bare "St" with
+                # nothing completing it yet, and is cleared as soon as a
+                # real component (a <source-name>) follows it; it is
+                # never set for the other five letters, since those are
+                # already complete substitutions by themselves.
                 pos += 2
                 consumed_any_component = True
-                pending_prefix_only = True
+                pending_prefix_only = rest[pos - 1] == "t"
                 continue
             if not rest[pos].isdigit():
                 break
@@ -1025,7 +1032,15 @@ def _change_discriminator(
     # even when they happen to report the exact same mismatched-record set
     # (Codex review, fresh evidence, round 2).
     if kind_value in _STRUCTURED_EVIDENCE_KIND_SLUGS:
-        evidence = ",".join(sorted(change.affected_symbols or ()))
+        # A comma join is not injective when a C++ record name itself
+        # contains a comma (common in template types, e.g.
+        # "A<int,int>") -- mismatch sets ("A,B", "C") and ("A", "B,C")
+        # would both join to "A,B,C", colliding two distinct evidence
+        # sets (Codex review, fresh evidence). "\x1f" (unit separator,
+        # the same delimiter the fallback `parts` join below uses) is
+        # not a byte any real record name contains, so the join stays
+        # unambiguous.
+        evidence = "\x1f".join(sorted(change.affected_symbols or ()))
         side_match = _MISMATCH_SIDE_RE.match(change.description or "")
         side = side_match.group(1) if side_match else ""
         return f"evidence:{side}:{evidence}"
