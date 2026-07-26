@@ -15,7 +15,7 @@ _30 case(s)._ [← back to all examples](../index.md)
 | [case26b_union_field_added_compatible](../case26b_union_field_added_compatible.md) | Union Field Added (No Size Change) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case27_symbol_binding_weakened](../case27_symbol_binding_weakened.md) | Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case29_ifunc_transition](../case29_ifunc_transition.md) | GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case47_inline_to_outlined](../case47_inline_to_outlined.md) | Inline Function Moved to Outlined | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case47_inline_to_outlined](../case47_inline_to_outlined.md) | Inline Method Moved Out-of-Line | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case49_executable_stack](../case49_executable_stack.md) | Executable Stack (GNU_STACK RWX) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case52_rpath_leak](../case52_rpath_leak.md) | RPATH Leak (Hardcoded Build Directory) | 🟢 COMPATIBLE | Quality (Compatible) |

@@ -25,7 +25,7 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case22_method_const_changed](../case22_method_const_changed.md) | Method Const Qualifier Changed | 🔴 BREAKING | Breaking |
 | [case23_pure_virtual_added](../case23_pure_virtual_added.md) | Virtual Method Became Pure Virtual | 🔴 BREAKING | Breaking |
 | [case24_union_field_removed](../case24_union_field_removed.md) | Union Field Removed | 🔴 BREAKING | Breaking |
-| [case26_union_field_added](../case26_union_field_added.md) | Union Field Added | 🔴 BREAKING | Breaking |
+| [case26_union_field_added](../case26_union_field_added.md) | Union Field Added (Size Grows) | 🔴 BREAKING | Breaking |
 | [case28_typedef_opaque](../case28_typedef_opaque.md) | Typedef and Opaque Type Changes | 🔴 BREAKING | Breaking |
 | [case30_field_qualifiers](../case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🔴 BREAKING | Breaking |
 | [case33_pointer_level](../case33_pointer_level.md) | Pointer Level Change | 🔴 BREAKING | Breaking |

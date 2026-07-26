@@ -1,87 +1,104 @@
-# Case 24 — Union Field Removed
+# Case 24: Union Field Removed
 
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
-**Verdict:** 🔴 BREAKING
-**abicheck verdict: BREAKING**
+## Verdict and consumer impact
 
-## What changes
+`union Data` loses its `float f` member in v2 — only `int i` remains. Any
+caller compiled against v1 that reads or writes `d.f` is now interacting
+with a member the library no longer maintains: the library's `init_data()`
+stores an `int` bit pattern, but the caller reinterprets those same bits as
+a `float`. The result is silent data corruption, not a crash — the removed
+alternative was part of the union's public contract.
 
-| Version | Definition |
-|---------|-----------|
-| v1 | `union Data { int i; float f; };` |
-| v2 | `union Data { int i; };` |
+## Old/new diff
 
-## What breaks at binary level
+| old/lib.h | new/lib.h |
+|-----------|-----------|
+| `union Data { int i; float f; };` | `union Data { int i; };` |
+| `init_data()` writes `d->f = 3.14f;` | `init_data()` writes `d->i = 42;` |
 
-Removing a union field removes a supported representation of the shared storage.
-While the remaining field (`int i`) is still at offset 0 and accessible, any code
-that was compiled to use the `float f` variant is now accessing an undefined member.
+## abicheck command
 
-If the removal also reduces the union's size (e.g., removing a `double` field from
-a union of `int` and `double`), existing code that allocates `sizeof(union Data)` with
-the old size will over-allocate (harmless) or under-allocate if the field was the
-largest member (harmful — but this is caught by `TYPE_SIZE_CHANGED`).
-
-The semantic break is the main concern: the removed field was part of the type's
-public contract, and consumers relied on it as a valid interpretation.
-
-**Note:** Adding a union field is classified as **COMPATIBLE** because all fields
-share offset 0 and existing fields are unaffected. Size increases are caught
-separately.
-
-## Consumer impact
-
-```c
-/* consumer compiled against v1 */
-union Data d;
-d.f = 3.14f;   /* valid in v1 */
-lib_consume(d); /* library no longer expects float variant */
-
-/* v2: 'f' field doesn't exist — semantic mismatch */
+```bash
+gcc -shared -fPIC -g old/lib.c -Iold -o libdata_v1.so
+gcc -shared -fPIC -g new/lib.c -Inew -o libdata_v2.so
+abicheck compare libdata_v1.so libdata_v2.so
 ```
 
-## Mitigation
+## Expected abicheck finding
 
-- Keep union variants stable across ABI-compatible releases.
-- Introduce versioned replacement types (e.g., `DataV2`) when the union contract
-  must change.
-- Use tagged unions with explicit discriminators to manage variant evolution.
+```text
+Verdict: BREAKING (exit 4)
 
-## Code diff
-
-```diff
--union Data { int i; float f; };
-+union Data { int i; };
+- union_field_removed: Union field removed: Data::f (float)
+  > Old code accessing removed alternative reads uninitialized memory.
+  Affected symbols: init_data
+- struct_field_removed: Field removed from struct; old code accessing it
+  reads/writes garbage.
+  Affected symbols: init_data
 ```
 
-## Real Failure Demo
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's member list for `Data` (`DW_TAG_union_type`'s
+`DW_TAG_member` children) records each variant's name and type for both
+versions; abicheck diffs the two member sets directly from debug info, no
+public headers required.
+
+## Why abicheck catches it
+
+DWARF encodes union members the same way it encodes struct members — a
+list of `DW_TAG_member` children, all sharing offset 0; abicheck compares
+the old and new member lists and reports any variant present in v1 but
+absent in v2 as `union_field_removed`.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-**Scenario:** app reads `d.f` as float after `init_data()`. With v2 the function writes `d.i = 42` — reading as float gives garbage.
+**Scenario:** app writes/reads `d.f` after `init_data()`. v2's
+`init_data()` writes an `int` (42) into the same storage; the app still
+reinterprets it as a `float`.
 
 ```bash
-# Build old lib + app
+# Build old library + app
 gcc -shared -fPIC -g old/lib.c -Iold -o libdata.so
 gcc -g app.c -Iold -L. -ldata -Wl,-rpath,. -o app
 ./app
-# → d.f = 3.140000
+# → d.f = 3.140000e+00 (expected ~3.14)
 
-# Swap in new lib (writes int 42 instead of float 3.14)
+# Swap in new library (no recompile)
 gcc -shared -fPIC -g new/lib.c -Inew -o libdata.so
 ./app
-# → d.f = 0.000000 (expected 3.14, got wrong value with v2)
-# (integer 42 reinterpreted as IEEE 754 float = ~5.88e-44)
+# → d.f = 5.885454e-44 (expected ~3.14)
+# → UNION_MISMATCH: removed float field changed interpretation
 ```
 
-**Why CRITICAL:** The library writes integer bits, the caller reads float bits from the
-same storage. Silent wrong value — no crash, no error, just completely wrong data.
+**Why CRITICAL:** the library now writes integer bits where the caller
+still reads float bits from the same storage. There is no crash or
+diagnostic — just a silently wrong value, here `5.885454e-44` instead of
+`~3.14`.
 
-## Why runtime result may differ from verdict
-Union field removed: accessing removed field reads undefined memory
+## Safe redesign
 
-## Runtime note
-Runtime check now fails explicitly when removed union member changes data interpretation.
+Never remove a union variant that's part of the public contract. If a
+variant is truly obsolete, keep it declared (even if the library stops
+writing it) for at least one deprecation cycle, or move to a tagged union
+with an explicit discriminator so callers can detect which variant is
+currently valid.
+
+**Real-world example:** POSIX unions such as `union sigval` keep every
+historical variant declared indefinitely — removing one would silently
+break any consumer still reading it.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libdata_v1.so
+abidw --out-file v2.xml libdata_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 

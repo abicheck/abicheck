@@ -77,7 +77,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case23_pure_virtual_added](case23_pure_virtual_added.md) | Virtual Method Became Pure Virtual | 🔴 BREAKING | Breaking |
 | [case24_union_field_removed](case24_union_field_removed.md) | Union Field Removed | 🔴 BREAKING | Breaking |
 | [case25_enum_member_added](case25_enum_member_added.md) | Enum Member Added | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case26_union_field_added](case26_union_field_added.md) | Union Field Added | 🔴 BREAKING | Breaking |
+| [case26_union_field_added](case26_union_field_added.md) | Union Field Added (Size Grows) | 🔴 BREAKING | Breaking |
 | [case26b_union_field_added_compatible](case26b_union_field_added_compatible.md) | Union Field Added (No Size Change) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case27_symbol_binding_weakened](case27_symbol_binding_weakened.md) | Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case28_typedef_opaque](case28_typedef_opaque.md) | Typedef and Opaque Type Changes | 🔴 BREAKING | Breaking |
@@ -99,7 +99,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case44_cyclic_type_member_added](case44_cyclic_type_member_added.md) | Cyclic Type Member Added | 🔴 BREAKING | Breaking |
 | [case45_multi_dim_array_change](case45_multi_dim_array_change.md) | Multi-Dimensional Array Element Type Change | 🔴 BREAKING | Breaking |
 | [case46_pointer_chain_type_change](case46_pointer_chain_type_change.md) | Pointer Chain Type Change | 🔴 BREAKING | Breaking |
-| [case47_inline_to_outlined](case47_inline_to_outlined.md) | Inline Function Moved to Outlined | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case47_inline_to_outlined](case47_inline_to_outlined.md) | Inline Method Moved Out-of-Line | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case48_leaf_struct_through_pointer](case48_leaf_struct_through_pointer.md) | Leaf Struct Change Propagated Through Pointer | 🔴 BREAKING | Breaking |
 | [case49_executable_stack](case49_executable_stack.md) | Executable Stack (GNU_STACK RWX) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case50_soname_inconsistent](case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |

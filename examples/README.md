@@ -284,7 +284,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [23](case23_pure_virtual_added/README.md) | Virtual Method Became Pure Virtual | Breaking | 🔴 BREAKING |
 | [24](case24_union_field_removed/README.md) | Union Field Removed | Breaking | 🔴 BREAKING |
 | [25](case25_enum_member_added/README.md) | Enum Member Added | Addition | 🟢 COMPATIBLE |
-| [26](case26_union_field_added/README.md) | Union Field Added | Breaking | 🔴 BREAKING |
+| [26](case26_union_field_added/README.md) | Union Field Added (Size Grows) | Breaking | 🔴 BREAKING |
 | [26b](case26b_union_field_added_compatible/README.md) | Union Field Added (No Size Change) | Addition | 🟢 COMPATIBLE |
 | [27](case27_symbol_binding_weakened/README.md) | Symbol Binding Weakened (GLOBAL → WEAK) | Quality | 🟢 COMPATIBLE |
 | [28](case28_typedef_opaque/README.md) | Typedef and Opaque Type Changes | Breaking | 🔴 BREAKING |
@@ -306,7 +306,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [44](case44_cyclic_type_member_added/README.md) | Cyclic Type Member Added | Breaking | 🔴 BREAKING |
 | [45](case45_multi_dim_array_change/README.md) | Multi-Dimensional Array Element Type Change | Breaking | 🔴 BREAKING |
 | [46](case46_pointer_chain_type_change/README.md) | Pointer Chain Type Change | Breaking | 🔴 BREAKING |
-| [47](case47_inline_to_outlined/README.md) | Inline Function Moved to Outlined | Addition | 🟢 COMPATIBLE |
+| [47](case47_inline_to_outlined/README.md) | Inline Method Moved Out-of-Line | Addition | 🟢 COMPATIBLE |
 | [48](case48_leaf_struct_through_pointer/README.md) | Leaf Struct Change Propagated Through Pointer | Breaking | 🔴 BREAKING |
 | [49](case49_executable_stack/README.md) | Executable Stack (GNU_STACK RWX) | Quality | 🟢 COMPATIBLE (bad practice) |
 | [50](case50_soname_inconsistent/README.md) | SONAME Inconsistent (Wrong Major Version) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
