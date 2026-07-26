@@ -351,6 +351,14 @@ def _spelling_index(
         for suffix in _namespace_suffix_spellings(identity)[1:]:
             generic_bare.setdefault(suffix, set()).add(identity)
     for bare, ids in generic_bare.items():
+        if bare in non_stdlib_identities:
+            # A derived suffix that collides with a *different* record's own
+            # full identity (Codex review, fresh evidence: identities "Inner"
+            # and "api::Inner" both present) is ambiguous the same way two
+            # colliding derived suffixes are -- record_index[bare] already
+            # holds that other record's own unambiguous self-entry, and must
+            # not be contaminated with this suffix's candidates.
+            continue
         if len(ids) == 1:
             record_index.setdefault(bare, set()).update(ids)
         # else: ambiguous suffix spelling shared by distinct records -- drop.
@@ -404,11 +412,25 @@ def _typedef_spelling_targets(
     a partially-qualified nested-class spelling) rather than a separate
     stdlib-only stripper, since this case has nothing to do with stdlib
     namespace/ABI markers.
+
+    An *exact* typedef key is tracked through the same ambiguity-counting
+    structure as every derived suffix, not given automatic priority over
+    one (Codex review, fresh evidence): when ``snapshot.typedefs`` holds
+    both a global ``"Alias" -> "std::…"`` and a qualified
+    ``"api::Alias" -> "Foo"``, a declaration inside ``api`` can
+    legitimately spell the latter as bare ``"Alias"`` too — the bare
+    spelling is genuinely ambiguous between the two real typedefs, and
+    silently preferring the pre-existing exact key (as an earlier version
+    did merely because it already had an entry) could resolve a bare
+    ``"Alias"`` to the *wrong* one of the two, either hiding a real
+    non-stdlib reference or fabricating a stdlib one. Both contribute to
+    the same per-spelling target set; a spelling resolves only when every
+    contributing source agrees on exactly one target.
     """
     non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
-    index: dict[str, str] = dict(typedefs)
-    stripped_candidates: dict[str, set[str]] = {}
+    targets_by_spelling: dict[str, set[str]] = {}
     for key, target in typedefs.items():
+        targets_by_spelling.setdefault(key, set()).add(target)
         candidates = {
             c
             for c in (
@@ -420,12 +442,14 @@ def _typedef_spelling_targets(
         for stripped in candidates:
             if stripped in non_stdlib_spellings:
                 continue
-            stripped_candidates.setdefault(stripped, set()).add(target)
-    for stripped, targets in stripped_candidates.items():
-        if len(targets) == 1 and stripped not in index:
-            index[stripped] = next(iter(targets))
-        # else: ambiguous (colliding with a real record, or two typedefs
-        # disagreeing on the target) -- drop.
+            targets_by_spelling.setdefault(stripped, set()).add(target)
+    index: dict[str, str] = {}
+    for spelling, targets in targets_by_spelling.items():
+        if len(targets) == 1:
+            index[spelling] = next(iter(targets))
+        # else: ambiguous (an exact key and a derived suffix disagreeing,
+        # a stripped/suffix spelling colliding with a real record, or two
+        # typedefs disagreeing on the target) -- drop.
     return index
 
 

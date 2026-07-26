@@ -896,6 +896,28 @@ Once a root command genuinely clears the bar above, pick the right home:
   seed paths may legitimately need the ambiguous-tail lookup and which
   must not), not a same-PR drive-by extension of an unrelated finding.
 
+  **Two more ambiguity-tracking gaps found in the same collision guards**
+  (Codex review, fresh evidence, both confirmed with minimal repros): (1)
+  when two non-stdlib records had identities `"Inner"` and `"api::Inner"`,
+  `_spelling_index`'s derived-suffix collection only counted contributors
+  to the *derived* suffix `"Inner"` (from `"api::Inner"`) — the unrelated
+  global `"Inner"` identity never contributes to that same tracking
+  structure (it's already a full identity, not a derived suffix), so the
+  ambiguity count saw only one contributor and merged `"api::Inner"`
+  straight into the pre-existing full-identity entry for the global
+  `"Inner"`. Fixed by also treating a derived suffix that collides with a
+  *different* record's own full identity as ambiguous. (2)
+  `_typedef_spelling_targets` gave an *exact* pre-existing typedef key
+  automatic priority over a derived suffix from a different key, rather
+  than tracking both through the same ambiguity-counting structure: when
+  `snapshot.typedefs` held both a global `"Alias" -> "std::…"` and a
+  qualified `"api::Alias" -> "Foo"`, a declaration inside `api` can
+  legitimately spell the latter as bare `"Alias"` too — silently
+  preferring the pre-existing exact key could resolve it to the wrong
+  one. Fixed by unifying exact keys and derived suffixes into one
+  target-set-per-spelling structure, resolving a spelling only when every
+  contributing source agrees on exactly one target.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a

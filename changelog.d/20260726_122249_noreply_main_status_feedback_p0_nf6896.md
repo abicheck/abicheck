@@ -446,3 +446,31 @@
   variables, plus the owner-seeding exact-match fix (positive and
   negative cases). Full suite green, 100% module coverage, FP-rate gate
   stays 0 FP/0 FN.
+- **Two more ambiguity-tracking gaps found in `type_reachability.py`'s
+  collision guards** (Codex review, fresh evidence, both confirmed with
+  minimal repros): (1) when two non-stdlib records had identities
+  `"Inner"` and `"api::Inner"`, `_spelling_index`'s derived-suffix
+  collection only counted contributors to the *derived* suffix `"Inner"`
+  (from `"api::Inner"`) — since the unrelated global `"Inner"` identity
+  never contributes to that same tracking structure (it's already a full
+  identity, not a derived suffix), the ambiguity count saw only one
+  contributor and merged `"api::Inner"` straight into the pre-existing
+  full-identity entry for the global `"Inner"`. A public signature
+  spelling the global type as bare `"Inner"` then also queued the
+  unrelated `"api::Inner"` and its `std::` field. Fixed by also treating a
+  derived suffix that collides with a *different* record's own full
+  identity as ambiguous. (2) `_typedef_spelling_targets` gave an *exact*
+  pre-existing typedef key automatic priority over a derived suffix from
+  a different key, rather than tracking both through the same
+  ambiguity-counting structure: when `snapshot.typedefs` held both a
+  global `"Alias" -> "std::…"` and a qualified `"api::Alias" -> "Foo"`, a
+  declaration inside `api` can legitimately spell the latter as bare
+  `"Alias"` too — the bare spelling is genuinely ambiguous between the
+  two real typedefs, and silently preferring the pre-existing exact key
+  could resolve it to the wrong one (hiding a real non-stdlib reference or
+  fabricating a stdlib one). Fixed by unifying exact keys and derived
+  suffixes into one target-set-per-spelling structure, resolving a
+  spelling only when every contributing source agrees on exactly one
+  target. New regression tests cover both fixes (positive repro plus a
+  guard that an agreeing exact-key/derived-suffix pair is still kept).
+  Full suite green, 100% module coverage, FP-rate gate stays 0 FP/0 FN.

@@ -1769,3 +1769,64 @@ class TestItaniumStdSubstitution:
             types=[RecordType(name="std::string", kind="class")],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset()
+
+
+class TestBareIdentityCollisionWithDerivedSuffix:
+    def test_bare_record_identity_collision_with_qualified_records_suffix(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: when records have identities
+        "Inner" and "api::Inner", the derived-suffix collection previously
+        saw only one candidate contributor for the derived suffix "Inner"
+        (from api::Inner) and merged it straight into the *existing*
+        full-identity entry for the unrelated global Inner record, so a
+        public signature spelling the global type as bare "Inner" also
+        queued the unrelated api::Inner and its std::string field."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="Inner")],
+            types=[
+                RecordType(name="Inner", kind="class"),
+                RecordType(
+                    name="Inner",
+                    kind="class",
+                    qualified_name="api::Inner",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_typedef_exact_key_disagreeing_with_derived_suffix_is_dropped(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: when snapshot.typedefs holds both
+        a global "Alias" -> "std::..." and a qualified "api::Alias" ->
+        "Foo", a declaration inside api can legitimately spell the latter
+        as bare "Alias" too -- the bare spelling is genuinely ambiguous
+        between the two, and silently preferring the pre-existing exact
+        key (as an earlier version did) could resolve it to the wrong
+        one. Both must be treated as an ambiguous collision and dropped."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="Alias")],
+            types=[
+                RecordType(name="Foo", kind="class", qualified_name="api::Foo"),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        snap.typedefs = {"Alias": "std::string", "api::Alias": "api::Foo"}
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_typedef_exact_key_agreeing_with_derived_suffix_is_kept(self) -> None:
+        """Guard against over-correcting: when the exact key and a derived
+        suffix happen to agree on the same target, there is no real
+        ambiguity in the outcome and the spelling must still resolve."""
+        index = _typedef_spelling_targets(
+            {"Alias": "Foo", "api::Alias": "Foo"},
+            frozenset(),
+        )
+        assert index["Alias"] == "Foo"
