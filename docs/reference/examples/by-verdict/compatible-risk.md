@@ -23,11 +23,11 @@ _29 case(s)._ [← back to all examples](../index.md)
 | [case154_lto_mode_flip](../case154_lto_mode_flip.md) | _lto_mode_flip — LTO mode flip (`-flto`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case155_char_signedness_flip](../case155_char_signedness_flip.md) | _char_signedness_flip — Plain-`char` signedness flip (`-fsigned-char` ↔ `-funsigned-char`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case160_public_api_internal_dep_added](../case160_public_api_internal_dep_added.md) | Public API Gains an Internal Dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case161_target_dependency_added](../case161_target_dependency_added.md) | _target_dependency_added — New inter-target build/link dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case162_symbol_source_owner_changed](../case162_symbol_source_owner_changed.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case161_target_dependency_added](../case161_target_dependency_added.md) | New Inter-Target Build/Link Dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case162_symbol_source_owner_changed](../case162_symbol_source_owner_changed.md) | Exported Symbol's Declaring File Moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case165_polymorphic_nonvirtual_dtor](../case165_polymorphic_nonvirtual_dtor.md) | Polymorphic Type Without a Virtual Destructor (New Anti-Pattern) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case169_overload_added](../case169_overload_added.md) | Overload Added to a Previously Unique Function | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case170_env_runtime_floor_raised](../case170_env_runtime_floor_raised.md) | Runtime Floor Raised (glibc relink drift) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case170_env_runtime_floor_raised](../case170_env_runtime_floor_raised.md) | Runtime Floor Raised (glibc Relink Drift) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case171_static_tls_introduced](../case171_static_tls_introduced.md) | Static TLS Introduced | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case178_unnamed_type_in_public_abi](../case178_unnamed_type_in_public_abi.md) | Unnamed Type Leaks Into the Public ABI | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case179_cet_protection_weakened](../case179_cet_protection_weakened.md) | CET Protection Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |

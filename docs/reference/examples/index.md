@@ -207,8 +207,8 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case157_inline_function_removed](case157_inline_function_removed.md) | Inline Function Removed | 🟠 API_BREAK | API Break |
 | [case158_public_typedef_removed](case158_public_typedef_removed.md) | Public Typedef Removed | 🟠 API_BREAK | API Break |
 | [case160_public_api_internal_dep_added](case160_public_api_internal_dep_added.md) | Public API Gains an Internal Dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case161_target_dependency_added](case161_target_dependency_added.md) | _target_dependency_added — New inter-target build/link dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case162_symbol_source_owner_changed](case162_symbol_source_owner_changed.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case161_target_dependency_added](case161_target_dependency_added.md) | New Inter-Target Build/Link Dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case162_symbol_source_owner_changed](case162_symbol_source_owner_changed.md) | Exported Symbol's Declaring File Moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case163_python_kwarg_renamed](case163_python_kwarg_renamed.md) | Python Keyword Argument Renamed (Stub-Only API Break) | 🟠 API_BREAK | API Break |
 | [case164_preproc_conditional_field](case164_preproc_conditional_field.md) | Preprocessor-Conditional Field (Build-Context False Positive) | ✅ NO_CHANGE | No Change |
 | [case165_polymorphic_nonvirtual_dtor](case165_polymorphic_nonvirtual_dtor.md) | Polymorphic Type Without a Virtual Destructor (New Anti-Pattern) | 🟡 COMPATIBLE_WITH_RISK | Risk |
@@ -216,7 +216,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case167_base_became_virtual](case167_base_became_virtual.md) | Base Class Became Virtual (`: public Device` → `: public virtual Device`) | 🔴 BREAKING | Breaking |
 | [case168_virtual_method_devirtualized](case168_virtual_method_devirtualized.md) | Virtual Method Devirtualized (`flush()` leaves the vtable) | 🔴 BREAKING | Breaking |
 | [case169_overload_added](case169_overload_added.md) | Overload Added to a Previously Unique Function | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case170_env_runtime_floor_raised](case170_env_runtime_floor_raised.md) | Runtime Floor Raised (glibc relink drift) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case170_env_runtime_floor_raised](case170_env_runtime_floor_raised.md) | Runtime Floor Raised (glibc Relink Drift) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case171_static_tls_introduced](case171_static_tls_introduced.md) | Static TLS Introduced | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case172_vtable_thunk_offset_changed](case172_vtable_thunk_offset_changed.md) | Vtable Thunk Offset Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
 | [case173_vtt_slot_count_changed](case173_vtt_slot_count_changed.md) | VTT Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |

@@ -419,8 +419,8 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [157](case157_inline_function_removed/README.md) | Inline Function Removed | API Break | 🟠 API_BREAK |
 | [158](case158_public_typedef_removed/README.md) | Public Typedef Removed | API Break | 🟠 API_BREAK |
 | [160](case160_public_api_internal_dep_added/README.md) | Public API Gains an Internal Dependency | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [161](case161_target_dependency_added/README.md) | _target_dependency_added — New inter-target build/link dependency | Risk | 🟡 COMPATIBLE_WITH_RISK |
-| [162](case162_symbol_source_owner_changed/README.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [161](case161_target_dependency_added/README.md) | New Inter-Target Build/Link Dependency | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [162](case162_symbol_source_owner_changed/README.md) | Exported Symbol's Declaring File Moved | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [163](case163_python_kwarg_renamed/README.md) | Python Keyword Argument Renamed (Stub-Only API Break) | API Break | 🟠 API_BREAK |
 | [164](case164_preproc_conditional_field/README.md) | Preprocessor-Conditional Field (Build-Context False Positive) | No Change | ✅ NO_CHANGE |
 | [165](case165_polymorphic_nonvirtual_dtor/README.md) | Polymorphic Type Without a Virtual Destructor (New Anti-Pattern) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
@@ -428,7 +428,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [167](case167_base_became_virtual/README.md) | Base Class Became Virtual (`: public Device` → `: public virtual Device`) | Breaking | 🔴 BREAKING |
 | [168](case168_virtual_method_devirtualized/README.md) | Virtual Method Devirtualized (`flush()` leaves the vtable) | Breaking | 🔴 BREAKING |
 | [169](case169_overload_added/README.md) | Overload Added to a Previously Unique Function | Risk | 🟡 COMPATIBLE_WITH_RISK |
-| [170](case170_env_runtime_floor_raised/README.md) | Runtime Floor Raised (glibc relink drift) | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [170](case170_env_runtime_floor_raised/README.md) | Runtime Floor Raised (glibc Relink Drift) | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [171](case171_static_tls_introduced/README.md) | Static TLS Introduced | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [172](case172_vtable_thunk_offset_changed/README.md) | Vtable Thunk Offset Changed (detected from a stripped binary) | Breaking | 🔴 BREAKING |
 | [173](case173_vtt_slot_count_changed/README.md) | VTT Slot Count Changed (detected from a stripped binary) | Breaking | 🔴 BREAKING |
