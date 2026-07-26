@@ -281,6 +281,49 @@ class TestPackVersionedIdentity:
         assert contract_v1 != contract_v2
 
 
+class TestPackAndProviderOrderIndependence:
+    # ADR-049 D8: "Pack order never decides semantics"; D7: "equivalent
+    # semantic inputs must resolve to an equivalent object" -- selecting
+    # the same packs/providers in a different order must not change
+    # equality.
+    def test_contract_packs_order_independent(self):
+        a = _identity("rust_c_ffi")
+        b = _identity("qt_kde_cpp")
+        forward = ContractConfig(mode=ContractMode.PUBLIC, packs=[a, b])
+        backward = ContractConfig(mode=ContractMode.PUBLIC, packs=[b, a])
+        assert forward == backward
+        assert forward.packs == backward.packs
+
+    def test_policy_packs_order_independent(self):
+        a = _identity("qt_kde_cpp")
+        b = _identity("glibc_symbol_versioned")
+        forward = CompatibilityPolicyConfig(base=_identity("strict_abi"), packs=[a, b])
+        backward = CompatibilityPolicyConfig(base=_identity("strict_abi"), packs=[b, a])
+        assert forward == backward
+
+    def test_gate_packs_order_independent(self):
+        a = _identity("security_hardening")
+        b = _identity("release_governance")
+        forward = GateConfig(packs=[a, b])
+        backward = GateConfig(packs=[b, a])
+        assert forward == backward
+
+    def test_evidence_providers_order_independent(self):
+        active_ast = EvidenceProviderRequirement(
+            capability="active_ast",
+            required=True,
+            implementation=_identity("clang_ast"),
+        )
+        guarded_index = EvidenceProviderRequirement(
+            capability="guarded_declaration_index",
+            required=True,
+            implementation=_identity("guarded_index"),
+        )
+        forward = EvidenceConfig(providers=[active_ast, guarded_index])
+        backward = EvidenceConfig(providers=[guarded_index, active_ast])
+        assert forward == backward
+
+
 class TestGateSeverityDefault:
     def test_default_gate_severity_matches_existing_defaults(self):
         # GateConfig.severity should default to the same SeverityConfig

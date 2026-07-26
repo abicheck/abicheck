@@ -44,13 +44,16 @@ the object to actually stay put).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
+from typing import Any, TypeVar
 
 from .change_registry_types import Verdict
 from .contract_relevance_types import ContractMode, SelectorLayer
 from .severity import SeverityConfig
+
+_T = TypeVar("_T")
 
 
 def _frozen_mapping(m: Mapping[str, object]) -> MappingProxyType[str, object]:
@@ -59,6 +62,19 @@ def _frozen_mapping(m: Mapping[str, object]) -> MappingProxyType[str, object]:
 
 def _frozen_tuple(s: Sequence[object]) -> tuple[object, ...]:
     return tuple(s)
+
+
+def _canonical_tuple(s: Sequence[_T], *, key: Callable[[_T], Any]) -> tuple[_T, ...]:
+    """Sort an unordered selection into a stable, order-independent tuple.
+
+    ADR-049 D8: "Pack order never decides semantics," and D7 requires
+    "equivalent semantic inputs must resolve to an equivalent object" --
+    two constructions that select the same packs/providers in a different
+    order must compare equal. Sorting by a stable key (rather than leaving
+    insertion order, or discarding order entirely via a set) gives both
+    order-independent equality and a deterministic serialization order.
+    """
+    return tuple(sorted(s, key=key))
 
 
 def _require_nonempty_digest(sha256: str, *, owner: str) -> None:
@@ -194,7 +210,13 @@ class ContractConfig:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "overlays", _frozen_tuple(self.overlays))
-        object.__setattr__(self, "packs", _frozen_tuple(self.packs))
+        object.__setattr__(
+            self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)
+        )
+
+
+def _pack_sort_key(identity: ImmutableIdentity) -> tuple[str, int]:
+    return (identity.id, identity.version)
 
 
 @dataclass(frozen=True)
@@ -224,6 +246,16 @@ class EvidenceProviderRequirement:
             )
 
 
+def _provider_sort_key(req: EvidenceProviderRequirement) -> tuple[str, bool, str, int]:
+    impl = req.implementation
+    return (
+        req.capability,
+        req.required,
+        impl.id if impl else "",
+        impl.version if impl else -1,
+    )
+
+
 @dataclass(frozen=True)
 class EvidenceConfig:
     """Providers, requirements, and variants (ADR-049 D5/D6)."""
@@ -238,7 +270,9 @@ class EvidenceConfig:
     variants: DigestedItems | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "providers", _frozen_tuple(self.providers))
+        object.__setattr__(
+            self, "providers", _canonical_tuple(self.providers, key=_provider_sort_key)
+        )
 
 
 @dataclass(frozen=True)
@@ -290,7 +324,9 @@ class CompatibilityPolicyConfig:
     overrides: Mapping[str, Verdict] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "packs", _frozen_tuple(self.packs))
+        object.__setattr__(
+            self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)
+        )
         object.__setattr__(self, "overrides", _frozen_mapping(self.overrides))
 
 
@@ -308,7 +344,9 @@ class GateConfig:
     severity: SeverityConfig = field(default_factory=SeverityConfig)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "packs", _frozen_tuple(self.packs))
+        object.__setattr__(
+            self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)
+        )
 
 
 @dataclass(frozen=True)
