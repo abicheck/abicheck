@@ -189,6 +189,44 @@ def test_atomic_write_json_replace_failure_cleans_up_temp_file_and_reraises(
     assert list(target.parent.iterdir()) == []
 
 
+def test_atomic_write_swallows_unlink_failure_during_cleanup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Same doubly-defensive path as _atomic_copy's equivalent test: os.replace()
+    # fails, and the cleanup os.unlink() of the staging file *also* fails. The
+    # unlink failure must be swallowed -- the caller still sees the original
+    # replace error, not a masking unlink error.
+    target = tmp_path / "cache" / "abcd.xml"
+    target.parent.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        os, "replace", lambda *_a, **_k: (_ for _ in ()).throw(OSError("replace failed"))
+    )
+    monkeypatch.setattr(
+        os, "unlink", lambda *_a, **_k: (_ for _ in ()).throw(OSError("unlink failed"))
+    )
+
+    with pytest.raises(OSError, match="replace failed"):
+        _atomic_write(target, b"data")
+
+
+def test_atomic_write_json_swallows_unlink_failure_during_cleanup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / "cache" / "abcd.json"
+    target.parent.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        os, "replace", lambda *_a, **_k: (_ for _ in ()).throw(OSError("replace failed"))
+    )
+    monkeypatch.setattr(
+        os, "unlink", lambda *_a, **_k: (_ for _ in ()).throw(OSError("unlink failed"))
+    )
+
+    with pytest.raises(OSError, match="replace failed"):
+        _atomic_write_json(target, {"a": 1})
+
+
 def test_write_failure_cleans_up_temp_file_and_reraises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

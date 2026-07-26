@@ -445,12 +445,11 @@ def _clang_header_dump(
     ``frontend_context`` (ADR-050 D5, G32 Phase D) is ``"host"``/``"device"``.
     ``resolved_kind`` is *frontend_context* itself when *clang_bin* is
     DPC++-capable (:func:`abicheck.dumper_clang._is_dpcpp_family_binary`) --
-    :func:`abicheck.sycl_context.select_frontend_context` only ever returns a
-    context whose ``kind`` matches what was requested, or raises -- and
-    ``None`` otherwise (a plain clang invocation has no host/device concept).
-    A non-``"host"`` request against a non-DPC++-capable *clang_bin* fails
-    immediately with :class:`abicheck.errors.AstContextMissingError` rather
-    than spending a subprocess invocation on an unsatisfiable request.
+    :mod:`abicheck.sycl_context`'s selector only ever returns a context
+    whose ``kind`` matches what was requested, or raises -- and ``None``
+    otherwise. A non-``"host"`` request against a non-DPC++-capable
+    *clang_bin* fails immediately with
+    :class:`abicheck.errors.AstContextMissingError`.
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
     is_dpcpp = _is_dpcpp_family_binary(clang_bin)
@@ -673,7 +672,13 @@ def _header_ast_parser(
             '"hybrid" AST frontend has no single parser here '
             "(see dumper_hybrid.run_hybrid_dump)."
         )
-    if resolved == "castxml" and frontend_context != "host":
+    # Checked against *backend* (Codex review): "auto" also resolves to
+    # "castxml", so `resolved` alone can't tell an explicit request apart.
+    if (
+        resolved == "castxml"
+        and frontend_context != "host"
+        and (backend or "auto").lower() == "castxml"
+    ):
         raise AstContextMissingError(
             f"--frontend-context {frontend_context!r} requires the clang "
             "header backend (--ast-frontend clang); castxml has no SYCL/"
@@ -1373,11 +1378,8 @@ def dump(
                 "frontend; pass an explicit --ast-frontend castxml/clang."
             )
         if frontend_context != "host":
-            # ADR-050 D5 (Codex review): hybrid merges castxml+clang, and
-            # castxml has no device-context concept -- reject explicitly
-            # rather than silently forwarding no frontend_context to
-            # run_hybrid_dump's two recursive calls below (both would
-            # default to "host", returning an ordinary host snapshot).
+            # Hybrid has no device concept (castxml+clang merge); reject
+            # rather than silently defaulting both recursive calls to "host".
             raise AstContextMissingError(
                 f"--frontend-context {frontend_context!r} requires the "
                 "clang header backend (--ast-frontend clang); 'hybrid' "

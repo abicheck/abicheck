@@ -718,6 +718,36 @@ def test_header_ast_parser_explicit_castxml_rejects_device_context(
         )
 
 
+def test_header_ast_parser_auto_device_routes_to_clang_not_rejected(
+    tmp_path, monkeypatch
+):
+    """ADR-050 D5 (Codex review): --ast-frontend auto (the default) also
+    resolves to "castxml", so a device request must not be rejected the
+    same way an EXPLICIT --ast-frontend castxml is -- auto's own
+    documented contract is "a non-host request skips castxml entirely",
+    routing straight to clang instead. Regression: the resolved-backend
+    check alone couldn't distinguish "auto happened to resolve to castxml"
+    from "the user explicitly asked for castxml", so a device request
+    through plain auto (no --ast-frontend given at all) incorrectly raised
+    before ever reaching the clang backend that could actually satisfy it.
+    """
+    from abicheck import dumper
+    from abicheck.dumper import _ClangAstParser, _header_ast_parser
+
+    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+    ast = {"kind": "TranslationUnitDecl", "inner": []}
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, "device"))
+
+    parser = _header_ast_parser(
+        [Path("a.h")],
+        [],
+        backend="auto",
+        frontend_context="device",
+        **_ast_parser_kwargs(tmp_path),
+    )
+    assert isinstance(parser, _ClangAstParser)
+
+
 def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkeypatch):
     """A castxml failure that is NOT a toolchain-version signature (e.g. a bad
     header) re-raises — fallback is reserved for the recoverable case."""

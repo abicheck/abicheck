@@ -98,3 +98,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   path also gained `dumper_cache._atomic_write_json`, which streams
   `json.dump` straight to the cache file instead of building a full
   `json.dumps(...).encode()` blob first (Codex review, second round).
+- `dumper._header_ast_parser`'s castxml/device rejection guard fired for
+  *any* request that merely resolved to `"castxml"` — including the
+  default `--ast-frontend auto` — instead of only an explicit
+  `--ast-frontend castxml`, contradicting the function's own documented
+  "under auto a non-host request skips castxml entirely" contract. A
+  plain `--frontend-context device` with no `--ast-frontend` given at all
+  was incorrectly rejected before ever reaching the clang backend that
+  could satisfy it. Now checks the literal `backend` argument (not just
+  its resolved value) so only an explicit castxml request is rejected
+  (Codex review).
+- `dumper_cache._atomic_write`/`_atomic_write_json` lacked coverage for the
+  doubly-defensive path where the cleanup `os.unlink()` of the staging file
+  itself fails after `os.replace()` already failed (only `_atomic_copy` had
+  this test) — added, closing a Codecov-flagged patch-coverage gap (no
+  behavior change).
