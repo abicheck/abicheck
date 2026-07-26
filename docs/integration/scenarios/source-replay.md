@@ -19,10 +19,14 @@ where the *build* emits source facts as it compiles instead.
   zero-config (CMake configure-only, a Bazel `aquery`, or a Make dry-run
   transcript) — see
   [Source-Scan Depth § Obtaining a compile database](../../use/scan-levels.md#obtaining-a-compile-database-without-a-full-build).
-- `clang` on the runner. The root Action's default
-  `dependency-source: conda-forge` does **not** install clang — pin
-  `dependency-source: conda-forge-clang20` (or `system`, or install clang
-  yourself) to enable L4 replay. Without clang, the run silently degrades
+- `clang` on the runner. On the latest published release (`@v0.5.0`, used
+  below), the Action's only installer is the legacy `install-deps: true`
+  path, which already installs clang alongside castxml — no extra input
+  needed. On a newer pin (`dependency-source` and its `conda-forge-clang20`
+  value are not in `@v0.5.0` — see the note on the `check-target` example
+  below), the default `dependency-source: conda-forge` does **not** install
+  clang; pin `dependency-source: conda-forge-clang20` (or `system`, or
+  install clang yourself) instead. Without clang, the run silently degrades
   to L0–L2 evidence instead of failing; check the `layers`/coverage output
   to confirm L4 actually ran. See
   [GitHub Action: dependency-source](../../use/github-action.md).
@@ -51,10 +55,12 @@ cross-source check.
 
 **Composed via `check-target`/`check-project.yml`** — when this check is one
 of several a `.abicheck.yml` `targets:`/`profiles:` block declares,
-`evidence-producer: replay` is the bridge:
+`evidence-producer: replay` is the bridge. `actions/check-target` shipped
+after the `v0.5.0` release, so pin a commit SHA (or `@main`) instead of a
+release tag until the next release includes it:
 
 ```yaml
-- uses: abicheck/abicheck/actions/check-target@v0.5.0
+- uses: abicheck/abicheck/actions/check-target@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
   with:
     name: libfoo
     requested-depth: source

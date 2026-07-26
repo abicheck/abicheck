@@ -574,7 +574,9 @@ build-id resolution:
 
 There is no separate `appcompat` mode (ADR-043 folded it into `compare
 --used-by`). Check whether your application binary is affected by a library
-update by scoping a normal `compare` to it via the dedicated `used-by` input:
+update by scoping a normal `compare` to it via `extra-args` (see the note in
+[GitHub Action: Application-scoped comparison](github-action.md#application-scoped-comparison-adr-043-appcompat-folded-into-compare-used-by)
+about the newer, post-`v0.5.0` dedicated `used-by` input):
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
@@ -582,7 +584,7 @@ update by scoping a normal `compare` to it via the dedicated `used-by` input:
           old-library: libfoo.so.1
           new-library: build/libfoo.so.2
           header: include/foo.h
-          used-by: build/myapp
+          extra-args: '--used-by build/myapp'
 ```
 
 ## Quick symbol availability check (weak mode)
@@ -597,5 +599,5 @@ COMPATIBLE only if every symbol it uses resolves:
           old-library: build/libfoo.so
           new-library: build/libfoo.so
           install-deps: false
-          used-by: build/myapp
+          extra-args: '--used-by build/myapp'
 ```

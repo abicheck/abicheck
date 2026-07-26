@@ -104,23 +104,26 @@ from `action.yml`), see the
 ### Application-scoped comparison (ADR-043: appcompat folded into `compare --used-by`)
 
 There is no separate `appcompat` mode. Scope a normal `compare` to what an
-application actually uses via the dedicated `used-by` input:
+application actually uses via `extra-args`:
 
 ```yaml
 - uses: abicheck/abicheck@v0.5.0
   with:
     old-library: libfoo-old.so
     new-library: libfoo-new.so
-    used-by: myapp
+    extra-args: '--used-by myapp'
 ```
 
-`used-by` (space-separated for multiple app binaries; maps to repeated
-`compare --used-by`) runs the full library comparison once, then scopes the
-primary verdict/exit code to the worst app-affecting result; the full
-verdict and unrelated changes stay as informational context. The
-`old-library`/`new-library` inputs may be real library binaries or JSON
-snapshots that carry binary evidence (a `dump` of a real library, not
-headers-only). Mutually exclusive with `required-symbol`/`required-symbols`.
+`--used-by <app-binary>` (repeatable) runs the full library comparison once,
+then scopes the primary verdict/exit code to the worst app-affecting result;
+the full verdict and unrelated changes stay as informational context. The
+`OLD`/`NEW` operands may be real library binaries or JSON snapshots that
+carry binary evidence (a `dump` of a real library, not headers-only).
+
+> A dedicated `used-by` input (space-separated, mutually exclusive with
+> `required-symbol`/`required-symbols`) was added after the `v0.5.0` release
+> — on a commit-SHA pin newer than `v0.5.0`, prefer `used-by: myapp` over
+> `extra-args` for the same effect.
 
 ### Version labels
 
