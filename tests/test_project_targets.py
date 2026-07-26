@@ -1619,6 +1619,10 @@ def test_profile_compile_overlay_rejects_whitespace_injection_in_abi_macros() ->
         "-specs",
         "-wrapper",
         "@evil-response-file",
+        "--config",
+        "--config=evil.cfg",
+        "--config-system-dir=/tmp/evil",
+        "--config-user-dir=/tmp/evil",
     ],
 )
 def test_profile_compile_overlay_rejects_dangerous_args(dangerous_arg: str) -> None:

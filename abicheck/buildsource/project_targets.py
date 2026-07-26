@@ -442,20 +442,28 @@ class BundleSpec:
 
 
 #: Flags that reach a compiler frontend's own plugin/response-file/spec-
-#: substitution machinery rather than an ABI-relevant compile axis. Each is
-#: a single whitespace-free atom (so ``_safe_profile_atom``'s smuggling
-#: check alone does not reject it) that either loads arbitrary code into the
-#: compiler process (``-Xclang``/``-load``/``-fplugin=``/``-fpass-plugin=``),
-#: re-expands attacker-controlled file content into more argv
-#: (``@response-file``), or substitutes the compiler driver's own trusted
-#: built-in command line for one read from disk (``-specs=``/``-wrapper``).
-#: ``profiles.<id>.compile.args`` is documented (this module's docstring,
-#: ``ProfileCompileSpec``'s own docstring) as a "normalized extra args"
-#: escape hatch for ABI-relevant flags an auto-discovered, untrusted
-#: ``.abicheck.yml`` may declare — never an executable-code path. Checked as
-#: an exact match or a prefix (for the ``=``-joined spellings) against each
-#: ``args`` atom; case-sensitive, matching how compiler CLIs themselves
-#: parse these flags.
+#: substitution/config-file machinery rather than an ABI-relevant compile
+#: axis. Each is a single whitespace-free atom (so ``_safe_profile_atom``'s
+#: smuggling check alone does not reject it) that either loads arbitrary
+#: code into the compiler process
+#: (``-Xclang``/``-load``/``-fplugin=``/``-fpass-plugin=``), re-expands
+#: attacker-controlled file content into more argv (``@response-file``,
+#: Clang's ``--config``/``--config=<file>`` — a "configuration file" of
+#: additional command-line options, including ``-fplugin=``, so leaving it
+#: unblocked would let it re-smuggle back in everything else this denylist
+#: rejects; the ``--config`` prefix below also catches
+#: ``--config-system-dir=``/``--config-user-dir=``, which redirect where an
+#: implicit/explicit config file is looked up), or substitutes the
+#: compiler driver's own trusted built-in command line for one read from
+#: disk (``-specs=``/``-wrapper``). ``profiles.<id>.compile.args`` is documented
+#: (this module's docstring, ``ProfileCompileSpec``'s own docstring) as a
+#: "normalized extra args" escape hatch for ABI-relevant flags an
+#: auto-discovered, untrusted ``.abicheck.yml`` may declare — never an
+#: executable-code path. Checked as an exact match or a prefix (for the
+#: ``=``-joined spellings) against each ``args`` atom; case-sensitive,
+#: matching how compiler CLIs themselves parse these flags. (Codex review,
+#: PR #639: the initial denylist omitted ``--config``, which could
+#: reintroduce a blocked ``-fplugin=`` argument via a config file.)
 _DANGEROUS_ARG_PREFIXES = (
     "-Xclang",
     "-load",
@@ -465,6 +473,7 @@ _DANGEROUS_ARG_PREFIXES = (
     "-specs=",
     "-specs",
     "-wrapper",
+    "--config",
     "@",
 )
 
