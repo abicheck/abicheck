@@ -633,7 +633,7 @@ jobs:
         with: { fetch-depth: 0 }
       - name: Build old + new (EPICS Base + both pvxs refs, -g -Og)
         run: ./ci/build-two-refs.sh   # produces old/lib/<arch> and new/lib/<arch>
-      - uses: abicheck/abicheck@767f48dc660cb96cbb4c525a5ca4171494984929  # claude/pvxs-version-scan-02efc5 HEAD, 2026-07-26 (temporary -- see note below; retarget to a release once one ships this branch's fixes)
+      - uses: abicheck/abicheck@77199ae996e961bf141f5c370d218bd29d43040b  # claude/pvxs-version-scan-02efc5 HEAD, 2026-07-26 (temporary -- see note below; retarget to a release once one ships this branch's fixes)
         with:
           old-library: old/lib/linux-x86_64/${{ matrix.lib }}.so
           new-library: new/lib/linux-x86_64/${{ matrix.lib }}.so
