@@ -319,7 +319,11 @@ def test_sc_release_recommendation(tmp_path: Path) -> None:
     )
     assert res.exit_code == 4
     doc = json.loads(res.output)
-    assert doc["release_recommendation"]["version_bump"] == "major"
+    # No platform/elf metadata on either side → no binary evidence → state
+    # "unavailable" and version_bump null (schema 2.20); see
+    # test_sc_linux_elf_baseline below for the binary-evidence-present case.
+    assert doc["release_recommendation"]["version_bump"] is None
+    assert doc["release_recommendation"]["state"] == "unavailable"
 
 
 def test_sc_accept_known_break(tmp_path: Path) -> None:

@@ -10,55 +10,95 @@
 | **Detected `ChangeKind`s** | `runpath_changed` |
 | **Source files** | `examples/case137_runpath_changed/` |
 
-**Category:** ELF / Linker metadata | **Verdict:** COMPATIBLE
+**Category:** Quality | **Verdict:** 🟢 COMPATIBLE
 
-## What this case is about
+## Verdict and consumer impact
 
-Both libraries export identical symbols. v2 is linked with an embedded
-`-rpath` (`-Wl,-rpath,/opt/vendor/lib -Wl,--enable-new-dtags`), which the
-linker records as a **`DT_RUNPATH`** dynamic entry. v1 has none. The functional
-ABI is unchanged, but the runtime library search path the dynamic loader uses
-to resolve *this* library's dependencies has changed.
+Both libraries export identical symbols with identical signatures — no
+recompilation is ever required. v2 is linked with an embedded `-rpath`
+(`-Wl,-rpath,/opt/vendor/lib -Wl,--enable-new-dtags`), which the linker
+records as a `DT_RUNPATH` dynamic entry; v1 has none. The functional ABI is
+unchanged, but the runtime library search path the dynamic loader uses to
+resolve *this* library's own dependencies has changed — that can silently
+alter which build of a transitive dependency gets picked up on a different
+host, so it's worth surfacing without treating it as an ABI break.
 
-A baked-in `RUNPATH` changes where dependencies are found at load time. That can
-silently alter which build of a transitive dependency is picked up, so it is
-worth surfacing — without treating it as an ABI break.
+## Old/new diff
 
-## What abicheck detects
+| old/lib.c | new/lib.c |
+|-----------|-----------|
+| linked with no `-rpath` (`DT_RUNPATH` absent) | linked with `-Wl,-rpath,/opt/vendor/lib -Wl,--enable-new-dtags` |
+| (library source is identical — see `old/lib.c` / `new/lib.c`) | |
 
-- **`RUNPATH_CHANGED`**: `DT_RUNPATH` differs between the two libraries.
-  Classified as a compatible quality/metadata change.
-
-**Overall verdict: COMPATIBLE.**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so -Wl,-rpath,/opt/vendor/lib -Wl,--enable-new-dtags
-
-readelf -dW libv1.so | grep RUNPATH || echo "v1: none"
-readelf -dW libv2.so | grep RUNPATH         # /opt/vendor/lib
-
-python3 -m abicheck.cli dump libv1.so -o v1.json
-python3 -m abicheck.cli dump libv2.so -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-# → COMPATIBLE + RUNPATH_CHANGED
+gcc -shared -fPIC -g old/lib.c -o libfoo_v1.so
+gcc -shared -fPIC -g new/lib.c -o libfoo_v2.so -Wl,-rpath,/opt/vendor/lib -Wl,--enable-new-dtags
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
+## Expected abicheck finding
 
-Avoid baking absolute `RUNPATH`/`RPATH` into distributed shared objects; prefer
-`$ORIGIN`-relative paths or loader configuration. This case documents the
-detection, not a required fix.
+```text
+Verdict: COMPATIBLE (exit 0)
 
-## Real Failure Demo
+- runpath_changed: RUNPATH changed: '' -> '/opt/vendor/lib'
+```
 
-**Severity: INFORMATIONAL**
+## Minimum evidence
 
-The library loads and runs the same, but its dependency search path now points
-at `/opt/vendor/lib`, which can change which transitive dependency is resolved
-on a different host.
+`min_evidence: L0` — `DT_RUNPATH` is a dynamic-section tag read directly
+from the ELF `.dynamic` section; no debug info or headers are needed to see
+the change.
+
+## Why abicheck catches it
+
+abicheck reads each library's `DT_RUNPATH`/`DT_RPATH` entry from the ELF
+dynamic section and diffs the string value (including the empty-string
+"absent" case) between versions — a pure L0 ELF fact, unrelated to the
+exported symbol surface.
+
+## Runtime failure demonstration
+
+No observable effect on existing binaries — the exported symbols and their
+behavior are byte-identical between versions:
+
+```bash
+readelf -dW libfoo_v1.so | grep RUNPATH || echo "v1: none"
+# → v1: none
+
+readelf -dW libfoo_v2.so | grep RUNPATH
+# → Library runpath: [/opt/vendor/lib]
+
+gcc -shared -fPIC -g old/lib.c -o libfoo.so
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → compute(7) = 50
+# → transform(3, 4) = 11
+
+gcc -shared -fPIC -g new/lib.c -o libfoo.so -Wl,-rpath,/opt/vendor/lib -Wl,--enable-new-dtags
+./app
+# → compute(7) = 50
+# → transform(3, 4) = 11   ← identical
+```
+
+`compute()`/`transform()` compute the same results with either `.so`
+loaded; the change only affects which paths the loader searches when
+resolving *this* library's own transitive dependencies.
+
+## Safe redesign
+
+Avoid baking absolute `RUNPATH`/`RPATH` values into distributed shared
+objects; prefer `$ORIGIN`-relative paths (see case52) or leave dependency
+resolution to system search paths / loader configuration (`/etc/ld.so.conf`).
+If an embedded RUNPATH is genuinely required for a vendored deployment,
+document it in release notes so packagers and downstream integrators know
+to check it against their environment.
+
+## References
+
+- [ELF dynamic section: `DT_RUNPATH`/`DT_RPATH`](https://refspecs.linuxfoundation.org/elf/gabi4+/ch5.dynamic.html)
 
 ---
 

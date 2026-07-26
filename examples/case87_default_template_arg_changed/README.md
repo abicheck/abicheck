@@ -1,8 +1,8 @@
-# Case 87: Default template argument changed
+# Case 87: Default Template Argument Changed
 
-**Category:** Template ABI | **Verdict:** BREAKING
+**Category:** Template ABI | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
 ```cpp
 // v1
@@ -14,67 +14,120 @@ template <typename Float, typename Distance = euclidean_distance<Float>>
 class descriptor;
 ```
 
-Consumer source like `mylib::descriptor<float> d;` compiles against both
-headers — the change is invisible at the call site. But the *substituted*
-type differs:
+Consumer source like `mylib::descriptor<float> d;` compiles unchanged
+against both headers — the default-argument change is invisible at the call
+site. But the *substituted* type differs, so the mangled symbol differs
+too: v1 ships `descriptor<float, minkowski_distance<float>>`, v2 ships
+`descriptor<float, euclidean_distance<float>>`. A consumer compiled against
+v1's header calls the first mangled name; the v2 library exports only the
+second. Recompilation is mandatory even though nothing in the consumer's
+own source changed.
 
-- v1: `descriptor<float, minkowski_distance<float>>` → mangled symbol
-  `_ZN5mylib10descriptorIfNS_18minkowski_distanceIfEEEC1Ev`
-- v2: `descriptor<float, euclidean_distance<float>>` → mangled symbol
-  `_ZN5mylib10descriptorIfNS_18euclidean_distanceIfEEEC1Ev`
+## Old/new diff
 
-A consumer compiled against v1 emits calls to the first mangled name.
-A consumer compiled against v2 emits calls to the second. The shipped
-library can only contain one — whichever version was built. Cross-version
-linking yields unresolved symbols.
+| v1.h | v2.h |
+|------|------|
+| `template <typename Float, typename Distance = minkowski_distance<Float>> class descriptor;` | `template <typename Float, typename Distance = euclidean_distance<Float>> class descriptor;` |
 
-## Real Failure Demo
-
-**Severity: API BREAK / LOAD-TIME FAILURE**
+## abicheck command
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case87_default_template_arg_changed_app case87_default_template_arg_changed_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case87_default_template_arg_changed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case87_default_template_arg_changed/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# ./app_v1: symbol lookup error: undefined symbol: descriptor<float, minkowski_distance<float>>::dimension()
+g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so \
+  --ast-frontend clang -H old=v1.h -H new=v2.h --lang c++
 ```
 
-## Why distinct from case32
+## Expected abicheck finding
 
-case32 covers *function* default parameter values, which are resolved at
-the call site and never affect mangling — a source-only break (verdict
-API_BREAK; old binaries keep working). case87 covers *template* default
-arguments, which ARE part of the substituted type and DO affect
-mangling — a binary break (verdict BREAKING; old binaries fail to link
-against a v2-only build). Different outcome, opposite mechanism, same
-English phrase ("default value changed"). Easy to confuse without a
-dedicated case.
+```text
+Verdict: BREAKING (exit 4)
 
-## How abicheck catches it
+- default_template_arg_changed: Template instantiation 'descriptor'
+  substitutes to different arguments than its surviving sibling
+  'descriptor'. Consistent with a change to a default template argument
+  in the declaring header: consumer source compiles unchanged, but the
+  substituted mangled symbol differs.
+  (float, mylib::minkowski_distance<float> -> float, mylib::euclidean_distance<float>)
+  > Consumers built against the old default reference a symbol that no
+    longer exists. Unlike function default parameter changes (NO_CHANGE),
+    template default arguments ARE part of the substituted type and
+    affect mangling.
 
-The diff produces `func_removed` for the v1-mangled constructor symbol
-and `func_added` for the v2-mangled one. The new
-`default_template_arg_changed` detector correlates them when the
-unqualified function name is identical and the substituted template
-argument differs only in the inner-type chain. The grouped finding
-points to the header line where the default was changed so the report
-explains *why* the symbols differ.
-
-## Real-world reference
-
-`cpp/oneapi/dal/algo/knn/common.hpp`:
-
-```cpp
-template <typename Float = float,
-          typename Method = method::by_default,
-          typename Task = task::by_default,
-          typename Distance = oneapi::dal::minkowski_distance::descriptor<Float>>
-class descriptor;
+- instantiation_missing_from_binary / func_removed (per instantiation):
+  the old library's descriptor<float, minkowski_distance<float>> symbols
+  are gone; only descriptor<float, euclidean_distance<float>> ships in v2.
 ```
 
-Any change to the default for `Method`, `Task`, or `Distance` re-mangles
-every explicit instantiation that didn't override that argument.
+## Minimum evidence
+
+`min_evidence: L2` — the raw symbol diff shows an unrelated-looking
+add/remove pair (old mangled name gone, new one added); recovering the
+*template's default argument* fact needs the public header AST, since
+`default_template_arg_changed`'s detector demangles `Function.mangled` to
+recover the template-argument-embedded name and correlates it against the
+default declared in the header. `castxml` is the documented default header
+backend; a clang-based AST frontend is a supported alternative that reaches
+the same evidence.
+
+## Why abicheck catches it
+
+`detect_default_template_arg_changed` (`abicheck/diff_cpp_patterns.py`)
+demangles each removed/added function's mangled name to recover its
+substituted template arguments, groups instantiations by their unqualified
+template name, and flags a surviving sibling whose only difference is the
+substituted-default-argument slot — the header AST confirms which
+parameter actually carries a default, distinguishing this from an
+unrelated overload change.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** app instantiates `descriptor<float>` using v1's default
+(`minkowski_distance<float>`); v2's library only ships the
+`euclidean_distance<float>` instantiation.
+
+```bash
+# Build old library + app
+g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo.so
+g++ -g -std=c++17 -I. app.cpp -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → dim = 0
+
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol:
+#   _ZNK5mylib10descriptorIfNS_18minkowski_distanceIfEEE9dimensionEv
+```
+
+**Why CRITICAL:** the app's own source (`mylib::descriptor<float> d;`)
+never changed and recompiles cleanly against either header — the failure
+only shows up as a runtime unresolved-symbol error against a library built
+from the other header's default.
+
+## Safe redesign
+
+Never change a template's default argument once instantiations of it have
+shipped — it's part of the substituted type, not a source-only convenience.
+Either keep the old default and add an explicitly-named alias for the new
+behavior (`descriptor_euclidean<Float>`), or bump the SONAME/major version
+so old and new defaults can never mix in the same deployment.
+
+**Real-world example:** oneDAL's `cpp/oneapi/dal/algo/knn/common.hpp`
+declares `descriptor<Float, Method, Task, Distance = ...>` with several
+defaulted template parameters; changing any one of them re-mangles every
+explicit instantiation that didn't override that argument.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+Not independently re-verified in this environment (`abidiff` unavailable
+here) — see case02's parameter-type-change case for a documented `abidiff`
+exit-code comparison.

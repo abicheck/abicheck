@@ -1,49 +1,57 @@
 # Case 10: Return Type Change
 
-**Category:** Symbol API | **Verdict:** 🟡 ABI CHANGE (exit 4)
+**Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
-> **Note on abidiff 2.4.0:** Returns exit **4**. Semantically breaking — on
-> x86-64, `int` is returned in the lower 32 bits of `rax`; `long` uses all 64 bits.
-> Old callers read only the lower 32 bits of `rax` as a signed int, producing garbage for large values.
+## Verdict and consumer impact
 
-## What breaks
-Callers compiled against v1 truncate the return value to 32 bits. For counts above
-`INT_MAX`, the result is wrong or negative. This is a silent data corruption bug.
+Callers compiled against v1 expect `get_count()` to return an `int` in the
+lower 32 bits of `rax`; v2 returns a `long` using the full 64 bits. Old
+callers read only the truncated lower half as a signed `int`, producing
+wrong (and for large values, negative) results — a silent data corruption
+bug with no crash.
 
-## Why abidiff catches it
-Reports `return type changed: type name changed from 'int' to 'long int'`.
-
-## Code diff
+## Old/new diff
 
 | v1.c | v2.c |
 |------|------|
 | `int get_count(void) { return 42; }` | `long get_count(void) { return 3000000000L; }` |
 
-## Reproduce manually
+## abicheck command
+
 ```bash
 gcc -shared -fPIC -g v1.c -o libfoo_v1.so
 gcc -shared -fPIC -g v2.c -o libfoo_v2.so
-abidw --out-file v1.xml libfoo_v1.so
-abidw --out-file v2.xml libfoo_v2.so
-abidiff v1.xml v2.xml
-echo "exit: $?"   # → 4
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
-Add a new function with the new return type (e.g., `get_count_ex()` returning `long`)
-and deprecate the old one. Change the SONAME on the major version bump when the old
-symbol is eventually removed.
+## Expected abicheck finding
 
-## Real-world example
-`ftell()` → `ftello()` (returns `off_t` instead of `long`) is the classic example of
-this class of change in the C standard library — a new function was introduced instead
-of changing the old one.
+```text
+Verdict: BREAKING (exit 4)
 
-## Real Failure Demo
+- func_return_changed: Return type changed: get_count (int -> long int)
+  > Callers expect the old return type layout in registers/stack;
+    misinterpretation causes data corruption.
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's subprogram entry (`DW_AT_type` on `get_count`)
+records the return type for both versions, so `-g` alone is enough to
+detect the change; no public headers required.
+
+## Why abicheck catches it
+
+DWARF records each function's return type; abicheck diffs the two
+functions' return-type entries directly from debug info and flags the
+mismatch, no headers required.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-**Scenario:** app compiled with v1 (`get_count()` returns `int`) calls v2 which returns `long 3000000000` — truncated on read.
+**Scenario:** app compiled against v1 (`get_count()` returns `int`) calls
+v2, which returns `long 3000000000` — truncated on read.
 
 ```bash
 # Build v1 + app
@@ -52,15 +60,40 @@ gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
 ./app
 # → get_count() = 42   (v1 returns 42 — correct)
 
-# Swap in v2 (returns 3000000000L)
+# Swap in v2 (no recompile)
 gcc -shared -fPIC -g v2.c -o libfoo.so
 ./app
-# → get_count() = -1294967296   ← low 32 bits of 3000000000 = 0xB2D05E00, signed int = -1294967296
+# → get_count() = -1294967296
+# → WRONG RESULT: return type changed/truncated
 ```
 
-**Why CRITICAL:** On x86-64, `int` is returned in the lower 32 bits of `rax`; `long`
-uses all 64. The app reads only `eax` (lower 32 bits) as a signed int, interpreting a
-completely wrong value. Silent data corruption for any count above `INT_MAX`.
+**Why CRITICAL:** on x86-64, `int` is returned in the lower 32 bits of
+`rax`; `long` uses all 64. The app reads only `eax` (lower 32 bits) as a
+signed int, interpreting a completely wrong value — silent data corruption
+for any count above `INT_MAX`.
+
+## Safe redesign
+
+Add a new function with the new return type (e.g. `get_count_ex()`
+returning `long`) and deprecate the old one. Change the SONAME on the major
+version bump when the old symbol is eventually removed.
+
+**Real-world example:** `ftell()` → `ftello()` (returns `off_t` instead of
+`long`) is the classic example of this class of change in the C standard
+library — a new function was introduced instead of changing the old one.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+echo "exit: $?"   # → 4
+```
+
+> **Note on abidiff 2.4.0:** reports `return type changed: type name
+> changed from 'int' to 'long int'`, exit **4**. Semantically breaking —
+> old callers read only the lower 32 bits of the return register.
 
 ## References
 

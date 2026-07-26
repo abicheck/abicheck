@@ -16,6 +16,7 @@ Not every workflow here blocks a merge. Before assuming a red check means
 | `cli-interface-check.yml` | Yes, when the CLI surface changes | Diffs `dump_cli_surface.py` output old vs. new |
 | `dependency-review.yml` | Yes | GitHub's built-in dependency-review action |
 | `docs-pr.yml` | Yes, when `docs/**`/`mkdocs.yml` changes | |
+| `docs-review-triggers.yml` | No (informational) | Diffs the PR's changed files against every docs page's front-matter `depends_on` list (`scripts/check_docs_review_triggers.py`) and posts an `::notice::`/step-summary when they overlap — a nudge to re-check that page, never a merge blocker. |
 | `security.yml` | Yes | CodeQL + related static checks |
 | `ci.yml`'s `windows-msvc` job | No — `continue-on-error: true` | MSVC+PDB lane is still maturing; informational only |
 | `ci.yml`'s `heavy-parity-gate` → `libabigail-parity`/`abicc-parity` | Conditional | Only runs when `abicheck/**`, `tests/**`, `examples/**`, or `.github/workflows/**` changed (path-filtered via `dorny/paths-filter`) |

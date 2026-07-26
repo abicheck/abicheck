@@ -61,6 +61,43 @@ via the `merge` path): `abicheck_inputs/` (Flow-2 build-dropped facts pack),
 `compile_commands.json` (L3 build context), `install_manifest.txt` (installed
 public-header set), and `.abicheck.yml` (risk/cross-check config).
 
+## README template (abicheck-first)
+
+A per-case `README.md` should lead with **abicheck**, not a competing tool —
+readers come here to learn what abicheck reports, and a reproduction using
+`abidiff`/`abidw` alone (with no abicheck command anywhere in the page) was
+a real recurring pattern in the older cases (a documentation review flagged
+it; `case01`/`case02`/`case07` were rewritten as the reference examples).
+Section order:
+
+1. **Verdict and consumer impact** — what breaks for a real consumer, one
+   paragraph.
+2. **Old/new diff** — the minimal source change, usually a small table.
+3. **abicheck command** — the actual `abicheck compare ...` invocation
+   (built + run against the case's real fixtures, not paraphrased) at the
+   evidence level the case actually needs — see `min_evidence` below;
+   don't pass `-H`/headers if the ground-truth `min_evidence` is `L0`/`L1`.
+4. **Expected abicheck finding** — the verdict, exit code, and the specific
+   `ChangeKind`(s) abicheck reports, condensed from a real run (not the
+   full report dump).
+5. **Minimum evidence** — the case's `ground_truth.json` `min_evidence`
+   value and a sentence on why that's the floor (what artifact/layer
+   carries the fact abicheck needs).
+6. **Why abicheck catches it** — one paragraph on the underlying mechanism
+   (which parser/evidence layer surfaces the fact).
+7. **Runtime failure demonstration** — the existing "build v1+app, swap in
+   v2, observe the crash/corruption" demo.
+8. **Safe redesign** — how to avoid the break, plus a real-world example if
+   one is known.
+9. **Cross-tool comparison** — `abidiff`/ABICC reproduction, kept as
+   context *after* the abicheck-first sections above, not instead of them.
+
+Not every case needs every section verbatim (e.g. a `COMPATIBLE_WITH_RISK`
+case's "consumer impact" is a risk description, not a hard break) — keep
+the order, adapt the content. This template isn't retroactively applied to
+the whole catalog; existing cases migrate opportunistically, same as the
+front-matter rollout in `docs/AGENTS.md`.
+
 ## Ground truth
 
 The authoritative expected verdicts live in `ground_truth.json` at the

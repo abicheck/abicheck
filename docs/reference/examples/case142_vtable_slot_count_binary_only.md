@@ -10,9 +10,19 @@
 | **Detected `ChangeKind`s** | `vtable_slot_count_changed` |
 | **Source files** | `examples/case142_vtable_slot_count_binary_only/` |
 
-**Category:** C++ Layout | **Verdict:** BREAKING
+**Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
-## What this case is about
+## Verdict and consumer impact
+
+A new virtual function is inserted **between** two existing ones. Under the
+Itanium C++ ABI a class's vtable is an ordered array of slots; inserting a
+virtual in the middle shifts every later slot down by one. A consumer
+compiled against v1 dispatches `perimeter()` through a *fixed slot index*
+— after the insertion that index now points at `rotate()` instead. Every
+prebuilt binary that calls a virtual method declared after the insertion
+point silently misdispatches, with no crash to signal it.
+
+## Old/new diff
 
 ```cpp
 // v1                              // v2
@@ -24,76 +34,94 @@ struct Shape {                     struct Shape {
 };                                 };
 ```
 
-A new virtual function is inserted **between** two existing ones. Under the
-Itanium C++ ABI a class's vtable is an ordered array of slots; inserting a
-virtual in the middle shifts every later slot down by one. A consumer compiled
-against v1 dispatches `perimeter()` through a *fixed slot index* — after the
-insertion that index now points at `rotate()`.
-
-## Why this case exists: binary-only (L0) detection
-
-The point of this case is **not** that abicheck catches a vtable change — many
-cases do that from DWARF/headers. The point is that abicheck catches it from the
-**ELF symbol table alone**, with no debug info and no headers.
-
-The Itanium ABI emits a `_ZTV5Shape` ("vtable for Shape") object whose layout is
-`[offset-to-top, typeinfo*, slot0, slot1, …]`. Adding one virtual grows that
-object by exactly one pointer (8 bytes on LP64). abicheck's binary-only layout
-detector (`diff_elf_layout.py`) reads the `st_size` of the `_ZTV` symbol on both
-sides and infers the slot-count delta — closing the blind spot a pure
-symbol-*name* diff would have (no mangled name need change).
-
-```
-_ZTV5Shape size:  v1 = 5 words (offset-to-top + typeinfo + 3 slots)
-                  v2 = 6 words (one extra slot)   -> ~3 → ~4 virtual slots
-```
-
-## What abicheck detects
-
-- **`vtable_slot_count_changed`** — `_ZTV5Shape` grew by one pointer; a virtual
-  method was added, removed, or reordered. **Evidence tier L0** (ELF symbol size
-  only — works on a fully stripped `.so`). Confidence is `MEDIUM` because the
-  slot count is inferred from size, not read from a vtable dump.
-
-When debug info or headers *are* present, the same change is additionally
-reported as `type_vtable_changed` / `virtual_method_added` (L1/L2) — but the L0
-signal is what makes this detectable on a stripped production binary.
-
-**Overall verdict: BREAKING**
-
-## How to reproduce (stripped, binary-only)
+## abicheck command
 
 ```bash
-g++ -shared -fPIC -g v1.cpp -o libv1.so
-g++ -shared -fPIC -g v2.cpp -o libv2.so
-strip --strip-debug libv1.so libv2.so          # remove all DWARF
-
-python3 -m abicheck.cli dump libv1.so -o /tmp/v1.json
-python3 -m abicheck.cli dump libv2.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → BREAKING: vtable_slot_count_changed (_ZTV5Shape)
+g++ -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g v2.cpp -o libfoo_v2.so
+strip --strip-debug libfoo_v1.so libfoo_v2.so   # remove all DWARF
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- vtable_slot_count_changed: Vtable for 'Shape' changed size: 48 -> 56
+  bytes (~4 -> ~5 virtual slots). A virtual method was added, removed, or
+  reordered; existing binaries dispatch through fixed vtable offsets and
+  will call the wrong slot. Detected from the ELF symbol size without
+  debug info.
+
+Additions:
+- func_added: New public function: Shape::rotate()
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — no DWARF, no headers. This case exists specifically to
+show binary-only detection: the point isn't that abicheck catches a vtable
+change (many cases do that from DWARF/headers), it's that it catches this
+one from the **ELF symbol table alone**, on a fully stripped `.so`.
+
+## Why abicheck catches it
+
+The Itanium ABI emits a `_ZTV5Shape` ("vtable for Shape") object whose
+layout is `[offset-to-top, typeinfo*, slot0, slot1, …]`. Adding one virtual
+grows that object by exactly one pointer (8 bytes on LP64). abicheck's
+binary-only layout detector (`diff_elf_layout.py`) reads the `st_size` of
+the `_ZTV` symbol on both sides and infers the slot-count delta directly
+from that size change — closing the blind spot a pure symbol-*name* diff
+would have, since no mangled name needs to change for this break to occur.
+When debug info or headers *are* present, the same change is additionally
+reported as `type_vtable_changed`/`virtual_method_added` (L1/L2) with
+higher confidence; the L0 signal is what makes it detectable on a
+production binary with no debug info shipped.
+
+## Runtime failure demonstration
 
 **Severity: BREAKING / SILENT MISDISPATCH**
 
+**Scenario:** app calls `perimeter()` through a `Shape*`. The compiler
+emits a virtual call through a *fixed vtable slot index* (slot 1 under
+v1). Insert `rotate()` ahead of `perimeter()` in v2 and slot 1 now holds
+`rotate()`, so the same binary silently misdispatches.
+
 ```bash
+# Build old library + app
 g++ -shared -fPIC -g v1.cpp -o libshape.so
 g++ -g app.cpp -I. -L. -lshape -Wl,-rpath,. -o app
 ./app
-# perimeter() = 20 (expected 20)   ✓
+# → perimeter() = 20 (expected 20)
 
-g++ -shared -fPIC -g v2.cpp -o libshape.so       # insert rotate() ahead of perimeter()
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g v2.cpp -o libshape.so
 ./app
-# perimeter() = 99 (expected 20)   ✗  the call dispatched to rotate()
+# → perimeter() = 99 (expected 20)
+# → MISDISPATCH: vtable slot order changed
 ```
 
-## Mitigation
+**Why BREAKING:** `perimeter()`'s call site was compiled to invoke whatever
+sits at slot 1 of `Shape`'s vtable; under v2 that slot holds `rotate()`
+instead, and the app's binary has no way to know without recompiling
+against the v2 header.
 
-- Never insert or reorder virtual functions in a published polymorphic class;
-  append-only, and even then only with per-ABI review.
-- Prefer non-virtual extension points or explicitly versioned interfaces.
+## Safe redesign
+
+Never insert or reorder virtual functions in a published polymorphic
+class; append-only, and even then only with per-ABI review. Prefer
+non-virtual extension points or explicitly versioned interfaces.
+
+## Cross-tool comparison
+
+`abidiff` works from DWARF (via `abidw`) and would flag this from debug
+info the same way most struct/vtable cases in this catalog do — but it has
+no equivalent binary-only (stripped, no-DWARF) detection path; run against
+these stripped `.so`s, `abidw` has no type information to extract at all.
+abicheck's ELF-only `_ZTV` size heuristic is what makes this specific
+production scenario (a stripped release binary) detectable in the first
+place.
 
 ## References
 

@@ -10,7 +10,7 @@ _17 case(s)._ [← back to all examples](../index.md)
 | [case31_enum_rename](../case31_enum_rename.md) | Enum Member Rename | 🟠 API_BREAK | API Break |
 | [case32_param_defaults](../case32_param_defaults.md) | Parameter Default Value Changes (C++) | 🟠 API_BREAK | API Break |
 | [case34_access_level](../case34_access_level.md) | Access Level Changed | 🟠 API_BREAK | API Break |
-| [case35_field_rename](../case35_field_rename.md) | - Field Rename | 🟠 API_BREAK | API Break |
+| [case35_field_rename](../case35_field_rename.md) | Field Rename | 🟠 API_BREAK | API Break |
 | [case96_hidden_friend_removed](../case96_hidden_friend_removed.md) | Hidden Friend Operator Removed | 🟠 API_BREAK | API Break |
 | [case105_concept_tightening](../case105_concept_tightening.md) | Concept Tightening (C++20) | 🟠 API_BREAK | API Break |
 | [case106_ctor_became_explicit](../case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
@@ -18,9 +18,9 @@ _17 case(s)._ [← back to all examples](../index.md)
 | [case123_default_argument_removed](../case123_default_argument_removed.md) | Default Argument Removed | 🟠 API_BREAK | API Break |
 | [case124_header_constant_value_changed](../case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
 | [case125_class_became_final](../case125_class_became_final.md) | Class Became `final` | 🟠 API_BREAK | API Break |
-| [case148_xcheck_header_build_mismatch](../case148_xcheck_header_build_mismatch.md) | Header build-context mismatch (cross-source flagship) | 🟠 API_BREAK | API Break |
-| [case149_xcheck_odr_variant](../case149_xcheck_odr_variant.md) | ODR type variant (cross-source, L4 layout ↔ layout) | 🟠 API_BREAK | API Break |
+| [case148_xcheck_header_build_mismatch](../case148_xcheck_header_build_mismatch.md) | Header Build-Context Mismatch (Cross-Source Flagship) | 🟠 API_BREAK | API Break |
+| [case149_xcheck_odr_variant](../case149_xcheck_odr_variant.md) | ODR Type Variant (Cross-Source, L4 Layout ↔ Layout) | 🟠 API_BREAK | API Break |
 | [case156_public_macro_removed](../case156_public_macro_removed.md) | _public_macro_removed — Public macro removed | 🟠 API_BREAK | API Break |
-| [case157_inline_function_removed](../case157_inline_function_removed.md) | _inline_function_removed — Public inline function removed | 🟠 API_BREAK | API Break |
-| [case158_public_typedef_removed](../case158_public_typedef_removed.md) | _public_typedef_removed — Public typedef removed | 🟠 API_BREAK | API Break |
-| [case163_python_kwarg_renamed](../case163_python_kwarg_renamed.md) | Python-API break invisible to the C-ABI check | 🟠 API_BREAK | API Break |
+| [case157_inline_function_removed](../case157_inline_function_removed.md) | Inline Function Removed | 🟠 API_BREAK | API Break |
+| [case158_public_typedef_removed](../case158_public_typedef_removed.md) | Public Typedef Removed | 🟠 API_BREAK | API Break |
+| [case163_python_kwarg_renamed](../case163_python_kwarg_renamed.md) | Python Keyword Argument Renamed (Stub-Only API Break) | 🟠 API_BREAK | API Break |

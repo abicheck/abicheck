@@ -95,8 +95,16 @@ shape differs by tool:
 | `abi_estimate` | `{"status": "ok", "estimate": [...], "total_est_seconds": ...}` |
 | `abi_scan` | `{"status": "ok", "verdict": ..., "layers": [...], ...}` |
 
-The simplest client check is: `status == "error"` ⇒ failure; otherwise
-treat as success and parse the tool-specific payload. See
+The simplest client check has three outcomes, not two:
+
+```text
+status == "error"          → operation failed, see Error responses below
+status == "not_comparable" → abi_compare only; no verdict was produced
+otherwise                  → success, parse the tool-specific payload
+```
+
+`not_comparable` is not a success — it means old/new could not be compared
+under ADR-050 D2's contract, so there is no `verdict` field to read. See
 [Error responses](#error-responses) for the error shape and common causes.
 
 ### `abi_compare` — Compare two ABI surfaces
@@ -161,11 +169,16 @@ for the exhaustive, generated parameter list.
 | `API_BREAK` | 2 |
 | `BREAKING` | 4 |
 
-When `used_by` or `required_symbols` is given, `exit_code_scheme` becomes
-`"scoped"` and `exit_code` instead floors on the worst app/contract-scoped
-verdict (`BREAKING` → 4, `API_BREAK` → 2, else 0), overriding the legacy or
-severity scheme above — mirroring the CLI's `compare --used-by`/
-`--required-symbol(s)` behavior.
+When `used_by` or `required_symbols` is given, `exit_code` is computed from
+the worst app/contract-scoped verdict instead of the whole-surface verdict.
+Without any `severity_*` argument this uses the legacy floor
+(`BREAKING` → 4, `API_BREAK` → 2, else 0). With a `severity_*` argument
+present, it uses the severity-aware scheme instead — which can return `0`
+for a scoped `BREAKING` verdict under `severity_preset="info-only"` — the
+same legacy-vs-severity-aware choice as the unscoped case above, not an
+override of it. This mirrors the CLI's `compare --used-by`/
+`--required-symbol(s)` behavior. See the exact mapping in the
+[MCP Tools Reference](../reference/mcp-tools-reference.md#abi_compare).
 
 See [Exit Codes](../reference/exit-codes.md) for the full CLI matrix.
 

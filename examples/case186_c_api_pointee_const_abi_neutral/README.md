@@ -1,76 +1,107 @@
-# Case 186: C API pointee const-qualification is ABI-neutral
+# Case 186: C API Pointee const-Qualification Is ABI-Neutral
 
-**Category:** No Change | **Verdict:** ✅ NO_CHANGE (exit 0)
+**Category:** No Change | **Verdict:** ✅ NO_CHANGE
 
-## What changes
+## Verdict and consumer impact
 
 `send_buffer()`'s parameter changes from `char *` to `const char *`. The
-pointer itself is still one machine word, passed the same way, with the same
-calling convention — only the pointee's mutability contract tightened (the
-callee now promises not to write through the pointer).
+pointer itself is still one machine word, passed the same way, with the
+same calling convention — only the pointee's mutability contract tightened
+(the callee now promises not to write through the pointer). Every existing
+call site — whether it passes a mutable or already-const buffer — still
+compiles and links unchanged against v2. No consumer action is required.
 
-**Deliberately scoped to a function parameter, not a struct field.** A
-parameter is a pure input-direction contract: `char *` implicitly converts to
-`const char *`, so *every* existing call site — whether it passes a mutable
-or already-const buffer — still compiles and links unchanged against v2.
-Adding `const` to a **public struct field** doesn't have that one-directional
-guarantee: code that writes through the field (`buf.data[0] = 'x'`) would
-stop compiling against a `const`-qualified field, which is a real
-source-level break despite the identical binary layout. That's a
-`char *` → `const char *` FP case, but scoped to a struct field it wouldn't
-be safely `NO_CHANGE` — see `tests/test_libuv_private_type_churn.py`'s
-`test_private_struct_field_pointee_const_change_is_neutral`, which
-deliberately uses a *private* struct field precisely to sidestep this
-direct-mutation hazard.
+## Old/new diff
 
-## Why this is not a break
+| v1.h | v2.h |
+|------|------|
+| `void send_buffer(char *data);` | `void send_buffer(const char *data);` |
 
-A mechanical type-spelling diff sees `char *` and `const char *` as
-different strings and would report a `FUNC_PARAMS_CHANGED` on `send_buffer`
-— normally `BREAKING`, since a changed parameter type is usually a real
-ABI/calling convention change.
-
-But adding `const` to what a pointer points to changes neither the pointer's
-size, its position in the argument list, nor how it's passed at the ABI
-level — it only narrows what the *callee* promises to do with the data the
-caller already owns. `abicheck/name_classification.py`'s
-`cv_qualifiers_only_differ()` recognizes this specific shape (a top-level
-`*`/`&` on both sides, differing only by `const`/`volatile` on or behind it)
-and the call site in `diff_symbols.py` (`_params_differ`) skips emitting a
-finding entirely when it fires — this is fully suppressed, not merely
-downgraded to a risk tier.
+## abicheck command
 
 ```bash
-abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
-# verdict: NO_CHANGE (exit 0)
+gcc -shared -fPIC -g v1.c -o libv1.so
+gcc -shared -fPIC -g v2.c -o libv2.so
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --ast-frontend clang
 ```
 
-This mirrors real upstream churn: Wayland's `wl_display` accessor functions
-picked up pointee `const` on their parameters between releases without an
-actual ABI break, and conda-forge's libuv 1.5x packaging campaign hit exactly
-this false-positive class. See `tests/test_const_pointer_abi_neutral.py`
-(`test_param_pointee_const_added_is_not_breaking`,
-`test_return_pointee_const_added_is_not_breaking`) for the unit-level
-equivalent.
+## Expected abicheck finding
 
-## Negative twin: a real pointee type change stays BREAKING
+```text
+Verdict: NO_CHANGE (exit 0)
 
-This suppression is narrow — it fires only when the two spellings differ by
-`const`/`volatile` alone. Changing what a pointer points to (`char *` →
-`wchar_t *`, or `char *` → `char **`) is a genuine ABI-relevant type change
-and is reported normally. See
+_No ABI changes detected._
+```
+
+`func_params_changed` is expected *not* to fire here (it would for an
+ordinary parameter-type change) — the suppression is the point of the case.
+
+## Minimum evidence
+
+`min_evidence: L2` — a mechanical type-spelling diff would need only DWARF
+to see `char *` vs `const char *` as differing strings and misreport a
+break; the public header AST is what lets abicheck recognize the top-level
+`*`-plus-`const`-only shape and suppress the finding correctly rather than
+merely downgrade it. castxml is the documented default backend for this
+evidence layer; clang (`--ast-frontend clang`, used above) is a supported
+alternative AST frontend for hosts without castxml installed.
+
+## Why abicheck catches it
+
+`abicheck/name_classification.py`'s `cv_qualifiers_only_differ()` recognizes
+a type-pair shape where both sides have a top-level `*`/`&` and differ only
+by `const`/`volatile` on or behind it. The call site in `diff_symbols.py`
+(`_params_differ`) skips emitting a finding entirely when it fires — this is
+fully suppressed, not merely downgraded to a risk tier — because a `char *`
+argument implicitly converts to `const char *` at every call site, so no
+caller can fail to link or misbehave.
+
+## Runtime failure demonstration
+
+**Severity: none — verified no observable effect.**
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g v1.c -o libv1.so
+gcc -g app.c -L. -lv1 -Wl,-rpath,. -o app
+./app
+# → sent 5 bytes
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g v2.c -o libv1.so
+./app
+# → sent 5 bytes   (identical output, no crash, no misread argument)
+```
+
+The pointer is still passed in the same register with the same width; the
+callee's added promise not to write through it changes nothing observable
+to a caller compiled against the old signature.
+
+## Safe redesign
+
+None needed — this is the safe pattern. Adding `const` to a public struct
+**field**, by contrast, is not automatically safe: code that writes through
+the field (`buf.data[0] = 'x'`) would stop compiling against a
+`const`-qualified field, a real source-level break despite identical binary
+layout — that hazard is exactly why this case is scoped to a function
+parameter rather than a struct field.
+
+**Real-world example:** Wayland's `wl_display` accessor functions picked up
+pointee `const` on their parameters between releases without an actual ABI
+break, and conda-forge's libuv 1.5x packaging campaign hit exactly this
+false-positive class — the motivating case for this suppression.
+
+## Cross-tool comparison
+
+A naive AST- or symbol-spelling diff (including some `abidiff`
+configurations) reports this as a signature change requiring investigation,
+since `char *` and `const char *` are different type strings; abicheck's
+header-aware `cv_qualifiers_only_differ()` check is what tells the two
+apart from a real pointee-type change (see
 [`case46_pointer_chain_type_change`](../case46_pointer_chain_type_change/README.md)
-for that non-suppressed baseline — don't confuse the two.
+for the non-suppressed baseline).
 
-## How to reproduce
+## References
 
-```bash
-cmake -S examples -B /tmp/abicheck-examples-build
-cmake --build /tmp/abicheck-examples-build --target \
-    case186_c_api_pointee_const_abi_neutral_v1 case186_c_api_pointee_const_abi_neutral_v2
-
-python3 -m abicheck.cli compare \
-    /tmp/abicheck-examples-build/case186_c_api_pointee_const_abi_neutral/libv1.so \
-    /tmp/abicheck-examples-build/case186_c_api_pointee_const_abi_neutral/libv2.so \
-    --header old=v1.h --header new=v2.h
-```
+- [`tests/test_const_pointer_abi_neutral.py`](../../tests/test_const_pointer_abi_neutral.py) — unit-level equivalent
+- [`tests/test_libuv_private_type_churn.py`](../../tests/test_libuv_private_type_churn.py) — the struct-field negative case

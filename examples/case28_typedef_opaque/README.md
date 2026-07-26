@@ -1,109 +1,142 @@
-# Case 28 — Typedef and Opaque Type Changes
+# Case 28: Typedef and Opaque Type Changes
 
-**Category:** Type System | **Verdict:** 🔴 BREAKING (Scenario 1: typedef_base_changed) / 🟡 API_BREAK (Scenarios 2-3)
+**Category:** Type System | **Verdict:** 🔴 BREAKING
 
-## What changes
+## Verdict and consumer impact
 
-| Symbol / Type | v1 | v2 | Effect |
-|---|---|---|---|
-| `dim_t` | `typedef int dim_t` | `typedef long dim_t` | Size 4 → 8 bytes (LP64) |
-| `handle_t` | `typedef unsigned int handle_t` | *(removed)* | Source break |
-| `struct Context` | Complete (id, flags, name[32]) | Forward declaration only | Opaque — no stack alloc |
+Three related changes ship together in this header: `dim_t`'s underlying
+type changes (`int` → `long`), the `handle_t` typedef is removed (so
+`create_handle()`'s return type changes from `handle_t` to plain
+`unsigned int`), and `struct Context`'s full definition is hidden behind a
+forward declaration. Any caller compiled against v1 that treats
+`get_dimension()`'s result as a 4-byte `int` reads a truncated/misinterpreted
+value once the library is upgraded — the underlying representation grew to
+8 bytes. Recompilation is required either way: the typedef and return-type
+changes are binary-incompatible, and code using the now-removed `handle_t`
+name or stack-allocating `Context` won't even compile against v2.
 
-## Why this IS a source/ABI break (details depend on usage)
+## Old/new diff
 
-1. **TYPEDEF_BASE_CHANGED (`dim_t`):** The return type of `get_dimension()` changes from
-   `int` (4 bytes, returned in lower 32 bits of `%eax`) to `long` (8 bytes, full `%rax`).
-   Callers compiled against v1 treat the return as `int` and may truncate or misinterpret
-   the value. If `dim_t` is used in structs, their layout changes silently.
+| v1.h | v2.h |
+|------|------|
+| `typedef int dim_t;` | `typedef long dim_t;` |
+| `typedef unsigned int handle_t;` `handle_t create_handle(void);` | *(typedef removed)* `unsigned int create_handle(void);` |
+| `struct Context { int id; int flags; char name[32]; };` | `struct Context;` *(forward declaration only)* |
 
-2. **TYPEDEF_REMOVED (`handle_t`):** Code using `handle_t` will not compile against v2.
-   At the binary level `create_handle()` still exists (returns `unsigned int`), so
-   already-compiled binaries continue to link. This is a **source-only** break.
-
-3. **TYPE_BECAME_OPAQUE (`struct Context`):** v1 exposes the full struct definition,
-   allowing stack allocation and direct field access. v2 provides only a forward
-   declaration. Existing binaries that stack-allocate `Context` or access its fields
-   inline will silently corrupt memory if the internal layout ever changes.
-
-## Code diff
-
-```diff
--typedef int dim_t;
-+typedef long dim_t;
-
--typedef unsigned int handle_t;
-+/* removed */
-
--struct Context {
--    int id;
--    int flags;
--    char name[32];
--};
-+struct Context;   /* opaque forward declaration */
-```
-
-## Real Failure Demo
-
-**Severity: HIGH**
-
-**Scenario:** Compile app against v1 headers, then swap in the v2 `.so` without recompiling.
-
-```bash
-# Build v1 library + app
-gcc -shared -fPIC -g v1.c -o libfoo.so
-gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
-./app
-# → Scenario 1 — dim_t base type change:
-# →   sizeof(dim_t) at compile time = 4 (expected 4 for int)
-# →   get_dimension(7) = 7
-# →   If v2 lib loaded: dim_t is long (8 bytes) but caller expects int (4 bytes)
-# →
-# → Scenario 2 — handle_t typedef removed:
-# →   create_handle() = 42
-# →   Binary still works (function exists), but recompilation against v2.h fails
-# →
-# → Scenario 3 — struct Context became opaque:
-# →   sizeof(struct Context) at compile time = 40
-# →   Stack-allocated Context: id=99 flags=0x1 name="stack-ctx"
-# →   With v2 header this code would NOT compile (incomplete type)
-
-# Swap in v2 library (no recompile of app)
-gcc -shared -fPIC -g v2.c -o libfoo.so
-./app
-# → Output looks identical — but dim_t return is now 8 bytes wide;
-# → the caller only reads 4 bytes. On LP64 this happens to work for
-# → small values but is technically undefined behavior.
-```
-
-**Source break verification** (recompilation against v2 fails):
-
-```bash
-gcc -g app.c -I. -include v2.h -L. -lfoo -Wl,-rpath,. -o app_v2 2>&1
-# → error: 'handle_t' undeclared
-# → error: invalid application of 'sizeof' to incomplete type 'struct Context'
-# → error: variable 'local' has initializer but incomplete type
-```
-
-## Reproduce with abicheck
+## abicheck command
 
 ```bash
 gcc -shared -fPIC -g v1.c -o libfoo_v1.so
 gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- typedef_base_changed: Typedef base type changed: dim_t (int -> long int)
+  > Underlying type changed; old code using the typedef operates on wrong
+    representation.
+  Affected symbols: get_dimension
+- func_return_changed: Return type changed: create_handle (handle_t -> unsigned int)
+  > Callers expect the old return type layout in registers/stack;
+    misinterpretation causes data corruption.
+- typedef_removed: Typedef removed: handle_t (unsigned int)
+  > Old code using the typedef name won't compile; binary impact depends
+    on usage.
+
+Quality issues:
+- imported_symbol_removed: Imported symbol no longer required: memset@GLIBC_2.2.5
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF already carries enough to reach BREAKING here:
+`dim_t`'s `DW_AT_type` changes from `int` to `long` in v2's debug info, and
+`create_handle`'s `DW_TAG_subprogram` return type changes accordingly, both
+visible without public headers. The `struct Context` opacity transition
+itself (full definition → forward declaration) is a *header-surface* fact
+rather than a binary-layout one — the internal struct definition still
+exists inside `v2.c` and is fully described in DWARF — so confirming it
+specifically needs header/AST evidence (abicheck's default AST backend is
+castxml; clang is a supported alternative frontend via `--ast-frontend
+clang`). The typedef/return-type changes above are enough on their own to
+reach the correct BREAKING verdict at L1.
+
+## Why abicheck catches it
+
+DWARF's type-die graph links `dim_t`'s typedef DIE to its underlying-type
+DIE for both binaries; abicheck compares the resolved underlying type
+directly and reports a size/representation change. The same graph exposes
+each function's return-type DIE, catching the `handle_t` → `unsigned int`
+change on `create_handle`, and the disappearance of the `handle_t` typedef
+DIE itself between the two snapshots.
+
+## Runtime failure demonstration
+
+**Severity: HIGH**
+
+**Scenario:** compile app against v1 headers (`dim_t` = `int`), swap in the
+v2 `.so` without recompiling.
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g v1.c -o libfoo.so
+gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → get_dimension(5) = 5
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g v2.c -o libfoo.so
+./app
+# → get_dimension(5) = 6
+# → WRONG RESULT: typedef underlying type changed (int -> long)
+```
+
+**Why HIGH:** v2's `get_dimension` returns a `long` (`axis + 1`, deliberately
+offset here to make the mismatch visible) but the app still reads the
+result as a 4-byte `int`; on this LP64 platform the truncated value happens
+to differ from the caller's expectation, demonstrating that the ABI
+contract for the return value's width and representation no longer matches
+what the caller was compiled against.
+
+**Source break verification** (recompiling against v2 fails outright, for
+the two purely source-level issues):
+
+```bash
+gcc -g app.c -I. -include v2.h -L. -lfoo -Wl,-rpath,. -o app_v2
+# → error: use of undeclared identifier 'handle_t' (wherever it's referenced)
+# → error: variable has incomplete type 'struct Context' (stack allocation)
+```
+
+## Safe redesign
+
+- **Typedef base change:** never change the underlying type of a public
+  typedef; introduce a new typedef (e.g. `dim64_t`) and deprecate the old
+  one instead.
+- **Typedef removal:** keep the old typedef as an alias
+  (`typedef unsigned int handle_t;`) until the next major SONAME bump.
+- **Opaque transition:** design the public API with an opaque pointer from
+  the start (full struct definition lives only in an internal header), so
+  there's never a compatible-looking "complete struct" period for callers
+  to depend on.
+
+**Real-world example:** dimension/size typedefs in numeric and graphics
+libraries (e.g. widening an index type from 32-bit to 64-bit for large
+datasets) are a recurring source of this exact break — silent truncation
+instead of a compile error, because the symbol name and calling convention
+otherwise look unchanged.
+
+## Cross-tool comparison
+
+```bash
 abidw --out-file v1.xml libfoo_v1.so
 abidw --out-file v2.xml libfoo_v2.so
 abidiff v1.xml v2.xml
 echo "exit: $?"
 ```
-
-## How to fix
-
-- **typedef base change:** Never change the underlying type of a public typedef.
-  Introduce a new typedef (`dim64_t`) and deprecate the old one.
-- **typedef removal:** Keep the old typedef as an alias (`typedef unsigned int handle_t;`)
-  until the next major SONAME bump.
-- **opaque transition:** Provide the full struct definition in a separate "internal" header
-  and only expose the opaque pointer in the public API from the start.
 
 ## References
 

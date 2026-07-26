@@ -11,8 +11,8 @@ _9 case(s)._ [← back to all examples](../index.md)
 | [case16_inline_to_non_inline](../case16_inline_to_non_inline.md) | Inline → Non-inline (ODR / Symbol Appearance) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case25_enum_member_added](../case25_enum_member_added.md) | Enum Member Added | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case26b_union_field_added_compatible](../case26b_union_field_added_compatible.md) | Union Field Added (No Size Change) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case47_inline_to_outlined](../case47_inline_to_outlined.md) | Inline Function Moved to Outlined | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case47_inline_to_outlined](../case47_inline_to_outlined.md) | Inline Method Moved Out-of-Line | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case61_var_added](../case61_var_added.md) | Global Variable Added | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case62_type_field_added_compatible](../case62_type_field_added_compatible.md) | Type Field Added (Compatible — Opaque Struct) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case99_experimental_graduated](../case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case99_experimental_graduated](../case99_experimental_graduated.md) | Experimental to Stable Graduation (Compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case185_inherited_override_reuses_slot](../case185_inherited_override_reuses_slot.md) | Inherited override reuses the base's vtable slot | 🟢 COMPATIBLE | Addition (Compatible) |

@@ -57,6 +57,8 @@ from .model import (
     is_non_abi_surface_type as _is_non_abi_surface_type,
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
+from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
+from .type_reachability import directly_referenced_stdlib_types
 
 
 def _field_type_genuinely_changed(
@@ -113,14 +115,34 @@ def _exported_elf_symbol_names(snap: AbiSnapshot, *, symbol_types: Collection[st
     )
 
 
-def _is_abi_surface_type(t: RecordType, *, exclude_stdlib: bool) -> bool:
+def _is_abi_surface_type(
+    t: RecordType, *, exclude_stdlib: bool, directly_referenced: frozenset[str] = frozenset()
+) -> bool:
     """True if record *t* is part of the inspected library's ABI surface.
 
     Shared by every type-level detector (records, unions, field/kind/reserved
     diffs) so std::/anonymous filtering (FP-1/FP-2) is applied consistently and
     cannot be bypassed via an alternate map-construction path.
+
+    *directly_referenced* (status-review item 3, ``type_reachability.py``)
+    un-filters a std:: record a public, non-stdlib declaration names directly
+    (vs. only reachable via template-instantiation internals) -- its layout
+    changes are a real break (e.g. a libstdc++ dual-ABI flip). Keys on
+    ``qualified_name or name``, not ``name`` alone (see ``type_reachability``'s
+    identity fix for why); FP-2's anonymous-marker check keeps the bare name.
     """
-    return not _is_non_abi_surface_type(t.name, exclude_stdlib_namespaces=exclude_stdlib)
+    identity = t.qualified_name or t.name
+    is_stdlib = identity.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)
+    if exclude_stdlib and is_stdlib and identity not in directly_referenced:
+        return False
+    return not _is_non_abi_surface_type(t.name, exclude_stdlib_namespaces=False)
+
+
+def _directly_referenced(old: AbiSnapshot, new: AbiSnapshot) -> frozenset[str]:
+    """Stdlib record identities directly referenced from either snapshot's
+    public surface (status-review item 3) -- union of both sides so a type
+    used directly in only one of old/new still lifts the filter for it."""
+    return directly_referenced_stdlib_types(old) | directly_referenced_stdlib_types(new)
 
 
 def _has_type_evidence(snap: AbiSnapshot) -> bool:
@@ -199,8 +221,9 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # Include ALL types (including unions) for size/alignment/base/vtable checks.
     # TYPE_FIELD_* for unions is skipped below — handled by _diff_unions() instead.
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl))
-    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl))
+    directly_referenced = _directly_referenced(old, new)
+    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
+    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
     # RD2-5: don't manufacture phantom TYPE_REMOVED when the new side is stripped.
     suppress_removed = _removals_are_unconfirmed(old, new)
 
@@ -1236,8 +1259,9 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_unions = _build_type_map(t for t in old.types if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
-    new_unions = _build_type_map(t for t in new.types if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
+    directly_referenced = _directly_referenced(old, new)
+    old_unions = _build_type_map(t for t in old.types if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
+    new_unions = _build_type_map(t for t in new.types if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
     # Same legacy-snapshot cv-fact concern as _diff_type_field_pair (Codex
     # review, PR #582).
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
@@ -1497,8 +1521,9 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = _build_type_map(t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
-    new_map = _build_type_map(t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
+    directly_referenced = _directly_referenced(old, new)
+    old_map = _build_type_map(t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
+    new_map = _build_type_map(t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)
@@ -1548,8 +1573,9 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     """
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl))
-    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl))
+    directly_referenced = _directly_referenced(old, new)
+    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
+    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)
@@ -1612,8 +1638,9 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl))
-    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl))
+    directly_referenced = _directly_referenced(old, new)
+    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
+    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)
@@ -1664,8 +1691,9 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl))
-    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl))
+    directly_referenced = _directly_referenced(old, new)
+    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
+    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)
@@ -1741,8 +1769,9 @@ def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect field renames: same offset+type, different name."""
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = _build_type_map(t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
-    new_map = _build_type_map(t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
+    directly_referenced = _directly_referenced(old, new)
+    old_map = _build_type_map(t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
+    new_map = _build_type_map(t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)
@@ -1836,8 +1865,9 @@ def _diff_type_kind_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect struct↔union kind changes (ABICC: StructToUnion / DataType_Type)."""
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl))
-    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl))
+    directly_referenced = _directly_referenced(old, new)
+    old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
+    new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)
@@ -1871,8 +1901,9 @@ def _diff_reserved_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = _build_type_map(t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
-    new_map = _build_type_map(t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
+    directly_referenced = _directly_referenced(old, new)
+    old_map = _build_type_map(t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
+    new_map = _build_type_map(t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, directly_referenced=directly_referenced))
 
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)

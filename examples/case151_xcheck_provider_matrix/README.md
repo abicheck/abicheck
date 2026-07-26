@@ -1,35 +1,106 @@
-# case151 — Provider-agreement matrix (corroboration grows with evidence)
+# Case 151: Provider-Agreement Matrix (Corroboration Grows With Evidence)
 
-**Verdict:** 🟢 COMPATIBLE · **Cross-check:** `private_header_leak` ·
-**Mode:** single-release audit · **Evidence tier:** L2
+**Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
-## What it demonstrates
+## Verdict and consumer impact
 
-"Better results from the *combination*" as a measurable output property. The same
-`PRIVATE_HEADER_LEAK` finding is recorded with a **different provider list**
-depending on how much evidence is available — the §6.8 provider-agreement matrix.
+Single-release audit: one build's evidence checked against itself, no
+baseline. abicheck's verdict is `COMPATIBLE` on both fixtures below — the
+ABI hasn't broken — but the audit's `private_header_leak` finding (public
+function `make_widget()` returns a private-header type, same shape as
+case144) is the fixed point of this case; what varies is **how much
+evidence corroborates it**. `abicheck scan`'s cross-check machinery records
+which providers (evidence sources) contributed to each finding, and this
+case demonstrates that the list grows — without the finding itself
+changing — as more evidence becomes available.
 
-| Fixture | Evidence present | Providers recorded for the finding |
-|---------|------------------|------------------------------------|
-| `thin.abi.json` | public-header AST only | `public_header_ast` (1) |
-| `snapshot.abi.json` | header AST **+ L5 source graph** | `public_header_ast`, `source_index` (2) |
+## What this snapshot contains
 
-Both fixtures flag the *same* leak — the finding does not change — but the rich
-fixture's source graph **corroborates** it with a second, independent provider.
-That provider list is the available corroboration signal ScanResult records.
+Two fixtures for the same underlying leak, differing only in how much
+evidence is attached:
 
-> **Scope.** This case asserts the provider *list* differs. Deriving a per-finding
-> confidence *tag* from the provider count (so 1-provider corroboration renders a
-> weaker tag than 2) is a separate reporting enhancement, not part of this corpus.
+| Fixture | Evidence present | Providers recorded for `private_header_leak` |
+|---------|-------------------|-----------------------------------------------|
+| `thin.abi.json` | public-header AST (L2) only | `public_header_ast` (1 provider) |
+| `snapshot.abi.json` | header AST (L2) **+** L5 source graph | `public_header_ast`, `source_index` (2 providers) |
 
-## Reproduce
+## abicheck command
 
 ```bash
-abicheck scan --binary libdemo.so -H include/ --audit                 # thin: 1 provider
-abicheck scan --binary libdemo.so -H include/ --audit --sources .     # rich: + source_index
+abicheck scan thin.abi.json                 # 1 provider
+abicheck scan snapshot.abi.json             # + source_index corroboration
 ```
 
-## Fix
+## Expected abicheck finding
 
-Same as any private-header leak (see case144): opaque-handle the internal type or
-install its header.
+Both fixtures report the same finding and the same verdict:
+
+```text
+Coverage
+  crosscheck:private_header_leak present   public API ↔ private-header provenance: 1 public declaration(s) exposing one of 1 private type(s)
+
+ABI-hygiene catalog (intra-version, advisory)
+  [warning] private_header_leak: 1
+
+Verdict: COMPATIBLE (exit 0)
+```
+
+The provider list — not shown in the text renderer's coverage line above,
+but recorded in the `crosscheck.providers` field of `--format json` output
+and asserted directly by `run_crosschecks()` — is where the two fixtures
+diverge:
+
+```text
+thin.abi.json     private_header_leak providers: ['public_header_ast']
+snapshot.abi.json private_header_leak providers: ['public_header_ast', 'source_index']
+```
+
+## Minimum evidence
+
+`min_evidence: L2` — the public-header AST alone (the `thin.abi.json`
+floor) is already enough to flag the leak with one provider. The L5 source
+graph, when present, adds a second, independent corroborating provider —
+it strengthens confidence in the same finding but is not required to reach
+the floor.
+
+## Why abicheck catches it
+
+`private_header_leak` is a cross-source check: abicheck resolves every
+type referenced in a public signature and checks that type's own
+provenance. The `public_header_ast` provider alone is enough to know
+`make_widget()` returns a type recorded as `origin: private_header`. When
+an L5 source graph is also attached, `source_index` independently confirms
+the same declaration-to-private-type relationship by walking the graph's
+edges — a second source reaching the same conclusion, recorded as a second
+provider rather than a stronger verdict.
+
+> **Scope.** This case asserts the provider *list* differs. Deriving a
+> per-finding confidence *tag* from the provider count (so 1-provider
+> corroboration renders differently from 2) is a separate reporting
+> enhancement, not part of this corpus.
+
+## Why this matters for a real release
+
+A finding backed by one provider and a finding backed by two independent
+providers are not equally trustworthy, even though both fire the same
+`ChangeKind`. A CI pipeline that only ran a header scan (thin evidence) and
+one that also replayed the source tree (rich evidence) should both catch
+this leak — and do — but only the richer pipeline can tell a reviewer "two
+independent sources agree," which matters when deciding whether a finding
+is worth blocking a release over.
+
+## Safe redesign
+
+Same as any private-header leak (see case144): opaque-handle the internal
+type, or install its header so it's a real, documented part of the public
+API.
+
+## Cross-tool comparison
+
+`private_header_leak` is a cross-source check unique to abicheck's audit
+mode — it reconciles a public function's signature against the provenance
+of the type it references within the *same* build, which isn't something
+`abidiff`/`abi-compliance-checker` do (they diff two ABI dumps against each
+other, not a binary's public surface against its own header provenance).
+Provider-agreement tracking (this case's subject) has no equivalent in
+either tool.

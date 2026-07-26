@@ -1,84 +1,118 @@
-# Case 86: Tag struct renamed (empty class re-mangling)
+# Case 86: Tag Struct Renamed (empty class re-mangling)
 
-**Category:** Mangling ABI | **Verdict:** BREAKING
+**Category:** Mangling ABI | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-Empty tag structs are the workhorses of C++ template specialization:
+Empty tag structs are the workhorses of C++ template specialization
+(`mylib::method::brute_force`, `mylib::method::kd_tree`, ...). They carry no
+layout, but every explicit instantiation that names them bakes the tag into
+its mangled symbol. v2 renames `brute_force` → `search_brute`: the type
+itself has zero fields so layout-based detectors see nothing, but every
+`descriptor<brute_force, ...>` instantiation symbol re-mangles and the old
+symbols vanish. A consumer binary linked against v1 fails to resolve those
+symbols at load time — recompilation is mandatory even though no field or
+method actually changed.
 
-```cpp
-namespace mylib::method {
-struct brute_force {};
-struct kd_tree {};
-}
-```
+## Old/new diff
 
-The library ships explicit instantiations that bake the tag's mangled name
-into symbol names:
+| v1.h | v2.h |
+|------|------|
+| `namespace method { struct brute_force {}; struct kd_tree {}; }` | `namespace method { struct search_brute {}; struct kd_tree {}; }` |
+| `extern template class descriptor<method::brute_force, task::classification>;` | `extern template class descriptor<method::search_brute, task::classification>;` |
 
-```
-_ZN5mylib10descriptorINS_6method11brute_forceENS_4task14classificationEEC1Ev
-```
-
-v2 renames `brute_force` → `search_brute`. Mechanically:
-
-- The struct has zero fields and zero methods. Layout-based detectors
-  (`type_size_changed`, `type_field_*`) see nothing.
-- The old type appears as `TYPE_REMOVED`, the new one as `TYPE_ADDED` —
-  an existing detector can produce both findings but does not link them.
-- Every explicit instantiation referencing the old tag gets a brand-new
-  mangled name. Consumer binaries linked against v1 request the old
-  symbol at load time and get an unresolved-symbol error.
-
-## Real Failure Demo
-
-**Severity: BREAKING / LOAD-TIME FAILURE**
+## abicheck command
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case86_tag_struct_renamed_app case86_tag_struct_renamed_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case86_tag_struct_renamed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case86_tag_struct_renamed/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# ./app_v1: symbol lookup error: undefined symbol: descriptor<brute_force, classification>::descriptor()
+g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Why this is its own ChangeKind
+## Expected abicheck finding
 
-Renaming a *non-empty* class is rare and would already trigger many
-layout-related findings. Renaming a tag struct — the *only* purpose of
-which is to participate in mangling — is a distinct risk of the
-empty-tag-struct idiom used by many C++ libraries (such as oneDAL, Boost,
-and the standard library), and no existing ChangeKind correlates the disappearance with the
-appearance. A new `TAG_TYPE_RENAMED` makes the correlation explicit.
+```text
+Verdict: BREAKING (exit 4)
 
-## How abicheck detects it
-
-The new detector (`abicheck/diff_cpp_patterns.py::detect_tag_type_renamed`) runs after the
-type-diff pass:
-
-1. Find every `TYPE_REMOVED` for a record type with zero fields and no
-   virtual methods (an "empty" type).
-2. Find every `TYPE_ADDED` for an empty record type in the same parent
-   namespace.
-3. Look for a symbol-rename pair in the symbol diff where the old mangled
-   substring contains the removed tag's name segment and the new mangled
-   substring contains the added tag's name segment.
-4. When both halves match, emit a single `TAG_TYPE_RENAMED` finding
-   pairing the two and suppress the redundant `TYPE_REMOVED` /
-   `TYPE_ADDED`.
-
-## Real-world reference
-
-oneDAL's `cpp/oneapi/dal/algo/*/common.hpp` defines:
-
-```cpp
-namespace method { struct by_default {}; struct brute_force {}; struct kd_tree {}; }
-namespace task   { struct by_default {}; struct classification {}; struct regression {}; }
+- tag_type_renamed: Empty tag struct 'mylib::method::brute_force' renamed
+  to 'mylib::method::search_brute'. The type has no fields or vtable, so
+  layout-based detectors see no change, but 3 explicit instantiation
+  symbol(s) referencing the old name were re-mangled (now 3 symbol(s)
+  reference the new name). Consumers built against the old header fail to
+  resolve the instantiation at load time.
+  > An empty tag struct used solely for template specialization was
+    renamed. Every explicit instantiation that referenced the old tag is
+    re-mangled and the old symbol disappears.
+  Affected symbols: mylib::descriptor<mylib::method::brute_force,
+  mylib::task::classification>::descriptor(), ...::kind() const
 ```
 
-…and every `descriptor<Float, Method, Task>` instantiation embeds these
-tags in its mangled name. Renaming any of them silently breaks every
-shipped instantiation symbol.
+## Minimum evidence
+
+`min_evidence: L0` — the exported-symbol table alone is enough to reach the
+BREAKING verdict: even on a fully stripped binary, abicheck's binary
+fingerprinting matches each renamed instantiation by identical code
+size/hash and reports `func_likely_renamed`. The specific `tag_type_renamed`
+diagnosis shown above additionally needs DWARF's `type_removed`/`type_added`
+pair for the empty struct — present once the binaries are built with `-g`
+(L1) — to correlate the rename with the tag type itself rather than leaving
+it as an unexplained heuristic symbol match.
+
+## Why abicheck catches it
+
+`detect_tag_type_renamed` (`abicheck/diff_cpp_patterns.py`) looks for an
+empty-record `TYPE_REMOVED`/`TYPE_ADDED` pair in the same parent namespace,
+then confirms a symbol-rename pair exists whose old/new mangled names embed
+the removed/added tag's name segment — correlating the "invisible" tag
+rename with the very real re-mangling of every instantiation that used it.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
+
+```bash
+# Build old library + app
+g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo.so
+g++ -g -std=c++17 -I. app.cpp -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → kind = 1
+
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol:
+#   _ZN5mylib10descriptorINS_6method11brute_forceENS_4task14classificationEEC1Ev
+```
+
+**Why CRITICAL:** the `descriptor<method::brute_force, task::classification>`
+constructor's mangled name embeds `brute_force`'s name segment; once the tag
+is renamed, that exact symbol no longer exists in the new library and the
+dynamic linker refuses to load the old binary.
+
+## Safe redesign
+
+Never rename an empty tag struct used in shipped explicit instantiations —
+even though "nothing about the type changed", every instantiation that named
+it re-mangles. Add a new tag alongside the old one and deprecate, or keep
+the old tag as a type alias (`using brute_force = search_brute;`) so its
+mangled identity survives even though the "canonical" name moves.
+
+**Real-world example:** oneDAL's `cpp/oneapi/dal/algo/*/common.hpp` defines
+`method::*`/`task::*` tag families exactly like this; every
+`descriptor<Float, Method, Task>` instantiation embeds them in its mangled
+name, so renaming any tag silently breaks every shipped instantiation
+symbol.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+Not independently re-verified in this environment (`abidiff` unavailable
+here) — see case01's symbol-removal case for a documented `abidiff`
+exit-code comparison.

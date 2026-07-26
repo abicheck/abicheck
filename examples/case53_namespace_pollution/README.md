@@ -1,89 +1,105 @@
 # Case 53: Namespace Pollution (Generic Symbol Names)
 
-**Category:** API Design / Policy | **Verdict:** BREAKING (bad practice)
+**Category:** API Design | **Verdict:** 🔴 BREAKING (bad practice)
 
-## What this case is about
+## Verdict and consumer impact
 
 v1 exports functions with extremely generic names: `init`, `process`,
 `cleanup`, `status`. v2 renames them to `mylib_init`, `mylib_process`,
-`mylib_cleanup`, `mylib_status` with a proper library prefix.
+`mylib_cleanup`, `mylib_status` with a proper library prefix. The rename
+itself is a hard ABI break — every consumer that resolved the old,
+unprefixed names fails to load against v2 — but the underlying problem is
+that v1's names were a collision time-bomb in the first place: C has no
+namespaces, and any other library sharing the process that also exports
+`init`/`process`/`cleanup`/`status` would silently interpose or be
+interposed on.
 
-This is a **design-level bad practice**: unprefixed names in C shared libraries
-are a collision time-bomb in any non-trivial application that links multiple
-libraries.
+## Old/new diff
 
-## Real Failure Demo
+| bad.c (v1) | good.c (v2) |
+|------------|-------------|
+| `int init(void)` | `int mylib_init(void)` |
+| `int process(int data)` | `int mylib_process(int data)` |
+| `void cleanup(void)` | `void mylib_cleanup(void)` |
+| `int status(void)` | `int mylib_status(void)` |
 
-**Severity: BREAKING / SYMBOL REMOVAL**
-
-```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case53_namespace_pollution_app case53_namespace_pollution_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case53_namespace_pollution/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case53_namespace_pollution/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# ./app_v1: symbol lookup error: ./app_v1: undefined symbol: process
-```
-
-## Why namespace pollution is bad practice
-
-C has no namespaces. All exported symbols from all shared libraries loaded in
-a process share a single flat namespace. Generic names cause:
-
-- **Silent symbol interposition:** If two libraries export `init()`, the
-  dynamic linker picks one (typically the first loaded). The other library
-  silently calls the wrong function with no warning.
-- **Hard-to-debug crashes:** Symbol collisions produce mysterious behavior —
-  wrong return values, corrupted state, segfaults in unrelated code.
-- **Prevents library composition:** Applications cannot safely link two
-  libraries with overlapping symbol names without `RTLD_LOCAL` hacks.
-- **LD_PRELOAD conflicts:** Tools like sanitizers, profilers, and debug
-  libraries commonly use names like `init` and `cleanup`.
-
-## What abicheck detects
-
-- **`FUNC_REMOVED`**: `init`, `process`, `cleanup`, `status` removed
-- **`FUNC_ADDED`**: `mylib_init`, `mylib_process`, `mylib_cleanup`, `mylib_status` added
-- **`NAMESPACE_POLLUTION`**: v1 exports symbols without a consistent prefix
-
-**Verdict: BREAKING (bad practice)** — symbols renamed; v1 was the bad practice.
-
-## How to reproduce
+## abicheck command
 
 ```bash
-# Build both versions
-gcc -shared -fPIC -g bad.c  -o libbad.so
-gcc -shared -fPIC -g good.c -o libgood.so
-
-# Check exports
-nm -D libbad.so  | grep ' T '
-# → T cleanup, T init, T process, T status  ← generic names!
-nm -D libgood.so | grep ' T '
-# → T mylib_cleanup, T mylib_init, T mylib_process, T mylib_status  ← prefixed
-
-# Demonstrate the collision
-cat > other_lib.c <<'EOF'
-int init(void) { return 99; }  /* another library's init */
-EOF
-gcc -shared -fPIC other_lib.c -o libother.so
-
-# Link app against both — silent collision
-gcc -g app.c -L. -lbad -lother -Wl,-rpath,. -o app
-LD_DEBUG=symbols ./app 2>&1 | grep 'init'
-# → init() resolves to libother.so's version — wrong library!
-
-# Run abicheck
-python3 -m abicheck.cli dump libbad.so  -o /tmp/v1.json
-python3 -m abicheck.cli dump libgood.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → BREAKING (renamed symbols) + NAMESPACE_POLLUTION warning
+gcc -shared -fPIC -g bad.c  -o libfoo_v1.so
+gcc -shared -fPIC -g good.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
+## Expected abicheck finding
 
-Use a consistent prefix for all exported symbols:
+```text
+Verdict: BREAKING (exit 4)
+
+- func_removed: Public function removed: status
+- func_removed: Public function removed: cleanup
+- func_removed: Public function removed: process
+- func_removed: Public function removed: init
+  > Old binaries call a symbol that no longer exists; dynamic linker
+    will refuse to load or crash at call site.
+- symbol_renamed_batch: Batch symbol rename detected (namespace
+  refactoring): prefix 'mylib_' added to 4 symbols (cleanup ->
+  mylib_cleanup, init -> mylib_init, process -> mylib_process, status ->
+  mylib_status)
+  > Multiple symbols renamed (e.g. namespace prefix added/removed); old
+    binaries reference the old names and will get undefined symbol errors
+    at load time.
+
+Additions:
+- func_added: New public function: mylib_status, mylib_cleanup,
+  mylib_process, mylib_init
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the exported-symbol table alone shows four names
+disappearing and four new ones appearing; abicheck's `symbol_renamed_batch`
+heuristic further correlates the two sets by common prefix, all from the
+`.dynsym` table with no debug info or headers needed.
+
+## Why abicheck catches it
+
+The dynamic symbol table is authoritative L0 evidence — abicheck diffs the
+exported-symbol sets directly. Beyond the plain `func_removed`/`func_added`
+pairs, abicheck's rename-detection heuristic notices that all four removed
+names reappear with a shared `mylib_` prefix and groups them into a single
+`symbol_renamed_batch` finding, flagging it as a namespace-prefixing
+refactor rather than four unrelated symbol changes.
+
+## Runtime failure demonstration
+
+**Severity: BREAKING**
+
+**Scenario:** compile app against v1's unprefixed API, swap in v2 `.so`
+without recompile.
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g bad.c -o libfoo.so
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → status() = 1
+# → process(21) = 43
+# → status() = 0
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g good.c -o libfoo.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol: process
+```
+
+**Why BREAKING:** all four of v1's exported names are gone from v2's dynamic
+symbol table; the runtime linker cannot resolve them and the process fails
+before `main()` runs.
+
+## Safe redesign
+
+Use a consistent prefix for all exported symbols from the start:
 
 ```c
 /* Good: all symbols prefixed with library name */
@@ -92,7 +108,7 @@ int mylib_process(int data);
 void mylib_cleanup(void);
 ```
 
-Or use a version script to hide unprefixed names:
+Or use a version script to hide any unprefixed internal names:
 
 ```
 MYLIB_1.0 {
@@ -101,17 +117,20 @@ MYLIB_1.0 {
 };
 ```
 
-## Real-world examples
+**Real-world example:** zlib uses a `z_`/`inflate`/`deflate` naming
+convention, OpenSSL uses `SSL_`/`EVP_`/`BN_` prefixes, SQLite prefixes
+everything with `sqlite3_`, and libpng uses `png_` — all specifically to
+avoid the flat-namespace collision this case demonstrates. Libraries that
+historically did *not* prefix (early POSIX `open`, `read`, `write`) cause
+endless compatibility headaches.
 
-- **zlib** uses `z_` prefix: `z_inflate`, `z_deflate`
-- **OpenSSL** uses `SSL_`, `EVP_`, `BN_` prefixes
-- **SQLite** prefixes everything with `sqlite3_`
-- **libpng** uses `png_` prefix
+## Cross-tool comparison
 
-Libraries that historically did NOT prefix (like early POSIX `open`, `read`,
-`write`) cause endless compatibility headaches.
+```bash
+nm -D libfoo_v1.so | grep ' T '
+nm -D libfoo_v2.so | grep ' T '
+```
 
 ## References
 
-- [C API Design — Namespacing](https://github.com/cognitect-labs/transit-format)
 - [How to Write Shared Libraries — Symbol Naming](https://www.akkadia.org/drepper/dsohowto.pdf)

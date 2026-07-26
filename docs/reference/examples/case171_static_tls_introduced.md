@@ -10,103 +10,121 @@
 | **Detected `ChangeKind`s** | `static_tls_introduced` |
 | **Source files** | `examples/case171_static_tls_introduced/` |
 
-**Category:** Deployment Risk (ELF/Loader) | **Verdict:** COMPATIBLE_WITH_RISK
+**Category:** Deployment Risk (ELF/Loader) | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
-## What this case is about
+## Verdict and consumer impact
 
-```c
-/* v1 and v2 have byte-identical source */
-__thread int counter = 0;
-int bump(void) { return ++counter; }
-```
-
-```text
-v1: gcc -shared -fPIC              v1.c   -o libv1.so   (global-dynamic TLS)
-v2: gcc -shared -fPIC -ftls-model=initial-exec v2.c -o libv2.so   (initial-exec TLS)
-```
-
-The **source is unchanged**. Only the TLS access model selected at compile
-time differs. Under the default `global-dynamic` model, a thread's storage for
-`counter` is allocated lazily (via `__tls_get_addr`), so the library can be
-loaded at any point in a process's life — including via `dlopen()` long after
+The **source is byte-identical** between v1 and v2 — only the TLS access
+model selected at compile time differs (`-ftls-model=initial-exec` on v2
+vs. the default `global-dynamic` on v1). Under `global-dynamic`, a thread's
+storage for `counter` is allocated lazily, so the library can be loaded at
+any point in a process's life — including via `dlopen()` long after
 startup. Under `initial-exec`, the dynamic linker must instead assign
 `counter` a **fixed offset** in a per-thread block sized once, at process
-startup, from the libraries present at that time (the "static TLS surplus").
+startup, from the libraries present at that time (the "static TLS
+surplus"). The exported ABI (symbol names, signatures) is identical, so
+this is not a hard break — but the library's runtime loading contract
+silently narrowed: it may no longer be reliably `dlopen()`-able once the
+static-TLS surplus is exhausted.
 
-## Why this case exists: the binary fact, not the build flag
+## Old/new diff
 
-`case133_tls_model_flip` already demonstrates this same flag flip — but from
-the **build side**: it reads the recorded `-ftls-model` compiler option (L3
-evidence) and reports `tls_model_changed`. That requires build metadata
-(`--build-info` / embedded build options) to be available.
+| v1.c | v2.c |
+|------|------|
+| `__thread int counter = 0; int bump(void) { return ++counter; }` | *(identical source)* |
+| built: `gcc -shared -fPIC v1.c` (global-dynamic TLS) | built: `gcc -shared -fPIC -ftls-model=initial-exec v2.c` (initial-exec TLS) |
 
-This case demonstrates the **consequence**, read straight from the shipped
-`.so` with zero build metadata: the linker stamps `DF_STATIC_TLS` into
-`DT_FLAGS` whenever *any* input object used the initial-exec/local-exec model.
-A distributor who receives only the compiled library — no build logs, no
-compile database — can still see that the deployment contract changed:
-
-```text
-$ readelf -d libv1.so | grep FLAGS      # (nothing — no DF_STATIC_TLS)
-$ readelf -d libv2.so | grep FLAGS
- 0x000000000000001e (FLAGS)              STATIC_TLS
-```
-
-## What abicheck detects
-
-- **`static_tls_introduced`** — `DF_STATIC_TLS` newly set in `DT_FLAGS`, and
-  the library genuinely participates in TLS (it exports or imports at least
-  one `STT_TLS` symbol, so a spurious flag on a TLS-free library never fires).
-  **Evidence tier L0** — the ELF dynamic section alone, no DWARF, no headers,
-  no build metadata.
-
-**Overall verdict: COMPATIBLE_WITH_RISK** — the ABI (symbol names, signatures)
-is identical, so this is not a `BREAKING` change. But it is a **deployment
-risk**: the library's runtime loading contract silently narrowed.
-
-## How to reproduce (binary-only)
+## abicheck command
 
 ```bash
-gcc -shared -fPIC v1.c -o libv1.so
-gcc -shared -fPIC -ftls-model=initial-exec v2.c -o libv2.so
-
-python3 -m abicheck.cli dump libv1.so -o /tmp/v1.json
-python3 -m abicheck.cli dump libv2.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → COMPATIBLE_WITH_RISK: static_tls_introduced (DF_STATIC_TLS)
+gcc -shared -fPIC -g v1.c -o libv1.so
+gcc -shared -fPIC -g -ftls-model=initial-exec v2.c -o libv2.so
+abicheck compare libv1.so libv2.so
 ```
 
-## Real Failure Demo (illustrative — not the CI oracle)
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
+
+Deployment Risk Changes:
+- static_tls_introduced: Static-TLS model introduced (DF_STATIC_TLS set):
+  the library may no longer be reliably dlopen()ed
+
+Quality Issues:
+- needed_removed: Dependency removed: ld-linux-x86-64.so.2
+- symbol_version_required_removed: Symbol version requirement removed:
+  GLIBC_2.3 (from ld-linux-x86-64.so.2)
+- imported_symbol_removed: Imported symbol no longer required:
+  __tls_get_addr@GLIBC_2.3
+```
+
+The dependency/symbol-version churn is a build-environment side effect of
+dropping the `__tls_get_addr` call (global-dynamic needs it, initial-exec
+doesn't); `static_tls_introduced` is the finding that names the actual
+deployment-contract change.
+
+## Minimum evidence
+
+`min_evidence: L0` — the ELF dynamic section alone is enough: abicheck
+reads `DF_STATIC_TLS` straight from `DT_FLAGS` and checks the library
+genuinely participates in TLS (it exports or imports at least one
+`STT_TLS` symbol, so a spurious flag on a TLS-free library never fires).
+No DWARF, no headers, no build metadata required — this is the
+binary-only counterpart to `case133_tls_model_flip`'s L3 build-flag view
+of the same transition.
+
+## Why abicheck catches it
+
+The linker stamps `DF_STATIC_TLS` into a library's `DT_FLAGS` whenever any
+input object used the initial-exec/local-exec TLS model — a fact visible
+even on a distributed binary with no build logs or compile database:
+
+```bash
+readelf -d libv1.so | grep FLAGS      # (nothing — no DF_STATIC_TLS)
+readelf -d libv2.so | grep FLAGS
+#  0x000000000000001e (FLAGS)              STATIC_TLS
+```
+
+abicheck reads this flag directly from each side's dynamic section and
+reports its introduction as `static_tls_introduced`.
+
+## Runtime failure demonstration
+
+**Severity: INFORMATIONAL (host-dependent)**
+
+**Scenario:** `dlopen()` a plugin after the process has already started.
 
 ```bash
 gcc -g app.c -o app -ldl
 ./app
-# dlopen succeeded; bump() = 1
+# → dlopen succeeded; bump() = 1
 
 cp libv2.so libv1.so
 ./app
+# → dlopen succeeded; bump() = 1   (on this host — surplus absorbed it)
 ```
 
-Whether the second run fails depends on how much static-TLS "surplus" the
-libc reserved at process startup for later `dlopen()`s — a budget that varies
-by glibc version, `LD_DEBUG=statistics` tuning, and how many other
-`initial-exec` libraries are already loaded. On many systems it will simply
-work (the surplus absorbs one more consumer); on a host where the surplus is
-exhausted, `dlopen()` fails outright with glibc's
-`"cannot allocate memory in static TLS block"` (or an analogous diagnostic on
-other libcs), and the plugin never loads at all — a hard load failure with no
-exported-symbol change to explain it. Because
-this outcome is host-dependent, the demo is included for intuition but the
-**CI-graded proof is the `DF_STATIC_TLS` artifact fact above**, not whether
-this particular run happens to fail.
+**Why this demo isn't the CI-graded proof:** whether the second run fails
+depends on how much static-TLS "surplus" the libc reserved at process
+startup for later `dlopen()`s — a budget that varies by glibc version,
+`LD_DEBUG=statistics` tuning, and how many other `initial-exec` libraries
+are already loaded. On many systems (including the sandbox this was run
+in) it simply works, since the surplus absorbs one more consumer; on a
+host where the surplus is exhausted, `dlopen()` fails outright with
+glibc's `"cannot allocate memory in static TLS block"` (or an analogous
+diagnostic on other libcs) — a hard load failure with no exported-symbol
+change to explain it. The CI-graded proof is the `DF_STATIC_TLS` artifact
+fact above, not whether this particular run happens to fail.
 
-## Mitigation
+## Safe redesign
 
-- Avoid `-ftls-model=initial-exec`/`local-exec` (or `__attribute__((tls_model(...)))`
-  on individual variables) in any library that may be `dlopen()`'d after
-  startup — plugins, optional codecs, lazily-loaded backends.
-- If the static model is required for performance, document that the library
-  must be linked at startup (`DT_NEEDED`), not `dlopen()`'d later.
+- Avoid `-ftls-model=initial-exec`/`local-exec` (or
+  `__attribute__((tls_model(...)))` on individual variables) in any
+  library that may be `dlopen()`'d after startup — plugins, optional
+  codecs, lazily-loaded backends.
+- If the static model is required for performance, document that the
+  library must be linked at startup (`DT_NEEDED`), not `dlopen()`'d later.
 
 ## References
 

@@ -1,82 +1,120 @@
-# Case 36 -- Anonymous Struct/Union Change
+# Case 36: Anonymous Struct/Union Change
 
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
-**Verdict:** 🔴 BREAKING
-**abicheck verdict: BREAKING**
+## Verdict and consumer impact
 
-## What changes
+`Variant`'s anonymous union member changes from `float f` to `double d`,
+growing the union from 4 to 8 bytes and the struct from 8 to 16 bytes (with
+alignment padding). Code compiled against v1 allocates and copies `Variant`
+at the old 8-byte size; any binary passing `Variant` by value or embedding it
+in a larger structure reads/writes at stale offsets once the new library is
+loaded. Recompilation is mandatory.
 
-| Version | Definition |
-|---------|-----------|
-| v1 | `struct Variant { int tag; union { int i; float f; }; };` (size 8) |
-| v2 | `struct Variant { int tag; union { int i; double d; }; };` (size 16) |
+## Old/new diff
 
-## Why this is a binary ABI break
+| v1.h | v2.h |
+|------|------|
+| `struct Variant { int tag; union { int i; float f; }; };` | `struct Variant { int tag; union { int i; double d; }; };` |
 
-Changing `float f` to `double d` inside the anonymous union increases the union's
-size from 4 bytes to 8 bytes. This changes the overall struct size from 8 to 16
-bytes (with alignment padding). When the app allocates a `Variant` on the stack
-using v1's sizeof (8 bytes), but the v2 library's functions expect 16-byte objects,
-the mismatch can cause:
+## abicheck command
 
-- Stack corruption if the library writes beyond the 8-byte allocation
-- Wrong field offsets if the `i` member moves due to alignment changes
-- Subtle data corruption in arrays of `Variant`
-
-The demo makes this offset mismatch deterministic by embedding the `Variant` in
-a buffer filled with sentinel bytes (0xAA). When v2's `variant_get_int()` reads
-`v->i` at offset 8 instead of offset 4, it reads the sentinel bytes instead of
-the actual value 42, producing a visibly wrong result every run.
-
-## Code diff
-
-```diff
- struct Variant {
-     int tag;
-     union {
-         int    i;
--        float  f;    /* 4 bytes -> union size = 4 */
-+        double d;    /* 8 bytes -> union size = 8, struct gains padding */
-     };
- };
+```bash
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: Variant (64 -> 128 bits)
+  > Old code allocates or copies the type with the old size;
+    heap/stack corruption, out-of-bounds access.
+  Affected symbols: variant_get_int
+- type_field_offset_changed: Field offset changed: Variant::i (32 -> 64 bits)
+  > Old code reads/writes fields at stale offsets; silent data corruption.
+  Affected symbols: variant_get_int
+- type_field_removed: Field removed: Variant::f
+  > Old code accesses a field that no longer exists at the expected offset;
+    reads garbage or writes out of bounds.
+  Affected symbols: variant_get_int
+
+Additions:
+- type_field_added_compatible: Field added: Variant::d
+  > Field appended without changing existing offsets; old code works
+    but won't initialize the new field.
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's struct-layout info (`DW_TAG_structure_type`
+size + member offsets, including the anonymous union's members) is enough to
+detect the size and offset change; no public headers required.
+
+## Why abicheck catches it
+
+DWARF flattens anonymous union members into the enclosing struct's member
+list with their own byte offsets; abicheck compares each named member's
+offset and the overall type size directly from debug info in both versions.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-```bash
-# Build v1 lib + app
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -g app.c -I. -L. -lv1 -Wl,-rpath,. -o app
-./app
-# -> sizeof(Variant) = 8 (compiled against v1)
-# -> tag = 1, i = 42
-# -> variant_get_int() = 42
+**Scenario:** app allocates `Variant` with v1's 8-byte layout, calls
+`variant_get_int()` from v2 which reads `i` at offset 8 (shifted by the
+union's new `double` alignment) instead of offset 4.
 
-# Swap to v2
-gcc -shared -fPIC -g v2.c -o libv1.so
+```bash
+# Build old library + app
+gcc -shared -fPIC -g v1.c -o libfoo.so
+gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
 ./app
-# -> sizeof(Variant) = 8 (compiled against v1)    <-- app still uses v1's size!
-# -> tag = 1, i = 42
-# -> variant_get_int() = -1431655766               <-- WRONG! (0xAAAAAAAA sentinel)
-# -> ERROR: expected 42, got -1431655766 — ABI layout mismatch!
-#      v2's variant_get_int() read 'i' at offset 8 instead of 4
-#      (sentinel bytes 0xAA were read instead of the actual value)
+# → sizeof(Variant) = 8 (compiled against v1)
+# → tag = 1, i = 42
+# → variant_get_int() = 42
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g v2.c -o libfoo.so
+./app
+# → sizeof(Variant) = 8 (compiled against v1)
+# → tag = 1, i = 42
+# → variant_get_int() = -1431655766
+# → ERROR: expected 42, got -1431655766 — ABI layout mismatch!
 ```
 
-**Why CRITICAL:** The struct size changed from 8 to 16 bytes. The `double`
-member in v2's anonymous union forces 8-byte alignment, shifting `v->i` from
-offset 4 to offset 8. Reading `v->i` via `variant_get_int()` is already
-undefined behavior due to the layout change — the demo makes this visible by
-using sentinel-filled buffers so the wrong offset read produces a deterministic
-incorrect value.
+**Why CRITICAL:** the struct size changed from 8 to 16 bytes and `i`'s
+offset shifted from 4 to 8 because `double d` forces 8-byte union alignment.
+`variant_get_int()` reads past the app's 8-byte allocation, returning
+sentinel bytes instead of the real value — silent, deterministic data
+corruption with no crash to signal it.
 
-## Why runtime result may differ from verdict
-Anon struct layout change: field offsets shift without DWARF, silent corruption
+## Safe redesign
 
-## Runtime note
-App returns non-zero on detected offset mismatch.
+Never widen a member of a public anonymous union — it silently changes the
+enclosing struct's size and every sibling member's offset. Add a new,
+separately-named field instead, or move variant-sized payloads behind an
+opaque pointer so the union's internal layout isn't part of the ABI.
+
+**Real-world example:** tagged-union APIs (e.g. `JSON_Value`-style variant
+types) commonly hit this when a new numeric type is added to the union —
+widening any member without bumping the SONAME breaks every consumer that
+allocated the smaller layout.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` also detect this (a struct-layout change
+from an anonymous-union member type swap) via their own DWARF-based layout
+comparison:
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 

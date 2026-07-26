@@ -183,7 +183,7 @@ even when no comparison ever ran.
 
 ```yaml
 - name: Check libpvxs against accepted-main
-  uses: abicheck/abicheck/actions/check-target@v1
+  uses: abicheck/abicheck/actions/check-target@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
   with:
     name: libpvxs
     profile: linux-x86_64-gcc13-release
@@ -198,7 +198,7 @@ even when no comparison ever ran.
 ```yaml
 # S5: single-build audit, no baseline.
 - name: Audit libpvxs (no baseline)
-  uses: abicheck/abicheck/actions/check-target@v1
+  uses: abicheck/abicheck/actions/check-target@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
   with:
     name: libpvxs
     profile: linux-x86_64-gcc13-release

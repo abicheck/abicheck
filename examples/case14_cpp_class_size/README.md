@@ -1,50 +1,59 @@
 # Case 14: C++ Class Size Change
 
-**Category:** C++ ABI | **Verdict:** 🟡 ABI CHANGE (exit 4)
+**Category:** C++ ABI | **Verdict:** 🔴 BREAKING
 
-> **Note on abidiff 2.4.0:** Returns exit **4**. Semantically breaking for any
-> code that heap-allocates `Buffer` via operator new or embeds it by value.
+## Verdict and consumer impact
 
-## What breaks
-Old code allocates `Buffer` on the stack or via `new` expecting 64 bytes. v2's `Buffer`
-needs 128 bytes. The constructor (which zero-initializes the `data` array) writes 128
-bytes into a 64-byte allocation, corrupting adjacent memory. Any pre-built consumer
-compiled against the older 64-byte v1 layout that inherits from or embeds `Buffer` by
-value is also broken; consumers recompiled against the new 128-byte layout are unaffected.
+Old code allocates `Buffer` on the stack or via `new`, expecting 64 bytes.
+v2's `Buffer` needs 128 bytes. The constructor (which zero-initializes the
+`data` array) writes 128 bytes into whatever allocation the caller made,
+corrupting adjacent memory if that allocation is still sized for v1. Any
+pre-built consumer that embeds `Buffer` by value is broken without
+recompilation; consumers recompiled against the new layout are unaffected.
 
-## Why abidiff catches it
-Reports `type size changed from 512 to 1024 (in bits)` (64 bytes → 128 bytes).
+## Old/new diff
 
-## Code diff
-
-| v1.cpp | v2.cpp |
-|--------|--------|
+| v1.h | v2.h |
+|------|------|
 | `char data[64];` | `char data[128];` |
 
-## Reproduce manually
+## abicheck command
+
 ```bash
 g++ -shared -fPIC -g v1.cpp -o libbuf_v1.so
 g++ -shared -fPIC -g v2.cpp -o libbuf_v2.so
-abidw --out-file v1.xml libbuf_v1.so
-abidw --out-file v2.xml libbuf_v2.so
-abidiff v1.xml v2.xml
-echo "exit: $?"   # → 4
+abicheck compare libbuf_v1.so libbuf_v2.so
 ```
 
-## How to fix
-Use the PIMPL idiom: the public `Buffer` class stores only a pointer to a private
-`BufferImpl` struct whose layout can change freely without affecting `sizeof(Buffer)`.
+## Expected abicheck finding
 
-## Real-world example
-Qt's "binary compatibility" rule explicitly forbids changing `sizeof` of any public
-class. Every Qt class that needs to grow uses a `d_ptr` PIMPL to keep the public
-class size constant across minor releases.
+```text
+Verdict: BREAKING (exit 4)
 
-## Real Failure Demo
+- type_size_changed: Size changed: Buffer (512 -> 1024 bits)
+  > Old code allocates or copies the type with the old size; heap/stack
+    corruption, out-of-bounds access.
+  Affected symbols: make_buffer
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's structure-type entry (`DW_TAG_class_type` size
+in bytes) is enough to detect the size change; no public headers required.
+
+## Why abicheck catches it
+
+DWARF records each class's total byte size for both versions; abicheck
+compares them directly from debug info, the same mechanism it uses for
+plain C structs.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-**Scenario:** app allocates `Buffer` by value on the stack using v1 layout (64 bytes). With v2 the constructor initializes 128 bytes, corrupting adjacent stack memory.
+**Scenario:** app allocates `Buffer` by value on the stack using v1's
+layout (64 bytes, `-O0` for predictable stack layout). With v2 the
+constructor initializes 128 bytes, writing past the allocated slot.
 
 ```bash
 # Build v1 + app (use -O0 so stack layout is predictable)
@@ -59,20 +68,42 @@ g++ -g -O0 app.cpp -I. -L. -lbuf -Wl,-rpath,. -o app
 g++ -shared -fPIC -g v2.cpp -o libbuf.so
 ./app
 # → via factory: size() = 128 (expected 64)
-# → canary = CANARY!
-# → after  =         ← CORRUPTED (v2 constructor overwrote 64 bytes past the stack slot)
-# → CORRUPTION: stack overwritten by v2 constructor!
-
-# With ASAN (stack-by-value scenario):
-g++ -shared -fPIC -g -fsanitize=address v2.cpp -o libbuf.so
-g++ -g -O0 -fsanitize=address app.cpp -I. -L. -lbuf -Wl,-rpath,. -o app_asan
-./app_asan
-# → ERROR: AddressSanitizer: stack-buffer-overflow
+# → *** stack smashing detected ***: terminated
+# → Aborted (core dumped)
 ```
 
-**Why CRITICAL:** Old code allocates `Buffer` on the stack expecting 64 bytes. The v2
-constructor initializes 128 bytes — writing 64 bytes past the stack slot, corrupting
-adjacent variables and potentially return addresses.
+**Why CRITICAL:** the v2 constructor writes 128 bytes into a stack slot the
+app only sized for 64. glibc's stack protector notices the canary it
+inserted around the frame was overwritten and aborts immediately — on a
+build without `-fstack-protector` the same write instead silently
+corrupts adjacent stack memory. AddressSanitizer catches the same bug from
+a different angle: the `factory` path alone (`make_buffer()` returning a
+128-byte `new`, `delete`d through the 64-byte `v1.h` view) trips a
+`new-delete-type-mismatch` before the stack scenario even runs.
+
+## Safe redesign
+
+Use the PIMPL idiom: the public `Buffer` class stores only a pointer to a
+private `BufferImpl` struct whose layout can change freely without
+affecting `sizeof(Buffer)`.
+
+**Real-world example:** Qt's "binary compatibility" rule explicitly
+forbids changing the `sizeof` of any public class. Every Qt class that
+needs to grow uses a `d_ptr` PIMPL to keep the public class size constant
+across minor releases.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libbuf_v1.so
+abidw --out-file v2.xml libbuf_v2.so
+abidiff v1.xml v2.xml
+echo "exit: $?"   # → 4
+```
+
+> **Note on abidiff 2.4.0:** reports `type size changed from 512 to 1024
+> (in bits)`, exit **4**. Semantically breaking for any code that
+> heap-allocates `Buffer` via `operator new` or embeds it by value.
 
 ## References
 

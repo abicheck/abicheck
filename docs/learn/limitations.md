@@ -37,6 +37,11 @@ support extracts struct/class/union layouts, enum types, calling conventions, an
 toolchain info from PDB files produced by MSVC (`/Zi` flag). Use `--pdb-path` to
 specify the PDB file location if automatic discovery fails.
 
+**"Yes" above means implemented capability, not per-toolchain CI-proven
+maturity.** Windows in particular has more than one toolchain path with very
+different validation status — see the next section before relying on a
+specific Windows toolchain in production.
+
 ---
 
 
@@ -350,7 +355,7 @@ castxml supports.
 
 ## Troubleshooting
 
-See [troubleshooting.md](../contribute/troubleshooting.md) for a diagnostic decision tree
+See [troubleshooting.md](../use/troubleshooting.md) for a diagnostic decision tree
 covering common false positives, false negatives, and unexpected verdicts.
 
 ---

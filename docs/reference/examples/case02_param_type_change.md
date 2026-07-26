@@ -10,29 +10,50 @@
 | **Detected `ChangeKind`s** | `func_params_changed` |
 | **Source files** | `examples/case02_param_type_change/` |
 
-**Category:** Symbol API | **Verdict:** 🟡 ABI CHANGE (exit 4)
+**Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
-> **Note on abidiff 2.4.0:** libabigail classifies parameter type changes as
-> "indirect sub-type changes" with exit code **4** (ABI change detected, not
-> flagged as *symbol-removal* breaking). The change is still real ABI drift and
-> should be treated as BREAKING by policy.
+## Verdict and consumer impact
 
-## What breaks
 Callers compiled against v1 pass `int a` in a 32-bit register; v2 expects `double a`
 in an FP register (x86-64 SysV ABI). The argument is misread, producing wrong results
 or a crash. Re-compilation against v2 is mandatory.
 
-## Why abidiff catches it
-Reports `parameter 1 of type 'int' changed: type name changed from 'int' to 'double'`
-with exit **4**.
-
-## Code diff
+## Old/new diff
 
 | v1.c | v2.c |
 |------|------|
 | `double process(int a, int b)` | `double process(double a, int b)` |
 
-## Real Failure Demo
+## abicheck command
+
+```bash
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- func_params_changed: Parameters changed: process (int, int -> double, int)
+  > Callers push arguments with the old layout; callee reads wrong data
+    from stack/registers.
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF debug info carries each parameter's type, so `-g`
+alone (no public headers) is enough to detect the signature change.
+
+## Why abicheck catches it
+
+DWARF's `DW_TAG_formal_parameter` entries record each parameter's type for
+both versions; abicheck diffs the two functions' parameter-type lists
+directly from debug info, no headers required.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
@@ -56,23 +77,28 @@ gcc -shared -fPIC -g v2.c -o libfoo.so
 in an integer register; the argument is silently misinterpreted, producing wrong output
 with no error or crash.
 
-## Reproduce manually
+## Safe redesign
+
+Introduce a new function with the desired signature alongside the old one. Keep the
+old symbol with its original signature for at least one deprecation cycle.
+
+**Real-world example:** common in numerical libraries (BLAS, LAPACK) when
+precision is upgraded — `float` → `double` parameter changes require
+wrapper shims for backward compatibility.
+
+## Cross-tool comparison
+
 ```bash
-gcc -shared -fPIC -g v1.c -o libfoo_v1.so
-gcc -shared -fPIC -g v2.c -o libfoo_v2.so
 abidw --out-file v1.xml libfoo_v1.so
 abidw --out-file v2.xml libfoo_v2.so
 abidiff v1.xml v2.xml
 echo "exit: $?"   # → 4
 ```
 
-## How to fix
-Introduce a new function with the desired signature alongside the old one. Keep the
-old symbol with its original signature for at least one deprecation cycle.
-
-## Real-world example
-Common in numerical libraries (BLAS, LAPACK) when precision is upgraded — `float` →
-`double` parameter changes require wrapper shims for backward compatibility.
+> **Note on abidiff 2.4.0:** libabigail classifies parameter type changes as
+> "indirect sub-type changes" with exit code **4** (ABI change detected, not
+> flagged as *symbol-removal* breaking). The change is still real ABI drift and
+> should be treated as BREAKING by policy.
 
 ## References
 

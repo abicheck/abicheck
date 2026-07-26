@@ -1,54 +1,67 @@
 # Case 67: TLS Variable Size Changed
 
-**Category:** Variable ABI | **Verdict:** BREAKING
+**Category:** Variable ABI | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-The thread-local `ErrorCtx` struct grows from 68 bytes (v1) to 72 bytes (v2)
-because a new `severity` field is inserted between `code` and `message`. This
-shifts `message` from offset 4 to offset 8.
+`ErrorCtx` is a thread-local (`__thread`) struct. v2 inserts a `severity`
+field between `code` and `message`, growing the struct from 68 to 72 bytes
+and shifting `message` from offset 4 to offset 8. Any consumer compiled
+against v1 that reads `tls_error.message` directly still reads offset 4 —
+which now holds the `severity` integer, not the string — silently
+corrupting output with no crash. Recompilation is mandatory.
 
-A consumer compiled against v1 accesses `tls_error.message` at offset 4, but
-v2 wrote the `severity` integer there. The app reads the integer bytes as a
-string — getting garbage or an empty string instead of the error message.
+## Old/new diff
 
-## Why this matters
+| v1.h | v2.h |
+|------|------|
+| `int code;` *(offset 0)* | `int code;` *(offset 0, unchanged)* |
+| `char message[64];` *(offset 4)* | `int severity;` *(offset 4, NEW)* |
+| *(sizeof = 68)* | `char message[64];` *(offset 8, shifted)* — *(sizeof = 72)* |
 
-Thread-local variables (`__thread` / `thread_local`) are commonly used for
-per-thread error state, logging context, and locale data. When exported as part
-of a library's public ABI, the **struct layout** of TLS variables becomes a
-binary contract:
+## abicheck command
 
-- Consumers that access struct fields directly (not through accessor functions)
-  embed the field offsets at compile time
-- Changing the struct layout changes the ELF symbol size (`st_size` in `.dynsym`)
-  which abicheck tracks
-- The corruption is **per-thread** and hard to reproduce in testing because each
-  thread gets its own TLS copy
-
-This break is particularly dangerous because:
-- TLS variables are often accessed on hot paths (error checking, logging)
-- The struct may be large (message buffers, context data)
-- Inserting a field is a natural "improvement" that seems harmless
-
-## Code diff
-
-```c
-// v1: message at offset 4
-typedef struct ErrorCtx {
-    int   code;          /* offset 0 */
-    char  message[64];   /* offset 4 */
-} ErrorCtx;  /* sizeof = 68 */
-
-// v2: severity inserted, message shifts to offset 8
-typedef struct ErrorCtx {
-    int   code;          /* offset 0 (unchanged) */
-    int   severity;      /* offset 4 (NEW!) */
-    char  message[64];   /* offset 8 (was 4 — shifted!) */
-} ErrorCtx;  /* sizeof = 72 */
+```bash
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: ErrorCtx (544 -> 576 bits)
+  > Old code allocates or copies the type with the old size; heap/stack
+    corruption, out-of-bounds access.
+- struct_field_offset_changed: Field offset changed: ErrorCtx::message (+4 -> +8)
+  > Field moved to different offset; old code accesses wrong memory.
+- symbol_size_changed: Symbol size changed: tls_error (68 -> 72 bytes)
+  > ELF symbol size changed; copy relocations or memcpy-based consumers get
+    truncated/oversized data.
+- tls_var_size_changed: TLS variable size changed: tls_error (68 -> 72 bytes)
+  > Exported thread-local (TLS) variable size changed; consumers using copy
+    relocations or direct TLS access will read/write out of bounds.
+
+Additions:
+- type_field_added_compatible: Field added: ErrorCtx::severity
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF debug info records the TLS variable's `.dynsym`
+size plus the struct's member offsets for both versions; abicheck compares
+them directly from debug info (`-g`), no public headers required.
+
+## Why abicheck catches it
+
+abicheck reads the TLS symbol's ELF size (`STT_TLS` entries in `.dynsym`)
+and DWARF's `DW_TAG_structure_type` member-offset list for `ErrorCtx` in
+both binaries; the offset shift for `message` and the size growth are both
+visible directly in debug info, no header parsing needed.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
@@ -66,45 +79,34 @@ gcc -g app.c -L. -llogger -Wl,-rpath,. -o app
 gcc -shared -fPIC -g v2.c -o liblogger.so
 ./app
 # → error code = 404 (expected 404)
-# → message = "\x03" (expected "not found")   ← reads severity=3 as a char!
-# → CORRUPTION: TLS struct layout changed
+# → message = "" (expected "not found")
+# → CORRUPTION: TLS struct layout changed — app reads v1 offset but library
+#   wrote v2 layout!
 ```
 
-**Why CRITICAL:** The app reads `tls_error.message` at v1's offset 4, but v2
-placed the `severity` integer (value 3) there. On little-endian x86, the app
-interprets bytes `0x03 0x00 0x00 0x00` as a 1-character string `"\x03"` (a
-non-printable control character). The actual message `"not found"` is at
-offset 8, which the app never reads. No crash occurs — just silently wrong
-error messages, making debugging extremely difficult.
+**Why CRITICAL:** the app reads `tls_error.message` at v1's offset 4, but v2
+placed the `severity` integer there instead; the real message, now at offset
+8, is never read. No crash occurs — just silently wrong data, which is far
+harder to diagnose than a hard failure.
 
-## How to fix
+## Safe redesign
 
-1. **Use accessor functions**: don't export TLS variables directly; provide
-   `logger_get_message()` / `logger_set_message()` instead
-2. **Append-only layout**: only add new fields at the end of the struct, never
-   insert between existing fields
-3. **Use opaque pointers**: `extern __thread void *tls_error_ctx;` with accessor
-   functions that cast internally
-4. **Freeze exported struct layout**: treat the `sizeof` and field offsets of
-   any exported TLS variable as part of the ABI contract
-5. **Add reserved space**: include padding fields for future expansion
+Don't export TLS structs directly — provide accessor functions
+(`logger_get_message()`) instead, and treat any exported TLS variable's
+layout as frozen ABI (append-only, never insert fields).
 
-## Real-world example
+**Real-world example:** glibc's `__thread int errno` has been frozen at 4
+bytes since glibc 2.0 for exactly this reason. OpenSSL's per-thread error
+queue used to be a public TLS struct; OpenSSL 3.0 moved to an opaque handle
+to avoid this class of break when the context needed to grow.
 
-glibc's `errno` is a TLS variable (`__thread int errno`). Its size (4 bytes)
-has been frozen since glibc 2.0 — changing it would break every C program in
-existence. Similarly, `__thread locale_t __locale` in glibc has a fixed layout
-that cannot change without breaking the ABI.
+## Cross-tool comparison
 
-OpenSSL's per-thread error queue used to be a public TLS struct; OpenSSL 3.0
-moved to an opaque handle specifically to avoid this class of break when the
-error context needed to grow.
-
-## abicheck detection
-
-abicheck detects this as `tls_var_size_changed` (BREAKING) by comparing the
-`st_size` field in the `.dynsym` entry for TLS symbols (those with `STT_TLS`
-type) between the two library versions.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 

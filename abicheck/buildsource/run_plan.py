@@ -92,12 +92,18 @@ passes an already-loaded *resolved_bindings* mapping to
 ``build_outputs`` above); with no mapping, or a binding id absent from it,
 ``compile_gcc_path`` stays empty and a caller's own ``gcc-path``/global
 fallback applies. ``compiler_family``/``compiler_version`` are deliberately
-**not** projected into any forwarded field yet -- ``compiler_family``
-selects a toolchain only through ``binding`` (there is no separate "pick a
-family" invocation flag), and ``compiler_version`` is a *constraint* (e.g.
+**not** projected into any forwarded field -- ``compiler_family`` selects a
+toolchain only through ``binding`` (there is no separate "pick a family"
+invocation flag), and ``compiler_version`` is a *constraint* (e.g.
 ``">=14.0,<15"``), not a value to pass through; verifying a resolved
 binding's actual version against it needs a real toolchain-identity probe
-(subprocess), which stays out of this module by design -- a documented gap,
+(subprocess), which stays out of this module by design. A P0 audit round
+briefly made :func:`_compose_gcc_options` consult ``compiler_family`` to
+drop ``-stdlib=``/``--target=`` for GCC-family profiles; a later review
+round found that broke real cross-compilation-target correctness for the
+direct-clang backend (the composed string is never actually fed to a
+literal GCC binary anywhere in this pipeline, only ever to Clang -- see
+that function's own docstring), so it was reverted -- a documented gap,
 not an oversight.
 """
 
@@ -145,6 +151,32 @@ def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
     deterministic output; ``args`` are appended verbatim, in declared
     order, last -- the operator's own explicit escape hatch wins over the
     structured axes this function derives flags from.
+
+    **Deliberately not family-aware.** A P0 audit round had this function
+    drop ``-stdlib=``/``--target=`` whenever ``compiler_family: gcc`` was
+    set, reasoning that a real GCC binary rejects both (true: confirmed
+    against GCC 14.2). A later review round found that fix backwards: this
+    composed string is *never* fed to a literal GCC binary anywhere in the
+    current pipeline -- ``--ast-frontend`` only has ``auto``/``castxml``/
+    ``clang``/``hybrid`` (no ``gcc``); castxml's own frontend is always its
+    internal bundled Clang (``--castxml-cc-<id>`` selects an *emulation*
+    mode, not a literal execution path); and the direct-clang backend's
+    ``_resolve_clang_bin`` (``dumper_clang.py``) explicitly *rejects* a
+    ``gcc-path`` that doesn't look clang-family and falls back to host
+    ``clang``/``clang++`` instead. Since the real consumer is always Clang,
+    dropping ``--target=`` actively broke cross-compilation-target
+    correctness for the direct-clang backend: it is the *only* signal
+    available there to steer parsing away from the host architecture (no
+    "probe the real compiler" auto-discovery step exists on that path the
+    way castxml has one), so a GCC-family profile with an explicit
+    ``target:`` would silently have its headers parsed for the runner's
+    architecture instead -- a correctness bug, not merely a redundant flag.
+    Reverted; both flags are emitted unconditionally regardless of
+    ``compiler_family`` again, same as before that audit. A genuine
+    family-specific argv resolver belongs to the toolchain-profile-
+    execution-contract work (AGENTS.md's "Known gaps"), where the actual
+    consuming frontend is known at composition time -- not a per-flag
+    heuristic here that cannot tell which frontend will read its output.
     """
     parts: list[str] = []
     if compile_spec.standard:

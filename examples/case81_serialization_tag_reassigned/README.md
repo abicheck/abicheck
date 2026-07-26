@@ -1,76 +1,113 @@
-# Case 81: Serialization tag ID reassigned
+# Case 81: Serialization Tag ID Reassigned
 
-**Category:** Payload ABI | **Verdict:** BREAKING
+**Category:** Payload ABI | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-DAAL's classic API persists models via `daal::services::SerializationIface`,
-which assigns each serializable class a `uint64` tag ID. Files written by v1
-embed these IDs; on load, a registry maps `tag_id → factory`.
+DAAL-style `SerializationIface` assigns each serializable class a tag ID
+persisted inside every saved file; on load, a registry maps `tag_id ->
+factory`. v2 swaps the values of `knn_model` and `linear_regression` (e.g.
+"putting them in alphabetical order"). A `.dat` file written by v1 embeds
+the bytes for `knn_model = 0x1002`; loaded against v2, the registry looks
+up `0x1002` and returns the `linear_regression` factory instead.
+Deserialization proceeds with **no error at all** — the model silently
+becomes the wrong class. Symbols, types, and layout are all unchanged, so
+every conventional (symbol/layout-only) ABI checker reports COMPATIBLE.
 
-If a maintainer reassigns an ID — e.g. swaps `knn_model_tag` and
-`linear_regression_tag` because they were "out of alphabetical order" — every
-existing saved model becomes silently corrupt:
+## Old/new diff
 
-- A `.dat` file written by v1 starts with bytes encoding `knn_model_tag = 0x1002`.
-- Loaded against v2, the registry looks up `0x1002` and gets back the
-  `linear_regression` factory.
-- Deserialization proceeds without any error (the bytes parse as a different
-  but structurally similar class) and returns the wrong type.
+| v1.h | v2.h |
+|------|------|
+| `knn_model = 0x1002, linear_regression = 0x1003` | `knn_model = 0x1003, linear_regression = 0x1002` |
 
-There is **no symbol change**, **no layout change**, **no link error**, **no
-load error**. Every conventional ABI checker reports COMPATIBLE.
-
-## Real Failure Demo
-
-**Severity: BREAKING / PERSISTENCE FORMAT DRIFT**
-
-Old serialized model tags now deserialize as a different model family.
+## abicheck command
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case81_serialization_tag_reassigned_app case81_serialization_tag_reassigned_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case81_serialization_tag_reassigned/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case81_serialization_tag_reassigned/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# knn_model_tag = 0x1003; linear_regression = 0x1002
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --ast-frontend clang
 ```
 
-## Why this is its own ChangeKind
+## Expected abicheck finding
 
-This is a *payload-level* invariant — the binary contract between two
-different runs of the program separated by serialization. ChangeKinds today
-track types, symbols, and layouts; tag-ID reassignment leaves all three
-intact. A new `SERIALIZATION_TAG_CHANGED` ChangeKind gives this break a
-name and lets policy files require explicit acknowledgement of such changes.
+```text
+Verdict: BREAKING (exit 4)
 
-## How abicheck detects it
-
-The new detector inspects exported variables and constants whose name matches
-a serialization-tag convention (configurable; defaults include
-`*_serialization_tag`, `*_tag`, `kSerializationTag`, `SERIALIZATION_TAG`,
-DAAL's `*SerializationTag` pattern). If two such constants in the same
-snapshot swap values between versions, a `SERIALIZATION_TAG_CHANGED` finding
-is emitted for each.
-
-## Code diff
-
-```cpp
-// v1.h
-constexpr std::uint64_t knn_model_tag         = 0x1002;
-constexpr std::uint64_t linear_regression_tag = 0x1003;
-
-// v2.h — values swapped
-constexpr std::uint64_t knn_model_tag         = 0x1003;
-constexpr std::uint64_t linear_regression_tag = 0x1002;
+- enum_member_value_changed: Enum member value changed:
+  SerializationTag::knn_model (4098 -> 4099)
+- enum_member_value_changed: Enum member value changed:
+  SerializationTag::linear_regression (4099 -> 4098)
+- serialization_tag_changed: Serialization tag 'SerializationTag::knn_model'
+  value changed 4098 -> 4099; this is the same value previously assigned to
+  'SerializationTag::linear_regression'. Saved data referencing the old
+  value now deserialises as the wrong class.
+- serialization_tag_changed: Serialization tag
+  'SerializationTag::linear_regression' value changed 4099 -> 4098; this is
+  the same value previously assigned to 'SerializationTag::knn_model'.
 ```
 
-## Real-world reference
+## Minimum evidence
 
-`daal::services::SerializationIface::getSerializationTag()` returns an `int`
-that uniquely identifies the class for persistence. The implementation is
-sprinkled across `cpp/daal/include/algorithms/*/_model.h` files using
-`DAAL_SERIALIZATION_TAG` macros. The tag IDs are part of the persisted
-file format — changing them is on par with changing a wire protocol field.
+`min_evidence: L2` — the header AST is what lets abicheck recognize
+`SerializationTag`'s members as tag-shaped constants (configurable naming
+convention: `*_serialization_tag`, `*_tag`, `kSerializationTag`,
+`SERIALIZATION_TAG`, DAAL's `*SerializationTag` pattern) and cross-reference
+their numeric values between versions. castxml is the documented default
+backend for this evidence layer; clang (`--ast-frontend clang`) is a
+supported alternative AST frontend used above.
+
+## Why abicheck catches it
+
+The dedicated serialization-tag detector inspects exported enum
+members/constants matching the tag-naming convention and checks whether
+two such constants swap values between snapshots. Here `knn_model`
+(`0x1002` → `0x1003`) and `linear_regression` (`0x1003` → `0x1002`) trade
+places exactly — the detector reports a `serialization_tag_changed`
+finding for each, explicitly naming which sibling now holds the old value.
+This is a *payload-level* invariant: no type, symbol, or layout changed, so
+without this dedicated detector the change would be invisible to every
+symbol/layout-based ABI checker.
+
+## Runtime failure demonstration
+
+**Severity: BREAKING — silent persistence-format corruption**
+
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile —
+the app just reads back the tag values a real serializer would embed in a
+saved file.
+
+```bash
+# Build old library + app
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo.so
+g++ -std=c++17 -g app.cpp -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → knn_model_tag       = 0x1002
+# → linear_regression   = 0x1003
+
+# Swap in new library (no recompile)
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo.so
+./app
+# → knn_model_tag       = 0x1003
+# → linear_regression   = 0x1002
+```
+
+**Why this is BREAKING despite no crash:** there is no symbol change, no
+layout change, no link error, no load error — the process runs to
+completion cleanly on both sides. But a `.dat` file written while linked
+against v1 (tagged `0x1002` for `knn_model`) silently deserializes as
+`linear_regression` once the same bytes are read back against v2. This is
+data corruption with zero observable failure signal at the point of
+damage.
+
+## Safe redesign
+
+Treat serialization tag IDs as a permanent, append-only registry: once a
+tag value is assigned to a class, never reassign it to a different class,
+even during "cleanup" refactors. Retire a class by reserving its old tag
+value rather than reusing it.
+
+**Real-world example:** `daal::services::SerializationIface::getSerializationTag()`
+returns an `int` uniquely identifying a class for persistence, implemented
+across `cpp/daal/include/algorithms/*/_model.h` via `DAAL_SERIALIZATION_TAG`
+macros. The tag IDs are part of the persisted file format — changing them
+is on par with changing a wire-protocol field.

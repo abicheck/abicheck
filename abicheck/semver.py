@@ -141,10 +141,39 @@ class ReleaseRecommendation:
     rationale: str
     state: ReleaseRecommendationState = ReleaseRecommendationState.ACTIONABLE
 
-    def to_dict(self) -> dict[str, str]:
-        """Serialise for JSON reports (additive ``release_recommendation`` key)."""
+    def to_dict(self) -> dict[str, str | None]:
+        """Serialise for JSON reports (additive ``release_recommendation`` key).
+
+        ``version_bump`` is ``null`` when :attr:`state` is ``UNAVAILABLE`` —
+        the confident-looking ``"major"`` literal previously survived
+        serialization even though the docstring/rationale explain abicheck
+        could not confirm it, which let automation blindly act on a bump it
+        had no real evidence for. The still-plausible bump is only in
+        ``rationale`` prose then; ``self.bump`` itself (and ``headline()``)
+        keep the pre-serialization value for human-facing callers that
+        already gate on ``state``.
+
+        ``possible_impact`` (schema 2.22, status-review follow-up) exposes
+        that same still-plausible bump as a *separate*, always-non-null,
+        machine-readable field — ``rationale`` prose is not something
+        automation should parse to recover it. It equals ``version_bump``
+        whenever ``state`` is ``ACTIONABLE`` (the two fields agree by
+        construction); the split only matters for ``REVIEW``/``UNAVAILABLE``,
+        where ``version_bump`` is deliberately withheld/nulled but a caller
+        that wants to know "what would abicheck recommend if this were
+        confirmed" (e.g. to size a review queue, not to auto-act) still has
+        an answer. Never gate an automated release action on
+        ``possible_impact`` alone — that is exactly the blind-trust failure
+        mode ``version_bump: null`` exists to prevent; always check ``state``
+        first.
+        """
         return {
-            "version_bump": self.bump.value,
+            "version_bump": (
+                None
+                if self.state == ReleaseRecommendationState.UNAVAILABLE
+                else self.bump.value
+            ),
+            "possible_impact": self.bump.value,
             "soname_action": self.soname.value,
             "rationale": self.rationale,
             "state": self.state.value,

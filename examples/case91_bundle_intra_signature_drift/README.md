@@ -1,53 +1,125 @@
-# Case 91: Bundle — intra-bundle extern-C signature drift
+# Case 91: Bundle — Intra-Bundle extern-C Signature Drift
 
 **Category:** Bundle / cross-library | **Verdict:** 🔴 BREAKING
-(per-library: NO_CHANGE for libalgo; BREAKING for libcore)
+(per-library: `libalgo.so` COMPATIBLE, `libcore.so` BREAKING)
 
-## What breaks
-`libcore.so` changes `core_add(int,int)` to `core_add(long,long)`.
-Because `core_add` has C linkage, the **mangled name is identical** on
-both sides — the dynamic linker happily resolves the symbol. But the
-calling convention is now wrong:
-- `libalgo.so` was compiled against the v1 declaration; its call sites
-  push two 32-bit ints onto the stack / into `edi`/`esi`.
-- The new `libcore.so` `core_add` reads 64-bit `rdi`/`rsi`, picking up
-  garbage in the high halves of the registers.
-- Result: undefined behaviour or wrong values, depending on caller layout.
+## Verdict and consumer impact
 
-## Real Failure Demo
+`libcore.so` changes `core_add(int, int)` to `core_add(long, long)`.
+Because `core_add` has C linkage, the mangled symbol name is identical on
+both sides — the dynamic linker resolves it without complaint. `libalgo.so`
+is byte-identical between versions: it was compiled once against the v1
+declaration and its call sites still push two 32-bit ints. The new
+`libcore.so`'s `core_add` reads 64-bit `rdi`/`rsi`, picking up garbage in
+the high halves of the registers it wasn't given. There is no load-time
+error — only silently wrong results or undefined behaviour at the first
+cross-library call, depending on what garbage lands in the unused register
+bits.
 
-**Severity: BREAKING / CROSS-DSO CALLING-CONVENTION MISMATCH**
+## Old/new diff
+
+| Library | v1 | v2 |
+|---|---|---|
+| `libcore.so` | `extern "C" int core_add(int a, int b)` | `extern "C" long core_add(long a, long b)` — same mangled name |
+| `libalgo.so` | declares/calls `core_add(int,int)` | unchanged — still declares/calls `core_add(int,int)` |
+
+## abicheck command
 
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case91_bundle_intra_signature_drift_old_libalgo case91_bundle_intra_signature_drift_new_libalgo
-PYTHONPATH=. python3 -m abicheck.cli compare-release   /tmp/abicheck-examples-build/case91_bundle_intra_signature_drift/old   /tmp/abicheck-examples-build/case91_bundle_intra_signature_drift/new   --format markdown
-# bundle_intra_dep_signature_changed: libalgo.so calls core_add but libcore.so changed its DWARF signature.
+cmake --build /tmp/abicheck-examples-build \
+    --target case91_bundle_intra_signature_drift_old_libcore \
+              case91_bundle_intra_signature_drift_old_libalgo \
+              case91_bundle_intra_signature_drift_new_libcore \
+              case91_bundle_intra_signature_drift_new_libalgo
+abicheck compare \
+    /tmp/abicheck-examples-build/case91_bundle_intra_signature_drift/old \
+    /tmp/abicheck-examples-build/case91_bundle_intra_signature_drift/new \
+    --format json
 ```
 
-## Why per-library compare misses it
-- `compare libcore_v1 libcore_v2` correctly flags `func_params_changed`
-  and `func_return_changed` on `core_add`.
-- `compare libalgo_v1 libalgo_v2` reports `NO_CHANGE` — libalgo's binary
-  is byte-identical between versions.
-
-Per-library compare has no concept of "library A's change affects library
-B's calls".
-
-## What the bundle layer detects
-`abicheck compare-release old/ new/` flags both:
+## Expected abicheck finding
 
 ```text
-## 🔗 Bundle (Cross-Library) Findings
-- bundle_intra_dep_signature_changed — core_add (consumer: libalgo.so) (provider: libcore.so)
-  - libalgo.so calls core_add (mangled name unchanged) but libcore.so
-    altered its DWARF signature. Calling convention is now mismatched.
+Verdict: BREAKING (exit 4)
+
+Per-library:
+- libalgo.so -> COMPATIBLE (no findings — the file is byte-identical)
+- libcore.so -> BREAKING
+  - func_return_changed: Return type changed: core_add
+  - func_params_changed: Parameters changed: core_add
+
+Bundle (cross-library) findings:
+- bundle_intra_dep_signature_changed: libalgo.so calls core_add (mangled
+  name unchanged) but libcore.so altered its DWARF signature (int -> long int).
+  > Calling convention is now mismatched.
 ```
 
-Exit code: 4 (BREAKING).
+## Minimum evidence
 
-## Real-world analogue
-oneDAL's internal `extern "C"` shims between threading layers and
-algorithm kernels. A core type-width change (e.g. row count `int32_t →
-int64_t`) silently breaks every algorithm `.so` that was compiled against
-the old header.
+`ground_truth.json` records `min_evidence: L0` for this case's bundle
+category. In this specific instance the DT_NEEDED/`.dynsym` import graph
+that the bundle layer walks (`libalgo.so` imports `core_add`, `libcore.so`
+still exports a symbol of that exact mangled name) is genuinely L0
+evidence. But confirming that the *signature itself* changed needs DWARF:
+`extern "C"` keeps the mangled name identical on both sides, so a
+symbols-only comparison sees the same exported name before and after and
+has no type information to compare. `abicheck/bundle.py`'s
+`_detect_intra_dep_signature_changed` reads this fact off the underlying
+`func_params_changed`/`func_return_changed` findings, both of which need
+DWARF's `DW_TAG_formal_parameter`/return-type entries — this repro's
+`-DCMAKE_BUILD_TYPE=Debug` build supplies that (L1). Stripping debug info
+from both sides before comparing (verified locally) drops the verdict to
+`NO_CHANGE`: the bundle finding disappears along with the per-library
+signature-change findings it's built from.
+
+## Why abicheck catches it
+
+A pairwise `compare` of `libalgo.so` old vs. new alone reports
+`COMPATIBLE` — the file is genuinely unchanged. The bundle layer instead
+diffs `libcore.so` on its own (finding `func_params_changed` /
+`func_return_changed` on `core_add` via DWARF) and then cross-references
+that against every sibling's imports: `libalgo.so` imports the same
+mangled `core_add`, so the provider-side signature change is re-emitted as
+a bundle-level `bundle_intra_dep_signature_changed` finding attributing the
+break to the consumer (`libalgo.so`) even though `libalgo.so`'s own binary
+never changed.
+
+## Runtime failure demonstration
+
+**Severity: BREAKING (cross-DSO calling-convention mismatch)**
+
+There's no single `app.c` — the mismatch is between two library binaries,
+not between an app and one library, and it produces silently wrong values
+rather than a crash the OS reports. What actually happens when both new
+libraries are loaded together: `libalgo.so`'s call sites for `core_add`
+still emit 32-bit `mov`s into `edi`/`esi` (or push 32-bit values); the new
+`libcore.so`'s `core_add` reads the full 64-bit `rdi`/`rsi`. Since the
+caller only ever wrote the low 32 bits, the upper 32 bits of each register
+hold whatever was left over from prior code — `core_add`'s result depends
+on that leftover garbage. Unlike case90's undefined-symbol failure, the
+dynamic linker is completely satisfied here (same mangled name resolves
+fine); the bug only shows up as wrong numbers coming out of `algo_sum()`.
+
+## Safe redesign
+
+Never change a public `extern "C"` function's parameter or return types in
+place — the mangled name gives callers no signal that anything changed.
+Introduce a new symbol name (`core_add_l`) for the new signature, or bump
+the library's SONAME and keep the old `core_add(int,int)` available under
+it, so old callers keep resolving to a function with the calling
+convention they were built for.
+
+**Real-world example:** oneDAL's internal `extern "C"` shims between
+threading and algorithm-kernel layers. A core type-width change (e.g. row
+count `int32_t → int64_t`) silently breaks every algorithm `.so` compiled
+against the old header, exactly this pattern at production scale.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` compare one library pair at a time. Run
+against `libalgo.so` old vs. new alone, either would correctly report "no
+ABI change" — the file really is byte-identical — which is exactly why
+this class of break (the change lives entirely in a sibling library, only
+visible by cross-referencing the DT_NEEDED graph) needs bundle-aware
+tooling rather than a stronger per-file diff.

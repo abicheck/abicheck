@@ -208,3 +208,99 @@ def test_pvxs_error_requires_guard_does_not_force_cxx20(tmp_path: Path) -> None:
     release = report.get("release_recommendation") or {}
     assert release.get("soname_action") not in ("bump_required", "bump_missing")
     assert release.get("version_bump") != "major"
+
+
+def test_pvxs_explicit_gnu11_dialect_resolves_and_matches_on_both_sides(
+    tmp_path: Path,
+) -> None:
+    """Companion to the test above (status-review follow-up): that test only
+    proves the C++20 auto-detection heuristic did NOT fire (``ast_resolved_
+    standard is None`` -- no explicit dialect was ever requested, so nothing
+    to resolve). It does not prove old/new were actually parsed under
+    gnu++11 -- ``int pvxs_op(int x)`` mangles identically under gnu++11 and a
+    silently-forced gnu++20, so a scanner that quietly ignored the profile's
+    dialect and defaulted to some other standard entirely would pass that
+    test too. This test closes that gap: both sides are dumped with an
+    *explicit* ``--gcc-options -std=gnu++11``, and the decisive assertion is
+    that both snapshots' own ``ast_resolved_standard`` provenance field
+    reads back exactly ``"gnu++11"`` -- proving the requested dialect was
+    the one actually used, not merely that C++20 wasn't force-applied."""
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+
+    old_so = old_dir / "libpvxs.so"
+    new_so = new_dir / "libpvxs.so"
+    _build_lib(old_dir, old_so)
+    _build_lib(new_dir, new_so)
+
+    def _dump_with_explicit_gnu11(so_path: Path, header: Path, out_json: Path) -> dict:
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "-H",
+                str(header),
+                "--ast-frontend",
+                "clang",
+                "--gcc-options",
+                "-DHAVE_BASE=1 -std=gnu++11",
+                "-o",
+                str(out_json),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        return json.loads(out_json.read_text(encoding="utf-8"))
+
+    old_snap = _dump_with_explicit_gnu11(
+        old_so, old_dir / "pvxs.h", tmp_path / "old-gnu11.abi.json"
+    )
+    new_snap = _dump_with_explicit_gnu11(
+        new_so, new_dir / "pvxs.h", tmp_path / "new-gnu11.abi.json"
+    )
+    # The decisive assertion: both sides actually resolved to gnu++11, not
+    # merely "not gnu++20" -- and they agree with each other.
+    assert old_snap.get("ast_resolved_standard") == "gnu++11", old_snap.get(
+        "ast_resolved_standard"
+    )
+    assert new_snap.get("ast_resolved_standard") == "gnu++11", new_snap.get(
+        "ast_resolved_standard"
+    )
+    assert old_snap.get("ast_resolved_standard") == new_snap.get(
+        "ast_resolved_standard"
+    )
+
+    out_json = tmp_path / "report-gnu11.json"
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(old_so),
+            str(new_so),
+            "--header",
+            f"old={old_dir / 'pvxs.h'}",
+            "--header",
+            f"new={new_dir / 'pvxs.h'}",
+            "--ast-frontend",
+            "clang",
+            "--gcc-options",
+            "-DHAVE_BASE=1 -std=gnu++11",
+            "--format",
+            "json",
+            "-o",
+            str(out_json),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    report = json.loads(out_json.read_text(encoding="utf-8"))
+    # Same tolerance as the sibling test above: NO_CHANGE/COMPATIBLE is the
+    # common case, but a platform-specific header<->export-table matching
+    # degradation (observed on macOS) can widen this to
+    # COMPATIBLE_WITH_RISK -- orthogonal to what this test guards (the
+    # requested dialect actually took effect), so only BREAKING/API_BREAK
+    # are asserted away.
+    assert report["verdict"] not in ("BREAKING", "API_BREAK")
+    assert report["summary"]["breaking"] == 0
+    assert report["summary"]["source_breaks"] == 0

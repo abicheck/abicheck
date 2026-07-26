@@ -2,52 +2,103 @@
 
 **Category:** Struct Layout | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-The `Matrix` struct contains a 2D array member `data[ROWS][COLS]`. Its element type
-changes from `float` (4 bytes) to `double` (8 bytes), so `sizeof(Matrix)` doubles
-from **72 → 136 bytes** (`4×4×4 + 8 = 72` → `4×4×8 + 8 = 136`). Any consumer
-compiled against v1 headers will read/write the struct at the wrong offsets.
-Return types of `matrix_get()`/`matrix_set()` also change.
+`Matrix` embeds a 2D array member `data[ROWS][COLS]`. Its element type changes
+from `float` (4 bytes) to `double` (8 bytes), so `sizeof(Matrix)` grows from
+72 to 136 bytes and every field after `data` shifts to a new offset. Any
+consumer compiled against v1 headers allocates and indexes the old (smaller,
+differently-strided) layout — reads land on the wrong bytes. Recompilation
+against v2 is mandatory.
 
-## Why abidiff catches it
-
-abidiff reports `Subrange_Change` in multi-dim array and exits **4**.
-abicheck detects: `TYPE_SIZE_CHANGED`, `TYPE_FIELD_TYPE_CHANGED`, `FUNC_RETURN_CHANGED`.
-
-## Code diff
+## Old/new diff
 
 | v1.h | v2.h |
 |------|------|
-| `float data[4][4];` — 64 bytes | `double data[4][4];` — 128 bytes |
-| `float matrix_get(...)` | `double matrix_get(...)` |
+| `float data[ROWS][COLS];` — 64 bytes | `double data[ROWS][COLS];` — 128 bytes |
+| `float matrix_get(const Matrix *m, int r, int c);` | `double matrix_get(const Matrix *m, int r, int c);` |
 
-## Real Failure Demo
-
-**Severity: 🔴 CRITICAL**
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so
-
-abidw --out-file v1.abi libv1.so
-abidw --out-file v2.abi libv2.so
-abidiff v1.abi v2.abi
-echo "exit: $?"   # → 4 (TYPE_SIZE_CHANGED + FUNC_RETURN_CHANGED)
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Reproduce manually
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: Matrix (576 -> 1088 bits)
+  > Old code allocates or copies the type with the old size;
+    heap/stack corruption, out-of-bounds access.
+  Affected symbols: matrix_get, matrix_set
+- type_field_type_changed: Field type changed: Matrix::data (float[] -> double[])
+  > Field has different size or representation; old code misinterprets the data.
+- type_field_offset_changed: Field offset changed: Matrix::rows (512 -> 1024 bits)
+- type_field_offset_changed: Field offset changed: Matrix::cols (544 -> 1056 bits)
+- func_return_changed: Return type changed: matrix_get (float -> double)
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's array-subrange and struct-member info (element
+type, element count, member offsets) is enough to compute the new size and
+field shifts; no public headers needed.
+
+## Why abicheck catches it
+
+DWARF represents `data[ROWS][COLS]` as an array type with a subrange and an
+element type; abicheck reads the element type and total byte size from debug
+info for both versions and diffs them directly, propagating the size change
+into every downstream field offset.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so
-abidw --headers-dir . --out-file v1.abi libv1.so
-abidw --headers-dir . --out-file v2.abi libv2.so
-abidiff v1.abi v2.abi
+# Build old library + app
+gcc -shared -fPIC -g v1.c -o libfoo.so
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → a=1.500 b=2.500 sum=4.000
+# → expected: a=1.500 b=2.500 sum=4.000
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g v2.c -o libfoo.so
+./app
+# → a=1.500 b=0.000 sum=1.500
+# → expected: a=1.500 b=2.500 sum=4.000
+# → CORRUPTION: matrix element type/layout changed (float[][] vs double[][])
 ```
 
-## How to fix
+**Why CRITICAL:** the app writes `float` values at v1's 4-byte stride, but
+`matrix_get()` in v2 reads the same memory at an 8-byte `double` stride —
+every element after the first is misaligned, so `b` reads as zero instead of
+`2.5`.
 
-1. **Abstract the element type** via a typedef: `typedef float mat_elem_t;` — change the typedef, not the struct directly.
-2. **Version via SONAME** — element type changes in matrix structs require a major version bump.
-3. **Provide both** `matrix_float_get()` and `matrix_double_get()` during a deprecation window.
+## Safe redesign
+
+Abstract the element type behind a typedef (`typedef float mat_elem_t;`) so
+future changes touch one declaration, not the struct layout, and never widen
+an array element type in a public struct without a SONAME bump. If both
+precisions are genuinely needed, ship `matrix_float_get()` and
+`matrix_double_get()` as distinct symbols during a deprecation window.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+echo "exit: $?"   # → 4
+```
+
+> **Note on abidiff:** libabigail reports this as a `Subrange_Change` inside
+> the array member, surfacing as a `Matrix` type-size change with exit code
+> **4** — the same conclusion abicheck reaches, from the same DWARF evidence.

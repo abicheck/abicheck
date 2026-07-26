@@ -1,78 +1,88 @@
 # Case 62: Type Field Added (Compatible — Opaque Struct)
 
-**Category:** Type Layout | **Verdict:** COMPATIBLE
+**Category:** Addition | **Verdict:** 🟢 COMPATIBLE
 
-## What this case is about
+## Verdict and consumer impact
 
-v1 defines `Session` as an opaque struct with `name` and `timeout` fields.
-v2 adds a `priority` field at the end. Because callers only use `Session*`
-(never allocate, embed, or sizeof the struct), the change is **ABI-compatible**.
+`Session` is an opaque handle — callers only ever hold `Session*`, never
+allocate, embed, or `sizeof()` the struct themselves. v2 grows the private
+struct definition and adds `session_get_priority()`, but every existing
+caller keeps working unmodified: allocation happens inside the library via
+`session_open()`, so the caller-visible surface (the pointer and the
+existing accessor functions) is untouched.
 
-This is the **correct design pattern** for extensible C APIs: opaque handles +
-accessor functions allow adding fields without breaking existing consumers.
+## Old/new diff
 
-## Real Failure Demo
+| old/lib.c (private struct) | new/lib.c (private struct) |
+|-----------------------------|-----------------------------|
+| `char name[64]; int timeout; int _reserved0;` | `char name[64]; int timeout; int priority;` |
+| *(no accessor)* | `int session_get_priority(const Session *s);` |
 
-**Severity: COMPATIBLE - NO FAILURE EXPECTED**
-
-The struct is opaque to callers, so v2 can grow the private allocation without changing caller layout.
-
-```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case62_type_field_added_compatible_app case62_type_field_added_compatible_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case62_type_field_added_compatible/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case62_type_field_added_compatible/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# name = test / timeout = 30
-```
-
-## Why this is compatible
-
-- **Callers never see the layout**: `Session` is forward-declared in the header.
-  All allocation is done by `session_open()` inside the library.
-- **Existing field offsets unchanged**: `name` and `timeout` are at the same
-  offsets. Only a new field is appended.
-- **Existing functions unchanged**: `session_get_name()` and `session_get_timeout()`
-  work identically.
-
-## Contrast with case07 (breaking)
-
-Case 07 adds a field to a **non-opaque** struct that callers `sizeof` and
-embed — that's breaking. This case demonstrates the safe pattern.
-
-## What abicheck detects
-
-- **`FUNC_ADDED`**: `session_get_priority()` is a new symbol.
-
-`Session` is forward-declared only in the public header — its definition
-never appears in header-based diffing at all, so no type-level finding
-fires for it (not `TYPE_FIELD_ADDED`, not `TYPE_FIELD_ADDED_COMPATIBLE`).
-That's the point of the pattern: the struct's layout isn't part of the
-diffed public surface to begin with, so there's nothing to classify as
-"added" or "compatible" — it's simply invisible to the checker, which is
-exactly what makes it safe to change. (For an example where `TYPE_FIELD_ADDED_COMPATIBLE`
-actually fires on a *visible* struct's appended field, see case94 — there
-it's paired with a breaking `TYPE_SIZE_CHANGED` on the same struct, since
-the catalog does not yet have a case isolating a clean, standalone
-COMPATIBLE verdict driven by `TYPE_FIELD_ADDED_COMPATIBLE` alone.)
-
-**Overall verdict: COMPATIBLE**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g bad.c  -include bad.h  -o libbad.so
-gcc -shared -fPIC -g good.c -include good.h -o libgood.so
-
-python3 -m abicheck.cli dump libbad.so  -o /tmp/v1.json
-python3 -m abicheck.cli dump libgood.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → COMPATIBLE: FUNC_ADDED
+gcc -shared -fPIC -g -include old/lib.h old/lib.c -o libfoo_v1.so
+gcc -shared -fPIC -g -include new/lib.h new/lib.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Design pattern
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE (exit 0)
+
+- func_added: New public function: session_get_priority
+  > New function available; existing binaries are unaffected.
+
+Quality:
+- used_reserved_field: Reserved field put into use: Session::_reserved0 -> priority
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — `session_get_priority` appearing in v2's `.dynsym` is
+enough to see the addition; `Session` is forward-declared only in the public
+header, so its private layout is never part of the diffed surface at any
+evidence tier, header-based or not.
+
+## Why abicheck catches it
+
+The dynamic symbol table shows a new exported function name in v2's
+`.dynsym` that isn't in v1's — a pure L0 addition. `Session`'s private
+struct layout would only be visible to abicheck if it appeared in a public
+header's type declaration; here it never does, so no type-level finding is
+possible or needed to justify the COMPATIBLE verdict.
+
+## Runtime failure demonstration
+
+No observable effect on existing binaries — the opaque-pointer pattern is
+exactly what makes growing the private struct safe.
+
+```bash
+# Build old library + app (app.c only ever holds Session*)
+gcc -shared -fPIC -g -include old/lib.h old/lib.c -o libfoo.so
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → name = test
+# → timeout = 30
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g -include new/lib.h new/lib.c -o libfoo.so
+./app
+# → name = test
+# → timeout = 30   ← identical
+```
+
+Allocation and field access both happen inside the library, so growing
+`Session` never affects `app.c`'s stack/heap layout.
+
+## Safe redesign
+
+This case *is* the safe redesign: expose only an opaque pointer plus
+accessor functions, and do all allocation inside the library. Contrast with
+case07, which adds a field to a **non-opaque** struct that callers `sizeof`
+and embed directly — that case is breaking precisely because the struct
+layout is part of the public contract.
 
 ```c
 /* PUBLIC HEADER — opaque pointer */
@@ -83,27 +93,15 @@ void widget_free(Widget *w);
 /* PRIVATE IMPLEMENTATION — can grow freely */
 struct Widget {
     int x, y;
-    int new_field;  /* ← safe to add */
+    int new_field;  /* safe to add */
 };
 ```
 
-## Real-world examples
-
-- **OpenSSL**: All major types (`SSL`, `EVP_MD_CTX`, etc.) are opaque since 1.1.0
-- **libcurl**: `CURL *` handle is fully opaque
-- **SQLite**: `sqlite3 *` is opaque
+**Real-world examples:** OpenSSL's `SSL`/`EVP_MD_CTX` types have been opaque
+since 1.1.0; libcurl's `CURL*` handle is fully opaque; SQLite's `sqlite3*`
+is opaque — all three let the library grow internal state across releases
+without breaking callers.
 
 ## References
 
 - [How to Write Shared Libraries — Opaque Types](https://www.akkadia.org/drepper/dsohowto.pdf)
-
-
-Implementation note: v1's private `Session` definition keeps a reserved
-`_reserved0` slot; v2 renames it to `priority` at the same offset and size.
-This keeps `sizeof(Session)` identical between versions — deliberately, so
-the case isolates *only* the opacity argument (the struct is invisible to
-header-based diffing either way) rather than also depending on
-`_filter_opaque_size_changes`' pointer-only-usage suppression of a growing
-`sizeof`. Since `Session` is never in the public header, none of this is
-visible to abicheck regardless — the private struct could have changed
-size too and the verdict would be identical.

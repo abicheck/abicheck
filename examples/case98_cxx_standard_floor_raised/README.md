@@ -1,33 +1,110 @@
-# case98 — C++ standard floor raised (build-context risk)
+# Case 98: C++ Standard Floor Raised
 
-## What this case demonstrates
+**Category:** Build context risk | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
-`v1.h` and `v2.h` declare an identical public surface and neither uses any
-post-C++17 construct — a consumer TU including `v2.h` compiles unchanged
-under `-std=c++17` with both GCC and Clang (verified directly). The
-difference is entirely in the *library's own* build contract: `v2` is
-compiled with `-std=c++20` (via `V2_COMPILE_OPTIONS` in `CMakeLists.txt`),
-so the `.so` was produced under a higher C++ standard floor than `v1`
-while its public declaration set stays byte-identical.
+## Verdict and consumer impact
 
-## Why build context changes the verdict
+`v1.h`/`v2.h` declare an identical public surface, and neither uses any
+post-C++17 construct — a consumer TU including either header compiles
+unchanged. What changes is the *library's own* build contract: v1 is
+built with `-std=gnu++17`, v2 with `-std=c++20`. The binary ABI (symbols,
+layout, vtables) is untouched, so nothing breaks today — but the producer
+now assumes a newer C++ dialect than before, and that's a deployment risk
+signal worth surfacing before it turns into a real break (e.g. once the
+library starts relying on standard-library types whose layout differs
+across dialects).
 
-The symbol set, vtable, and declared interface are unchanged between
-v1 and v2, so a deliberately context-free per-binary ABI diff returns
-`NO_CHANGE`. The example validation supplies each side's compile database
-through the public `abicheck` CLI. L3 build evidence then records
-`std:CXX` changing from `gnu++17` to `c++20`, and comparison emits
-`abi_relevant_build_flag_changed`.
+## Old/new diff
 
-The case has one ground-truth verdict at every scan depth:
-`COMPATIBLE_WITH_RISK`. L3 is the first sufficient evidence layer; L4/L5
-source replay is not required. An L0–L2 scan that reports `NO_CHANGE` has
-missed the risk because it lacks the required evidence. That is a documented
-detection gap, not a second expected verdict.
+| v1.h / v1.cpp | v2.h / v2.cpp |
+|---------------|---------------|
+| Declarations byte-identical to v2 | Declarations byte-identical to v1 |
+| Built with `-std=gnu++17` | Built with `-std=c++20` (`V2_COMPILE_OPTIONS` in `CMakeLists.txt`) |
 
-## Expected verdict
+## abicheck command
 
-`COMPATIBLE_WITH_RISK` with
-`abi_relevant_build_flag_changed` — the binary ABI is unchanged, but the
-producer's ABI-relevant C++ dialect changed and consumers should review
-the compatibility implications.
+```bash
+g++ -std=gnu++17 -shared -fPIC -g v1.cpp -o old/liblib_v1.so
+g++ -std=c++20  -shared -fPIC -g v2.cpp -o new/liblib_v2.so
+# compile_commands.json per side records the -std flag actually used
+abicheck compare old/liblib_v1.so new/liblib_v2.so \
+  --depth build \
+  --build-info old=old/compile_commands.json \
+  --build-info new=new/compile_commands.json
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
+
+## Deployment Risk Changes
+
+- abi_relevant_build_flag_changed: Build option 'std:CXX' changed: 'gnu++17' -> 'c++20'
+```
+
+## Minimum evidence
+
+`min_evidence: L3` — the symbol set, layout, and header-declared surface
+are all byte-identical between v1 and v2, so an L0–L2 artifact-only scan
+returns `NO_CHANGE`: that's a documented false negative from insufficient
+evidence, not an alternative valid verdict. Only L3 build-context
+comparison (a compile database recording each side's `-std=` flag) carries
+the fact abicheck needs here. L4/L5 source replay is not required.
+
+## Why abicheck catches it
+
+With `--depth build` and a `--build-info` compile database per side,
+abicheck's build-context collector reads each compile unit's flags and
+records `std:CXX`. Comparing the two sides' recorded standards directly
+surfaces the `gnu++17` → `c++20` change as `abi_relevant_build_flag_changed`,
+independent of whether the flag change produced any observable binary
+difference yet.
+
+## Runtime failure demonstration
+
+This case is `COMPATIBLE_WITH_RISK`, not a hard break — there is no crash
+to demonstrate. Verified directly: the consumer app compiles unchanged
+against either header and behaves identically whether linked against
+`liblib_v1.so` or hot-swapped to `liblib_v2.so` (no recompile):
+
+```bash
+g++ -std=c++17 app.cpp -Iold -Lold -llib_v1 -Wl,-rpath,old -o app
+./app          # → 42
+# swap in the v2 .so (no recompile)
+cp new/liblib_v2.so old/liblib_v1.so
+./app          # → 42 (identical output)
+```
+
+No observable effect on existing binaries — the risk is in what the raised
+standard floor licenses the library to do *next*, not in today's ABI.
+
+## Safe redesign
+
+Track and publish the minimum/maximum supported C++ standard as part of
+the library's documented ABI contract, and treat a floor change as a
+notable release-note item even when it produces no symbol/layout diff
+today. If the library exposes any STL types across the ABI boundary
+(`std::string`, `std::vector`, …), pin the standard library's ABI mode
+explicitly (see case 104) rather than letting the compiler default drift
+between builds.
+
+**Real-world example:** projects that bump `CMAKE_CXX_STANDARD` in a
+"modernization" PR often don't realize the new floor is itself an
+ABI-relevant fact for consumers cross-compiling or vendoring the library
+under a pinned older toolchain — the break shows up later as a confusing
+toolchain-compatibility bug, not at review time.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` compare binary artifacts (with optional
+DWARF) and have no concept of "build context" outside the binary itself;
+neither would report anything for this case, since the `.so` files are
+layout-identical. Detecting a build-flag drift like this requires
+consuming the compile database directly, which is what abicheck's L3
+build-context layer is for.
+
+## References
+
+- [CMake `CXX_STANDARD` / `CXX_EXTENSIONS` properties](https://cmake.org/cmake/help/latest/prop_tgt/CXX_STANDARD.html)
+- [GCC C++ dialect options (`-std=`)](https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html)

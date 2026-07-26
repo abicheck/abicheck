@@ -10,71 +10,83 @@
 | **Detected `ChangeKind`s** | `func_virtual_added` |
 | **Source files** | `examples/case68_virtual_method_added/` |
 
-**Category:** Class Layout / Vtable | **Verdict:** BREAKING
+**Category:** Class Layout / Vtable | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-The `Sensor` class gains a virtual destructor and `read()` becomes virtual. This
-introduces a **vtable pointer** (`vptr`) as a hidden member at the beginning of
-the object. On x86-64, this adds 8 bytes to the object size and shifts **every
-data member** to a higher offset:
+`Sensor` gains a virtual destructor and `read()` becomes virtual. The
+compiler prepends a vtable pointer to the object, growing `sizeof(Sensor)`
+from 16 to 24 bytes and shifting every data member 8 bytes higher. A
+consumer compiled against v1 that reads `value_` at offset 0 instead reads
+the vtable pointer; reading `id_` at offset 8 instead reads `value_`.
+Recompilation is mandatory.
 
-| Member | v1 offset | v2 offset | Shift |
-|--------|-----------|-----------|-------|
-| *(vptr)* | — | 0 | *new* |
-| `value_` | 0 | 8 | +8 |
-| `id_` | 8 | 16 | +8 |
-| **sizeof** | **16** | **24** | **+8** |
+## Old/new diff
 
-Any consumer compiled against v1 that accesses `value_` at offset 0 will instead
-read the vtable pointer — interpreting a memory address as a `double`, producing
-astronomically wrong values.
-
-## Why this matters
-
-Adding the first virtual method to a class is one of the most destructive ABI
-changes possible, because it fundamentally alters the object layout:
-
-1. **Object size increases**: `sizeof(Sensor)` grows by `sizeof(void*)`, breaking
-   stack allocation, arrays, and embedding in other structs
-2. **All fields shift**: every data member moves to accommodate the vtable pointer,
-   causing every field access to read/write the wrong memory
-3. **Construction changes**: the constructor now initializes the vtable pointer,
-   adding a hidden write that wasn't there before
-4. **Copy semantics change**: memcpy of the object must include the vtable pointer
-5. **It's a one-way door**: once virtual, removing virtuality is equally breaking
-
-This is especially common when adding:
-- A virtual destructor (for proper cleanup through base pointers)
-- A virtual method for plugin/extension APIs
-- A virtual method for testing/mocking
-
-## Code diff
+| Member | v1 offset | v2 offset |
+|--------|-----------|-----------|
+| *(vptr)* | — | 0 *(new)* |
+| `value_` | 0 | 8 |
+| `id_` | 8 | 16 |
+| **sizeof** | **16** | **24** |
 
 ```cpp
-// v1: non-virtual class (no vtable pointer)
-class Sensor {
-public:
-    double value_;  // offset 0
-    int    id_;     // offset 8
-    Sensor(int id, double initial);
-    double read() const;        // non-virtual
-};
-// sizeof(Sensor) = 16
+// v1: non-virtual
+double read() const;
 
-// v2: virtual methods added (vtable pointer inserted!)
-class Sensor {
-public:
-    double value_;  // offset 8 (shifted!)
-    int    id_;     // offset 16 (shifted!)
-    Sensor(int id, double initial);
-    virtual ~Sensor();            // NEW virtual destructor
-    virtual double read() const;  // NOW virtual
-};
-// sizeof(Sensor) = 24
+// v2: virtual destructor + virtual read()
+virtual ~Sensor();
+virtual double read() const;
 ```
 
-## Real Failure Demo
+## abicheck command
+
+```bash
+g++ -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: Sensor (128 -> 192 bits)
+  > Old code allocates or copies the type with the old size; heap/stack
+    corruption, out-of-bounds access.
+- type_field_offset_changed: Field offset changed: Sensor::value_ (0 -> 64 bits)
+  > Old code reads/writes fields at stale offsets; silent data corruption.
+- type_field_offset_changed: Field offset changed: Sensor::id_ (64 -> 128 bits)
+  > Old code reads/writes fields at stale offsets; silent data corruption.
+- type_vtable_changed: vtable changed: Sensor ('' -> 'Sensor::~Sensor(), Sensor::read() const')
+  > Vtable slot reordering; virtual dispatch calls wrong method.
+- vptr_introduced: 'Sensor' gained a vtable pointer (became polymorphic).
+  sizeof grows and every data member's offset shifts by a pointer width;
+  binaries that embed or derive from the type are laid out incompatibly.
+  (non-polymorphic -> vptr@0)
+
+Deployment risk:
+- imported_symbol_added: New imported symbol:
+  vtable for __cxxabiv1::__class_type_info@CXXABI_1.3
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's `DW_TAG_structure_type` layout for `Sensor`
+already carries the vtable pointer and every member's shifted offset in
+both binaries; abicheck compares them directly from debug info (`-g`), no
+public headers required.
+
+## Why abicheck catches it
+
+DWARF records `Sensor`'s total size and each member's byte offset for both
+versions, plus the presence of a vtable-pointer member and the vtable's
+virtual-function-slot list; abicheck's layout diff spots the introduced
+vptr, the size growth, and every field's offset shift directly from that
+debug info.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
@@ -99,43 +111,33 @@ g++ -shared -fPIC -g v2.cpp -o libsensor.so
 # → CORRUPTION: value_ at v1 offset 0 reads v2's vtable pointer!
 ```
 
-**Why CRITICAL:** The app accesses `s->value_` at v1 offset 0, but v2 placed
-the vtable pointer there — the app reads an address as a `double`, getting 0.0
-or garbage. The app accesses `s->id_` at v1 offset 8, but v2 placed `value_`
-(98.6) there — interpreting the double's bytes as an `int` yields 1717986918.
-For heap-allocated objects the library created a 24-byte object correctly, but
-the app's direct field access uses v1 offsets and reads the wrong data.
+**Why CRITICAL:** the app accesses `s->value_` at v1 offset 0, but v2 placed
+the vtable pointer there — the app reads an address as a `double`, getting
+0.0 or garbage. `s->id_` at v1 offset 8 now lands on `value_` (98.6),
+whose bytes reinterpreted as `int` yield 1717986918. The library itself
+allocates the correct 24-byte object; it's the app's direct field access
+using v1 offsets that reads the wrong data.
 
-## How to fix
+## Safe redesign
 
-1. **Design for virtuality from the start**: if a class might ever need virtual
-   methods, add a virtual destructor in v1 to reserve the vtable pointer slot
-2. **Use the Pimpl idiom**: hide the implementation behind a pointer to avoid
-   exposing the class layout
-3. **Use C-style opaque handles**: `typedef struct Sensor Sensor;` with factory
-   functions — sizeof is never exposed
-4. **SONAME bump**: if virtual methods must be added, bump the major version
+If a class might ever need virtual methods, add a virtual destructor from
+the start to reserve the vtable slot, or hide the layout entirely behind
+the Pimpl idiom / a C-style opaque handle. If virtuality must be added
+later, bump the SONAME.
 
-## Real-world example
-
-Qt's `QObject` has been virtual since Qt 1.0 specifically to avoid this problem.
-The Qt ABI guidelines explicitly state: "never add a virtual function to a class
-that previously had none."
-
-The KDE Frameworks ABI policy documents this as one of the "cardinal sins" of
+**Real-world example:** Qt's `QObject` has been virtual since Qt 1.0
+specifically to avoid this problem — the Qt ABI guidelines explicitly
+state "never add a virtual function to a class that previously had none."
+The KDE Frameworks ABI policy lists this as one of the "cardinal sins" of
 ABI breakage, requiring a SONAME bump if violated.
 
-The Chromium project's Blink engine has encountered this when refactoring DOM
-classes — adding virtuality to `Node` subclasses required rebuilding all
-downstream components.
+## Cross-tool comparison
 
-## abicheck detection
-
-abicheck detects this primarily as `func_virtual_added` (BREAKING) — a virtual
-method was introduced to a class that previously had none. Depending on the
-analysis depth (DWARF-aware, header-aware), additional change kinds such as
-`type_size_changed` and `type_vtable_changed` may also be reported, providing
-further evidence of the vtable-insertion break.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 

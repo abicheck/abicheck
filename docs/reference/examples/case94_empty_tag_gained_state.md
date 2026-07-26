@@ -12,72 +12,117 @@
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-A type that was *empty* in v1 (`sizeof == 1` per C++ rules) is no longer empty in v2.
-Any consumer compiled against v1 that passes the tag by value — into a header-inline
-template, an algorithm overload selector, or any function taking it by value — wrote a
-1-byte argument into what is now an 8-byte parameter slot. The callee reads partially
-uninitialized memory, then steps on subsequent stack/register state.
+A type that was *empty* in v1 (`sizeof == 1`, per the C++ empty-class rule)
+is no longer empty in v2 (`sizeof == 8`). Any consumer compiled against v1
+that passes the tag by value — into a header-inline template, an algorithm
+overload selector, or any function taking it by value — wrote a 1-byte
+argument into what is now an 8-byte parameter slot. The pattern mirrors
+`tbb::auto_partitioner`/`tbb::simple_partitioner`: empty tag types passed
+by value into header-only algorithm wrappers. The library author sees the
+tag as an implementation detail with "no public members", but its `sizeof`
+*is* part of the ABI because every call site serializes the value.
 
-## Real Failure Demo
+## Old/new diff
 
-**Severity: BREAKING / LATENT CALL ABI DRIFT**
+| v1.h | v2.h |
+|------|------|
+| `struct auto_partitioner {};` (`sizeof == 1`) | `struct auto_partitioner { void* affinity_state_; };` (`sizeof == 8`) |
 
-The smoke app does not crash, but the public by-value tag changed from empty to stateful. Header-inlined algorithms compiled against v1 pass the old object shape into a v2 function expecting the wider tag.
+## abicheck command
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case94_empty_tag_gained_state_app case94_empty_tag_gained_state_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case94_empty_tag_gained_state/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case94_empty_tag_gained_state/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# run(7) = 14 (expect 14)
+g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Why this is a breaking change
+## Expected abicheck finding
 
-The pattern mirrors the `tbb::auto_partitioner` / `tbb::simple_partitioner` /
-`tbb::affinity_partitioner` shape: empty tag types are passed by value into header-only
-algorithm wrappers (`tbb::parallel_for`, `tbb::parallel_reduce`). The library author
-sees the tag as an implementation detail with "no public members" — but its sizeof
-*is* part of the ABI because consumers serialize the value at every call site.
+```text
+Verdict: BREAKING (exit 4)
 
-This is exactly the failure mode `affinity_partitioner` had to engineer around: it
-*does* carry state, so it's intentionally non-copyable and only passed by reference.
+- type_size_changed: Size changed: mylib::auto_partitioner (8 -> 64 bits)
+  > Old code allocates or copies the type with the old size; heap/stack
+    corruption, out-of-bounds access.
 
-## Code diff
+Additions:
+- type_field_added_compatible: Field added: mylib::auto_partitioner::affinity_state_
+  > Field appended without changing existing offsets; old code works but
+    won't initialize the new field.
+```
 
-| v1 | v2 |
-|------|------|
-| `struct auto_partitioner {};` | `struct auto_partitioner { void* affinity_state_; };` |
-| `sizeof == 1` (empty class rule) | `sizeof == 8` (pointer-sized) |
+## Minimum evidence
 
-## How abicheck catches it
+`min_evidence: L1` — DWARF's struct-layout info (`DW_TAG_structure_type`
+size) is enough to detect the empty-to-stateful size growth; no public
+headers required. The field addition itself is correctly classified
+`type_field_added_compatible` (non-polymorphic struct, no existing offsets
+disturbed) — a separate claim from the breaking size growth, which is
+carried entirely by `type_size_changed`.
 
-The existing `TYPE_SIZE_CHANGED` detector fires on the tag struct.
-`STRUCT_FIELD_ADDED` also fires (a previously-zero-field struct gained `affinity_state_`).
+## Why abicheck catches it
 
-## How to fix
+DWARF records each struct's total byte size for both versions; abicheck's
+`type_size_changed` detector compares them directly. No layout inference or
+header parsing is needed — the size is an explicit DWARF attribute on the
+`DW_TAG_structure_type` DIE.
 
-If you need to add state to a previously-empty tag, the safe migration is:
-1. Mark v1's tag as deprecated.
-2. Introduce a *new* tag type (e.g. `auto_partitioner_v2`).
-3. Provide a v1-compatible overload that ignores the old tag and converts.
-4. Bump SONAME on the next ABI release.
+## Runtime failure demonstration
 
-## Real-world example
+**Severity: BREAKING (latent — not observable in this minimal demo)**
 
-oneTBB's `affinity_partitioner` is intentionally larger than the other partitioners
-and is the only one that's stateful — the library evolved this distinction
-specifically to avoid the silent-corruption pattern this case demonstrates.
+**Scenario:** app passes `auto_partitioner{}` by value into `runner::run()`,
+compiled against v1's 1-byte tag; swap in v2's 8-byte tag without
+recompiling the app.
 
-## References
+```bash
+# Build old library + app
+g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo.so
+g++ -g -std=c++17 -I. app.cpp -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → run(7) = 14 (expect 14)
 
-- [oneTBB VERSIONING.md](https://github.com/uxlfoundation/oneTBB/blob/master/VERSIONING.md)
-- [C++ empty class rule (sizeof must be >= 1)](https://en.cppreference.com/w/cpp/language/object#Object_representation_and_value_representation)
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo.so
+./app
+# → run(7) = 14 (expect 14) — unchanged; run() ignores its tag parameter
+```
+
+**Why the demo doesn't crash:** this minimal `runner::run()` never reads
+its `auto_partitioner` parameter, so the size mismatch has no observable
+effect here — the risk is latent, not demonstrated by this toy consumer.
+`tbb::affinity_partitioner` is the real-world case where a partitioner tag
+*does* carry state read by the callee: passing a v1-sized argument into a
+v2-sized parameter slot there corrupts the following stack/register
+arguments the moment the callee actually reads past the old 1-byte extent.
+
+## Safe redesign
+
+If you need to add state to a previously-empty tag: mark v1's tag
+deprecated, introduce a *new* tag type (e.g. `auto_partitioner_v2`),
+provide a v1-compatible overload that ignores the old tag and converts, and
+bump the SONAME on the next ABI release rather than growing the existing
+tag in place.
+
+**Real-world example:** oneTBB's `affinity_partitioner` is intentionally
+larger than the other partitioners and is the only one that's stateful —
+the library evolved this distinction specifically to avoid the
+silent-corruption pattern this case demonstrates. See
+[oneTBB VERSIONING.md](https://github.com/uxlfoundation/oneTBB/blob/master/VERSIONING.md).
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+Not independently re-verified in this environment (`abidiff` unavailable
+here) — see case07's struct-layout case for a documented `abidiff` exit-code
+comparison on the same class of change (a plain struct size growth).
 
 ---
 

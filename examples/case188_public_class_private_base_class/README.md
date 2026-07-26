@@ -1,92 +1,113 @@
-# case188_public_class_private_base_class — Public class gains a private base class
+# Case 188: Public Class Gains a Private Base Class
 
-**Verdict:** 🔴 BREAKING · **Findings:** `type_base_changed`/`struct_size_changed`/`struct_field_offset_changed` (artifact-proven) + `public_api_internal_dependency_added` (L5, correlated) · **Evidence tier:** L1 for the verdict; L5 (the L2 header-only graph, built automatically for `--depth headers` and above) for the risk finding
+**Category:** Class Layout | **Verdict:** 🔴 BREAKING
 
-This is a real, compiled `v1`/`v2` example, verified end-to-end against gcc
-and clang.
-
-## What it demonstrates
+## Verdict and consumer impact
 
 `demo::PublicHandle` gains a second base class, `detail::InternalBase` —
 declared only in an internal, non-public header (`detail_private.h`, never
-passed as `--public-header`/`-H`) — alongside its existing public `Base`.
+passed as `--public-header`) — alongside its existing public `Base`. Adding
+a base class shifts every member declared after it: `PublicHandle::x` moves
+from offset +4 to +8, and the object grows from 8 to 12 bytes. Any binary
+that allocates, copies, or accesses fields of `PublicHandle` is broken
+without recompilation.
 
-This is a genuine, artifact-level layout break on its own: adding a base
-class shifts every member declared after it. abicheck correctly reports it
-as BREAKING via `type_base_changed`/`type_size_changed`/
-`type_field_offset_changed` (headers) and `struct_size_changed`/
-`struct_field_offset_changed` (DWARF) — no build integration needed, the
-default `debug-headers` lane catches this. The **Real Failure Demo** below
-shows the concrete runtime corruption this causes.
+## Old/new diff
 
-Layered on top, the L2 header-only graph (built automatically) additionally proves, via the L5 source
-graph, that `demo::PublicHandle` newly carries a `TYPE_INHERITS` edge to
-`demo::detail::InternalBase` — a dependency it did not have in v1 — and
-reports `public_api_internal_dependency_added`. This is *correlated context*
-on an already-detected break, not a standalone signal: it names exactly
-which internal type the public class now depends on.
+| v1.h | v2.h |
+|------|------|
+| `struct PublicHandle : Base { int x; };` | `struct PublicHandle : Base, detail::InternalBase { int x; };` |
 
-### Why this isn't the original "invisible below L5" scenario
-
-An earlier version of this catalog modeled this case as a hand-built L5
-graph fixture, with the premise that `public_api_internal_dependency_added`
-would be the *only* finding — verdict `COMPATIBLE_WITH_RISK`, invisible to
-every lower evidence tier. That premise was never verified against a real
-compiled example, and it does not hold: any real base-class change a person
-can see in the header is, by construction, something abicheck's existing
-layout detectors already catch. Only a *body-only* reference (no signature
-or layout change at all — see
-[case190](../case190_public_inline_function_references_internal_constant/README.md))
-can stay genuinely invisible outside L5.
-
-## How to reproduce
+## abicheck command
 
 ```bash
 g++ -std=c++17 -shared -fPIC -g v1.cpp -o libv1.so
 g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv2.so
-
-# Default debug-headers lane: BREAKING, via the layout findings alone.
-python3 -m abicheck.cli dump libv1.so --header v1.h -o v1.json
-python3 -m abicheck.cli dump libv2.so --header v2.h -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-# → BREAKING: type_base_changed, struct_size_changed, struct_field_offset_changed
-
-# With --public-header set: the same BREAKING verdict, plus the L5 risk
-# finding — the L2 header-only graph builds automatically, no flag needed.
-python3 -m abicheck.cli dump libv1.so --header v1.h --public-header v1.h -o v1.json
-python3 -m abicheck.cli dump libv2.so --header v2.h --public-header v2.h -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-# → BREAKING: type_base_changed, public_api_internal_dependency_added
-#   Proof path: use_handle --[DECL_HAS_TYPE]--> demo::PublicHandle
-#               --[TYPE_INHERITS]--> demo::detail::InternalBase
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --ast-frontend clang
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
 
-**Severity: 🔴 CRITICAL — silent field-offset corruption**
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: PublicHandle (64 -> 96 bits)
+  > Old code allocates or copies the type with the old size; heap/stack
+    corruption, out-of-bounds access.
+- type_field_offset_changed: Field offset changed: PublicHandle::x (32 -> 64 bits)
+  > Old code reads/writes fields at stale offsets; silent data corruption.
+- type_base_changed: Base classes changed: PublicHandle (['Base'] -> ['Base', 'detail::InternalBase'])
+  > Base class layout change shifts derived member offsets and vtable
+    pointers; this-pointer arithmetic breaks.
+- struct_size_changed: Struct size changed: demo::PublicHandle (8 -> 12 bytes)
+- struct_field_offset_changed: Field offset changed: demo::PublicHandle::x (+4 -> +8)
+
+Deployment risk (binary-compatible, review needed):
+- public_api_internal_dependency_added: Public entry 'use_handle' now reaches internal
+  declaration(s)/type(s) demo::detail::InternalBase it did not before.
+  Proof path: use_handle --[DECL_HAS_TYPE]--> demo::PublicHandle
+              --[TYPE_INHERITS]--> demo::detail::InternalBase
+- public_api_internal_dependency_added: Public entry 'demo::PublicHandle' now reaches
+  demo::detail::InternalBase via demo::PublicHandle --[TYPE_INHERITS]--> demo::detail::InternalBase
+```
+
+## Minimum evidence
+
+`min_evidence: L5` — the layout break itself is already visible from DWARF
+alone (`type_base_changed`/`struct_size_changed`/`struct_field_offset_changed`
+all fire from `-g` debug info with no headers at all), so the verdict does
+not strictly need L5. What L5 buys is the second finding: the source graph
+is what names *which* internal type the public class now depends on
+(`public_api_internal_dependency_added`, naming `demo::detail::InternalBase`
+and the exact `TYPE_INHERITS` edge) — that correlated context requires the
+L2 header AST plus the L5 source-graph pass built on top of it, not DWARF
+alone.
+
+## Why abicheck catches it
+
+DWARF records each type's base-class list and every member's byte offset,
+so the inserted `InternalBase` subobject and the resulting shift of `x` from
+offset 4 to offset 8 are direct layout diffs at L1. Layered on top, the
+header AST resolves `detail::InternalBase` as a type declared outside the
+public header set, and the L5 source graph walks
+`use_handle --[DECL_HAS_TYPE]--> demo::PublicHandle --[TYPE_INHERITS]-->
+demo::detail::InternalBase` to report that the public surface took on an
+undeclared dependency on internal code — correlated context on top of the
+already-detected layout break.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case188_public_class_private_base_class_app case188_public_class_private_base_class_v2
+# Build old library + app
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libv1.so
+g++ -std=c++17 -g app.cpp -L. -lv1 -Wl,-rpath,. -I. -o app
+./app
+# → exit 0 (h.x read at offset +4, matches v1 layout)
 
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case188_public_class_private_base_class/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case188_public_class_private_base_class/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1; echo "exit: $?")
-# exit: 1 — app_v1 was compiled expecting PublicHandle::x at offset +4 (right
-# after the single Base subobject); v2's PublicHandle inserts InternalBase
-# ahead of it, moving x to offset +8. The old app reads garbage instead of 42.
+# Swap in new library (no recompile)
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv1.so
+./app
+# → exit 1
 ```
 
-## Sibling cases
+**Why CRITICAL:** `app` was compiled expecting `PublicHandle::x` at offset
++4 (right after the single `Base` subobject); v2's `PublicHandle` inserts
+`InternalBase` ahead of it, moving `x` to offset +8. The old app reads
+garbage instead of 42 — a silent field-offset corruption, not a crash.
+
+## Safe redesign
+
+Either promote `detail::InternalBase` to a documented part of the API, or
+avoid privately inheriting from internal types in a class whose layout is
+part of the published ABI — composition or a pimpl indirection instead of
+inheritance for internal implementation details.
+
+## References
 
 - [case160_public_api_internal_dep_added](../case160_public_api_internal_dep_added/README.md) — same finding family via a `DECL_CALLS_DECL` edge (a public function calling an internal one), hand-built fixture.
 - [case187_public_struct_private_field_type](../case187_public_struct_private_field_type/README.md) — same finding family via `TYPE_HAS_FIELD_TYPE` (a private field type), real compiled example.
 - [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type/README.md) — same finding family via `DECL_HAS_TYPE` (a private parameter type), real compiled example.
-
-## How to fix
-
-Either promote `detail::InternalBase` to a documented part of the API, or
-avoid privately inheriting from internal types in a class whose layout is
-part of the published ABI (composition/pimpl instead of inheritance for
-internal implementation details).

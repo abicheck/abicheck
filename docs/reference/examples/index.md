@@ -66,7 +66,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case12_function_removed](case12_function_removed.md) | Function Removed from Shared Library | 🔴 BREAKING | Breaking |
 | [case13_symbol_versioning](case13_symbol_versioning.md) | Symbol Versioning Script | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case14_cpp_class_size](case14_cpp_class_size.md) | C++ Class Size Change | 🔴 BREAKING | Breaking |
-| [case15_noexcept_change](case15_noexcept_change.md) | `noexcept` Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case15_noexcept_change](case15_noexcept_change.md) | `noexcept` Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case16_inline_to_non_inline](case16_inline_to_non_inline.md) | Inline → Non-inline (ODR / Symbol Appearance) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case17_template_abi](case17_template_abi.md) | Template Instantiation ABI Change | 🔴 BREAKING | Breaking |
 | [case18_dependency_leak](case18_dependency_leak.md) | Dependency ABI Leak | 🔴 BREAKING | Breaking |
@@ -77,7 +77,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case23_pure_virtual_added](case23_pure_virtual_added.md) | Virtual Method Became Pure Virtual | 🔴 BREAKING | Breaking |
 | [case24_union_field_removed](case24_union_field_removed.md) | Union Field Removed | 🔴 BREAKING | Breaking |
 | [case25_enum_member_added](case25_enum_member_added.md) | Enum Member Added | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case26_union_field_added](case26_union_field_added.md) | Union Field Added | 🔴 BREAKING | Breaking |
+| [case26_union_field_added](case26_union_field_added.md) | Union Field Added (Size Grows) | 🔴 BREAKING | Breaking |
 | [case26b_union_field_added_compatible](case26b_union_field_added_compatible.md) | Union Field Added (No Size Change) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case27_symbol_binding_weakened](case27_symbol_binding_weakened.md) | Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case28_typedef_opaque](case28_typedef_opaque.md) | Typedef and Opaque Type Changes | 🔴 BREAKING | Breaking |
@@ -85,11 +85,11 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case30_field_qualifiers](case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🔴 BREAKING | Breaking |
 | [case31_enum_rename](case31_enum_rename.md) | Enum Member Rename | 🟠 API_BREAK | API Break |
 | [case32_param_defaults](case32_param_defaults.md) | Parameter Default Value Changes (C++) | 🟠 API_BREAK | API Break |
-| [case33_pointer_level](case33_pointer_level.md) | - Pointer Level Change | 🔴 BREAKING | Breaking |
+| [case33_pointer_level](case33_pointer_level.md) | Pointer Level Change | 🔴 BREAKING | Breaking |
 | [case34_access_level](case34_access_level.md) | Access Level Changed | 🟠 API_BREAK | API Break |
-| [case35_field_rename](case35_field_rename.md) | - Field Rename | 🟠 API_BREAK | API Break |
-| [case36_anon_struct](case36_anon_struct.md) | - Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
-| [case37_base_class](case37_base_class.md) | - Base Class Changes | 🔴 BREAKING | Breaking |
+| [case35_field_rename](case35_field_rename.md) | Field Rename | 🟠 API_BREAK | API Break |
+| [case36_anon_struct](case36_anon_struct.md) | Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
+| [case37_base_class](case37_base_class.md) | Base Class Changes | 🔴 BREAKING | Breaking |
 | [case38_virtual_methods](case38_virtual_methods.md) | Virtual Method Changes | 🔴 BREAKING | Breaking |
 | [case39_var_const](case39_var_const.md) | Variable Const Change | 🔴 BREAKING | Breaking |
 | [case40_field_layout](case40_field_layout.md) | Field Layout Changes | 🔴 BREAKING | Breaking |
@@ -99,7 +99,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case44_cyclic_type_member_added](case44_cyclic_type_member_added.md) | Cyclic Type Member Added | 🔴 BREAKING | Breaking |
 | [case45_multi_dim_array_change](case45_multi_dim_array_change.md) | Multi-Dimensional Array Element Type Change | 🔴 BREAKING | Breaking |
 | [case46_pointer_chain_type_change](case46_pointer_chain_type_change.md) | Pointer Chain Type Change | 🔴 BREAKING | Breaking |
-| [case47_inline_to_outlined](case47_inline_to_outlined.md) | Inline Function Moved to Outlined | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case47_inline_to_outlined](case47_inline_to_outlined.md) | Inline Method Moved Out-of-Line | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case48_leaf_struct_through_pointer](case48_leaf_struct_through_pointer.md) | Leaf Struct Change Propagated Through Pointer | 🔴 BREAKING | Breaking |
 | [case49_executable_stack](case49_executable_stack.md) | Executable Stack (GNU_STACK RWX) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case50_soname_inconsistent](case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |
@@ -127,31 +127,31 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case72_covariant_return_changed](case72_covariant_return_changed.md) | Covariant Return Type Changed | 🔴 BREAKING | Breaking |
 | [case73_typedef_underlying_changed](case73_typedef_underlying_changed.md) | Typedef Underlying Type Changed | 🔴 BREAKING | Breaking |
 | [case74_detail_base_class_changed](case74_detail_base_class_changed.md) | Internal `detail::` base class layout change leaks via public API | 🔴 BREAKING | Breaking |
-| [case75_detail_embedded_by_value](case75_detail_embedded_by_value.md) | Internal `detail::` impl struct embedded by value | 🔴 BREAKING | Breaking |
-| [case76_detail_pimpl_vtable_changed](case76_detail_pimpl_vtable_changed.md) | Internal `detail::` polymorphic base vtable change | 🔴 BREAKING | Breaking |
-| [case77_detail_templated_base_changed](case77_detail_templated_base_changed.md) | Internal `detail::` *templated* base class layout change | 🔴 BREAKING | Breaking |
-| [case78_task_arena_attach_tag](case78_task_arena_attach_tag.md) | task_arena::attach Tag Type Replaces Enum | 🔴 BREAKING | Breaking |
-| [case79_missing_template_instantiation](case79_missing_template_instantiation.md) | Missing template instantiation in shipped binary | 🔴 BREAKING | Breaking |
-| [case80_pimpl_shared_to_unique](case80_pimpl_shared_to_unique.md) | Pimpl alias changed from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
-| [case81_serialization_tag_reassigned](case81_serialization_tag_reassigned.md) | Serialization tag ID reassigned | 🔴 BREAKING | Breaking |
-| [case82_sycl_overload_set_removed](case82_sycl_overload_set_removed.md) | SYCL overload set removed (DPC++ build withdrawn) | 🔴 BREAKING | Breaking |
+| [case75_detail_embedded_by_value](case75_detail_embedded_by_value.md) | Internal `detail::` Struct Embedded by Value | 🔴 BREAKING | Breaking |
+| [case76_detail_pimpl_vtable_changed](case76_detail_pimpl_vtable_changed.md) | Internal `detail::` Polymorphic Base Vtable Change | 🔴 BREAKING | Breaking |
+| [case77_detail_templated_base_changed](case77_detail_templated_base_changed.md) | Internal `detail::` Templated Base Class Layout Change | 🔴 BREAKING | Breaking |
+| [case78_task_arena_attach_tag](case78_task_arena_attach_tag.md) | `task_arena::attach` Tag Type Replaces Enum | 🔴 BREAKING | Breaking |
+| [case79_missing_template_instantiation](case79_missing_template_instantiation.md) | Missing Template Instantiation in Shipped Binary | 🔴 BREAKING | Breaking |
+| [case80_pimpl_shared_to_unique](case80_pimpl_shared_to_unique.md) | Pimpl Alias Switched from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
+| [case81_serialization_tag_reassigned](case81_serialization_tag_reassigned.md) | Serialization Tag ID Reassigned | 🔴 BREAKING | Breaking |
+| [case82_sycl_overload_set_removed](case82_sycl_overload_set_removed.md) | SYCL Overload Set Removed (DPC++ Build Withdrawn) | 🔴 BREAKING | Breaking |
 | [case83_cpu_dispatch_isa_dropped](case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case85_internal_template_signature_changed](case85_internal_template_signature_changed.md) | internal function-template signature leaks via public API (BREAKING) | 🔴 BREAKING | Breaking |
-| [case86_tag_struct_renamed](case86_tag_struct_renamed.md) | Tag struct renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |
-| [case87_default_template_arg_changed](case87_default_template_arg_changed.md) | Default template argument changed | 🔴 BREAKING | Breaking |
+| [case85_internal_template_signature_changed](case85_internal_template_signature_changed.md) | Internal Template Signature Changed | 🔴 BREAKING | Breaking |
+| [case86_tag_struct_renamed](case86_tag_struct_renamed.md) | Tag Struct Renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |
+| [case87_default_template_arg_changed](case87_default_template_arg_changed.md) | Default Template Argument Changed | 🔴 BREAKING | Breaking |
 | [case88_cpo_kind_changed](case88_cpo_kind_changed.md) | CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
-| [case89_inline_accessor_renamed_pimpl_member](case89_inline_accessor_renamed_pimpl_member.md) | Inline accessor references renamed pimpl member | 🔴 BREAKING | Breaking |
+| [case89_inline_accessor_renamed_pimpl_member](case89_inline_accessor_renamed_pimpl_member.md) | Inline Accessor References Renamed Pimpl Member | 🔴 BREAKING | Breaking |
 | [case94_empty_tag_gained_state](case94_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |
 | [case95_allocator_nested_typedef_removed](case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
 | [case96_hidden_friend_removed](case96_hidden_friend_removed.md) | Hidden Friend Operator Removed | 🟠 API_BREAK | API Break |
-| [case97_api_depends_on_consumer_env](case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🔴 BREAKING | Breaking |
-| [case98_cxx_standard_floor_raised](case98_cxx_standard_floor_raised.md) | C++ standard floor raised (build-context risk) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case99_experimental_graduated](case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case100_experimental_removed_without_replacement](case100_experimental_removed_without_replacement.md) | experimental:: removed without replacement (API break) | 🔴 BREAKING | Breaking |
-| [case101_inline_namespace_version_bumped](case101_inline_namespace_version_bumped.md) | inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
-| [case102_frozen_runtime_signature_changed](case102_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | 🔴 BREAKING | Breaking |
-| [case103_toolchain_flag_drift](case103_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case104_glibcxx_dual_abi_flip](case104_glibcxx_dual_abi_flip.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | 🔴 BREAKING | Breaking |
+| [case97_api_depends_on_consumer_env](case97_api_depends_on_consumer_env.md) | API Depends on Consumer Environment | 🔴 BREAKING | Breaking |
+| [case98_cxx_standard_floor_raised](case98_cxx_standard_floor_raised.md) | C++ Standard Floor Raised | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case99_experimental_graduated](case99_experimental_graduated.md) | Experimental to Stable Graduation (Compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case100_experimental_removed_without_replacement](case100_experimental_removed_without_replacement.md) | Experimental Declaration Removed Without Replacement | 🔴 BREAKING | Breaking |
+| [case101_inline_namespace_version_bumped](case101_inline_namespace_version_bumped.md) | Inline Namespace Version Bumped | 🔴 BREAKING | Breaking |
+| [case102_frozen_runtime_signature_changed](case102_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed | 🔴 BREAKING | Breaking |
+| [case103_toolchain_flag_drift](case103_toolchain_flag_drift.md) | Toolchain Flag Drift | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case104_glibcxx_dual_abi_flip](case104_glibcxx_dual_abi_flip.md) | libstdc++ Dual-ABI Flip | 🔴 BREAKING | Breaking |
 | [case105_concept_tightening](case105_concept_tightening.md) | Concept Tightening (C++20) | 🟠 API_BREAK | API Break |
 | [case106_ctor_became_explicit](case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
 | [case107_task_scheduler_init_removed](case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (historical ABI break) | 🔴 BREAKING | Breaking |
@@ -159,28 +159,28 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case109_flow_graph_policy_renames](case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🔴 BREAKING | Breaking |
 | [case110_concurrent_unordered_map_api_drift](case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
 | [case111_enumerable_thread_specific_lambda_ambiguity](case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟠 API_BREAK | API Break |
-| [case112_lp64_ilp64](case112_lp64_ilp64.md) | LP64 → ILP64 integer-model switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
+| [case112_lp64_ilp64](case112_lp64_ilp64.md) | LP64 → ILP64 Integer-Model Switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
 | [case113_abi_tag_changed](case113_abi_tag_changed.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | 🔴 BREAKING | Breaking |
-| [case114_char8t_migration](case114_char8t_migration.md) | char8_t migration (C++20 char-family → char8_t) | 🔴 BREAKING | Breaking |
-| [case115_bit_int_width_changed](case115_bit_int_width_changed.md) | _BitInt(N) width change (C23 64 → 128) | 🔴 BREAKING | Breaking |
-| [case116_atomic_qualifier_changed](case116_atomic_qualifier_changed.md) | _Atomic qualifier added (C11) | 🔴 BREAKING | Breaking |
-| [case117_no_unique_address](case117_no_unique_address.md) | [[no_unique_address]] layout overlay (no new ChangeKind) | 🔴 BREAKING | Breaking |
-| [case118_internal_struct_field_added_scoped](case118_internal_struct_field_added_scoped.md) | Internal struct gains a field (non-public, scoped) | ✅ NO_CHANGE | No Change |
-| [case119_internal_struct_field_removed_scoped](case119_internal_struct_field_removed_scoped.md) | Internal struct loses a field (non-public, scoped) | ✅ NO_CHANGE | No Change |
-| [case120_internal_struct_reordered_scoped](case120_internal_struct_reordered_scoped.md) | Internal struct fields reordered (non-public, scoped) | ✅ NO_CHANGE | No Change |
-| [case121_kernel_btf_struct_field_added](case121_kernel_btf_struct_field_added.md) | Kernel BTF struct grows a field (out-of-tree module break) | 🔴 BREAKING | Breaking |
+| [case114_char8t_migration](case114_char8t_migration.md) | char8_t Migration (C++20 char-family → char8_t) | 🔴 BREAKING | Breaking |
+| [case115_bit_int_width_changed](case115_bit_int_width_changed.md) | _BitInt(N) Width Change (C23 64 → 128) | 🔴 BREAKING | Breaking |
+| [case116_atomic_qualifier_changed](case116_atomic_qualifier_changed.md) | _Atomic Qualifier Added (C11) | 🔴 BREAKING | Breaking |
+| [case117_no_unique_address](case117_no_unique_address.md) | [[no_unique_address]] Layout Overlay (no dedicated ChangeKind) | 🔴 BREAKING | Breaking |
+| [case118_internal_struct_field_added_scoped](case118_internal_struct_field_added_scoped.md) | Internal Struct Gains a Field (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
+| [case119_internal_struct_field_removed_scoped](case119_internal_struct_field_removed_scoped.md) | Internal Struct Loses a Field (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
+| [case120_internal_struct_reordered_scoped](case120_internal_struct_reordered_scoped.md) | Internal Struct Fields Reordered (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
+| [case121_kernel_btf_struct_field_added](case121_kernel_btf_struct_field_added.md) | Kernel BTF Struct Field Growth | 🔴 BREAKING | Breaking |
 | [case122_template_signature_uninstantiated](case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case123_default_argument_removed](case123_default_argument_removed.md) | Default Argument Removed | 🟠 API_BREAK | API Break |
 | [case124_header_constant_value_changed](case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
 | [case125_class_became_final](case125_class_became_final.md) | Class Became `final` | 🟠 API_BREAK | API Break |
-| [case126_sycl_device_impl_ptr](case126_sycl_device_impl_ptr.md) | SYCL `device` impl pointer — `shared_ptr` → raw pointer | 🔴 BREAKING | Breaking |
-| [case127_data_object_size_changed](case127_data_object_size_changed.md) | Exported Data Object Size Change | 🔴 BREAKING | Breaking |
+| [case126_sycl_device_impl_ptr](case126_sycl_device_impl_ptr.md) | SYCL `device` Impl Pointer — `shared_ptr` → Raw Pointer | 🔴 BREAKING | Breaking |
+| [case127_data_object_size_changed](case127_data_object_size_changed.md) | Exported Data Object Size Changed | 🔴 BREAKING | Breaking |
 | [case128_symbol_binding_strengthened](case128_symbol_binding_strengthened.md) | Symbol Binding Strengthened (Weak → Global) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case129_struct_return_convention](case129_struct_return_convention.md) | Struct-Return Convention Change | 🔴 BREAKING | Breaking |
 | [case130_exceptions_mode_flip](case130_exceptions_mode_flip.md) | Exceptions Mode Flip (`-fno-exceptions`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case131_rtti_mode_flip](case131_rtti_mode_flip.md) | RTTI Mode Flip (`-fno-rtti`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case132_threadsafe_statics_flip](case132_threadsafe_statics_flip.md) | Thread-Safe Statics Mode Flip (`-fno-threadsafe-statics`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case133_tls_model_flip](case133_tls_model_flip.md) | TLS Model Flip (`-ftls-model`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case132_threadsafe_statics_flip](case132_threadsafe_statics_flip.md) | Thread-Safe Statics Mode Flip | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case133_tls_model_flip](case133_tls_model_flip.md) | TLS Model Flip | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case134_relro_weakened](case134_relro_weakened.md) | RELRO Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case135_stack_canary_removed](case135_stack_canary_removed.md) | Stack Canary Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case136_executable_stack_removed](case136_executable_stack_removed.md) | Executable Stack Removed (the fix direction) | 🟢 COMPATIBLE | Quality (Compatible) |
@@ -190,33 +190,33 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case140_empty_base_optimization_lost](case140_empty_base_optimization_lost.md) | Empty Base Optimization Lost (base subobject moved) | 🔴 BREAKING | Breaking |
 | [case141_versioned_symbol_scheme](case141_versioned_symbol_scheme.md) | Versioned-Symbol Scheme (library-wide rename) | 🔴 BREAKING | Breaking |
 | [case142_vtable_slot_count_binary_only](case142_vtable_slot_count_binary_only.md) | Vtable Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
-| [case143_audit_accidental_export](case143_audit_accidental_export.md) | Accidental export (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case144_audit_private_header_leak](case144_audit_private_header_leak.md) | Private header leak (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case145_audit_unversioned_export](case145_audit_unversioned_export.md) | Unversioned export under a versioning scheme (audit, pure L0) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case146_audit_rtti_for_internal](case146_audit_rtti_for_internal.md) | RTTI exported for an internal type (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case147_scan_depth_ladder](case147_scan_depth_ladder.md) | Depth ladder: the same input answered at three depths | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case148_xcheck_header_build_mismatch](case148_xcheck_header_build_mismatch.md) | Header build-context mismatch (cross-source flagship) | 🟠 API_BREAK | API Break |
-| [case149_xcheck_odr_variant](case149_xcheck_odr_variant.md) | ODR type variant (cross-source, L4 layout ↔ layout) | 🟠 API_BREAK | API Break |
-| [case150_xcheck_export_public_pair](case150_xcheck_export_public_pair.md) | Bidirectional export ↔ declaration pair | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case151_xcheck_provider_matrix](case151_xcheck_provider_matrix.md) | Provider-agreement matrix (corroboration grows with evidence) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case143_audit_accidental_export](case143_audit_accidental_export.md) | Accidental Export (Single-Release Audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case144_audit_private_header_leak](case144_audit_private_header_leak.md) | Private Header Leak (Single-Release Audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case145_audit_unversioned_export](case145_audit_unversioned_export.md) | Unversioned Export Under a Versioning Scheme (Audit, Pure L0) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case146_audit_rtti_for_internal](case146_audit_rtti_for_internal.md) | RTTI Exported for an Internal Type (Single-Release Audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case147_scan_depth_ladder](case147_scan_depth_ladder.md) | Depth Ladder — the Same Input Answered at Increasing Depth | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case148_xcheck_header_build_mismatch](case148_xcheck_header_build_mismatch.md) | Header Build-Context Mismatch (Cross-Source Flagship) | 🟠 API_BREAK | API Break |
+| [case149_xcheck_odr_variant](case149_xcheck_odr_variant.md) | ODR Type Variant (Cross-Source, L4 Layout ↔ Layout) | 🟠 API_BREAK | API Break |
+| [case150_xcheck_export_public_pair](case150_xcheck_export_public_pair.md) | Bidirectional Export ↔ Declaration Pair | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case151_xcheck_provider_matrix](case151_xcheck_provider_matrix.md) | Provider-Agreement Matrix (Corroboration Grows With Evidence) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case152_enum_size_flag_flip](case152_enum_size_flag_flip.md) | _enum_size_flag_flip — Enum-size flag flip (`-fshort-enums`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case153_struct_packing_flip](case153_struct_packing_flip.md) | _struct_packing_flip — Struct-packing mode flip (`-fpack-struct`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case154_lto_mode_flip](case154_lto_mode_flip.md) | _lto_mode_flip — LTO mode flip (`-flto`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case155_char_signedness_flip](case155_char_signedness_flip.md) | _char_signedness_flip — Plain-`char` signedness flip (`-fsigned-char` ↔ `-funsigned-char`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case156_public_macro_removed](case156_public_macro_removed.md) | _public_macro_removed — Public macro removed | 🟠 API_BREAK | API Break |
-| [case157_inline_function_removed](case157_inline_function_removed.md) | _inline_function_removed — Public inline function removed | 🟠 API_BREAK | API Break |
-| [case158_public_typedef_removed](case158_public_typedef_removed.md) | _public_typedef_removed — Public typedef removed | 🟠 API_BREAK | API Break |
-| [case160_public_api_internal_dep_added](case160_public_api_internal_dep_added.md) | _public_api_internal_dep_added — Public API newly depends on an internal declaration | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case161_target_dependency_added](case161_target_dependency_added.md) | _target_dependency_added — New inter-target build/link dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case162_symbol_source_owner_changed](case162_symbol_source_owner_changed.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case163_python_kwarg_renamed](case163_python_kwarg_renamed.md) | Python-API break invisible to the C-ABI check | 🟠 API_BREAK | API Break |
-| [case164_preproc_conditional_field](case164_preproc_conditional_field.md) | Preprocessor-conditional field: a header false positive only build context clears | ✅ NO_CHANGE | No Change |
+| [case157_inline_function_removed](case157_inline_function_removed.md) | Inline Function Removed | 🟠 API_BREAK | API Break |
+| [case158_public_typedef_removed](case158_public_typedef_removed.md) | Public Typedef Removed | 🟠 API_BREAK | API Break |
+| [case160_public_api_internal_dep_added](case160_public_api_internal_dep_added.md) | Public API Gains an Internal Dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case161_target_dependency_added](case161_target_dependency_added.md) | New Inter-Target Build/Link Dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case162_symbol_source_owner_changed](case162_symbol_source_owner_changed.md) | Exported Symbol's Declaring File Moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case163_python_kwarg_renamed](case163_python_kwarg_renamed.md) | Python Keyword Argument Renamed (Stub-Only API Break) | 🟠 API_BREAK | API Break |
+| [case164_preproc_conditional_field](case164_preproc_conditional_field.md) | Preprocessor-Conditional Field (Build-Context False Positive) | ✅ NO_CHANGE | No Change |
 | [case165_polymorphic_nonvirtual_dtor](case165_polymorphic_nonvirtual_dtor.md) | Polymorphic Type Without a Virtual Destructor (New Anti-Pattern) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case166_ref_qualifier_added](case166_ref_qualifier_added.md) | Method Ref-Qualifier Added (`str()` → `str() &`) | 🔴 BREAKING | Breaking |
 | [case167_base_became_virtual](case167_base_became_virtual.md) | Base Class Became Virtual (`: public Device` → `: public virtual Device`) | 🔴 BREAKING | Breaking |
-| [case168_virtual_method_devirtualized](case168_virtual_method_devirtualized.md) | Virtual Method Devirtualized (flush() leaves the vtable) | 🔴 BREAKING | Breaking |
+| [case168_virtual_method_devirtualized](case168_virtual_method_devirtualized.md) | Virtual Method Devirtualized (`flush()` leaves the vtable) | 🔴 BREAKING | Breaking |
 | [case169_overload_added](case169_overload_added.md) | Overload Added to a Previously Unique Function | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case170_env_runtime_floor_raised](case170_env_runtime_floor_raised.md) | Runtime Floor Raised (glibc relink drift) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case170_env_runtime_floor_raised](case170_env_runtime_floor_raised.md) | Runtime Floor Raised (glibc Relink Drift) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case171_static_tls_introduced](case171_static_tls_introduced.md) | Static TLS Introduced | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case172_vtable_thunk_offset_changed](case172_vtable_thunk_offset_changed.md) | Vtable Thunk Offset Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
 | [case173_vtt_slot_count_changed](case173_vtt_slot_count_changed.md) | VTT Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
@@ -227,18 +227,18 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case178_unnamed_type_in_public_abi](case178_unnamed_type_in_public_abi.md) | Unnamed Type Leaks Into the Public ABI | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case179_cet_protection_weakened](case179_cet_protection_weakened.md) | CET Protection Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case180_symbol_binding_lost_unique](case180_symbol_binding_lost_unique.md) | Symbol Binding Lost GNU_UNIQUE | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case181_xcheck_public_to_internal_dependency](case181_xcheck_public_to_internal_dependency.md) | Public API reaches an internal declaration | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case182_accidental_export_removed_still_breaking](case182_accidental_export_removed_still_breaking.md) | Accidental export removed — still BREAKING under public-header scoping | 🔴 BREAKING | Breaking |
+| [case181_xcheck_public_to_internal_dependency](case181_xcheck_public_to_internal_dependency.md) | Public API Reaches an Internal Declaration | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case182_accidental_export_removed_still_breaking](case182_accidental_export_removed_still_breaking.md) | Accidental Export Removed — Still Breaking Under Public-Header Scoping | 🔴 BREAKING | Breaking |
 | [case183_internal_version_node_churn](case183_internal_version_node_churn.md) | Internal ELF symbol-version node churn | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case184_internal_enum_churn_scoped](case184_internal_enum_churn_scoped.md) | Internal enum churn, scoped out by private-header origin | ✅ NO_CHANGE | No Change |
+| [case184_internal_enum_churn_scoped](case184_internal_enum_churn_scoped.md) | Internal Enum Churn, Scoped Out by Private-Header Origin | ✅ NO_CHANGE | No Change |
 | [case185_inherited_override_reuses_slot](case185_inherited_override_reuses_slot.md) | Inherited override reuses the base's vtable slot | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case186_c_api_pointee_const_abi_neutral](case186_c_api_pointee_const_abi_neutral.md) | C API pointee const-qualification is ABI-neutral | ✅ NO_CHANGE | No Change |
-| [case187_public_struct_private_field_type](case187_public_struct_private_field_type.md) | _public_struct_private_field_type — Public struct field retyped to an internal type | 🔴 BREAKING | Breaking |
-| [case188_public_class_private_base_class](case188_public_class_private_base_class.md) | _public_class_private_base_class — Public class gains a private base class | 🔴 BREAKING | Breaking |
-| [case189_public_function_private_parameter_type](case189_public_function_private_parameter_type.md) | _public_function_private_parameter_type — Public function parameter retyped to an internal type | 🔴 BREAKING | Breaking |
-| [case190_public_inline_function_references_internal_constant](case190_public_inline_function_references_internal_constant.md) | _public_inline_function_references_internal_constant — Public inline function newly reads an internal constant | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case191_header_only_graph_field_type](case191_header_only_graph_field_type.md) | _header_only_graph_field_type — Same finding, proven with a genuine confirmed-zero (no coverage trick) | 🔴 BREAKING | Breaking |
-| [case192_call_graph_break_survives_suppression](case192_call_graph_break_survives_suppression.md) | Call-graph-reachable break survives a broad internal-namespace suppression | 🔴 BREAKING | Breaking |
-| [case193_ordinary_exported_fn_call_not_reachable](case193_ordinary_exported_fn_call_not_reachable.md) | An ordinary exported function's internal call is not public-reachable | 🔴 BREAKING | Breaking |
-| [case194_header_graph_rename_reconciled](case194_header_graph_rename_reconciled.md) | _header_graph_rename_reconciled — Internal dependency target renamed, safely reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case195_header_graph_ambiguous_rename_not_reconciled](case195_header_graph_ambiguous_rename_not_reconciled.md) | _header_graph_ambiguous_rename_not_reconciled — Ambiguous simultaneous rename, correctly NOT reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case186_c_api_pointee_const_abi_neutral](case186_c_api_pointee_const_abi_neutral.md) | C API Pointee const-Qualification Is ABI-Neutral | ✅ NO_CHANGE | No Change |
+| [case187_public_struct_private_field_type](case187_public_struct_private_field_type.md) | Public Struct Field Retyped to an Internal Type | 🔴 BREAKING | Breaking |
+| [case188_public_class_private_base_class](case188_public_class_private_base_class.md) | Public Class Gains a Private Base Class | 🔴 BREAKING | Breaking |
+| [case189_public_function_private_parameter_type](case189_public_function_private_parameter_type.md) | Public Function Parameter Retyped to an Internal Type | 🔴 BREAKING | Breaking |
+| [case190_public_inline_function_references_internal_constant](case190_public_inline_function_references_internal_constant.md) | Public Inline Function References Internal Constant | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case191_header_only_graph_field_type](case191_header_only_graph_field_type.md) | Public Struct Gains a Field of a Private Type (Header-Only Graph) | 🔴 BREAKING | Breaking |
+| [case192_call_graph_break_survives_suppression](case192_call_graph_break_survives_suppression.md) | Call-Graph-Reachable Break Survives Suppression | 🔴 BREAKING | Breaking |
+| [case193_ordinary_exported_fn_call_not_reachable](case193_ordinary_exported_fn_call_not_reachable.md) | Ordinary Exported Function's Internal Call Is Not Public-Reachable | 🔴 BREAKING | Breaking |
+| [case194_header_graph_rename_reconciled](case194_header_graph_rename_reconciled.md) | Internal Dependency Target Renamed, Safely Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case195_header_graph_ambiguous_rename_not_reconciled](case195_header_graph_ambiguous_rename_not_reconciled.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |

@@ -95,15 +95,16 @@ def test_readme_presents_conda_forge_before_pip_lightweight_install() -> None:
     assert "lightweight" in text.lower() or "core" in text.lower()
 
 
-def test_getting_started_presents_conda_forge_before_pip_lightweight_install() -> None:
-    text = _read("docs/start/getting-started.md")
+def test_install_page_presents_conda_forge_before_pip_lightweight_install() -> None:
+    """Install content lives on docs/start/install.md, not getting-started.md
+    -- getting-started.md was trimmed to a thin hub linking to install.md,
+    first-check.md, and first-report.md (docs/AGENTS.md's "Layout" section)."""
+    text = _read("docs/start/install.md")
     conda_idx = text.find("conda create -n abicheck -c conda-forge")
     pip_idx = text.find("pip install abicheck")
-    assert conda_idx != -1, (
-        "getting-started.md is missing the conda-forge full-install command"
-    )
-    assert pip_idx != -1, "getting-started.md is missing the pip install command"
+    assert conda_idx != -1, "install.md is missing the conda-forge full-install command"
+    assert pip_idx != -1, "install.md is missing the pip install command"
     assert conda_idx < pip_idx, (
-        "getting-started.md must present the conda-forge full installation "
+        "install.md must present the conda-forge full installation "
         "before the pip lightweight/core installation"
     )

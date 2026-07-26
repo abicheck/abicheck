@@ -227,7 +227,41 @@ from typing import Any
 #:       cap), and ``occurrence_id`` (a hash over the path's edges' own graph
 #:       occurrences, independent of ``description`` text). All absent for
 #:       the common single-candidate/no-occurrence-data case.
-REPORT_SCHEMA_VERSION = "2.19"
+#:   2.20: ``release_recommendation.version_bump`` gains ``null`` as a valid
+#:       value (P0 evidence-recommendation-honesty audit): previously the
+#:       field always serialized a plausible-looking ``"major"`` literal even
+#:       when ``state`` was ``"unavailable"`` (no real evidence backs the
+#:       bump), which let automation reading ``version_bump`` alone act on a
+#:       release action abicheck explicitly could not confirm. Now
+#:       ``version_bump`` is ``null`` whenever ``state == "unavailable"``;
+#:       the still-plausible bump, if any, remains readable from
+#:       ``rationale`` prose. A consumer that only reads ``state`` (as the
+#:       2.14 addition intended) is unaffected; a consumer that reads
+#:       ``version_bump`` without checking ``state`` first must now handle
+#:       ``null``, which is why this is a relaxed-constraint MINOR bump, not
+#:       a MAJOR one (the enum widened, no existing value changed meaning).
+#:   2.21: ``release_recommendation`` gains an ``allOf``/``if``/``then`` pair
+#:       enforcing ``version_bump == null`` iff ``state == "unavailable"``
+#:       (CodeRabbit review, PR #639). 2.20 widened ``version_bump``'s type
+#:       to accept ``null`` but did not, at the schema level, tie that to
+#:       ``state`` — a producer bug could in principle emit
+#:       ``version_bump: null`` with ``state: "actionable"``, or a concrete
+#:       bump with ``state: "unavailable"``, and still validate. Every real
+#:       producer (``ReleaseRecommendation.to_dict()``) already only emits
+#:       the paired combination, so this tightens validation without
+#:       changing what a conformant report looks like — a MINOR bump, not
+#:       MAJOR, same reasoning as 2.20 itself.
+#:   2.22: ``release_recommendation`` gains ``possible_impact`` (status-review
+#:       follow-up): a new, always-non-null string field carrying the bump
+#:       abicheck would recommend if its evidence were sufficient to confirm
+#:       one. 2.20 made ``version_bump`` itself ``null`` for ``state ==
+#:       "unavailable"``/withheld the value for automation — correctly, but
+#:       it left the still-plausible bump readable only from free-text
+#:       ``rationale`` prose, which no machine consumer should have to parse.
+#:       ``possible_impact`` is additive (new optional key, existing fields
+#:       unchanged) and equals ``version_bump`` whenever ``state ==
+#:       "actionable"`` — a MINOR bump.
+REPORT_SCHEMA_VERSION = "2.22"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

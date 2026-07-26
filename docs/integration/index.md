@@ -1,3 +1,15 @@
+---
+doc_type: hub
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+canonical_for:
+  - integration-scenario-selection
+lifecycle: active
+generated: false
+---
+
 # Project Integration: Which Scenario Am I?
 
 This section answers a different question than
@@ -15,23 +27,11 @@ requirement` — not as one implicit `aggregate` report. See
 [Concepts](concepts.md) for the full vocabulary (target, profile, baseline
 channel, check, run plan, ...).
 
-> **Status.** This page, [Concepts](concepts.md), and every `scenarios/*.md`
-> page below are G30 P1.7's scenario-first documentation IA
-> (`docs/development/plans/g30-github-actions-integration-model.md` §P1.7) —
-> all 15 scenario pages the plan's own file tree names are now in place.
-> Rows without a dedicated `scenarios/*.md` page (S2, S4, S10, S12, S16,
-> S19-S21, S28) were never meant to have one — the plan's file tree only
-> lists a scenario page where the question needs a distinct walkthrough;
-> everywhere else the existing reference/concept page already answers it
-> directly, and duplicating it into a thin wrapper page would violate this
-> repo's own "one fact, one place" documentation rule. The `baselines/`/
-> `reference/` sub-trees the plan's original file tree also names are largely
-> superseded by `docs/reference/{publish-baseline,resolve-baseline,
-> check-target,build-output-schema,run-plan-schema,project-targets-schema,
-> reusable-workflows}.md`, all of which shipped in G30 P1.1-P1.6 — concurrent
-> with/after this plan was written — and already cover that ground; see the
-> plan's own P1.7 status note for the corrected scope. The scenario ID
-> (`S`-number) is the stable cross-reference either way: it names a row in
+> Not every scenario below needs a dedicated `scenarios/*.md` page — where an
+> existing reference or concept page already answers the question directly,
+> this index links there instead of duplicating it into a thin wrapper page.
+> The scenario ID (`S`-number) is the stable cross-reference either way: it
+> names a row in
 > [ADR-047 §8](../contribute/adr/047-github-actions-integration-model.md#8-condensed-scenario-catalog-s1s28)'s
 > full catalog, independent of which page currently hosts the answer.
 

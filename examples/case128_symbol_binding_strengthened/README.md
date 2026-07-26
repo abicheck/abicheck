@@ -2,37 +2,83 @@
 
 **Category:** Symbol Binding | **Verdict:** 🟢 COMPATIBLE
 
-## What changes
+## Verdict and consumer impact
 
-The exported function `helper` is defined with **weak** binding (`STB_WEAK`) in
-v1 and **strong/global** binding (`STB_GLOBAL`) in v2. abicheck reports
-`symbol_binding_strengthened` and classifies the change as compatible. Detected
-at **L0** — binding lives in the ELF symbol table.
+The exported function `helper` is defined with weak binding (`STB_WEAK`) in
+v1 and strong/global binding (`STB_GLOBAL`) in v2. Every binary that
+previously resolved calls to the weak `helper` resolves to the *same*
+definition in v2 — the address and behavior are unchanged, so no consumer
+needs to recompile or is otherwise affected. The only semantic difference is
+that a strong symbol can no longer be silently overridden by another strong
+definition elsewhere in the link — that removes a footgun (accidental
+interposition), it does not break callers.
 
-## Why it is compatible (and a *good* practice)
+## Old/new diff
 
-Strengthening a symbol's binding is backward compatible:
-
-- Every binary that previously resolved to the weak `helper` resolves to the
-  **same definition** in v2 — the address and behavior are unchanged.
-- The only semantic difference is that a *strong* symbol can no longer be
-  silently overridden by another strong definition elsewhere in the link. That
-  removes a footgun (accidental interposition), it does not break callers.
-
-This case is the benign counterpart to a binding **weakening** (global → weak),
-which *is* risky: a previously guaranteed definition could afterwards be
-overridden or left unresolved.
-
-## Code diff
-
-| v1 | v2 |
-|----|----|
-| `__attribute__((weak)) int helper(int x)` | `int helper(int x)` |
+| v1.c | v2.c |
+|------|------|
+| `__attribute__((weak)) int helper(int x) { ... }` | `int helper(int x) { ... }` |
 | `STB_WEAK` | `STB_GLOBAL` |
 
-## How to reason about it
+## abicheck command
 
-- Weak → strong: safe (this case).
-- Strong → weak: review — a guaranteed symbol becomes overridable/optional.
-- Keep public API symbols strong; reserve weak binding for intentional
-  fallback/override hooks and document them.
+```bash
+gcc -shared -fPIC -g v1.c -o libbind_v1.so
+gcc -shared -fPIC -g v2.c -o libbind_v2.so
+abicheck compare libbind_v1.so libbind_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE (exit 0)
+
+Quality Issues:
+- symbol_binding_strengthened: Symbol binding changed: helper (weak -> global)
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — a symbol's binding (`STB_WEAK`/`STB_GLOBAL`) is a field
+in the ELF symbol table itself; no debug info or headers are required.
+
+## Why abicheck catches it
+
+abicheck reads each exported symbol's `st_info` binding field from both
+binaries' `.dynsym` and reports a flip. Weak→strong is classified compatible
+(quality-improvement) rather than risky, since it can only remove
+overridability, never change which definition existing callers reach.
+
+## Runtime failure demonstration
+
+**No observable effect on existing binaries.** The strengthened symbol
+resolves to the identical implementation either way, so there is no failure
+to demonstrate — swapping the library binary is silent.
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g v1.c -o libbind.so
+gcc -g app.c -I. -L. -lbind -Wl,-rpath,. -o app
+./app
+# -> result = 16
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g v2.c -o libbind.so
+./app
+# -> result = 16   (identical -- weak->strong is backward compatible)
+```
+
+## Safe redesign
+
+This case *is* the safe practice — weak→strong is the direction to prefer
+once a symbol is no longer meant to be interposable. The reverse direction
+(strong→weak) is the risky one: a previously guaranteed definition could
+afterwards be silently overridden or left unresolved (see case27, its risky
+counterpart). Keep public API symbols strong by default, and reserve weak
+binding for intentional fallback/override hooks, documented as such.
+
+## Cross-tool comparison
+
+`abidiff` also reads ELF symbol-table binding and would report the same
+weak→strong transition — this is a pure L0 fact both tools read from the
+same field.

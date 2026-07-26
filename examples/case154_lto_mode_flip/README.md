@@ -1,30 +1,108 @@
 # case154_lto_mode_flip — LTO mode flip (`-flto`)
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Finding:** `lto_mode_changed` · **Evidence tier:** L3
+**Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
-> These cases ship a hand-built pair of evidence-model fixtures (`old.json` +
-> `new.json`) instead of compiled `v1`/`v2` binaries, so the corpus is validated
-> compiler-free by `tests/test_l3l4l5_examples.py`. See
-> [`scripts/gen_l3l4l5_examples.py`](../../scripts/gen_l3l4l5_examples.py).
+## Verdict and consumer impact
 
-## What it demonstrates
+v1 and v2 share identical source; v1 was built without LTO, v2 with
+`-flto`. Link-time optimization changes cross-TU inlining and can
+devirtualize or drop vtable/typeinfo emission the linker would otherwise
+keep, so the emitted symbol set and the inlined bodies of public inline
+functions can differ from a non-LTO build of the same source — even though
+nothing in the source changed. A consumer relying on a symbol the old
+non-LTO build happened to export may find it gone, or may link against a
+devirtualized call path the source no longer literally expresses.
 
-v1 builds without LTO, v2 adds `-flto`. Link-time optimization changes cross-TU inlining and can devirtualize or drop vtable/typeinfo emission the linker would otherwise keep, so the emitted symbol set and the inlined bodies of public inlines can differ from a non-LTO build of the same source.
+## Old/new diff
 
-## Why no single artifact layer sees it
+| Build flags | v1 | v2 |
+|---|---|---|
+| LTO | off | `-flto` |
 
-| Source | What it sees alone |
-|--------|--------------------|
-| Binary (L0/L1) | one self-consistent build — the flag is not in the artifact |
-| Header AST (L2) | the declarations, but not the flags the library was built with |
-| **Build context (L3)** | the captured compile options — the flag flip → the finding |
+Source is identical between v1 and v2; only this compile/link option
+differs.
 
-The change is a property of *how* the library was built, not a diff of one artifact. Symbol-only checks that happen to see a stable export set miss the inlining/emission differences.
+## abicheck command
 
-Per ADR-028 D3 a build/source-evidence finding never decides a shipped-ABI break
-on its own — the artifact diff proves any concrete break; this finding flags the
-elevated risk (or source/API break) and localizes the cause for review.
+The case ships `old.json`/`new.json` as hand-built `BuildEvidence` fixtures
+(the normalized L3 model `dump --build-info`/`--sources` would produce from a
+real build) rather than compiled binaries, so reproducing the finding means
+embedding each side's fixture into a snapshot's `build_source` field —
+exactly what `dump --build-info` does internally — and comparing the two:
 
-## How to fix
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+from abicheck.model import AbiSnapshot
+from abicheck.buildsource.pack import BuildSourcePack
+from abicheck.buildsource.build_evidence import BuildEvidence
+from abicheck.serialization import save_snapshot
 
-Prefer a single LTO policy across the library and its consumers. If public inlines or polymorphic types are involved, rebuild consumers against the matching LTO setting.
+for side in ("old", "new"):
+    d = json.loads(Path(f"{side}.json").read_text())
+    snap = AbiSnapshot(library="libdemo.so", version="1")
+    snap.build_source = BuildSourcePack(root=Path(""), build_evidence=BuildEvidence.from_dict(d))
+    save_snapshot(snap, f"{side}.abi.json")
+PY
+
+abicheck compare old.abi.json new.abi.json
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
+
+Deployment Risk Changes:
+- lto_mode_changed: Runtime-model option 'lto' changed: 'off' -> 'on'.
+  > May not be link- or runtime-compatible across consumers; the artifact
+    diff confirms any concrete break.
+```
+
+## Minimum evidence
+
+`min_evidence: L3` — the compile/link options themselves carry the fact.
+The change is a property of *how* the library was built, not something
+visible in a diff of one artifact: symbol-only checks that happen to see a
+stable export set on both sides would miss the inlining/emission
+differences LTO can introduce elsewhere.
+
+## Why abicheck catches it
+
+`abicheck compare` reads each side's normalized `BuildEvidence.build_options`
+(as embedded by `dump --build-info`/`--sources`, or supplied out-of-band via
+`--old/new-build-info`) and diffs the `lto` option directly — the same
+`diff_build_evidence()` routine `tests/test_l3l4l5_examples.py` exercises
+against the committed fixtures. Per ADR-028 D3 this build-evidence finding
+never decides a shipped-ABI break on its own — it flags the elevated risk
+and localizes the cause; an artifact diff of the actual compiled symbol
+sets and layouts is what would confirm a concrete break.
+
+## Runtime failure demonstration
+
+There's no compiled `app.c` consumer for this case — the failure mode is a
+build-pipeline one, not a single process crash. Picture a release job that
+enables `-flto` for a performance-tuned production build while a debug or
+sanitizer build of the same library stays non-LTO: if a consumer links
+against whichever build happens to be on disk, it can pick up an ABI that
+differs in exactly the symbols LTO devirtualized or inlined away. A CI job
+that diffs captured build options between build variants — not just between
+releases — is exactly what would catch this before both variants ship.
+
+## Safe redesign
+
+Prefer a single LTO policy across the library and its consumers. If public
+inline functions or polymorphic (vtable-bearing) types are involved, rebuild
+consumers against the matching LTO setting rather than mixing LTO and
+non-LTO builds of interdependent binaries.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` compare built binaries (symbols + DWARF);
+neither reads compile/link options, so two builds from identical source
+under different `-flto` settings produce no diff for either tool unless LTO
+actually changed the emitted symbol set or layout in the compiled output
+(at which point it's that resulting change they'd catch, not the flag
+itself). Only the L3 build-evidence layer that abicheck reads directly
+localizes the cause to the LTO flag flip.

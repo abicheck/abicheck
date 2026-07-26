@@ -1,30 +1,110 @@
 # case156_public_macro_removed — Public macro removed
 
-**Verdict:** 🟠 API_BREAK · **Finding:** `public_macro_removed` · **Evidence tier:** L4
+**Category:** API Break | **Verdict:** 🟠 API_BREAK
 
-> These cases ship a hand-built pair of evidence-model fixtures (`old.json` +
-> `new.json`) instead of compiled `v1`/`v2` binaries, so the corpus is validated
-> compiler-free by `tests/test_l3l4l5_examples.py`. See
-> [`scripts/gen_l3l4l5_examples.py`](../../scripts/gen_l3l4l5_examples.py).
+## Verdict and consumer impact
 
-## What it demonstrates
+The public header macro `DEMO_MAX_ITEMS` is present in v1's source-replay
+surface and gone from v2. Macros are a preprocessor construct — they never
+reach the binary — so removing one changes nothing an artifact-only check
+can see, but any consumer source that referenced `DEMO_MAX_ITEMS` (a
+constant, a feature guard, a function-like macro invocation) fails to
+compile against v2's headers. This is a source/API break: recompilation
+against v2 is not just required, it's impossible without a code change.
 
-The public header macro `DEMO_MAX_ITEMS` is present in the v1 source-replay surface and gone from v2. Source that referenced the macro (a constant, a feature guard, a function-like macro) no longer compiles.
+## Old/new diff
 
-## Why no single artifact layer sees it
+| include/demo/config.h — v1 | include/demo/config.h — v2 |
+|---|---|
+| `#define DEMO_MAX_ITEMS 64` | *(removed)* |
 
-| Source | What it sees alone |
-|--------|--------------------|
-| Binary (L0/L1) | nothing — the construct leaves no artifact footprint |
-| Header AST (L2) | partial — but source replay is what records this surface authoritatively |
-| **Source replay (L4)** | the per-TU source surface → the finding |
+The exported binary symbol (`demo::keep`) is unchanged between v1 and v2;
+only the header-level macro surface differs.
 
-Macros are a preprocessor construct — they never reach the binary, so no artifact layer (L0/L1/L2 debug/symbols) can see the removal. Only the L4 per-TU source-replay surface records public macros.
+## abicheck command
 
-Per ADR-028 D3 a build/source-evidence finding never decides a shipped-ABI break
-on its own — the artifact diff proves any concrete break; this finding flags the
-elevated risk (or source/API break) and localizes the cause for review.
+The case ships `old.json`/`new.json` as hand-built `SourceAbiSurface`
+fixtures (the normalized L4 model `dump --sources` would produce from a real
+source-replay pass) rather than compiled binaries, so reproducing the
+finding means embedding each side's fixture into a snapshot's
+`build_source` field — exactly what `dump --sources` does internally — and
+comparing the two:
 
-## How to fix
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+from abicheck.model import AbiSnapshot
+from abicheck.buildsource.pack import BuildSourcePack
+from abicheck.buildsource.source_abi import SourceAbiSurface
+from abicheck.serialization import save_snapshot
 
-Keep a compatible macro (optionally `#define`-forwarding to a replacement), or document the removal and provide a migration path for consumers.
+for side in ("old", "new"):
+    d = json.loads(Path(f"{side}.json").read_text())
+    snap = AbiSnapshot(library="libdemo.so", version="1")
+    snap.build_source = BuildSourcePack(root=Path(""), source_abi=SourceAbiSurface.from_dict(d))
+    save_snapshot(snap, f"{side}.abi.json")
+PY
+
+abicheck compare old.abi.json new.abi.json
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: API_BREAK (exit 2)
+
+Source-Level Breaks:
+- public_macro_removed: Public macro 'DEMO_MAX_ITEMS' was removed from the headers.
+  ('64' -> '') — include/demo/config.h:12 [L4_SOURCE_ABI]
+  > Source that referenced it no longer compiles; there is no binary
+    footprint, so only source replay sees it.
+```
+
+## Minimum evidence
+
+`min_evidence: L4` — only the per-TU source-replay surface records public
+macros. Macros never reach the binary, so no artifact layer (L0 symbols, L1
+DWARF, L2 header AST as parsed for types/decls) sees the removal; L4 source
+replay is the floor.
+
+## Why abicheck catches it
+
+`abicheck compare` reads each side's normalized `SourceAbiSurface`'s
+`reachable_source_surface.macros` (as embedded by `dump --sources`, or
+supplied out-of-band via `--old/new-sources`) and diffs the macro set
+directly — the same `diff_source_abi()` routine `tests/test_l3l4l5_examples.py`
+exercises against the committed fixtures. Per ADR-028 D3 a source-evidence
+finding never decides a shipped-*ABI* break on its own, but `public_macro_removed`
+is registered as an `API_BREAK_KINDS` default verdict (a source-level break),
+not a risk signal — the compile failure it causes is deterministic, not
+contingent on a further artifact diff.
+
+## Runtime failure demonstration
+
+There's no compiled `app.c` consumer for this case — the failure happens at
+compile time, not runtime, so a "swap the .so and observe a crash" demo
+doesn't apply here. Picture a downstream package that does
+`#if DEMO_MAX_ITEMS > 32` or simply uses `DEMO_MAX_ITEMS` as an array bound;
+after upgrading to v2's headers, that translation unit fails to compile with
+`'DEMO_MAX_ITEMS' undeclared`. This is exactly what a CI job running source
+replay (L4) over a consumer's include path — or over the library's own
+public headers on each PR — would catch before the header ships, well
+before any consumer attempts to build against it.
+
+## Safe redesign
+
+Keep a compatible macro in place (optionally `#define`-forwarding to a
+replacement constant or `enum`), or document the removal with a migration
+path and a deprecation window before dropping it — the same discipline
+applied to removing a public symbol, since the compile-time contract is
+just as binding on consumers.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` operate on built binaries and their debug
+info; macros are stripped by the preprocessor before either format exists,
+so neither tool can see this removal under any invocation — there is
+nothing to run. Only the L4 source-replay layer that abicheck reads
+directly (or the header AST as parsed by a full C/C++ frontend) preserves
+the macro-removal fact at all.

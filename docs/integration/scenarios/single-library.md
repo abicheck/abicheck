@@ -24,7 +24,7 @@ Call the root Action directly in your PR workflow, pointing `old-library` at
 the committed snapshot and `new-library` at the just-built candidate:
 
 ```yaml
-- uses: abicheck/abicheck@v1
+- uses: abicheck/abicheck@v0.5.0
   with:
     old-library: baseline.json
     new-library: build/lib/libfoo.so

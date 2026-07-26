@@ -10,49 +10,77 @@
 | **Detected `ChangeKind`s** | `inline_namespace_moved` |
 | **Source files** | `examples/case71_inline_namespace_moved/` |
 
-**Category:** Symbol ABI | **Verdict:** BREAKING
+**Category:** Symbol ABI | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-Functions are moved from `inline namespace v1` to `inline namespace v2`. While
-source code using `crypto::encrypt()` compiles fine against both versions (inline
-namespaces are transparent to unqualified lookup), the **mangled symbol names**
-encode the inline namespace:
+`crypto::encrypt()`/`decrypt()` move from `inline namespace v1` to
+`inline namespace v2`. Source using the unqualified `crypto::encrypt()`
+name compiles fine against either version — inline namespaces are
+transparent to unqualified lookup — but the **mangled symbol name** encodes
+the inline namespace (`crypto::v1::encrypt` vs `crypto::v2::encrypt`). Old
+binaries request the v1-mangled symbol; v2 only exports the v2-mangled one,
+so the dynamic linker fails to resolve it at load time.
 
-- v1 symbol: `_ZN6crypto2v17encryptEPKNS0_7ContextEPKci` (crypto::v1::encrypt)
-- v2 symbol: `_ZN6crypto2v27encryptEPKNS0_7ContextEPKci` (crypto::v2::encrypt)
+## Old/new diff
 
-Old binaries request the v1-mangled name from the dynamic linker. Since v2 only
-exports the v2-mangled name, the symbols are not found at load time.
+| v1.h | v2.h |
+|------|------|
+| `namespace crypto { inline namespace v1 { ... } }` | `namespace crypto { inline namespace v2 { ... } }` |
+| `_ZN6crypto2v17encryptEPKNS0_7ContextEPKci` | `_ZN6crypto2v27encryptEPKNS0_7ContextEPKci` |
 
-This is the mechanism libstdc++ uses for ABI versioning (e.g., `std::__cxx11::string`
-vs `std::string`), and it's the exact break that caused widespread ecosystem issues
-during the GCC 5.x transition.
+## abicheck command
+
+```bash
+g++ -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_removed: Type removed: crypto::v1::Context
+  > Old code references a type that no longer exists; compilation or link failure.
+- func_removed_elf_only: Elf_only function removed:
+  crypto::v1::decrypt(crypto::v1::Context const*, char const*, int)
+- func_removed_elf_only: Elf_only function removed:
+  crypto::v1::encrypt(crypto::v1::Context const*, char const*, int)
+  > Exported function symbol removed from the binary; old binaries that link
+    or dlsym() it can fail even without header evidence.
+- inline_namespace_moved: Inline namespace move detected: 2 symbols appear to
+  have moved between inline namespace versions (e.g. ::v1:: -> ::v2::);
+  mangled names changed
+- inline_namespace_version_bumped: Inline namespace version bumped:
+  'crypto::v1::Context' -> 'crypto::v2::Context' (version segment changed
+  from [1] to [2]); mangled names change so old and new TUs of the same
+  program ODR-violate.
+
+Additions:
+- func_added: New public function: crypto::v2::decrypt(...), crypto::v2::encrypt(...)
+- type_added: New type: crypto::v2::Context
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the exported-symbol table alone is enough: the
+mangled names for `crypto::v1::*` disappear and `crypto::v2::*` names with
+matching demangled signatures appear in their place, which is exactly the
+pattern abicheck's inline-namespace-move detector matches on. `-g` above is
+only there so the *Runtime failure demonstration* below can build a
+matching app.
 
 ## Why abicheck catches it
 
-Symbol comparison detects that old mangled names disappeared and new ones with
-different namespace encoding appeared (`inline_namespace_moved`). This is flagged
-as BREAKING rather than simple removal + addition, because the pattern indicates
-an intentional version bump.
+abicheck demangles each exported symbol and compares the demangled
+signature (ignoring the inline-namespace segment) across versions; when it
+finds the same signature reappearing under a different numbered inline
+namespace, it reports `inline_namespace_moved` — a mangled-name-only
+signal, no debug info or headers required.
 
-## Code diff
-
-```cpp
-// v1.h
-namespace crypto {
-inline namespace v1 {
-    int encrypt(const Context *ctx, const char *data, int len);
-}}
-
-// v2.h — inline namespace version bumped
-namespace crypto {
-inline namespace v2 {
-    int encrypt(const Context *ctx, const char *data, int len);
-}}
-```
-
-## Real Failure Demo
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
@@ -63,31 +91,32 @@ inline namespace v2 {
 g++ -shared -fPIC -g v1.cpp -o libcrypto_ex.so
 g++ -g app.cpp -L. -lcrypto_ex -Wl,-rpath,. -o app
 ./app
-# -> encrypt() = 262
-# -> Expected: 262
+# → encrypt() = 262
+# → Expected: 262
 
 # Verify v1 exports v1-namespace symbols
 nm -D libcrypto_ex.so | grep encrypt
-# -> T _ZN6crypto2v17encryptEPKNS0_7ContextEPKci
+# → T _ZN6crypto2v17encryptEPKNS0_7ContextEPKci
 
-# Build v2 (namespace v2)
+# Swap in v2 (namespace v2, no recompile)
 g++ -shared -fPIC -g v2.cpp -o libcrypto_ex.so
-
-# Verify v2 exports v2-namespace symbols
 nm -D libcrypto_ex.so | grep encrypt
-# -> T _ZN6crypto2v27encryptEPKNS0_7ContextEPKci
+# → T _ZN6crypto2v27encryptEPKNS0_7ContextEPKci
 
 ./app
-# -> ./app: symbol lookup error: undefined symbol: _ZN6crypto2v17encryptE...
+# → ./app: symbol lookup error: ./app: undefined symbol:
+#   _ZN6crypto2v17encryptEPKNS0_7ContextEPKci
 ```
 
-**Why CRITICAL:** The mangled symbol name includes the inline namespace version.
-Old binaries request `crypto::v1::encrypt` but only `crypto::v2::encrypt` exists.
-The dynamic linker fails immediately.
+**Why CRITICAL:** the mangled symbol name includes the inline namespace
+version. Old binaries request `crypto::v1::encrypt` but only
+`crypto::v2::encrypt` exists in the swapped-in library, so the dynamic
+linker fails immediately instead of running with wrong data.
 
-## How to fix
+## Safe redesign
 
-Keep the old inline namespace alongside the new one with compatibility aliases:
+Keep the old inline namespace alongside the new one with compatibility
+aliases:
 
 ```cpp
 namespace crypto {
@@ -96,21 +125,24 @@ inline namespace v2 {
 }
 // Backward compatibility
 namespace v1 {
-    using v2::encrypt;  // or provide a wrapper
+    using v2::encrypt;
 }
 }
 ```
 
-Or use ELF symbol versioning to map old symbols to new implementations.
+**Real-world example:** the libstdc++ dual ABI introduced in GCC 5 uses
+exactly this mechanism — `std::string` moved to
+`std::__cxx11::basic_string`, and mixing binaries built with different
+`_GLIBCXX_USE_CXX11_ABI` settings produces this same "undefined symbol"
+failure, causing years of ecosystem pain for Linux distributions.
 
-## Real-world example
+## Cross-tool comparison
 
-The most famous instance is the libstdc++ dual ABI introduced in GCC 5. The
-`std::string` implementation changed, and the new one lives in
-`std::__cxx11::basic_string`. The `_GLIBCXX_USE_CXX11_ABI` macro controls which
-inline namespace is active, and mixing old and new binaries produces exactly this
-kind of "undefined symbol" failure. This caused years of ecosystem pain for Linux
-distributions.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 

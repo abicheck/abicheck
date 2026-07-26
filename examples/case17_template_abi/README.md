@@ -1,123 +1,124 @@
-# Case 17 — Template Instantiation ABI Change
+# Case 17: Template Instantiation ABI Change
 
-**Verdict:** 🔴 BREAKING
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
-> **Note:** The verdict was previously marked COMPATIBLE in error.
-> When app_v1 is loaded against libv2.so using LD_PRELOAD, the v2 constructor
-> writes 24 bytes into a 16-byte stack slot → sentinel corruption confirmed at runtime.
-> abicheck correctly detects `struct_size_changed: Buffer<int> 16→24` = BREAKING.
-## What changes
+## Verdict and consumer impact
 
-| Version | `Buffer<int>` layout |
-|---------|---------------------|
-| v1 | `{ T* data_; size_t size_; }` → sizeof = 16 bytes (64-bit) |
-| v2 | `{ T* data_; size_t size_; size_t capacity_; }` → sizeof = 24 bytes |
+`Buffer<int>` is an explicitly-instantiated C++ template, compiled into the
+`.so` like an ordinary class — its mangled symbols (e.g.
+`_ZN6BufferIiEC1Em`) are identical in both versions, so a linker-level check
+alone would miss this. A caller compiled against v1 headers allocates
+`sizeof(Buffer<int>) = 16` bytes (stack, heap, or embedded in another
+struct). The v2 constructor writes 24 bytes — 8 bytes past the allocated
+region — corrupting whatever follows. Any binary that constructs, copies, or
+embeds `Buffer<int>` by value is broken without recompilation.
 
-## What breaks at binary level
+## Old/new diff
 
-C++ template classes with explicit instantiations are compiled into the `.so` like
-regular classes. The mangled symbol for `Buffer<int>::Buffer(size_t)` is
-`_ZN6BufferIiEC1Em` — identical in both versions.
+| v1.hpp | v2.hpp |
+|--------|--------|
+| `T* data_; std::size_t size_;` (16 bytes) | `T* data_; std::size_t size_; std::size_t capacity_;` (24 bytes) |
 
-A caller compiled against v1 headers **allocates** `sizeof(Buffer<int>) = 16` bytes
-(e.g. on the stack or in a struct). The v2 `.so` constructor writes **24 bytes** —
-overwriting 8 bytes past the allocated region. This is a classic **stack smash / heap
-corruption** scenario, extremely hard to debug.
-
-## Why abidiff catches it (with DWARF)
-
-When compiled with `-g`, DWARF records the type layout for `Buffer<int>`. `abidiff`
-compares type offsets and sizes → detects `sizeof` grew from 16 to 24. Without `-g`,
-abidiff sees only the symbol table and misses the layout change.
-
-## Why ABICC catches it
-
-ABICC parses the header AST and computes `sizeof` for all template instantiations
-referenced in the headers. It sees `capacity_` was added and reports:
-> "Size of type 'Buffer<int>' changed from 16 to 24 bytes."
-
-## Real-world example
-
-In large numeric libraries, templated classes like `HomogenNumericTable<float>` are
-often explicitly instantiated in the `.so`. When a private member is added for
-thread-safety tracking, downstream bindings compiled with old headers write past
-buffers. This class of bug is typically caught by ASAN in integration tests.
-
-## Code diff
-
-```diff
- template<typename T>
- class Buffer {
- private:
-     T*          data_;
-     std::size_t size_;
-+    std::size_t capacity_;  // NEW field
- };
-```
-
-## Reproduce steps
+## abicheck command
 
 ```bash
-cd examples/case17_template_abi
-
-# Build with debug info
 g++ -shared -fPIC -std=c++17 -g v1.cpp -o libv1.so
 g++ -shared -fPIC -std=c++17 -g v2.cpp -o libv2.so
-
-# abidiff WITH DWARF catches layout change
-abidw --out-file v1.xml libv1.so
-abidw --out-file v2.xml libv2.so
-abidiff v1.xml v2.xml   # exit 4: reports Buffer<int> size change
-
-# Build WITHOUT debug info (strip DWARF)
-g++ -shared -fPIC -std=c++17 v1.cpp -o libv1_nodebug.so
-g++ -shared -fPIC -std=c++17 v2.cpp -o libv2_nodebug.so
-abidw --out-file v1nd.xml libv1_nodebug.so
-abidw --out-file v2nd.xml libv2_nodebug.so
-abidiff v1nd.xml v2nd.xml   # exit 0: MISSES the change (no DWARF)
-
-# ABICC catches via header AST regardless of debug info
-abi-compliance-checker -lib Buffer -v1 1.0 -v2 2.0 \
-  -header v1.hpp -header v2.hpp \
-  -gcc-options "-std=c++17"
+abicheck compare libv1.so libv2.so
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: Buffer<int> (128 -> 192 bits)
+  > Old code allocates or copies the type with the old size; heap/stack
+    corruption, out-of-bounds access.
+- type_field_added: Field added: Buffer<int>::capacity_
+  > New field shifts subsequent fields; old code reads wrong offsets for
+    all fields after insertion point.
+
+Additions:
+- func_added: New public function: Buffer<int>::capacity() const
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF records the explicit instantiation
+`Buffer<int>` as a concrete type with its own `DW_TAG_structure_type` size
+and member offsets, exactly like a non-template class. `-g` alone (no
+public headers) is enough; the mangled symbol names never change, so L0
+symbol-table evidence alone would miss this.
+
+## Why abicheck catches it
+
+Explicit template instantiation means `Buffer<int>` exists in the compiled
+`.so`'s debug info as a concrete, fully-laid-out type. abicheck reads its
+DWARF size and member offsets the same way it would for any struct/class,
+so the 16→24 byte growth and the new `capacity_` member are detected
+without any template-specific handling.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-**Scenario:** app compiled with v1 layout (Buffer<int> = 16 bytes) runs against v2 constructor that writes 24 bytes → stack overflow.
+**Scenario:** app embeds `Buffer<int>` (sized at compile time against v1,
+16 bytes) directly before a sentinel field in a struct, then constructs it
+via a `.so` swapped to v2 without recompiling.
 
 ```bash
-# Build v1 + app
+# Build old library + app
 g++ -shared -fPIC -std=c++17 -g v1.cpp -o libbuf.so
 g++ -std=c++17 -g -O0 app.cpp -I. -L. -lbuf -Wl,-rpath,. -o app
 ./app
 # → sizeof(Buffer<int>) at compile time = 16
 # → before ctor: sentinel = SENTINEL
-# → after  ctor: sentinel = SENTINEL   (v1: only 16 bytes written)
+# → after  ctor: sentinel = SENTINEL
 
-# Swap in v2 (constructor writes 24 bytes — 8 bytes past the 16-byte slot)
+# Swap in new library (no recompile)
 g++ -shared -fPIC -std=c++17 -g v2.cpp -o libbuf.so
 ./app
 # → sizeof(Buffer<int>) at compile time = 16
 # → before ctor: sentinel = SENTINEL
-# → after  ctor: sentinel =           ← CORRUPTED (v2 wrote 8 bytes past slot)
+# → after  ctor: sentinel = (empty)
 # → CORRUPTION: v2 constructor wrote past Buffer slot!
-
-# With ASAN:
-g++ -shared -fPIC -std=c++17 -g -fsanitize=address v2.cpp -o libbuf.so
-g++ -std=c++17 -g -fsanitize=address app.cpp -I. -L. -lbuf -Wl,-rpath,. -o app_asan
-./app_asan
-# → ERROR: AddressSanitizer: stack-buffer-overflow
 ```
 
-**Why CRITICAL:** The v2 constructor writes a new `capacity_` field at offset 16,
-but the app only reserved 16 bytes on the stack. The 8 bytes past the allocation are
-overwritten — classic stack smash, potentially corrupting return addresses.
+**Why CRITICAL:** the v2 constructor writes a new `capacity_` field at byte
+offset 16, but the app only reserved 16 bytes for the object. The adjacent
+`sentinel` field is overwritten — the same mechanism can corrupt heap
+metadata, adjacent struct fields, or return addresses depending on where
+the object is allocated.
 
-## Why runtime result may differ from verdict
-Template instantiation in binary: symbol names unchanged
+## Safe redesign
+
+Never add data members to an explicitly-instantiated template class once
+it's part of the public ABI. Use the opaque-pointer (PIMPL) idiom, or
+reserve unused padding/bytes up front for anticipated growth, so new
+internal state doesn't change `sizeof`.
+
+**Real-world example:** large numeric libraries that explicitly instantiate
+templated classes (e.g. `HomogenNumericTable<float>`) into their `.so` hit
+this exact bug when a private member is added for bookkeeping — downstream
+bindings compiled against old headers write past buffers, a class of bug
+typically only caught by ASan in integration tests.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libv1.so
+abidw --out-file v2.xml libv2.so
+abidiff v1.xml v2.xml
+echo "exit: $?"   # → 4 (with -g / DWARF present)
+```
+
+> **Note on abidiff and debug info:** `abidiff` only sees this change when
+> both `.so` files carry DWARF (`-g`); with debug info stripped it falls
+> back to the symbol table alone, where the mangled names are identical and
+> the layout change is invisible. `abi-compliance-checker`, which parses
+> the header AST directly, catches the `sizeof` growth regardless of
+> whether debug info is present.
 
 ## References
 

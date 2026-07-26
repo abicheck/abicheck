@@ -20,7 +20,7 @@ check can run entirely offline/elsewhere, decoupled as two separate steps.
    applies:
 
 ```yaml
-- uses: abicheck/abicheck/actions/check-target@v1
+- uses: abicheck/abicheck/actions/check-target@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
   with:
     name: libfoo
     gcc-prefix: arm-linux-gnueabihf-   # or gcc-path: /opt/cross/bin/arm-linux-gnueabihf-gcc

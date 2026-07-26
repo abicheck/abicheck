@@ -1,99 +1,120 @@
 # Case 59: Function Became Inline (outlined → inline)
 
-**Category:** Symbol API | **Verdict:** BREAKING (API_BREAK)
+**Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
-## What this case is about
+## Verdict and consumer impact
 
-v1 exports `fast_abs` and `fast_max` as regular outlined functions in the
-shared library. v2 moves them to the header as `static inline` — the symbols
-disappear from `.dynsym`.
+v1 exports `fast_abs` and `fast_max` as regular outlined functions from the
+shared library. v2 moves both to `bad.h`'s successor, `good.h`, as `static
+inline` — the definitions still exist and are still callable from source,
+but the exported symbols disappear from `.dynsym`. This is the inverse of
+case47 (`inline_to_outlined`, which is compatible): existing binaries that
+resolve `fast_abs`/`fast_max` against the shared library get `undefined
+symbol` at load time, even though a fresh compile against v2's header works
+fine. Recompilation is mandatory for every already-linked consumer.
 
-This is the **inverse of case47** (inline_to_outlined), which is compatible.
-Moving a function from outlined to inline is **breaking** because existing
-binaries depend on the symbol being in the library.
+## Old/new diff
 
-## What breaks at binary level
+| bad.h (v1) | good.h (v2) |
+|------------|-------------|
+| `int fast_abs(int x);` — declared, defined (and exported) in `bad.c` | `static inline int fast_abs(int x) { ... }` — defined in the header, not exported |
+| `int fast_max(int a, int b);` — same | `static inline int fast_max(int a, int b) { ... }` — same |
 
-- **Symbols removed**: `fast_abs` and `fast_max` are no longer in `.dynsym`.
-- **Dynamic linker fails**: Existing binaries that reference these symbols
-  get `undefined symbol` errors at load time.
-- **Source compatibility preserved**: New compilations with the v2 header work
-  fine (the inline definition is available), but old binaries break.
+## abicheck command
 
-## What abicheck detects
-
-- **`FUNC_REMOVED`**: Both function symbols are absent from v2's export table.
-  From the binary perspective, this is indistinguishable from deletion.
-
-**Overall verdict: BREAKING**
-
-## How to reproduce
-
-**Linux:**
 ```bash
-gcc -shared -fPIC -g bad.c  -o libbad.so
-gcc -shared -fPIC -g good.c -o libgood.so
-
-nm -D libbad.so  | grep fast_  # → T fast_abs, T fast_max
-nm -D libgood.so | grep fast_  # → (nothing — inlined away)
-
-# Link app against v1
-gcc -g app.c -L. libbad.so -Wl,-rpath,. -o app
-./app  # works
-
-# Swap to v2
-cp libgood.so libbad.so
-./app
-# → error: undefined symbol: fast_abs
+gcc -shared -fPIC -g -I. bad.c  -o libfoo_v1.so
+gcc -shared -fPIC -g -I. good.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so \
+  --header old=bad.h --header new=good.h --ast-frontend clang
 ```
 
-**macOS:**
-```bash
-cc -shared -fPIC -g bad.c  -o libbad.dylib
-cc -shared -fPIC -g good.c -o libgood.dylib
+## Expected abicheck finding
 
-nm libbad.dylib  | grep fast_  # → T _fast_abs, T _fast_max
-nm libgood.dylib | grep fast_  # → (nothing — inlined away)
+```text
+Verdict: BREAKING (exit 4)
 
-# Link app against v1
-cc -g app.c -L. -lbad -Wl,-rpath,@loader_path -o app
-./app  # works
-
-# Swap to v2
-cp libgood.dylib libbad.dylib
-./app
-# → dyld: Symbol not found: _fast_abs
+- func_visibility_changed: Function visibility changed to hidden: fast_abs (public -> hidden)
+  > Symbol hidden from dynamic linking; old binaries can't find it at load time.
+- func_visibility_changed: Function visibility changed to hidden: fast_max (public -> hidden)
+  > Symbol hidden from dynamic linking; old binaries can't find it at load time.
+- func_removed_elf_only: Elf_only function removed: fast_abs
+  > Exported function symbol removed from the binary; old binaries that
+    link or dlsym() it can fail even without header evidence.
+- func_removed_elf_only: Elf_only function removed: fast_max
+  > Exported function symbol removed from the binary; old binaries that
+    link or dlsym() it can fail even without header evidence.
 ```
 
-## How to fix
+## Minimum evidence
 
-Keep an outlined fallback alongside the inline version:
+`min_evidence: L0` — the underlying fact (`fast_abs`/`fast_max` vanish from
+`.dynsym`) is fully visible from the exported-symbol table alone: a bare
+`abicheck compare libfoo_v1.so libfoo_v2.so` with no headers already reports
+BREAKING via the plain `func_removed` kind. Adding `good.h`'s header AST (as
+above) sharpens the diagnosis from "symbol removed" to "removed from the
+binary but still declared `static inline` in the header" — surfacing the
+more precise `func_visibility_changed`/`func_removed_elf_only` pair — but
+that extra precision isn't needed to reach the correct BREAKING verdict.
+
+## Why abicheck catches it
+
+The dynamic symbol table is authoritative L0 evidence: `fast_abs` and
+`fast_max` are `T`-type symbols in v1's `.dynsym` and absent from v2's, so
+abicheck flags a plain removal without any further evidence. When public
+headers are also supplied, abicheck cross-references the header AST and
+sees both functions are still declared (as `static inline`) on the new
+side — reclassifying the finding as a visibility change plus an ELF-only
+hard removal, rather than treating it as if the API vanished from source
+too.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1 (functions resolved from the shared
+library), swap in v2 `.so` without recompile.
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g -I. bad.c -o libfoo.so
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → abs(-7) = 7
+# → max(3, 9) = 9
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g -I. good.c -o libfoo.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol: fast_abs
+```
+
+**Why CRITICAL:** `fast_abs` is no longer in v2's dynamic symbol table
+because it was inlined into the header; the runtime linker cannot resolve
+the app's reference to it and the process is killed immediately on startup.
+
+## Safe redesign
+
+Keep an outlined, exported definition alongside the inline one so both old
+binaries (linking against the symbol) and new compiles (using the inline
+fast path) keep working:
 
 ```c
 /* header */
 static inline int fast_abs(int x) { return x < 0 ? -x : x; }
 
-/* .c file — provide an exported symbol for backward compat */
+/* .c file — still provide an exported symbol for backward compat */
 int fast_abs(int x) { return x < 0 ? -x : x; }
 ```
 
-Or use a `__attribute__((weak))` symbol.
+Or mark the outlined definition `__attribute__((weak))` so callers that
+still bind it dynamically keep resolving.
+
+**Real-world example:** header-only refactors that convert small "hot path"
+helper functions to `static inline` for performance are a common source of
+this exact break — the API still compiles fine from source, which is why
+the symbol-table regression is easy to miss in review.
 
 ## References
 
 - [C99 inline semantics](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)
-
-## Real Failure Demo
-
-**Severity: BREAKING / LOAD-TIME FAILURE**
-
-```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case59_func_became_inline_app case59_func_became_inline_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case59_func_became_inline/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case59_func_became_inline/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# ./app_v1: symbol lookup error: ./app_v1: undefined symbol: fast_abs
-```

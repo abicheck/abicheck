@@ -10,55 +10,79 @@
 | **Detected `ChangeKind`s** | `var_added` |
 | **Source files** | `examples/case61_var_added/` |
 
-**Category:** Symbol API | **Verdict:** COMPATIBLE
+**Category:** Addition | **Verdict:** 🟢 COMPATIBLE
 
-## What this case is about
+## Verdict and consumer impact
 
-v1 exports `lib_version`. v2 adds a new global variable `lib_build_number`.
-All existing symbols are unchanged — this is a purely additive change.
+v1 exports `lib_version`. v2 adds a new global variable `lib_build_number`,
+leaving `lib_version` and `get_version()` untouched. Existing binaries never
+reference the new symbol, so they are completely unaffected — new consumers
+can opt in to reading `lib_build_number` once they recompile against v2's
+header.
 
-## Real Failure Demo
+## Old/new diff
 
-**Severity: COMPATIBLE - NO FAILURE EXPECTED**
+| old/lib.c | new/lib.c |
+|-----------|-----------|
+| `int lib_version = 1;` | `int lib_version = 1;`<br>`int lib_build_number = 1042;` |
 
-This is an additive ABI change. The old app does not reference the new global, so runtime substitution is safe.
-
-```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case61_var_added_app case61_var_added_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case61_var_added/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case61_var_added/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# version = 2 / get_version() = 2
-```
-
-## Why this is compatible
-
-- Existing binaries never reference `lib_build_number`, so it doesn't affect them.
-- New consumers can optionally use the new variable.
-- No layout, offset, or size changes.
-
-## What abicheck detects
-
-- **`VAR_ADDED`**: A new global variable symbol appeared in `.dynsym`.
-
-**Overall verdict: COMPATIBLE**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g bad.c  -o libbad.so
-gcc -shared -fPIC -g good.c -o libgood.so
-
-nm -D libgood.so | grep lib_build_number  # → D lib_build_number
-
-python3 -m abicheck.cli dump libbad.so  -o /tmp/v1.json
-python3 -m abicheck.cli dump libgood.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → COMPATIBLE: VAR_ADDED
+gcc -shared -fPIC -g old/lib.c -o libfoo_v1.so
+gcc -shared -fPIC -g new/lib.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
+
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE (exit 0)
+
+- var_added: New public variable: lib_build_number
+  > New variable available; existing binaries are unaffected.
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — `lib_build_number` appearing in v2's `.dynsym` (and
+absent from v1's) is enough on its own; no debug info or headers needed.
+(`-g` above is only there so the *Runtime failure demonstration* below can
+build a matching app.)
+
+## Why abicheck catches it
+
+The dynamic symbol table is authoritative L0 evidence — abicheck diffs the
+exported-symbol sets directly and classifies a name present only in the new
+set as an addition.
+
+## Runtime failure demonstration
+
+No observable effect on existing binaries — this is a pure addition.
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g old/lib.c -o libfoo.so
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → version = 1
+# → get_version() = 1
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g new/lib.c -o libfoo.so
+./app
+# → version = 1
+# → get_version() = 1   ← identical
+```
+
+The app never references `lib_build_number`, so the swap is transparent.
+
+## Safe redesign
+
+This case *is* the safe pattern — adding a new exported symbol without
+touching existing ones is the textbook compatible ABI change. No redesign
+needed; just avoid ever repurposing `lib_build_number`'s name or removing it
+once shipped.
 
 ## References
 

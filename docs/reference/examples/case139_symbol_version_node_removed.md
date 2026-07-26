@@ -10,19 +10,29 @@
 | **Detected `ChangeKind`s** | `symbol_version_node_removed` |
 | **Source files** | `examples/case139_symbol_version_node_removed/` |
 
-**Category:** ELF / Symbol versioning | **Verdict:** BREAKING
+**Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
-## What this case is about
+## Verdict and consumer impact
 
-v1 exports two symbols bound to two **version nodes** defined by a linker
-version script:
+Any downstream binary that links against `beta` records a dependency on
+`beta@LIBX_2.0` (the version node it was defined under in v1). v2 deletes
+the `LIBX_2.0` node entirely and folds `beta` into `LIBX_1.0` — the symbol
+*name* is still exported, but the version node the old binary's dynamic
+loader looks for no longer exists. The process fails at load time with
+`version 'LIBX_2.0' not found`, before `main()` ever runs. This is the
+classic glibc-style versioned-symbol ABI break: removing or renaming a
+version node breaks every binary that recorded a dependency on it, even
+though nothing about the symbol's name or signature changed.
+
+## Old/new diff
+
+v1 exports two symbols bound to two version nodes via a linker version
+script:
 
 ```
 LIBX_1.0 { global: alpha; local: *; };
-LIBX_2.0 { global: beta; } LIBX_1.0;   # beta@@LIBX_2.0
+LIBX_2.0 { global: beta; } LIBX_1.0;    # beta@@LIBX_2.0
 ```
-
-A consumer that links against `beta` records a dependency on `beta@LIBX_2.0`.
 
 v2 deletes the `LIBX_2.0` node and folds `beta` into `LIBX_1.0`:
 
@@ -30,53 +40,97 @@ v2 deletes the `LIBX_2.0` node and folds `beta` into `LIBX_1.0`:
 LIBX_1.0 { global: alpha; beta; local: *; };   # beta@@LIBX_1.0
 ```
 
-The version node `LIBX_2.0` no longer exists, so the verneed `beta@LIBX_2.0`
-baked into the old consumer can no longer be satisfied. This is the classic
-glibc-style versioned-symbol ABI break: removing or renaming a version node
-breaks every binary that recorded a dependency on it, even though the symbol
-*name* is still exported.
-
-## What abicheck detects
-
-- **`SYMBOL_VERSION_NODE_REMOVED`**: the `LIBX_2.0` version definition present in
-  v1 is gone in v2. Classified as BREAKING.
-
-(The compare also notes `symbol_moved_version_node` for `beta` relocating to a
-different node.)
-
-**Overall verdict: BREAKING.**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so -Wl,--version-script=v1.map
-gcc -shared -fPIC -g v2.c -o libv2.so -Wl,--version-script=v2.map
-
-readelf -V libv1.so | grep 'Name: LIBX'   # LIBX_1.0, LIBX_2.0
-readelf -V libv2.so | grep 'Name: LIBX'   # LIBX_1.0 only
-
-python3 -m abicheck.cli dump libv1.so -o v1.json
-python3 -m abicheck.cli dump libv2.so -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-# → BREAKING + SYMBOL_VERSION_NODE_REMOVED
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so -Wl,--version-script=v1.map
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so -Wl,--version-script=v2.map
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
+## Expected abicheck finding
 
-Never remove or rename a published version node. Add new symbols under a new
-node (`LIBX_3.0`) while keeping all existing nodes intact, so old verneed
-records keep resolving.
+```text
+Verdict: BREAKING (exit 4)
 
-## Real Failure Demo
+- symbol_version_node_removed: Version node LIBX_2.0 was entirely removed
+  from the version script. Symbols previously under this node: beta.
+  Applications linked against LIBX_2.0 will get unresolved symbol errors.
+  > A version node (e.g. LIBFOO_1.0) was entirely removed from the version
+    script. Applications linked against symbols under that version node
+    will get unresolved symbol errors at load time.
 
-**Severity: CRITICAL (load-time failure)**
-
-An executable built against v1 (recording `beta@LIBX_2.0`) fails to start when
-run against v2 with:
-
+Also reported (risk):
+- symbol_moved_version_node: Symbol beta moved from version node LIBX_2.0
+  to LIBX_1.0.
 ```
-symbol beta version LIBX_2.0 not defined in file libv1.so with link time reference
+
+## Minimum evidence
+
+`min_evidence: L0` — the `.gnu.version_d`/`.gnu.version_r` ELF sections
+carry every version node's name and its member symbols directly; no debug
+info or headers needed.
+
+## Why abicheck catches it
+
+abicheck parses each binary's ELF symbol-version definitions
+(`.gnu.version_d`) into the full set of version nodes and their member
+symbols, then diffs the two sets directly — a node present in v1 and
+absent in v2 is reported as removed, independent of whether the symbol
+names themselves changed.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1 (recording `beta@LIBX_2.0`), swap in
+v2 `.so` without recompile.
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g v1.c -o libfoo.so -Wl,--version-script=v1.map
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → alpha(1) = 2
+# → beta(1) = 3
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g v2.c -o libfoo.so -Wl,--version-script=v2.map
+./app
+# → ./app: ./libfoo.so: version `LIBX_2.0' not found (required by ./app)
 ```
+
+**Why CRITICAL:** the dynamic loader checks every recorded version
+dependency before running any application code; `LIBX_2.0` no longer
+exists in v2, so the process refuses to start at all.
+
+## Safe redesign
+
+Never remove or rename a published version node. Add new symbols under a
+new node (`LIBX_3.0`) while keeping all existing nodes intact, so old
+verneed records keep resolving.
+
+**Real-world example:** glibc itself follows this discipline strictly —
+`GLIBC_2.x` version nodes are added, never removed or renamed, precisely so
+that decades-old binaries keep resolving their versioned symbols.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+`abidiff` also models symbol-version information (via
+`elf-symbol::version`) and would flag `beta`'s version change; the version
+*node deletion* itself is the sharper signal abicheck reports directly, and
+is what actually explains the load-time failure above.
+
+## References
+
+- [ELF symbol versioning (`.gnu.version_d`/`.gnu.version_r`)](https://refspecs.linuxfoundation.org/LSB_3.0.0/LSB-generic/LSB-generic/symversion.html)
+- [libabigail `abidiff` manual](https://sourceware.org/libabigail/manual/abidiff.html)
 
 ---
 

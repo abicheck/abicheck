@@ -1,43 +1,77 @@
 # Case 65: Symbol Version Removed
 
-**Category:** Symbol Versioning | **Verdict:** BREAKING
+**Category:** Symbol Versioning | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-The `CRYPTO_1.0` symbol version node is removed from v2 of the library.
-Old binaries that were linked against `crypto_hash@CRYPTO_1.0` record that
-version requirement in their `.gnu.version_r` section. When the dynamic linker
-tries to load v2 (which only provides `CRYPTO_2.0`), it cannot satisfy the
-`CRYPTO_1.0` requirement and refuses to start the process.
+The `CRYPTO_1.0` symbol-version node is removed from v2 of the library.
+Old binaries linked against `crypto_hash@CRYPTO_1.0` record that version
+requirement in their `.gnu.version_r` section. When the dynamic linker
+loads v2 — which only provides `CRYPTO_2.0` — it cannot satisfy the
+`CRYPTO_1.0` requirement and refuses to start the process. Tools like `nm`
+or `readelf -s` still show `crypto_hash` in the symbol table, so the
+breakage is invisible to a naive symbol-name check; only the version node
+itself is gone. Recompilation (and re-linking against whatever version node
+now provides `crypto_hash`) is mandatory for affected binaries.
 
-## Why this matters
-
-ELF symbol versioning (via `.gnu.version_d` / `.gnu.version_r` sections and
-version scripts) is the primary mechanism for maintaining backward compatibility
-in shared libraries across major-version boundaries. It allows a single `.so`
-to provide multiple implementations of the same symbol for different ABI
-generations.
-
-Removing a version node is equivalent to removing symbols — but worse, because:
-- The version was an **explicit promise** of backward compatibility
-- Tools like `nm` or `readelf -s` still show `crypto_hash` in the symbol table,
-  so the breakage is **invisible to naive checks**
-- The failure happens at **load time**, not link time — binaries that appeared
-  to link correctly fail only when deployed against the new library
-
-## Code diff
+## Old/new diff
 
 ```
-v1.c:  .symver crypto_hash_v1,crypto_hash@CRYPTO_1.0   ← compat version
-       .symver crypto_hash_v2,crypto_hash@@CRYPTO_2.0   ← default version
+v1.c:  .symver crypto_hash_v1,crypto_hash@CRYPTO_1.0    ← compat version
+       .symver crypto_hash_v2,crypto_hash@@CRYPTO_2.0    ← default version
 v1.map: CRYPTO_1.0 { crypto_hash; };
         CRYPTO_2.0 { crypto_hash; crypto_verify; } CRYPTO_1.0;
 
-v2.c:  (no .symver — plain crypto_hash() definition)    ← CRYPTO_1.0 gone!
+v2.c:  (no .symver — plain crypto_hash() definition)     ← CRYPTO_1.0 gone!
 v2.map: CRYPTO_2.0 { crypto_hash; crypto_verify; };
 ```
 
-## Real Failure Demo
+## abicheck command
+
+```bash
+gcc -shared -fPIC -g v1.c -Wl,--version-script=v1.map -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -Wl,--version-script=v2.map -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- symbol_version_node_removed: Version node CRYPTO_1.0 was entirely removed
+  from the version script. Symbols previously under this node: crypto_hash.
+  Applications linked against CRYPTO_1.0 will get unresolved symbol errors.
+  > A version node (e.g. LIBFOO_1.0) was entirely removed from the version
+    script. Applications linked against symbols under that version node
+    will get unresolved symbol errors at load time.
+
+Additions:
+- func_added: New public function: crypto_hash
+  > New function available; existing binaries are unaffected.
+```
+
+The `func_added` finding is an artifact of comparing the plain (unversioned)
+export name once the version wrapper is gone — the `symbol_version_node_removed`
+finding above is the one that carries the real break, and both
+`SYMBOL_VERSION_DEFINED_REMOVED` and `SYMBOL_VERSION_NODE_REMOVED` detect
+this same removal; abicheck's cross-detector deduplication keeps the more
+specific `symbol_version_node_removed`.
+
+## Minimum evidence
+
+`min_evidence: L0` — the ELF `.gnu.version_d` section alone records which
+version nodes a library defines and which symbols belong to each; comparing
+that section between v1 and v2 is enough, no debug info or headers needed.
+
+## Why abicheck catches it
+
+abicheck parses the `.gnu.version_d` (version definitions) section of both
+binaries into a node → symbol-set mapping and diffs the node sets directly —
+the same class of authoritative, always-present ELF metadata that a plain
+symbol removal (case01) is detected from, just one section over.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
@@ -45,7 +79,7 @@ v2.map: CRYPTO_2.0 { crypto_hash; crypto_verify; };
 swap in v2 `.so` which removed the `CRYPTO_1.0` version node.
 
 ```bash
-# Build v1 library with both version nodes
+# Build v1 library with both version nodes, and app
 gcc -shared -fPIC -g v1.c -Wl,--version-script=v1.map -o libcrypto.so
 gcc -g app.c -L. -lcrypto -Wl,-rpath,. -o app
 ./app
@@ -62,38 +96,34 @@ gcc -shared -fPIC -g v2.c -Wl,--version-script=v2.map -o libcrypto.so
 # → ./app: ./libcrypto.so: version `CRYPTO_1.0' not found (required by ./app)
 ```
 
-**Why CRITICAL:** The dynamic linker's version check is strict — if the required
-version node doesn't exist in the loaded library, the process is killed
-immediately. This is a hard failure with a clear error message, but it still
-catches many library maintainers by surprise when they "clean up" old version
-nodes.
+**Why CRITICAL:** the dynamic linker's version check is strict — if the
+required version node doesn't exist in the loaded library, the process is
+killed immediately. This is a hard failure with a clear error message, but
+it still catches many library maintainers by surprise when they "clean up"
+old version nodes.
 
-## How to fix
+## Safe redesign
 
-Never remove a symbol version node from a shared library. Instead:
+Never remove a symbol version node from a shared library. Keep the old
+`.symver` alias even once the implementation is identical
+(`__asm__(".symver old_impl,func@OLD_VER")` can point the old version at the
+new implementation), and only drop old version nodes alongside a SONAME
+major-version bump that forces all consumers to re-link.
 
-1. **Keep the old version node**: even if the implementation is identical, retain
-   the `.symver` alias so old binaries still resolve
-2. **Forward old versions**: `__asm__(".symver old_impl,func@OLD_VER")` can point
-   the old version to the new implementation
-3. **SONAME bump**: if you must drop old versions, increment the SONAME major
-   version to force all consumers to re-link
+**Real-world example:** glibc maintains symbol versions going back to
+`GLIBC_2.0` (1997) — its version script is append-only, because removing any
+node would break every binary linked against that version across the entire
+Linux ecosystem. OpenSSL 3.0 removed the `OPENSSL_1.0.0` and `OPENSSL_1.1.0`
+version nodes, which is why it required a SONAME change from
+`libssl.so.1.1` to `libssl.so.3` — all consumers had to be rebuilt.
 
-## Real-world example
+## Cross-tool comparison
 
-glibc maintains symbol versions going back to `GLIBC_2.0` (1997). Removing any
-version node would break every binary linked against that version — potentially
-millions of executables across the entire Linux ecosystem. This is why glibc's
-version script is append-only.
-
-OpenSSL 3.0 removed the `OPENSSL_1.0.0` and `OPENSSL_1.1.0` version nodes,
-which is why it required a SONAME change from `libssl.so.1.1` to `libssl.so.3`
-— all consumers had to be rebuilt.
-
-## abicheck detection
-
-abicheck detects this as `symbol_version_defined_removed` (BREAKING) by
-comparing the `.gnu.version_d` sections of the two library versions.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 

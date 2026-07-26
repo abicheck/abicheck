@@ -1,87 +1,119 @@
 # Case 95: Allocator Nested-Typedef Removed
 
-**Category:** Source API contract | **Verdict:** 🔴 BREAKING (policy escalated source break)
+**Category:** Source API contract | **Verdict:** 🔴 BREAKING (policy-escalated source break)
 
-## Compatibility classification
-
-- **Binary ABI impact:** None — exported member symbols are unchanged; already-built consumer binaries keep linking and running.
-- **Source compatibility impact:** BREAKING — `typename Alloc::value_type` and the other four nested aliases stop resolving.
-- **Semantic verdict (by the project's own API_BREAK/BREAKING definitions):** `API_BREAK` — a recompile-only failure with no impact on already-built binaries.
-- **Policy severity:** `BREAKING` in `ground_truth.json` — `typedef_removed` is a generic detector that conservatively classifies every nested-typedef removal as BREAKING by default policy, without distinguishing "this alias was source-only, never encoded in the binary" from an actual layout/link break. See `case158_public_typedef_removed` (L4 source-ABI replay) for the API_BREAK-classified sibling of this same removal pattern.
-
-## What breaks
+## Verdict and consumer impact
 
 An allocator-style class drops its historical nested typedef set
-(`value_type`, `pointer`, `reference`, `size_type`, `difference_type`).
-The exported member functions keep their mangled names, so the .so symbol
-table is unchanged and previously-linked binaries still load. Every
-consumer source TU that wrote `typename Alloc::value_type` (or
-participates in STL-style generic code that does) fails to compile against
-v2 headers.
+(`value_type`, `pointer`, `reference`, `size_type`, `difference_type`) —
+mirroring the historical `std::allocator<T>` shape. The exported member
+functions keep their mangled names, so the `.so` symbol table is unchanged
+and previously-linked binaries still load and run. But every consumer
+source TU that wrote `typename my_allocator::value_type` (or participates
+in STL-style generic code that does) fails to **compile** against v2
+headers. `typedef_removed` is a generic detector that conservatively
+classifies every nested-typedef removal as `BREAKING` by default policy —
+the underlying compatibility fact here is `API_BREAK` (recompile-only
+failure, no impact on already-built binaries); see the `policy_note` in
+`ground_truth.json` for the full distinction from the L4 source-ABI-replay
+sibling case that classifies the identical pattern as `API_BREAK`.
 
-## Why this fires "noise cannon"-style
+## Old/new diff
 
-DWARF stores nested typedefs by their bare name (`value_type`), not
-qualified by the containing class. A diff therefore emits
-`TYPEDEF_REMOVED` once per removed alias name across the entire library.
-For a real allocator + container stack, removing the same five aliases
-from `allocator<T>`, `vector<T>::allocator_type`, and friends shows up as
-many findings — even though it's a single coherent design change.
+| v1.h | v2.h |
+|------|------|
+| `typedef int value_type; typedef int* pointer; typedef int& reference; typedef unsigned long size_type; typedef long difference_type;` | *(all five removed)* |
+| `int* allocate(size_type n);` | `int* allocate(unsigned long n);` *(same underlying type, spelled directly)* |
 
-## How abicheck catches it
-
-The existing `TYPEDEF_REMOVED` detector fires for each removed alias.
-That detection is correct on its own; the noise problem is **policy**.
-
-The new `member_name` suppression selector (added in this batch) lets
-maintainers control that noise with a single rule:
-
-```yaml
-version: 1
-suppressions:
-  - member_name: "(value_type|pointer|reference|size_type|difference_type)"
-    change_kind: typedef_removed
-    reason: "Modernization — STL nested-typedef set removed."
-    expires: 2026-12-01
-```
-
-`member_name` fullmatches the last `::`-segment of `change.symbol`.
-Combined with `change_kind: typedef_removed`, it scopes the rule tightly:
-non-typedef changes are not affected, and only the listed aliases are
-suppressed.
-
-Combine with `type_pattern` for even tighter scoping when the host class
-contributes the qualifier (e.g. when typedef symbols are emitted as
-`Allocator::value_type` rather than the bare alias).
-
-## Code diff
-
-| v1 | v2 |
-|----|------|
-| `typedef int value_type;` and four more nested aliases | (removed) |
-| `int* allocate(size_type n);` | `int* allocate(unsigned long n);` |
-
-## How to fix (as a library maintainer)
-
-- If consumers depend on STL-style allocator traits, keep the typedef
-  set even when modernizing the public API.
-- If you really want them gone, ship a deprecation cycle: in release
-  N–1, alias the old names to the new types with `[[deprecated]]`; in
-  release N, remove them.
-
-## Real failure demo
+## abicheck command
 
 ```bash
-# v1 header, v1 .so:
-g++ -std=c++17 -I. app.cpp -L. -lmylib -o app   # compiles and runs
+g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so \
+  --ast-frontend clang -H old=v1.h -H new=v2.h --lang c++
+```
 
-# v2 header, v2 .so: app.cpp's `my_allocator::value_type` is undefined.
-g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- typedef_removed: Typedef removed: size_type (unsigned long)
+  > Old code using the typedef name won't compile; binary impact
+    depends on usage.
+```
+
+(the header AST-level parameter-name diff on `allocate`/`deallocate` also
+surfaces as `func_params_changed` in the full report — the underlying
+integral type and mangled symbol are unchanged, only the header's spelled
+parameter type differs from the removed `size_type` alias.)
+
+## Minimum evidence
+
+`min_evidence: L1` per `ground_truth.json` — DWARF carries typedef DIEs in
+principle, but this environment's headerless DWARF-only extraction does not
+surface *class-member* typedefs (only namespace/global-scope ones), so the
+command above supplies header/AST evidence (`--ast-frontend clang`, since
+`castxml` is unavailable here) to reach the same fact a production
+`castxml` install would recover from headers directly.
+
+## Why abicheck catches it
+
+The header AST records each nested `typedef` declared inside
+`my_allocator`; abicheck's `typedef_removed` detector diffs the old and new
+declared-typedef sets by name and reports every alias present in v1 but
+absent from v2.
+
+## Runtime failure demonstration
+
+**Severity: none at runtime — this is a compile-time-only break.**
+
+No exported symbol changed, so an already-linked binary keeps working
+unmodified. The break is in *source*, not in the binary:
+
+```bash
+# v1 header + v1 library: compiles and runs.
+g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libmylib.so
+g++ -std=c++17 -I. app.cpp -L. -lmylib -Wl,-rpath,. -o app
+./app
+# → exit 0
+
+# Same consumer source, but against v2.h (nested typedef removed):
+g++ -std=c++17 -I. app.cpp -L. -lmylib -o app   # (app.cpp using v2.h)
 # → error: 'value_type' is not a member of 'mylib::my_allocator'
 ```
 
-## References
+**Why source-only:** `allocate`/`deallocate`'s mangled names are identical
+in both versions (the v2 parameter's underlying type matches v1's
+`size_type` exactly), so a binary already linked against v1 keeps loading
+and running against v2 — only a *fresh compile* against v2's headers, using
+the removed alias, fails.
 
-- [C++ allocator traits — historical nested types](https://en.cppreference.com/w/cpp/memory/allocator)
-- See `tests/test_suppression.py::test_member_name_*` for the selector's
-  test coverage.
+## Safe redesign
+
+If consumers depend on STL-style allocator traits, keep the typedef set
+even when modernizing the public API. If you really want them gone, ship a
+deprecation cycle: in release N-1, alias the old names to the new types
+with `[[deprecated]]`; in release N, remove them.
+
+**Real-world example:** the historical C++03/11 `std::allocator<T>` nested
+typedef set (`value_type`, `pointer`, `reference`, `size_type`,
+`difference_type`) is exactly this shape — code doing
+`typename Alloc::value_type` in generic/STL-style contexts depends on it
+resolving.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+Not independently re-verified in this environment (`abidiff` unavailable
+here). Since no exported symbol or binary layout changed, a pure ABI-XML
+diff tool has limited grounds to flag anything at all here — this is
+fundamentally a source-API contract change, which is exactly what
+`min_evidence: L1`/`L2`-aware tooling like abicheck is positioned to catch
+where a binary-only diff tool is not.

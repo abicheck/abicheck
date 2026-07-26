@@ -10,56 +10,67 @@
 | **Detected `ChangeKind`s** | `flexible_array_member_changed`, `func_return_changed` |
 | **Source files** | `examples/case70_flexible_array_member_changed/` |
 
-**Category:** Type Layout | **Verdict:** BREAKING
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-The element type of the flexible array member (FAM) `data[]` changes from
-`float` (4 bytes) to `double` (8 bytes). This causes multiple ABI breaks:
+The flexible array member (FAM) `Packet::data[]` changes element type from
+`float` (4 bytes) to `double` (8 bytes). `sizeof(Packet)` itself is
+unchanged — a FAM has no static size — so callers that allocated
+`sizeof(Packet) + count * sizeof(float)` now have half the space a
+`double[]` needs, and every `data[i]` access reads at the wrong byte
+offset. `packet_sum()`'s return type also changes from `float` to
+`double`. Any binary using `Packet` directly needs recompilation.
 
-1. **Allocation size:** Callers that allocated `sizeof(Packet) + count * sizeof(float)`
-   now have **half the space** needed for `double` elements
-2. **Element access:** `p->data[i]` reads 8 bytes per element instead of 4 — even
-   indices overlap, odd indices read into uninitialized memory
-3. **Return type:** `packet_sum()` changes from `float` to `double`, read from
-   different register width
+## Old/new diff
 
-This is fundamentally different from fixed-size struct changes (case07, case14)
-because the FAM has **zero static size** in `sizeof(Packet)` — the struct header
-size is unchanged. Tools that only compare `sizeof` miss this entirely. The break
-is in the dynamically-allocated tail portion.
+| v1.h | v2.h |
+|------|------|
+| `float data[];` | `double data[];` |
+| `float packet_sum(const struct Packet *p);` | `double packet_sum(const struct Packet *p);` |
 
-It's also different from case45 (multi-dim array change) because a FAM has no
-compile-time bound — the length is determined at runtime, making the allocation
-mismatch especially dangerous.
+## abicheck command
+
+```bash
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- struct_field_type_changed: Field type changed: Packet::data float[](0B) -> double[](0B)
+  > Field type changed in binary; old code misinterprets the field data.
+  Affected symbols: packet_create, packet_free, packet_sum
+- func_return_changed: Return type changed: packet_sum (float -> double)
+  > Callers expect the old return type layout in registers/stack;
+    misinterpretation causes data corruption.
+
+Quality:
+- flexible_array_member_changed: Flexible array member element type changed:
+  Packet::data (float[] -> double[])
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's array-type DIE for the trailing member records
+its element type for both versions; `sizeof(Packet)` stays identical since
+a FAM has zero static size, so only DWARF inspection of the tail element
+type (not the struct's overall size) reveals the break — `-g` is enough,
+no public headers required.
 
 ## Why abicheck catches it
 
-Header comparison detects that `Packet::data[]` changed element type from `float`
-to `double` (`flexible_array_member_changed`). The function `packet_sum` also
-changes return type (`func_return_changed`). Both are flagged as BREAKING.
+abicheck reads the FAM's DWARF element-type DIE directly (rather than
+relying on the struct's static size, which doesn't change for a FAM), and
+compares it between versions; it also compares `packet_sum`'s DWARF return
+type, since register width for the return value shifted from `float` to
+`double`.
 
-## Code diff
-
-```c
-// v1: float elements (4 bytes each)
-struct Packet {
-    unsigned int id;
-    unsigned int count;
-    float data[];
-};
-float packet_sum(const struct Packet *p);
-
-// v2: double elements (8 bytes each)
-struct Packet {
-    unsigned int id;
-    unsigned int count;
-    double data[];
-};
-double packet_sum(const struct Packet *p);
-```
-
-## Real Failure Demo
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
@@ -68,27 +79,30 @@ double packet_sum(const struct Packet *p);
 ```bash
 # Build v1 and app
 gcc -shared -fPIC -g v1.c -o libpacket.so
-gcc -g app.c -L. -lpacket -Wl,-rpath,. -o app
+gcc -g app.c -L. -lpacket -Wl,-rpath,. -o app -lm
 ./app
-# -> packet_sum = 10.0
-# -> Expected: 10.0
+# → packet_sum = 10.0
+# → Expected: 10.0
 
-# Swap in v2 (FAM element type changed)
+# Swap in v2 (FAM element type changed, no recompile)
 gcc -shared -fPIC -g v2.c -o libpacket.so
 ./app
-# -> packet_sum = <garbage> (buffer underallocation + type mismatch)
+# → packet_sum = 0.0
+# → Expected: 10.0
+# → WRONG RESULT: flexible-array element type changed
 ```
 
-**Why CRITICAL:** The old binary calls `packet_create(1, 4)` which now allocates
-space for 4 doubles (32 bytes of FAM) but the pointer arithmetic in the old
-binary still assumes 4-byte float elements. When `packet_sum()` reads `data[2]`
-and `data[3]`, it reads beyond the allocation boundary of what the caller
-expected, interpreting float bit patterns as doubles.
+**Why CRITICAL:** `packet_create(1, 4)` now allocates space for 4 `double`
+elements (32 bytes of FAM data), written as doubles by v2's `packet_create`.
+The app's own read path expects `float` elements and the old `packet_sum`
+return-type convention (an FP register width for `float`, not `double`);
+the mismatch produces a silently wrong sum instead of the expected 10.0,
+with no crash or warning.
 
-## How to fix
+## Safe redesign
 
-Use an opaque allocation API and accessor functions instead of exposing the FAM
-directly:
+Use an opaque allocation API and accessor functions instead of exposing the
+FAM directly:
 
 ```c
 /* Safe: opaque packet — element type is hidden */
@@ -97,24 +111,23 @@ Packet *packet_create(unsigned int id, unsigned int count);
 float packet_get(const Packet *p, unsigned int index);  /* accessor */
 ```
 
-If the FAM must be public, freeze the element type and add a new struct for the
-new type:
+If the FAM must stay public, freeze the element type and introduce a new
+struct for the new element type instead of changing the existing one.
 
-```c
-struct PacketF { unsigned int id, count; float data[]; };   /* keep */
-struct PacketD { unsigned int id, count; double data[]; };   /* new */
+**Real-world example:** flexible array members are common in network
+protocol implementations (packet buffers) and database engines
+(variable-length records) — the Linux kernel's `struct sk_buff` and
+PostgreSQL's varlena types use this pattern extensively, and changing a
+FAM's element type is a subtle break because `sizeof(T)` stays the same;
+only DWARF inspection of the trailing array's element type reveals it.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
 ```
-
-## Real-world example
-
-Flexible array members are common in network protocol implementations (packet
-buffers), database engines (variable-length records), and audio/video codecs
-(sample buffers). The Linux kernel's `struct sk_buff` and PostgreSQL's varlena
-types use this pattern extensively. Changing the element type of a FAM is a
-subtle break that has caused memory corruption bugs in these projects.
-
-libabigail specifically tracks FAM changes because `sizeof(T)` stays the same —
-only DWARF inspection of the trailing array element type reveals the break.
 
 ## References
 

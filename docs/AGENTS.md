@@ -32,8 +32,9 @@ values; `learn/evidence-and-detectability.md` owns the full mental model
 (including the `--depth` dial and the deprecated-axes appendix);
 `learn/what-each-level-sees.md` owns one worked example walking the same
 model level-by-level; `use/scan-levels.md` owns the practical `--depth`
-choice. `getting-started.md` and `start/choose-your-workflow.md` may
-each carry a short summary that links back — not a second explanation.
+choice. `getting-started.md`, `start/first-check.md`, and
+`start/choose-your-workflow.md` may each carry a short summary that links
+back — not a second explanation.
 
 `docs/_meta/topics.yaml` makes this split machine-checkable instead of a
 convention only documented in prose (see "Topic ownership registry" below).
@@ -47,8 +48,10 @@ than their directory would suggest; keep links pointing at the real file
 path, not the nav position.
 
 - `index.md` — home / landing page.
-- `start/` — first-contact onboarding: `getting-started.md` (navigated as
-  the first page of the User Guide) and the worked real-world example
+- `start/` — first-contact onboarding: `getting-started.md` is a short hub
+  (navigated as the first page of the User Guide) linking to `install.md`,
+  `first-check.md`, and `first-report.md` — one question each (install, run
+  a check, read the result) — plus the worked real-world example
   (`start/real-world-example.md`). New user, first five minutes.
 - `learn/` — the narrative/conceptual track: verdicts, the evidence model,
   architecture, and `abi-api-handling.md` (the consolidated ABI/API handling
@@ -64,10 +67,10 @@ path, not the nav position.
   verdict→exit-code chain); `reference/exit-codes.md` stays the exhaustive
   per-command authority.
 - `use/` — task-oriented how-to docs (GitHub Action, CLI flags, policy
-  files, suppression, output formats). Nav is grouped basics-first: Start
-  Here → Everyday Use → CI & Gating → Specialised Checks → Integrations &
-  Migration. `troubleshooting.md` lives here but is navigated under
-  **Development**.
+  files, suppression, output formats, `troubleshooting.md`). Nav is grouped
+  basics-first: Start Here → Everyday Use → CI & Gating → Specialised
+  Checks → Integrations & Migration; `troubleshooting.md` is navigated
+  under **Everyday Use**, alongside the other day-to-day pages.
 - `reference/` — exhaustive, looked-up-not-read-linearly material:
   - curated reference (change kinds, exit codes, platforms, tool comparison,
     ABICC format compliance) at the top level, navigated as its own
@@ -161,7 +164,14 @@ duplication, not a structural ownership conflict):
   manual (non-generated) pages — usually a sign one of them should be a
   summary-with-link instead of a second explanation;
 - a page other than a `terminology.yaml` term's registered `canonical_page`
-  appearing to define that term itself (see "Terminology registry" below).
+  appearing to define that term itself (see "Terminology registry" below);
+- a manual, non-generated page (outside `contribute/adr/`, `contribute/plans/`,
+  `contribute/archive/`, and pages with `lifecycle: migration`/`historical`
+  front matter — all inherently historical/planning records) containing an
+  in-progress status phrase such as "being updated in parallel", "currently
+  being implemented", "work in progress", or `TBD`/`TODO:` — this class of
+  claim is true only until the described work ships, then goes stale with
+  nothing else to catch it; a hit needs a human read, not an automatic fix.
 
 ## Terminology registry
 
@@ -209,17 +219,23 @@ generated: false
 | `level` | `beginner`, `intermediate`, `advanced`, or `expert`. |
 | `canonical_for` | Topic ids (from `topics.yaml`) this page is the narrative owner of. Usually empty or one entry. |
 | `summarizes` | Topic ids this page briefly references without owning — the page must link to that topic's `canonical_page` rather than re-explain it. |
-| `depends_on` | Repo-relative paths (code, CLI commands, config keys) whose change should prompt a look at this page. Informational today — a review-trigger check that diffs this against a PR's changed files is not yet wired into CI. |
+| `depends_on` | Repo-relative paths (code, CLI commands, config keys) whose change should prompt a look at this page. `scripts/check_docs_review_triggers.py` (CI: `docs-review-triggers.yml`) diffs this against a PR's changed files and posts an `::notice::` + step-summary table when they overlap — advisory only, it never fails the build (a path-prefix match is a heuristic, not proof the page is actually stale). |
 | `lifecycle` | `active`, `migration`, or `historical`. |
 | `generated` | `true` for machine-generated pages (don't hand-edit; `check_docs_contract.py` skips front-matter enforcement on these). |
 
 **Rollout status**: front matter is populated today only on the pages
 referenced by `docs/_meta/topics.yaml` (the pilot topic set above) — it is
-not yet required repo-wide. Extend both files together when you add a new
-topic to the registry; don't add front matter to an unrelated page as a
-drive-by, since an orphaned `canonical_for`/`summarizes` entry not backed by
-a `topics.yaml` topic is exactly the kind of unchecked claim this schema
-exists to prevent silently accumulating.
+not yet required repo-wide for *existing* pages, which may migrate
+incrementally. Extend both files together when you add a new topic to the
+registry; don't add front matter to an unrelated page as a drive-by, since
+an orphaned `canonical_for`/`summarizes` entry not backed by a
+`topics.yaml` topic is exactly the kind of unchecked claim this schema
+exists to prevent silently accumulating. Every **newly created** manual
+public page must carry front matter from the day it's added, though — at
+minimum `doc_type`/`level`/`lifecycle`, plus `canonical_for` if it's the
+new canonical owner of a topic you're registering in the same change; a
+brand-new page starting without it is exactly the debt this pilot is
+meant to stop accumulating, not something to defer to a later cleanup.
 
 ## When does a new fact need a new page?
 

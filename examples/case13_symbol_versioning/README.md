@@ -1,21 +1,27 @@
 # Case 13: Symbol Versioning Script
 
-**Category:** ELF/Linker  
-**Verdict:** 🟢 COMPATIBLE — `symbol_version_defined_added: LIBFOO_1.0`  
-**Direction tested:** unversioned (v1) → versioned (v2)
+**Category:** ELF/Linker | **Verdict:** ✅ COMPATIBLE
 
----
+## Verdict and consumer impact
 
-## What changes
+Nothing breaks: a binary already linked against unversioned `foo`/`bar` (old)
+keeps running unmodified when the library adds GNU symbol versioning (new).
+`ld.so` resolves the old, unversioned symbol references against the new
+`foo@@LIBFOO_1.0`/`bar@@LIBFOO_1.0` definitions transparently — no
+`DT_VERNEED` entry means the loader doesn't require a specific version, so it
+accepts the newest one. This is the safe direction to add symbol versioning
+to a previously-unversioned library.
 
-| Version | Build flags | Symbol in `.dynsym` |
-|---------|------------|---------------------|
-| v1 (old) | `gcc -shared -fPIC bad.c` (no version script) | `foo`, `bar` |
-| v2 (new) | `gcc -shared -fPIC good.c -Wl,--version-script=libfoo.map` | `foo@@LIBFOO_1.0`, `bar@@LIBFOO_1.0` |
+## Old/new diff
 
-`bad.c` and `good.c` are **identical source** — the only difference is the linker script.
+| old/lib.c | new/lib.c |
+|-----------|-----------|
+| `int foo(void) { return 0; }` | `int foo(void) { return 0; }` |
+| `int bar(void) { return 1; }` | `int bar(void) { return 1; }` |
 
-`libfoo.map`:
+Identical source. The only difference is new's link step adds a version
+script, `libfoo.map`:
+
 ```ld
 LIBFOO_1.0 {
   global: foo; bar;
@@ -23,124 +29,98 @@ LIBFOO_1.0 {
 };
 ```
 
----
-
-## What abicheck detects
-
-Running `abicheck dump` + `abicheck compare` on the compiled `.so` files:
-
-```
-verdict: COMPATIBLE
-changes:
-  - symbol_version_defined_added: LIBFOO_1.0
-```
-
-The ELF detector sees `LIBFOO_1.0` in v2's `.gnu.version_d` section but not in v1 → version definition *added*. This is a `compatible_addition`, not a break.
-
----
-
-## Real Failure Demo
-
-**Severity: COMPATIBLE / VERSIONING QUALITY**
-
-The old binary keeps running when the v2 library adds GNU symbol versions, but
-the real observable difference is in ELF metadata: v1 has no version section;
-v2 exports the public ABI under `LIBFOO_1.0`.
+## abicheck command
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case13_symbol_versioning_app case13_symbol_versioning_v2
-
-readelf --version-info /tmp/abicheck-examples-build/case13_symbol_versioning/libv1.so
-# No version information found in this file.
-
-readelf --version-info /tmp/abicheck-examples-build/case13_symbol_versioning/libv2.so | grep LIBFOO_1.0
-# 2 (LIBFOO_1.0) ... Name: LIBFOO_1.0
+gcc -shared -fPIC -g old/lib.c -o libfoo_v1.so
+gcc -shared -fPIC -g new/lib.c -o libfoo_v2.so -Wl,--version-script=libfoo.map
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Why it is COMPATIBLE (unversioned → versioned)
+## Expected abicheck finding
 
-When an existing binary was linked against unversioned `foo` (v1), its ELF `DT_NEEDED`
-has no version requirement (no `DT_VERNEED` entry for `LIBFOO_1.0`). Loading such a
-binary against versioned v2 works normally: `ld.so` resolves `foo` → `foo@@LIBFOO_1.0`
-without complaint.
+```text
+Verdict: COMPATIBLE (exit 0)
 
-**Runtime demo:**
+Quality Issues:
+- symbol_version_defined_added: Symbol version definition added: LIBFOO_1.0
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — version definitions live in the ELF `.gnu.version_d`
+section, readable straight from the binary alongside the dynamic symbol
+table. No debug info or headers needed.
+
+## Why abicheck catches it
+
+abicheck reads each library's `.gnu.version_d` section as part of its L0 ELF
+metadata pass (skipping the `VER_FLG_BASE` self-entry) and diffs the sets of
+version names between old and new. `LIBFOO_1.0` present only on the new side
+is classified `symbol_version_defined_added` and placed in the
+compatible/quality bucket, not the breaking one — going the other direction
+(a version definition *removed*, which breaks any consumer whose
+`DT_VERNEED` requires it) is a separate, breaking `ChangeKind`.
+
+## Runtime failure demonstration
+
+**Severity: INFORMATIONAL — no observable effect on existing binaries.**
+
+**Scenario:** compile `app` against old (unversioned), swap in new (versioned)
+`.so` without recompile.
 
 ```bash
-make clean && make
+# Build old library + app
+gcc -shared -fPIC -g old/lib.c -o libfoo.so
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → foo() = 0
+# → bar() = 1
 
-# app linked against v1 (unversioned)
-gcc -g app.c -L. -lv1 -Wl,-rpath,. -o app_v1
-./app_v1
-# foo() = 0
-# bar() = 1
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g new/lib.c -o libfoo.so -Wl,--version-script=libfoo.map
+./app
+# → foo() = 0   (same — no breakage)
+# → bar() = 1
 
-# Swap in v2 (versioned) — ld.so resolves transparently
-cp libv1.so libv1.so.bak
-cp libv2.so libv1.so
-./app_v1
-# foo() = 0       ← still works, no warnings
-# bar() = 1
-mv libv1.so.bak libv1.so
+nm -D libfoo.so | grep -E 'foo|bar'
+# → 0000000000001108 T bar@@LIBFOO_1.0
+# → 00000000000010f9 T foo@@LIBFOO_1.0
 ```
 
----
+**Why INFORMATIONAL:** `app` was linked against unversioned symbols, so its
+ELF has no `DT_VERNEED` entry requiring `LIBFOO_1.0`; the dynamic linker
+resolves `foo`/`bar` against the new library's default (`@@`) versioned
+definitions without complaint. The opposite direction — a library going from
+versioned to unversioned, dropping a version consumers already require —
+*is* breaking (`symbol_version_defined_removed`), because `dlvsym()` lookups
+pinned to that version would then fail.
 
-## The opposite direction IS breaking
+## Safe redesign
 
-If you go **versioned → unversioned** (v1 has `@@LIBFOO_1.0`, v2 drops the version
-script), binaries compiled against the versioned v1 embed a `DT_VERNEED` entry
-`LIBFOO_1.0`. Running against unversioned v2:
+No fix needed — adding a version script to a previously-unversioned library
+is the correct way to start managing symbol versions going forward. Keep
+existing symbols in the first version node (as done here) so already-built
+consumers keep resolving against them; only later API changes need a new
+`LIBFOO_2.0` node.
 
-- `ld.so` prints: `no version information available (required by ./app)`
-- Basic symbol lookup still works (soft match), but:
-  - `dlvsym(handle, "foo", "LIBFOO_1.0")` returns `NULL` — **hard failure**
-  - Any future `LIBFOO_2.0` block becomes impossible to add alongside v1 symbols
-  - abicheck reports: `symbol_version_defined_removed: LIBFOO_1.0` → **BREAKING**
+**Real-world example:** glibc and most core system libraries ship symbol
+versioning so multiple ABI generations of the same function (e.g.
+`realpath@GLIBC_2.2.5` vs. `realpath@GLIBC_2.3`) can coexist in one `.so`.
 
-That reverse scenario is a separate test case.
+## Cross-tool comparison
 
----
-
-## Why two test suites report different verdicts
-
-| Test suite | How it builds | v1 | v2 | Verdict |
-|-----------|--------------|----|----|---------|
-| `test_abi_examples.py` | Builds via CMake (applies `--version-script`) | `bad.c` (unversioned) | `good.c + libfoo.map` (versioned) | **COMPATIBLE** |
-| `test_example_autodiscovery.py` | Compiles source files directly without CMake linker flags | `bad.c` | `good.c` (no `--version-script`!) | **NO_CHANGE** (both lack version sections) |
-
-The autodiscovery test fallback compilation does not re-apply linker flags from
-CMakeLists.txt, so both `.so` files it compiles lack `.gnu.version_d` → no version
-change detected → `NO_CHANGE`.
-This is a known gap, listed in `KNOWN_GAPS` in `test_example_autodiscovery.py`.
-
----
-
-## ELF inspection
+`readelf --version-info` is the lower-level way to inspect the same fact:
 
 ```bash
-# v1: bare symbols
-nm -D libv1.so | grep -E 'foo|bar'
-# 0000000000001108 T bar
-# 00000000000010f9 T foo
+readelf --version-info libfoo_v1.so
+# → No version information found in this file.
 
-# v2: versioned symbols
-nm -D libv2.so | grep -E 'foo|bar|LIBFOO'
-# 0000000000000000 A LIBFOO_1.0      ← version-def aux symbol (SHN_ABS, filtered by abicheck)
-# 0000000000001108 T bar@@LIBFOO_1.0
-# 00000000000010f9 T foo@@LIBFOO_1.0
-
-# v2: version definition section
-readelf --version-info libv2.so
-# Version definition section '.gnu.version_d':
-#   000000: Rev: 1  Flags: BASE  Index: 1  Cnt: 1  Name: libv2.so   ← skipped (VER_FLG_BASE)
-#   0x001c:  Rev: 1  Flags: none  Index: 2  Cnt: 1  Name: LIBFOO_1.0 ← recorded as versions_defined
+readelf --version-info libfoo_v2.so
+# → Version definition section '.gnu.version_d' contains 2 entries:
+#     Index: 1  Cnt: 1  Name: libfoo_v2.so     ← skipped (VER_FLG_BASE)
+#     Index: 2  Cnt: 1  Name: LIBFOO_1.0       ← recorded as versions_defined
 ```
-
-abicheck filters out the `LIBFOO_1.0` **symbol** from `.dynsym` (it's an `SHN_ABS`
-entry with size=0), but correctly captures `LIBFOO_1.0` as a **version definition** from
-`.gnu.version_d` (skipping the `VER_FLG_BASE` entry for `libv2.so` itself).
 
 ## References
 

@@ -110,7 +110,7 @@ than done in this PR.
 ```yaml
 - name: Resolve accepted-main baseline for libpvxs
   id: baseline
-  uses: abicheck/abicheck/actions/resolve-baseline@v1
+  uses: abicheck/abicheck/actions/resolve-baseline@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
   with:
     baseline-path: ./restored-baseline # staged by an earlier actions/cache step
     channel: accepted-main
@@ -119,7 +119,7 @@ than done in this PR.
 
 - name: Compare against resolved baseline
   if: steps.baseline.outputs.outcome == 'resolved'
-  uses: abicheck/abicheck@v1
+  uses: abicheck/abicheck@v0.5.0
   with:
     old-library: ${{ steps.baseline.outputs.snapshot-path }}
     new-library: build/lib/libpvxs.so

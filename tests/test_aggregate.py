@@ -37,6 +37,7 @@ from abicheck.aggregate import (
     OnMissingRequired,
     OnUnexpectedTarget,
     aggregate_reports_dir,
+    parse_check_id,
     parse_report_verdict,
     target_id_from_path,
 )
@@ -629,7 +630,7 @@ class TestRendering:
     def test_json_schema_shape(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         d = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS)).to_dict()
-        assert d["aggregate_schema_version"] == "1.0"
+        assert d["aggregate_schema_version"] == "1.1"
         assert d["status"] == "fail"
         assert d["gate"]["exit_code"] == 1
         assert d["gate"]["coverage_blocking"] is True
@@ -718,6 +719,268 @@ class TestRendering:
             on_unexpected_target=OnUnexpectedTarget.FAIL,
         ).render_text()
         assert f"unexpected target(s) present: {MACOS}" in text
+
+
+class TestProfileMatrix:
+    """Status-review item 5: affected_profiles / profile-level dedup —
+    ``check_id``-shaped ``target_id``s (ADR-047 §7:
+    ``target@profile#baseline_channel@requested_depth``) group back to one
+    logical target across profiles instead of showing unrelated-looking
+    target rows."""
+
+    def test_parse_check_id_roundtrips(self) -> None:
+        parsed = parse_check_id("libfoo@linux-gcc14#release@headers")
+        assert parsed is not None
+        assert parsed.target == "libfoo"
+        assert parsed.profile == "linux-gcc14"
+        assert parsed.baseline_channel == "release"
+        assert parsed.requested_depth == "headers"
+
+    def test_parse_check_id_rejects_non_check_id_shaped(self) -> None:
+        assert parse_check_id("linux-x86_64") is None
+        assert parse_check_id("abi-report-linux-x86_64") is None
+
+    def test_target_report_profile_id_and_base_target(self, tmp_path: Path) -> None:
+        _write_report(tmp_path, "libfoo@linux-gcc14#release@headers", "BREAKING")
+        r = aggregate_reports_dir(
+            tmp_path, expected=_expect("libfoo@linux-gcc14#release@headers")
+        )
+        (t,) = r.targets
+        assert t.profile_id == "linux-gcc14"
+        assert t.base_target == "libfoo"
+
+    def test_bare_target_id_has_no_profile(self, tmp_path: Path) -> None:
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        (t,) = r.targets
+        assert t.profile_id is None
+        assert t.base_target == LINUX
+        assert r.profile_matrix == ()
+
+    def test_profile_matrix_groups_by_base_target(self, tmp_path: Path) -> None:
+        gcc = "libfoo@linux-gcc14#release@headers"
+        clang = "libfoo@linux-clang20#release@headers"
+        msvc = "libfoo@windows-msvc#release@headers"
+        _write_report(tmp_path, gcc, "BREAKING")
+        _write_report(tmp_path, clang, "BREAKING")
+        _write_report(tmp_path, msvc, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(gcc, clang, msvc))
+        (entry,) = r.profile_matrix
+        assert entry.base_target == "libfoo"
+        assert entry.profiles == ("linux-clang20", "linux-gcc14", "windows-msvc")
+        assert entry.affected_profiles == ("linux-clang20", "linux-gcc14")
+        assert entry.verdict_by_profile == {
+            "linux-gcc14": "BREAKING",
+            "linux-clang20": "BREAKING",
+            "windows-msvc": "COMPATIBLE",
+        }
+
+    def test_profile_matrix_marks_unavailable_profile_not_affected(
+        self, tmp_path: Path
+    ) -> None:
+        gcc = "libfoo@linux-gcc14#release@headers"
+        msvc = "libfoo@windows-msvc#release@headers"
+        _write_report(tmp_path, gcc, "BREAKING")
+        # msvc never reports — unavailable, not "affected".
+        r = aggregate_reports_dir(tmp_path, expected=_expect(gcc, msvc))
+        (entry,) = r.profile_matrix
+        assert entry.affected_profiles == ("linux-gcc14",)
+        assert entry.verdict_by_profile["windows-msvc"] is None
+
+    def test_profile_matrix_json_and_text(self, tmp_path: Path) -> None:
+        gcc = "libfoo@linux-gcc14#release@headers"
+        clang = "libfoo@linux-clang20#release@headers"
+        _write_report(tmp_path, gcc, "BREAKING")
+        _write_report(tmp_path, clang, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(gcc, clang))
+        d = r.to_dict()
+        assert d["profile_matrix"] == [
+            {
+                "base_target": "libfoo",
+                "profiles": ["linux-clang20", "linux-gcc14"],
+                "affected_profiles": ["linux-gcc14"],
+                "incomplete_profiles": [],
+                "unanalyzed_profiles": [],
+                "verdict_by_profile": {
+                    "linux-clang20": "COMPATIBLE",
+                    "linux-gcc14": "BREAKING",
+                },
+            }
+        ]
+        text = r.render_text()
+        assert "Profile matrix:" in text
+        assert "libfoo: affected on linux-gcc14" in text
+
+    def test_profile_matrix_all_clean_renders_distinctly(self, tmp_path: Path) -> None:
+        gcc = "libfoo@linux-gcc14#release@headers"
+        clang = "libfoo@linux-clang20#release@headers"
+        _write_report(tmp_path, gcc, "COMPATIBLE")
+        _write_report(tmp_path, clang, "COMPATIBLE")
+        text = aggregate_reports_dir(
+            tmp_path, expected=_expect(gcc, clang)
+        ).render_text()
+        assert "libfoo: clean on all checked profiles" in text
+
+    def test_profile_matrix_combines_multiple_checks_per_profile_worst_wins(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: the same (base_target, profile) pair can have more
+        than one check differing only by baseline_channel/requested_depth —
+        e.g. one profile checked at both `headers` and `build` depth. A
+        later, cleaner check must not silently overwrite an earlier,
+        breaking one for that same profile."""
+        headers_check = "libfoo@linux-gcc14#release@headers"
+        build_check = "libfoo@linux-gcc14#release@build"
+        other_profile = "libfoo@windows-msvc#release@headers"
+        _write_report(tmp_path, headers_check, "BREAKING")
+        _write_report(tmp_path, build_check, "COMPATIBLE")  # would overwrite naively
+        _write_report(tmp_path, other_profile, "COMPATIBLE")
+        r = aggregate_reports_dir(
+            tmp_path, expected=_expect(headers_check, build_check, other_profile)
+        )
+        (entry,) = r.profile_matrix
+        assert entry.profiles == ("linux-gcc14", "windows-msvc")
+        # linux-gcc14 must still be affected -- one of its two checks broke.
+        assert entry.affected_profiles == ("linux-gcc14",)
+        assert entry.verdict_by_profile["linux-gcc14"] == "BREAKING"
+        assert entry.verdict_by_profile["windows-msvc"] == "COMPATIBLE"
+
+    def test_profile_matrix_surfaces_incomplete_coverage_not_silently_clean(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: one profile has a completed, compatible headers
+        check plus a missing required build-depth check for the same
+        target. The missing check must not be silently dropped -- the
+        profile is incomplete, not flatly "clean"."""
+        headers_check = "libfoo@linux-gcc14#release@headers"
+        build_check = "libfoo@linux-gcc14#release@build"  # never reports
+        _write_report(tmp_path, headers_check, "COMPATIBLE")
+        r = aggregate_reports_dir(
+            tmp_path, expected=_expect(headers_check, build_check)
+        )
+        (entry,) = r.profile_matrix
+        assert entry.profiles == ("linux-gcc14",)
+        assert entry.affected_profiles == ()  # the one completed check was clean
+        assert entry.incomplete_profiles == ("linux-gcc14",)  # but coverage isn't
+        assert entry.verdict_by_profile["linux-gcc14"] == "COMPATIBLE"
+        text = r.render_text()
+        assert "libfoo: clean on all checked profiles" in text
+        assert "[incomplete coverage on linux-gcc14]" in text
+
+    def test_profile_matrix_incomplete_profile_can_still_be_affected(
+        self, tmp_path: Path
+    ) -> None:
+        headers_check = "libfoo@linux-gcc14#release@headers"
+        build_check = "libfoo@linux-gcc14#release@build"  # never reports
+        _write_report(tmp_path, headers_check, "BREAKING")
+        r = aggregate_reports_dir(
+            tmp_path, expected=_expect(headers_check, build_check)
+        )
+        (entry,) = r.profile_matrix
+        assert entry.affected_profiles == ("linux-gcc14",)
+        assert entry.incomplete_profiles == ("linux-gcc14",)
+
+    def test_profile_matrix_excludes_optional_gap_from_incomplete(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: an unavailable *optional* check must not mark its
+        profile incomplete -- that would contradict
+        AggregateResult.coverage, which also only gates on required
+        targets, so a required-complete/optional-missing profile would
+        otherwise read as both "coverage complete" and "incomplete"."""
+        headers_check = "libfoo@linux-gcc14#release@headers"
+        build_check = "libfoo@linux-gcc14#release@build"  # optional, never reports
+        _write_report(tmp_path, headers_check, "COMPATIBLE")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(headers_check, optional=(build_check,)),
+        )
+        (entry,) = r.profile_matrix
+        assert entry.incomplete_profiles == ()
+        assert r.coverage is CoverageStatus.COMPLETE
+
+    def test_profile_matrix_marks_policy_blocking_compatible_profile_as_affected(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: verdict COMPATIBLE with a policy-blocking gate
+        (e.g. an addition: error policy) must not read as "clean" in the
+        profile matrix -- the aggregate gate itself fails on it."""
+        check = "libfoo@linux-gcc14#release@headers"
+        _write_report(
+            tmp_path,
+            check,
+            "COMPATIBLE",
+            severity={
+                "exit_code": 1,
+                "blocking": True,
+                "blocking_categories": ["addition"],
+            },
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(check))
+        (entry,) = r.profile_matrix
+        assert entry.affected_profiles == ("linux-gcc14",)
+        assert entry.verdict_by_profile["linux-gcc14"] == "COMPATIBLE"
+
+    def test_profile_matrix_never_calls_an_unanalyzed_optional_profile_clean(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: a profile with only unavailable *optional* checks
+        has verdict_by_profile[pid] is None, and both affected_profiles and
+        incomplete_profiles empty -- it must not be rendered/reported as
+        "clean", since it was never actually analyzed."""
+        analyzed = "libfoo@linux-gcc14#release@headers"
+        never_reports = "libfoo@windows-msvc#release@headers"  # optional
+        _write_report(tmp_path, analyzed, "COMPATIBLE")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(analyzed, optional=(never_reports,)),
+        )
+        (entry,) = r.profile_matrix
+        assert entry.unanalyzed_profiles == ("windows-msvc",)
+        assert entry.affected_profiles == ()
+        assert entry.incomplete_profiles == ()  # optional gap, not a coverage failure
+        assert entry.verdict_by_profile["windows-msvc"] is None
+        text = r.render_text()
+        assert "clean on linux-gcc14" in text
+        assert "no analyzed result on windows-msvc" in text
+        assert "clean on all checked profiles" not in text
+
+    def test_profile_matrix_all_unanalyzed_never_says_clean(
+        self, tmp_path: Path
+    ) -> None:
+        """Every profile for this target is unanalyzed (all optional,
+        none ever reported) -- the whole entry must say so, not "clean"."""
+        never_reports = "libfoo@windows-msvc#release@headers"
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(optional=(never_reports,)),
+        )
+        (entry,) = r.profile_matrix
+        assert entry.unanalyzed_profiles == ("windows-msvc",)
+        text = r.render_text()
+        assert "no analyzed result on any checked profile" in text
+        assert "clean" not in text.split("Profile matrix:")[1].split("Coverage:")[0]
+
+    def test_profile_matrix_affected_entry_still_surfaces_unanalyzed_sibling(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: one profile is BREAKING (affected) while a sibling
+        optional profile never reported at all (unanalyzed). The affected
+        branch must still surface the unanalyzed one instead of implying
+        "checked on" both profiles produced a result."""
+        broken = "libfoo@linux-gcc14#release@headers"
+        never_reports = "libfoo@windows-msvc#release@headers"  # optional
+        _write_report(tmp_path, broken, "BREAKING")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(broken, optional=(never_reports,)),
+        )
+        (entry,) = r.profile_matrix
+        assert entry.affected_profiles == ("linux-gcc14",)
+        assert entry.unanalyzed_profiles == ("windows-msvc",)
+        text = r.render_text()
+        assert "libfoo: affected on linux-gcc14" in text
+        assert "no analyzed result on windows-msvc" in text
 
 
 class TestAggregateCLI:

@@ -1,3 +1,15 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+canonical_for:
+  - project-integration
+lifecycle: active
+generated: false
+---
+
 # Integration Concepts
 
 This page is the glossary behind [Project Integration](index.md) and

@@ -10,76 +10,92 @@
 | **Detected `ChangeKind`s** | `kabi_crc_changed` |
 | **Source files** | `examples/case175_kabi_crc_changed/` |
 
-**Category:** Linux Kernel Module ABI | **Verdict:** BREAKING
+**Category:** Linux Kernel Module ABI (kABI) | **Verdict:** 🔴 BREAKING
 
-## What this case is about
+## Verdict and consumer impact
 
-```text
-v1.symvers:
-0x8f3a2c11	ext4_iget	fs/ext4/ext4	EXPORT_SYMBOL_GPL	EXT4
-
-v2.symvers:
-0xd41d8cd9	ext4_iget	fs/ext4/ext4	EXPORT_SYMBOL_GPL	EXT4
-```
-
-Two checked-in `Module.symvers` manifests — the Linux kernel's canonical
-kABI record, one line per `EXPORT_SYMBOL*` symbol: `<CRC>\t<Symbol>\t<Module>\t<Export
-Type>\t<Namespace>`. **The symbol name, module, export type, and namespace
-are all identical.** Only the CRC changed.
-
-The CRC is not a version number a maintainer sets — it is a hash of the
-symbol's *type signature*, computed by `genksyms` at build time from the
-function's return type, parameter types, and (transitively) every type they
-reference. A CRC change means **the type behind the symbol changed** —
-typically a struct gained/lost/reordered a field, even one nobody thinks of
-as part of `ext4_iget`'s "interface." The symbol name never had to change at
-all.
-
-## Why this case matters: the symbol still exists, but the module won't load
-
-Ordinary symbol-diffing tools look for symbols that appear or disappear.
-`ext4_iget` exists on both sides — a naive diff sees **no change**. But when
-`CONFIG_MODVERSIONS` is enabled (the default on distro kernels), every
-out-of-tree module embeds the CRC of each symbol it imports at build time.
+`ext4_iget` keeps its symbol name, module, export type, and namespace —
+every field a naive symbol-presence diff would look at is identical
+between v1 and v2. Only its CRC changed. The CRC is not a version number a
+maintainer sets; it is a hash `genksyms` computes at build time from the
+symbol's *type signature* — its return type, parameter types, and
+(transitively) every type they reference. A CRC change means a type behind
+`ext4_iget` changed, even though the function itself may look untouched.
+With `CONFIG_MODVERSIONS` enabled (the default on distro kernels), every
+out-of-tree module embeds the CRC of each symbol it imports at build time;
 `insmod`/`modprobe` reject a module whose embedded CRC disagrees with the
 running kernel's, with `disagrees about version of symbol ext4_iget` — a
-hard load failure with an unhelpful message, for a symbol that is
-unambiguously still exported.
+hard load failure for a symbol that unambiguously still exists.
 
-## What abicheck detects
+## Old/new diff
 
-- **`kabi_crc_changed`** — the CRC for `ext4_iget` changed while the symbol,
-  module, export type, and namespace stayed the same. **Evidence tier L0** —
-  read directly from the two `Module.symvers` manifests; no kernel build, no
-  compiler.
+| v1.symvers | v2.symvers |
+|------------|------------|
+| `0x8f3a2c11  ext4_iget  fs/ext4/ext4  EXPORT_SYMBOL_GPL  EXT4` | `0xd41d8cd9  ext4_iget  fs/ext4/ext4  EXPORT_SYMBOL_GPL  EXT4` |
 
-**Overall verdict: BREAKING**
+(both files also carry an unrelated, unchanged `ext4_mark_iloc_dirty` line —
+abicheck correctly leaves it out of the finding.)
 
-## How to reproduce
-
-No compiler or kernel build required — `Module.symvers` is recognized
-directly by abicheck (by filename or, for a generically-named file, by
-content):
+## abicheck command
 
 ```bash
-python3 -m abicheck.cli compare v1.symvers v2.symvers
-# → BREAKING: kabi_crc_changed (ext4_iget: 0x8f3a2c11 -> 0xd41d8cd9)
+abicheck compare v1.symvers v2.symvers
 ```
 
-In a real kernel tree, generate `Module.symvers` for two revisions with
-`make modules` (or `make M=<dir> modules` for an out-of-tree module) and
-compare the two files the same way.
+## Expected abicheck finding
 
-## Mitigation
+```text
+Verdict: BREAKING (exit 4)
 
-- Treat any change to a struct/typedef reachable from an `EXPORT_SYMBOL*`
-  function's signature as a kABI break, even when the function itself is
-  untouched — the CRC is transitive.
-- For distros that guarantee kABI stability across a kernel ABI series
-  (RHEL-style "kABI whitelists"), gate merges on `Module.symvers` diffing,
-  not just `nm`/`objdump` symbol presence.
-- If a field genuinely must change, add a *new* exported accessor rather
-  than changing the layout an existing one depends on.
+- kabi_crc_changed: Kernel symbol CRC changed: ext4_iget (0x8f3a2c11 -> 0xd41d8cd9)
+  -- modversions will reject the module
+  > A kernel-exported symbol's genksyms CRC changed. Even though the symbol
+    still exists, CONFIG_MODVERSIONS embeds the old CRC in out-of-tree
+    modules and the loader rejects the module ('disagrees about version of
+    symbol') -- the type signature behind the symbol changed.
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the two `Module.symvers` manifests are read directly
+(one `<CRC>\t<Symbol>\t<Module>\t<Export Type>\t<Namespace>` line per
+exported symbol); no kernel build and no compiler are needed.
+
+## Why abicheck catches it
+
+abicheck parses each `Module.symvers` line into its five columns and diffs
+by symbol name across the two manifests. A CRC delta with every other
+column identical is exactly `kabi_crc_changed` — the tool never needs to
+know *which* type changed, only that the hash summarizing "everything
+`ext4_iget`'s signature transitively touches" no longer matches.
+
+## Real-world deployment scenario
+
+This is what a CI job diffing two kernel build trees' `Module.symvers`
+across a kernel update sees — e.g. a distro's kABI-stability gate (RHEL-style
+kABI whitelists) checked before publishing a kernel update, or an
+out-of-tree driver vendor verifying their module still loads against an
+upcoming kernel release before shipping it. A plain `nm`/symbol-presence
+diff of the running kernel would report no change at all; only reading the
+CRC column catches the break before a customer's `insmod` fails in the
+field.
+
+## Safe redesign
+
+Treat any change to a struct or typedef reachable from an
+`EXPORT_SYMBOL*` function's signature as a kABI break, even when the
+function itself is untouched — the CRC is transitive. If a field genuinely
+must change, add a *new* exported accessor rather than changing the layout
+an existing one depends on, and gate merges on `Module.symvers` diffing (not
+just symbol-presence checks) for any kernel ABI series with a stability
+guarantee.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` diff DWARF-carrying compiled binaries
+(`.so`/kernel modules with debug info); neither reads `Module.symvers`
+directly, so there is no equivalent invocation of either tool for this
+fixture pair.
 
 ## References
 
