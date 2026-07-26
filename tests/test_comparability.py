@@ -24,6 +24,7 @@ from abicheck.comparability import (
     ComparabilityMismatch,
     IncludeDir,
     _header_sequence_is_additive_reorder_free,
+    _scope_field_is_additive_superset,
     check_contracts_comparable,
     compute_extraction_contract,
 )
@@ -1340,6 +1341,52 @@ def test_gate_header_sequence_carve_out_makes_f8_scenario_fully_comparable(tmp_p
         "header_sequence"
     ]
     assert check_contracts_comparable(old, new) is None  # must not raise either error
+
+
+def test_gate_additive_header_set_carve_out_ignores_unchanged_single_dir_sentinel(
+    tmp_path,
+):
+    # Codex review (PR #641 follow-up, third round): the real F8 CLI shape
+    # is `-H old=<dir> -H new=<dir>` -- a single public_header_dir per side
+    # -- so BOTH sides collapse to the identical "<single-header-dir>"
+    # sentinel even though old/new point at different physical directories.
+    # The scope carve-out's `all(...)` checks every SCOPE_FIELD_KEYS field,
+    # not just the ones that actually differ (unlike the profile side,
+    # which pre-filters to a `differing` set) -- so this unchanged,
+    # sentinel-shaped field was wrongly declining the whole carve-out before
+    # it ever reached the genuinely differing "headers" field. Direct repro
+    # confirmed this raised ScopeMismatchError before the fix.
+    old_dir = tmp_path / "old" / "include"
+    new_dir = tmp_path / "new" / "include"
+    a1 = _write(old_dir / "a.h", "int f(void);\n")
+    b1 = _write(old_dir / "b.h", "int g(void);\n")
+    a2 = _write(new_dir / "a.h", "int f(void);\n")
+    b2 = _write(new_dir / "b.h", "int g(void);\n")
+    c2 = _write(new_dir / "c.h", "int h(void);\n")
+    old = _snap(
+        compute_extraction_contract(
+            declared_headers=[a1, b1], public_header_dirs=[old_dir], l2_frontend_ran=True
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            declared_headers=[a2, b2, c2],
+            public_header_dirs=[new_dir],
+            l2_frontend_ran=True,
+        )
+    )
+    assert (
+        old.contract.scope_fields["public_header_dirs"]
+        == new.contract.scope_fields["public_header_dirs"]
+    )
+    assert check_contracts_comparable(old, new) is None  # must not raise either error
+
+
+def test_scope_field_additive_superset_true_for_unchanged_single_entry_sentinel():
+    # The pure-function-level pin for the same fix: an unchanged sentinel
+    # value must be treated as trivially satisfied, not declined.
+    sentinel = json.dumps(["<single-header-dir>"])
+    assert _scope_field_is_additive_superset(sentinel, sentinel)
 
 
 def test_gate_header_sequence_carve_out_still_raises_when_existing_headers_reordered(

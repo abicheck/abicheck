@@ -496,8 +496,47 @@ growth — declined, pure removal — declined, single-header-sentinel on
 either side — declined, `None` inputs — declined) and one gate-level
 end-to-end test reproducing the full real scenario (both fingerprints
 differ, `check_contracts_comparable` returns `None`). Full fast unit suite
-green, mypy/ruff clean, 97% branch coverage on `comparability.py` — this is
-the final state of both fixes as of this branch.
+green, mypy/ruff clean, 97% branch coverage on `comparability.py`.
+
+**A twelfth review pass** (`chatgpt-codex-connector`) found one more gap in
+the F8 carve-out itself, plus one unrelated pinning gap this section's
+own newly-added warning had just introduced:
+
+- **The scope carve-out's `all(...)` checks every `SCOPE_FIELD_KEYS`
+  field, not only the ones that actually differ — unlike the profile side,
+  which pre-filters to a `differing` set before ever calling a carve-out.**
+  The real F8 CLI shape is `-H old=<dir> -H new=<dir>` — a *single*
+  `public_header_dir` per side — so `public_header_dirs` collapses to the
+  identical `"<single-header-dir>"` sentinel on *both* sides even though
+  old and new point at different physical directories. Confirmed by direct
+  repro before any fix: exactly this shape (`declared_headers=[a,b]` →
+  `[a,b,c]`, `public_header_dirs=[old_dir]` → `[new_dir]`, otherwise
+  matching the real invocation) still raised `ScopeMismatchError`, because
+  `_scope_field_is_additive_superset` declined on the sentinel
+  *unconditionally*, before ever checking whether the two sides were
+  actually equal — wrongly hard-failing on a field that never changed at
+  all, before the carve-out could reach the genuinely differing `headers`
+  field. Fixed: the helper now returns `True` immediately when
+  `old_value == new_value`, regardless of shape. Re-verified the real
+  directory-based F8 repro end-to-end afterward: `check_contracts_comparable`
+  now returns `None`.
+- This section's own SARIF/Code-Scanning `docs/use/output-formats.md`
+  example had just gained an explicit `security-events: write` permission
+  and a "pin every `uses:` here" warning in an earlier round, but its
+  pre-existing `conda-incubator/setup-miniconda@v3` step was left on a
+  mutable tag — now running in the same elevated job the warning describes,
+  contradicting it. Resolved the real commit `v3`/`v3.3.0` resolves to
+  (`fc2d68f6413eb2d87b895e92f8584b5b94a10167`, confirmed via
+  `git ls-remote --tags`, a lightweight, non-annotated tag so the resolved
+  SHA is the commit itself) and pinned it the same way as the other two
+  actions in that job.
+
+New regression tests: `test_gate_additive_header_set_carve_out_ignores_unchanged_single_dir_sentinel`
+(the exact real directory-based F8 shape, proven to fail without the fix)
+and `test_scope_field_additive_superset_true_for_unchanged_single_entry_sentinel`
+(the pure-function-level pin). Full fast unit suite green, mypy/ruff clean
+— this is the final state of all three fixes (scope, header-sequence,
+unchanged-field handling) as of this branch.
 
 ```yaml
 # .github/workflows/abi.yml (for epics-base/pvxs)

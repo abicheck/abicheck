@@ -897,17 +897,32 @@ def _scope_field_is_additive_superset(
     fingerprint exists to catch, yet both symptoms fingerprint identically:
     a differing declared-file set).
 
-    Declines (returns False) whenever either side is ``None`` or collapsed
-    to a single-entry sentinel (:data:`_SCOPE_SINGLE_ENTRY_SENTINELS`) --
-    with no real per-file/per-dir identity to compare, "new looks like it
-    might be bigger" can't be told apart from "the one entry was
-    simultaneously renamed AND something else added", so there is nothing
-    here to safely verify a true superset against; the existing hard-fail
-    is the correct, conservative answer for that case, same as it always
-    was.
+    An unchanged field (``old_value == new_value``) is always ``True``, even
+    when both sides are the single-entry sentinel (Codex review, PR #641
+    follow-up): the caller checks *every* :data:`SCOPE_FIELD_KEYS` field,
+    not only the ones that actually differ (unlike the profile-fingerprint
+    carve-outs, which pre-filter to a ``differing`` set) -- the real F8
+    scenario declares headers via a single ``-H old=<dir> -H new=<dir>``
+    each side, so ``public_header_dirs`` collapses to the identical
+    ``"<single-header-dir>"`` sentinel on *both* sides even though old and
+    new point at different physical directories. Declining on the sentinel
+    unconditionally, before checking for equality, wrongly hard-failed a
+    field that never actually changed at all, before this carve-out could
+    ever reach a genuinely differing field like ``headers``.
+
+    Otherwise declines (returns False) whenever either side is ``None`` or
+    collapsed to a single-entry sentinel (:data:`_SCOPE_SINGLE_ENTRY_SENTINELS`)
+    with a genuinely *different* value on the other side -- with no real
+    per-file/per-dir identity to compare, "new looks like it might be
+    bigger" can't be told apart from "the one entry was simultaneously
+    renamed AND something else added", so there is nothing here to safely
+    verify a true superset against; the existing hard-fail is the correct,
+    conservative answer for that case, same as it always was.
     """
     if old_value is None or new_value is None:
         return False
+    if old_value == new_value:
+        return True
     old_list = json.loads(old_value)
     new_list = json.loads(new_value)
     if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
