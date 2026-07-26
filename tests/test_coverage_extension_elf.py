@@ -455,6 +455,18 @@ class TestObjectAlignmentReduced:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
 
+    # Codex review, PR #641: the exemption above must NOT cover a local-name
+    # symbol whose enclosing function belongs to the library under test, not
+    # the C++ runtime -- a PUBLIC inline/template function's function-local
+    # `static` is exactly what STB_GNU_UNIQUE/weak-symbol cross-TU dedup
+    # exists for, so consumers genuinely can rely on its declared alignment.
+    def test_library_owned_local_name_symbol_still_fires(self):
+        sym = "_ZZN4pvxs6client8Config1_5cacheEvE5cache"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
     def test_real_mangled_data_object_still_fires(self):
         # The exemption is by RTTI prefix, not "looks mangled": a genuine
         # namespace-scoped global variable (_ZN…E, not _ZT*) is real data whose

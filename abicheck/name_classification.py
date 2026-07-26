@@ -58,6 +58,7 @@ __all__ = [
     "is_rtti_symbol",
     "is_local_rtti_symbol",
     "is_local_name_symbol",
+    "is_stdlib_local_name_symbol",
     "has_internal_namespace_component",
     "symbol_origin",
     "COMPILER_INTERNAL_TYPES",
@@ -103,14 +104,33 @@ LOCAL_RTTI_PREFIXES: tuple[str, ...] = ("_ZTIZ", "_ZTSZ", "_ZTVZ", "_ZTTZ")
 # local ``static`` object mangles as ``_ZZ4mainE1x``. Unlike LOCAL_RTTI_PREFIXES
 # (four specific ``_ZT[IVST]Z`` combinations), a bare local variable/entity has
 # no preceding special-name marker, so the production appears immediately
-# after the leading ``_Z``. Such an entity is never named by any header
-# declaration (only the enclosing function's own signature is), so its
-# address-derived layout facts (alignment; see
-# diff_platform_elf_symbols._check_object_alignment_reduced) are
-# build-dependent linker-placement noise, not a declared ABI fact — observed
-# live on a real pvxs binary: a libstdc++ ``<regex>`` template instantiation's
-# local static table (``_ZZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEE...E12__classnames``).
+# after the leading ``_Z``.
+#
+# NOT, by itself, a "never ABI-relevant" marker (Codex review, PR #641): a
+# PUBLIC inline/template function's function-local ``static`` is exactly what
+# the Itanium ``STB_GNU_UNIQUE``/weak-symbol mechanism exists to
+# cross-TU-deduplicate, so consumers genuinely can bind against it and rely on
+# its declared alignment -- a real regression there is a real hazard, not
+# noise. Only the runtime/standard-library-OWNED subset (see
+# :func:`is_stdlib_local_name_symbol`) is safe to treat as address-placement
+# noise; a local static declared in the library-under-test's own public
+# header is not covered by this constant alone.
 LOCAL_NAME_PREFIX = "_ZZ"
+
+# A LOCAL_NAME_PREFIX symbol whose *enclosing function* belongs to the C++
+# runtime/standard library (std::, __gnu_cxx::, __cxxabiv1::) rather than the
+# library under test -- the qualifier letters ``r``/``V``/``K`` (restrict/
+# volatile/const) and ref-qualifier ``R``/``O`` a const/ref-qualified member
+# function's <encoding> may carry appear between the ``_ZZN`` nested-name
+# opener and the namespace component itself (e.g. ``_ZZNKSt7__cxx11...`` for
+# a const std::__cxx11:: member function), hence the ``[KVRO]{0,3}`` gap
+# rather than a plain fixed-prefix match. Deliberately narrower than
+# :func:`is_local_name_symbol`: a library's OWN public inline function's local
+# static (e.g. ``_ZZN4somelib...``) must NOT match here, since its alignment
+# genuinely matters to consumers (see LOCAL_NAME_PREFIX's docstring above).
+_STDLIB_LOCAL_NAME_RE = re.compile(
+    r"^_ZZN?[KVRO]{0,3}(?:St|3std|9__gnu_cxx|10__cxxabiv1?|7__cxx11)"
+)
 
 # Length-prefixed Itanium namespace components (``<len><name>``) for the
 # conventional internal namespaces. Matching the length prefix avoids false
@@ -171,6 +191,14 @@ def is_local_name_symbol(name: str) -> bool:
     entity (typically a variable) declared inside a function body, never
     nameable by any header declaration. See :data:`LOCAL_NAME_PREFIX`."""
     return name.startswith(LOCAL_NAME_PREFIX)
+
+
+def is_stdlib_local_name_symbol(name: str) -> bool:
+    """Return True if *name* is a local-name-production symbol (see
+    :func:`is_local_name_symbol`) whose enclosing function is owned by the
+    C++ runtime/standard library, not the library under test. See
+    :data:`_STDLIB_LOCAL_NAME_RE`."""
+    return bool(_STDLIB_LOCAL_NAME_RE.match(name))
 
 
 def has_internal_namespace_component(name: str) -> bool:

@@ -35,7 +35,7 @@ from .diff_versioning import (  # noqa: F401 — re-exported for existing caller
 )
 from .elf_metadata import SymbolBinding, SymbolType
 from .model import AbiSnapshot
-from .name_classification import is_local_name_symbol
+from .name_classification import is_stdlib_local_name_symbol
 
 # Module-level constant: ELF visibility values that form the default<->protected pair (case51).
 _ELF_VIS_PROTECTED_PAIR: frozenset[str] = frozenset({"default", "protected"})
@@ -595,18 +595,26 @@ def _check_object_alignment_reduced(
     mirrors _check_symbol_size_change, which excludes the same four prefixes as
     not ABI-meaningful (their real shape changes are owned by diff_elf_layout).
 
-    Itanium <local-name>-production symbols (_ZZ...) are skipped for the same
-    address-placement-noise reason, not because another detector owns them:
-    such an entity (e.g. a function-local `static` table inside an inlined/
-    templated header function) is never named by any header declaration, so
+    Itanium <local-name>-production symbols owned by the C++ runtime/standard
+    library (is_stdlib_local_name_symbol -- _ZZ... whose enclosing function is
+    std::/__gnu_cxx::/__cxxabiv1::) are skipped for the same address-
+    placement-noise reason, not because another detector owns them: such an
+    entity (e.g. a libstdc++ <regex> template instantiation's function-local
+    `static` lookup table) is never named by any header declaration, so
     _declared_alignment_bits can never resolve corroborating evidence for it
     and the address-derived heuristic is always the only signal available —
-    observed live on a real pvxs binary (a libstdc++ <regex> template
-    instantiation's local static lookup table). Unlike the RTTI prefixes, this
-    is deliberately NOT extended to _check_symbol_size_change: st_size is a
-    direct, real symbol-table fact regardless of scope (not an inferred
-    address heuristic), so a local-name symbol's size change stays a
-    meaningful signal there.
+    observed live on a real pvxs binary. Deliberately NOT the whole
+    is_local_name_symbol set (Codex review, PR #641): a PUBLIC inline/template
+    function belonging to the library UNDER TEST can itself own a
+    function-local `static` that Itanium's STB_GNU_UNIQUE/weak-symbol
+    mechanism cross-TU-deduplicates, so consumers genuinely can bind against
+    it and rely on its declared alignment -- a real regression there must
+    still fire, which is exactly why this checks the narrower stdlib-owned
+    predicate, not a blanket `_ZZ` prefix.
+    Also unlike the RTTI prefixes, this is deliberately NOT extended to
+    _check_symbol_size_change: st_size is a direct, real symbol-table fact
+    regardless of scope (not an inferred address heuristic), so a local-name
+    symbol's size change stays a meaningful signal there.
 
     st_value-derived alignment is address-placement evidence, not a declared
     one: adding an unrelated neighbouring global can shift a symbol's link-time
@@ -628,7 +636,7 @@ def _check_object_alignment_reduced(
         return []
     if sym_name.startswith(("_ZTV", "_ZTI", "_ZTS", "_ZTT")):
         return []
-    if is_local_name_symbol(sym_name):
+    if is_stdlib_local_name_symbol(sym_name):
         return []
     old_align = getattr(s_old, "value_alignment", 0)
     new_align = getattr(s_new, "value_alignment", 0)

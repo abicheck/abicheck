@@ -163,25 +163,38 @@ this.
 **Fix** (`abicheck/name_classification.py`, `abicheck/diff_platform_elf_symbols.py`):
 added `LOCAL_NAME_PREFIX`/`is_local_name_symbol()` (any `_ZZ`-prefixed
 symbol — a local-name-production entity is by construction never named by a
-header declaration, so `_declared_alignment_bits` can never corroborate it,
-same reasoning as the RTTI exemption) and wired it into
-`_check_object_alignment_reduced` alongside the existing RTTI check.
-Deliberately **not** extended to `_check_symbol_size_change`: unlike
-address-derived alignment (an inferred heuristic), `st_size` is a direct,
-real symbol-table fact regardless of a symbol's scope, so a local-name
-symbol's size change stays meaningful signal there — the two detectors'
-exemption lists are allowed to diverge here for a reason, unlike the RTTI
-case where they're deliberately kept in sync (owned-elsewhere, not
-noise-in-source).
+header declaration) and wired it into `_check_object_alignment_reduced`
+alongside the existing RTTI check. Deliberately **not** extended to
+`_check_symbol_size_change`: unlike address-derived alignment (an inferred
+heuristic), `st_size` is a direct, real symbol-table fact regardless of a
+symbol's scope, so a local-name symbol's size change stays meaningful signal
+there.
+
+**Refined after PR review** (`chatgpt-codex-connector`, P2): the initial fix
+exempted *every* `_ZZ`-prefixed symbol, which is too broad — a **public**
+inline/template function belonging to the library under test (not the C++
+runtime) can itself own a function-local `static` that Itanium's
+`STB_GNU_UNIQUE`/weak-symbol mechanism cross-TU-deduplicates, so consumers
+genuinely can bind against it and rely on its declared alignment; a real
+regression there must still fire. Narrowed to
+`is_stdlib_local_name_symbol()` — a regex matching the local-name production
+only when the *enclosing function* is itself `std::`/`__gnu_cxx::`/
+`__cxxabiv1::` (mirroring `STDLIB_RTTI_PREFIXES`'s existing, reviewed
+toolchain-vs-library-under-test distinction for the RTTI case), so a
+library's own public inline-function statics are no longer swept into the
+exemption. Confirmed with a new test using a synthetic
+`pvxs::`-namespaced local-name symbol that must still fire.
 
 Verified against the real pair: before the fix, `libpvxs 1.5.2 → master`
 (diagnostic-forced) reported 11 risk + 1 addition (12 total); after, 10 risk
 + 1 addition (11 total) — the exact spurious finding gone, verdict unchanged
 (`COMPATIBLE_WITH_RISK`). New regression tests: `tests/test_name_classification.py`
-(`test_is_local_name_symbol_true/false`), `tests/test_coverage_extension_elf.py::TestObjectAlignmentReduced::test_local_name_symbol_is_exempt`
-(uses the exact real mangled name from this run). Full fast unit suite
-(19532 passed / 30 skipped / 4 xfailed), `mypy abicheck/`, and
-`ruff check abicheck/ tests/` all clean after the change.
+(`test_is_local_name_symbol_true/false`, `test_is_stdlib_local_name_symbol_true/false`),
+`tests/test_coverage_extension_elf.py::TestObjectAlignmentReduced::test_local_name_symbol_is_exempt`
+(uses the exact real mangled name from this run) and
+`test_library_owned_local_name_symbol_still_fires` (the Codex-flagged case).
+Full fast unit suite (19541 passed / 30 skipped / 4 xfailed), `mypy abicheck/`,
+and `ruff check abicheck/ tests/` all clean after the change.
 
 ## CI / GitHub Action integration — verified end-to-end
 

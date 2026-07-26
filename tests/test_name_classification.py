@@ -28,6 +28,7 @@ from abicheck.name_classification import (
     is_local_rtti_symbol,
     is_non_abi_surface_type,
     is_rtti_symbol,
+    is_stdlib_local_name_symbol,
     symbol_origin,
 )
 
@@ -72,6 +73,37 @@ def test_is_local_name_symbol_false(name: str) -> None:
     # A local-RTTI symbol (_ZTIZ...) is a distinct production (typeinfo of a
     # local type), not the bare local-name production this checks for.
     assert not is_local_name_symbol(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # Real symbol from a live pvxs binary (PR #641 validation): a const
+        # member function (_ZZNK...), std::__cxx11:: nested namespace.
+        "_ZZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames",
+        "_ZZNSt6vectorIiSaIiEE9push_backERKiE1x",  # plain (non-const) std:: member
+        "_ZZN9__gnu_cxx13new_allocatorIiE10deallocateEPim1E",
+        "_ZZN10__cxxabiv116__enum_type_infoD2Ev1x",
+        "_ZZSt4sortIN9__gnu_cxx17__normal_iteratorIPiSt6vectorIiSaIiEEEEEvT_S6_1x",
+    ],
+)
+def test_is_stdlib_local_name_symbol_true(name: str) -> None:
+    assert is_stdlib_local_name_symbol(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # A library-under-test's own public inline/template function's local
+        # static (Codex review, PR #641): must NOT be classified as
+        # stdlib-owned, since consumers can genuinely bind against it.
+        "_ZZN4pvxs6client6ConfigEvE5cache",
+        "_ZN3Foo3barEv",  # not a local-name symbol at all
+        "",
+    ],
+)
+def test_is_stdlib_local_name_symbol_false(name: str) -> None:
+    assert not is_stdlib_local_name_symbol(name)
 
 
 @pytest.mark.parametrize(
