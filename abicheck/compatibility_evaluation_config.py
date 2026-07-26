@@ -321,6 +321,17 @@ class ValueProvenance:
                     f"ValueProvenance.{field_name} must be a str or None, "
                     f"not {value!r}."
                 )
+        # An empty sha256 is exactly as unable to detect content drift on
+        # replay as no digest at all -- ImmutableIdentity/DigestedItems/
+        # SuppressionConfig already reject this via _require_nonempty_digest
+        # (though those fields are unconditionally required, unlike this
+        # one: None here means "no digest", "" would mean "a digest that
+        # proves nothing"). Codex review.
+        if self.sha256 is not None and not self.sha256:
+            raise ValueError(
+                "ValueProvenance.sha256 must be a non-empty digest or None, "
+                "not an empty string."
+            )
         if self.version is not None and (
             not isinstance(self.version, int) or isinstance(self.version, bool)
         ):

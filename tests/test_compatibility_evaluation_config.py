@@ -411,6 +411,18 @@ class TestValueProvenance:
         with pytest.raises(TypeError, match=r"ValueProvenance\.version"):
             ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, version=True)  # type: ignore[arg-type]
 
+    def test_empty_string_sha256_is_rejected(self):
+        # Codex review: an empty sha256 is exactly as unable to detect
+        # content drift on replay as no digest at all -- None already means
+        # "no digest," so "" (a digest that proves nothing) must not be a
+        # separate silently-accepted state.
+        with pytest.raises(ValueError, match=r"ValueProvenance\.sha256"):
+            ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, sha256="")
+
+    def test_none_sha256_still_constructs(self):
+        prov = ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, sha256=None)
+        assert prov.sha256 is None
+
     def test_none_optional_fields_construct(self):
         prov = ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI)
         assert prov.source_kind is None
