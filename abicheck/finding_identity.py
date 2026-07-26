@@ -289,23 +289,32 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
         # ...) falls back to the original naive scan -- still this
         # heuristic's documented accepted boundary, just narrowed to the
         # one concrete counterexample found so far.
-        body = rest[1:]
-        if body and body[0].isdigit():
-            # No other <nested-name>/<local-name> first-component
-            # production starts with a bare digit -- it can only be a
-            # <source-name> (same reasoning as _operand_looks_valid). If
-            # that fails to parse (declared length 0, or claims more
-            # bytes than exist), the whole production is invalid --
-            # falling back to the naive terminator scan would otherwise
-            # treat the trailing E of a truncated digit-prefixed
-            # component as a valid terminator, wrongly accepting
-            # "_ZN0E"/"_ZN9abcE" (Codex review, fresh evidence, round 3).
-            source_name_end = _source_name_end(body)
-            if source_name_end is None:
+        # No other <nested-name>/<local-name> first-component production
+        # starts with a bare digit -- a digit-prefixed component can only
+        # be a <source-name> (same reasoning as _operand_looks_valid), and
+        # a <nested-name>'s <prefix> can chain MULTIPLE consecutive
+        # source-name components (e.g. "N1A1BE" = namespace A, class B) --
+        # a single-component skip left a later component's own trailing
+        # 'E' byte exposed to the same embedded-terminator confusion the
+        # first-component fix addressed: "_ZN1A1E" is incomplete (after
+        # consuming "1A", "1E" is a second length-1 <source-name> whose
+        # identifier IS "E", leaving no separate terminator -- the
+        # complete form is "_ZN1A1EE"), but a single skip still found that
+        # embedded byte (Codex review, fresh evidence, round 4). If a
+        # digit-prefixed component fails to parse (declared length 0, or
+        # claims more bytes than exist), the whole production is invalid,
+        # matching the single-component "_ZN0E"/"_ZN9abcE" fix (round 3).
+        pos = 1
+        consumed_any_component = False
+        while pos < len(rest) and rest[pos].isdigit():
+            component_end = _source_name_end(rest[pos:])
+            if component_end is None:
                 return False
-            search_start = 1 + source_name_end
-            e_index = rest.find("E", search_start)
-            terminator_ok = e_index >= search_start
+            pos += component_end
+            consumed_any_component = True
+        if consumed_any_component:
+            e_index = rest.find("E", pos)
+            terminator_ok = e_index >= pos
         else:
             e_index = rest.find("E", 1)
             terminator_ok = e_index > 1

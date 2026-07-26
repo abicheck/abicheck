@@ -226,6 +226,22 @@ class TestNormalizeMangledName:
         assert normalize_mangled_name("_ZN0E", "_ZN0E") is None
         assert normalize_mangled_name("_ZN9abcE", "_ZN9abcE") is None
 
+    def test_nested_name_second_component_embedded_e_is_not_a_terminator(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence, round 4: a single-component skip
+        # left a SECOND chained source-name component's own trailing 'E'
+        # byte exposed to the same embedded-terminator confusion the
+        # first-component fix addressed. "_ZN1A1E" is incomplete -- after
+        # consuming "1A", "1E" is a second length-1 <source-name> whose
+        # one-byte identifier IS "E", leaving no separate terminator (the
+        # complete form is "_ZN1A1EE").
+        assert normalize_mangled_name("_ZN1A1E", "_ZN1A1E") is None
+
+    def test_nested_name_with_two_complete_components_is_accepted(self) -> None:
+        # "_ZN1A1EE" -- namespace A, entity named "E", real terminator.
+        assert normalize_mangled_name("_ZN1A1EE", None) == "_ZN1A1EE"
+
     def test_local_name_with_nothing_after_terminator_is_rejected(self) -> None:
         # Codex review, fresh evidence: unlike <nested-name> (complete once
         # its own terminator E is found), a <local-name> is
