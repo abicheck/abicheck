@@ -142,6 +142,10 @@ def test_is_stdlib_local_name_symbol_nested_but_user_owned_false() -> None:
         # std::tuple_size<MyType> is another standard customization-point
         # class template a program can legally specialize for its own type.
         "_ZZNSt10tuple_sizeI6MyTypeE1fEvE1x",
+        # Codex review, PR #641 follow-up (fourth instance of this same gap
+        # class): std::common_type<A, A>::f() -- a program-defined partial
+        # specialization of another standard customization-point template.
+        "_ZZNSt11common_typeIJ1AS0_EE1fEvE1x",
     ],
 )
 def test_is_stdlib_local_name_symbol_user_specialized_customization_point_false(

@@ -105,9 +105,10 @@ this, which is why neither of the two earlier validation passes (both capped
 at 1.5.2 or a single hand-picked historical diff) surfaced it — it only shows
 up once a scan genuinely reaches current `master`.
 
-**Confirmed workaround (ADR-050's sanctioned escape hatch).** `--diagnostic-comparison`
-forces the diff through, stamping `assurance: "none"` instead of silently
-upgrading confidence:
+**Original workaround, before this branch's carve-out fixes (ADR-050's
+sanctioned escape hatch).** `--diagnostic-comparison` forced the diff
+through, stamping `assurance: "none"` instead of silently upgrading
+confidence:
 
 ```sh
 abicheck compare 1.5.2-build/libpvxs.so master-build/libpvxs.so \
@@ -122,6 +123,22 @@ The forced diff is sane: 7 `imported_symbol_added` findings for the new
 each side built in its own separate tree), 2×`header_binary_context_mismatch`,
 and a `declaration_renamed` for an unrelated unnamed-enum reconciliation. No
 spurious breaking findings.
+
+**Superseded by the fix below (Codex review, PR #641 follow-up):
+`--diagnostic-comparison` is no longer needed for this exact scenario.**
+Once the additive-only scope/header-sequence/include-sequence carve-outs
+below all landed, the same command **without** the flag succeeds directly
+— `1.5.2` and `master` both ran a real L2 header-AST frontend, so this is
+the ordinary case those carve-outs target, not one of the cases they still
+decline (see "Known, accepted limitation" below). Verified via a direct
+repro of the exact scope/profile-field shape this pair produces (both
+`scope_fingerprint` and `profile_fingerprint` genuinely differ, and
+`check_contracts_comparable` returns `None` for neither error). The escape
+hatch remains necessary only for cases the carve-outs correctly decline
+(a header landing outside the old side's common ancestor directory, or
+genuinely unrelated, uncorroborated profile drift) — reaching for it for
+this case now is unnecessary and bypasses comparability validation the
+gate no longer needs waived here.
 
 **Fixed in a follow-up pass, with an ADR record, not a drive-by patch.** The
 gate cannot locally distinguish "upstream added a real header" from "the

@@ -207,12 +207,27 @@ _STDLIB_LOCAL_NAME_RE = re.compile(
 # specialize for its own type (e.g. to support structured bindings), the
 # same "user-authored code nominally in namespace std" shape as `std::hash`
 # -- real GCC output for such a specialization's local static mangles as
-# `_ZZNSt10tuple_sizeI6MyTypeE1fEvE1x`.
+# `_ZZNSt10tuple_sizeI6MyTypeE1fEvE1x`. Also includes `11common_type`
+# (Codex review, PR #641 follow-up): `std::common_type<A, A>` is yet
+# another standard customization-point class template a program can
+# legally specialize for its own type -- real GCC output for such a
+# specialization's local static mangles as
+# `_ZZNSt11common_typeIJ1AS0_EE1fEvE1x`. This is the fourth instance of the
+# exact same gap class (`hash`/`swap`/`tuple_size`/`common_type`) found
+# across successive review rounds -- an intrinsic limitation of
+# mangled-name string matching, not a bug being progressively fixed: the
+# C++ standard permits specializing dozens of library templates this way
+# (`tuple_element`, `pointer_traits`, `allocator_traits`,
+# `is_error_code_enum`, ...), so this allowlist can never be exhaustive by
+# construction, no matter how many more entries are added. Treated here as
+# an accepted, permanent limitation of this exemption (not a to-do list to
+# keep clearing) -- closing it fully needs a real demangler or type-graph
+# analysis, per this comment block's own opening paragraph.
 _USER_SPECIALIZABLE_STD_TEMPLATE_RE = re.compile(
     r"^_ZZZ*N?[rVK]{0,3}[RO]?(?:St|3std)"
     r"(?:4hash|4less|7greater|8equal_to|12not_equal_to|10less_equal|"
     r"13greater_equal|11char_traits|14numeric_limits|15iterator_traits|"
-    r"14default_delete|9formatter|4swap|10tuple_size)I"
+    r"14default_delete|9formatter|4swap|10tuple_size|11common_type)I"
 )
 
 # Length-prefixed Itanium namespace components (``<len><name>``) for the
