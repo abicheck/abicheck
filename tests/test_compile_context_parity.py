@@ -723,6 +723,53 @@ def test_probe_gnu_system_includes_drops_terminal_symlinked_resource_dir(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason=_SYMLINK_SKIP_REASON)
+def test_probe_gnu_system_includes_keeps_real_dir_via_midpath_symlink(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Codex review (PR #643, round 7): checking the raw string in *addition
+    # to* realpath (an "or", as an earlier version of this fix did) is wrong
+    # once '..' is involved, not just insufficient on its own. Here a
+    # mid-path symlink component ('hop') sits between the version dir and a
+    # trailing '..': lexically this collapses right back to the canonical
+    # resource shape, but the compiler's actual open() call resolves through
+    # the symlink to a real, unrelated include dir elsewhere. Checking the
+    # raw string here would wrongly drop that real include dir -- only
+    # realpath is trustworthy once '..' is present.
+    from abicheck import dumper_sysinc
+
+    base = tmp_path / "base"
+    real_deep = base / "external" / "deep"
+    real_deep.mkdir(parents=True)
+    real_include = base / "external" / "include"
+    real_include.mkdir(parents=True)
+    ver_dir = base / "lib" / "gcc" / "x86_64-linux-gnu" / "13"
+    ver_dir.mkdir(parents=True)
+    hop = ver_dir / "hop"
+    hop.symlink_to(real_deep, target_is_directory=True)
+
+    reported = str(hop / ".." / "include")
+    # Sanity check the fixture actually exercises the hazard: the raw path
+    # lexically matches the resource-dir shape, but its realpath is a real,
+    # differently-shaped, unrelated directory.
+    assert dumper_sysinc._is_gnu_compiler_resource_dir(reported) is True
+    assert os.path.realpath(reported) == str(real_include)
+    assert (
+        dumper_sysinc._is_gnu_compiler_resource_dir(os.path.realpath(reported)) is False
+    )
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc, "_parse_gnu_include_search_dirs", lambda s: [reported]
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    # This is a real, unrelated include dir -- must be kept, not dropped.
+    assert out == [reported]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason=_SYMLINK_SKIP_REASON)
 def test_probe_gnu_system_includes_keeps_libstdcxx_symlinked_under_lib_gcc(
     monkeypatch, tmp_path: Path
 ) -> None:

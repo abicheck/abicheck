@@ -52,10 +52,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   opposite failure — a *terminal* symlink at GCC's own canonical resource
   path (e.g. `.../lib/gcc/<triple>/<ver>/include` symlinked to storage
   outside any `lib/gcc` hierarchy) loses the lexical evidence that this is
-  GCC's resource dir, so `_probe_gnu_system_includes` now rejects a
-  directory when *either* the raw reported string or its
-  `os.path.realpath(d)` classifies as a resource dir — safe since the
-  directory's existence (`Path(d).is_dir()`) is already confirmed by that
-  point — while `_is_gnu_compiler_resource_dir` itself keeps its
-  lexical-only, pure/string-testable contract for callers that don't have
-  (or need) a real path on disk.
+  GCC's resource dir (round 2). Checking *both* the raw string and
+  `os.path.realpath(d)` — rejecting a directory when either matches — fixes
+  round 2 but is itself wrong once `..` is present: a *mid-path* symlink
+  (e.g. `.../lib/gcc/<triple>/<ver>/hop/../include` where `hop` symlinks
+  elsewhere) can lexically collapse right back to the resource shape while
+  physically resolving to a real, unrelated system include dir that must be
+  *kept* — checking the raw string here wrongly drops it (round 7).
+  `_probe_gnu_system_includes` now picks exactly one of the two checks
+  based on whether the raw reported string contains a literal `..`
+  component at all: no `..` → trust only the raw string (round 2's case);
+  `..` present → trust only `os.path.realpath(d)` (rounds 1 and 7's case) —
+  safe since the directory's existence (`Path(d).is_dir()`) is already
+  confirmed by that point — never both via `or`. `_is_gnu_compiler_resource_dir`
+  itself keeps its lexical-only, pure/string-testable contract for callers
+  that don't have (or need) a real path on disk.
