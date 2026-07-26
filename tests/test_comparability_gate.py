@@ -476,6 +476,26 @@ def test_header_sequence_additive_reorder_free_true_when_appended_matches_scope_
     assert _header_sequence_is_additive_reorder_free(old, new, frozenset({"c.h"}))
 
 
+def test_header_sequence_additive_reorder_free_false_for_duplicate_appended_entry():
+    # Codex review, PR #641 follow-up (thirteenth P2): a genuine
+    # header_sequence is always order-preserving-deduplicated by
+    # construction, so a duplicated appended entry (c.h twice) is
+    # malformed evidence -- without this check, the final
+    # set(...) <= scope_new_headers comparison silently collapses the
+    # duplicate away and still authorizes the waiver.
+    old = json.dumps(["a.h", "b.h"])
+    new = json.dumps(["a.h", "b.h", "c.h", "c.h"])
+    assert not _header_sequence_is_additive_reorder_free(old, new, frozenset({"c.h"}))
+
+
+def test_header_sequence_additive_reorder_free_false_for_duplicate_in_old_list():
+    # Same principle applied to the old side -- a duplicate there is
+    # equally impossible in genuine compute_extraction_contract output.
+    old = json.dumps(["a.h", "a.h"])
+    new = json.dumps(["a.h", "a.h", "c.h"])
+    assert not _header_sequence_is_additive_reorder_free(old, new, frozenset({"c.h"}))
+
+
 # ---------------------------------------------------------------------------
 # _include_sequence_is_additive_owned_growth (PR #641 follow-up, fourth
 # round): resolve_inferred_header_roots (cli_dump_helpers.py) auto-adds a

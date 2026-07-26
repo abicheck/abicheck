@@ -268,12 +268,25 @@ def _header_sequence_is_additive_reorder_free(
     (like :func:`_scope_field_is_additive_superset`) whenever either side
     is the ``<single-header>`` sentinel, since there is no real order to
     verify there.
+
+    Also declines whenever *old_list* or *new_list* contains a duplicate
+    entry (Codex review, PR #641 follow-up, thirteenth P2): a genuine
+    ``header_sequence`` value is always order-preserving-deduplicated by
+    construction (see this parameter's own docstring above), so a
+    duplicate is never real evidence -- e.g. appending ``"c.h"`` twice
+    (``["a.h", "b.h"]`` -> ``["a.h", "b.h", "c.h", "c.h"]``) is malformed.
+    Without this check, the final ``set(...) <= scope_new_headers``
+    comparison collapses the duplicate away silently, so it would
+    otherwise still authorize the waiver instead of failing closed on
+    unverifiable evidence.
     """
     if old_value is None or new_value is None:
         return False
     old_list = _json_load_str_list(old_value)
     new_list = _json_load_str_list(new_value)
     if old_list is None or new_list is None:
+        return False
+    if len(old_list) != len(set(old_list)) or len(new_list) != len(set(new_list)):
         return False
     if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
         return False
