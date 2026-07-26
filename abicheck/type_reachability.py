@@ -51,6 +51,8 @@ of change going wrong) — a scoped follow-up, not a drive-by extension here
 
 from __future__ import annotations
 
+import re
+from collections.abc import Collection
 from typing import TYPE_CHECKING
 
 from .model import ScopeOrigin, Visibility
@@ -63,6 +65,20 @@ __all__ = [
     "directly_referenced_stdlib_types",
     "type_string_references_name",
 ]
+
+# libc++ (and Android NDK's libc++) wrap the whole standard library in an
+# inline namespace directly under ``std::`` -- ``std::__1::vector<int>``,
+# ``std::__ndk1::vector<int>`` -- invisible to normal C++ code (inline
+# namespaces are transparent to lookup/spelling) but very much present in a
+# debug-info-derived RecordType's own qualified name. A signature spelled by
+# the same backend's bare-name convention omits it too, same as the
+# "std::"-namespace prefix itself (Codex review, fresh evidence).
+_LIBCXX_INLINE_NAMESPACE_MARKERS: tuple[str, ...] = ("__1::", "__ndk1::")
+
+# Boundary character class shared by type_string_references_name's manual
+# check and the compiled multi-spelling pattern below -- kept as one
+# constant so the two implementations can't silently drift apart.
+_BOUNDARY_CHARS = "_:"
 
 # Provenance origins that are confidently NOT part of the public header
 # surface (same set as idioms.py's _NON_PUBLIC_ORIGINS, ADR-024/027) -- a
@@ -128,10 +144,11 @@ def _record_identity(name: str, qualified_name: str | None) -> str:
     return qualified_name or name
 
 
-def _signature_spellings(identity: str) -> frozenset[str]:
-    """Every spelling of *identity* that a real dumper backend's own
-    ``Function.return_type``/``Param.type``/``TypeField.type`` strings might
-    actually use (Codex review, fresh evidence).
+def _stripped_signature_spelling(identity: str) -> str | None:
+    """The namespace-prefix-stripped spelling a real dumper backend's own
+    ``Function.return_type``/``Param.type``/``TypeField.type`` strings
+    actually use for *identity*, or ``None`` if *identity* carries no
+    recognized stdlib namespace prefix at all.
 
     ``RecordType.name``/``qualified_name`` and the *signature* type-string
     fields are populated by independent code paths per backend and do not
@@ -144,10 +161,14 @@ def _signature_spellings(identity: str) -> frozenset[str]:
     signature — only its namespace-prefix-stripped form
     ``"vector<int, std::allocator<int> >"`` does, because
     ``Function.return_type``/``Param.type`` spell the outermost type bare
-    even when ``RecordType.name`` is fully qualified. Returning both the
-    full identity and its prefix-stripped form lets the scan match whichever
-    convention the snapshot's producer actually used, without guessing which
-    backend produced it.
+    even when ``RecordType.name`` is fully qualified.
+
+    libc++ (and Android NDK's libc++) additionally wrap the standard library
+    in an inline namespace right after ``std::`` (``std::__1::vector<int>``,
+    ``std::__ndk1::vector<int>``) — invisible to real C++ code but very much
+    present in the debug-info-derived qualified name, so it must be stripped
+    too or the reconstructed spelling (``"__1::vector<int>"``) still never
+    matches a bare backend signature (Codex review, fresh evidence).
 
     This does **not** close the deeper, separate gap of typedef-aliased
     stdlib types (``std::string``, ``std::wstring``, ...): a signature
@@ -157,11 +178,70 @@ def _signature_spellings(identity: str) -> frozenset[str]:
     ``AGENTS.md``'s "Known gaps" for why resolving that needs a dedicated
     typedef-alias-resolution layer, not a string-spelling fallback.
     """
-    spellings = {identity}
     for prefix in STDLIB_TYPE_NAMESPACE_PREFIXES:
         if identity.startswith(prefix):
-            spellings.add(identity[len(prefix) :])
-    return frozenset(spellings)
+            rest = identity[len(prefix) :]
+            for marker in _LIBCXX_INLINE_NAMESPACE_MARKERS:
+                if rest.startswith(marker):
+                    rest = rest[len(marker) :]
+                    break
+            return rest
+    return None
+
+
+def _spelling_index(
+    stdlib_identities: list[str], non_stdlib_identities: frozenset[str]
+) -> dict[str, frozenset[str]]:
+    """spelling -> {identity, ...} that spelling proves directly referenced.
+
+    A stripped spelling that collides with a real, unrelated non-stdlib
+    record's own identity is dropped (Codex review, fresh evidence): a
+    library can happen to define its own public type with the exact bare
+    spelling a stdlib candidate reduces to after stripping (e.g. its own
+    top-level ``vector<int, ...>``), and a signature naming that unrelated
+    user type must not be misread as a direct stdlib reference — silently
+    missing that stdlib candidate here (a false negative) is far safer than
+    attributing an unrelated type's layout change to it (a false positive).
+    Multiple stdlib identities can legitimately share one spelling (e.g. two
+    distinct namespaces both reducing to the same bare form after stripping)
+    — every one of them is recorded, not just the first.
+    """
+    index: dict[str, set[str]] = {}
+    for identity in stdlib_identities:
+        index.setdefault(identity, set()).add(identity)
+        stripped = _stripped_signature_spelling(identity)
+        if stripped is not None and stripped not in non_stdlib_identities:
+            index.setdefault(stripped, set()).add(identity)
+    return {spelling: frozenset(ids) for spelling, ids in index.items()}
+
+
+def _compile_spelling_pattern(spellings: Collection[str]) -> re.Pattern[str] | None:
+    """One compiled alternation matching any of *spellings* as a whole type
+    token — the same boundary semantics as :func:`type_string_references_name`
+    (non-identifier, non-``:``-scope character, or the string boundary, on
+    both sides), but resolved in a single pass over each declaration's type
+    string regardless of how many spellings there are.
+
+    This is the fix for the quadratic candidate-by-candidate scan (Codex
+    review, fresh evidence: a synthetic snapshot with 1,000 functions and
+    1,000 unreferenced stdlib records took over a second in a single
+    ``directly_referenced_stdlib_types`` call, and nine independent
+    ``diff_types.py`` call sites each repeated it) — building one pattern
+    once turns the scan from O(candidates × declarations) into
+    O(declarations), independent of candidate count. Longest-first ordering
+    doesn't change *whether* something matches (every alternative is
+    anchored to the same boundary, so a shorter spelling can't "shadow" a
+    longer one the way it could in an unanchored first-match scan) but keeps
+    the compiled pattern's alternation order deterministic for a stable
+    ``.finditer()`` iteration order.
+    """
+    if not spellings:
+        return None
+    ordered = sorted(spellings, key=len, reverse=True)
+    alternation = "|".join(re.escape(s) for s in ordered)
+    return re.compile(
+        rf"(?<![A-Za-z0-9{_BOUNDARY_CHARS}])(?:{alternation})(?![A-Za-z0-9{_BOUNDARY_CHARS}])"
+    )
 
 
 def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
@@ -173,18 +253,20 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     Returns the empty set when the snapshot carries no stdlib-namespaced
     types at all (the common case) — never an error. Deliberately a single,
     snapshot-scoped, pure computation: no build/source evidence, no template
-    argument resolution beyond substring matching (see
-    :func:`type_string_references_name`), so a stdlib type mentioned only
-    inside another stdlib type's own template arguments (never surfacing in
-    a non-stdlib declaration) is correctly excluded.
+    argument resolution beyond substring matching, so a stdlib type
+    mentioned only inside another stdlib type's own template arguments
+    (never surfacing in a non-stdlib declaration) is correctly excluded.
 
     Candidate identification uses ``qualified_name or name`` (Codex review,
     fresh evidence), not ``name`` alone: castxml/direct-clang record the bare
     leaf in ``name`` and the namespace-qualified spelling separately in
     ``qualified_name``, so ``name`` alone never carries a ``std::`` prefix
     for those two backends and this helper would silently find nothing. See
-    :func:`_signature_spellings` for how the resulting identity is matched
-    back against the (differently-spelled) signature type strings.
+    :func:`_stripped_signature_spelling`/:func:`_spelling_index` for how the
+    resulting identity is matched back against the (differently-spelled,
+    possibly ambiguous) signature type strings, and
+    :func:`_compile_spelling_pattern` for why the matching itself is one
+    compiled regex rather than a per-candidate substring scan.
 
     A ``Function`` whose ``visibility`` is not :attr:`Visibility.PUBLIC`
     (``HIDDEN``/``ELF_ONLY``) is never itself the referencing side (Codex
@@ -205,27 +287,35 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     header must not make its own field types count as reachability roots
     either.
     """
-    candidates: dict[str, frozenset[str]] = {}
+    stdlib_identities: list[str] = []
+    non_stdlib_identities: set[str] = set()
     for t in snapshot.types:
         identity = _record_identity(t.name, t.qualified_name)
         if identity.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
-            candidates[identity] = _signature_spellings(identity)
-    if not candidates:
+            stdlib_identities.append(identity)
+        else:
+            non_stdlib_identities.add(identity)
+    if not stdlib_identities:
         return frozenset()
 
+    spelling_index = _spelling_index(
+        stdlib_identities, frozenset(non_stdlib_identities)
+    )
+    pattern = _compile_spelling_pattern(spelling_index)
+    # spelling_index always has at least one entry here (every stdlib
+    # identity maps at least itself), so _compile_spelling_pattern's
+    # empty-input case never applies to this caller.
+    assert pattern is not None
+
     referenced: set[str] = set()
-    remaining = set(candidates)
+    remaining = set(stdlib_identities)
 
     def _scan(type_string: str) -> None:
-        if not remaining:
+        if not remaining or not type_string:
             return
-        for identity in tuple(remaining):
-            if any(
-                type_string_references_name(type_string, spelling)
-                for spelling in candidates[identity]
-            ):
-                referenced.add(identity)
-                remaining.discard(identity)
+        for match in pattern.finditer(type_string):
+            referenced.update(spelling_index.get(match.group(0), ()))
+        remaining.difference_update(referenced)
 
     for fn in snapshot.functions:
         if fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):

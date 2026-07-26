@@ -122,3 +122,39 @@
   `public_stdlib_type_used_directly_layout_changed` (real-break/FN
   sentinel) and `stdlib_type_unreferenced_stays_filtered` (internal-noise/
   FP sentinel) — both pass at baseline 0/0.
+- **`type_reachability.py` hardened three more ways** (Codex review, fresh
+  evidence, found while reviewing the `diff_types.py` wiring above):
+  (1) **Spelling collision**: the namespace-prefix-stripped fallback
+  spelling could coincidentally equal an unrelated, genuinely non-stdlib
+  type's own bare name (e.g. a library's own top-level `vector<int, ...>`)
+  — a signature naming that unrelated user type was misread as a direct
+  stdlib reference, risking a false-positive attribution of unrelated
+  layout churn to the stdlib candidate. Fixed by excluding a stripped
+  spelling that collides with any real non-stdlib record's own identity
+  from the match set for that candidate — missing the stdlib candidate in
+  that rare case is far safer than misattributing an unrelated break.
+  (2) **libc++ inline namespaces**: libc++/Android-NDK-libc++ wrap the
+  whole standard library in an invisible inline namespace
+  (`std::__1::`/`std::__ndk1::`) that shows up in a record's qualified
+  name but never in a bare backend signature spelling — stripping only the
+  `std::` prefix left `__1::vector<int>`, which still couldn't match.
+  Fixed by also stripping a recognized inline-namespace marker right after
+  the namespace prefix. (3) **Performance**: the per-candidate substring
+  scan was O(candidates × declarations) — a synthetic snapshot with 1,000
+  functions and 1,000 unreferenced stdlib records took over a second in a
+  single call (confirmed locally; Codex additionally measured ~21s across
+  the 9 independent `diff_types.py` call sites in one comparison). Fixed
+  by compiling one alternation pattern per snapshot and scanning each
+  declaration's type string once, turning the cost into O(declarations)
+  independent of candidate count (~16x faster on the synthetic worst case,
+  ~47x faster end-to-end through a full `compare()` call). The remaining
+  9x redundant computation across `diff_types.py`'s independent call sites
+  was deliberately left alone rather than added to a shared cache keyed on
+  snapshot object identity — `AbiSnapshot` isn't hashable and an `id()`-
+  based cache risks a silently-wrong result if two different snapshot
+  objects across separate `compare()` calls in a long-running process ever
+  reused the same id() after garbage collection, a correctness risk judged
+  worse than the now-small remaining performance cost (~0.45s end-to-end
+  on the synthetic worst case, verified). A future pass could eliminate it
+  safely by threading a shared per-comparison context through the detector
+  registry — a bigger, separate structural change.

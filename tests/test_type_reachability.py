@@ -27,6 +27,8 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.type_reachability import (
+    _compile_spelling_pattern,
+    _stripped_signature_spelling,
     directly_referenced_stdlib_types,
     type_string_references_name,
 )
@@ -462,3 +464,153 @@ class TestDirectlyReferencedStdlibTypes:
         assert directly_referenced_stdlib_types(snap) == frozenset(
             {"std::vector<int, std::allocator<int> >"}
         )
+
+    def test_stripped_spelling_colliding_with_unrelated_user_type_is_not_attributed(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: a library can define its own public
+        type whose bare spelling happens to collide with a stdlib
+        candidate's namespace-prefix-stripped fallback spelling. A signature
+        naming the unrelated user type must NOT be misread as a direct
+        stdlib reference -- silently missing the stdlib candidate here is
+        far safer than wrongly attributing an unrelated type's own layout
+        churn to it."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    params=[Param(name="v", type="vector<int, std::allocator<int> >")],
+                )
+            ],
+            types=[
+                # An unrelated, genuinely non-stdlib user type that happens
+                # to share the exact bare spelling the stdlib candidate
+                # below reduces to after stripping "std::".
+                RecordType(name="vector<int, std::allocator<int> >", kind="class"),
+                RecordType(
+                    name="vector<int, std::allocator<int> >",
+                    kind="class",
+                    qualified_name="std::vector<int, std::allocator<int> >",
+                ),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_stripped_spelling_without_collision_still_matches(self) -> None:
+        """Guard against over-correcting: when there is no colliding
+        non-stdlib type, the stripped-spelling fallback must still work
+        (this is the same scenario as the castxml-style test above, kept
+        here as a direct sibling of the collision-guard test)."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    params=[Param(name="v", type="vector<int, std::allocator<int> >")],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="vector<int, std::allocator<int> >",
+                    kind="class",
+                    qualified_name="std::vector<int, std::allocator<int> >",
+                )
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {"std::vector<int, std::allocator<int> >"}
+        )
+
+    def test_libcxx_inline_namespace_stripped_to_match_bare_signature(self) -> None:
+        """Codex review, fresh evidence: libc++ wraps the whole standard
+        library in an inline namespace (std::__1::) invisible to real C++
+        code but present in the debug-info-derived qualified name --
+        stripping only "std::" leaves "__1::vector<int>", which still can't
+        match the bare backend spelling "vector<int>". The inline-namespace
+        marker must be stripped too."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", params=[Param(name="v", type="vector<int>")])],
+            types=[
+                RecordType(
+                    name="vector<int>",
+                    kind="class",
+                    qualified_name="std::__1::vector<int>",
+                )
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {"std::__1::vector<int>"}
+        )
+
+    def test_android_libcxx_ndk_inline_namespace_stripped(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", params=[Param(name="v", type="vector<int>")])],
+            types=[
+                RecordType(
+                    name="vector<int>",
+                    kind="class",
+                    qualified_name="std::__ndk1::vector<int>",
+                )
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {"std::__ndk1::vector<int>"}
+        )
+
+    def test_many_unreferenced_stdlib_candidates_scan_efficiently(self) -> None:
+        """Codex review, fresh evidence: the pre-fix per-candidate substring
+        scan was O(candidates x declarations) -- a synthetic snapshot with
+        1,000 functions and 1,000 unreferenced stdlib records took over a
+        second in a single call before the single-pass regex rewrite. This
+        is a correctness-adjacent regression guard, not a micro-benchmark:
+        it asserts the call completes well under a generous ceiling rather
+        than pinning an exact duration (flake-prone on shared CI runners)."""
+        import time
+
+        functions = [
+            _fn(f"fn{i}", params=[Param(name="a", type="int")]) for i in range(1000)
+        ]
+        types = [
+            RecordType(
+                name=f"vector<T{i}, std::allocator<T{i}> >",
+                kind="class",
+                qualified_name=f"std::vector<T{i}, std::allocator<T{i}> >",
+            )
+            for i in range(1000)
+        ]
+        snap = AbiSnapshot(
+            library="libfoo.so", version="1.0", functions=functions, types=types
+        )
+        start = time.monotonic()
+        result = directly_referenced_stdlib_types(snap)
+        elapsed = time.monotonic() - start
+        assert result == frozenset()
+        assert elapsed < 5.0
+
+
+class TestStrippedSignatureSpelling:
+    def test_no_stdlib_prefix_returns_none(self) -> None:
+        assert _stripped_signature_spelling("MyNamespace::Widget") is None
+
+    def test_plain_std_prefix_stripped(self) -> None:
+        assert _stripped_signature_spelling("std::vector<int>") == "vector<int>"
+
+    def test_libcxx_inline_namespace_stripped(self) -> None:
+        assert _stripped_signature_spelling("std::__1::vector<int>") == "vector<int>"
+
+
+class TestCompileSpellingPattern:
+    def test_empty_spellings_returns_none(self) -> None:
+        assert _compile_spelling_pattern([]) is None
+
+    def test_nonempty_spellings_compiles_a_pattern(self) -> None:
+        pattern = _compile_spelling_pattern(["std::string"])
+        assert pattern is not None
+        assert pattern.search("const std::string &")
