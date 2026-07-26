@@ -193,6 +193,9 @@ def deps_compare_cmd(
       0  PASS — binary loads and no harmful ABI changes
       1  WARN — loads but ABI risk detected
       4  FAIL — load failure or binary ABI break
+      5  At least one dependency's before/after DSOs were not extracted
+         under a comparable profile/scope contract (ADR-050 D2) — its
+         per-library ABI diff never ran
 
     \b
     Examples:
@@ -248,7 +251,8 @@ def deps_compare_cmd(
         dry_result.add(
             "Output and exit-code behavior",
             f"format: {fmt}",
-            "exit codes: 0 pass, 1 warn (ABI risk), 4 fail (load/ABI break)",
+            "exit codes: 0 pass, 1 warn (ABI risk), 4 fail (load/ABI break), "
+            "5 not_comparable (ADR-050 D2)",
         )
         emit_dry_run(dry_result)
 
@@ -276,6 +280,15 @@ def deps_compare_cmd(
     else:
         click.echo(text)
 
+    if any(sc.not_comparable_reason for sc in result.stack_changes):
+        # ADR-050 D2: at least one dependency's before/after DSOs were not
+        # extracted under a comparable profile/scope contract, so the
+        # per-library ABI diff for it never ran -- this dominates fail/warn
+        # the same way the comparability gate dominates elsewhere (a
+        # not_comparable result means the comparison couldn't establish
+        # what changed at all, so a coincidental pass/warn/fail computed
+        # from the rest of the stack is not the whole story).
+        sys.exit(5)
     if result.loadability.value == "fail" or result.abi_risk.value == "fail":
         sys.exit(4)
     elif result.abi_risk.value == "warn" or result.loadability.value == "warn":

@@ -20,7 +20,8 @@ The pre-1.0 CLI reset requires the public root surface to show *exactly*
 (the multi-target CI fan-in gate), ``build-output`` (the G30 P1.1
 ``build-output.json`` validator group), ``project-targets`` (the G30
 P1.5 ``targets:``/``bundles:``/``profiles:``/``baseline:`` validator group),
-and ``run-plan`` (the G30 P1.4 run-plan generator group), all added
+``run-plan`` (the G30 P1.4 run-plan generator group), and ``plan`` (the
+ADR-050 D3 ``--dump-manifest`` diagnostic, G32 Phase B), all added
 afterward — with no hidden aliases, and no deprecated shims for
 the deleted commands
 (``appcompat``, ``plugin-check``, ``baseline``, ``collect``, ``merge``,
@@ -53,6 +54,7 @@ _PUBLIC_COMMANDS = frozenset(
         "build-output",
         "project-targets",
         "run-plan",
+        "plan",
     }
 )
 

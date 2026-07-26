@@ -33,6 +33,7 @@ import click
 
 from ..checker import compare
 from ..dumper import dump
+from ..errors import ProfileMismatchError, ScopeMismatchError
 from ..html_report import write_html_report
 from ..reporter import to_json, to_markdown
 from ..serialization import load_snapshot, save_snapshot
@@ -965,7 +966,10 @@ def compat_check_cmd(  # noqa: PLR0913
         suppress,
     )
 
-    result = compare(old_snap, new_snap, suppression=suppression, policy="strict_abi")
+    try:
+        result = compare(old_snap, new_snap, suppression=suppression, policy="strict_abi")
+    except (ProfileMismatchError, ScopeMismatchError) as exc:
+        _compat_fail("comparing snapshots", exc)
 
     # ── Post-compare transforms ───────────────────────────────────────────
     result, full_result = _apply_result_transforms(

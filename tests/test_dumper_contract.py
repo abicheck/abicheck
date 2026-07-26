@@ -111,3 +111,78 @@ def test_attach_extraction_contract_with_malformed_gcc_options_does_not_raise(
         public_header_dirs=None,
     )
     assert snap.contract is not None
+
+
+def _attach(
+    tmp_path: Path,
+    extra_includes: list[Path],
+    extra_include_labels: dict[Path, str] | None,
+) -> AbiSnapshot:
+    header = tmp_path / "api.h"
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    _attach_extraction_contract(
+        snap,
+        headers=[header],
+        extra_includes=extra_includes,
+        gcc_options=None,
+        gcc_option_tokens=(),
+        lang=None,
+        public_headers=None,
+        public_header_dirs=None,
+        extra_include_labels=extra_include_labels,
+    )
+    assert snap.contract is not None
+    return snap
+
+
+class TestExtraIncludeLabels:
+    """ADR-050 D1 (G32 Phase A) -- the ``--include old:LABEL=PATH`` CLI
+    grammar's resolved label map, threaded here from
+    ``dumper.dump()``/``service._dump_elf`` etc., must actually reach
+    ``compute_extraction_contract``'s ``IncludeDir.label`` -- not be
+    silently dropped at this, the final hop before the fingerprint itself
+    (mirrors ``test_comparability.py::test_14_labeled_sibling_support_root_edit_does_not_flip_profile``,
+    which exercises ``compute_extraction_contract`` directly; this covers
+    the CLI-facing glue function one layer up)."""
+
+    def test_label_changes_the_profile_fingerprint(self, tmp_path: Path) -> None:
+        support = tmp_path / "src"
+        support.mkdir()
+        unlabeled = _attach(tmp_path, [support], None)
+        labeled = _attach(tmp_path, [support], {support: "support"})
+        assert (
+            unlabeled.contract.profile_fingerprint
+            != labeled.contract.profile_fingerprint
+        )
+
+    def test_no_labels_is_unaffected(self, tmp_path: Path) -> None:
+        support = tmp_path / "src"
+        support.mkdir()
+        a = _attach(tmp_path, [support], None)
+        b = _attach(tmp_path, [support], {})
+        assert a.contract.profile_fingerprint == b.contract.profile_fingerprint
+
+    def test_unrelated_path_in_the_label_map_is_a_no_op(self, tmp_path: Path) -> None:
+        support = tmp_path / "src"
+        support.mkdir()
+        other = tmp_path / "other"
+        other.mkdir()
+        a = _attach(tmp_path, [support], None)
+        b = _attach(tmp_path, [support], {other: "unrelated"})
+        assert a.contract.profile_fingerprint == b.contract.profile_fingerprint
+
+    def test_same_label_both_sides_matches_despite_different_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """The whole point of the feature: a genuine two-checkout compare
+        pairs the *same* label on each side's own differently-rooted
+        support directory (``--include old:support=old/src --include
+        new:support=new/src``), so the fingerprints match despite the
+        paths themselves never being equal."""
+        old_support = tmp_path / "old" / "src"
+        old_support.mkdir(parents=True)
+        new_support = tmp_path / "new" / "src"
+        new_support.mkdir(parents=True)
+        old = _attach(tmp_path, [old_support], {old_support: "support"})
+        new = _attach(tmp_path, [new_support], {new_support: "support"})
+        assert old.contract.profile_fingerprint == new.contract.profile_fingerprint

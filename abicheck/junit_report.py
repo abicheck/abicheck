@@ -737,3 +737,47 @@ def _to_xml_string(root: ET.Element) -> str:
     buf = io.BytesIO()
     tree.write(buf, encoding="UTF-8", xml_declaration=True)
     return buf.getvalue().decode("UTF-8")
+
+
+def to_junit_xml_not_comparable(
+    library: str, old_version: str, new_version: str, kind: str, message: str
+) -> str:
+    """Render an ADR-050 D2 comparability-gate hard failure as JUnit XML.
+
+    ``checker.compare``'s gate raises before any ``DiffResult`` exists, so
+    there is nothing for :func:`to_junit_xml` to render — unlike an ordinary
+    verdict, this has no changes/policy/scope to report. A single ``<testsuite
+    errors="1">`` with one errored ``<testcase>`` mirrors
+    :func:`_build_error_testsuite`'s existing "library whose comparison
+    failed" shape (used by :func:`to_junit_xml_multi` for a genuine crash)
+    rather than a bespoke structure, so any CI dashboard already parsing
+    abicheck's JUnit output surfaces this the same way: a build-breaking
+    error, not a silently-empty report.
+    """
+    root = ET.Element("testsuites")
+    root.set("name", "abicheck")
+    root.set("tests", "1")
+    root.set("failures", "0")
+    root.set("errors", "1")
+
+    ts = ET.SubElement(root, "testsuite")
+    ts.set("name", library)
+    ts.set("tests", "1")
+    ts.set("failures", "0")
+    ts.set("errors", "1")
+
+    tc = ET.SubElement(ts, "testcase")
+    tc.set("name", f"{library} old={old_version!r} new={new_version!r}")
+    tc.set("classname", "comparability")
+
+    err = ET.SubElement(tc, "error")
+    err.set(
+        "message",
+        f"Not comparable: '{library}' old={old_version!r} new={new_version!r} "
+        f"were not extracted under a comparable profile/scope contract "
+        f"(ADR-050 D1/D2): {message}",
+    )
+    err.set("type", kind)
+    err.text = message
+
+    return _to_xml_string(root)

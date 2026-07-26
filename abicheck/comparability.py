@@ -16,35 +16,88 @@
 and the gate that proves two snapshots were extracted comparably before
 ``compare`` is allowed to produce a verdict.
 
-**Scope of this module today (ADR-050 "Phase A, slice 2" — see
-``docs/development/plans/g32-comparability-contract-and-multi-tu-manifest.md``
-Phase A): the fingerprint algorithm and the gate, wired into
-``checker.compare`` (the Tier-1 core) only.** Every snapshot produced today
-still has ``contract=None`` (see below), so the gate stays fully inert in
-practice until that changes — but the call site itself, and the
-``diagnostic_comparison``/``contract_coverage``/``assurance`` plumbing
-around it, are real. Not yet wired in:
+**Scope of this module today (ADR-050 Phase A — see
+``docs/contribute/plans/g32-comparability-contract-and-multi-tu-manifest.md``
+Phase A): the fingerprint algorithm and the gate are real, and both are wired
+into real production dumps, not just ``checker.compare``'s call site.**
+``dumper.py`` calls :func:`compute_extraction_contract` unconditionally on
+every dump and attaches whatever it returns, so a freshly-produced snapshot
+with fingerprintable extraction inputs (an L2 header/AST frontend ran, or
+public-header provenance was given) now carries a real ``contract`` — not
+``contract=None`` — and the gate is live for anyone comparing two such
+dumps. A dump with neither (plain binary/symbols-only, no headers) still
+gets ``contract=None``, exactly as documented on
+:func:`compute_extraction_contract` itself ("nothing to fingerprint at
+all"). :func:`check_contracts_comparable` is reachable — and has its own
+exception→outcome handling — from all seven ADR-050 D2 entry points: the
+native ``compare`` CLI command (``cli_compare_helpers.run_compare`` — a
+``--diagnostic-comparison`` flag, a schema-conformant ``verdict: null`` JSON
+report, exit ``16``), ``cli_compare_release.py``'s directory/package fan-out
+(a per-library ``"not_comparable"`` verdict string, dominating the release
+rollup, exit ``16``), ``compat/cli.py``'s ``compat check`` (exit ``9``),
+``cli_scan.py``'s ``scan --against`` via ``scan_engine.run_scan_core`` (a
+``NOT_COMPARABLE`` verdict, exit ``6``), ``stack_checker.py``'s
+``deps compare`` (``StackChange.not_comparable_reason``, exit ``5``), the
+``abi_compare`` MCP tool (a dedicated ``{"status": "not_comparable", ...}``
+envelope, plus its own ``diagnostic_comparison`` parameter), and
+``service.py``'s ``CompareRequest``/``run_compare_request``/legacy
+``run_compare`` keyword shim (threads ``diagnostic_comparison``; a raised
+mismatch propagates to whichever of the above front-ends called it — no
+handling of its own, since it isn't itself a front-end). ``appcompat.py``'s
+``check_appcompat``/``check_plugin_host_contract`` are deliberately *not*
+among these seven — raw propagation is their documented default contract.
+Not yet wired in — tracked as explicit follow-up work, not silently
+dropped scope:
 
-- ``dumper.py`` does not call :func:`compute_extraction_contract` yet, so
-  every freshly-produced snapshot still has ``contract=None`` — the gate
-  is fully wired into ``checker.compare`` but currently inert for that
-  reason, not because the call site is missing.
-- :func:`check_contracts_comparable` is not yet called from any of the
-  ADR's other six entry points (``service.py``'s ``CompareRequest``/
-  ``run_compare_request``/legacy ``run_compare`` shim, ``mcp_server.py``,
-  ``cli_compare_release.py``, ``compat/cli.py``, ``cli_scan.py``,
-  ``stack_checker.py``) — only ``checker.compare`` itself calls it so far,
-  so a caller reaching `compare()` **only** through one of those wrappers
-  (every real front-end today) still can't reach ``diagnostic_comparison``
-  or observe a raised mismatch as anything but an unhandled exception.
-- The legacy-CLI labeled ``--include old:LABEL=PATH`` grammar
-  (``SidedIncludePathParam``) does not exist yet; this module accepts a
-  resolved ``label`` per :class:`IncludeDir` directly; only the CLI-parsing
-  glue that would populate it from a command line is missing.
-- ``snapshot_cache.py``'s cache-key order-sensitivity fix, the new exit
-  codes, and every reporter (``reporter.py``/``sarif.py``/
-  ``junit_report.py``/``html_report.py``)/``aggregate.py``/``action/run.sh``
-  change the ADR's D2 section calls for are not part of this module either.
+- The legacy-CLI labeled ``--include old:LABEL=PATH``/``new:LABEL=PATH``
+  grammar (``cli_params.SidedIncludePathParam``) is wired end-to-end for the
+  native ``compare`` command only: its ``--include`` option resolves a
+  ``label`` per entry, ``cli_options.split_sided_include_paths`` collects a
+  ``path -> label`` map, and it threads through
+  ``run_compare``/``_resolve_compare_snapshots``/``service.resolve_input``/
+  ``run_dump``/``dumper.dump()`` into :class:`IncludeDir`'s ``label`` field.
+  ``scan --against``'s own separate inline ``--include`` registration and
+  ``dump``'s single-input ``--include`` (which needs the narrower
+  ``both:LABEL=PATH``-only ``cli_params.LabeledIncludePathParam``, already
+  built but not yet wired into ``dump_cmd``) do not thread a label yet — a
+  labeled entry there is parsed as an ordinary unlabeled path, silently.
+  ``compare``'s directory/package (release) fan-out rejects a labeled
+  ``--include`` outright (see below) rather than silently dropping it.
+- ``sarif.py``/``junit_report.py`` now render a not_comparable outcome as a
+  real, spec-conformant document of their own — a failed-invocation SARIF
+  run (``executionSuccessful: False`` + a ``toolExecutionNotification``,
+  never a synthetic finding-shaped ``result``) via
+  :func:`sarif.to_sarif_not_comparable`, and an errored JUnit testcase via
+  :func:`junit_report.to_junit_xml_not_comparable` — wired into native
+  ``compare``'s ``_report_not_comparable`` for ``--format sarif``/``junit``,
+  and into ``compare-release``'s own ``_format_release_junit`` (a
+  ``"not_comparable"`` per-library entry was previously excluded from
+  ``error_libs`` entirely, silently producing zero testsuites for it).
+  ``html_report.py``/``action/run.sh`` are not part of this module either —
+  ``markdown``/``html``/``review`` still get only the clear stderr message
+  (see ``_report_not_comparable``'s own docstring for why: those are
+  human-facing formats already reading that stderr output, with no
+  equivalent "run failed" document convention worth fabricating one for).
+  ``reporter.py``'s JSON output (``contract_coverage``/``assurance`` on an
+  ordinary completed diff, plus the ``verdict: null`` document on a
+  hard-fail) is unaffected — already covered. ``aggregate.py`` (the
+  multi-target CI fan-in gate) *is* wired: ``_load_report_file`` special-cases
+  a real ``verdict: null`` + structured ``reason`` (schema 2.17) the same way
+  it already special-cased a compare-release operational-error report — a
+  synthetic blocking ``BREAKING``/exit-4 ``GateInfo`` with
+  ``blocking_categories=("not_comparable",)`` and the reason preserved on
+  :class:`TargetReport`, so it folds into ``exit_code()`` unconditionally
+  (including in ``discovered_only`` mode, which has no coverage axis at all)
+  instead of silently decaying into the same "unavailable" bucket a report
+  that simply never arrived gets.
+  (``snapshot_cache.py``'s cache-key order-sensitivity — headers/includes
+  order is real, load-bearing input, the same rule ``profile_fingerprint``
+  below already enforces — is fixed, cache version ``4``.)
+- ``cli_compare_release.py``'s fan-out does not accept
+  ``--diagnostic-comparison`` at all (rejected up front by
+  ``_reject_set_input_flags``, alongside every other single-pair-only flag)
+  — it only closes the *default hard-fail* half of D2 (a mismatch reported
+  cleanly instead of crashing), not the escape-hatch half.
 
 These are tracked as explicit follow-up work, not silently dropped scope.
 
@@ -359,10 +412,10 @@ def compute_extraction_contract(
     non-manifest CLI path (ADR-050 D1; the manifest-driven path is Phase B,
     not yet implemented).
 
-    All inputs are already-resolved data ``dumper.py`` would hand this
-    function after running the actual castxml/clang invocation and parsing
-    its ``-MD`` depfile (not yet wired — see this module's docstring); this
-    function itself never shells out or re-parses anything.
+    All inputs are already-resolved data ``dumper.py`` hands this function
+    after running the actual castxml/clang invocation and parsing its
+    ``-MD`` depfile; this function itself never shells out or re-parses
+    anything.
 
     Returns ``None`` when there is nothing to fingerprint at all (no L2
     frontend ran and no public-header provenance inputs were given) — the

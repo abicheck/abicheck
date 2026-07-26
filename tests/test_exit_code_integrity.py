@@ -111,3 +111,15 @@ def test_compat_scheme_is_distinct() -> None:
     assert interrupted not in legacy_codes
     # And the legacy mapping itself is unchanged.
     assert legacy_exit_code(Verdict.BREAKING) == 4
+
+
+def test_compat_not_comparable_exit_code_is_9_and_distinct_from_compare() -> None:
+    # ADR-050 D2: compat check's not_comparable code (9) is the one integer
+    # the 3-11 range documented no meaning for, and deliberately different
+    # from native compare's own not_comparable code (16) -- the two commands
+    # maintain independent, non-overlapping exit-code schemes.
+    from abicheck.compat._errors import _classify_compat_error_exit_code
+    from abicheck.errors import ProfileMismatchError, ScopeMismatchError
+
+    assert _classify_compat_error_exit_code(ProfileMismatchError("x")) == 9
+    assert _classify_compat_error_exit_code(ScopeMismatchError("x")) == 9

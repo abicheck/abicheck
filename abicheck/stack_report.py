@@ -118,6 +118,10 @@ def stack_to_json(result: StackCheckResult, indent: int = 2) -> str:
                 "abi_breaking": len(sc.abi_diff.breaking) if sc.abi_diff else 0,
                 "abi_changes": len(sc.abi_diff.changes) if sc.abi_diff else 0,
             }
+            # ADR-050 D2 — distinguishes "the gate rejected this pair" from
+            # every other abi_diff=None cause (unreadable file, diff error).
+            if sc.not_comparable_reason:
+                sc_dict["not_comparable_reason"] = sc.not_comparable_reason
             # Per-library confidence and evidence tiers
             if sc.abi_diff:
                 diff = sc.abi_diff
@@ -210,9 +214,19 @@ def _render_stack_changes_section(lines: list[str], stack_changes: list[StackCha
         elif sc.change_type == "added":
             lines.append(f"- ➕ **{sc.library}** — new in candidate")
         elif sc.change_type == "content_changed":
-            verdict = sc.abi_diff.verdict.value if sc.abi_diff else "unknown"
-            emoji = "❌" if verdict == "BREAKING" else ("⚠️" if verdict in ("API_BREAK", "COMPATIBLE_WITH_RISK") else "✅")
+            if sc.not_comparable_reason:
+                verdict = "not_comparable"
+            else:
+                verdict = sc.abi_diff.verdict.value if sc.abi_diff else "unknown"
+            emoji = "❌" if verdict == "BREAKING" else ("⚠️" if verdict in ("API_BREAK", "COMPATIBLE_WITH_RISK", "not_comparable") else "✅")
             lines.append(f"- {emoji} **{sc.library}** — content changed (ABI: `{verdict}`)")
+            if sc.not_comparable_reason:
+                # Backtick-wrapped, matching this function's own convention
+                # for other embedded free-text (e.g. the missing-symbols
+                # section above) -- the reason can embed a filesystem path,
+                # and an unwrapped path containing '*'/'_'/'`' would
+                # otherwise corrupt this line's Markdown formatting.
+                lines.append(f"  - Reason: `{sc.not_comparable_reason}`")
             if sc.abi_diff:
                 conf = getattr(sc.abi_diff, "confidence", None)
                 tiers = getattr(sc.abi_diff, "evidence_tiers", []) or []

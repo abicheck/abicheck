@@ -1,7 +1,7 @@
 # G32 Phase 0 fixtures
 
-Regression fixtures for [ADR-050](../../../docs/development/adr/050-comparability-contract-and-multi-tu-manifest.md)
-/ [G32](../../../docs/development/plans/g32-comparability-contract-and-multi-tu-manifest.md)
+Regression fixtures for [ADR-050](../../../docs/contribute/adr/050-comparability-contract-and-multi-tu-manifest.md)
+/ [G32](../../../docs/contribute/plans/g32-comparability-contract-and-multi-tu-manifest.md)
 Phase 0. These are raw inputs (headers, and one real AST capture) for later
 phases to load — not generated `.abi.json` snapshots, and (per Phase 0's own
 "Out of scope") no production code reads any of this yet. `tests/test_g32_fixtures.py`
@@ -56,14 +56,42 @@ no counterpart on the old side — a manifest/CLI-flag drift between two
 extraction runs, not a real API change. `abicheck.comparability.compute_extraction_contract`/
 `check_contracts_comparable` (ADR-050 D1/D2, G32 Phase A) exist and are unit
 tested against exactly this shape of drift in `tests/test_comparability.py`,
-and `checker.compare` itself now calls the gate (Phase A slice 2) —
-comparing `old/` against `new/` through `compute_extraction_contract` +
-`compare()` hard-fails `ScopeMismatchError` (`not_comparable`) by default,
-and `compare(..., diagnostic_comparison=True)` downgrades that to a
-tentative, `assurance: "none"`-stamped diff. **Not yet true at the CLI/
-application level**: no `abicheck compare` flag, exit code, or front-end
-(`service.py`, `mcp_server.py`, `cli_scan.py`, etc.) reaches this gate yet —
-`dumper.py` doesn't call `compute_extraction_contract` on a real dump
-either, so every snapshot a real `dump`/`compare` invocation produces still
-has `contract=None` today. See `abicheck/comparability.py`'s own module
-docstring for the exact remaining scope.
+and `checker.compare` itself now calls the gate — comparing `old/` against
+`new/` through `compute_extraction_contract` + `compare()` hard-fails
+`ScopeMismatchError` (`not_comparable`) by default, and
+`compare(..., diagnostic_comparison=True)` downgrades that to a tentative,
+`assurance: "none"`-stamped diff. `dumper.py` now calls
+`compute_extraction_contract` on every real dump too, so a fresh
+`dump`/`compare` invocation with fingerprintable extraction inputs (headers
+given, or an L2 frontend ran) carries a real `contract`, not `contract=None`
+— a plain binary/symbols-only dump with no headers still gets
+`contract=None`, per `compute_extraction_contract`'s own "nothing to
+fingerprint" rule. **Reachable today from all seven ADR-050 D2 entry
+points**: the native `abicheck compare` CLI command (`--diagnostic-comparison`
+flag, `verdict: null` JSON report, exit `16`), `cli_compare_release.py`'s
+release fan-out (a per-library `"not_comparable"` verdict dominating the
+rollup, exit `16`, though it does not itself accept
+`--diagnostic-comparison`), `compat/cli.py`'s `compat check` (exit `9`),
+`cli_scan.py`'s `scan --against` (`NOT_COMPARABLE` verdict, exit `6`),
+`stack_checker.py`'s `deps compare` (`not_comparable_reason`, exit `5`), the
+`abi_compare` MCP tool (`{"status": "not_comparable", ...}`, plus its own
+`diagnostic_comparison` parameter), and `service.py`'s
+`CompareRequest`/`run_compare_request`/legacy `run_compare` shim (threads
+`diagnostic_comparison` through to whichever front-end called it).
+`snapshot_cache.py`'s cache-key order-sensitivity, and SARIF/JUnit
+rendering of a `not_comparable` outcome (native `compare` and
+`compare-release`'s own JUnit report), and `aggregate.py`'s multi-target
+fan-in gate (a `not_comparable` per-target report now blocks unconditionally
+instead of decaying into a plain "unavailable" coverage gap) are also done
+(G32 Phase A, complete). **Still not wired**: the legacy-CLI labeled
+`--include old:LABEL=PATH` grammar is wired for native `compare` only (not
+`scan --against`'s own separate `--include` registration, nor `dump`'s),
+`compare-release`'s fan-out doesn't accept `--diagnostic-comparison`, and
+`html_report.py`/`action/run.sh` render nothing for `not_comparable`
+(a deliberate, documented gap — see below). See
+`abicheck/comparability.py`'s own module docstring for the exact remaining
+scope.
+
+G32 Phase B (ADR-050 D3 — the manifest schema and real multi-TU dump) is
+next; these Phase 0 fixtures (especially Fixture 3, external STL noise) are
+what Phase B's own tests wire through the manifest path end to end.

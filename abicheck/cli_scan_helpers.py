@@ -333,6 +333,12 @@ def render_baseline_lines(out: Any) -> list[str]:
     """
     if out.diff_summary is None:
         return []
+    if "reason" in out.diff_summary:
+        # ADR-050 D2: the baseline compare hard-failed on a profile/scope
+        # mismatch before producing any counts -- diff_summary is just
+        # {"reason": ...} here, not the normal breaking/api_break/risk/
+        # compatible shape below.
+        return ["", "Baseline comparison", f"  not comparable: {out.diff_summary['reason']}"]
     lines = [
         "",
         "Baseline comparison",

@@ -185,7 +185,19 @@ from typing import Any
 #:       ``root_cause_id`` is a stable hash of the grouping key, not the
 #:       eventual G29 Phase 6 ``RootCauseCorrelator``'s own identifier
 #:       scheme.
-REPORT_SCHEMA_VERSION = "2.16"
+#:   2.17: ADR-050 D2 -- ``verdict`` gains a third class, ``null``, for a
+#:       comparability-gate hard-fail (old/new were not extracted under a
+#:       comparable ``ExtractionContract``; see ADR-050 D1). A ``null``-verdict
+#:       report carries a new ``reason`` object (``{kind, message}``,
+#:       ``kind`` one of ``"profile_mismatch"``/``"scope_mismatch"``) instead
+#:       of the full compare-report shape (``changes``/``summary``/etc. are
+#:       never populated, since the gate raises before any diff runs). Two
+#:       more additive optional top-level keys, present on an ordinary
+#:       completed comparison: ``contract_coverage`` (``"partial"`` when
+#:       only one side of the pair carried a given fingerprint) and
+#:       ``assurance`` (``"none"`` when the comparison only completed via
+#:       ``--diagnostic-comparison`` after a genuine mismatch).
+REPORT_SCHEMA_VERSION = "2.17"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -209,7 +221,15 @@ REPORT_SCHEMA_VERSION = "2.16"
 #:       ``action_version``, ``tool_version``), populated the same way by
 #:       ``actions/check-target`` (G30 P1.3) for a ``scan``-mode audit
 #:       check (ADR-047 S5).
-SCAN_SCHEMA_VERSION = "1.2"
+#: 1.3 — added the ``NOT_COMPARABLE`` ``verdict``/exit code ``6`` (ADR-050
+#:       D2): ``scan --against`` (via ``run_scan_core``'s
+#:       ``_run_baseline_compare`` call) now catches a genuine
+#:       ``ProfileMismatchError``/``ScopeMismatchError`` instead of letting
+#:       it propagate unhandled, setting ``diff.reason`` to the exception
+#:       message. Mirrors compare's 2.17 ``verdict: null``/``reason`` bump —
+#:       a new possible value a pre-1.3 ``scan`` consumer could never have
+#:       received before.
+SCAN_SCHEMA_VERSION = "1.3"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"
