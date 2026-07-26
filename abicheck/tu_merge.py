@@ -69,6 +69,7 @@ from dataclasses import replace
 from functools import partial
 from typing import Protocol, TypeVar
 
+from .diff_symbols import _is_cc_attribute as _is_cc_attribute
 from .dumper_castxml import (
     _mangled_name_is_local_linkage as _mangled_name_is_local_linkage,
 )
@@ -192,6 +193,32 @@ def _function_key(tu_name: str, fn: Function) -> tuple[str, str]:
     in the environment this round's changes were verified in), so this is
     documented rather than guess-fixed, the same call already made for the
     anonymous-namespace-type and typedef-qualification gaps above.
+
+    **Second known, accepted limitation** (Codex review, PR #635 round
+    12): ``fn.mangled == fn.name`` is not actually proof of a plain-C
+    declaration -- clang's header AST also has no ``mangledName`` for an
+    *uninstantiated* C++ function/method template, so
+    ``dumper_clang.py``'s ``mangled = ... or name`` falls back to the bare
+    name there too (empirically confirmed: ``template <typename T> struct
+    A { void run(T); };`` and an unrelated ``template <typename T> struct
+    B { void run(T, T); };`` both parse with ``mangledName=None`` for
+    their ``run`` method). Two structurally unrelated template methods
+    sharing a bare name in different TUs therefore reach this branch and
+    fall to ``fn.is_static`` -- ordinarily ``False`` for a non-static
+    method, so ``is_local`` is wrongly ``False`` and the two land in the
+    same ``entity_key`` bucket. If their signatures happen to differ (the
+    common case) :func:`_merge_functions` raises a spurious
+    ``INCONSISTENT_DECLARATION``; if their signatures happen to coincide,
+    they silently merge into one function despite being unrelated. Fixing
+    this precisely needs a way to tell "genuinely unmangled, e.g. plain
+    C/`extern "C"`" apart from "C++ but clang produced no mangled name" at
+    this call site -- :class:`Function` carries no such signal today
+    (unlike :class:`RecordType`'s ``is_template_pattern``, there is no
+    per-function equivalent, and nothing here links a ``Function`` back to
+    its enclosing template even if there were) -- so, like the MSVC gap
+    above, this needs a producer-side model/schema addition rather than a
+    guess at this call site, and is documented rather than fixed this
+    round.
     """
     if fn.mangled == fn.name:
         is_local = fn.is_static
@@ -555,6 +582,21 @@ def _union_optional_fact(a: str | None, b: str | None) -> tuple[bool, str | None
     return True, a if a is not None else b
 
 
+#: Attribute families whose arguments are a *set* that legally accumulates
+#: across separate attribute occurrences -- GCC/clang both accept
+#: ``__attribute__((nonnull(1))) __attribute__((nonnull(2)))`` (or the
+#: equivalent split across two compatible redeclarations in different TUs)
+#: as "parameters 1 and 2 are both nonnull", not two conflicting claims.
+#: :func:`abicheck.dumper_clang._clang_contract_attributes` already keeps
+#: each occurrence as its own list entry rather than folding them into one
+#: token (see that function's own docstring), so a same-family, different-
+#: argument pair here is ordinary redeclaration, not a conflict (Codex
+#: review, PR #635 round 12) -- unlike an argument-bearing family such as
+#: ``format``/``regparm``, where two different argument sets truly are
+#: incompatible claims about the same function.
+_SET_VALUED_ATTRIBUTE_FAMILIES = frozenset({"nonnull"})
+
+
 def _merge_contract_attributes(
     a: list[str] | None, b: list[str] | None
 ) -> tuple[bool, list[str] | None]:
@@ -578,10 +620,27 @@ def _merge_contract_attributes(
     :func:`abicheck.dumper_clang._clang_contract_attributes`), so two
     tokens from the same attribute family (the text before any ``(``, e.g.
     both ``nonnull(...)``) that aren't byte-identical describe genuinely
-    different arguments for the same attribute and are a real conflict,
-    not something to silently prefer one side of -- an unrecognized/
-    unparsed token has no family boundary to find and is compared whole.
-    A token present in only one TU's list is purely additive and is kept.
+    different arguments for the same attribute and are a real conflict --
+    **except** :data:`_SET_VALUED_ATTRIBUTE_FAMILIES`, whose differing
+    arguments legitimately accumulate instead (Codex review, PR #635 round
+    12). An unrecognized/unparsed token has no family boundary to find and
+    is compared whole. A token present in only one TU's list is purely
+    additive and is kept.
+
+    Calling-convention tokens (``_CC_ATTRIBUTE_BASES`` --
+    :mod:`abicheck.diff_symbols`'s own canonical set, reused here rather
+    than duplicated) are mutually exclusive as a *group*, not just within
+    one family: two TUs redeclaring the same Itanium-mangled function with
+    ``ms_abi`` vs. ``sysv_abi`` share a linker identity but have
+    incompatible call ABIs -- each is its own bare family (no ``(``), so
+    the per-family check above never sees them as the same family and
+    would otherwise silently union both onto one function, exactly what
+    :func:`abicheck.diff_symbols._check_contract_attributes_change`
+    treats as ``CALLING_CONVENTION_CHANGED`` when it later diffs two
+    already-merged snapshots (Codex review, PR #635 round 12). More than
+    one surviving calling-convention token is therefore rejected here,
+    before that comparison ever gets the chance to run on a nonsensical
+    merged function.
     """
     if a is None:
         return True, b
@@ -597,9 +656,12 @@ def _merge_contract_attributes(
     for token in b:
         if token in merged:
             continue
-        if _family(token) in a_families:
+        family = _family(token)
+        if family in a_families and family not in _SET_VALUED_ATTRIBUTE_FAMILIES:
             return False, None
         merged.add(token)
+    if sum(1 for token in merged if _is_cc_attribute(token)) > 1:
+        return False, None
     return True, sorted(merged)
 
 

@@ -1003,6 +1003,53 @@ def test_merge_fragments_function_raises_on_conflicting_contract_attribute_args(
     assert excinfo.value.code == INCONSISTENT_DECLARATION
 
 
+def test_merge_fragments_function_unions_set_valued_nonnull_arguments():
+    # nonnull(1) and nonnull(2) from separate TUs both apply -- GCC/clang
+    # accumulate constraints across separate nonnull attributes rather than
+    # treating a second one as contradicting the first.
+    a = _fn("f", "_Z1fPvS_", contract_attributes=["nonnull(1)"])
+    b = _fn("f", "_Z1fPvS_", contract_attributes=["nonnull(2)"])
+    merged = merge_fragments(
+        [
+            TuFragment(tu_name="a", functions=(a,)),
+            TuFragment(tu_name="b", functions=(b,)),
+        ]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].contract_attributes == ["nonnull(1)", "nonnull(2)"]
+
+
+def test_merge_fragments_function_raises_on_conflicting_calling_convention():
+    # ms_abi and sysv_abi are different bare families (no shared "(" prefix
+    # to collide on) but are mutually exclusive as a calling-convention
+    # group -- unioning both onto one function would be nonsensical, and
+    # diff_symbols.py treats exactly this pair as CALLING_CONVENTION_CHANGED
+    # when comparing two already-merged snapshots.
+    a = _fn("f", "_Z1fi", contract_attributes=["ms_abi"])
+    b = _fn("f", "_Z1fi", contract_attributes=["sysv_abi"])
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments(
+            [
+                TuFragment(tu_name="a", functions=(a,)),
+                TuFragment(tu_name="b", functions=(b,)),
+            ]
+        )
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+
+
+def test_merge_fragments_function_allows_matching_calling_convention():
+    a = _fn("f", "_Z1fi", contract_attributes=["ms_abi"])
+    b = _fn("f", "_Z1fi", contract_attributes=["ms_abi"])
+    merged = merge_fragments(
+        [
+            TuFragment(tu_name="a", functions=(a,)),
+            TuFragment(tu_name="b", functions=(b,)),
+        ]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].contract_attributes == ["ms_abi"]
+
+
 def test_merge_fragments_variable_unions_deprecated_across_ordinary_redeclaration():
     a = _var("g_old", "g_old", deprecated="use g_new instead")
     b = _var("g_old", "g_old")
