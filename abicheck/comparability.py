@@ -117,6 +117,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -303,6 +304,29 @@ _INCLUDE_SEQUENCE_FIELDS = frozenset({"include_sequence"})
 _OWNED_HEADER_TOKEN_PREFIX = "hdrs:"
 _OWNED_HEADER_SINGLE_SENTINEL = "hdrs:<single-header>"
 
+_SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _is_valid_digest_payload(value: str) -> bool:
+    """Whether *value* is exactly the ``"sha256:<64 lowercase hex chars>"``
+    form :func:`_sha256_of` always produces (Codex review, PR #641
+    follow-up, twelfth P2).
+
+    An ``"ext:"``/``"sys:"`` token's payload is always a real
+    :func:`_sha256_of` digest in genuine ``compute_extraction_contract``
+    output -- never arbitrary text -- so a malformed payload like
+    ``"ext:bogus"`` or ``"sys:not-a-sha256"`` unchanged on both sides is
+    exactly as unverifiable as the delimiter-less/non-positional slots the
+    previous two rounds closed: if it rides alongside a genuinely-growing
+    ``"hdrs:"`` slot, the per-slot loop's equality short-circuit never
+    re-examines it, and the carve-out would otherwise still return
+    additive-safe despite one slot being unverifiable garbage. Not applied
+    to ``"label:"`` (an arbitrary user-supplied label, never a hash) or
+    ``"hdrs:"`` (its own JSON-list-of-pairs shape is validated separately,
+    by :func:`_json_load_list`/:func:`_is_owned_header_pair`).
+    """
+    return bool(_SHA256_DIGEST_RE.match(value))
+
 
 def _slot_indices_match_position(slots: list[str]) -> bool:
     """Whether every ``"<slot-index>:<token>"`` entry in *slots* carries the
@@ -350,13 +374,32 @@ def _slot_indices_match_position(slots: list[str]) -> bool:
     ``compute_extraction_contract`` always have exactly one of these three
     token prefixes after the delimiter, so requiring one here is the real
     shape, not a new restriction.
+
+    Also requires an ``"ext:"`` slot's (or the trailing ``"sys:"`` entry's)
+    payload to be a well-formed :func:`_sha256_of` digest (Codex review, PR
+    #641 follow-up, twelfth P2): the previous round only checked the
+    ``"ext:"``/``"sys:"`` PREFIX, not that what follows it is a genuine
+    digest -- an unchanged malformed payload like ``"ext:bogus"`` or
+    ``"sys:not-a-sha256"`` passed that check trivially and, exactly like
+    the delimiter-less case above, could ride unexamined alongside a
+    genuinely-growing ``"hdrs:"`` slot. ``"label:"`` (arbitrary
+    user-supplied text) and ``"hdrs:"`` (its own JSON-shape, validated
+    separately) are deliberately excluded from this digest check -- see
+    :func:`_is_valid_digest_payload`.
     """
-    numbered_slots = slots[:-1] if slots and slots[-1].startswith("sys:") else slots
+    if slots and slots[-1].startswith("sys:"):
+        numbered_slots = slots[:-1]
+        if not _is_valid_digest_payload(slots[-1][len("sys:") :]):
+            return False
+    else:
+        numbered_slots = slots
     for i, slot in enumerate(numbered_slots):
         idx, sep, rest = slot.partition(":")
         if sep != ":" or not rest.startswith(("hdrs:", "ext:", "label:")):
             return False
         if idx != str(i):
+            return False
+        if rest.startswith("ext:") and not _is_valid_digest_payload(rest[len("ext:") :]):
             return False
     return True
 

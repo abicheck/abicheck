@@ -540,11 +540,12 @@ def test_include_sequence_additive_owned_growth_true_when_one_slot_unchanged():
     # Multi-slot case: slot 0 (an external, non-owned dir) is byte-identical
     # on both sides; only slot 1 (the owned root) grows. The per-slot
     # equality short-circuit must let the unchanged slot through without
-    # re-parsing it.
-    old = json.dumps(["0:ext:" + "a" * 16, _hdrs_slot(1, [("a.h", "a.h")])])
-    new = json.dumps(
-        ["0:ext:" + "a" * 16, _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])]
-    )
+    # re-parsing it. The "ext:" payload is a real _sha256_of digest shape
+    # (Codex review, PR #641 follow-up, twelfth P2 -- payload format is now
+    # validated even for unchanged slots).
+    ext_slot = "0:ext:" + _sha256_of("dir-contents")
+    old = json.dumps([ext_slot, _hdrs_slot(1, [("a.h", "a.h")])])
+    new = json.dumps([ext_slot, _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])])
     assert _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
 
 
@@ -575,8 +576,11 @@ def test_include_sequence_additive_owned_growth_true_with_unchanged_trailing_sys
     # P2 fix's _slot_indices_match_position required EVERY slot's prefix
     # to equal its position, which this "sys:" entry never can (it owns no
     # IncludeDir and thus no position). An unchanged system bucket must
-    # not block an otherwise-legitimate owned-header addition.
-    sys_bucket = "sys:" + "a" * 16
+    # not block an otherwise-legitimate owned-header addition. The payload
+    # is a real _sha256_of digest shape (Codex review, PR #641 follow-up,
+    # twelfth P2 -- payload format is now validated even for unchanged
+    # slots).
+    sys_bucket = "sys:" + _sha256_of("system-headers")
     old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")]), sys_bucket])
     new = json.dumps(
         [_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")]), sys_bucket]
@@ -606,6 +610,28 @@ def test_include_sequence_additive_owned_growth_false_for_unchanged_delimiterles
     # any fix: this was accepted as safe growth.
     old = json.dumps(["0", _hdrs_slot(1, [("a.h", "a.h")])])
     new = json.dumps(["0", _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])])
+    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+
+
+def test_include_sequence_additive_owned_growth_false_for_unchanged_malformed_ext_payload():
+    # Codex review, PR #641 follow-up (twelfth P2): the delimiter/token-
+    # shape fix only checked the "ext:" PREFIX, not that what follows it is
+    # a genuine _sha256_of digest. An unchanged malformed payload like
+    # "ext:bogus" still passes that check trivially and, exactly like the
+    # delimiter-less case above, could ride unexamined alongside a
+    # genuinely-growing "hdrs:" slot. Confirmed by direct repro before any
+    # fix: this was accepted as safe growth.
+    old = json.dumps(["0:ext:bogus", _hdrs_slot(1, [("a.h", "a.h")])])
+    new = json.dumps(["0:ext:bogus", _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])])
+    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+
+
+def test_include_sequence_additive_owned_growth_false_for_unchanged_malformed_sys_payload():
+    # Same gap as above, for the trailing "sys:" bucket's payload.
+    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h")]), "sys:not-a-sha256"])
+    new = json.dumps(
+        [_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")]), "sys:not-a-sha256"]
+    )
     assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
 
 
