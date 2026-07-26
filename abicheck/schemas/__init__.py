@@ -251,7 +251,17 @@ from typing import Any
 #:       the paired combination, so this tightens validation without
 #:       changing what a conformant report looks like — a MINOR bump, not
 #:       MAJOR, same reasoning as 2.20 itself.
-REPORT_SCHEMA_VERSION = "2.21"
+#:   2.22: ``release_recommendation`` gains ``possible_impact`` (status-review
+#:       follow-up): a new, always-non-null string field carrying the bump
+#:       abicheck would recommend if its evidence were sufficient to confirm
+#:       one. 2.20 made ``version_bump`` itself ``null`` for ``state ==
+#:       "unavailable"``/withheld the value for automation — correctly, but
+#:       it left the still-plausible bump readable only from free-text
+#:       ``rationale`` prose, which no machine consumer should have to parse.
+#:       ``possible_impact`` is additive (new optional key, existing fields
+#:       unchanged) and equals ``version_bump`` whenever ``state ==
+#:       "actionable"`` — a MINOR bump.
+REPORT_SCHEMA_VERSION = "2.22"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

@@ -47,6 +47,7 @@ Three orthogonal axes, kept separate on purpose (ADR-042):
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -57,7 +58,56 @@ from .change_registry_types import Verdict
 
 #: Machine-readable schema version of the ``to_dict()`` / ``--format json``
 #: output. Bump on any incompatible change to that structure.
-AGGREGATE_SCHEMA_VERSION = "1.0"
+AGGREGATE_SCHEMA_VERSION = "1.1"
+
+#: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
+#: ``target@profile#baseline_channel@requested_depth``, built verbatim by
+#: ``buildsource.check_report.build_check_id``. ``profile``/``baseline_channel``
+#: are identifiers (``[A-Za-z0-9][A-Za-z0-9._-]*``, see that module's
+#: ``_IDENTIFIER_RE`` — never containing ``@``/``#``) and ``requested_depth``
+#: is one of the four fixed evidence-depth values, so anchoring on those two
+#: known-shaped tail segments is safe even if ``target`` itself were ever to
+#: contain a stray ``@``/``#`` (bundle/target ids are also identifiers today,
+#: but this regex does not need to assume that to parse correctly).
+_CHECK_ID_RE = re.compile(
+    r"^(?P<target>.+)@(?P<profile>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"#(?P<channel>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"@(?P<depth>binary|headers|build|source)$"
+)
+
+
+@dataclass(frozen=True)
+class CheckIdParts:
+    """A parsed ``check_id``-shaped ``target_id`` (ADR-047 §7)."""
+
+    target: str
+    profile: str
+    baseline_channel: str
+    requested_depth: str
+
+
+def parse_check_id(target_id: str) -> CheckIdParts | None:
+    """Split *target_id* into its ``check_id`` components, or ``None``.
+
+    ``None`` means *target_id* does not follow the
+    ``target@profile#baseline_channel@requested_depth`` shape
+    ``buildsource.check_report.build_check_id`` produces — e.g. a bare
+    filename-derived id (:func:`target_id_from_path`) from a report that
+    never went through the run-plan/``check-target`` pipeline. This is the
+    common case for a single-profile setup and is not an error; callers
+    that group by profile (:attr:`AggregateResult.profile_matrix`) simply
+    have nothing to group such a target under.
+    """
+    m = _CHECK_ID_RE.match(target_id)
+    if m is None:
+        return None
+    return CheckIdParts(
+        target=m.group("target"),
+        profile=m.group("profile"),
+        baseline_channel=m.group("channel"),
+        requested_depth=m.group("depth"),
+    )
+
 
 #: SemVer-style (MAJOR.MINOR) version of the expected-target *manifest* input
 #: (``--manifest``). Independent of the report-output schema above. A manifest
@@ -314,6 +364,25 @@ class TargetReport:
     def analyzed(self) -> bool:
         return self.compatibility_verdict is not None
 
+    @property
+    def profile_id(self) -> str | None:
+        """The ``profile`` component of a ``check_id``-shaped ``target_id``
+        (status-review item 5: "profile identity in TargetReport"), or
+        ``None`` when ``target_id`` doesn't follow that shape at all — see
+        :func:`parse_check_id`."""
+        parsed = parse_check_id(self.target_id)
+        return parsed.profile if parsed is not None else None
+
+    @property
+    def base_target(self) -> str:
+        """The target/bundle identity with any ``@profile#channel@depth``
+        suffix stripped — the key that groups this report with the *same*
+        logical target checked under a different profile
+        (:attr:`AggregateResult.profile_matrix`). Equals ``target_id``
+        verbatim when it isn't ``check_id``-shaped."""
+        parsed = parse_check_id(self.target_id)
+        return parsed.target if parsed is not None else self.target_id
+
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
             "target_id": self.target_id,
@@ -328,11 +397,54 @@ class TargetReport:
         }
         if self.unexpected:
             d["unexpected"] = True
+        profile_id = self.profile_id
+        if profile_id is not None:
+            d["profile_id"] = profile_id
         for key in ("report_path", "library", "reason"):
             value = getattr(self, key)
             if value is not None:
                 d[key] = value
         return d
+
+
+@dataclass(frozen=True)
+class ProfileMatrixEntry:
+    """One logical target's outcome across every toolchain profile that
+    checked it (status-review item 5: "affected_profiles for one logical
+    finding", "profile-level finding deduplication").
+
+    Before this, a project running the same target under several
+    ``profiles:`` (e.g. ``linux-gcc14``, ``linux-clang20``, ``windows-msvc``)
+    saw three unrelated-looking ``target_id`` rows in
+    :attr:`AggregateResult.targets` — nothing tied them back together as the
+    *same* logical target, so a consumer had to already know the naming
+    convention to notice "this one target broke everywhere except
+    windows-msvc". This groups by :attr:`TargetReport.base_target` instead.
+    """
+
+    base_target: str
+    #: Every profile that reported for this target, sorted.
+    profiles: tuple[str, ...]
+    #: Subset of ``profiles`` whose verdict was neither ``NO_CHANGE`` nor
+    #: ``COMPATIBLE`` (i.e. contributed a break, source break, or risk
+    #: finding) — deliberately excludes an *unavailable* profile (no
+    #: verdict at all is a coverage gap, not "this profile is affected").
+    affected_profiles: tuple[str, ...]
+    #: profile -> verdict value, or ``None`` when that profile's target
+    #: report is unavailable.
+    verdict_by_profile: dict[str, str | None]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "base_target": self.base_target,
+            "profiles": list(self.profiles),
+            "affected_profiles": list(self.affected_profiles),
+            "verdict_by_profile": dict(self.verdict_by_profile),
+        }
+
+
+#: Verdicts that do NOT make a profile "affected" in the profile matrix.
+_UNAFFECTED_VERDICTS = frozenset({Verdict.NO_CHANGE, Verdict.COMPATIBLE})
 
 
 @dataclass(frozen=True)
@@ -459,6 +571,50 @@ class AggregateResult:
     def passed(self) -> bool:
         return self.exit_code() == 0
 
+    # --- profile matrix (status-review item 5) ------------------------------
+    @property
+    def profile_matrix(self) -> tuple[ProfileMatrixEntry, ...]:
+        """Group every expected target sharing a :attr:`TargetReport.base_target`
+        (the same logical target checked under different profiles) into one
+        entry each. Only targets whose ``target_id`` is ``check_id``-shaped
+        (carries a parseable ``profile_id``) participate — a target with no
+        profile encoding has nothing to group by, so it is silently excluded
+        here (it is still fully represented in :attr:`targets`). Empty when
+        no target in this result carries a ``profile_id`` (the common
+        single-profile case), not an error. ``unexpected_targets`` are not
+        grouped — a not-in-manifest report is a different axis entirely.
+        """
+        by_target: dict[str, dict[str, TargetReport]] = {}
+        for t in self.targets:
+            pid = t.profile_id
+            if pid is None:
+                continue
+            by_target.setdefault(t.base_target, {})[pid] = t
+
+        entries = []
+        for base_target in sorted(by_target):
+            reports = by_target[base_target]
+            profiles = tuple(sorted(reports))
+            affected = tuple(
+                pid
+                for pid in profiles
+                if reports[pid].compatibility_verdict is not None
+                and reports[pid].compatibility_verdict not in _UNAFFECTED_VERDICTS
+            )
+            verdict_by_profile: dict[str, str | None] = {}
+            for pid in profiles:
+                v = reports[pid].compatibility_verdict
+                verdict_by_profile[pid] = v.value if v is not None else None
+            entries.append(
+                ProfileMatrixEntry(
+                    base_target=base_target,
+                    profiles=profiles,
+                    affected_profiles=affected,
+                    verdict_by_profile=verdict_by_profile,
+                )
+            )
+        return tuple(entries)
+
     # --- rendering ----------------------------------------------------------
     def render_text(self) -> str:
         required_total = sum(1 for t in self.targets if t.required)
@@ -486,6 +642,23 @@ class AggregateResult:
         lines.append("")
         lines.append("Compatibility:")
         lines.append("  " + self._render_compatibility_line())
+
+        matrix = self.profile_matrix
+        if matrix:
+            lines.append("")
+            lines.append("Profile matrix:")
+            for entry in matrix:
+                if entry.affected_profiles:
+                    lines.append(
+                        f"  {entry.base_target}: affected on "
+                        f"{', '.join(entry.affected_profiles)} "
+                        f"(checked on {', '.join(entry.profiles)})"
+                    )
+                else:
+                    lines.append(
+                        f"  {entry.base_target}: clean on all checked profiles "
+                        f"({', '.join(entry.profiles)})"
+                    )
 
         lines.append("Coverage:")
         if self.coverage is CoverageStatus.COMPLETE:
@@ -594,6 +767,7 @@ class AggregateResult:
             },
             "targets": [t.to_dict() for t in self.targets],
             "unexpected_targets": [t.to_dict() for t in self.unexpected_targets],
+            "profile_matrix": [e.to_dict() for e in self.profile_matrix],
         }
 
 

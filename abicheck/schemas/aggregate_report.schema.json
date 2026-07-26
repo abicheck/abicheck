@@ -92,6 +92,11 @@
       "type": "array",
       "description": "Reports for target ids not in the expected set (a matrix leg the manifest has not caught up to).",
       "items": {"$ref": "#/$defs/target"}
+    },
+    "profile_matrix": {
+      "type": "array",
+      "description": "Added in schema 1.1 (status-review item 5): every distinct base_target among `targets` whose target_id is check_id-shaped (ADR-047 §7 target@profile#baseline_channel@requested_depth), grouped across the profiles that checked it — so a project running one target under several toolchain profiles sees one logical entry instead of unrelated-looking target rows. Empty when no target carries a parseable profile (the common single-profile case).",
+      "items": {"$ref": "#/$defs/profile_matrix_entry"}
     }
   },
   "$defs": {
@@ -110,11 +115,38 @@
           "anyOf": [{"type": "null"}, {"$ref": "#/$defs/gate"}]
         },
         "unexpected": {"type": "boolean"},
+        "profile_id": {
+          "type": "string",
+          "description": "Added in schema 1.1: the profile component of a check_id-shaped target_id — absent when target_id doesn't follow that shape."
+        },
         "report_path": {"type": "string"},
         "library": {"type": "string"},
         "reason": {
           "type": "string",
           "description": "Present when the target is unavailable — why it could not be analyzed."
+        }
+      }
+    },
+    "profile_matrix_entry": {
+      "type": "object",
+      "description": "Added in schema 1.1. One logical target's outcome across every profile that checked it.",
+      "required": ["base_target", "profiles", "affected_profiles", "verdict_by_profile"],
+      "properties": {
+        "base_target": {"type": "string"},
+        "profiles": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Every profile that reported for this target, sorted."
+        },
+        "affected_profiles": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Subset of profiles whose verdict was neither NO_CHANGE nor COMPATIBLE."
+        },
+        "verdict_by_profile": {
+          "type": "object",
+          "additionalProperties": {"type": ["string", "null"]},
+          "description": "profile -> verdict value, or null when that profile's target report is unavailable."
         }
       }
     },

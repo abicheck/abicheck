@@ -37,6 +37,7 @@ from abicheck.aggregate import (
     OnMissingRequired,
     OnUnexpectedTarget,
     aggregate_reports_dir,
+    parse_check_id,
     parse_report_verdict,
     target_id_from_path,
 )
@@ -629,7 +630,7 @@ class TestRendering:
     def test_json_schema_shape(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         d = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS)).to_dict()
-        assert d["aggregate_schema_version"] == "1.0"
+        assert d["aggregate_schema_version"] == "1.1"
         assert d["status"] == "fail"
         assert d["gate"]["exit_code"] == 1
         assert d["gate"]["coverage_blocking"] is True
@@ -718,6 +719,105 @@ class TestRendering:
             on_unexpected_target=OnUnexpectedTarget.FAIL,
         ).render_text()
         assert f"unexpected target(s) present: {MACOS}" in text
+
+
+class TestProfileMatrix:
+    """Status-review item 5: affected_profiles / profile-level dedup —
+    ``check_id``-shaped ``target_id``s (ADR-047 §7:
+    ``target@profile#baseline_channel@requested_depth``) group back to one
+    logical target across profiles instead of showing unrelated-looking
+    target rows."""
+
+    def test_parse_check_id_roundtrips(self) -> None:
+        parsed = parse_check_id("libfoo@linux-gcc14#release@headers")
+        assert parsed is not None
+        assert parsed.target == "libfoo"
+        assert parsed.profile == "linux-gcc14"
+        assert parsed.baseline_channel == "release"
+        assert parsed.requested_depth == "headers"
+
+    def test_parse_check_id_rejects_non_check_id_shaped(self) -> None:
+        assert parse_check_id("linux-x86_64") is None
+        assert parse_check_id("abi-report-linux-x86_64") is None
+
+    def test_target_report_profile_id_and_base_target(self, tmp_path: Path) -> None:
+        _write_report(tmp_path, "libfoo@linux-gcc14#release@headers", "BREAKING")
+        r = aggregate_reports_dir(
+            tmp_path, expected=_expect("libfoo@linux-gcc14#release@headers")
+        )
+        (t,) = r.targets
+        assert t.profile_id == "linux-gcc14"
+        assert t.base_target == "libfoo"
+
+    def test_bare_target_id_has_no_profile(self, tmp_path: Path) -> None:
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        (t,) = r.targets
+        assert t.profile_id is None
+        assert t.base_target == LINUX
+        assert r.profile_matrix == ()
+
+    def test_profile_matrix_groups_by_base_target(self, tmp_path: Path) -> None:
+        gcc = "libfoo@linux-gcc14#release@headers"
+        clang = "libfoo@linux-clang20#release@headers"
+        msvc = "libfoo@windows-msvc#release@headers"
+        _write_report(tmp_path, gcc, "BREAKING")
+        _write_report(tmp_path, clang, "BREAKING")
+        _write_report(tmp_path, msvc, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(gcc, clang, msvc))
+        (entry,) = r.profile_matrix
+        assert entry.base_target == "libfoo"
+        assert entry.profiles == ("linux-clang20", "linux-gcc14", "windows-msvc")
+        assert entry.affected_profiles == ("linux-clang20", "linux-gcc14")
+        assert entry.verdict_by_profile == {
+            "linux-gcc14": "BREAKING",
+            "linux-clang20": "BREAKING",
+            "windows-msvc": "COMPATIBLE",
+        }
+
+    def test_profile_matrix_marks_unavailable_profile_not_affected(
+        self, tmp_path: Path
+    ) -> None:
+        gcc = "libfoo@linux-gcc14#release@headers"
+        msvc = "libfoo@windows-msvc#release@headers"
+        _write_report(tmp_path, gcc, "BREAKING")
+        # msvc never reports — unavailable, not "affected".
+        r = aggregate_reports_dir(tmp_path, expected=_expect(gcc, msvc))
+        (entry,) = r.profile_matrix
+        assert entry.affected_profiles == ("linux-gcc14",)
+        assert entry.verdict_by_profile["windows-msvc"] is None
+
+    def test_profile_matrix_json_and_text(self, tmp_path: Path) -> None:
+        gcc = "libfoo@linux-gcc14#release@headers"
+        clang = "libfoo@linux-clang20#release@headers"
+        _write_report(tmp_path, gcc, "BREAKING")
+        _write_report(tmp_path, clang, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(gcc, clang))
+        d = r.to_dict()
+        assert d["profile_matrix"] == [
+            {
+                "base_target": "libfoo",
+                "profiles": ["linux-clang20", "linux-gcc14"],
+                "affected_profiles": ["linux-gcc14"],
+                "verdict_by_profile": {
+                    "linux-clang20": "COMPATIBLE",
+                    "linux-gcc14": "BREAKING",
+                },
+            }
+        ]
+        text = r.render_text()
+        assert "Profile matrix:" in text
+        assert "libfoo: affected on linux-gcc14" in text
+
+    def test_profile_matrix_all_clean_renders_distinctly(self, tmp_path: Path) -> None:
+        gcc = "libfoo@linux-gcc14#release@headers"
+        clang = "libfoo@linux-clang20#release@headers"
+        _write_report(tmp_path, gcc, "COMPATIBLE")
+        _write_report(tmp_path, clang, "COMPATIBLE")
+        text = aggregate_reports_dir(
+            tmp_path, expected=_expect(gcc, clang)
+        ).render_text()
+        assert "libfoo: clean on all checked profiles" in text
 
 
 class TestAggregateCLI:

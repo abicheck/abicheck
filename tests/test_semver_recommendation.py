@@ -129,10 +129,28 @@ def test_to_dict_keys() -> None:
     d = rec.to_dict()
     assert d == {
         "version_bump": "major",
+        "possible_impact": "major",
         "soname_action": "bump_required",
         "rationale": "because",
         "state": "actionable",
     }
+
+
+def test_possible_impact_survives_when_version_bump_is_nulled() -> None:
+    """``possible_impact`` (schema 2.22) is the machine-readable escape hatch
+    for "what would abicheck recommend if this were confirmed" — distinct
+    from ``version_bump``, which is deliberately withheld (``null``) when
+    ``state`` is ``UNAVAILABLE`` so automation can't blindly act on it."""
+    rec = ReleaseRecommendation(
+        SemverBump.MAJOR,
+        SonameAction.NOT_DETERMINED,
+        "because",
+        state=ReleaseRecommendationState.UNAVAILABLE,
+    )
+    d = rec.to_dict()
+    assert d["version_bump"] is None
+    assert d["possible_impact"] == "major"
+    assert d["state"] == "unavailable"
 
 
 def test_headline_mentions_soname_only_when_relevant() -> None:

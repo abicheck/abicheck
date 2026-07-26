@@ -660,10 +660,17 @@ route to a human), or `unavailable` (abicheck had no binary evidence at all
 to back a confident bump — **`version_bump` is `null`**, not a
 plausible-looking string, so automation that reads `version_bump` without
 checking `state` first can silently treat a real, unconfirmed break as "no
-action needed" or crash on the unexpected `null`). `rationale` always
-explains what abicheck would still recommend even when `state` isn't
-`actionable`. See the compare-report
-[JSON Schema](../reference/schemas/v1/compare_report.schema.json)'s
+action needed" or crash on the unexpected `null`).
+
+`possible_impact` is always a non-null string — the bump abicheck would
+recommend if its evidence were sufficient to confirm one. It equals
+`version_bump` when `state` is `actionable`; for `review`/`unavailable` it is
+the machine-readable form of what `rationale` prose already says (e.g. sizing
+a human-review queue), **not** a substitute for checking `state` before
+acting — an automated release job must still gate on `version_bump`/`state`,
+never on `possible_impact` alone. `rationale` always explains what abicheck
+would still recommend even when `state` isn't `actionable`. See the
+compare-report [JSON Schema](../reference/schemas/v1/compare_report.schema.json)'s
 `release_recommendation` object for the full field contract.
 
 ---
