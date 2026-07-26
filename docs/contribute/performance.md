@@ -478,7 +478,7 @@ replay **scope** (`changed`/`target`), both already in place.
 
 ### `--budget` mid-step preemption gap (found live, pvxs full-version-matrix scan)
 
-Real-world evidence (`validation/pvxs-main-scan-2026-07-26.md`): `scan --depth
+Real-world evidence: `scan --depth
 source` on a real 62-TU library, `--ast-frontend clang` (no castxml on that
 host), did not complete within a 3+ minute `--budget` on a 4-core host — RSS
 climbed past 4.9 GiB before an *external* kill, with no indication `--budget`
