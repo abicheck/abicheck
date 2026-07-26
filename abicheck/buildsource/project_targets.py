@@ -455,15 +455,19 @@ class BundleSpec:
 #: ``--config-system-dir=``/``--config-user-dir=``, which redirect where an
 #: implicit/explicit config file is looked up), or substitutes the
 #: compiler driver's own trusted built-in command line for one read from
-#: disk (``-specs=``/``-wrapper``). ``profiles.<id>.compile.args`` is documented
-#: (this module's docstring, ``ProfileCompileSpec``'s own docstring) as a
-#: "normalized extra args" escape hatch for ABI-relevant flags an
-#: auto-discovered, untrusted ``.abicheck.yml`` may declare — never an
-#: executable-code path. Checked as an exact match or a prefix (for the
-#: ``=``-joined spellings) against each ``args`` atom; case-sensitive,
-#: matching how compiler CLIs themselves parse these flags. (Codex review,
-#: PR #639: the initial denylist omitted ``--config``, which could
-#: reintroduce a blocked ``-fplugin=`` argument via a config file.)
+#: disk (``-specs=``/``--specs=`` -- GCC's driver accepts both spellings,
+#: translating the GNU-style ``--specs`` long-option form to ``-specs``
+#: internally, so both must be blocked -- and ``-wrapper``).
+#: ``profiles.<id>.compile.args`` is documented (this module's docstring,
+#: ``ProfileCompileSpec``'s own docstring) as a "normalized extra args"
+#: escape hatch for ABI-relevant flags an auto-discovered, untrusted
+#: ``.abicheck.yml`` may declare — never an executable-code path. Checked as
+#: an exact match or a prefix (for the ``=``-joined spellings) against each
+#: ``args`` atom; case-sensitive, matching how compiler CLIs themselves
+#: parse these flags. (Codex review, PR #639: the initial denylist omitted
+#: ``--config``, which could reintroduce a blocked ``-fplugin=`` argument
+#: via a config file, and omitted the ``--specs`` double-dash spelling of
+#: ``-specs``, which GCC accepts identically.)
 _DANGEROUS_ARG_PREFIXES = (
     "-Xclang",
     "-load",
@@ -472,6 +476,8 @@ _DANGEROUS_ARG_PREFIXES = (
     "-fpass-plugin=",
     "-specs=",
     "-specs",
+    "--specs=",
+    "--specs",
     "-wrapper",
     "--config",
     "@",

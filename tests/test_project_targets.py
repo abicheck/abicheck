@@ -1617,6 +1617,8 @@ def test_profile_compile_overlay_rejects_whitespace_injection_in_abi_macros() ->
         "-fpass-plugin=./evil.so",
         "-specs=evil.specs",
         "-specs",
+        "--specs=evil.specs",
+        "--specs",
         "-wrapper",
         "@evil-response-file",
         "--config",

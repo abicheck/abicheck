@@ -12,16 +12,17 @@
   `version_bump`'s enum now includes `null`).
 - **`profiles.<id>.compile.args` (`.abicheck.yml`) now rejects flags that
   reach a compiler's plugin/response-file/spec-substitution machinery**
-  (`-Xclang`, `-load`, `-fplugin=`, `-fpass-plugin=`, `-specs=`,
+  (`-Xclang`, `-load`, `-fplugin=`, `-fpass-plugin=`, `-specs=`/`--specs=`,
   `-wrapper`, `--config`, `@response-file`). The existing whitespace-
   smuggling check only rejected one YAML scalar expanding into multiple
   argv tokens; each of these is a single, whitespace-free atom and passed
   through untouched, even though this field is documented as a normalized
   ABI-flag escape hatch for untrusted, auto-discovered config — never
-  executable configuration. (`--config` added after review: Clang's
-  `--config=<file>` loads a file of additional command-line options and
-  could otherwise reintroduce a blocked `-fplugin=` past this same
-  denylist.)
+  executable configuration. (`--config` and the `--specs` double-dash
+  spelling added after review: Clang's `--config=<file>` loads a file of
+  additional command-line options and GCC accepts `--specs=` identically to
+  `-specs=` — either could otherwise reintroduce a blocked argument past
+  this same denylist.)
 - **`run-plan generate`'s composed `compile_gcc_options` no longer emits
   `-stdlib=`/`--target=` for a profile declaring `compile.compiler_family:
   gcc`.** Both are Clang-driver-only spellings a real GCC binary rejects
