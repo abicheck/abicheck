@@ -296,29 +296,42 @@ class TestUnknownSelectorLayer:
     # than silently vanish from resolution (BUILT_IN_DEFAULT always matches
     # some tier, so the unknown-layer candidate would otherwise just be
     # dropped with no error).
+    #
+    # ValueProvenance.__post_init__ now validates layer is a real
+    # SelectorLayer member at construction time (Codex review), so neither
+    # scenario below can be reached by constructing a ValueProvenance
+    # normally anymore -- test_compatibility_evaluation_config.py's
+    # TestValueProvenance.test_raw_string_layer_is_rejected already covers
+    # that construction-time rejection. resolve_field's own _KNOWN_LAYERS
+    # guard is still real defense-in-depth, though: a ValueProvenance built
+    # before SelectorLayer gains a genuinely new member (frozen dataclasses
+    # can still be corrupted via object.__setattr__, and any future
+    # non-constructor path -- deserialization, a cached/pickled object --
+    # isn't guaranteed to go through __post_init__) would reach it with a
+    # real enum-shaped layer _PRECEDENCE_TIERS doesn't recognize yet.
+    # Bypass construction validation via object.__setattr__ (frozen
+    # dataclasses still allow this) to keep exercising that guard directly.
     class _FutureLayer:
         name = "FUTURE_ADAPTER"
         value = "future_adapter"
 
     def test_candidate_outside_all_precedence_tiers_raises(self):
-        bad_candidate = FieldCandidate(
-            provenance=ValueProvenance(layer=self._FutureLayer()),  # type: ignore[arg-type]
-            value=ContractMode.PUBLIC,
-        )
+        provenance = ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI)
+        object.__setattr__(provenance, "layer", self._FutureLayer())
+        bad_candidate = FieldCandidate(provenance=provenance, value=ContractMode.PUBLIC)
         with pytest.raises(ValueError, match="not represented in any"):
             resolve_field("contract.mode", [bad_candidate], default=_default())
 
     def test_typo_string_layer_raises_value_error_not_attribute_error(self):
-        # ValueProvenance.layer's SelectorLayer annotation isn't
-        # runtime-enforced -- an untyped API/manifest adapter could pass a
-        # plain, typo'd string through. Formatting used to assume `.name`
-        # exists (true for a real/duck-typed enum, false for a bare str),
-        # crashing with AttributeError instead of the documented ValueError
-        # (Codex review).
-        bad_candidate = FieldCandidate(
-            provenance=ValueProvenance(layer="explict_cli"),  # type: ignore[arg-type]
-            value=ContractMode.PUBLIC,
-        )
+        # Formatting used to assume `.name` exists (true for a real/
+        # duck-typed enum, false for a bare str), crashing with
+        # AttributeError instead of the documented ValueError (Codex
+        # review). getattr falls back to repr() for anything without a
+        # `.name` attribute -- still worth guarding even though
+        # ValueProvenance's own constructor now rejects this input first.
+        provenance = ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI)
+        object.__setattr__(provenance, "layer", "explict_cli")
+        bad_candidate = FieldCandidate(provenance=provenance, value=ContractMode.PUBLIC)
         with pytest.raises(ValueError, match="not represented in any"):
             resolve_field("contract.mode", [bad_candidate], default=_default())
 

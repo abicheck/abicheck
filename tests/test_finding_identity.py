@@ -125,6 +125,26 @@ class TestNormalizeMangledName:
             == "_ZN6Widget8getValueEv"
         )
 
+    def test_local_name_is_accepted(self) -> None:
+        # <local-name> ::= Z <function encoding> E <entity name>
+        assert (
+            normalize_mangled_name("_ZZ4mainEN4Test1xE", None) == "_ZZ4mainEN4Test1xE"
+        )
+
+    def test_nested_name_with_no_terminator_is_rejected(self) -> None:
+        # Codex review: rest[0] in "NZ" previously accepted any N/Z-prefixed
+        # string outright with no structural check at all -- both
+        # <nested-name> and <local-name> always terminate with a literal
+        # "E" after at least one component, so "_ZNonsense" (no E at all)
+        # and "_ZN" (nothing after N) are not real Itanium encodings despite
+        # structurally passing the coarser _Z + character-class check.
+        assert normalize_mangled_name("_ZNonsense", "_ZNonsense") is None
+        assert normalize_mangled_name("_ZN", "_ZN") is None
+
+    def test_local_name_with_no_terminator_is_rejected(self) -> None:
+        assert normalize_mangled_name("_ZZnonsense", "_ZZnonsense") is None
+        assert normalize_mangled_name("_ZZ", "_ZZ") is None
+
     def test_std_substitution_abbreviated_name_is_accepted(self) -> None:
         assert normalize_mangled_name("_ZSt3foo", None) == "_ZSt3foo"
 

@@ -213,7 +213,15 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
     if rest[0].isdigit():  # <source-name>: digit-prefixed length
         return _valid_source_name(rest)
     if rest[0] in "NZ":  # <nested-name> / <local-name>
-        return True
+        # Both productions (`N...E`, `Z<encoding>E...`) terminate with a
+        # literal 'E' after at least one non-empty component -- a bare "N"
+        # or content with no terminator at all (e.g. "_ZNonsense", "_ZN")
+        # was previously accepted outright regardless of structure (Codex
+        # review). Does not validate that everything between N/Z and E is
+        # itself well-formed -- that is the unbounded full-grammar case
+        # this heuristic deliberately doesn't attempt (see this function's
+        # docstring on its accepted boundary).
+        return rest.find("E", 1) > 1
     if rest[0] == "L" and len(rest) > 1 and rest[1].isdigit():
         # GCC internal-linkage prefix (_ZL7g_count) + <source-name>
         return _valid_source_name(rest[1:])
