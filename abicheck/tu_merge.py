@@ -561,7 +561,7 @@ def _blank_provenance(entity: _T) -> _T:
 
     Every one of the four model types this module compares
     (:class:`Function`/:class:`Variable`/:class:`RecordType`/:class:`EnumType`)
-    carries these same three provenance fields (ADR-015 schema v6). They
+    carries these same provenance fields (ADR-015 schema v6). They
     legitimately differ across TUs for what is otherwise the very same
     declaration -- each TU force-includes its own header file, so a
     genuinely identical redeclaration still has a different
