@@ -19,14 +19,21 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.compatibility_evaluation_config import ValueProvenance
+from abicheck.change_registry_types import Verdict
+from abicheck.compatibility_evaluation_config import ImmutableIdentity, ValueProvenance
 from abicheck.compatibility_evaluation_resolver import (
     ConflictingFieldValuesError,
     FieldCandidate,
     LegacyAliasConflictError,
+    PackConflictError,
+    detect_pack_conflicts,
     resolve_field,
 )
 from abicheck.contract_relevance_types import ContractMode, SelectorLayer
+
+
+def _pack(id: str, version: int = 1, sha256: str = "test-digest") -> ImmutableIdentity:
+    return ImmutableIdentity(id=id, version=version, sha256=sha256)
 
 
 def _candidate(layer: SelectorLayer, value, **provenance_kwargs) -> FieldCandidate:
@@ -298,3 +305,96 @@ class TestUnknownSelectorLayer:
         )
         with pytest.raises(ValueError, match="not represented in any"):
             resolve_field("contract.mode", [bad_candidate], default=_default())
+
+
+class TestDetectPackConflicts:
+    # ADR-049 D8: "Two selected packs that assign incompatible values to the
+    # same field or ChangeKind are a usage error until an explicit final
+    # override resolves the conflict. Pack order never decides semantics."
+    def test_no_packs_is_fine(self):
+        assert detect_pack_conflicts([]) is None
+
+    def test_single_pack_never_conflicts_with_itself(self):
+        result = detect_pack_conflicts(
+            [(_pack("rust_c_ffi"), {"func_removed": Verdict.BREAKING})]
+        )
+        assert result is None
+
+    def test_two_packs_agreeing_on_a_kind_do_not_conflict(self):
+        result = detect_pack_conflicts(
+            [
+                (_pack("rust_c_ffi"), {"func_removed": Verdict.BREAKING}),
+                (_pack("qt_kde_cpp"), {"func_removed": Verdict.BREAKING}),
+            ]
+        )
+        assert result is None
+
+    def test_two_packs_disagreeing_on_a_kind_raises(self):
+        with pytest.raises(PackConflictError) as exc_info:
+            detect_pack_conflicts(
+                [
+                    (_pack("rust_c_ffi"), {"func_removed": Verdict.BREAKING}),
+                    (_pack("qt_kde_cpp"), {"func_removed": Verdict.COMPATIBLE}),
+                ]
+            )
+        assert exc_info.value.change_kind == "func_removed"
+        assert len(exc_info.value.contributors) == 2
+
+    def test_conflict_report_is_order_independent(self):
+        # "Pack order never decides semantics" -- forward and reversed input
+        # both raise on the same kind, deterministically.
+        a = (_pack("rust_c_ffi"), {"func_removed": Verdict.BREAKING})
+        b = (_pack("qt_kde_cpp"), {"func_removed": Verdict.COMPATIBLE})
+        for ordering in ([a, b], [b, a]):
+            with pytest.raises(PackConflictError) as exc_info:
+                detect_pack_conflicts(ordering)
+            assert exc_info.value.change_kind == "func_removed"
+
+    def test_explicit_override_resolves_the_conflict(self):
+        # D8 composition order: explicit override > selected packs > base
+        # policy -- a kind already covered by policy.overrides is exempt.
+        result = detect_pack_conflicts(
+            [
+                (_pack("rust_c_ffi"), {"func_removed": Verdict.BREAKING}),
+                (_pack("qt_kde_cpp"), {"func_removed": Verdict.COMPATIBLE}),
+            ],
+            explicit_overrides={"func_removed": Verdict.API_BREAK},
+        )
+        assert result is None
+
+    def test_conflict_on_one_kind_does_not_hide_agreement_on_another(self):
+        result = detect_pack_conflicts(
+            [
+                (
+                    _pack("rust_c_ffi"),
+                    {"func_removed": Verdict.BREAKING, "func_added": Verdict.COMPATIBLE},
+                ),
+                (
+                    _pack("qt_kde_cpp"),
+                    {"func_added": Verdict.COMPATIBLE},
+                ),
+            ]
+        )
+        assert result is None
+
+    def test_only_the_conflicting_kind_is_reported(self):
+        with pytest.raises(PackConflictError) as exc_info:
+            detect_pack_conflicts(
+                [
+                    (
+                        _pack("rust_c_ffi"),
+                        {
+                            "func_removed": Verdict.BREAKING,
+                            "func_added": Verdict.COMPATIBLE,
+                        },
+                    ),
+                    (
+                        _pack("qt_kde_cpp"),
+                        {
+                            "func_removed": Verdict.COMPATIBLE,
+                            "func_added": Verdict.COMPATIBLE,
+                        },
+                    ),
+                ]
+            )
+        assert exc_info.value.change_kind == "func_removed"

@@ -60,15 +60,27 @@ fields, the caller declares that per call via ``allow_run_profile``
 (default ``False``): a ``RUN_PROFILE`` candidate for a field that doesn't
 opt in is a caller bug, not a legitimate input, so it raises loudly rather
 than silently taking part in precedence.
+
+:func:`detect_pack_conflicts` implements ADR-049 D8's separate pack-level
+usage error: "Two selected packs that assign incompatible values to the
+same field or ChangeKind are a usage error until an explicit final override
+resolves the conflict. Pack order never decides semantics." Like
+``resolve_field``, it is pure logic over already-resolved input -- callers
+supply each selected pack's identity paired with its own resolved
+ChangeKind-slug -> Verdict override mapping; how that content is loaded
+(a future pack-manifest format) is a front end's job this module doesn't
+own.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Hashable, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 
-from .compatibility_evaluation_config import ValueProvenance
+from .change_registry_types import Verdict
+from .compatibility_evaluation_config import ImmutableIdentity, ValueProvenance
 from .contract_relevance_types import SelectorLayer
 
 # D7: "explicit CLI or explicit API request for the field/manifest" are the
@@ -267,3 +279,64 @@ def resolve_field(
     raise AssertionError(  # pragma: no cover - default always matches a tier
         f"{field_name}: no candidate matched any precedence tier"
     )
+
+
+class PackConflictError(ValueError):
+    """Two selected packs assign different values to the same ChangeKind.
+
+    ADR-049 D8: "Two selected packs that assign incompatible values to the
+    same field or ChangeKind are a usage error until an explicit final
+    override resolves the conflict."
+    """
+
+    def __init__(
+        self, change_kind: str, contributors: Sequence[tuple[ImmutableIdentity, Verdict]]
+    ) -> None:
+        self.change_kind = change_kind
+        self.contributors = tuple(contributors)
+        packs = ", ".join(
+            f"{identity.id}@{identity.version} -> {verdict.value}"
+            for identity, verdict in sorted(
+                self.contributors, key=lambda c: (c[0].id, c[0].version, c[0].sha256)
+            )
+        )
+        super().__init__(
+            f"{change_kind!r}: conflicting values from selected packs "
+            f"({packs}) (ADR-049 D8) -- add an explicit policy.overrides "
+            f"entry for {change_kind!r} to resolve the conflict"
+        )
+
+
+def detect_pack_conflicts(
+    pack_overrides: Sequence[tuple[ImmutableIdentity, Mapping[str, Verdict]]],
+    *,
+    explicit_overrides: Mapping[str, Verdict] = MappingProxyType({}),
+) -> None:
+    """Raise :class:`PackConflictError` if two selected packs disagree.
+
+    ``pack_overrides`` pairs each selected pack's :class:`ImmutableIdentity`
+    with its own resolved ``ChangeKind`` slug -> :class:`Verdict` override
+    mapping. ``explicit_overrides`` is the effective config's own
+    ``policy.overrides`` (ADR-049 D8 composition order: "explicit
+    per-ChangeKind override > selected packs > base policy") -- a
+    ``ChangeKind`` already covered there is exempt from conflict detection,
+    since the explicit override already resolves any pack-vs-pack
+    disagreement on that kind.
+
+    Two packs that assign the *same* verdict to the same kind never
+    conflict (equivalent duplicates are fine, mirroring D7's rule for
+    field-level candidates). Iteration and error ordering are both
+    key-sorted, so which conflict is detected first never depends on
+    ``pack_overrides`` input order ("pack order never decides semantics").
+    """
+    by_kind: dict[str, list[tuple[ImmutableIdentity, Verdict]]] = {}
+    for identity, overrides in pack_overrides:
+        for change_kind, verdict in overrides.items():
+            by_kind.setdefault(change_kind, []).append((identity, verdict))
+
+    for change_kind in sorted(by_kind):
+        if change_kind in explicit_overrides:
+            continue
+        contributors = by_kind[change_kind]
+        if len({verdict for _, verdict in contributors}) > 1:
+            raise PackConflictError(change_kind, contributors)
