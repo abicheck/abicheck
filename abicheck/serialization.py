@@ -154,7 +154,16 @@ from .model import (
 #     — see `AbiSnapshot`'s own field docstring. Purely additive: a pre-v16
 #     reader loads both as their conservative "not recorded" defaults
 #     (`None` / `()`).
-SCHEMA_VERSION: int = 16
+# v17: `AbiSnapshot.frontend_context_kind` (ADR-050 D5, G32 Phase D) — which
+#     SYCL/DPC++ AST pass ("host"/"device") a header-AST snapshot was built
+#     from, threaded through from `sycl_context.py`'s selector. Purely
+#     additive: a pre-v17 reader loads it as its default (`None`), i.e. "not
+#     recorded" — the same conservative default a non-SYCL snapshot always
+#     had. Bumped (rather than left at v16) so a pre-v17 reader gets the
+#     usual version-mismatch `UserWarning` instead of silently discarding
+#     this provenance on re-save, matching every other purely-additive bump
+#     from v9 onward (Codex review, PR #636).
+SCHEMA_VERSION: int = 17
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9

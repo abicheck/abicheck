@@ -142,6 +142,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   on its own to erase a hand-picked timing margin, while the old
   C-level-dominated cost was largely unaffected by the same tracing (Codex
   review).
+- `AbiSnapshot.frontend_context_kind` was added without bumping
+  `serialization.SCHEMA_VERSION` — every other purely-additive snapshot
+  field from v9 onward (including this same PR's own `dwarf_layout_
+  coherence`/`dwarf_layout_coherence_mismatches` at v16) got its own bump
+  specifically so a pre-bump reader gets `snapshot_from_dict`'s usual
+  version-mismatch `UserWarning` instead of silently discarding the new
+  field on re-save. Bumped to `SCHEMA_VERSION = 17` (Codex review).
 - `service_dump_cache._manifest_cache_paths`/`manifest_tu_scope_field`
   together only ever see a manifest's `roots` as membership in a
   deduplicated, role-blind flattened header list shared with every TU's
