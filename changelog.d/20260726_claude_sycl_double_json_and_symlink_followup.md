@@ -41,9 +41,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   directory at the OS level, not the symlink's own location, so purely
   lexical normalization can misjudge which directory an unresolved
   `../`-bearing search-dir path actually denotes (Codex review, PR #643).
-  `_probe_gnu_system_includes` now classifies `os.path.realpath(d)` instead
-  of the raw reported string — safe since the directory's existence
-  (`Path(d).is_dir()`) is already confirmed by that point — while
-  `_is_gnu_compiler_resource_dir` itself keeps its lexical-only, pure/
-  string-testable contract for callers that don't have (or need) a real
-  path on disk.
+  Classifying only `os.path.realpath(d)` fixes that but reintroduces the
+  opposite failure — a *terminal* symlink at GCC's own canonical resource
+  path (e.g. `.../lib/gcc/<triple>/<ver>/include` symlinked to storage
+  outside any `lib/gcc` hierarchy) loses the lexical evidence that this is
+  GCC's resource dir, so `_probe_gnu_system_includes` now rejects a
+  directory when *either* the raw reported string or its
+  `os.path.realpath(d)` classifies as a resource dir — safe since the
+  directory's existence (`Path(d).is_dir()`) is already confirmed by that
+  point — while `_is_gnu_compiler_resource_dir` itself keeps its
+  lexical-only, pure/string-testable contract for callers that don't have
+  (or need) a real path on disk.
