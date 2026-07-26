@@ -1034,7 +1034,29 @@ Once a root command genuinely clears the bar above, pick the right home:
   `std::`-namespaced MSVC-mangled free function that would otherwise have
   bypassed the guard identically to the Mach-O case above.
 
+  **A ninth finding pointed at an asymmetry in the typedef-spelling
+  ambiguity guard, not a mangling gap.** `_typedef_spelling_targets()`
+  registers every *derived* candidate spelling (a stdlib-stripped or
+  namespace-suffix form of a typedef key) only after checking it against
+  `_non_stdlib_signature_spellings()` — but the typedef's own *exact* key
+  was registered unconditionally, with no equivalent guard (Codex review,
+  fresh evidence). The already-documented direct-clang typedef-scope-loss
+  gap above (`parse_typedefs()` storing only the bare `node["name"]`) means
+  an exact key like `"Alias"` can itself collide with an unrelated
+  non-stdlib record's own bare signature spelling — e.g. a global `struct
+  Alias {};` sharing the same name as a namespaced `namespace api { using
+  Alias = std::string; }` whose `api::` the producer already dropped.
+  Confirmed empirically: `directly_referenced_stdlib_types()` incorrectly
+  returned `{"std::string"}` for a public function taking the unrelated
+  `Alias` record by value, purely because of the same-named, unrelated
+  typedef. Fixed by applying the identical `non_stdlib_spellings` guard to
+  the exact-key registration, matching how a colliding derived candidate is
+  already skipped — the spelling belongs to the real record, so the
+  typedef contributes nothing for it, rather than competing through the
+  ambiguity-resolution machinery.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
+  `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a
   std:: record that set names, instead of blanket-filtering every std::

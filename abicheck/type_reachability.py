@@ -433,11 +433,29 @@ def _typedef_spelling_targets(
     non-stdlib reference or fabricating a stdlib one. Both contribute to
     the same per-spelling target set; a spelling resolves only when every
     contributing source agrees on exactly one target.
+
+    An *exact* key is also checked against ``non_stdlib_spellings`` before
+    being registered at all, the same guard every derived candidate already
+    goes through (Codex review, fresh evidence): the direct-clang backend's
+    own typedef-scope-loss (a namespaced ``namespace api { using Alias =
+    std::string; }`` is stored under the bare key ``"Alias"``, losing
+    ``api::``) can make an exact typedef key collide with an unrelated
+    non-stdlib record's own signature spelling — e.g. a global ``struct
+    Alias {};`` sharing the identical bare name. Registering the exact key
+    unconditionally let a public function taking that unrelated ``Alias``
+    record by value resolve through the typedef target instead of the real
+    record, incorrectly marking the typedef's stdlib target (e.g.
+    ``std::string``) reachable. Skipping the exact key's registration
+    entirely when it collides (rather than letting it compete for
+    ambiguity resolution) matches how a colliding *derived* candidate is
+    already handled: the spelling belongs to the real record, not to this
+    typedef, so the typedef contributes nothing for it.
     """
     non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
     targets_by_spelling: dict[str, set[str]] = {}
     for key, target in typedefs.items():
-        targets_by_spelling.setdefault(key, set()).add(target)
+        if key not in non_stdlib_spellings:
+            targets_by_spelling.setdefault(key, set()).add(target)
         candidates = {
             c
             for c in (

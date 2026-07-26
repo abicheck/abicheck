@@ -546,3 +546,24 @@
   directly plus an end-to-end owner-seeding guard through
   `directly_referenced_stdlib_types`. Full suite green, 100% module
   coverage, FP-rate gate stays 0 FP/0 FN.
+- **An exact typedef key could collide with an unrelated record's own
+  spelling and resolve the wrong thing** (Codex review, fresh evidence):
+  `_typedef_spelling_targets()` guarded every *derived* candidate spelling
+  against colliding with a non-stdlib record's own signature spelling, but
+  registered the typedef's *exact* key unconditionally, with no equivalent
+  guard. Combined with direct-clang's already-known typedef-scope-loss
+  (`parse_typedefs()` storing only the bare name), an exact key like
+  `"Alias"` could collide with an unrelated non-stdlib record also named
+  `Alias`, resolving a public function taking that record by value through
+  the unrelated typedef instead — confirmed empirically
+  (`directly_referenced_stdlib_types()` incorrectly returned
+  `{"std::string"}` for exactly this collision). Fixed by applying the same
+  `non_stdlib_spellings` guard to the exact-key registration. New
+  regression tests cover both the collision (dropped) and non-colliding
+  (still resolves) cases. Also split `tests/test_type_reachability.py`
+  (over the AI-readiness 2000-line hard cap after this round's additions)
+  into a new sibling `tests/test_type_reachability_mangling.py` holding the
+  mangled-name-derived reachability tests (namespace-suffix spellings,
+  Itanium/Mach-O/MSVC mangled-name recovery, and their ambiguity guards) —
+  a pure file split, no test behavior changed. Full suite green, 100%
+  module coverage, FP-rate gate stays 0 FP/0 FN.
