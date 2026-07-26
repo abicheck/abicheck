@@ -1,30 +1,117 @@
-# case157_inline_function_removed — Public inline function removed
+# Case 157: Inline Function Removed
 
-**Verdict:** 🟠 API_BREAK · **Finding:** `inline_function_removed` · **Evidence tier:** L4
+**Category:** Build/Source Evidence (L4) | **Verdict:** 🟠 API_BREAK
 
-> These cases ship a hand-built pair of evidence-model fixtures (`old.json` +
-> `new.json`) instead of compiled `v1`/`v2` binaries, so the corpus is validated
-> compiler-free by `tests/test_l3l4l5_examples.py`. See
-> [`scripts/gen_l3l4l5_examples.py`](../../scripts/gen_l3l4l5_examples.py).
+> This case ships a hand-built pair of evidence-model fixtures (`old.json` +
+> `new.json` — `SourceAbiSurface` dumps) instead of compilable `v1`/`v2`
+> sources, so the corpus is also validated compiler-free by
+> `tests/test_l3l4l5_examples.py` (which calls `diff_source_abi` on the same
+> two files directly). See
+> [`scripts/gen_l3l4l5_examples.py`](../../scripts/gen_l3l4l5_examples.py)
+> for how they were generated.
 
-## What it demonstrates
+## Verdict and consumer impact
 
-The public header-only inline function `demo::clamp` is present in v1 and removed in v2. Source that called the inline no longer compiles.
+The public header-only inline function `demo::clamp` is present in v1 and
+removed in v2. Nothing about the shipped `.so` changes — an inline function
+never had an exported symbol to remove, so the binary is byte-for-byte
+compatible at the ELF/DWARF level. The break is purely at the source level:
+any translation unit that `#include`s the header and calls `clamp()` fails
+to compile against the v2 headers, with no runtime signal at all — recompiling
+against v2 is what surfaces the problem, not deploying it.
 
-## Why no single artifact layer sees it
+## Old/new diff
 
-| Source | What it sees alone |
-|--------|--------------------|
-| Binary (L0/L1) | nothing — the construct leaves no artifact footprint |
-| Header AST (L2) | partial — but source replay is what records this surface authoritatively |
-| **Source replay (L4)** | the per-TU source surface → the finding |
+| v1 source-surface fact | v2 source-surface fact |
+|---|---|
+| `include/demo/math.h:20` — `inline demo::clamp(...)`, public header, body hash `sha256:clampv1` | *(removed — no `inline_bodies` entry)* |
+| `include/demo/keep.h:3` — `demo::keep()`, public header (unrelated, unchanged) | `include/demo/keep.h:3` — `demo::keep()`, unchanged |
 
-Because it was `inline`, the function had no exported binary symbol, so the artifact diff (L0) sees nothing. Only the L4 source-replay surface observes the lost declaration.
+## abicheck command
 
-Per ADR-028 D3 a build/source-evidence finding never decides a shipped-ABI break
-on its own — the artifact diff proves any concrete break; this finding flags the
-elevated risk (or source/API break) and localizes the cause for review.
+```bash
+# old.json / new.json here are this case's committed L4 source-ABI-replay
+# fixtures (SourceAbiSurface dumps, as produced by source-replay extraction
+# over a real source checkout) -- not AbiSnapshot files, so they're supplied
+# to abicheck as an out-of-band --build-info pack rather than as compare's
+# positional inputs.
+mkdir -p pack_old/source pack_new/source
+echo '{"build_source_pack_version": 1}' > pack_old/manifest.json
+echo '{"build_source_pack_version": 1}' > pack_new/manifest.json
+cp old.json pack_old/source/source_abi.json
+cp new.json pack_new/source/source_abi.json
 
-## How to fix
+# Nothing changed at the binary/header level between v1 and v2, so a pair of
+# otherwise-empty snapshots stands in for the (unchanged) artifact side.
+python3 -c "
+from abicheck.model import AbiSnapshot
+from abicheck.serialization import save_snapshot
+save_snapshot(AbiSnapshot(library='libdemo.so', version='1.0'), 'empty_old.json')
+save_snapshot(AbiSnapshot(library='libdemo.so', version='2.0'), 'empty_new.json')
+"
 
-Keep a compatible declaration (it can forward to a replacement), or move the removal behind a documented deprecation window.
+abicheck compare empty_old.json empty_new.json \
+  --build-info old=pack_old --build-info new=pack_new
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: API_BREAK (exit 2)
+
+- inline_function_removed: Public inline function 'demo::clamp' removed
+  (include/demo/math.h:20 [L4_SOURCE_ABI])
+  > It had no exported binary symbol, so only source replay sees the
+    loss; source that called it no longer compiles.
+```
+
+## Minimum evidence
+
+`min_evidence: L4` — the exported-symbol table (L0), DWARF (L1), and even the
+public-header AST (L2) are all blind here: an `inline` function leaves no
+symbol to remove and no size/layout to diff. Only source replay's per-TU
+surface — built by a source extractor (clang, castxml, or the Android
+header-ABI dumper) walking the real translation units — records inline
+function bodies as first-class facts, which is what lets `diff_source_abi`
+see one vanish between releases.
+
+## Why abicheck catches it
+
+`SourceAbiSurface.reachable_source_surface.inline_bodies` carries one entry
+per public inline function reachable from the linked library, keyed by
+qualified name; `diff_source_abi` diffs the two surfaces' `inline_bodies`
+sets directly and reports `inline_function_removed` for any entry present
+in v1 and absent in v2 — the same mechanism DWARF-based detectors use for
+symbols, just at the source-fact layer instead of the binary layer.
+
+## Build/deployment scenario
+
+This is what a CI job that replays two releases' public headers through a
+source extractor (or ingests a captured `abicheck_inputs/` pack from the
+build) would see the moment a header-only inline utility is dropped: `.so`
+symbol tables and DWARF are identical release over release, so a pipeline
+gating only on a binary/DWARF `abicheck compare` would wave this through as
+clean. Only a scan that also collects L4 source-replay evidence over the
+public header tree catches that downstream code including `<demo/math.h>`
+and calling `clamp()` will fail to compile against the new release.
+
+## Safe redesign
+
+Treat a header-only inline function as part of the public API contract, not
+free churn — deprecate it the same way as an exported symbol
+(`[[deprecated("use new_clamp() instead")]]`) for at least one release
+before deleting the declaration, and keep the old inline body forwarding to
+any replacement so existing translation units keep compiling.
+
+**Real-world example:** header-only utility libraries commonly keep a
+deprecated inline shim around specifically to avoid a hard build break for
+consumers who haven't migrated to the replacement yet.
+
+## Cross-tool comparison
+
+Neither `abidiff` nor `abi-compliance-checker` have an operand here: both
+tools diff compiled binaries (plus optional DWARF/headers), and this finding
+is — by construction — invisible at that layer; the whole reason it needs L4
+source-replay evidence is that no built binary or header-AST-only diff can
+see an inline function's body disappear. There's no `.so`/`abidw` XML pair
+to hand either tool for this case.

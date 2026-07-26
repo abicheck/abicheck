@@ -204,13 +204,13 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case154_lto_mode_flip](case154_lto_mode_flip.md) | _lto_mode_flip — LTO mode flip (`-flto`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case155_char_signedness_flip](case155_char_signedness_flip.md) | _char_signedness_flip — Plain-`char` signedness flip (`-fsigned-char` ↔ `-funsigned-char`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case156_public_macro_removed](case156_public_macro_removed.md) | _public_macro_removed — Public macro removed | 🟠 API_BREAK | API Break |
-| [case157_inline_function_removed](case157_inline_function_removed.md) | _inline_function_removed — Public inline function removed | 🟠 API_BREAK | API Break |
-| [case158_public_typedef_removed](case158_public_typedef_removed.md) | _public_typedef_removed — Public typedef removed | 🟠 API_BREAK | API Break |
-| [case160_public_api_internal_dep_added](case160_public_api_internal_dep_added.md) | _public_api_internal_dep_added — Public API newly depends on an internal declaration | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case157_inline_function_removed](case157_inline_function_removed.md) | Inline Function Removed | 🟠 API_BREAK | API Break |
+| [case158_public_typedef_removed](case158_public_typedef_removed.md) | Public Typedef Removed | 🟠 API_BREAK | API Break |
+| [case160_public_api_internal_dep_added](case160_public_api_internal_dep_added.md) | Public API Gains an Internal Dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case161_target_dependency_added](case161_target_dependency_added.md) | _target_dependency_added — New inter-target build/link dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case162_symbol_source_owner_changed](case162_symbol_source_owner_changed.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case163_python_kwarg_renamed](case163_python_kwarg_renamed.md) | Python-API break invisible to the C-ABI check | 🟠 API_BREAK | API Break |
-| [case164_preproc_conditional_field](case164_preproc_conditional_field.md) | Preprocessor-conditional field: a header false positive only build context clears | ✅ NO_CHANGE | No Change |
+| [case163_python_kwarg_renamed](case163_python_kwarg_renamed.md) | Python Keyword Argument Renamed (Stub-Only API Break) | 🟠 API_BREAK | API Break |
+| [case164_preproc_conditional_field](case164_preproc_conditional_field.md) | Preprocessor-Conditional Field (Build-Context False Positive) | ✅ NO_CHANGE | No Change |
 | [case165_polymorphic_nonvirtual_dtor](case165_polymorphic_nonvirtual_dtor.md) | Polymorphic Type Without a Virtual Destructor (New Anti-Pattern) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case166_ref_qualifier_added](case166_ref_qualifier_added.md) | Method Ref-Qualifier Added (`str()` → `str() &`) | 🔴 BREAKING | Breaking |
 | [case167_base_became_virtual](case167_base_became_virtual.md) | Base Class Became Virtual (`: public Device` → `: public virtual Device`) | 🔴 BREAKING | Breaking |

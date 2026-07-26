@@ -416,13 +416,13 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [154](case154_lto_mode_flip/README.md) | _lto_mode_flip — LTO mode flip (`-flto`) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [155](case155_char_signedness_flip/README.md) | _char_signedness_flip — Plain-`char` signedness flip (`-fsigned-char` ↔ `-funsigned-char`) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [156](case156_public_macro_removed/README.md) | _public_macro_removed — Public macro removed | API Break | 🟠 API_BREAK |
-| [157](case157_inline_function_removed/README.md) | _inline_function_removed — Public inline function removed | API Break | 🟠 API_BREAK |
-| [158](case158_public_typedef_removed/README.md) | _public_typedef_removed — Public typedef removed | API Break | 🟠 API_BREAK |
-| [160](case160_public_api_internal_dep_added/README.md) | _public_api_internal_dep_added — Public API newly depends on an internal declaration | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [157](case157_inline_function_removed/README.md) | Inline Function Removed | API Break | 🟠 API_BREAK |
+| [158](case158_public_typedef_removed/README.md) | Public Typedef Removed | API Break | 🟠 API_BREAK |
+| [160](case160_public_api_internal_dep_added/README.md) | Public API Gains an Internal Dependency | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [161](case161_target_dependency_added/README.md) | _target_dependency_added — New inter-target build/link dependency | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [162](case162_symbol_source_owner_changed/README.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | Risk | 🟡 COMPATIBLE_WITH_RISK |
-| [163](case163_python_kwarg_renamed/README.md) | Python-API break invisible to the C-ABI check | API Break | 🟠 API_BREAK |
-| [164](case164_preproc_conditional_field/README.md) | Preprocessor-conditional field: a header false positive only build context clears | No Change | ✅ NO_CHANGE |
+| [163](case163_python_kwarg_renamed/README.md) | Python Keyword Argument Renamed (Stub-Only API Break) | API Break | 🟠 API_BREAK |
+| [164](case164_preproc_conditional_field/README.md) | Preprocessor-Conditional Field (Build-Context False Positive) | No Change | ✅ NO_CHANGE |
 | [165](case165_polymorphic_nonvirtual_dtor/README.md) | Polymorphic Type Without a Virtual Destructor (New Anti-Pattern) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [166](case166_ref_qualifier_added/README.md) | Method Ref-Qualifier Added (`str()` → `str() &`) | Breaking | 🔴 BREAKING |
 | [167](case167_base_became_virtual/README.md) | Base Class Became Virtual (`: public Device` → `: public virtual Device`) | Breaking | 🔴 BREAKING |
