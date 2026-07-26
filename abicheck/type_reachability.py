@@ -367,15 +367,33 @@ def _typedef_spelling_targets(
     checking bare aliases, a signature naming the unrelated user type would
     incorrectly resolve through this typedef target to ``std::string``'s
     real backing record, unfiltering stdlib layout churn that isn't real.
+
+    A **non-stdlib** namespace-qualified typedef key also needs a bare
+    alias, not just a stdlib one (Codex review, fresh evidence): the DWARF
+    backend stores a qualified key like ``"api::Alias"`` while a
+    declaration's own type string spells the bare ``"Alias"`` — the exact
+    same bare-vs-qualified split as everywhere else in this module, just on
+    the typedef key this time instead of a ``RecordType`` identity. Without
+    this, a public signature using the bare alias never resolves through
+    this typedef target at all, silently missing a stdlib field reachable
+    through it. Reuses :func:`_bare_type_name` (already correct for
+    qualified template arguments) rather than a separate stdlib-only
+    stripper, since this case has nothing to do with stdlib namespace/ABI
+    markers.
     """
     non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
     index: dict[str, str] = dict(typedefs)
     stripped_candidates: dict[str, set[str]] = {}
     for key, target in typedefs.items():
-        stripped = _stripped_signature_spelling(key)
-        if stripped is None or stripped in non_stdlib_spellings:
-            continue
-        stripped_candidates.setdefault(stripped, set()).add(target)
+        candidates = {
+            c
+            for c in (_stripped_signature_spelling(key), _bare_type_name(key))
+            if c is not None and c != key
+        }
+        for stripped in candidates:
+            if stripped in non_stdlib_spellings:
+                continue
+            stripped_candidates.setdefault(stripped, set()).add(target)
     for stripped, targets in stripped_candidates.items():
         if len(targets) == 1 and stripped not in index:
             index[stripped] = next(iter(targets))

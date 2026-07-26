@@ -1407,3 +1407,49 @@ class TestNonStdlibBareAliasCollisionWithStdlibStrippedSpelling:
             "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
         }
         assert directly_referenced_stdlib_types(snap) == frozenset()
+
+
+class TestNonStdlibTypedefBareAlias:
+    def test_non_stdlib_qualified_typedef_key_resolves_via_bare_alias(self) -> None:
+        """Codex review, fresh evidence: the DWARF backend stores a
+        namespace-qualified typedef key ("api::Alias") while a public
+        declaration's own type string spells the bare "Alias" -- without
+        also deriving a bare alias for a non-stdlib typedef key (not just
+        a stdlib one), a signature using that bare spelling never resolves
+        through the typedef to its target, silently missing a stdlib field
+        reachable through it."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="Alias")],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        snap.typedefs = {"api::Alias": "Foo"}
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_non_stdlib_typedef_bare_alias_colliding_with_real_record_is_dropped(
+        self,
+    ) -> None:
+        """The new non-stdlib bare-alias derivation must still respect the
+        existing collision guard: a bare alias that coincides with a real,
+        unrelated non-stdlib record's own bare spelling must not be
+        registered."""
+        index = _typedef_spelling_targets(
+            {"api::Alias": "Foo"},
+            frozenset({"unrelated::Alias"}),
+        )
+        assert "Alias" not in index
+
+    def test_non_stdlib_typedef_key_without_namespace_is_unaffected(self) -> None:
+        """Guard against over-correcting: an already-bare typedef key must
+        not gain a spurious duplicate entry (_bare_type_name returns it
+        unchanged, which the `c != key` filter must exclude)."""
+        index = _typedef_spelling_targets({"Alias": "Foo"}, frozenset())
+        assert index == {"Alias": "Foo"}

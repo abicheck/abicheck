@@ -775,6 +775,47 @@ Once a root command genuinely clears the bar above, pick the right home:
   none of them could have been relying on the old behavior's output for
   this input shape without already being wrong.
 
+  **A fifth finding, on the same owner-seeding feature, investigated and
+  deliberately not implemented this pass:** a public method whose dumper
+  backend recorded only a bare member name (CastXML's convention — "the
+  bare `bar` rather than `C::bar`", per `owner_class_of()`'s own
+  docstring) on a class-template specialization falls through to
+  `owner_class_of()`'s mangled-name fallback
+  (`itanium_scope_components`), which — confirmed empirically
+  (`itanium_scope_components("_ZN3FooIiE3barEv")` returns
+  `["FooIiE", "bar"]`) — deliberately keeps the **raw, undemangled**
+  Itanium template-argument encoding (`"FooIiE"`) rather than the spelled
+  form (`"Foo<int>"`) a real `RecordType` identity actually uses; that
+  design choice is itself intentional and documented in
+  `itanium_scope_components`'s own docstring ("the raw template-argument
+  encoding is kept so distinct specializations stay distinct"), since its
+  other callers use it for grouping/distinguishing specializations, not
+  for matching against demangled model spellings. `type_reachability.py`'s
+  owner-seeding then feeds this raw string into `_scan()`, which correctly
+  finds no match (a silent false negative — the same
+  false-negative-over-false-positive default this whole module already
+  uses throughout, not a new failure mode). A real fix has two paths, both
+  rejected as out of scope for a drive-by extension here: (1) making
+  `owner_class_of()` itself resolve raw template encodings to spelled
+  form would mean invoking the real demangler (`demangle.py`'s
+  `demangle()`, which shells out to `c++filt`/`cxxfilt` on a cache miss)
+  from a hot path every one of its four callers shares, directly
+  contradicting `itanium_scope_components`'s own stated design rationale
+  ("avoids any dependency on an external demangler ... so this works
+  identically on Linux, macOS, and Windows and never shells out"); (2) a
+  narrower, local-only translation in `type_reachability.py` (demangle
+  just `fn.mangled` when `owner_class_of()` took the mangled-fallback
+  path, then re-derive the owner from the *demangled* qualified name)
+  would need a genuinely new depth-aware "class::member" boundary splitter
+  for demangled text — not a reuse of `_bare_type_name` (which strips a
+  *leading* namespace qualifier, the opposite half of this problem) — and
+  would have to correctly compose with the already-fragile
+  `"::operator "` marker special-case from the fourth finding above (a
+  demangled conversion operator on a qualified template specialization
+  could combine both edge cases at once), which is exactly the kind of
+  compounding-edge-case complexity this file's own docstring already
+  flags as needing "its own scoped follow-up," not a reactive patch.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a

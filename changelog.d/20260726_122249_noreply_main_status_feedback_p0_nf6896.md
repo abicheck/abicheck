@@ -326,3 +326,19 @@
   the previous behavior otherwise. New regression tests cover the direct
   unit behavior (including a namespace-nested owner, to guard against
   over-correcting) and the end-to-end `type_reachability.py` seeding path.
+- **`type_reachability.py`'s typedef-key bare-aliasing only covered
+  stdlib-namespaced keys** (Codex review, fresh evidence): the DWARF
+  backend stores a namespace-qualified typedef key like `"api::Alias"`
+  while a public declaration's own type string spells the bare `"Alias"`
+  — the same bare-vs-qualified split this module already handles
+  everywhere else, but `_typedef_spelling_targets()` only derived a bare
+  form via `_stripped_signature_spelling()` (stdlib-namespace-prefix-only),
+  so a non-stdlib qualified typedef key never got a bare alias at all —
+  silently missing a stdlib field reachable through that typedef's target.
+  Fixed by also deriving a candidate via `_bare_type_name()` (already
+  correct for qualified template arguments) for every typedef key, not
+  just stdlib-namespaced ones — reusing the existing collision guard
+  unchanged. New regression tests cover the end-to-end resolution, the
+  existing collision guard applied to this new candidate source, and a
+  guard against registering a spurious duplicate entry for an
+  already-bare key.
