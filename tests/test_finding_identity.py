@@ -353,6 +353,30 @@ class TestResolveFunctionIdentity:
             != resolve_function_identity(rvalue).primary_id
         )
 
+    def test_variadic_distinguishes_otherwise_identical_overloads(self) -> None:
+        # Codex review: void f(int) vs. void f(int, ...) share a name and
+        # identical fixed param types when neither has a real mangling --
+        # variadic (...) is not itself a Param, so it must be folded into
+        # the discriminator separately.
+        fixed = Function(
+            name="f",
+            mangled="f",
+            return_type="void",
+            params=[Param(name="x", type="int")],
+            is_variadic=False,
+        )
+        variadic = Function(
+            name="f",
+            mangled="f",
+            return_type="void",
+            params=[Param(name="x", type="int")],
+            is_variadic=True,
+        )
+        assert (
+            resolve_function_identity(fixed).primary_id
+            != resolve_function_identity(variadic).primary_id
+        )
+
     def test_overloads_sharing_a_bare_name_are_distinguished_by_mangling(self) -> None:
         overload_a = Function(name="foo", mangled="_Z3fooi", return_type="int")
         overload_b = Function(name="foo", mangled="_Z3food", return_type="int")

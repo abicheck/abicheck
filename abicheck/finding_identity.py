@@ -392,6 +392,12 @@ def resolve_function_identity(func: Function) -> FindingIdentity:
             f"const:{func.is_const}",
             f"volatile:{func.is_volatile}",
             f"ref:{func.ref_qualifier}",
+            # variadic (...) is not itself a Param, so two overloads with
+            # identical fixed parameters (void f(int) vs. void f(int, ...))
+            # would otherwise get the same NORMALIZED-tier signature (Codex
+            # review). bool | None: distinguishes producers that don't know
+            # (None) from a confirmed non-variadic (False).
+            f"variadic:{func.is_variadic}",
         )
     )
     # qualified_name=func.name: resolve_symbol_identity itself prefers
