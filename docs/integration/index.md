@@ -1,3 +1,15 @@
+---
+doc_type: hub
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+canonical_for:
+  - integration-scenario-selection
+lifecycle: active
+generated: false
+---
+
 # Project Integration: Which Scenario Am I?
 
 This section answers a different question than

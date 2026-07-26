@@ -135,3 +135,57 @@ topics:
     reference_page: reference/source-graph-schema.md
     task_pages:
       - contribute/detector-impact-contract.md
+
+  policies:
+    canonical_page: use/policies.md
+    fact_sources:
+      - abicheck/policy_file.py
+      - abicheck/checker_policy.py
+
+  suppressions:
+    canonical_page: use/suppressions.md
+    fact_sources:
+      - abicheck/suppression.py
+
+  output-formats:
+    canonical_page: use/output-formats.md
+    fact_sources:
+      - abicheck/reporter.py
+      - abicheck/html_report.py
+      - abicheck/sarif.py
+      - abicheck/junit_report.py
+    allowed_summaries:
+      - start/first-report.md
+      - start/choose-your-workflow.md
+
+  github-actions-surface:
+    canonical_page: use/github-action.md
+    fact_sources:
+      - action.yml
+    reference_page: reference/github-action-inputs.md
+    task_pages:
+      - use/github-action-recipes.md
+      - use/github-action-source-scans.md
+      - use/annotations.md
+
+  project-integration:
+    canonical_page: integration/concepts.md
+    task_pages:
+      - integration/scenarios/single-library.md
+      - integration/scenarios/existing-build-artifact.md
+      - integration/scenarios/single-build-audit.md
+      - integration/scenarios/header-aware-check.md
+      - integration/scenarios/source-replay.md
+      - integration/scenarios/build-integrated-facts.md
+      - integration/scenarios/packages-and-sdks.md
+      - integration/scenarios/release-bundle.md
+      - integration/scenarios/multi-dso-project.md
+      - integration/scenarios/multi-platform.md
+      - integration/scenarios/cross-compilation.md
+      - integration/scenarios/application-and-plugin-contracts.md
+      - integration/scenarios/dependency-and-container-checks.md
+      - integration/scenarios/monorepo.md
+      - integration/scenarios/migration-and-rollout.md
+
+  integration-scenario-selection:
+    canonical_page: integration/index.md

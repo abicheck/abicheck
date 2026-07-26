@@ -1,3 +1,15 @@
+---
+doc_type: how-to
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+canonical_for:
+  - policies
+lifecycle: active
+generated: false
+---
+
 # Policy Profiles
 
 `abicheck compare` supports policy-based verdict classification.

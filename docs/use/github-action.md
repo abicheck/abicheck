@@ -1,3 +1,14 @@
+---
+doc_type: how-to
+audience:
+  - ci-owner
+level: beginner
+canonical_for:
+  - github-actions-surface
+lifecycle: active
+generated: false
+---
+
 # GitHub Action
 
 abicheck ships as a reusable GitHub Action that you can add to any CI pipeline
