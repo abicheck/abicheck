@@ -36,14 +36,17 @@ each self-skipping when clang/g++ are unavailable:
 
 from __future__ import annotations
 
+import os as dm_os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from abicheck import process_resources as dm_process_resources
 from abicheck.dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from abicheck.dumper import dump
 from abicheck.dumper_manifest import (
@@ -407,6 +410,129 @@ def test_run_tu_loop_optional_tu_failure_is_skipped():
         exported_static=set(),
     )
     assert {fn.name for fn in merged.functions} == {"b"}
+
+
+# ── per-TU pool (ADR-050 D6, G32 Phase E) ──────────────────────────────────
+
+
+def test_run_tu_loop_required_tu_failure_propagates_under_real_pool(monkeypatch):
+    # Force a real multi-worker pool (not the len(tus)<=1 sequential
+    # fast-path test_run_tu_loop_required_tu_failure_propagates already
+    # covers) so a required failure still propagates once several TUs are
+    # genuinely running concurrently.
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "4")
+    calls: list = []
+    stub = _make_stub_header_ast_parser(calls, fail_for=frozenset({"b.h"}))
+    tus = (_tu("a", "a.h"), _tu("b", "b.h", required=True), _tu("c", "c.h"))
+    with pytest.raises(SnapshotError, match="simulated extraction failure"):
+        run_tu_loop(
+            tus,
+            header_ast_parser=stub,
+            roots=[Path("a.h"), Path("b.h"), Path("c.h")],
+            backend="auto",
+            compiler="c++",
+            exported_dynamic=set(),
+            exported_static=set(),
+        )
+
+
+def test_run_tu_loop_optional_failure_does_not_cancel_siblings_under_pool(
+    monkeypatch,
+):
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "4")
+    calls: list = []
+    stub = _make_stub_header_ast_parser(calls, fail_for=frozenset({"b.h"}))
+    tus = (
+        _tu("a", "a.h"),
+        _tu("b", "b.h", required=False, contributes=False),
+        _tu("c", "c.h"),
+    )
+    merged = run_tu_loop(
+        tus,
+        header_ast_parser=stub,
+        roots=[Path("a.h"), Path("c.h")],
+        backend="auto",
+        compiler="c++",
+        exported_dynamic=set(),
+        exported_static=set(),
+    )
+    # Both non-failing TUs' declarations survive -- the optional failure
+    # must not have short-circuited or cancelled its siblings.
+    assert {fn.name for fn in merged.functions} == {"a", "c"}
+
+
+def test_run_tu_fragments_preserves_declared_order_despite_completion_order(
+    monkeypatch,
+):
+    """A later-declared TU that finishes FIRST must not reorder the
+    returned fragment list -- merge_tu_fragments treats TU order as
+    significant (which TU "wins" an ODR-compatible merge), so the pool must
+    collect results in submission order, not completion order."""
+    from abicheck.dumper_manifest import _run_tu_fragments
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+    order: list = []
+
+    def _stub(headers, extra_includes, **kwargs):
+        name = Path(headers[0]).stem
+        if name == "a":
+            # Let "b" (submitted second) finish first.
+            time.sleep(0.05)
+        order.append(name)
+        return _StubParser(functions=(_fn(name),))
+
+    tus = (_tu("a", "a.h"), _tu("b", "b.h"))
+    fragments = _run_tu_fragments(
+        tus,
+        header_ast_parser=_stub,
+        backend="auto",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        gcc_option_tokens=(),
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=["a.h", "b.h"],
+        public_dir_paths=[],
+        extra_hash_dirs=(),
+    )
+    # "b" really did finish executing before "a" (proves genuine concurrency,
+    # not an accidentally-serial pool)...
+    assert order == ["b", "a"]
+    # ...yet the returned fragment order still matches the manifest's own
+    # declared TU order, not completion order.
+    assert [f.tu_name for f in fragments] == ["a", "b"]
+
+
+def test_tu_jobs_env_override_forces_serial(monkeypatch):
+    from abicheck.dumper_manifest import _tu_jobs
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "1")
+    assert _tu_jobs(100) == 1
+
+
+def test_tu_jobs_auto_capped_at_cpu_and_eight(monkeypatch):
+    from abicheck.dumper_manifest import _tu_jobs
+
+    monkeypatch.delenv("ABICHECK_TU_JOBS", raising=False)
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
+    monkeypatch.setattr(dm_os, "cpu_count", lambda: 4)
+    assert _tu_jobs(1000) == 4  # min(units, cpu, 8)
+    assert _tu_jobs(2) == 2
+
+
+def test_tu_jobs_clamped_by_available_memory(monkeypatch):
+    from abicheck.dumper_manifest import _tu_jobs
+
+    monkeypatch.delenv("ABICHECK_TU_JOBS", raising=False)
+    monkeypatch.delenv("ABICHECK_TU_JOB_MEM_GIB", raising=False)
+    monkeypatch.setattr(dm_os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(dm_process_resources, "available_mem_gib", lambda: 6.0)
+    assert _tu_jobs(1000) == 2  # 6 GiB / 3.0 GiB-per-worker default == 2
 
 
 def test_run_tu_loop_reconciles_identical_entity_across_tus():

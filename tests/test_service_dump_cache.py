@@ -84,6 +84,13 @@ class TestDumpIsCacheable:
         cacheable, which is what actually matters here now."""
         assert _dump_is_cacheable(**_cacheable_kwargs()) is True
 
+    def test_dump_manifest_is_cacheable(self):
+        # ADR-050 D3/D6 (G32 Phase E): a manifest-driven dump used to be
+        # unconditionally excluded; it is now cacheable like any other plain
+        # shape once the cache key covers the manifest's own scope.
+        kwargs = _cacheable_kwargs(dump_manifest=object())
+        assert _dump_is_cacheable(**kwargs) is True
+
 
 class TestDumpCacheExtraKey:
     def test_differs_by_binary_fmt(self):
@@ -484,4 +491,211 @@ class TestCachedRunDump:
             fake_run_dump, binary, "elf", [], [], "1.0", "c++", dwarf_only=True
         )
 
+        assert len(calls) == 2
+
+
+class TestCachedRunDumpManifest:
+    """ADR-050 D3/D6 (G32 Phase E) — a manifest-driven dump is now cacheable,
+    keyed on the manifest's own content + structural identity (TU names,
+    ordered includes/forced_includes, required/contributes_to_abi,
+    project_owned)."""
+
+    def _manifest(self, tmp_path: Path, body: str):
+        from abicheck.dump_manifest import parse_manifest
+
+        base = tmp_path / "manifest_dir"
+        base.mkdir(exist_ok=True)
+        return parse_manifest(body, base_dir=base, source="<test>")
+
+    def _write_header(self, tmp_path: Path, name: str, content: str) -> Path:
+        p = tmp_path / "manifest_dir" / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def test_cache_hit_skips_run_dump_and_threads_manifest_on_miss(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        calls: list[object] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            # The dormant bug this test guards: cached_run_dump's live-dump
+            # call used to omit dump_manifest entirely once manifest dumps
+            # became reachable past the (former) unconditional exclusion --
+            # silently falling back to a legacy single-TU dump on every
+            # cache miss instead of the real manifest-driven one.
+            calls.append(kwargs.get("dump_manifest"))
+            return _sample_snap()
+
+        snap1 = cached_run_dump(
+            fake_run_dump,
+            binary,
+            "elf",
+            [],
+            [],
+            "1.0",
+            "c++",
+            dump_manifest=manifest,
+        )
+        snap2 = cached_run_dump(
+            fake_run_dump,
+            binary,
+            "elf",
+            [],
+            [],
+            "1.0",
+            "c++",
+            dump_manifest=manifest,
+        )
+        assert len(calls) == 1
+        assert calls[0] is manifest
+        assert snap1.functions[0].name == snap2.functions[0].name == "foo"
+
+    def test_forced_include_content_edit_invalidates_manifest_cache(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        header = self._write_header(tmp_path, "a.h", "int f(void);\n")
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=manifest
+        )
+        header.write_text("int f(void);\nint g(void);\n", encoding="utf-8")
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=manifest
+        )
+        assert len(calls) == 2
+
+    def test_tu_rename_invalidates_manifest_cache(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        old = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        new = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n  - name: tu_b\n    forced_includes: [a.h]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=old
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=new
+        )
+        assert len(calls) == 2
+
+    def test_tu_includes_reorder_invalidates_manifest_cache(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        (tmp_path / "manifest_dir" / "vendor").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "manifest_dir" / "extra").mkdir(parents=True, exist_ok=True)
+        old = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n"
+            "    includes: [vendor, extra]\n",
+        )
+        new = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n"
+            "    includes: [extra, vendor]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=old
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=new
+        )
+        assert len(calls) == 2
+
+    def test_contributes_to_abi_flip_invalidates_manifest_cache(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        old = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n"
+            "  - name: tu_b\n    forced_includes: [a.h]\n"
+            "    required: false\n    contributes_to_abi: false\n",
+        )
+        new = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n"
+            "  - name: tu_b\n    forced_includes: [a.h]\n"
+            "    required: true\n    contributes_to_abi: true\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=old
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=new
+        )
+        assert len(calls) == 2
+
+    def test_project_owned_flip_invalidates_manifest_cache(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        (tmp_path / "src").mkdir(parents=True, exist_ok=True)
+        old = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n"
+            "    includes: [{path: ../src, project_owned: false}]\n",
+        )
+        new = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n"
+            "    includes: [{path: ../src, project_owned: true}]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=old
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=new
+        )
         assert len(calls) == 2

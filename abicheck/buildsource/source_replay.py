@@ -51,7 +51,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from .. import deadline
+from .. import deadline, process_resources
 from .build_evidence import BuildEvidence, CompileUnit, Target
 from .source_abi import SOURCE_ABI_VERSION, SourceAbiSurface, SourceAbiTu
 from .source_extractors._argv import (
@@ -1209,8 +1209,13 @@ def _record_replay_coverage(
 #: (eval/SCALING.md saw jobs=8 on 4 CPUs *regress*). The explicit
 #: ``ABICHECK_L4_JOBS`` override is clamped to this so a stray ``=64`` can't
 #: thrash the host — a warning is logged when it is.
+#:
+#: Delegates to :mod:`abicheck.process_resources` (G32 Phase E) — the same
+#: leaf module :mod:`abicheck.dumper_manifest`'s per-TU pool sizes itself
+#: from, so the two pools share one RAM-probing/ceiling implementation
+#: rather than two independently-maintained copies.
 def _l4_jobs_ceiling() -> int:
-    return max(8, 2 * (os.cpu_count() or 1))
+    return process_resources.jobs_ceiling()
 
 
 #: Rough peak resident memory budget per concurrent L4 worker (GiB). A heavily
@@ -1222,134 +1227,15 @@ def _l4_jobs_ceiling() -> int:
 #: ``ABICHECK_L4_JOB_MEM_GIB``; the cap is skipped when RAM can't be read.
 _L4_JOB_MEM_BUDGET_GIB = 3.0
 
-_KIB = 1024.0
-_GIB = 1024.0 * 1024.0 * 1024.0
-
-#: cgroup memory accounting. In a container the process is confined to a cgroup
-#: whose limit is usually *below* the host RAM that ``/proc/meminfo`` reports, so
-#: the OOM guard must read it too (Codex review on #458): a 4 GiB-limited pod on a
-#: 64 GiB host would otherwise keep the host-sized cap and still get SIGKILLed.
-#: The *effective* limit lives at the process's own cgroup path (from
-#: ``/proc/self/cgroup``), not the controller root — under a nested cgroup
-#: (k8s pod / systemd slice / CI runner) the root is often unbounded while a
-#: parent slice imposes the real cap — so we walk leaf→root and take the tightest
-#: bounded limit. Roots are module constants so tests can repoint them.
-_PROC_SELF_CGROUP = "/proc/self/cgroup"
-_CGROUP_V2_ROOT = "/sys/fs/cgroup"  # unified-hierarchy mount
-_CGROUP_V1_ROOT = "/sys/fs/cgroup/memory"  # v1 memory-controller mount
-#: cgroup v1 reports "unlimited" as a near-INT64_MAX sentinel rather than a
-#: keyword; anything at/above this is treated as no limit.
-_CGROUP_V1_UNLIMITED = 1 << 62
-
-
-def _read_int_file(path: str) -> int | None:
-    """Read a single integer from ``path`` (cgroup files), or ``None``.
-
-    Returns ``None`` for a missing/unreadable file or a non-integer body such as
-    cgroup v2's literal ``max`` (= unbounded), which the callers treat as
-    "no cgroup limit".
-    """
-    try:
-        with open(path, encoding="ascii") as fh:
-            return int(fh.read().strip())
-    except (OSError, ValueError):
-        return None
-
-
-def _cgroup_rel_paths() -> tuple[str | None, str | None]:
-    """``(v2_rel, v1_memory_rel)`` cgroup paths from ``/proc/self/cgroup``.
-
-    Each is ``None`` when that hierarchy isn't listed (e.g. a pure-v2 host has no
-    v1 memory line). The v2 line is ``0::/rel``; the v1 memory line is
-    ``N:…,memory,…:/rel``.
-    """
-    v2 = v1 = None
-    try:
-        # ``errors="replace"`` (and the ValueError guard) keeps a non-ASCII
-        # systemd slice / container name in the cgroup path from raising
-        # UnicodeDecodeError mid-iteration and aborting the L4 run — this probe is
-        # best-effort and must degrade to ``None`` (CodeRabbit review on #458).
-        with open(_PROC_SELF_CGROUP, encoding="ascii", errors="replace") as fh:
-            for line in fh:
-                parts = line.rstrip("\n").split(":", 2)
-                if len(parts) != 3:
-                    continue
-                hid, controllers, path = parts
-                if hid == "0":
-                    v2 = path
-                elif "memory" in controllers.split(","):
-                    v1 = path
-    except (OSError, ValueError):
-        pass
-    return v2, v1
-
-
-def _cgroup_chain(root: str, rel: str | None) -> list[Path]:
-    """Cgroup dirs from the leaf (``root``/``rel``) up to ``root``, leaf first."""
-    base = Path(root)
-    chain = [base]
-    cur = base
-    for part in (rel or "").strip("/").split("/"):
-        if part:
-            cur = cur / part
-            chain.append(cur)
-    chain.reverse()
-    return chain
-
-
-def _cgroup_headroom_gib(
-    root: str, rel: str | None, max_name: str, cur_name: str, unlimited: int | None
-) -> float | None:
-    """Tightest memory headroom (GiB) along the leaf→root cgroup chain, or ``None``.
-
-    A bounded ancestor can cap a process more tightly than its own leaf cgroup, so
-    the effective headroom is the *minimum* across the chain. ``None`` when no
-    level is bounded.
-    """
-    best: float | None = None
-    for d in _cgroup_chain(root, rel):
-        limit = _read_int_file(str(d / max_name))
-        if limit is None or (unlimited is not None and limit >= unlimited):
-            continue
-        used = _read_int_file(str(d / cur_name)) or 0
-        headroom = max(0.0, (limit - used) / _GIB)
-        best = headroom if best is None else min(best, headroom)
-    return best
-
-
-def _cgroup_available_mem_gib() -> float | None:
-    """Container memory headroom in GiB from cgroup limits, or ``None``.
-
-    Resolves the process's own cgroup (``/proc/self/cgroup``) and walks leaf→root
-    for the tightest bounded limit — cgroup v2 (``memory.max`` − ``memory.current``)
-    then v1 (``memory.limit_in_bytes`` − ``memory.usage_in_bytes``). ``None`` when
-    nothing is bounded (the common bare-metal/host case).
-    """
-    v2_rel, v1_rel = _cgroup_rel_paths()
-    headroom = _cgroup_headroom_gib(
-        _CGROUP_V2_ROOT, v2_rel, "memory.max", "memory.current", None
-    )
-    if headroom is not None:
-        return headroom
-    return _cgroup_headroom_gib(
-        _CGROUP_V1_ROOT,
-        v1_rel,
-        "memory.limit_in_bytes",
-        "memory.usage_in_bytes",
-        _CGROUP_V1_UNLIMITED,
-    )
-
-
-def _meminfo_available_gib(path: str = "/proc/meminfo") -> float | None:
-    """Host ``MemAvailable`` in GiB (Linux ``/proc/meminfo``), or ``None``."""
-    try:
-        with open(path, encoding="ascii") as fh:
-            for line in fh:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) * _KIB / _GIB  # kB -> GiB
-    except (OSError, ValueError, IndexError):
-        pass
-    return None
+# G32 Phase E: the RAM-probing internals (meminfo/cgroup parsing) live in
+# abicheck.process_resources now — see this module's own "RAM-aware worker
+# sizing" note above the ThreadPoolExecutor split. This module keeps thin
+# ABICHECK_L4_*-named wrappers (unchanged log messages) rather than calling
+# process_resources directly everywhere, so ABICHECK_L4_JOBS/
+# ABICHECK_L4_JOB_MEM_GIB callers and their own dedicated policy tests
+# (test_l4_perf.py) are unaffected; the low-level probe tests themselves
+# moved to test_process_resources.py, which targets process_resources
+# directly (a refactor test, not new coverage).
 
 
 def _l4_available_mem_gib() -> float | None:
@@ -1360,12 +1246,7 @@ def _l4_available_mem_gib() -> float | None:
     worker count to what it is actually allowed to use. ``None`` when neither
     source is readable (non-Linux / sandbox), which skips the memory clamp.
     """
-    candidates = [
-        v
-        for v in (_meminfo_available_gib(), _cgroup_available_mem_gib())
-        if v is not None
-    ]
-    return min(candidates) if candidates else None
+    return process_resources.available_mem_gib()
 
 
 def _l4_job_mem_budget_gib() -> float:
@@ -1374,13 +1255,9 @@ def _l4_job_mem_budget_gib() -> float:
     ``ABICHECK_L4_JOB_MEM_GIB`` overrides the :data:`_L4_JOB_MEM_BUDGET_GIB`
     default (floored at 0.25 GiB); an unparsable value falls back to the default.
     """
-    try:
-        return max(
-            0.25,
-            float(os.environ.get("ABICHECK_L4_JOB_MEM_GIB") or _L4_JOB_MEM_BUDGET_GIB),
-        )
-    except ValueError:
-        return _L4_JOB_MEM_BUDGET_GIB
+    return process_resources.job_mem_budget_gib(
+        "ABICHECK_L4_JOB_MEM_GIB", _L4_JOB_MEM_BUDGET_GIB
+    )
 
 
 def _l4_mem_cap() -> int | None:

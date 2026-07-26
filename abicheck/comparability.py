@@ -120,6 +120,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .comparability_json import _SCOPE_SINGLE_ENTRY_SENTINELS, _json_load_str_list
 from .comparability_sequences import (
@@ -164,6 +165,7 @@ PROFILE_FIELD_KEYS = (
 SCOPE_FIELD_KEYS = (
     "headers",
     "public_header_dirs",
+    "translation_units",
 )
 
 # The only profile_fields keys the platform-identity carve-out (ADR-050
@@ -462,6 +464,67 @@ def _attribute_file(
     return None
 
 
+def manifest_tu_scope_field(dump_manifest: Any) -> str:
+    """JSON-serializable, order-preserving encoding of every ``--dump-manifest``
+    translation unit's own scope-affecting fields (ADR-050 D1: name, ordered
+    ``forced_includes``/``includes`` including ``project_owned``, ``required``,
+    ``contributes_to_abi``) -- fed into :func:`compute_extraction_contract`'s
+    ``scope_fingerprint`` as its ``"translation_units"`` field whenever a
+    manifest-driven dump is being fingerprinted.
+
+    Without this, two manifests declaring the identical ``roots`` (the only
+    scope input ``compute_extraction_contract`` otherwise sees for a
+    manifest-driven dump) but different TU structure -- a TU renamed, its
+    ``includes``/``forced_includes`` reordered, or a ``required``/
+    ``contributes_to_abi``/``project_owned`` flag flipped -- would silently
+    fingerprint identically: exactly the class of manifest/extraction-contract
+    drift ADR-050 exists to catch (D1's own text: "flipping ``contributes_to_abi``
+    changes which declarations feed the ABI model... without necessarily
+    changing that TU's includes at all").
+
+    Every path is normalized relative to *dump_manifest*'s own ``base_dir``
+    (the manifest file's own directory) -- ADR-050's "for the manifest path,
+    both fingerprints' roots are simply the manifest file's own directory"
+    rule, mirroring ``dumper_contract._manifest_declared_includes``'s
+    identical ``os.path.relpath``/``ValueError`` handling (falls back to the
+    resolved absolute path only for a genuinely cross-drive Windows path) so
+    two checkouts of the same manifest at different mount points still
+    normalize identically.
+
+    Computable from the manifest document alone, no compiler invocation --
+    genuinely available pre-dump, which is what lets
+    :mod:`abicheck.service_dump_cache` (G32 Phase E) fold it into the
+    whole-snapshot cache key *before* running a live dump.
+
+    Typed ``Any`` rather than ``dump_manifest.DumpManifest`` to avoid a
+    module-level import of :mod:`abicheck.dump_manifest` here purely for a
+    type hint (this module has no other reason to depend on it); only
+    ``.base_dir``/``.translation_units`` are read, structurally.
+    """
+    base = _resolved(dump_manifest.base_dir)
+
+    def _rel(p: Path) -> str:
+        try:
+            return os.path.relpath(_resolved(p), base)
+        except ValueError:
+            return str(_resolved(p))
+
+    tus = [
+        {
+            "name": tu.name,
+            "forced_includes": [_rel(p) for p in tu.forced_includes],
+            "includes": [
+                {"path": _rel(inc.path), "project_owned": inc.project_owned}
+                for inc in tu.includes
+            ],
+            "required": tu.required,
+            "contributes_to_abi": tu.contributes_to_abi,
+        }
+        for tu in dump_manifest.translation_units
+    ]
+    return json.dumps(tus)
+
+
 def compute_extraction_contract(
     *,
     compiler_family: str | None = None,
@@ -480,15 +543,24 @@ def compute_extraction_contract(
     l2_frontend_ran: bool = False,
     public_header_paths: Sequence[Path] = (),
     public_header_dirs: Sequence[Path] = (),
+    manifest_tu_scope: str | None = None,
 ) -> ExtractionContract | None:
-    """Compute one side's :class:`ExtractionContract` for the legacy,
-    non-manifest CLI path (ADR-050 D1; the manifest-driven path is Phase B,
-    not yet implemented).
+    """Compute one side's :class:`ExtractionContract`, for either the legacy
+    non-manifest CLI path or a ``--dump-manifest`` (ADR-050 D1/D3).
 
     All inputs are already-resolved data ``dumper.py`` hands this function
     after running the actual castxml/clang invocation and parsing its
     ``-MD`` depfile; this function itself never shells out or re-parses
     anything.
+
+    *manifest_tu_scope* is the pre-serialized :func:`manifest_tu_scope_field`
+    string for a manifest-driven dump (``None`` for the legacy path) --
+    passed in already-computed, rather than a raw ``DumpManifest``, so this
+    function stays generic over its scope inputs the same way it already is
+    over *declared_headers*/*declared_includes* (a manifest caller builds
+    *declared_headers* from ``dump_manifest.roots`` the same way it always
+    did; this parameter only adds the per-TU structure a flat header list
+    can't express).
 
     Returns ``None`` when there is nothing to fingerprint at all (no L2
     frontend ran and no public-header provenance inputs were given) — the
@@ -862,6 +934,11 @@ def compute_extraction_contract(
         scope_fields = {
             "headers": json.dumps(_scope_header_identities),
             "public_header_dirs": json.dumps(_scope_public_header_dirs),
+            # "[]" (not manifest-driven) for the legacy path -- a constant,
+            # so two legacy-vs-legacy comparisons are unaffected by this
+            # field's mere presence; a real value here only ever comes from
+            # a --dump-manifest side (manifest_tu_scope_field).
+            "translation_units": manifest_tu_scope or "[]",
         }
         scope_fingerprint = _sha256_of(*[scope_fields[k] for k in SCOPE_FIELD_KEYS])
 

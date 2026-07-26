@@ -161,7 +161,11 @@ def _attach_extraction_contract(
     so without this branch a manifest's ``project_owned`` markers would
     never reach ``profile_fingerprint`` at all.
     """
-    from .comparability import IncludeDir, compute_extraction_contract
+    from .comparability import (
+        IncludeDir,
+        compute_extraction_contract,
+        manifest_tu_scope_field,
+    )
     from .dumper_toolchain import _compiler_family_from_toolchain
     from .header_conditionals import (
         ordered_macro_ops,
@@ -218,4 +222,9 @@ def _attach_extraction_contract(
         l2_frontend_ran=snapshot.from_headers,
         public_header_paths=list(public_headers or []),
         public_header_dirs=list(public_header_dirs or []),
+        manifest_tu_scope=(
+            manifest_tu_scope_field(dump_manifest)
+            if dump_manifest is not None and snapshot.from_headers
+            else None
+        ),
     )

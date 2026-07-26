@@ -48,11 +48,14 @@ implementation has been replaced by the real one.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import process_resources
 from .dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from .dumper_clang import _ClangAstParser
 from .dumper_toolchain import (
@@ -73,6 +76,81 @@ if TYPE_CHECKING:
     from .dumper_castxml import _CastxmlParser
 
 log = logging.getLogger(__name__)
+
+#: Rough peak resident memory budget per concurrent per-TU worker (GiB) --
+#: same default as buildsource.source_replay's L4 pool
+#: (``_L4_JOB_MEM_BUDGET_GIB``), since both pools run the identical kind of
+#: work (one castxml/clang invocation, one heavy AST parse, per TU). Tunable
+#: via ``ABICHECK_TU_JOB_MEM_GIB``; the cap is skipped when RAM can't be read.
+_TU_JOB_MEM_BUDGET_GIB = 3.0
+
+
+def _tu_jobs(n_units: int) -> int:
+    """Worker count for the per-TU manifest-dump pool (ADR-050 D6, G32 Phase
+    E) -- ``run_tu_loop`` runs one castxml/clang invocation per translation
+    unit, instead of today's single aggregate-then-parse call, and this
+    function decides how many of those invocations run concurrently.
+
+    Ports ``buildsource.source_replay._l4_jobs``'s already-proven policy
+    verbatim (G32 Phase E's own "no new scheduling policy" note): auto ==
+    ``min(n_units, cpu_count, 8)``, clamped by available memory; an explicit
+    ``ABICHECK_TU_JOBS`` override (set ``1`` to force serial, e.g. for
+    deterministic tests) is clamped the same way. Uses this pool's own
+    ``ABICHECK_TU_JOBS``/``ABICHECK_TU_JOB_MEM_GIB`` env vars and log
+    messages rather than the L4 pool's ``ABICHECK_L4_*`` ones -- a
+    manifest dump and an L4 source replay are independent processes that
+    may run concurrently (e.g. ``compare --dump-manifest`` alongside a
+    separate ``--sources`` scan) and should be tunable independently.
+    Shares :mod:`abicheck.process_resources`'s RAM-probing/ceiling
+    primitives with the L4 pool rather than reimplementing them.
+    """
+    budget = process_resources.job_mem_budget_gib(
+        "ABICHECK_TU_JOB_MEM_GIB", _TU_JOB_MEM_BUDGET_GIB
+    )
+    cap = process_resources.mem_cap(budget)
+    env = os.environ.get("ABICHECK_TU_JOBS")
+    if env:
+        try:
+            requested = max(1, int(env))
+        except ValueError:
+            return 1
+        ceiling = process_resources.jobs_ceiling()
+        if requested > ceiling:
+            log.warning(
+                "ABICHECK_TU_JOBS=%d exceeds the oversubscription ceiling (%d "
+                "for %d CPUs); clamping to %d",
+                requested,
+                ceiling,
+                os.cpu_count() or 1,
+                ceiling,
+            )
+            requested = ceiling
+        if cap is not None and requested > cap:
+            log.warning(
+                "ABICHECK_TU_JOBS=%d may not fit in available memory (~%.1f GiB "
+                "at ~%.1f GiB/worker); clamping to %d to avoid an OOM-killed "
+                "manifest dump. Tune ABICHECK_TU_JOB_MEM_GIB, or split the "
+                "manifest into fewer translation units.",
+                requested,
+                process_resources.available_mem_gib() or 0.0,
+                budget,
+                cap,
+            )
+            return cap
+        return requested
+    auto = max(1, min(n_units, os.cpu_count() or 1, 8))
+    if cap is not None and cap < auto:
+        log.info(
+            "Per-TU manifest-dump workers reduced %d -> %d to fit available "
+            "memory (~%.1f GiB at ~%.1f GiB/worker); set ABICHECK_TU_JOBS / "
+            "ABICHECK_TU_JOB_MEM_GIB to override.",
+            auto,
+            cap,
+            process_resources.available_mem_gib() or 0.0,
+            budget,
+        )
+        return cap
+    return auto
 
 #: Signature of ``dumper._header_ast_parser`` -- injected by the caller
 #: rather than imported, see this module's own docstring.
@@ -159,6 +237,116 @@ def run_tu_fragment(
     )
 
 
+def _run_tu_fragments(
+    tus: Sequence[TranslationUnit],
+    *,
+    header_ast_parser: HeaderAstParserFn,
+    backend: str,
+    compiler: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+    nostdinc: bool,
+    lang: str | None,
+    exported_dynamic: set[str],
+    exported_static: set[str],
+    public_header_paths: list[str],
+    public_dir_paths: list[str],
+    extra_hash_dirs: tuple[Path, ...],
+) -> list[TuFragment]:
+    """Run :func:`run_tu_fragment` for every TU in *tus*, under a
+    RAM-aware thread pool (ADR-050 D6, G32 Phase E) instead of a fully
+    sequential loop -- ``run_tu_loop``'s own extraction step, split out so
+    the pooled-vs-serial dispatch has one obvious home.
+
+    Fragments are collected and returned in *tus*' own declared order
+    (submission order), never completion order -- :func:`merge_tu_fragments`
+    treats TU order as significant (which TU's declaration "wins" an
+    ODR-compatible merge), so a pool that returns results out of order would
+    make the merge outcome depend on scheduling luck instead of the
+    manifest's own declared TU order.
+
+    A ``required=True`` TU's failure (the default) still propagates and
+    fails the whole manifest dump -- any not-yet-started future is cancelled
+    (best effort; already-running ones are left to finish rather than
+    force-killed mid-subprocess) and the original exception re-raised
+    unchanged, so a killed/timed-out TU's real error (e.g. the descriptive
+    ``SnapshotError`` a castxml/clang timeout already raises, naming the
+    terminated process) surfaces exactly as it would from the sequential
+    loop -- never silently swallowed or replaced with an empty fragment. A
+    ``required=False`` TU's failure still degrades to a logged diagnostic,
+    identical to the pre-pool behavior.
+
+    A single TU, or a resolved worker count of 1 (``ABICHECK_TU_JOBS=1``,
+    used by tests to force determinism), takes the plain sequential path --
+    no pool overhead, and no ordering ambiguity to reason about at all.
+    """
+    jobs = _tu_jobs(len(tus))
+
+    def _run_one(tu: TranslationUnit) -> TuFragment:
+        return run_tu_fragment(
+            tu,
+            header_ast_parser=header_ast_parser,
+            backend=backend,
+            compiler=compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+            exported_dynamic=exported_dynamic,
+            exported_static=exported_static,
+            public_header_paths=public_header_paths,
+            public_dir_paths=public_dir_paths,
+            extra_hash_dirs=extra_hash_dirs,
+        )
+
+    def _handle_failure(tu: TranslationUnit) -> None:
+        if tu.required:
+            raise
+        log.warning(
+            "Optional translation unit %r failed to extract; skipping "
+            "(required=false). Its declarations are absent from this "
+            "snapshot.",
+            tu.name,
+            exc_info=True,
+        )
+
+    fragments: list[TuFragment] = []
+    if jobs <= 1 or len(tus) <= 1:
+        for tu in tus:
+            try:
+                fragments.append(_run_one(tu))
+            except Exception:
+                _handle_failure(tu)
+        return fragments
+
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures: list[tuple[Future[TuFragment], TranslationUnit]] = [
+            (pool.submit(_run_one, tu), tu) for tu in tus
+        ]
+        for fut, tu in futures:
+            try:
+                fragments.append(fut.result())
+            except Exception:
+                if tu.required:
+                    # Cancel whatever hasn't started yet (best effort -- a
+                    # future already running its subprocess can't be
+                    # force-killed from here) before propagating, so the
+                    # pool doesn't keep burning RAM/CPU on TUs whose output
+                    # is about to be discarded anyway. An optional TU's
+                    # failure, by contrast, must not cancel its siblings --
+                    # the loop is meant to keep collecting the rest.
+                    for other_fut, _other_tu in futures:
+                        other_fut.cancel()
+                _handle_failure(tu)
+    return fragments
+
+
 def run_tu_loop(
     tus: Sequence[TranslationUnit],
     *,
@@ -227,39 +415,24 @@ def run_tu_loop(
     explicit_public_paths = [str(p) for p in public_header_paths]
     explicit_public_dirs = [str(d) for d in public_header_dirs]
 
-    fragments: list[TuFragment] = []
-    for tu in tus:
-        try:
-            fragments.append(
-                run_tu_fragment(
-                    tu,
-                    header_ast_parser=header_ast_parser,
-                    backend=backend,
-                    compiler=compiler,
-                    gcc_path=gcc_path,
-                    gcc_prefix=gcc_prefix,
-                    gcc_options=gcc_options,
-                    gcc_option_tokens=gcc_option_tokens,
-                    sysroot=sysroot,
-                    nostdinc=nostdinc,
-                    lang=lang,
-                    exported_dynamic=exported_dynamic,
-                    exported_static=exported_static,
-                    public_header_paths=resolved_public_paths,
-                    public_dir_paths=resolved_public_dirs,
-                    extra_hash_dirs=extra_hash_dirs,
-                )
-            )
-        except Exception:
-            if tu.required:
-                raise
-            log.warning(
-                "Optional translation unit %r failed to extract; skipping "
-                "(required=false). Its declarations are absent from this "
-                "snapshot.",
-                tu.name,
-                exc_info=True,
-            )
+    fragments = _run_tu_fragments(
+        tus,
+        header_ast_parser=header_ast_parser,
+        backend=backend,
+        compiler=compiler,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        lang=lang,
+        exported_dynamic=exported_dynamic,
+        exported_static=exported_static,
+        public_header_paths=resolved_public_paths,
+        public_dir_paths=resolved_public_dirs,
+        extra_hash_dirs=extra_hash_dirs,
+    )
 
     return merge_tu_fragments(
         fragments,

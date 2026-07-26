@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -88,12 +88,17 @@ def _dump_is_cacheable(
     same-key snapshot whose ``contract`` was fingerprinted under a
     different label.
 
-    A ``dump_manifest`` (ADR-050 D3) is excluded the same way: its per-TU
-    fragments and any support-root ``project_owned`` markers are not folded
-    into the cache key below, so a manifest-driven dump always falls through
-    to a live dump rather than risk serving a snapshot keyed only on the
-    manifest file's own path/headers/includes (which the whole-snapshot cache
-    never even sees — a manifest dump passes no ``headers``).
+    A ``dump_manifest`` (ADR-050 D3) is cacheable too, as of G32 Phase E:
+    :func:`_manifest_cache_paths` derives headers/includes-shaped path lists
+    from the manifest for :func:`abicheck.snapshot_cache._cache_key`'s own
+    content-hash walk to reuse unchanged (an edit to any file a
+    manifest-driven dump could actually read still busts the cache), and
+    :func:`abicheck.comparability.manifest_tu_scope_field` folds the
+    manifest's own structural identity (TU names/order/``required``/
+    ``contributes_to_abi``/``project_owned``) into the ``extra`` key
+    material below — the part a filesystem content walk structurally cannot
+    see (renaming a TU, or flipping ``contributes_to_abi``, changes nothing
+    a content hash would notice). See :func:`cached_run_dump`.
     """
     return (
         pdb_path is None
@@ -105,8 +110,51 @@ def _dump_is_cacheable(
         and not debug_presence_only
         and compile is None
         and not include_labels
-        and dump_manifest is None
     )
+
+
+def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
+    """Derive ``(headers, includes)``-shaped path lists from *dump_manifest*
+    for :func:`abicheck.snapshot_cache._cache_key`'s existing content-hash
+    walk to reuse as-is, rather than teaching that function a second,
+    manifest-specific file-discovery mechanism.
+
+    ``headers`` is every declared root plus every translation unit's own
+    ``forced_includes`` (deduplicated, first-declared order); ``includes``
+    is every TU's own ``-I`` search directory (deduplicated, first-declared
+    order) plus the manifest's ``public_header_dirs``. This only feeds
+    :func:`abicheck.snapshot_cache._cache_key`'s *content* hashing (so an
+    edit to any file a manifest-driven dump could actually read busts the
+    cache) — the manifest's own *structural* identity (TU names/order/
+    ``required``/``contributes_to_abi``/``project_owned``) is a separate,
+    additional ``extra``-key input (see :func:`cached_run_dump`), since a
+    content walk over these same paths cannot see it at all: renaming a TU,
+    or flipping ``contributes_to_abi``, changes nothing here hashes.
+    """
+    seen_headers: set[Path] = set()
+    headers: list[Path] = []
+    for h in dump_manifest.roots:
+        if h not in seen_headers:
+            seen_headers.add(h)
+            headers.append(h)
+    for tu in dump_manifest.translation_units:
+        for h in tu.forced_includes:
+            if h not in seen_headers:
+                seen_headers.add(h)
+                headers.append(h)
+
+    seen_includes: set[Path] = set()
+    includes: list[Path] = []
+    for tu in dump_manifest.translation_units:
+        for entry in tu.includes:
+            if entry.path not in seen_includes:
+                seen_includes.add(entry.path)
+                includes.append(entry.path)
+    for d in dump_manifest.public_header_dirs:
+        if d not in seen_includes:
+            seen_includes.add(d)
+            includes.append(d)
+    return headers, includes
 
 
 def _dump_cache_extra_key(
@@ -356,22 +404,49 @@ def cached_run_dump(
 
     from . import snapshot_cache
 
-    # The dump pipeline independently infers an umbrella header's include root;
-    # fold the same roots into the whole-snapshot key so transitive edits bust it.
-    from .header_utils import resolve_inferred_header_roots
+    if dump_manifest is not None:
+        # ADR-050 D3/D6 (G32 Phase E): a manifest-driven dump passes no
+        # `headers` at all (dump()'s own mutual-exclusivity check enforces
+        # that) -- derive content-hashable path lists from the manifest
+        # itself instead, and fold the manifest's own structural identity
+        # (a content walk over those same paths cannot see a TU rename or a
+        # flipped required/contributes_to_abi/project_owned flag) in as
+        # additional `extra` key material.
+        from .comparability import manifest_tu_scope_field
 
-    _inferred_roots, _ = resolve_inferred_header_roots(_headers, _includes)
-    _cache_includes = _includes + _inferred_roots
-    extra = _dump_cache_extra_key(
-        binary_fmt,
-        header_backend,
-        public_headers,
-        public_header_dirs,
-        lang,
-        uses_ast=bool(_headers),
-    )
+        _cache_headers, _cache_includes = _manifest_cache_paths(dump_manifest)
+        _manifest_extra = manifest_tu_scope_field(dump_manifest)
+        _uses_ast = True
+    else:
+        # The dump pipeline independently infers an umbrella header's include
+        # root; fold the same roots into the whole-snapshot key so transitive
+        # edits bust it.
+        from .header_utils import resolve_inferred_header_roots
+
+        _inferred_roots, _ = resolve_inferred_header_roots(_headers, _includes)
+        _cache_headers = _headers
+        _cache_includes = _includes + _inferred_roots
+        _manifest_extra = ""
+        _uses_ast = bool(_headers)
+
+    def _build_extra() -> str:
+        base = _dump_cache_extra_key(
+            binary_fmt,
+            header_backend,
+            public_headers,
+            public_header_dirs,
+            lang,
+            uses_ast=_uses_ast,
+        )
+        # NUL-joined (see _dump_cache_extra_key's own docstring on why NUL,
+        # not a printable delimiter, is the only collision-safe choice here
+        # too): _manifest_extra is "" for a non-manifest dump, so this is a
+        # no-op split for the legacy path.
+        return f"{base}\x00{_manifest_extra}" if _manifest_extra else base
+
+    extra = _build_extra()
     initial_key = snapshot_cache._cache_key(
-        path, _headers, _cache_includes, version, lang, extra=extra
+        path, _cache_headers, _cache_includes, version, lang, extra=extra
     )
     cached = snapshot_cache.lookup_key(initial_key, path)
     if cached is not None:
@@ -397,17 +472,11 @@ def cached_run_dump(
         compile=compile,
         notify=notify,
         include_labels=include_labels,
+        dump_manifest=dump_manifest,
     )
-    final_extra = _dump_cache_extra_key(
-        binary_fmt,
-        header_backend,
-        public_headers,
-        public_header_dirs,
-        lang,
-        uses_ast=bool(_headers),
-    )
+    final_extra = _build_extra()
     final_key = snapshot_cache._cache_key(
-        path, _headers, _cache_includes, version, lang, extra=final_extra
+        path, _cache_headers, _cache_includes, version, lang, extra=final_extra
     )
     if initial_key and initial_key == final_key:
         snapshot_cache.store_key(snap, initial_key, path)
