@@ -1008,3 +1008,129 @@ def test_gate_rejects_opaque_profile_mismatch_in_diagnostic_mode_too():
     result = check_contracts_comparable(old, new, diagnostic=True)
     assert isinstance(result, ComparabilityMismatch)
     assert result.kind == "profile"
+
+
+def test_gate_rejects_unknown_profile_delta_even_with_a_waived_recognized_one():
+    # Codex review, PR #641 follow-up (P1): `differing` only ever iterates
+    # PROFILE_FIELD_KEYS, so a contract carrying an extra field this build
+    # doesn't recognize (a newer schema key) was invisible to `unexplained`
+    # -- if it happened to co-occur with an otherwise-legitimate,
+    # carve-out-waived delta (additive header_sequence growth,
+    # corroborated by real scope growth), the unrecognized delta slipped
+    # through entirely and the pair was wrongly reported comparable.
+    old_fields = {
+        "header_sequence": json.dumps(["a.h", "b.h"]),
+        "future_field": "one",
+    }
+    new_fields = {
+        "header_sequence": json.dumps(["a.h", "b.h", "c.h"]),
+        "future_field": "two",
+    }
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint="p-old",
+            scope_fingerprint="s-old",
+            profile_fields=old_fields,
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h"]),
+                "public_header_dirs": json.dumps([]),
+            },
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint="p-new",
+            scope_fingerprint="s-new",
+            profile_fields=new_fields,
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h", "c.h"]),
+                "public_header_dirs": json.dumps([]),
+            },
+        )
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_rejects_unknown_profile_delta_alone_too():
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint="p-old",
+            scope_fingerprint=None,
+            profile_fields={"future_field": "one"},
+            scope_fields={},
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint="p-new",
+            scope_fingerprint=None,
+            profile_fields={"future_field": "two"},
+            scope_fields={},
+        )
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+# ---------------------------------------------------------------------------
+# Codex review, PR #641 follow-up (P2): carve-out helpers must decline, not
+# crash, on malformed JSON in profile_fields/scope_fields
+# ---------------------------------------------------------------------------
+
+
+def test_scope_field_additive_superset_declines_on_malformed_json():
+    assert not _scope_field_is_additive_superset("not-json", json.dumps(["a.h"]))
+    assert not _scope_field_is_additive_superset(json.dumps(["a.h"]), "not-json")
+
+
+def test_scope_field_additive_superset_declines_on_non_list_json():
+    assert not _scope_field_is_additive_superset('{"a": 1}', json.dumps(["a.h"]))
+
+
+def test_header_sequence_additive_reorder_free_declines_on_malformed_json():
+    assert not _header_sequence_is_additive_reorder_free(
+        "not-json", json.dumps(["a.h", "b.h"])
+    )
+    assert not _header_sequence_is_additive_reorder_free(
+        json.dumps(["a.h"]), "not-json"
+    )
+
+
+def test_include_sequence_additive_owned_growth_declines_on_malformed_outer_json():
+    assert not _include_sequence_is_additive_owned_growth(
+        "not-json", json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
+    )
+
+
+def test_include_sequence_additive_owned_growth_declines_on_malformed_inner_json():
+    old = json.dumps(["0:hdrs:not-json"])
+    new = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
+    assert not _include_sequence_is_additive_owned_growth(old, new)
+
+
+def test_gate_scope_carve_out_declines_instead_of_crashing_on_malformed_scope_field():
+    # The gate-level end-to-end pin: a malformed scope_fields value must
+    # surface as the ordinary ScopeMismatchError, not an unhandled
+    # JSONDecodeError escaping check_contracts_comparable.
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-old",
+            profile_fields={},
+            scope_fields={"headers": "not-json", "public_header_dirs": json.dumps([])},
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-new",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h"]),
+                "public_header_dirs": json.dumps([]),
+            },
+        )
+    )
+    with pytest.raises(ScopeMismatchError):
+        check_contracts_comparable(old, new)

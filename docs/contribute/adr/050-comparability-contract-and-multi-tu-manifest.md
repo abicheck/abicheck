@@ -1755,13 +1755,12 @@ the composing-loop restructuring above each had one more gap:
   empty even though `profile_fingerprint` genuinely differs. `if not
   unexplained: return None` then treated "nothing left to explain" as
   "already explained," bypassing the fail-closed gate exactly when the
-  granular data needed to verify safety was missing. The same gap applies
-  if the two sides differ only on a field a newer schema might add outside
-  today's `PROFILE_FIELD_KEYS`. Fixed by distinguishing the two cases: an
-  empty `differing` now raises unconditionally (nothing was positively
-  verified, so this is not a hard-fail this gate should ever waive), while
-  a non-empty `differing` still requires the carve-outs to explain
-  everything before returning comparable, exactly as before.
+  granular data needed to verify safety was missing. Fixed by
+  distinguishing an entirely-empty `differing` (nothing was positively
+  verified, so this raises unconditionally) from a non-empty `differing`
+  (still requires the carve-outs to explain everything before returning
+  comparable, exactly as before) — see the sixth review pass below for the
+  related, still-open gap this round's fix didn't yet close.
 
 Both fixes add regression tests proven to fail without them (`git stash`
 the fix, confirm the new test fails, restore). Full fast unit suite green,
@@ -1771,6 +1770,54 @@ tests (already about two-thirds of the file) were split into a sibling
 `tests/test_comparability_gate.py`, leaving the parent file scoped to
 `compute_extraction_contract`'s own fingerprint-computation tests, per this
 repo's usual large-file-split convention.
+
+**A sixth review pass** (Codex, one P1, one P2) found the fifth pass's own
+opaque-mismatch fix still had a gap, plus a defensive-coding gap shared by
+all four carve-out helpers:
+
+- **A differing field outside `PROFILE_FIELD_KEYS` entirely could still
+  hide behind a legitimate, waived delta.** The fifth pass's fix only
+  covered `differing` (over `PROFILE_FIELD_KEYS`) coming out completely
+  *empty* — it left unaddressed a contract carrying an extra field this
+  build doesn't recognize (a newer schema key) that also differs, mixed
+  with an otherwise-legitimate, carve-out-waived delta (e.g. additive
+  `header_sequence` growth corroborated by real scope growth). Since
+  `differing`'s computation only ever iterates `PROFILE_FIELD_KEYS`, the
+  unrecognized field's delta was structurally invisible to `unexplained` —
+  once the recognized delta was waived, `unexplained` came out empty and
+  the pair was wrongly reported comparable, silently ignoring the
+  unrecognized field entirely. Fixed with a new, independently-computed
+  `unknown_differing` set (every key outside `PROFILE_FIELD_KEYS`, over the
+  union of both sides' field-dict keys, that actually differs) — its
+  presence is now unconditionally fatal, checked before any carve-out
+  result is trusted, since no carve-out understands an unrecognized key's
+  semantics well enough to vouch for it.
+- **The carve-out helpers didn't handle malformed JSON.**
+  `_scope_field_is_additive_superset`,
+  `_header_sequence_is_additive_reorder_free`, and
+  `_include_sequence_is_additive_owned_growth` all call `json.loads` on
+  their `str` inputs unguarded — but a serialized or externally
+  constructed `ExtractionContract` can carry an arbitrary string there
+  (`_extraction_contract_from_dict` preserves field values without
+  validating their JSON encoding), so a malformed value (e.g.
+  `headers: "not-json"`) raised an unhandled `JSONDecodeError` that escaped
+  `check_contracts_comparable` as a raw traceback instead of the clean
+  `ScopeMismatchError`/`ProfileMismatchError` the gate exists to fail
+  closed with. Fixed with a shared `_json_load_list` helper (decodes to a
+  list or returns `None` on any decode failure or non-list result); every
+  carve-out now declines instead of crashing when either side fails to
+  decode. `_include_sequence_is_additive_owned_growth`'s inner per-slot
+  owned-pairs decode gets the same treatment, plus a guard against a
+  structurally-malformed-but-valid-JSON pair (`tuple(p)` on a non-sequence
+  element) declining instead of raising `TypeError`.
+
+New regression tests: two gate-level tests for the unknown-differing-key
+case (one alone, one mixed with a waived recognized delta — proven to fail
+without the fix), one direct unit test per carve-out helper pinning
+malformed-JSON decline (plus a non-list-JSON case for the scope helper),
+and one gate-level end-to-end test confirming a malformed scope field
+raises `ScopeMismatchError` rather than crashing. Full fast unit suite
+green, mypy/ruff clean.
 
 ### D3. Manifest and real multi-TU dump
 

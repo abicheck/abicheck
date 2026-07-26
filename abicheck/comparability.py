@@ -120,6 +120,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
 from .model import AbiSnapshot, ExtractionContract
@@ -197,8 +198,10 @@ def _header_sequence_is_additive_reorder_free(
     """
     if old_value is None or new_value is None:
         return False
-    old_list: list[str] = json.loads(old_value)
-    new_list: list[str] = json.loads(new_value)
+    old_list = _json_load_list(old_value)
+    new_list = _json_load_list(new_value)
+    if old_list is None or new_list is None:
+        return False
     if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
         return False
     if len(new_list) == 1 and new_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
@@ -250,13 +253,17 @@ def _include_sequence_is_additive_owned_growth(
         return False
     if old_value == new_value:
         return True
-    old_slots: list[str] = json.loads(old_value)
-    new_slots: list[str] = json.loads(new_value)
+    old_slots = _json_load_list(old_value)
+    new_slots = _json_load_list(new_value)
+    if old_slots is None or new_slots is None:
+        return False
     if len(old_slots) != len(new_slots):
         return False
     for old_slot, new_slot in zip(old_slots, new_slots):
         if old_slot == new_slot:
             continue
+        if not (isinstance(old_slot, str) and isinstance(new_slot, str)):
+            return False
         old_idx, _, old_rest = old_slot.partition(":")
         new_idx, _, new_rest = new_slot.partition(":")
         if old_idx != new_idx:
@@ -271,10 +278,15 @@ def _include_sequence_is_additive_owned_growth(
             and new_rest.startswith(_OWNED_HEADER_TOKEN_PREFIX)
         ):
             return False
-        old_pairs = json.loads(old_rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
-        new_pairs = json.loads(new_rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
-        old_owned = {tuple(p) for p in old_pairs}
-        new_owned = {tuple(p) for p in new_pairs}
+        old_pairs = _json_load_list(old_rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
+        new_pairs = _json_load_list(new_rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
+        if old_pairs is None or new_pairs is None:
+            return False
+        try:
+            old_owned = {tuple(p) for p in old_pairs}
+            new_owned = {tuple(p) for p in new_pairs}
+        except TypeError:
+            return False
         if not new_owned >= old_owned:
             return False
     return True
@@ -953,6 +965,30 @@ def _binary_platform_components(snap: AbiSnapshot) -> dict[str, str] | None:
     return None
 
 
+def _json_load_list(value: str) -> list[Any] | None:
+    """Decode *value* as a JSON list, or ``None`` if it isn't valid JSON or
+    doesn't decode to a list (Codex review, PR #641 follow-up, P2).
+
+    Every carve-out helper below treats its ``profile_fields``/
+    ``scope_fields`` string inputs as trusted output of
+    :func:`compute_extraction_contract` -- but a serialized or externally
+    constructed :class:`~abicheck.model.ExtractionContract` can carry an
+    arbitrary string there (``_extraction_contract_from_dict`` preserves
+    field values without validating their JSON encoding), so an unguarded
+    ``json.loads`` call risks an unhandled ``JSONDecodeError`` escaping
+    :func:`check_contracts_comparable` as a raw traceback instead of the
+    clean ``ScopeMismatchError``/``ProfileMismatchError`` the gate is
+    supposed to fail closed with. A malformed value is exactly as
+    unverifiable as a missing one, so callers treat ``None`` here the same
+    way they already treat an absent field: decline the carve-out.
+    """
+    try:
+        decoded = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return decoded if isinstance(decoded, list) else None
+
+
 def _scope_field_is_additive_superset(
     old_value: str | None, new_value: str | None
 ) -> bool:
@@ -993,8 +1029,10 @@ def _scope_field_is_additive_superset(
         return False
     if old_value == new_value:
         return True
-    old_list = json.loads(old_value)
-    new_list = json.loads(new_value)
+    old_list = _json_load_list(old_value)
+    new_list = _json_load_list(new_value)
+    if old_list is None or new_list is None:
+        return False
     if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
         return False
     if len(new_list) == 1 and new_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
@@ -1172,15 +1210,28 @@ def check_contracts_comparable(
     above narrow an ``unexplained`` working set that starts as ``differing``
     — the set of :data:`PROFILE_FIELD_KEYS` that actually differ between
     ``old_fields``/``new_fields``. If ``profile_fingerprint`` differs but
-    ``differing`` itself is *empty* — either because one or both sides'
-    ``profile_fields`` were entirely absent/malformed on deserialization
+    ``differing`` itself is *empty* — e.g. one or both sides' ``profile_fields``
+    were entirely absent/malformed on deserialization
     (``_extraction_contract_from_dict`` substitutes ``{}``, so every field
-    trivially compares equal) or because the two sides only differ on a
-    field outside ``PROFILE_FIELD_KEYS`` a newer schema might add — there is
-    nothing here to positively verify as safe, so this raises rather than
-    treating the absence of an explanation as one. Only a ``differing`` set
-    that is non-empty and gets fully narrowed to nothing by the carve-outs
-    above counts as comparable.
+    trivially compares equal) — there is nothing here to positively verify
+    as safe, so this raises rather than treating the absence of an
+    explanation as one. Only a ``differing`` set that is non-empty and gets
+    fully narrowed to nothing by the carve-outs above counts as comparable.
+
+    **Unknown profile deltas are also rejected, checked independently of
+    and before any carve-out (Codex review, PR #641 follow-up, second P1):**
+    ``differing`` above only ever iterates :data:`PROFILE_FIELD_KEYS`, so a
+    contract carrying a field this build doesn't recognize at all (a newer
+    schema key) was invisible to it — if that unrecognized delta happened to
+    co-occur with an otherwise-legitimate, carve-out-waived delta (e.g.
+    additive ``header_sequence`` growth), the pair was wrongly reported
+    comparable once the recognized delta alone was waived, silently
+    ignoring the unrecognized one. ``unknown_differing`` separately computes
+    every key outside ``PROFILE_FIELD_KEYS`` (over the union of both sides'
+    field-dict keys) that actually differs; its presence is unconditionally
+    fatal, regardless of what the carve-outs above conclude about the
+    recognized fields, since no carve-out here understands an unrecognized
+    key's semantics well enough to vouch for it.
 
     **Carve-outs compose (PR #641 follow-up, fourth round):** a release
     combining two independently-sanctioned deltas — e.g. adding a header
@@ -1262,6 +1313,24 @@ def check_contracts_comparable(
             k
             for k in PROFILE_FIELD_KEYS
             if old_fields.get(k, "") != new_fields.get(k, "")
+        }
+        # A differing key OUTSIDE PROFILE_FIELD_KEYS entirely -- a newer
+        # schema field this build doesn't recognize -- must also block the
+        # "comparable" outcome, checked independently of and before any
+        # carve-out (Codex review, PR #641 follow-up, P1): `differing` above
+        # only ever iterates PROFILE_FIELD_KEYS, so a contract carrying an
+        # extra field this version doesn't know how to interpret (mixed
+        # with an otherwise-legitimate, carve-out-waived delta like additive
+        # `header_sequence` growth) was invisible to `unexplained` and the
+        # pair was wrongly reported comparable once the recognized delta
+        # alone got waived. No carve-out here understands an unrecognized
+        # key's semantics, so its presence is unconditionally fatal
+        # regardless of what the recognized fields' carve-outs conclude.
+        unknown_differing = {
+            k
+            for k in set(old_fields) | set(new_fields)
+            if k not in PROFILE_FIELD_KEYS
+            and old_fields.get(k, "") != new_fields.get(k, "")
         }
         # Each carve-out below claims and verifies only the subset of
         # `differing` it actually understands, removing exactly those
@@ -1375,15 +1444,21 @@ def check_contracts_comparable(
             # docstring.
             unexplained -= include_seq_candidate
 
-        if not differing:
+        if unknown_differing:
+            reason = (
+                "old and new snapshots were extracted under different "
+                "compile contexts (profile_fingerprint mismatch), and "
+                f"differ on field(s) this version does not recognize: "
+                f"{', '.join(sorted(unknown_differing))} — the comparison "
+                "cannot be verified safe."
+            )
+        elif not differing:
             # Codex review, PR #641 follow-up (P1): profile_fingerprint
             # differs but NONE of the known PROFILE_FIELD_KEYS explain it --
-            # either profile_fields was entirely absent/malformed on
+            # profile_fields was entirely absent/malformed on
             # deserialization (_extraction_contract_from_dict substitutes
             # {}, so every old_fields.get(k, "")/new_fields.get(k, "")
-            # compares "" == "" for every k) or the two sides only differ on
-            # a field outside PROFILE_FIELD_KEYS (a newer schema key this
-            # build doesn't know about yet). An empty `differing` must NOT
+            # compares "" == "" for every k). An empty `differing` must NOT
             # be treated as "nothing to explain, therefore comparable" --
             # that would silently bypass this fail-closed gate exactly when
             # the granular field data needed to verify safety is missing or
@@ -1392,8 +1467,7 @@ def check_contracts_comparable(
                 "old and new snapshots were extracted under different "
                 "compile contexts (profile_fingerprint mismatch), but no "
                 "recognized profile field explains the difference — "
-                "profile_fields may be absent/incomplete, or the mismatch "
-                "comes from a field this version does not track — so the "
+                "profile_fields may be absent/incomplete — so the "
                 "comparison cannot be verified safe."
             )
         elif not unexplained:
