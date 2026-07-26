@@ -36,6 +36,7 @@ from abicheck.header_utils import resolve_inferred_header_roots
 from abicheck.macho_metadata import MachoMetadata
 from abicheck.model import AbiSnapshot, ExtractionContract
 from abicheck.pe_metadata import PeMetadata
+from tests._comparability_gate_helpers import _ANY_NEW_HEADERS, _hdrs_slot
 
 
 def _write(path: Path, content: str) -> Path:
@@ -152,7 +153,9 @@ def test_gate_additive_header_set_carve_out_covers_public_header_dirs_growth(tmp
     for d in (dir1b, dir2b, dir3b):
         d.mkdir(parents=True)
     old = _snap(
-        compute_extraction_contract(declared_headers=[a, b], public_header_dirs=[dir1, dir2])
+        compute_extraction_contract(
+            declared_headers=[a, b], public_header_dirs=[dir1, dir2]
+        )
     )
     new = _snap(
         compute_extraction_contract(
@@ -252,15 +255,18 @@ def test_gate_header_sequence_carve_out_makes_f8_scenario_fully_comparable(tmp_p
     a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
     b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
     c2 = _write(tmp_path / "v2" / "c.h", "int h(void);\n")
-    old = _snap(compute_extraction_contract(declared_headers=[a, b], l2_frontend_ran=True))
+    old = _snap(
+        compute_extraction_contract(declared_headers=[a, b], l2_frontend_ran=True)
+    )
     new = _snap(
         compute_extraction_contract(declared_headers=[a2, b2, c2], l2_frontend_ran=True)
     )
     assert old.contract.scope_fingerprint != new.contract.scope_fingerprint
     assert old.contract.profile_fingerprint != new.contract.profile_fingerprint
-    assert old.contract.profile_fields["header_sequence"] != new.contract.profile_fields[
-        "header_sequence"
-    ]
+    assert (
+        old.contract.profile_fields["header_sequence"]
+        != new.contract.profile_fields["header_sequence"]
+    )
     assert check_contracts_comparable(old, new) is None  # must not raise either error
 
 
@@ -286,7 +292,9 @@ def test_gate_additive_header_set_carve_out_ignores_unchanged_single_dir_sentine
     c2 = _write(new_dir / "c.h", "int h(void);\n")
     old = _snap(
         compute_extraction_contract(
-            declared_headers=[a1, b1], public_header_dirs=[old_dir], l2_frontend_ran=True
+            declared_headers=[a1, b1],
+            public_header_dirs=[old_dir],
+            l2_frontend_ran=True,
         )
     )
     new = _snap(
@@ -349,7 +357,9 @@ def test_gate_header_sequence_carve_out_still_raises_when_existing_headers_reord
     a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
     b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
     c2 = _write(tmp_path / "v2" / "c.h", "int h(void);\n")
-    old = _snap(compute_extraction_contract(declared_headers=[a, b], l2_frontend_ran=True))
+    old = _snap(
+        compute_extraction_contract(declared_headers=[a, b], l2_frontend_ran=True)
+    )
     new = _snap(
         compute_extraction_contract(declared_headers=[b2, a2, c2], l2_frontend_ran=True)
     )
@@ -364,7 +374,9 @@ def test_gate_header_sequence_carve_out_declines_when_a_side_is_single_header_se
     a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
     b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
     old = _snap(compute_extraction_contract(declared_headers=[a], l2_frontend_ran=True))
-    new = _snap(compute_extraction_contract(declared_headers=[a2, b2], l2_frontend_ran=True))
+    new = _snap(
+        compute_extraction_contract(declared_headers=[a2, b2], l2_frontend_ran=True)
+    )
     with pytest.raises((ScopeMismatchError, ProfileMismatchError)):
         check_contracts_comparable(old, new)
 
@@ -378,14 +390,12 @@ def test_gate_header_sequence_carve_out_declines_when_a_side_is_single_header_se
 # scope_new_headers is required (Codex review, PR #641 follow-up, ninth
 # P1): the appended sequence entries must correspond to headers genuinely
 # new to the declared scope, not merely an additive-shaped sequence on its
-# own. _ANY_NEW_HEADERS below is a permissive stand-in covering every
-# header name used in this whole shape-only test block, so these tests
-# keep isolating the SHAPE logic (trailing-append/reorder/removal) --
-# see test_gate_*_correspondence_* further down for the dedicated
-# correspondence-check tests.
+# own. _ANY_NEW_HEADERS (tests/_comparability_gate_helpers.py) is a
+# permissive stand-in covering every header name used in this whole
+# shape-only test block, so these tests keep isolating the SHAPE logic
+# (trailing-append/reorder/removal) -- see test_gate_*_correspondence_*
+# further down for the dedicated correspondence-check tests.
 # ---------------------------------------------------------------------------
-
-_ANY_NEW_HEADERS = frozenset({"a.h", "b.h", "c.h"})
 
 
 def test_header_sequence_additive_reorder_free_true_for_pure_append():
@@ -497,193 +507,12 @@ def test_header_sequence_additive_reorder_free_false_for_duplicate_in_old_list()
 
 
 # ---------------------------------------------------------------------------
-# _include_sequence_is_additive_owned_growth (PR #641 follow-up, fourth
-# round): resolve_inferred_header_roots (cli_dump_helpers.py) auto-adds a
-# header-owning include directory, whose slot token in include_sequence
-# encodes the declared-header set IT owns -- so a pure header addition
-# changes this field too, independently of header_sequence.
+# _include_sequence_is_additive_owned_growth: split out to
+# test_comparability_gate_include_sequence.py (file-size hard cap) -- see
+# that file's module docstring. A few later tests in this file still
+# exercise the same function directly (via the shared _hdrs_slot/
+# _ANY_NEW_HEADERS helpers) where it composes with other gate behavior.
 # ---------------------------------------------------------------------------
-
-
-def _hdrs_slot(idx: int, pairs: list[tuple[str, str]]) -> str:
-    return f"{idx}:hdrs:{json.dumps(sorted(pairs))}"
-
-
-def test_include_sequence_additive_owned_growth_true_for_pure_append():
-    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
-    new = json.dumps(
-        [_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")])]
-    )
-    assert _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_true_when_unchanged():
-    same = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
-    assert _include_sequence_is_additive_owned_growth(same, same, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_false_for_removal():
-    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
-    new = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_false_for_non_owned_slot_drift():
-    # An "ext:" (external, non-owned) slot differing is real, unrelated
-    # profile drift -- this carve-out has no business waiving it.
-    old = json.dumps(["0:ext:" + "a" * 16])
-    new = json.dumps(["0:ext:" + "b" * 16])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_false_for_slot_count_change():
-    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
-    new = json.dumps(
-        [_hdrs_slot(0, [("a.h", "a.h")]), "1:ext:" + "a" * 16]
-    )
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_false_for_single_header_sentinel():
-    old = json.dumps(["0:hdrs:<single-header>"])
-    new = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_declines_on_none():
-    some = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
-    assert not _include_sequence_is_additive_owned_growth(None, some, _ANY_NEW_HEADERS)
-    assert not _include_sequence_is_additive_owned_growth(some, None, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_true_when_one_slot_unchanged():
-    # Multi-slot case: slot 0 (an external, non-owned dir) is byte-identical
-    # on both sides; only slot 1 (the owned root) grows. The per-slot
-    # equality short-circuit must let the unchanged slot through without
-    # re-parsing it. The "ext:" payload is a real _sha256_of digest shape
-    # (Codex review, PR #641 follow-up, twelfth P2 -- payload format is now
-    # validated even for unchanged slots).
-    ext_slot = "0:ext:" + _sha256_of("dir-contents")
-    old = json.dumps([ext_slot, _hdrs_slot(1, [("a.h", "a.h")])])
-    new = json.dumps([ext_slot, _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])])
-    assert _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_false_for_index_mismatch():
-    # A malformed/reordered slot list (index labels don't line up
-    # positionally) can never be safely verified.
-    old = json.dumps(["0:hdrs:[[\"a.h\", \"a.h\"]]"])
-    new = json.dumps(["1:hdrs:[[\"a.h\", \"a.h\"], [\"b.h\", \"b.h\"]]"])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_false_for_non_positional_index():
-    # Codex review, PR #641 follow-up (seventh P2): a slot index that is
-    # IDENTICAL on both sides but not a real positional index (the
-    # per-slot loop only checks old_idx == new_idx, never that the shared
-    # index is actually valid) must still be declined -- otherwise a
-    # fabricated slot label lets malformed evidence through as if it were
-    # genuine additive owned-header growth.
-    old = json.dumps(["bogus:hdrs:[[\"a.h\", \"a.h\"]]"])
-    new = json.dumps(["bogus:hdrs:[[\"a.h\", \"a.h\"], [\"b.h\", \"b.h\"]]"])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_true_with_unchanged_trailing_sys_bucket():
-    # Codex review, PR #641 follow-up (tenth P1): the real production
-    # construction appends an unnumbered trailing "sys:..." entry for any
-    # depfile header outside every declared include root -- the seventh
-    # P2 fix's _slot_indices_match_position required EVERY slot's prefix
-    # to equal its position, which this "sys:" entry never can (it owns no
-    # IncludeDir and thus no position). An unchanged system bucket must
-    # not block an otherwise-legitimate owned-header addition. The payload
-    # is a real _sha256_of digest shape (Codex review, PR #641 follow-up,
-    # twelfth P2 -- payload format is now validated even for unchanged
-    # slots).
-    sys_bucket = "sys:" + _sha256_of("system-headers")
-    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")]), sys_bucket])
-    new = json.dumps(
-        [_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")]), sys_bucket]
-    )
-    assert _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_false_when_sys_bucket_not_trailing():
-    # A "sys:"-prefixed entry anywhere but the last position is not the
-    # real production shape (the bucket is always appended last, if
-    # present) -- must still be declined as an unverifiable position.
-    old = json.dumps(["sys:" + "a" * 16, _hdrs_slot(1, [("a.h", "a.h")])])
-    new = json.dumps(
-        ["sys:" + "a" * 16, _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])]
-    )
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_false_for_unchanged_delimiterless_slot():
-    # Codex review, PR #641 follow-up (eleventh P2): a malformed slot with
-    # NO ":" delimiter at all, e.g. the bare string "0", still passes
-    # slot.partition(":")[0] == str(i) trivially ("0".partition(":")[0] is
-    # "0" itself). If that slot happens to be byte-identical on both
-    # sides, the per-slot loop's own equality short-circuit never
-    # re-examines it, so it could ride alongside a genuinely-growing slot
-    # 1 and still return additive-safe. Confirmed by direct repro before
-    # any fix: this was accepted as safe growth.
-    old = json.dumps(["0", _hdrs_slot(1, [("a.h", "a.h")])])
-    new = json.dumps(["0", _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_false_for_unchanged_malformed_ext_payload():
-    # Codex review, PR #641 follow-up (twelfth P2): the delimiter/token-
-    # shape fix only checked the "ext:" PREFIX, not that what follows it is
-    # a genuine _sha256_of digest. An unchanged malformed payload like
-    # "ext:bogus" still passes that check trivially and, exactly like the
-    # delimiter-less case above, could ride unexamined alongside a
-    # genuinely-growing "hdrs:" slot. Confirmed by direct repro before any
-    # fix: this was accepted as safe growth.
-    old = json.dumps(["0:ext:bogus", _hdrs_slot(1, [("a.h", "a.h")])])
-    new = json.dumps(["0:ext:bogus", _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_false_for_unchanged_malformed_sys_payload():
-    # Same gap as above, for the trailing "sys:" bucket's payload.
-    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h")]), "sys:not-a-sha256"])
-    new = json.dumps(
-        [_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")]), "sys:not-a-sha256"]
-    )
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
-
-
-def test_include_sequence_additive_owned_growth_declines_when_scope_new_headers_is_none():
-    # Codex review, PR #641 follow-up (ninth P1): a shape-valid owned-pair
-    # growth must still decline when the caller has no verified set of
-    # newly-added scope headers to check the newly-owned pair against.
-    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
-    new = json.dumps(
-        [_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")])]
-    )
-    assert not _include_sequence_is_additive_owned_growth(old, new, None)
-
-
-def test_include_sequence_additive_owned_growth_declines_when_new_pair_not_in_scope_new_headers():
-    # Codex review, PR #641 follow-up (ninth P1): the exact scenario --
-    # c.h is newly owned in the include_sequence slot, but the scope only
-    # grew by d.h (an unrelated header), so this must decline even though
-    # the shape itself (owned-pair superset growth) is otherwise valid.
-    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
-    new = json.dumps(
-        [_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")])]
-    )
-    assert not _include_sequence_is_additive_owned_growth(old, new, frozenset({"d.h"}))
-
-
-def test_include_sequence_additive_owned_growth_true_when_new_pair_matches_scope_new_headers():
-    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
-    new = json.dumps(
-        [_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")])]
-    )
-    assert _include_sequence_is_additive_owned_growth(old, new, frozenset({"c.h"}))
 
 
 def test_gate_handles_the_real_directory_based_f8_scenario_end_to_end(tmp_path):
@@ -723,9 +552,10 @@ def test_gate_handles_the_real_directory_based_f8_scenario_end_to_end(tmp_path):
             public_header_dirs=[new_dir],
         )
     )
-    assert old.contract.profile_fields["include_sequence"] != new.contract.profile_fields[
-        "include_sequence"
-    ]
+    assert (
+        old.contract.profile_fields["include_sequence"]
+        != new.contract.profile_fields["include_sequence"]
+    )
     assert check_contracts_comparable(old, new) is None  # must not raise either error
 
 
@@ -1179,9 +1009,10 @@ def test_gate_header_sequence_carve_out_declines_without_scope_corroboration(tmp
         )
     )
     assert old.contract.scope_fingerprint == new.contract.scope_fingerprint
-    assert old.contract.profile_fields["header_sequence"] != new.contract.profile_fields[
-        "header_sequence"
-    ]
+    assert (
+        old.contract.profile_fields["header_sequence"]
+        != new.contract.profile_fields["header_sequence"]
+    )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
 
@@ -1225,9 +1056,10 @@ def test_gate_include_sequence_carve_out_declines_without_scope_corroboration(
         )
     )
     assert old.contract.scope_fingerprint == new.contract.scope_fingerprint
-    assert old.contract.profile_fields["include_sequence"] != new.contract.profile_fields[
-        "include_sequence"
-    ]
+    assert (
+        old.contract.profile_fields["include_sequence"]
+        != new.contract.profile_fields["include_sequence"]
+    )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
 
@@ -1320,9 +1152,13 @@ def test_gate_header_sequence_carve_out_declines_when_appended_header_is_not_the
         )
     )
     assert old.contract.scope_fields["headers"] == json.dumps(["a.h", "b.h", "d.h"])
-    assert new.contract.scope_fields["headers"] == json.dumps(["a.h", "b.h", "c.h", "d.h"])
+    assert new.contract.scope_fields["headers"] == json.dumps(
+        ["a.h", "b.h", "c.h", "d.h"]
+    )
     assert old.contract.profile_fields["header_sequence"] == json.dumps(["a.h", "b.h"])
-    assert new.contract.profile_fields["header_sequence"] == json.dumps(["a.h", "b.h", "d.h"])
+    assert new.contract.profile_fields["header_sequence"] == json.dumps(
+        ["a.h", "b.h", "d.h"]
+    )
     assert _scope_growth_corroborated(old.contract, new.contract)
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
@@ -1626,12 +1462,8 @@ def test_scope_field_additive_superset_declines_on_non_string_list_members():
     # a list whose members aren't plain strings (e.g. a dict) -- downstream
     # `in _SCOPE_SINGLE_ENTRY_SENTINELS`/`set(...)` checks require hashable
     # strings, so this must decline rather than raise TypeError.
-    assert not _scope_field_is_additive_superset(
-        json.dumps([{}]), json.dumps(["a.h"])
-    )
-    assert not _scope_field_is_additive_superset(
-        json.dumps(["a.h"]), json.dumps([{}])
-    )
+    assert not _scope_field_is_additive_superset(json.dumps([{}]), json.dumps(["a.h"]))
+    assert not _scope_field_is_additive_superset(json.dumps(["a.h"]), json.dumps([{}]))
 
 
 def test_header_sequence_additive_reorder_free_declines_on_non_string_list_members():
@@ -1642,7 +1474,9 @@ def test_header_sequence_additive_reorder_free_declines_on_non_string_list_membe
 
 def test_include_sequence_additive_owned_growth_declines_on_non_string_outer_members():
     assert not _include_sequence_is_additive_owned_growth(
-        json.dumps([{}]), json.dumps([_hdrs_slot(0, [("a.h", "a.h")])]), _ANY_NEW_HEADERS
+        json.dumps([{}]),
+        json.dumps([_hdrs_slot(0, [("a.h", "a.h")])]),
+        _ANY_NEW_HEADERS,
     )
 
 
@@ -1694,10 +1528,7 @@ def test_include_sequence_additive_owned_growth_declines_on_wrong_arity_pair():
     # untrustworthy evidence.
     old = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
     new = json.dumps(
-        [
-            "0:hdrs:"
-            + json.dumps([["a.h", "a.h"], ["b.h", "b.h", "extra"]])
-        ]
+        ["0:hdrs:" + json.dumps([["a.h", "a.h"], ["b.h", "b.h", "extra"]])]
     )
     assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
 
@@ -1842,13 +1673,19 @@ def test_gate_rejects_unknown_scope_delta_present_empty_vs_absent():
 
 
 def test_fingerprint_matches_fields_true_for_real_computation():
-    fields = {"headers": json.dumps(["a.h", "b.h"]), "public_header_dirs": json.dumps([])}
+    fields = {
+        "headers": json.dumps(["a.h", "b.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
     real = _sha256_of(*[fields[k] for k in SCOPE_FIELD_KEYS])
     assert _fingerprint_matches_fields(real, fields, SCOPE_FIELD_KEYS)
 
 
 def test_fingerprint_matches_fields_false_for_arbitrary_string():
-    fields = {"headers": json.dumps(["a.h", "b.h"]), "public_header_dirs": json.dumps([])}
+    fields = {
+        "headers": json.dumps(["a.h", "b.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
     assert not _fingerprint_matches_fields("not-a-real-hash", fields, SCOPE_FIELD_KEYS)
 
 

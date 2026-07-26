@@ -399,6 +399,19 @@ def _slot_indices_match_position(slots: list[str]) -> bool:
     user-supplied text) and ``"hdrs:"`` (its own JSON-shape, validated
     separately) are deliberately excluded from this digest check -- see
     :func:`_is_valid_digest_payload`.
+
+    Also requires an ``"hdrs:"`` slot's own payload to actually decode to
+    the real owned-header shape -- either the ``<single-header>`` sentinel
+    or a JSON list of valid ``(identity, relative_path)`` pairs (Codex
+    review, PR #641 follow-up, thirteenth P2): the JSON-list-of-pairs shape
+    was previously only decoded and validated by
+    :func:`_include_sequence_is_additive_owned_growth`'s per-slot loop, and
+    that loop's equality short-circuit (``if old_slot == new_slot:
+    continue``) never reaches an *unchanged* slot -- so a malformed,
+    byte-identical payload like ``"0:hdrs:not-json"`` rode alongside a
+    genuinely-growing separate ``"hdrs:"`` slot completely unexamined,
+    exactly the same unverifiable-evidence gap the ``ext:``/``sys:`` digest
+    check above closed for its own token shape.
     """
     if slots and slots[-1].startswith("sys:"):
         numbered_slots = slots[:-1]
@@ -414,6 +427,10 @@ def _slot_indices_match_position(slots: list[str]) -> bool:
             return False
         if rest.startswith("ext:") and not _is_valid_digest_payload(rest[len("ext:") :]):
             return False
+        if rest.startswith(_OWNED_HEADER_TOKEN_PREFIX) and rest != _OWNED_HEADER_SINGLE_SENTINEL:
+            pairs = _json_load_list(rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
+            if pairs is None or not all(_is_owned_header_pair(p) for p in pairs):
+                return False
     return True
 
 
