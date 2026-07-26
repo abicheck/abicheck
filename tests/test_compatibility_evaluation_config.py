@@ -124,6 +124,15 @@ class TestConstruction:
         with pytest.raises(TypeError, match="CompatibilityPolicyConfig.base"):
             CompatibilityPolicyConfig(base="strict_abi")  # type: ignore[arg-type]
 
+    def test_raw_string_pack_element_is_rejected(self):
+        # Same class of gap as ContractConfig.packs, for the policy pack
+        # tuple: a bare slug would otherwise crash with AttributeError
+        # inside _pack_sort_key during canonicalization.
+        with pytest.raises(TypeError, match="ImmutableIdentity"):
+            CompatibilityPolicyConfig(
+                base=_identity("strict_abi"), packs=("rust_c_ffi",)
+            )
+
 
 class TestContractConfigUnresolvedBehavior:
     # ADR-049 D9: unresolved_behavior is a closed two-value vocabulary
@@ -163,6 +172,14 @@ class TestContractConfigUnresolvedBehavior:
     def test_overlays_duplicates_are_collapsed(self):
         contract = ContractConfig(mode=ContractMode.PUBLIC, overlays=("a", "a", "b"))
         assert contract.overlays == ("a", "b")
+
+    def test_raw_string_pack_element_is_rejected(self):
+        # packs: tuple[ImmutableIdentity, ...] isn't runtime-enforced per
+        # element -- a bare slug would otherwise crash with AttributeError
+        # inside _pack_sort_key during canonicalization instead of failing
+        # validation cleanly at construction (Codex review).
+        with pytest.raises(TypeError, match="ImmutableIdentity"):
+            ContractConfig(mode=ContractMode.PUBLIC, packs=("rust_c_ffi",))
 
 
 class TestImmutability:
@@ -335,6 +352,14 @@ class TestEvidenceProviderRequirement:
                 required=True,
                 implementation="castxml",  # type: ignore[arg-type]
             )
+
+    def test_raw_string_provider_element_is_rejected(self):
+        # EvidenceConfig.providers: tuple[EvidenceProviderRequirement, ...]
+        # isn't runtime-enforced per element -- a bare object would
+        # otherwise crash with AttributeError inside _provider_sort_key
+        # during canonicalization instead of failing validation cleanly.
+        with pytest.raises(TypeError, match="EvidenceProviderRequirement"):
+            EvidenceConfig(providers=("castxml",))  # type: ignore[arg-type]
 
     def test_providers_tuple_is_frozen(self):
         evidence = EvidenceConfig(
@@ -565,6 +590,13 @@ class TestGateConfigExitCodeScheme:
         # level_for_kind()/has_errors() on.
         with pytest.raises(TypeError, match="GateConfig.severity"):
             GateConfig(severity={"addition": "error"})  # type: ignore[arg-type]
+
+    def test_raw_string_pack_element_is_rejected(self):
+        # Same class of gap as ContractConfig.packs, for the gate pack
+        # tuple: a bare slug would otherwise crash with AttributeError
+        # inside _pack_sort_key during canonicalization.
+        with pytest.raises(TypeError, match="ImmutableIdentity"):
+            GateConfig(packs=("strict_gate_pack",))
 
 
 class TestDigestedItems:

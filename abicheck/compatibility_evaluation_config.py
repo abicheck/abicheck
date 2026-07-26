@@ -65,7 +65,12 @@ def _frozen_tuple(s: Sequence[object]) -> tuple[object, ...]:
     return tuple(s)
 
 
-def _canonical_tuple(s: Sequence[_T], *, key: Callable[[_T], Any]) -> tuple[_T, ...]:
+def _canonical_tuple(
+    s: Sequence[_T],
+    *,
+    key: Callable[[_T], Any],
+    element_type: type[_T] | None = None,
+) -> tuple[_T, ...]:
     """Sort+dedupe an unordered selection into a stable, canonical tuple.
 
     ADR-049 D8: "Pack order never decides semantics," and D7 requires
@@ -79,7 +84,22 @@ def _canonical_tuple(s: Sequence[_T], *, key: Callable[[_T], Any]) -> tuple[_T, 
     default, once via an explicit CLI flag) must resolve the same as
     selecting it once. ``dict.fromkeys`` on the already-sorted sequence
     dedupes by equality while keeping the sorted order.
+
+    ``element_type``, when given, validates every element before *key* ever
+    runs: a bare pack slug (e.g. ``"rust_c_ffi"`` where an ``ImmutableIdentity``
+    is expected) would otherwise crash with ``AttributeError`` inside *key*
+    (``identity.id``/``impl.sha256``) during canonicalization instead of
+    failing validation cleanly at the actual construction site (Codex
+    review) -- the same annotations-aren't-runtime-enforced gap as this
+    module's other ``isinstance`` checks, but for collection elements
+    rather than a single field.
     """
+    if element_type is not None:
+        invalid = [item for item in s if not isinstance(item, element_type)]
+        if invalid:
+            raise TypeError(
+                f"Every element must be a {element_type.__name__}, not: {invalid!r}"
+            )
     return tuple(dict.fromkeys(sorted(s, key=key)))
 
 
@@ -275,7 +295,11 @@ class ContractConfig:
             self, "overlays", _canonical_tuple(self.overlays, key=lambda s: s)
         )
         object.__setattr__(
-            self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)
+            self,
+            "packs",
+            _canonical_tuple(
+                self.packs, key=_pack_sort_key, element_type=ImmutableIdentity
+            ),
         )
 
 
@@ -342,7 +366,13 @@ class EvidenceConfig:
 
     def __post_init__(self) -> None:
         object.__setattr__(
-            self, "providers", _canonical_tuple(self.providers, key=_provider_sort_key)
+            self,
+            "providers",
+            _canonical_tuple(
+                self.providers,
+                key=_provider_sort_key,
+                element_type=EvidenceProviderRequirement,
+            ),
         )
 
 
@@ -434,7 +464,11 @@ class CompatibilityPolicyConfig:
                 "this constructor; any other front end must do the same."
             )
         object.__setattr__(
-            self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)
+            self,
+            "packs",
+            _canonical_tuple(
+                self.packs, key=_pack_sort_key, element_type=ImmutableIdentity
+            ),
         )
         object.__setattr__(self, "overrides", _frozen_mapping(self.overrides))
 
@@ -484,7 +518,11 @@ class GateConfig:
                 "level_for_kind()/has_errors() on."
             )
         object.__setattr__(
-            self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)
+            self,
+            "packs",
+            _canonical_tuple(
+                self.packs, key=_pack_sort_key, element_type=ImmutableIdentity
+            ),
         )
 
 
