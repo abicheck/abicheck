@@ -18,6 +18,7 @@ tests/fixtures/g32/dpcpp/ (see that directory's README.md)."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -356,6 +357,81 @@ def test_from_path_rejects_truncated_document_with_tiny_chunk_size(
         decode_and_select_frontend_context_from_path(
             ast_path, "", "host", chunk_size=4
         )
+
+
+def test_from_path_large_document_parses_json_exactly_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex review, PR #636: the document-boundary scan used to retry
+    ``json.JSONDecoder.raw_decode`` from position 0 over an ever-growing
+    ``str`` on every incomplete chunk, and grow that same ``str`` via
+    ``buf += chunk`` -- both re-process/re-copy the WHOLE accumulated
+    buffer each time, making a single document spanning many chunks
+    quadratic in its own size (a real DPC++ AST pass, the hundreds-of-MB-
+    to-multi-GB case this module exists to support, is exactly where this
+    would matter).
+
+    A wall-clock timing assertion would be the obvious regression guard,
+    but it turned out fragile here: this scan is a Python-level per-
+    character loop, so a trace-based `coverage` backend (not the cheap
+    `sys.monitoring` one CI's own coverage-instrumented lane uses, but
+    still what a plain local `pytest --cov` run picks on Python < 3.12)
+    slows it down by roughly 6x on its own -- enough to erase the margin
+    against a hand-picked wall-clock ceiling. Asserting the actual
+    complexity property directly instead: ``json.loads`` must be called
+    exactly ONCE for one large document split across many small chunks,
+    never once per incomplete-parse retry -- true regardless of tracing
+    overhead, coverage backend, or machine speed.
+
+    Also exercises correctness under chunking: the large string value
+    embeds literal ``{``/``}``/``[``/``]``/``\\"`` characters, which a naive
+    bracket counter (rather than a proper string-aware scan) would
+    miscount as structural depth changes.
+    """
+    calls: list[int] = []
+    orig_loads = json.loads
+
+    def _counting_loads(s: str, *a: object, **kw: object) -> object:
+        calls.append(len(s))
+        return orig_loads(s, *a, **kw)
+
+    monkeypatch.setattr(json, "loads", _counting_loads)
+
+    tricky_string = '{[]}\\"' * 50_000  # brace-like noise, escaped on encode
+    payload = {"kind": "TranslationUnitDecl", "tricky": tricky_string, "inner": []}
+    stdout = json.dumps(payload)
+    stderr = ' "clang" -cc1 -triple x86_64-unknown-linux-gnu -fsycl-is-host foo\n'
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text(stdout, encoding="utf-8")
+
+    selected = decode_and_select_frontend_context_from_path(
+        ast_path, stderr, "host", chunk_size=4096
+    )
+
+    assert selected.ast == payload
+    assert calls == [len(stdout)]
+
+
+def test_from_path_rejects_non_object_document(tmp_path: Path) -> None:
+    """A clang AST document is always a top-level JSON object -- a bare
+    scalar (or anything not starting with ``{``/``[``) is never valid AST
+    output, so the incremental scanner rejects it immediately rather than
+    looping forever waiting for a bracket depth that will never occur."""
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text("42", encoding="utf-8")
+    with pytest.raises(SnapshotError, match="expected an object/array"):
+        decode_and_select_frontend_context_from_path(ast_path, "", "host")
+
+
+def test_from_path_rejects_bracket_balanced_but_invalid_json(tmp_path: Path) -> None:
+    """The incremental scanner finds document boundaries via bracket depth
+    alone, without validating full JSON grammar -- a bracket-balanced but
+    otherwise malformed body (here, a bare comma where a key is expected)
+    still reaches ``json.loads``, which is what actually rejects it."""
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text("{,}", encoding="utf-8")
+    with pytest.raises(SnapshotError, match="truncated or malformed"):
+        decode_and_select_frontend_context_from_path(ast_path, "", "host")
 
 
 def test_from_path_rejects_document_count_mismatch(tmp_path: Path) -> None:

@@ -24,6 +24,7 @@ end result as a lazy import without the indirection.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -145,6 +146,27 @@ def _manifest_frontend_context(dump_manifest: Any) -> str:
     """*dump_manifest*'s own ``frontend_context`` (ADR-050 D5), typed
     ``Any`` for the same reason as :func:`_manifest_all_tus_required`."""
     return dump_manifest.frontend_context  # type: ignore[no-any-return]
+
+
+def _manifest_roots(dump_manifest: Any) -> str:
+    """*dump_manifest*'s own ``roots``, as an order-preserving JSON list.
+
+    :func:`_manifest_cache_paths` folds ``roots`` into a single deduplicated
+    ``headers`` list shared with every TU's ``forced_includes`` and the
+    manifest's ``public_header_paths`` -- adequate for *content*-hash
+    invalidation (any of those files changing must bust the cache), but it
+    is blind to which list a header came from. A header already reachable
+    via a TU's ``forced_includes`` that is (or isn't) *also* declared a
+    ``root`` produces an identical flattened path set either way, yet
+    ``roots`` is what :func:`abicheck.dumper.dump` uses as the manifest's
+    own declared-surface ``headers`` (``headers=list(dump_manifest.roots)``)
+    -- driving provenance/public classification independently of file
+    content. Without its own key component, two manifests differing only in
+    which already-parsed headers are declared ``roots`` would hash
+    identically and silently share a cached snapshot classified under the
+    *other* manifest's declared surface (Codex review, PR #636).
+    """
+    return json.dumps([str(p) for p in dump_manifest.roots])
 
 
 def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
@@ -492,7 +514,8 @@ def cached_run_dump(
         # review).
         _manifest_extra = (
             f"{manifest_tu_scope_field(dump_manifest)}\x00"
-            f"{_manifest_frontend_context(dump_manifest)}"
+            f"{_manifest_frontend_context(dump_manifest)}\x00"
+            f"{_manifest_roots(dump_manifest)}"
         )
         _uses_ast = True
         # dumper.dump() itself replaces the caller-supplied public_headers/

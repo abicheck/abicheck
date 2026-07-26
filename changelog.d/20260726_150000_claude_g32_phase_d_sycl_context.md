@@ -122,3 +122,35 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   the request. Fixed by threading `compile_context.frontend_context` (or
   `"host"` when no compile context was resolved) into that call too (Codex
   review).
+- `sycl_context._iter_json_documents`'s document-boundary scan retried
+  `json.JSONDecoder.raw_decode` from position 0 over an ever-growing `str`
+  on every incomplete chunk, and grew that same `str` via `buf += chunk` —
+  both re-process/re-copy the *entire* accumulated buffer each time, making
+  a single document spanning more than one chunk quadratic in its own size
+  (measured directly: a ~4MB document in 4KiB chunks took ~6.7s pre-fix,
+  ~1.6s at half that size, ~26s at double — textbook quadratic growth).
+  Exactly the case this module exists to support, since a single DPC++
+  pass's AST can itself be hundreds of MB to multi-GB. Rewritten as a
+  hand-rolled incremental bracket/string-escape scan over a list of
+  not-yet-consumed chunks (each byte inspected exactly once across the
+  whole stream) that materializes and `json.loads`-parses a document's text
+  exactly once, when its closing bracket is found — down to ~0.7s at the
+  same ~4MB size. The new regression test proves this via a deterministic
+  `json.loads` call-count assertion rather than wall-clock timing, which
+  turned out fragile: this scan is a Python-level per-character loop, and a
+  trace-based (non-`sys.monitoring`) coverage backend slows it down enough
+  on its own to erase a hand-picked timing margin, while the old
+  C-level-dominated cost was largely unaffected by the same tracing (Codex
+  review).
+- `service_dump_cache._manifest_cache_paths`/`manifest_tu_scope_field`
+  together only ever see a manifest's `roots` as membership in a
+  deduplicated, role-blind flattened header list shared with every TU's
+  `forced_includes` — a header already reachable via `forced_includes`
+  that is (or isn't) *also* declared a `root` produces an identical
+  flattened set either way. But `roots` is what `dumper.dump` uses as the
+  manifest's own declared-surface `headers`, driving provenance/public
+  classification independently of file content, so two such manifests
+  could hash identically and share a cached snapshot classified under the
+  *other* manifest's declared surface. New `_manifest_roots` folds the
+  manifest's own ordered `roots` list into the whole-snapshot cache key as
+  its own component (Codex review).

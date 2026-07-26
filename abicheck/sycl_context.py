@@ -191,50 +191,130 @@ def _iter_json_documents(read_more: Callable[[], str]) -> Iterator[dict[str, Any
     next one) -- never the whole stream at once. This is what lets a
     file-backed caller (:func:`decode_and_select_frontend_context_from_path`)
     avoid holding a multi-document DPC++ capture's full combined size in
-    memory just to reach one document near the end (Codex review: a prior
-    fix stopped retaining every *parsed* document, but the raw text of the
-    whole stream was still read up front in one ``read_text()`` call before
-    any parsing began -- this generator is what actually closes that gap).
+    memory just to reach one document near the end.
 
-    A ``json.JSONDecodeError`` when more input is still available (not yet
-    at end of stream) is treated as "this document isn't complete yet" and
-    triggers reading another chunk; the same error once ``read_more()`` has
-    signalled end-of-input means the document is genuinely truncated or
-    malformed, and raises :class:`abicheck.errors.SnapshotError`.
+    Each document must be a top-level JSON **object or array** (``{...}``/
+    ``[...]``) -- always true for a clang ``-ast-dump=json`` document, never
+    a bare scalar. Boundary detection is a hand-rolled bracket/string-escape
+    scan over ``chunks`` (a list of not-yet-fully-consumed pieces, each
+    scanned exactly once) rather than repeatedly retrying
+    ``json.JSONDecoder.raw_decode`` from position 0 over an ever-growing
+    single ``str``: that approach was quadratic in a single document's size
+    for any document spanning more than one chunk (Codex review) -- each
+    incomplete ``raw_decode`` attempt re-parses the *entire* accumulated
+    buffer, and ``buf += chunk`` on an immutable ``str`` additionally
+    re-copies the whole accumulated buffer on every single append. A
+    hundreds-of-MB or multi-GB single-pass AST (this module's whole reason
+    to exist) made both costs dominate. Here, each byte is inspected exactly
+    once across the whole stream, and a document's text is materialized
+    (joined, then ``json.loads``-parsed) exactly once, when its closing
+    bracket is found.
+
+    A genuinely truncated stream (input ends mid-document) or a malformed
+    document (bracket-balanced but not actually valid JSON) both raise
+    :class:`abicheck.errors.SnapshotError`.
     """
-    decoder = json.JSONDecoder()
-    buf = ""
     eof = False
+    chunks: list[str] = []
 
     def _fill() -> bool:
-        nonlocal buf, eof
+        nonlocal eof
         chunk = read_more()
         if not chunk:
             eof = True
             return False
-        buf += chunk
+        chunks.append(chunk)
         return True
 
-    while True:
-        buf = buf.lstrip()
-        while not buf and not eof:
-            if not _fill():
-                break
-            buf = buf.lstrip()
-        if not buf:
-            return
+    ci = 0  # index into `chunks` of the character at (ci, co)
+    co = 0
+
+    def _current() -> str | None:
+        """Character at the scan cursor, fetching more input as needed.
+        ``None`` only at genuine end of stream."""
+        nonlocal ci, co
         while True:
-            try:
-                doc, end = decoder.raw_decode(buf, 0)
-                break
-            except json.JSONDecodeError as exc:
-                if eof or not _fill():
-                    raise SnapshotError(
-                        "DPC++ frontend produced a truncated or malformed "
-                        f"AST document stream: {exc}"
-                    ) from exc
+            if ci < len(chunks):
+                if co < len(chunks[ci]):
+                    return chunks[ci][co]
+                ci += 1
+                co = 0
+                continue
+            if eof or not _fill():
+                return None
+
+    while True:
+        c = _current()
+        while c is not None and c.isspace():
+            co += 1
+            c = _current()
+        if c is None:
+            return  # genuine end of stream, no partial document pending
+        if c not in "{[":
+            raise SnapshotError(
+                "DPC++ frontend produced a truncated or malformed AST "
+                f"document stream: expected an object/array, found {c!r}"
+            )
+        start_ci, start_co = ci, co
+
+        depth = 0
+        in_string = False
+        escape = False
+        end_ci = end_co = None
+        while end_ci is None:
+            c = _current()
+            if c is None:
+                raise SnapshotError(
+                    "DPC++ frontend produced a truncated or malformed AST "
+                    "document stream: unexpected end of input"
+                )
+            if in_string:
+                if escape:
+                    escape = False
+                elif c == "\\":
+                    escape = True
+                elif c == '"':
+                    in_string = False
+            elif c == '"':
+                in_string = True
+            elif c in "{[":
+                depth += 1
+            elif c in "}]":
+                depth -= 1
+                if depth == 0:
+                    co += 1
+                    end_ci, end_co = ci, co
+                    continue
+            co += 1
+
+        if start_ci == end_ci:
+            doc_text = chunks[start_ci][start_co:end_co]
+        else:
+            doc_text = "".join(
+                (
+                    chunks[start_ci][start_co:],
+                    *chunks[start_ci + 1 : end_ci],
+                    chunks[end_ci][:end_co],
+                )
+            )
+        try:
+            doc = json.loads(doc_text)
+        except json.JSONDecodeError as exc:
+            raise SnapshotError(
+                "DPC++ frontend produced a truncated or malformed AST "
+                f"document stream: {exc}"
+            ) from exc
         yield doc
-        buf = buf[end:]
+
+        # Drop fully-consumed chunks; keep only the (typically small,
+        # bounded by chunk size, not document size) unconsumed tail.
+        # `end_ci` is always a valid index into the pre-deletion `chunks`
+        # (it comes from a cursor that just read a real character there),
+        # so at least chunks[end_ci] itself always survives the deletion.
+        del chunks[:end_ci]
+        chunks[0] = chunks[0][end_co:]
+        ci = 0
+        co = 0
 
 
 def _select_from_document_stream(
