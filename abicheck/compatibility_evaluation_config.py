@@ -211,6 +211,38 @@ class SelectedByEntry:
     argument_index: int | None = None
     path: str | None = None
 
+    def __post_init__(self) -> None:
+        # An untyped manifest/API adapter constructing
+        # SelectedByEntry(layer="explicit_cli") was previously accepted
+        # outright -- ValueProvenance.__post_init__ only checks that each
+        # selected_by element *is* a SelectedByEntry, not that its own
+        # fields are well-typed, so a malformed hop would freeze into the
+        # typed effective configuration's receipt provenance and a later
+        # consumer expecting a real SelectorLayer (e.g. `.value`) would
+        # fail instead of the input being rejected at construction (Codex
+        # review).
+        if not isinstance(self.layer, SelectorLayer):
+            raise TypeError(
+                "SelectedByEntry.layer must be a SelectorLayer member, not "
+                f"{self.layer!r}."
+            )
+        if self.option is not None and not isinstance(self.option, str):
+            raise TypeError(
+                f"SelectedByEntry.option must be a str or None, not {self.option!r}."
+            )
+        if self.argument_index is not None and (
+            not isinstance(self.argument_index, int)
+            or isinstance(self.argument_index, bool)
+        ):
+            raise TypeError(
+                "SelectedByEntry.argument_index must be an int or None, not "
+                f"{self.argument_index!r}."
+            )
+        if self.path is not None and not isinstance(self.path, str):
+            raise TypeError(
+                f"SelectedByEntry.path must be a str or None, not {self.path!r}."
+            )
+
 
 @dataclass(frozen=True)
 class ValueProvenance:

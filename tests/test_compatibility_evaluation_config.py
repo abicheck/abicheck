@@ -262,6 +262,43 @@ class TestEquality:
         assert a == b
 
 
+class TestSelectedByEntry:
+    # Codex review: ValueProvenance.__post_init__ only checks that each
+    # selected_by element *is* a SelectedByEntry -- it never validated that
+    # a SelectedByEntry's own fields are well-typed. SelectedByEntry(layer=
+    # "explicit_cli") previously constructed successfully and would freeze
+    # into the typed effective configuration's receipt provenance, so a
+    # later consumer expecting a real SelectorLayer (e.g. `.value`) would
+    # fail instead of the malformed input being rejected at construction.
+    def test_real_fields_construct(self):
+        entry = SelectedByEntry(
+            layer=SelectorLayer.EXPLICIT_CLI, option="--policy-file", argument_index=4
+        )
+        assert entry.layer is SelectorLayer.EXPLICIT_CLI
+        assert entry.option == "--policy-file"
+        assert entry.argument_index == 4
+
+    def test_raw_string_layer_is_rejected(self):
+        with pytest.raises(TypeError, match=r"SelectedByEntry\.layer"):
+            SelectedByEntry(layer="explicit_cli")  # type: ignore[arg-type]
+
+    def test_non_string_option_is_rejected(self):
+        with pytest.raises(TypeError, match=r"SelectedByEntry\.option"):
+            SelectedByEntry(layer=SelectorLayer.EXPLICIT_CLI, option=123)  # type: ignore[arg-type]
+
+    def test_non_int_argument_index_is_rejected(self):
+        with pytest.raises(TypeError, match=r"SelectedByEntry\.argument_index"):
+            SelectedByEntry(layer=SelectorLayer.EXPLICIT_CLI, argument_index="4")  # type: ignore[arg-type]
+
+    def test_bool_argument_index_is_rejected(self):
+        with pytest.raises(TypeError, match=r"SelectedByEntry\.argument_index"):
+            SelectedByEntry(layer=SelectorLayer.EXPLICIT_CLI, argument_index=True)  # type: ignore[arg-type]
+
+    def test_non_string_path_is_rejected(self):
+        with pytest.raises(TypeError, match=r"SelectedByEntry\.path"):
+            SelectedByEntry(layer=SelectorLayer.EXPLICIT_CLI, path=123)  # type: ignore[arg-type]
+
+
 class TestValueProvenance:
     def test_selected_by_chain_round_trips(self):
         prov = ValueProvenance(
