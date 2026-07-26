@@ -884,9 +884,13 @@ def _attach_header_graph(
             # inferred root would reuse a stale cached AST (Codex review;
             # mirrors _dump_elf's own deferred_dirs handling).
             deferred_dirs = tuple(deferred_token_dirs(deferred))
-        # This internal semantic header graph (G29 Phase A) always uses the
-        # default "host" context -- it's a best-effort secondary graph, not
-        # part of ADR-050 D5's host/device selection surface.
+        # ADR-050 D5 (Codex review): this internal semantic header graph
+        # (G29 Phase A) must be built from the SAME frontend_context as the
+        # primary snapshot it's attached to -- a device-context dump's
+        # embedded graph built from a host parse would combine device
+        # declarations with host-only call/type/include edges, feeding
+        # crosschecks/diff_source_graph_findings a graph incoherent with
+        # what it's describing.
         ast_root, _resolved_kind = _clang_header_dump(
             resolved_headers,
             eff_includes,
@@ -899,6 +903,7 @@ def _attach_header_graph(
             nostdinc=cc.nostdinc,
             lang=lang,
             extra_hash_dirs=deferred_dirs,
+            frontend_context=cc.frontend_context,
         )
     except (SnapshotError, ValidationError):
         ast_root = None

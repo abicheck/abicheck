@@ -205,16 +205,25 @@ def decode_and_select_frontend_context(
     document starts and to still catch a genuinely truncated/malformed
     document at that position) and then immediately dropped, letting the
     garbage collector reclaim it rather than accumulating in a list
-    alongside every other decoded document.
+    alongside every other decoded document. A **second** matching document
+    raises :class:`abicheck.errors.AstContextAmbiguousError` immediately
+    (Codex review) rather than continuing to scan and accumulate every
+    further match first -- each matching pass can itself be multi-GB
+    (a device build can emit several offload-target passes), so holding two
+    or more full trees simultaneously just to report an error neither needs
+    is the exact same avoidable-multiplication risk this function exists to
+    close for the non-matching passes.
 
     Behaves identically to ``select_frontend_context(decode_frontend_
-    contexts(stdout, stderr), requested_kind)`` for every outcome
-    (including the count-mismatch/truncated-document/three-outcome-
-    selection errors) -- only the memory profile differs.
+    contexts(stdout, stderr), requested_kind)`` for the exactly-one-match
+    and zero-matches outcomes (including the count-mismatch/truncated-
+    document errors); for the ambiguous outcome, it reports only the first
+    two matching targets rather than every one found, in exchange for never
+    retaining more than one matching AST tree at a time.
     """
     invocations = list(_CC1_INVOCATION_RE.finditer(stderr))
     decoder = json.JSONDecoder()
-    matches: list[FrontendContext] = []
+    first_match: FrontendContext | None = None
     pos = 0
     length = len(stdout)
     doc_count = 0
@@ -233,13 +242,19 @@ def decode_and_select_frontend_context(
         if doc_count < len(invocations):
             invocation = invocations[doc_count]
             if invocation.group("kind") == requested_kind:
-                matches.append(
-                    FrontendContext(
+                if first_match is None:
+                    first_match = FrontendContext(
                         kind=requested_kind,
                         target=invocation.group("target"),
                         ast=doc,
                     )
-                )
+                else:
+                    raise AstContextAmbiguousError(
+                        f"2+ AST contexts share kind={requested_kind!r} "
+                        f"(targets: {[first_match.target, invocation.group('target')]!r}) "
+                        "-- no implicit tiebreaker; narrow the request to a "
+                        "specific target."
+                    )
         doc_count += 1
         pos = end
     if doc_count != len(invocations):
@@ -251,5 +266,6 @@ def decode_and_select_frontend_context(
             "frontend invocation must always pass `-v` alongside "
             "`-ast-dump=json` for DPC++-capable compilers."
         )
+    matches = [first_match] if first_match is not None else []
     available = sorted({inv.group("kind") for inv in invocations})
     return _one_match_or_raise(matches, doc_count, available, requested_kind)

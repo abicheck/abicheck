@@ -73,3 +73,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   — hybrid merges castxml+clang and castxml has no device-context concept,
   so this combination is now rejected explicitly before the hybrid
   dispatch (Codex review).
+- `service.py`'s internal semantic header graph (G29 Phase A) was always
+  built from a hardcoded `"host"` AST pass regardless of the primary
+  snapshot's own requested `frontend_context` — a device-context dump's
+  embedded graph would combine device declarations with host-only
+  call/type/include edges, feeding crosschecks a graph incoherent with what
+  it describes. Now threads the same `CompileContext.frontend_context`
+  through (Codex review).
+- `sycl_context.decode_and_select_frontend_context` accumulated every
+  matching document before checking for ambiguity, so two or more
+  same-`kind` passes (each themselves potentially multi-GB) could be held
+  in memory simultaneously just to report an error that needs neither
+  tree. Now raises `AstContextAmbiguousError` as soon as a second match is
+  seen, without scanning or retaining anything further (Codex review).

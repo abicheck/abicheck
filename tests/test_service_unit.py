@@ -2303,6 +2303,37 @@ class TestRunDumpHeaderGraph:
         assert l3 is not None
         assert l3.status == CoverageStatus.NOT_COLLECTED
 
+    def test_header_graph_uses_same_frontend_context_as_primary_snapshot(
+        self, tmp_path
+    ):
+        """ADR-050 D5 (Codex review): the internal semantic header graph
+        (G29 Phase A) must be built with the SAME frontend_context as the
+        primary snapshot -- a device-context dump's embedded graph built
+        from an unrequested host parse would combine device declarations
+        with host-only call/type/include edges, feeding crosschecks a graph
+        incoherent with what it's describing."""
+        from abicheck.service_scan import CompileContext
+
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(
+            library="lib",
+            version="1.0",
+            platform="pe",
+            functions=[Function(name="f", mangled="_Z1fv", return_type="void")],
+        )
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        cc = CompileContext(frontend_context="device")
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)) as mock_ast,
+        ):
+            run_dump(p, "pe", [header], [], "1.0", "c++", compile=cc)
+        mock_ast.assert_called_once()
+        assert mock_ast.call_args.kwargs["frontend_context"] == "device"
+
     def test_degrades_gracefully_when_clang_unavailable(self, tmp_path):
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)

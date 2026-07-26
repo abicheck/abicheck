@@ -192,6 +192,27 @@ def test_fused_select_ambiguous_raises() -> None:
         decode_and_select_frontend_context(stdout, stderr, "device")
 
 
+def test_fused_select_ambiguous_stops_at_second_match_without_further_scan() -> None:
+    """Codex review: raising as soon as a SECOND matching document is seen
+    must not require scanning (or retaining) any later document -- proven
+    here by making the third document truncated/malformed. If the function
+    kept scanning past the second match, it would hit that malformed
+    document and raise SnapshotError instead; getting AstContextAmbiguousError
+    proves it stopped at exactly the second match."""
+    stdout = (
+        '{"kind": "TranslationUnitDecl", "inner": []}\n'
+        '{"kind": "TranslationUnitDecl", "inner": []}\n'
+        '{"kind": "TranslationUnitDecl", "inner": ['  # truncated -- never reached
+    )
+    stderr = (
+        ' "clang" -cc1 -triple spir64 -fsycl-is-device foo\n'
+        ' "clang" -cc1 -triple spir64_x86_64 -fsycl-is-device foo\n'
+        ' "clang" -cc1 -triple spir64_gen -fsycl-is-device foo\n'
+    )
+    with pytest.raises(AstContextAmbiguousError, match="spir64"):
+        decode_and_select_frontend_context(stdout, stderr, "device")
+
+
 def test_fused_select_rejects_truncated_document() -> None:
     stdout = '{"kind": "TranslationUnitDecl", "inner": ['  # truncated
     with pytest.raises(SnapshotError, match="truncated or malformed"):
