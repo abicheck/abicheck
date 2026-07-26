@@ -290,6 +290,21 @@ class TestNormalizeMangledName:
         # real terminator.
         assert normalize_mangled_name("_ZNSa1EE", None) == "_ZNSa1EE"
 
+    def test_nested_name_other_standard_substitution_with_no_following_component_is_rejected(  # noqa: E501
+        self,
+    ) -> None:
+        # Codex review, fresh evidence, round 9: <nested-name> is always
+        # N <prefix> <unqualified-name> E, and a <substitution> (what any
+        # of the six standard letters spells) is never itself a valid
+        # <unqualified-name> -- so "Sa"/"Sb"/"Sd"/"Si"/"So"/"Ss" need a
+        # real trailing component just like "St" does, even though they
+        # are complete, context-free substitutions in their own right
+        # outside a nested name. "_ZNSaE" leaves `pos` pointing straight
+        # at the 'E' right after "Sa", which the terminator search
+        # previously accepted as though "Sa" alone had completed the
+        # required trailing unqualified-name.
+        assert normalize_mangled_name("_ZNSaE", "_ZNSaE") is None
+
     def test_local_name_with_nothing_after_terminator_is_rejected(self) -> None:
         # Codex review, fresh evidence: unlike <nested-name> (complete once
         # its own terminator E is found), a <local-name> is

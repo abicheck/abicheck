@@ -317,23 +317,29 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
                 # "E", leaving no separate terminator) but a loop that
                 # only recognized "St" literally -- or only digits --
                 # never started skipping here for the other five letters
-                # (Codex review, fresh evidence, round 7). "St"
-                # specifically abbreviates the std:: NAMESPACE PREFIX
-                # only, unlike the other five (each a complete named
-                # substitution on its own, matching the reasoning in the
-                # non-nested "S"-prefix branch below) -- "_ZNStE" leaves
-                # `pos` pointing straight at the 'E', which the
-                # terminator search then wrongly accepted as though "St"
-                # alone had completed the prefix (Codex review, fresh
-                # evidence, round 6). `pending_prefix_only` tracks that
-                # the most recent thing consumed was a bare "St" with
-                # nothing completing it yet, and is cleared as soon as a
-                # real component (a <source-name>) follows it; it is
-                # never set for the other five letters, since those are
-                # already complete substitutions by themselves.
+                # (Codex review, fresh evidence, round 7).
+                #
+                # Whichever letter follows "S", the production is still
+                # <nested-name> ::= N <prefix> <unqualified-name> E, and
+                # <substitution> (what ANY of these six letters spells)
+                # is never itself a valid <unqualified-name> -- so even
+                # though "Sa"/"Sb"/"Sd"/"Si"/"So"/"Ss" are complete,
+                # context-free substitutions in their OWN right (see the
+                # non-nested "S"-prefix branch below), a <nested-name>
+                # still needs a real <unqualified-name> after them, same
+                # as "St". "_ZNSaE" leaves `pos` pointing straight at the
+                # 'E' right after "Sa", which the terminator search
+                # previously accepted as though "Sa" alone had completed
+                # the required trailing unqualified-name (Codex review,
+                # fresh evidence, round 9; round 6 fixed only the "St"
+                # spelling of this same gap). `pending_prefix_only`
+                # tracks that the most recent thing consumed was a bare
+                # substitution with nothing completing it yet, and is
+                # cleared as soon as a real component (a <source-name>)
+                # follows it.
                 pos += 2
                 consumed_any_component = True
-                pending_prefix_only = rest[pos - 1] == "t"
+                pending_prefix_only = True
                 continue
             if not rest[pos].isdigit():
                 break
