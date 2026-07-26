@@ -67,7 +67,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
 from functools import partial
-from typing import TypeVar
+from typing import Protocol, TypeVar
 
 from .errors import TuMergeError
 from .model import EnumType, Function, Param, RecordType, ScopeOrigin, Variable
@@ -80,7 +80,23 @@ from .tu_fragment import MergedTuFragments, TuFragment, entity_key
 INCONSISTENT_DECLARATION = "INCONSISTENT_DECLARATION"
 HETEROGENEOUS_ABI_CONTEXT = "HETEROGENEOUS_ABI_CONTEXT"
 
-_T = TypeVar("_T")
+
+class _Provenanced(Protocol):
+    """The ADR-015 schema v6 provenance fields every model type this module
+    merges (:class:`Function`/:class:`Variable`/:class:`RecordType`/
+    :class:`EnumType`) shares -- expressing this as a bound on ``_T`` (CodeRabbit
+    review, PR #635) lets :func:`_blank_provenance`/:func:`_more_public_of`/
+    :func:`_with_more_public_provenance` type-check their real contract
+    directly, instead of an unbound ``_T`` plus per-call-site ``# type:
+    ignore[attr-defined]`` suppressions.
+    """
+
+    source_location: str | None
+    source_header: str | None
+    origin: ScopeOrigin
+
+
+_T = TypeVar("_T", bound=_Provenanced)
 
 
 def merge_fragments(
@@ -402,7 +418,7 @@ def _more_public_of(
     if not have_public_set:
         return a
     origin_a = classify_origin(
-        header_from_location(getattr(a, "source_location", None)),
+        header_from_location(a.source_location),
         header_segs,
         dir_segs,
         have_public_set=have_public_set,
@@ -410,7 +426,7 @@ def _more_public_of(
     if origin_a == ScopeOrigin.PUBLIC_HEADER:
         return a
     origin_b = classify_origin(
-        header_from_location(getattr(b, "source_location", None)),
+        header_from_location(b.source_location),
         header_segs,
         dir_segs,
         have_public_set=have_public_set,
@@ -455,9 +471,9 @@ def _with_more_public_provenance(
         return winner
     return replace(  # type: ignore[type-var]
         winner,
-        source_location=other.source_location,  # type: ignore[attr-defined]
-        source_header=other.source_header,  # type: ignore[attr-defined]
-        origin=other.origin,  # type: ignore[attr-defined]
+        source_location=other.source_location,
+        source_header=other.source_header,
+        origin=other.origin,
     )
 
 
@@ -495,8 +511,8 @@ def _merge_functions(
     # preserve whatever the header spells) -- so they're blanked here
     # alongside `default`, the same "not ABI-relevant, don't let it block a
     # routine cross-TU redeclaration" treatment (Codex review, PR #635).
-    # The merged declaration still keeps *a*'s own parameter names (via
-    # `pa` below), not blanked ones -- only the *comparison* ignores them.
+    # Only the *comparison* ignores them -- the merged declaration's own
+    # parameter names come from `base` below, not blanked ones.
     a_bare = _blank_provenance(
         replace(a, params=[replace(p, name="", default=None) for p in a.params])
     )
@@ -505,10 +521,6 @@ def _merge_functions(
     )
     if a_bare != b_bare:
         return None
-    merged_params: list[Param] = [
-        replace(pa, default=pa.default if pa.default is not None else pb.default)
-        for pa, pb in zip(a.params, b.params, strict=True)
-    ]
     base = _more_public_of(
         a,
         b,
@@ -516,6 +528,24 @@ def _merge_functions(
         dir_segs=dir_segs,
         have_public_set=have_public_set,
     )
+    # Parameter names (and every other non-default field) must come from
+    # `base` -- the side actually selected as the merged declaration's
+    # provenance/representative -- never unconditionally from `a`. Building
+    # them from `a` regardless of which side won would attribute the
+    # winning (possibly public) declaration's identity to a bare parameter
+    # list still spelled the way the *other*, possibly-private, side spelled
+    # it -- diff_symbols.py treats a header-backed parameter rename as
+    # PARAM_RENAMED, so this could fabricate a false API-break finding
+    # purely from which TU happened to sort first (Codex review, PR #635
+    # round 4).
+    other = b if base is a else a
+    merged_params: list[Param] = [
+        replace(
+            p_base,
+            default=p_base.default if p_base.default is not None else p_other.default,
+        )
+        for p_base, p_other in zip(base.params, other.params, strict=True)
+    ]
     return replace(base, params=merged_params)
 
 
@@ -551,6 +581,23 @@ def _merge_variables(
     return replace(base, value=value)
 
 
+def _record_kinds_compatible(a_kind: str, b_kind: str) -> bool:
+    """Whether a forward declaration's class-key is compatible with the
+    other side's -- either the definition's, for
+    :func:`_merge_types`'s opaque branches, or (potentially) another
+    declaration's.
+
+    Equal kinds are always compatible. ``struct``/``class`` are otherwise
+    interchangeable: C++ allows forward-declaring a type with one class-key
+    and defining it with the other (they're the same underlying entity,
+    differing only in default member access/inheritance -- both GCC and
+    Clang accept this, even under ``-pedantic-errors``). ``union`` is a
+    genuinely different type category and never interchangeable with
+    either (Codex review, PR #635 round 4).
+    """
+    return a_kind == b_kind or {a_kind, b_kind} <= {"struct", "class"}
+
+
 def _merge_types(
     a: RecordType,
     b: RecordType,
@@ -562,10 +609,14 @@ def _merge_types(
     """Trivial-merge two same-``entity_key`` :class:`RecordType` declarations
     -- ADR-050 D4's canonical "forward-declaration + definition" case:
     ``is_opaque`` (incomplete, no fields) paired with a complete definition
-    merges to the definition, **provided the two agree on ``kind``**
-    (``struct``/``class``/``union``) -- a `union X;` forward declaration is
-    not compatible with a `struct X { ... };` definition even though both
-    key on the bare name ``X`` (Codex review, PR #635). The definition's
+    merges to the definition, **provided the two class-keys are
+    compatible** (see :func:`_record_kinds_compatible`) -- a `union X;`
+    forward declaration is not compatible with a `struct X { ... };`
+    definition even though both key on the bare name ``X`` (Codex review,
+    PR #635), but `class X;` followed by `struct X { ... };` *is* valid,
+    ordinary C++ (both compilers accept it -- ``class``/``struct`` are the
+    same underlying entity, differing only in default member
+    access/inheritance; round 4 of the same review). The definition's
     structural facts (fields, size, ...) always win, but its *provenance*
     prefers whichever side classifies as public (:func:`_with_more_public_provenance`)
     -- a public header commonly forward-declares a type whose full
@@ -575,7 +626,7 @@ def _merge_types(
     disagree, that is a genuine ODR conflict.
     """
     if a.is_opaque and not b.is_opaque:
-        if a.kind != b.kind:
+        if not _record_kinds_compatible(a.kind, b.kind):
             return None
         return _with_more_public_provenance(
             b,
@@ -585,7 +636,7 @@ def _merge_types(
             have_public_set=have_public_set,
         )
     if b.is_opaque and not a.is_opaque:
-        if a.kind != b.kind:
+        if not _record_kinds_compatible(a.kind, b.kind):
             return None
         return _with_more_public_provenance(
             a,

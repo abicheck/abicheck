@@ -38,7 +38,15 @@ import pytest
 from abicheck.change_registry import REGISTRY
 from abicheck.checker_policy import ChangeKind
 from abicheck.errors import TuMergeError
-from abicheck.model import EnumType, Function, Param, RecordType, TypeField, Variable
+from abicheck.model import (
+    EnumMember,
+    EnumType,
+    Function,
+    Param,
+    RecordType,
+    TypeField,
+    Variable,
+)
 from abicheck.tu_fragment import MergedTuFragments, TuFragment
 from abicheck.tu_merge import (
     HETEROGENEOUS_ABI_CONTEXT,
@@ -279,6 +287,80 @@ def test_merge_fragments_prefers_public_header_provenance():
     assert merged.functions[0].source_location == "include/api.h:1"
 
 
+def test_merge_fragments_function_keeps_parameter_names_from_the_winning_side():
+    # A private `void f(int internal_name)` in TU "a" and the identical
+    # public `void f(int public_name)` in TU "b" must merge to a function
+    # attributed to the public header *and* spelled with the public
+    # declaration's own parameter name -- not "internal_name" merely
+    # because "a" sorted first and fed the parameter list unconditionally.
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="internal_name", type="int")],
+                source_location="internal/detail.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="public_name", type="int")],
+                source_location="include/api.h:1",
+            ),
+        ),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.functions) == 1
+    winner = merged.functions[0]
+    assert winner.source_location == "include/api.h:1"
+    assert winner.params[0].name == "public_name"
+
+
+def test_merge_fragments_function_unions_default_from_the_losing_side_onto_winning_names():
+    # The public side ("b") wins both provenance and parameter names, but a
+    # default argument only the private side ("a") declared must still be
+    # unioned in -- the "keep the winning side's identity" fix must not
+    # regress the separate "union whichever side has a default" behavior.
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="internal_name", type="int", default="0")],
+                source_location="internal/detail.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="public_name", type="int")],
+                source_location="include/api.h:1",
+            ),
+        ),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.functions) == 1
+    winner = merged.functions[0]
+    assert winner.params[0].default == "0"
+    assert winner.source_location == "include/api.h:1"
+    assert winner.params[0].name == "public_name"
+
+
 def test_merge_fragments_without_public_set_keeps_deterministic_default():
     # No public_header_paths/public_header_dirs supplied -- origin
     # classification stays opt-in (matches abicheck.provenance's own
@@ -314,7 +396,6 @@ def test_merge_fragments_types_with_same_bare_name_different_namespace_do_not_co
 
 
 def test_merge_fragments_enums_with_same_bare_name_different_namespace_do_not_collide():
-    from abicheck.model import EnumMember
 
     one_e = EnumType(
         name="E", qualified_name="one::E", members=[EnumMember(name="A", value=0)]
@@ -355,7 +436,6 @@ def test_merge_fragments_type_forward_decl_provenance_wins_over_private_definiti
 
 
 def test_merge_fragments_enum_forward_decl_provenance_wins_over_private_definition():
-    from abicheck.model import EnumMember
 
     public_forward = EnumType(
         name="Color", members=[], source_location="include/api.h:1"
@@ -392,12 +472,26 @@ def test_merge_fragments_type_raises_on_conflicting_kind_for_opaque_pair():
     assert excinfo.value.entity_key == ("type", "X")
 
 
+def test_merge_fragments_type_reconciles_class_and_struct_forward_definition_pair():
+    # `class X;` forward-declared, then `struct X { ... };` defined -- valid,
+    # ordinary C++ (both GCC and Clang accept it): struct/class are the same
+    # underlying entity, differing only in default member access, unlike
+    # `union` which is a genuinely different type category.
+    forward_class = RecordType(name="X", kind="class", is_opaque=True)
+    struct_definition = RecordType(
+        name="X", kind="struct", fields=[TypeField(name="v", type="int")]
+    )
+    a = TuFragment(tu_name="a", types=(forward_class,))
+    b = TuFragment(tu_name="b", types=(struct_definition,))
+    merged = merge_fragments([a, b])
+    assert merged.types == (struct_definition,)
+
+
 def test_merge_fragments_enum_raises_on_conflicting_underlying_type_for_forward_pair():
     # `enum E : int;` is not compatible with `enum E : unsigned { X };`,
     # even though the forward declaration has no members to compare against
     # the definition's -- the empty-members/definition merge must check
     # underlying_type/is_scoped too.
-    from abicheck.model import EnumMember
 
     forward = EnumType(name="E", members=[], underlying_type="int")
     definition = EnumType(
@@ -426,7 +520,6 @@ def test_merge_fragments_variable_raises_on_conflicting_type():
 
 def test_merge_fragments_enum_reconciles_forward_declaration_and_definition():
     forward = EnumType(name="Color", members=[])
-    from abicheck.model import EnumMember
 
     definition = EnumType(name="Color", members=[EnumMember(name="RED", value=0)])
     a = TuFragment(tu_name="a", enums=(forward,))
@@ -436,7 +529,6 @@ def test_merge_fragments_enum_reconciles_forward_declaration_and_definition():
 
 
 def test_merge_fragments_enum_raises_on_conflicting_members():
-    from abicheck.model import EnumMember
 
     a = TuFragment(
         tu_name="a",
@@ -494,7 +586,6 @@ def test_merge_fragments_type_raises_on_conflicting_kind_for_reversed_opaque_pai
 def test_merge_fragments_enum_reconciles_definition_then_forward_across_tus():
     # Roles swapped from the enum forward-decl/definition test above (a =
     # definition, b = forward/empty) -- both directions must merge.
-    from abicheck.model import EnumMember
 
     definition = EnumType(name="Color", members=[EnumMember(name="RED", value=0)])
     forward = EnumType(name="Color", members=[])
@@ -505,7 +596,6 @@ def test_merge_fragments_enum_reconciles_definition_then_forward_across_tus():
 
 
 def test_merge_fragments_enum_raises_on_conflicting_underlying_type_for_reversed_forward_pair():
-    from abicheck.model import EnumMember
 
     definition = EnumType(
         name="E", members=[EnumMember(name="X", value=0)], underlying_type="unsigned"
@@ -523,7 +613,6 @@ def test_merge_fragments_enum_reconciles_identical_definitions_across_tus():
     # Both sides fully defined (non-empty members), identical modulo
     # provenance -- exercises the "_more_public_of" tie-break path for
     # enums, distinct from the forward-decl/definition path above.
-    from abicheck.model import EnumMember
 
     a_def = EnumType(
         name="Color",
@@ -556,7 +645,7 @@ def test_merge_fragments_raises_on_conflicting_constant_value():
 # ---------------------------------------------------------------------------
 
 
-def test_odr_safe_fixture_merges_cleanly_through_real_clang_backend(tmp_path):
+def test_odr_safe_fixture_merges_cleanly_through_real_clang_backend():
     if shutil.which("clang") is None:
         pytest.skip("clang is required for the real-backend tu_merge test")
     from abicheck.dump_manifest import TranslationUnit
@@ -587,7 +676,7 @@ def test_odr_safe_fixture_merges_cleanly_through_real_clang_backend(tmp_path):
     assert [fn.name for fn in merged.functions] == ["touches_point"]
 
 
-def test_odr_conflict_fixture_raises_through_real_clang_backend(tmp_path):
+def test_odr_conflict_fixture_raises_through_real_clang_backend():
     if shutil.which("clang") is None:
         pytest.skip("clang is required for the real-backend tu_merge test")
     from abicheck.dump_manifest import TranslationUnit

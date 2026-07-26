@@ -15,7 +15,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   disagree on anything else (return type, layout, member list, a typedef's
   or constant's value, ...). `TuMergeError` is an extraction-time failure
   (a `SnapshotError` subclass), not a `ChangeKind` — it fires before a
-  manifest-driven dump ever produces a snapshot to diff. `TuFragment`/
+  manifest-driven dump ever produces a snapshot to diff. A manifest whose
+  TUs were extracted by *different* AST producers (e.g. `--ast-frontend
+  auto` falling back to clang for only some TUs) is now also rejected, with
+  `code="HETEROGENEOUS_ABI_CONTEXT"`. `TuFragment`/
   `MergedTuFragments`/`entity_key` move to a new leaf module,
   `abicheck/tu_fragment.py`, re-exported from `dumper_manifest.py`
   unchanged for backward compatibility.
