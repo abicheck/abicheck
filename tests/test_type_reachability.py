@@ -167,3 +167,50 @@ class TestDirectlyReferencedStdlibTypes:
             ],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_scan_short_circuits_once_everything_is_found(self) -> None:
+        """Once every stdlib name has been matched, later scan calls (a
+        second param, a later function, a later type's fields) must not
+        keep re-scanning -- covers the early-exit path when a single
+        return type mentions every remaining stdlib name at once."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    return_type="std::pair<std::string, std::string>",
+                    params=[Param(name="v", type="std::string")],
+                )
+            ],
+            types=[
+                RecordType(name="std::pair<std::string, std::string>", kind="class")
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {"std::pair<std::string, std::string>"}
+        )
+
+    def test_field_scan_continues_across_multiple_non_stdlib_types(self) -> None:
+        """A stdlib type not found in any function signature, and not in
+        the first non-stdlib type's fields, must still be found via a
+        *later* non-stdlib type's fields -- covers the multi-type field
+        scan loop actually iterating past its first entry."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            types=[
+                RecordType(
+                    name="FirstPublicType",
+                    kind="class",
+                    fields=[TypeField(name="n", type="int")],
+                ),
+                RecordType(
+                    name="SecondPublicType",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})

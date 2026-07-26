@@ -879,6 +879,47 @@ class TestProfileMatrix:
         assert entry.affected_profiles == ("linux-gcc14",)
         assert entry.incomplete_profiles == ("linux-gcc14",)
 
+    def test_profile_matrix_excludes_optional_gap_from_incomplete(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: an unavailable *optional* check must not mark its
+        profile incomplete -- that would contradict
+        AggregateResult.coverage, which also only gates on required
+        targets, so a required-complete/optional-missing profile would
+        otherwise read as both "coverage complete" and "incomplete"."""
+        headers_check = "libfoo@linux-gcc14#release@headers"
+        build_check = "libfoo@linux-gcc14#release@build"  # optional, never reports
+        _write_report(tmp_path, headers_check, "COMPATIBLE")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(headers_check, optional=(build_check,)),
+        )
+        (entry,) = r.profile_matrix
+        assert entry.incomplete_profiles == ()
+        assert r.coverage is CoverageStatus.COMPLETE
+
+    def test_profile_matrix_marks_policy_blocking_compatible_profile_as_affected(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: verdict COMPATIBLE with a policy-blocking gate
+        (e.g. an addition: error policy) must not read as "clean" in the
+        profile matrix -- the aggregate gate itself fails on it."""
+        check = "libfoo@linux-gcc14#release@headers"
+        _write_report(
+            tmp_path,
+            check,
+            "COMPATIBLE",
+            severity={
+                "exit_code": 1,
+                "blocking": True,
+                "blocking_categories": ["addition"],
+            },
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(check))
+        (entry,) = r.profile_matrix
+        assert entry.affected_profiles == ("linux-gcc14",)
+        assert entry.verdict_by_profile["linux-gcc14"] == "COMPATIBLE"
+
 
 class TestAggregateCLI:
     def _run(self, args):

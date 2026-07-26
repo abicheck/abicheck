@@ -34,7 +34,14 @@
   one is surfaced here instead of being silently dropped — a completed,
   compatible `headers`-depth check plus a missing required `build`-depth
   check for the same profile is an incomplete-coverage gap, not "this
-  profile is clean" (Codex review).
+  profile is clean" (Codex review). `incomplete_profiles` only counts an
+  unavailable *required* check — an unavailable optional one does not, so
+  this stays consistent with `AggregateResult.coverage` (also required-only;
+  Codex review). `affected_profiles` also now considers a report's own gate
+  (`severity.blocking`), not just its verdict — a `COMPATIBLE` report can
+  still carry a policy-blocking gate (e.g. an `addition: error` policy), and
+  a profile in that state is not "clean" just because nothing broke (Codex
+  review).
 - **`abicheck/type_reachability.py`**: a new, additive building block for
   status-review item 3 ("direct vs. transitive type reachability").
   `directly_referenced_stdlib_types()` computes, from a snapshot alone,

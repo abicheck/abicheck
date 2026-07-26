@@ -426,16 +426,24 @@ class ProfileMatrixEntry:
     #: Every profile that reported for this target, sorted.
     profiles: tuple[str, ...]
     #: Subset of ``profiles`` whose worst analyzed verdict was neither
-    #: ``NO_CHANGE`` nor ``COMPATIBLE`` (i.e. contributed a break, source
-    #: break, or risk finding). A profile with *zero* analyzed checks (every
-    #: check for it is unavailable) is never "affected" here — no verdict at
-    #: all is a coverage gap, not a break — but see ``incomplete_profiles``:
-    #: a profile can be BOTH affected (one check broke) AND incomplete
-    #: (another of its checks never reported) at once.
+    #: ``NO_CHANGE`` nor ``COMPATIBLE``, OR whose gate is blocking even
+    #: though the verdict itself is compatible (Codex review: a
+    #: ``COMPATIBLE`` report can still carry a policy-blocking gate, e.g.
+    #: an ``addition: error`` policy — a profile in that state is not
+    #: "clean" just because nothing broke). A profile with *zero* analyzed
+    #: checks (every check for it is unavailable) is never "affected" here
+    #: — no verdict at all is a coverage gap, not a break — but see
+    #: ``incomplete_profiles``: a profile can be BOTH affected (one check
+    #: broke) AND incomplete (another of its checks never reported) at once.
     affected_profiles: tuple[str, ...]
-    #: Subset of ``profiles`` where at least one of that profile's checks
-    #: (this target can have more than one, at different baseline
-    #: channels/requested depths) is unavailable — no report arrived for it.
+    #: Subset of ``profiles`` where at least one of that profile's
+    #: *required* checks (this target can have more than one, at different
+    #: baseline channels/requested depths) is unavailable — no report
+    #: arrived for it. An unavailable *optional* check does not set this
+    #: (Codex review: it must agree with ``AggregateResult.coverage``, which
+    #: also only gates on required targets — otherwise a required-complete,
+    #: optional-missing profile would read as both "coverage complete" and
+    #: "incomplete" at once, contradicting itself).
     #: ``verdict_by_profile``/``affected_profiles`` are still computed from
     #: whichever of that profile's checks DID report (Codex review: an
     #: unavailable check must never be silently dropped from the picture,
@@ -605,11 +613,17 @@ class AggregateResult:
         combined worst-verdict-wins (Codex review) rather than keying by
         profile_id alone, which would let a later, cleaner check silently
         overwrite an earlier, breaking one for the same profile. When one of
-        a profile's checks is unavailable while another did report, the
-        unavailable one is never silently dropped either (Codex review) — it
-        surfaces in ``incomplete_profiles`` alongside whatever verdict the
-        completed check(s) contributed, rather than letting an incomplete
-        profile read as flatly "clean".
+        a profile's *required* checks is unavailable while another did
+        report, the unavailable one is never silently dropped either (Codex
+        review) — it surfaces in ``incomplete_profiles`` alongside whatever
+        verdict the completed check(s) contributed, rather than letting an
+        incomplete profile read as flatly "clean"; an unavailable *optional*
+        check does not, so this stays consistent with
+        :attr:`AggregateResult.coverage` (also required-only). A profile
+        whose analyzed verdict is compatible but whose gate is still
+        blocking (e.g. an ``addition: error`` policy) is not "affected" by
+        the verdict but is by the gate (Codex review) — either makes it
+        ``affected``.
         """
         by_target: dict[str, dict[str, list[TargetReport]]] = {}
         for t in self.targets:
@@ -627,7 +641,7 @@ class AggregateResult:
             verdict_by_profile: dict[str, str | None] = {}
             for pid in profiles:
                 reports = reports_by_profile[pid]
-                if any(r.compatibility_verdict is None for r in reports):
+                if any(r.compatibility_verdict is None and r.required for r in reports):
                     incomplete.append(pid)
                 verdicts = [
                     r.compatibility_verdict
@@ -639,7 +653,10 @@ class AggregateResult:
                     continue
                 worst = max(verdicts, key=lambda v: _VERDICT_RANK[v])
                 verdict_by_profile[pid] = worst.value
-                if worst not in _UNAFFECTED_VERDICTS:
+                gate_blocking = any(
+                    r.gate is not None and r.gate.blocking for r in reports
+                )
+                if worst not in _UNAFFECTED_VERDICTS or gate_blocking:
                     affected.append(pid)
             entries.append(
                 ProfileMatrixEntry(
