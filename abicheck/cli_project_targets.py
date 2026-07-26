@@ -38,6 +38,11 @@ from .buildsource.project_targets import (
     ProjectTargetsConfig,
     validate_project_targets,
 )
+from .buildsource.toolchain_bindings import (
+    BindingsFileError,
+    check_profile_bindings_resolve,
+    load_bindings_file,
+)
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_options import output_options, verbose_option
 
@@ -63,11 +68,24 @@ def project_targets_group() -> None:
     default="text",
     format_help="Output format for the validation report.",
 )
+@click.option(
+    "--toolchain-bindings",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Path to a trusted toolchain-bindings file (schema "
+        "abicheck.toolchain-bindings/v1) to additionally check every "
+        "declared profiles.<id>.compile.binding against. Loaded only from "
+        "this explicit path — never auto-discovered, per the untrusted-"
+        "config trust boundary ProfileCompileSpec.binding documents."
+    ),
+)
 @verbose_option
 def project_targets_validate_cmd(
     config: Path,
     fmt: str,
     output: Path | None,
+    toolchain_bindings: Path | None,
     verbose: bool,
 ) -> None:
     """Validate CONFIG's targets:/bundles:/profiles:/baseline: block (ADR-047 §3).
@@ -80,7 +98,9 @@ def project_targets_validate_cmd(
     ``checks[].channel`` resolves to a declared baseline channel (or is the
     ``"none"`` no-baseline sentinel); ``checks[].depth``/``gate_mode`` are
     valid; every ``checks[].profiles`` entry resolves to a declared profile;
-    every id is a valid, ``check_id``-embeddable identifier.
+    every id is a valid, ``check_id``-embeddable identifier. With
+    ``--toolchain-bindings``, also checks every declared
+    ``profiles.<id>.compile.binding`` resolves against that file.
 
     Structural/type errors in the YAML itself (unknown key, wrong type) fail
     immediately as a usage error; this command's own validation report only
@@ -111,6 +131,15 @@ def project_targets_validate_cmd(
         raise click.UsageError(str(exc)) from exc
 
     report = validate_project_targets(parsed)
+
+    if toolchain_bindings is not None:
+        try:
+            bindings_file = load_bindings_file(toolchain_bindings)
+        except BindingsFileError as exc:
+            raise click.UsageError(str(exc)) from exc
+        report.errors.extend(
+            check_profile_bindings_resolve(parsed.profiles, bindings_file)
+        )
 
     if fmt == "json":
         text = json.dumps(report.to_dict(), indent=2)

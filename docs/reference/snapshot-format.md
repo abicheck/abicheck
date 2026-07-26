@@ -19,13 +19,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`15`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`16`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 15,
+  "schema_version": 16,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -42,9 +42,11 @@ AST frontend's per-fact producer map, the resolved AST toolchain identity,
 `ast_toolchain_unsupported_reasons`), (v14) extraction-contract fingerprints
 proving two snapshots were compared under a comparable profile/scope
 (`AbiSnapshot.contract`, ADR-050 D1 — *verdict-blocking*: see the
-compatibility table below), and (v15) structured compile-context provenance
+compatibility table below), (v15) structured compile-context provenance
 for the header-AST parse (`ast_resolved_standard`, `ast_cplusplus_macro`,
-`ast_compile_args`, `ast_sysroot`).
+`ast_compile_args`, `ast_sysroot`), and (v16) DWARF-vs-header-AST layout
+coherence (`dwarf_layout_coherence`, `dwarf_layout_coherence_mismatches` —
+see "Compile-context provenance" below).
 
 ### Forward / backward compatibility
 
@@ -55,7 +57,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 15`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 16`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -93,7 +95,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `15`). |
+| `schema_version` | int | Snapshot format version (currently `16`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -120,6 +122,45 @@ before persistence — see `abicheck/buildsource/redaction.py`).
 | `ast_cplusplus_macro` | string \| null | `null` | The standard-mandated `__cplusplus` literal for `ast_resolved_standard` (e.g. `"201703L"` for `"gnu++17"`), looked up from a static ISO-standard table. `null` when `ast_resolved_standard` is unset or not a recognized C++ edition. |
 | `ast_compile_args` | array of strings | `[]` | The ordered extra compiler arguments passed to the header frontend (`--gcc-option` tokens, then a shlex-split `--gcc-options`), redacted. |
 | `ast_sysroot` | string \| null | `null` | The `--sysroot` passed to the header frontend, if any, redacted. |
+
+`ast_toolchain` (`dict[str, str]`, populated since schema v9) carries the
+exact tool identity behind the header-AST parse. It is untyped/free-form —
+new keys are additive and never require a schema bump — but these keys are
+stable and machine-checked by `tests/test_tool_identity.py`/
+`tests/test_castxml_policy.py`:
+
+| Key | Meaning |
+|-----|---------|
+| `selected` / `compiler_selected` | The exact frontend/host-compiler executable path selected from `PATH` (or an explicit `--gcc-path`). |
+| `realpath` / `compiler_realpath` | The same path with symlinks resolved. |
+| `sha256` / `compiler_sha256` | SHA-256 of the executable's file contents, so a same-version binary rebuild/repackage still changes provenance. |
+| `version` / `compiler_version` | The raw, bounded `--version` transcript for that exact executable revision. |
+| `target_triple` / `compiler_target_triple` | The `<tool> -dumpmachine` output for that executable (GCC/G++/Clang/Clang++ only — omitted, not empty, for a tool that doesn't support the flag, e.g. castxml itself or MSVC `cl.exe`). |
+| `castxml_version` | CastXML's own release version (e.g. `"0.7.0"`), parsed from `version` — castxml-producer snapshots only. |
+| `castxml_bundled_clang_version` | The bundled/linked Clang's `major.minor` (e.g. `"18.1"`), parsed from `version` — castxml-producer snapshots only. Kept separate from `castxml_version` since the two floors (`MIN_CASTXML`, `MIN_CASTXML_CLANG_MAJOR` in `castxml_policy.py`) are independently enforced by the version gate. |
+
+A `hybrid` snapshot (`ast_producer == "hybrid"`) namespaces every key from
+both runs instead of picking one — `castxml_selected`, `castxml_version`,
+`castxml_castxml_version`, `clang_selected`, `clang_target_triple`, and so
+on (`dumper_hybrid.py`'s merge is a generic `castxml_`/`clang_`-prefixed
+dict union, so a key that already started with `castxml_` on the castxml
+side is not special-cased).
+
+### DWARF-vs-header-AST layout coherence (schema v16)
+
+The clang L2 header backend is layout-blind (no `size_bits`/`alignment_bits`/
+field `offset_bits`) — when the binary being dumped also carries DWARF debug
+info, `dumper_layout_backfill.backfill_dwarf_layout()` backfills that layout
+from the same binary's DWARF, but only for a record it can corroborate as
+the *same* declaration (matching name, kind, and field/base overlap — see
+that function's docstring for the exact rules). These two fields make that
+corroboration outcome visible instead of silent; they never change *what*
+gets backfilled, only report on it.
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `dwarf_layout_coherence` | string \| null | `null` | One of `"matched"` (every record eligible for backfill was corroborated, or none needed it), `"partial"` (some corroborated, some had no DWARF candidate at all — benign, e.g. declared-but-never-instantiated), `"mismatch"` (at least one record found a uniquely-named DWARF candidate but the two disagreed — backfill already refused to merge that record's layout), or `"unavailable"` (the clang backend ran but the binary carried no usable DWARF at all). `null` on any snapshot not built via the clang L2 backend (a castxml snapshot computes layout directly — not a coherence question) and on any pre-v16 snapshot. |
+| `dwarf_layout_coherence_mismatches` | array of strings | `[]` | Header record names backfill found a uniquely-named DWARF candidate for but rejected as uncorroborated — populated only when `dwarf_layout_coherence == "mismatch"`. |
 
 ### ABI surface
 
@@ -177,7 +218,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `15`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `16`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

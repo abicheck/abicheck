@@ -182,7 +182,14 @@ def _attach_extraction_contract(
         compiler_family=_compiler_family_from_toolchain(snapshot.ast_toolchain),
         compiler_version=_profile_compiler_version(snapshot.ast_toolchain),
         abi_dialect=snapshot.ast_toolchain.get("abi_dialect"),
-        language_standard=language_standard_field(lang, gcc_options, gcc_option_tokens),
+        language_standard=language_standard_field(
+            lang,
+            gcc_options,
+            gcc_option_tokens,
+            resolved_standard=(
+                snapshot.ast_resolved_standard if snapshot.from_headers else None
+            ),
+        ),
         macro_ops=ordered_macro_ops(_flag_tokens),
         pass_through_flags=resolve_pass_through_paths(
             pass_through_flags_from_tokens(_flag_tokens), extra_includes or []

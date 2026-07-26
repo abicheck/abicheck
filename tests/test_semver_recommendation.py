@@ -290,3 +290,109 @@ class TestBinaryEvidenceGating:
         rec = recommend_release(result)
         assert rec.soname is SonameAction.NOT_DETERMINED
         assert rec.state is ReleaseRecommendationState.UNAVAILABLE
+
+
+class TestCoherenceGating:
+    """A BREAKING/API_BREAK verdict co-occurring with an evidence-coherence
+    RISK finding (AC-008 ``compile_context_conflict`` / AC-009
+    ``source_surface_dso_mismatch``) must not produce a confident SONAME/MAJOR
+    recommendation — the coherence check exists precisely because the
+    evidence backing *every* finding in this comparison, not just the one
+    that tripped it, can't be vouched for as internally consistent. See
+    AGENTS.md P0 "block release/SONAME recommendation on incoherent evidence"."""
+
+    def test_breaking_with_compile_context_conflict_is_unavailable(self) -> None:
+        result = _result(
+            Verdict.BREAKING,
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.COMPILE_CONTEXT_CONFLICT,
+        )
+        result.evidence_tiers = ["elf", "dwarf"]  # real binary evidence present
+        rec = recommend_release(result)
+        assert rec.soname is SonameAction.NOT_DETERMINED
+        assert rec.state is ReleaseRecommendationState.UNAVAILABLE
+        assert rec.bump is SemverBump.MAJOR  # still a likely real break
+        assert "compile_context_conflict" in rec.rationale
+
+    def test_breaking_with_source_surface_dso_mismatch_is_unavailable(self) -> None:
+        result = _result(
+            Verdict.BREAKING,
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.SOURCE_SURFACE_DSO_MISMATCH,
+        )
+        result.evidence_tiers = ["elf"]
+        rec = recommend_release(result)
+        assert rec.soname is SonameAction.NOT_DETERMINED
+        assert rec.state is ReleaseRecommendationState.UNAVAILABLE
+
+    def test_breaking_without_coherence_conflict_stays_actionable(self) -> None:
+        """Control: the same binary-evidence-backed BREAKING verdict with no
+        coherence finding present is unaffected by this gate."""
+        result = _result(Verdict.BREAKING, ChangeKind.FUNC_REMOVED)
+        result.evidence_tiers = ["elf", "dwarf"]
+        rec = recommend_release(result)
+        assert rec.soname is SonameAction.BUMP_REQUIRED
+        assert rec.state is ReleaseRecommendationState.ACTIONABLE
+
+    def test_coherence_conflict_takes_priority_over_missing_binary_evidence(
+        self,
+    ) -> None:
+        """Both gates would independently mark this UNAVAILABLE; the
+        coherence-specific rationale should win since it's the more precise
+        diagnosis (evidence exists but is inconsistent, vs. none at all)."""
+        result = _result(
+            Verdict.BREAKING,
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.COMPILE_CONTEXT_CONFLICT,
+        )
+        result.evidence_tiers = ["header"]  # no binary evidence either
+        rec = recommend_release(result)
+        assert rec.state is ReleaseRecommendationState.UNAVAILABLE
+        assert "compile_context_conflict" in rec.rationale
+
+    def test_api_break_with_coherence_conflict_is_unavailable(self) -> None:
+        result = _result(
+            Verdict.API_BREAK,
+            ChangeKind.ENUM_MEMBER_RENAMED,
+            ChangeKind.SOURCE_SURFACE_DSO_MISMATCH,
+        )
+        rec = recommend_release(result)
+        assert rec.state is ReleaseRecommendationState.UNAVAILABLE
+        assert rec.soname is SonameAction.NO_BUMP_NEEDED
+        assert "source_surface_dso_mismatch" in rec.rationale
+
+    def test_api_break_without_coherence_conflict_stays_review(self) -> None:
+        rec = recommend_release(
+            _result(Verdict.API_BREAK, ChangeKind.ENUM_MEMBER_RENAMED)
+        )
+        assert rec.state is ReleaseRecommendationState.REVIEW
+
+    def test_risk_only_coherence_finding_does_not_affect_compatible_verdict(
+        self,
+    ) -> None:
+        """A coherence RISK finding alongside an otherwise-COMPATIBLE_WITH_RISK
+        verdict makes no MAJOR/SONAME claim in the first place, so this gate
+        has nothing to downgrade — the existing risk-verdict path is
+        unaffected."""
+        rec = recommend_release(
+            _result(Verdict.COMPATIBLE_WITH_RISK, ChangeKind.COMPILE_CONTEXT_CONFLICT)
+        )
+        assert rec.bump is SemverBump.PATCH
+        assert rec.soname is SonameAction.NO_BUMP_NEEDED
+        assert rec.state is ReleaseRecommendationState.ACTIONABLE
+
+    def test_breaking_with_header_binary_context_mismatch_is_unavailable(self) -> None:
+        # P0 evidence-coherence audit follow-up: a DWARF-vs-header-AST
+        # layout-backfill coherence mismatch is the same class of
+        # "this run's own evidence disagrees with itself" signal as
+        # compile_context_conflict/source_surface_dso_mismatch.
+        result = _result(
+            Verdict.BREAKING,
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+        )
+        result.evidence_tiers = ["elf", "dwarf"]
+        rec = recommend_release(result)
+        assert rec.soname is SonameAction.NOT_DETERMINED
+        assert rec.state is ReleaseRecommendationState.UNAVAILABLE
+        assert "header_binary_context_mismatch" in rec.rationale

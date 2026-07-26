@@ -426,6 +426,15 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # linking against the binary's own export table (L0); it needs the surface,
     # so the weakest tier that can produce it is L4.
     "source_surface_dso_mismatch": "L4",
+    # header_binary_context_mismatch (P0 evidence-coherence audit follow-up)
+    # compares DWARF-derived (L1) record layout against header-AST-derived
+    # (L2) record declarations before backfilling one from the other
+    # (dumper_layout_backfill.py) -- it needs both, and headers (L2) is the
+    # binding requirement: a DWARF/symbols-only dump never has a header
+    # RecordType to attempt backfilling in the first place, so the weakest
+    # tier that can produce this finding is L2 (a debug-headers dump, same
+    # combination rtti_for_internal_type below needs).
+    "header_binary_context_mismatch": "L2",
     # ── Coverage extension: dynamic-loader / platform metadata (all read from
     # the binary's headers, dynamic section, notes, or symbol tables alone). ──
     "imported_symbol_added": "L0",

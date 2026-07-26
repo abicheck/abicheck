@@ -1,0 +1,8 @@
+# Trusted toolchain-bindings fixture pairing with .abicheck.yml in this
+# directory (P1 toolchain-profile audit). Operator/CI-managed, never
+# auto-discovered -- resolves the two logical `binding` ids declared there
+# to concrete executable paths. See README.md for the full walkthrough.
+schema: abicheck.toolchain-bindings/v1
+bindings:
+  gcc14: /opt/gcc-14.2.0/bin/g++
+  clang20: /opt/llvm-20/bin/clang++

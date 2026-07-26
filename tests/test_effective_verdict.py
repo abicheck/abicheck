@@ -23,6 +23,8 @@ from abicheck.checker_policy import (
     compute_verdict,
     effective_category,
     evidence_status_for_change,
+    evidence_status_for_result,
+    has_binary_evidence,
     policy_kind_sets,
 )
 from abicheck.checker_types import Change, DiffResult
@@ -166,3 +168,72 @@ def test_evidence_status_ignores_evidence_policy_ceiling() -> None:
     assert (
         evidence_status_for_change(c) is EvidenceStatus.CONTEXTUAL_RISK
     )  # ...but evidence_status still reflects the kind's own evidence tier
+
+
+# ---------------------------------------------------------------------------
+# has_binary_evidence / evidence_status_for_result (P0 evidence-provider
+# audit): a comparison-level refinement on top of evidence_status_for_change
+# — "artifact_proven" must not survive a comparison positively known to have
+# never examined a real binary.
+# ---------------------------------------------------------------------------
+
+
+def test_has_binary_evidence_true_for_elf_tier() -> None:
+    assert has_binary_evidence(["header", "elf"]) is True
+
+
+def test_has_binary_evidence_true_for_empty_unknown_tiers() -> None:
+    assert has_binary_evidence([]) is True
+
+
+def test_has_binary_evidence_false_for_header_only() -> None:
+    assert has_binary_evidence(["header"]) is False
+
+
+def test_evidence_status_for_result_downgrades_artifact_proven_to_unattributed() -> (
+    None
+):
+    c = _change(ChangeKind.FUNC_REMOVED)
+    assert evidence_status_for_result(c, ["header"]) is EvidenceStatus.UNATTRIBUTED
+
+
+def test_evidence_status_for_result_keeps_artifact_proven_with_binary_evidence() -> (
+    None
+):
+    c = _change(ChangeKind.FUNC_REMOVED)
+    assert (
+        evidence_status_for_result(c, ["header", "elf"])
+        is EvidenceStatus.ARTIFACT_PROVEN
+    )
+
+
+def test_evidence_status_for_result_defaults_to_unknown_tiers() -> None:
+    # Default () argument matches evidence_status_for_change's own behaviour
+    # for a caller that can't thread DiffResult.evidence_tiers through.
+    c = _change(ChangeKind.FUNC_REMOVED)
+    assert evidence_status_for_result(c) is EvidenceStatus.ARTIFACT_PROVEN
+    assert evidence_status_for_result(c) == evidence_status_for_change(c)
+
+
+def test_evidence_status_for_result_leaves_non_artifact_proven_kinds_unaffected() -> (
+    None
+):
+    # SOURCE_CONTRACT/CONTEXTUAL_RISK/NOT_CHECKABLE/None are untouched by
+    # evidence_tiers -- only ARTIFACT_PROVEN is ever downgraded.
+    source = _change(ChangeKind.FIELD_RENAMED)
+    assert (
+        evidence_status_for_result(source, ["header"]) is EvidenceStatus.SOURCE_CONTRACT
+    )
+
+    risk = _change(ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED)
+    assert (
+        evidence_status_for_result(risk, ["header"]) is EvidenceStatus.CONTEXTUAL_RISK
+    )
+
+    missing = _change(ChangeKind.EVIDENCE_REQUIRED_MISSING)
+    assert (
+        evidence_status_for_result(missing, ["header"]) is EvidenceStatus.NOT_CHECKABLE
+    )
+
+    compatible = _change(ChangeKind.FUNC_ADDED)
+    assert evidence_status_for_result(compatible, ["header"]) is None

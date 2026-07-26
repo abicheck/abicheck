@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.dumper_layout_backfill import (
+    DwarfLayoutCoherence,
     _topmost_scope_suffix,
     backfill_dwarf_layout,
     dwarf_layout_types_or_empty,
@@ -171,7 +172,7 @@ class TestBackfillDwarfLayout:
                 TypeField(name="y", type="int", offset_bits=32),
             ],
         )
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert len(out) == 1
         assert out[0].size_bits == 64
         assert out[0].alignment_bits == 32
@@ -192,7 +193,7 @@ class TestBackfillDwarfLayout:
             name="Point", kind="struct", size_bits=64,
             fields=[TypeField(name="x", type="int", offset_bits=999)],
         )
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].fields[0].offset_bits == 0  # untouched, not overwritten with 999
         assert out[0].fields[1].offset_bits is None  # left alone, not dropped
 
@@ -201,7 +202,7 @@ class TestBackfillDwarfLayout:
         even if a same-named DWARF type carries different layout."""
         header = RecordType(name="Point", kind="struct", size_bits=64)
         dwarf = RecordType(name="Point", kind="struct", size_bits=128)
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 64
 
     def test_unique_bare_name_without_field_overlap_is_not_trusted(self) -> None:
@@ -220,7 +221,7 @@ class TestBackfillDwarfLayout:
             name="impl::Foo", kind="struct", size_bits=999,
             fields=[TypeField(name="internal_thing", type="void *")],
         )
-        out = backfill_dwarf_layout([header], [unrelated])
+        out, _coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
     def test_unique_bare_name_with_field_overlap_is_trusted(self) -> None:
@@ -234,7 +235,7 @@ class TestBackfillDwarfLayout:
             name="Foo", kind="struct", size_bits=32,
             fields=[TypeField(name="x", type="int", offset_bits=0)],
         )
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 32
 
     def test_both_sides_empty_fields_is_trusted(self) -> None:
@@ -243,7 +244,7 @@ class TestBackfillDwarfLayout:
         case, e.g. case94_empty_tag_gained_state before a field is added)."""
         header = RecordType(name="Tag", kind="struct")
         dwarf = RecordType(name="Tag", kind="struct", size_bits=8)
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 8
 
     def test_empty_dwarf_fields_from_anonymous_aggregate_is_trusted(self) -> None:
@@ -267,7 +268,7 @@ class TestBackfillDwarfLayout:
             has_anonymous_aggregate_fields=True,
         )
         dwarf = RecordType(name="Foo", kind="struct", size_bits=32, fields=[])
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 32
 
     def test_nonempty_header_against_dwarf_empty_with_different_bases_is_never_guessed(
@@ -287,7 +288,7 @@ class TestBackfillDwarfLayout:
         unrelated = RecordType(
             name="impl::Foo", kind="struct", size_bits=8, bases=["InternalBase"], fields=[],
         )
-        out = backfill_dwarf_layout([header], [unrelated])
+        out, _coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
     def test_empty_header_against_nonempty_dwarf_is_never_guessed(self) -> None:
@@ -303,7 +304,7 @@ class TestBackfillDwarfLayout:
             name="impl::Foo", kind="struct", size_bits=32,
             fields=[TypeField(name="x", type="int")],
         )
-        out = backfill_dwarf_layout([header], [unrelated])
+        out, _coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
     def test_fieldless_but_different_bases_is_never_guessed(self) -> None:
@@ -317,7 +318,7 @@ class TestBackfillDwarfLayout:
         unrelated = RecordType(
             name="impl::Foo", kind="class", size_bits=64, fields=[], bases=["InternalBase"],
         )
-        out = backfill_dwarf_layout([header], [unrelated])
+        out, _coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
     def test_fieldless_with_matching_base_is_trusted(self) -> None:
@@ -326,7 +327,7 @@ class TestBackfillDwarfLayout:
         empty derived class that only exists to establish a base relation)."""
         header = RecordType(name="Foo", kind="class", fields=[], bases=["Base"])
         dwarf = RecordType(name="Foo", kind="class", size_bits=8, fields=[], bases=["Base"])
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 8
 
     def test_fieldless_matching_base_with_namespace_asymmetry_is_trusted(self) -> None:
@@ -338,7 +339,7 @@ class TestBackfillDwarfLayout:
         their bare suffix before checking overlap."""
         header = RecordType(name="Foo", kind="class", fields=[], bases=["api::Base"])
         dwarf = RecordType(name="Foo", kind="class", size_bits=8, fields=[], bases=["Base"])
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 8
 
     def test_templated_bases_with_differing_scope_are_not_falsely_corroborated(self) -> None:
@@ -357,7 +358,7 @@ class TestBackfillDwarfLayout:
             name="impl::Foo", kind="class", size_bits=64, fields=[],
             bases=["other::Different<detail::Tag>"],
         )
-        out = backfill_dwarf_layout([header], [unrelated])
+        out, _coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
     def test_templated_bases_with_matching_scope_are_corroborated(self) -> None:
@@ -371,7 +372,7 @@ class TestBackfillDwarfLayout:
             name="Foo", kind="class", size_bits=16, fields=[],
             bases=["Base<detail::Tag>"],
         )
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 16
 
     def test_fieldless_virtual_base_only_mismatch_is_never_guessed(self) -> None:
@@ -387,7 +388,7 @@ class TestBackfillDwarfLayout:
             name="impl::Foo", kind="class", size_bits=64, fields=[],
             virtual_bases=["InternalBase"],
         )
-        out = backfill_dwarf_layout([header], [unrelated])
+        out, _coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
     def test_fieldless_with_matching_virtual_base_is_trusted(self) -> None:
@@ -398,7 +399,7 @@ class TestBackfillDwarfLayout:
         dwarf = RecordType(
             name="Foo", kind="class", size_bits=16, fields=[], virtual_bases=["Base"],
         )
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 16
 
     def test_fieldless_and_baseless_on_both_sides_is_trusted(self) -> None:
@@ -407,7 +408,7 @@ class TestBackfillDwarfLayout:
         residual-risk trade-off already accepted for plain tag types."""
         header = RecordType(name="Tag", kind="struct", fields=[], bases=[])
         dwarf = RecordType(name="Tag", kind="struct", size_bits=8, fields=[], bases=[])
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 8
 
     def test_suffix_only_match_with_no_remaining_evidence_is_never_guessed(self) -> None:
@@ -420,7 +421,7 @@ class TestBackfillDwarfLayout:
         top of zero field/base evidence must not be trusted."""
         header = RecordType(name="Foo", kind="struct", fields=[], bases=[])
         unrelated = RecordType(name="impl::Foo", kind="struct", size_bits=8, fields=[], bases=[])
-        out = backfill_dwarf_layout([header], [unrelated])
+        out, _coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
     def test_suffix_only_match_with_no_remaining_evidence_and_header_fields_is_never_guessed(
@@ -437,7 +438,7 @@ class TestBackfillDwarfLayout:
             name="Foo", kind="struct", fields=[TypeField(name="x", type="int")],
         )
         unrelated = RecordType(name="impl::Foo", kind="struct", size_bits=8, fields=[])
-        out = backfill_dwarf_layout([header], [unrelated])
+        out, _coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
     def test_exact_name_match_with_populated_header_and_empty_dwarf_is_never_guessed(
@@ -458,7 +459,7 @@ class TestBackfillDwarfLayout:
             name="Foo", kind="struct", fields=[TypeField(name="x", type="int")],
         )
         unrelated = RecordType(name="Foo", kind="struct", size_bits=8, fields=[])
-        out = backfill_dwarf_layout([header], [unrelated])
+        out, _coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
     def test_exact_name_match_anonymous_aggregate_flag_does_not_trust_unrelated_polymorphic_type(
@@ -479,7 +480,7 @@ class TestBackfillDwarfLayout:
             name="Foo", kind="class", size_bits=64, fields=[],
             vtable=["_ZN3Foo1fEv"],
         )
-        out = backfill_dwarf_layout([header], [unrelated])
+        out, _coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
     def test_exact_name_match_fieldless_header_does_not_trust_unrelated_polymorphic_type(
@@ -498,7 +499,7 @@ class TestBackfillDwarfLayout:
             name="Foo", kind="class", size_bits=64, fields=[], bases=[],
             vtable=["_ZN3Foo1fEv"],
         )
-        out = backfill_dwarf_layout([header], [unrelated])
+        out, _coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
     def test_namespaced_anonymous_aggregate_suffix_match_is_trusted(self) -> None:
@@ -523,7 +524,7 @@ class TestBackfillDwarfLayout:
             has_anonymous_aggregate_fields=True,
         )
         dwarf = RecordType(name="api::Foo", kind="struct", size_bits=32, fields=[])
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 32
 
     def test_anonymous_aggregate_flag_does_not_trust_unrelated_polymorphic_type(
@@ -546,7 +547,7 @@ class TestBackfillDwarfLayout:
             name="impl::Foo", kind="class", size_bits=64, fields=[],
             vtable=["_ZN4impl3Foo1fEv"],
         )
-        out = backfill_dwarf_layout([header], [unrelated])
+        out, _coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
     def test_union_vs_struct_kind_mismatch_is_never_guessed(self) -> None:
@@ -563,13 +564,13 @@ class TestBackfillDwarfLayout:
             name="impl::Foo", kind="union", is_union=True, size_bits=64,
             fields=[TypeField(name="x", type="int", offset_bits=0)],
         )
-        out = backfill_dwarf_layout([header], [dwarf_union])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf_union])
         assert out[0].size_bits is None
 
     def test_leaves_opaque_type_untouched(self) -> None:
         header = RecordType(name="Handle", kind="struct", is_opaque=True)
         dwarf = RecordType(name="Handle", kind="struct", size_bits=64)
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits is None
         assert out[0].is_opaque
 
@@ -584,7 +585,7 @@ class TestBackfillDwarfLayout:
             fields=[TypeField(name="data_", type="T *")],
         )
         dwarf = RecordType(name="Buffer", kind="class", size_bits=128)
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits is None
         assert out[0].is_template_pattern
         assert [f.name for f in out[0].fields] == ["data_"]
@@ -598,7 +599,7 @@ class TestBackfillDwarfLayout:
             name="api::Foo", kind="struct", size_bits=32,
             fields=[TypeField(name="v", type="int", offset_bits=0)],
         )
-        out = backfill_dwarf_layout([header], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf])
         assert out[0].size_bits == 32
         assert out[0].fields[0].offset_bits == 0
 
@@ -611,7 +612,7 @@ class TestBackfillDwarfLayout:
         header = RecordType(name="Foo", kind="struct")
         dwarf_a = RecordType(name="ns_a::Foo", kind="struct", size_bits=32)
         dwarf_b = RecordType(name="ns_b::Foo", kind="struct", size_bits=999)
-        out = backfill_dwarf_layout([header], [dwarf_a, dwarf_b])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf_a, dwarf_b])
         assert out[0].size_bits is None
 
     def test_global_and_namespaced_same_bare_name_is_never_guessed(self) -> None:
@@ -623,12 +624,14 @@ class TestBackfillDwarfLayout:
         header = RecordType(name="Foo", kind="struct")
         dwarf_global = RecordType(name="Foo", kind="struct", size_bits=64)
         dwarf_namespaced = RecordType(name="api::Foo", kind="struct", size_bits=999)
-        out = backfill_dwarf_layout([header], [dwarf_global, dwarf_namespaced])
+        out, _coherence = backfill_dwarf_layout([header], [dwarf_global, dwarf_namespaced])
         assert out[0].size_bits is None
 
     def test_no_dwarf_types_is_a_no_op(self) -> None:
         header = RecordType(name="Point", kind="struct")
-        assert backfill_dwarf_layout([header], []) == [header]
+        out, coherence = backfill_dwarf_layout([header], [])
+        assert out == [header]
+        assert coherence is None
 
     def test_duplicate_header_bare_names_are_never_backfilled(self) -> None:
         """Regression (Codex review): the clang header parser never
@@ -648,6 +651,125 @@ class TestBackfillDwarfLayout:
             name="api::Foo", kind="struct", size_bits=32,
             fields=[TypeField(name="x", type="int", offset_bits=0)],
         )
-        out = backfill_dwarf_layout([header_a, header_b], [dwarf])
+        out, _coherence = backfill_dwarf_layout([header_a, header_b], [dwarf])
         assert out[0].size_bits is None
         assert out[1].size_bits is None
+
+
+class TestDwarfLayoutCoherence:
+    """P0 evidence-coherence audit: backfill_dwarf_layout's observability
+    return value. Must never change which records get backfilled (covered
+    by TestBackfillDwarfLayout above) -- only report what happened."""
+
+    def test_successful_backfill_is_matched(self) -> None:
+        header = RecordType(
+            name="Point", kind="struct", fields=[TypeField(name="x", type="int")]
+        )
+        dwarf = RecordType(
+            name="Point", kind="struct", size_bits=32,
+            fields=[TypeField(name="x", type="int", offset_bits=0)],
+        )
+        out, coherence = backfill_dwarf_layout([header], [dwarf])
+        assert out[0].size_bits == 32
+        assert coherence == DwarfLayoutCoherence(
+            status="matched", matched=("Point",)
+        )
+
+    def test_no_dwarf_candidate_is_partial_unavailable_type(self) -> None:
+        header = RecordType(
+            name="Point", kind="struct", fields=[TypeField(name="x", type="int")]
+        )
+        unrelated = RecordType(
+            name="Other", kind="struct", size_bits=64,
+            fields=[TypeField(name="y", type="int", offset_bits=0)],
+        )
+        out, coherence = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None  # unchanged: no candidate to trust
+        assert coherence.status == "partial"
+        assert coherence.unavailable_types == ("Point",)
+        assert coherence.matched == ()
+        assert coherence.mismatched == ()
+
+    def test_kind_mismatch_is_mismatch_status(self) -> None:
+        header = RecordType(
+            name="Foo", kind="struct", fields=[TypeField(name="x", type="int")]
+        )
+        dwarf_union = RecordType(
+            name="Foo", kind="union", is_union=True, size_bits=32,
+            fields=[TypeField(name="x", type="int", offset_bits=0)],
+        )
+        out, coherence = backfill_dwarf_layout([header], [dwarf_union])
+        assert out[0].size_bits is None  # unchanged: kind mismatch rejected
+        assert coherence.status == "mismatch"
+        assert coherence.mismatched == ("Foo",)
+        assert coherence.matched == ()
+
+    def test_field_corroboration_failure_is_mismatch_status(self) -> None:
+        header = RecordType(
+            name="Foo", kind="struct", fields=[TypeField(name="x", type="int")]
+        )
+        # Unique name-suffix candidate, but no field overlap -- rejected by
+        # _fields_corroborate, distinct from "no candidate at all".
+        unrelated = RecordType(
+            name="ns::Foo", kind="struct", size_bits=64,
+            fields=[TypeField(name="y", type="int", offset_bits=0)],
+        )
+        out, coherence = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
+        assert coherence.status == "mismatch"
+        assert coherence.mismatched == ("Foo",)
+
+    def test_ambiguous_bare_name_is_partial_ambiguous(self) -> None:
+        header_a = RecordType(
+            name="Foo", kind="struct", fields=[TypeField(name="x", type="int")]
+        )
+        header_b = RecordType(
+            name="Foo", kind="struct", fields=[TypeField(name="x", type="int")]
+        )
+        dwarf = RecordType(
+            name="api::Foo", kind="struct", size_bits=32,
+            fields=[TypeField(name="x", type="int", offset_bits=0)],
+        )
+        out, coherence = backfill_dwarf_layout([header_a, header_b], [dwarf])
+        assert out[0].size_bits is None
+        assert coherence.status == "partial"
+        assert coherence.ambiguous == ("Foo", "Foo")
+        assert coherence.matched == ()
+        assert coherence.mismatched == ()
+
+    def test_mismatch_wins_over_partial_when_both_present(self) -> None:
+        matched_header = RecordType(
+            name="Point", kind="struct", fields=[TypeField(name="x", type="int")]
+        )
+        matched_dwarf = RecordType(
+            name="Point", kind="struct", size_bits=32,
+            fields=[TypeField(name="x", type="int", offset_bits=0)],
+        )
+        mismatch_header = RecordType(
+            name="Foo", kind="struct", fields=[TypeField(name="x", type="int")]
+        )
+        mismatch_dwarf = RecordType(
+            name="Foo", kind="union", is_union=True, size_bits=32,
+            fields=[TypeField(name="x", type="int", offset_bits=0)],
+        )
+        no_candidate_header = RecordType(
+            name="Bar", kind="struct", fields=[TypeField(name="z", type="int")]
+        )
+        out, coherence = backfill_dwarf_layout(
+            [matched_header, mismatch_header, no_candidate_header],
+            [matched_dwarf, mismatch_dwarf],
+        )
+        assert out[0].size_bits == 32  # Point still backfilled
+        assert coherence.status == "mismatch"
+        assert coherence.matched == ("Point",)
+        assert coherence.mismatched == ("Foo",)
+        assert coherence.unavailable_types == ("Bar",)
+
+    def test_types_needing_no_backfill_produce_matched_status(self) -> None:
+        already_has_layout = RecordType(name="Point", kind="struct", size_bits=32)
+        out, coherence = backfill_dwarf_layout(
+            [already_has_layout],
+            [RecordType(name="Unrelated", kind="struct", size_bits=64)],
+        )
+        assert out == [already_has_layout]
+        assert coherence == DwarfLayoutCoherence(status="matched")

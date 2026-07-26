@@ -134,6 +134,32 @@ def _tool_version_output(selected_path: str, digest: str) -> str:
     return "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
 
 
+@lru_cache(maxsize=64)
+def _tool_target_triple(selected_path: str, digest: str) -> str | None:
+    """Return ``<tool> -dumpmachine`` output for one exact executable
+    revision, or ``None`` when the tool doesn't support the flag (e.g.
+    castxml itself) or the probe fails. GCC/G++/Clang/Clang++ all accept
+    ``-dumpmachine``; there is no MSVC equivalent (cl.exe is never the
+    executable this is probed against — see the gnu/msvc dialect split in
+    ``dumper._header_ast_parser``)."""
+    del digest
+    try:
+        result = subprocess.run(
+            [selected_path, "-dumpmachine"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+            text=True,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    triple = result.stdout.strip()
+    return triple or None
+
+
 def _resolved_tool(executable: str) -> tuple[str, Path, os.stat_result, str]:
     selected = shutil.which(executable)
     if selected is None:
@@ -185,7 +211,7 @@ def _tool_identity_metadata(executable: str) -> dict[str, str]:
         version = _tool_version_output(selected, digest)
     except OSError as exc:
         return {"selected": selected, "error": f"{type(exc).__name__}: {exc}"}
-    return {
+    metadata = {
         "selected": selected,
         "realpath": str(real),
         "mtime_ns": str(stat.st_mtime_ns),
@@ -193,6 +219,10 @@ def _tool_identity_metadata(executable: str) -> dict[str, str]:
         "sha256": digest,
         "version": version,
     }
+    triple = _tool_target_triple(selected, digest)
+    if triple is not None:
+        metadata["target_triple"] = triple
+    return metadata
 
 
 def _compiler_family_from_toolchain(ast_toolchain: dict[str, str]) -> str | None:

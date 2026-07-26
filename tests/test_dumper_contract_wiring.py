@@ -44,6 +44,7 @@ import pytest
 
 from abicheck.checker import Verdict, compare
 from abicheck.dumper import dump
+from abicheck.errors import ProfileMismatchError
 
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"),
@@ -355,3 +356,71 @@ def test_renamed_single_header_does_not_spuriously_block_compare(
     result = compare(snap_old, snap_new)
     names = {c.kind.value for c in result.changes}
     assert "enum_member_renamed" in names
+
+
+def test_cpp20_heuristic_forced_standard_flows_into_profile_fingerprint(
+    tmp_path: Path,
+) -> None:
+    """P0 evidence-provider audit: two dumps of the SAME binary, no explicit
+    -std=, differing only by whether their headers contain a genuine C++20
+    requires-clause (which forces gnu++20 on only one side via
+    dumper_ast_config_cpp20's heuristic) must not silently share a
+    profile_fingerprint -- before ast_resolved_standard fed
+    language_standard_field, this exact divergence was invisible to
+    check_contracts_comparable, so a caller could unknowingly compare a
+    C++20-parsed surface against a C++17-or-earlier one."""
+    if not (_have("clang") and _have("gcc")):
+        pytest.skip(
+            "clang and gcc are required for the contract-wiring integration test"
+        )
+    header_plain = tmp_path / "plain.h"
+    header_plain.write_text(
+        "#pragma once\n"
+        "struct Point { int x; int y; };\n"
+        'extern "C" int add(int a, int b);\n'
+    )
+    header_cxx20 = tmp_path / "cxx20.h"
+    header_cxx20.write_text(
+        "#pragma once\n"
+        "struct Point { int x; int y; };\n"
+        'extern "C" int add(int a, int b);\n'
+        "template<typename T>\n"
+        "requires (sizeof(T) > 0)\n"
+        "void touch(T value) {}\n"
+    )
+    src = tmp_path / "api.cpp"
+    src.write_text(
+        '#include "plain.h"\nextern "C" int add(int a, int b) { return a + b; }\n'
+    )
+    so = tmp_path / "libapi.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(so), str(src), f"-I{tmp_path}"],
+        check=True,
+        capture_output=True,
+    )
+
+    snap_plain = dump(
+        so, [header_plain], version="1.0", compiler="c++", header_backend="clang"
+    )
+    snap_cxx20 = dump(
+        so, [header_cxx20], version="2.0", compiler="c++", header_backend="clang"
+    )
+
+    assert snap_plain.contract is not None
+    assert snap_cxx20.contract is not None
+    assert snap_plain.ast_resolved_standard != snap_cxx20.ast_resolved_standard
+    assert snap_cxx20.ast_resolved_standard == "gnu++20"
+    assert (
+        snap_plain.contract.profile_fingerprint
+        != snap_cxx20.contract.profile_fingerprint
+    )
+
+    with pytest.raises(ProfileMismatchError):
+        compare(snap_plain, snap_cxx20)
+
+    # ADR-050 D2's sanctioned escape hatch still lets a caller force the
+    # comparison through, with the mismatch surfaced rather than hidden.
+    result = compare(snap_plain, snap_cxx20, diagnostic_comparison=True)
+    assert result.assurance == "none"
+    assert result.coverage_warnings
+    assert any("profile_fingerprint" in w for w in result.coverage_warnings)
