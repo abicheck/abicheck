@@ -50,6 +50,21 @@ class TestIsRealMangledName:
         assert is_real_mangled_name(None, "foo") is False
         assert is_real_mangled_name("", "foo") is False
 
+    def test_fallback_dumper_mangled_equal_to_name_is_still_real(self) -> None:
+        # dumper_elf_fallback.py/dumper.py's PE-only path set both
+        # name=mangled=the raw exported symbol for a genuine C++/MSVC
+        # export when no debug info is available to demangle it -- bare
+        # equality must not be mistaken for extern "C" here (Codex review).
+        assert is_real_mangled_name(_ITANIUM_MANGLED, _ITANIUM_MANGLED) is True
+        assert is_real_mangled_name("?foo@@YAHXZ", "?foo@@YAHXZ") is True
+
+    def test_bare_name_equal_to_itself_is_still_not_real(self) -> None:
+        # A genuinely non-mangled name riding in both fields (real extern
+        # "C" linkage) must still degrade -- only a value that
+        # independently looks like a real mangling overrides the equality
+        # check.
+        assert is_real_mangled_name("foo", "foo") is False
+
 
 class TestLooksLikeItaniumEncoding:
     def test_empty_string_is_rejected(self) -> None:
@@ -237,6 +252,22 @@ class TestResolveFunctionIdentity:
         func = Function(name="foo", mangled="foo", return_type="int")
         identity = resolve_function_identity(func)
         assert identity.tier == IDENTITY_TIER_NORMALIZED
+
+    def test_fallback_dumper_shaped_function_is_still_canonical(self) -> None:
+        # dumper_elf_fallback.py's symbols-only ELF path constructs
+        # Function(name=sym, mangled=sym, ...) for every exported symbol,
+        # including a genuine C++ export with no separate demangled name
+        # available -- this must still resolve to CANONICAL, not degrade
+        # to NORMALIZED just because name and mangled happen to be equal.
+        func = Function(
+            name=_ITANIUM_MANGLED,
+            mangled=_ITANIUM_MANGLED,
+            return_type="?",
+            is_extern_c=False,
+        )
+        identity = resolve_function_identity(func)
+        assert identity.tier == IDENTITY_TIER_CANONICAL
+        assert identity.primary_id == f"mangled:{_ITANIUM_MANGLED}"
 
     def test_param_types_feed_the_signature_for_non_extern_c_functions(self) -> None:
         # No real mangling (e.g. a DWARF-only snapshot) but genuinely

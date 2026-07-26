@@ -103,12 +103,24 @@ class FindingIdentity:
 def is_real_mangled_name(mangled_name: str | None, plain_name: str | None) -> bool:
     """Whether *mangled_name* is a genuine mangling, not a bare name that
     merely rode in the "mangled" field (``extern "C"``/C-linkage producers
-    report ``mangled_name == name`` deliberately -- mirrors
-    ``buildsource.entity_identity.is_real_mangled_name``'s identical check,
-    duplicated rather than imported per this module's dependency-direction
-    note above).
+    report ``mangled_name == name`` deliberately).
+
+    ``mangled_name == plain_name`` is usually that C-linkage signal, but
+    some symbols-only fallback dumpers (``dumper_elf_fallback.py``'s ELF
+    export scan, ``dumper.py``'s PE-only export path) populate *both*
+    fields with the same raw exported symbol string even for a genuine
+    C++/MSVC-mangled export (e.g. ``_Z3foov``/``?foo@@YAHXZ``), since no
+    separate demangled name is available without debug info -- they still
+    compute ``is_extern_c`` correctly (checking the same ``_Z``/``?``
+    prefix), but that fact never reaches this string-only check (Codex
+    review). Equality is therefore only trusted as C-linkage evidence when
+    the value doesn't independently look like a real platform mangling;
+    :func:`_looks_structurally_mangled` runs the same structural check
+    :func:`normalize_mangled_name` uses.
     """
-    return bool(mangled_name) and mangled_name != plain_name
+    if not mangled_name:
+        return False
+    return mangled_name != plain_name or _looks_structurally_mangled(mangled_name)
 
 
 #: Structural (no external tool) check that *mangled_name* has the shape of
@@ -223,6 +235,29 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
     return rest[:2] in _ITANIUM_OPERATOR_CODES
 
 
+def _looks_structurally_mangled(value: str) -> bool:
+    """Whether *value* has the shape of a real Itanium or MSVC mangling, on
+    its own -- independent of whether it also happens to equal a
+    declaration's plain name (used by :func:`is_real_mangled_name` to tell
+    a genuine mangling that rode into both fields apart from actual
+    C-linkage evidence).
+
+    Itanium ``_Z...`` names are validated structurally
+    (:func:`_looks_like_itanium_encoding`) rather than merely on the ``_Z``
+    prefix and character set alone. MSVC ``?...`` manglings have no such
+    check available (no demangler in this codebase to cross-check against
+    at all) and are accepted on the prefix convention alone (best-effort,
+    matches how the rest of the codebase already treats MSVC-mangled names
+    it cannot independently demangle).
+    """
+    if value.startswith("_Z"):
+        if not _ITANIUM_MANGLED_RE.match(value):
+            return False
+        rest = value[2:].split(".", 1)[0]  # drop clone suffix
+        return _looks_like_itanium_encoding(rest)
+    return value.startswith("?")
+
+
 def normalize_mangled_name(
     mangled_name: str | None, plain_name: str | None
 ) -> str | None:
@@ -237,25 +272,11 @@ def normalize_mangled_name(
     the comparison) -- a mangled name that only degrades to the NORMALIZED
     tier on a host with no demangler installed would silently change
     identity across CI runners or between a contributor's laptop and CI.
-    Itanium ``_Z...`` names are validated structurally
-    (:func:`_looks_like_itanium_encoding`) rather than merely on the ``_Z``
-    prefix and character set alone. MSVC ``?...`` manglings have no such
-    check available (no demangler in this codebase to cross-check against
-    at all) and are accepted on the prefix convention alone (best-effort,
-    matches how the rest of the codebase already treats MSVC-mangled names
-    it cannot independently demangle).
     """
     if not is_real_mangled_name(mangled_name, plain_name):
         return None
     assert mangled_name is not None  # for type-checkers; guarded above
-    if mangled_name.startswith("_Z"):
-        if not _ITANIUM_MANGLED_RE.match(mangled_name):
-            return None
-        rest = mangled_name[2:].split(".", 1)[0]  # drop clone suffix
-        return mangled_name if _looks_like_itanium_encoding(rest) else None
-    if mangled_name.startswith("?"):
-        return mangled_name
-    return None
+    return mangled_name if _looks_structurally_mangled(mangled_name) else None
 
 
 def normalized_signature(
