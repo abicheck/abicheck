@@ -260,6 +260,16 @@ class TestNormalizeMangledName:
         # terminator (std::E).
         assert normalize_mangled_name("_ZNSt1EE", None) == "_ZNSt1EE"
 
+    def test_nested_name_bare_substitution_with_no_following_component_is_rejected(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence, round 6: "St" is only the std::
+        # <prefix> component and must itself be followed by more encoding
+        # -- "_ZNStE" leaves `pos` pointing straight at the 'E' right
+        # after "St", which the terminator search wrongly accepted as
+        # though "St" alone had completed the prefix.
+        assert normalize_mangled_name("_ZNStE", "_ZNStE") is None
+
     def test_local_name_with_nothing_after_terminator_is_rejected(self) -> None:
         # Codex review, fresh evidence: unlike <nested-name> (complete once
         # its own terminator E is found), a <local-name> is
