@@ -7,13 +7,13 @@ system, or an `install` step, populates an `abicheck-build/` directory that
 downstream tooling then validates and consumes.
 
 > **Status.** This page documents the schema and the
-> `abicheck build-output validate` command shipped in G30 P1.1. The
+> `abicheck project validate-build` command shipped in G30 P1.1. The
 > consumers that read a validated `build-output.json` to resolve a
 > baseline or run a check — `resolve-baseline`/`check-target` (G30
-> P1.2/P1.3) and `abicheck run-plan generate`/[`check-project.yml`](reusable-workflows.md)
+> P1.2/P1.3) and `abicheck project plan`/[`check-project.yml`](reusable-workflows.md)
 > (G30 P1.4) — are all shipped; see the
 > [G30 plan](../contribute/plans/g30-github-actions-integration-model.md).
-> There is still no `abicheck build-output emit` producer helper; author
+> There is still no `abicheck project emit-build` producer helper; author
 > `build-output.json` by hand or from your build's own `install` step.
 
 ## Directory layout
@@ -70,7 +70,7 @@ as-installed header root — see [Validation rules](#validation-rules) below.
 
 Every field is optional and defaulted (the `buildsource` package-wide
 forward-compatibility convention) — a hand-written or partially-populated
-manifest never aborts a load. `abicheck build-output validate` is what turns
+manifest never aborts a load. `abicheck project validate-build` is what turns
 missing/inconsistent fields into an actionable report.
 
 ### Top-level fields
@@ -131,7 +131,7 @@ means the build itself asserted this evidence pack belongs to exactly this
 target (e.g. per-target compile-DB filtering, or a wrapper invoked once per
 link step). `"inferred"` would mean abicheck derived the association from a
 build-wide pack via TU→link-unit→DSO attribution — that attribution
-mechanism is G30 P2, not built yet, so `abicheck build-output validate`
+mechanism is G30 P2, not built yet, so `abicheck project validate-build`
 treats `"inferred"` (and any value other than `"declared"`) as a **hard
 validation failure**, not a lower-confidence warning. Until P2 ships, a
 build-wide evidence pack may only feed a build-wide source audit or a
@@ -142,7 +142,7 @@ for the practical consequence of this rule).
 
 ## Validation rules
 
-`abicheck build-output validate DIRECTORY` checks, per ADR-047 §11.1:
+`abicheck project validate-build DIRECTORY` checks, per ADR-047 §11.1:
 
 1. **Every declared header root is non-empty.** Each `public_header_roots`/
    `generated_header_roots` entry must resolve to an existing, non-empty
@@ -179,11 +179,11 @@ principle ADR-047 §11 states for every G30 validator.
 ### CLI
 
 ```console
-$ abicheck build-output validate abicheck-build/
+$ abicheck project validate-build abicheck-build/
 build-output validation: abicheck-build/
 OK — no errors.
 
-$ abicheck build-output validate abicheck-build/ --format json
+$ abicheck project validate-build abicheck-build/ --format json
 {
   "root": "abicheck-build/",
   "ok": true,

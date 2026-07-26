@@ -235,12 +235,13 @@ jobs:
           # directly, same as publish-baseline.yml's identical step.
           python3 -c "
           import json
+          import os
           from pathlib import Path
 
           from abicheck.buildsource.baseline_publish import derive_baseline_libraries
           from abicheck.buildsource.build_output import load_build_output
 
-          directory = Path('build-output/${PROFILE_ID}')
+          directory = Path('build-output') / os.environ['PROFILE_ID']
           try:
               build_output = load_build_output(directory)
           except (FileNotFoundError, ValueError):
