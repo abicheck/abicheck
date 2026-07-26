@@ -870,30 +870,58 @@ class TestResolveChangeIdentity:
         assert "_internal_helper_a" not in first_identity.primary_id
         assert all("_internal_helper_a" not in a for a in first_identity.aliases)
 
-    def test_header_binary_context_mismatch_is_batch_shaped(self) -> None:
+    def test_header_binary_context_mismatch_ignores_sample_order(self) -> None:
         # Codex review, fresh evidence: diff_layout_coherence.py's
-        # _mismatch_change fires once per side with symbol=snapshot.library
-        # (the library name, not a per-entity symbol) and embeds up to five
-        # uncorroborated record names sampled from
-        # dwarf_layout_coherence_mismatches into description -- two
-        # semantically identical snapshots whose mismatch tuple happens to
-        # be ordered differently would otherwise get different
-        # discriminators and fragment into separate primary_ids.
+        # _mismatch_change embeds up to five uncorroborated record names
+        # sampled from dwarf_layout_coherence_mismatches into description
+        # -- two semantically identical snapshots whose mismatch tuple
+        # happens to be ordered differently would otherwise get different
+        # discriminators and fragment into separate primary_ids. Uses
+        # affected_symbols (the complete, structured evidence set) instead
+        # of the order-dependent description prose.
         first = Change(
             kind=ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
             symbol="libfoo.so",
             description="The old snapshot's ... found 2 record(s): Foo, Bar.",
+            affected_symbols=["Foo", "Bar"],
         )
         second = Change(
             kind=ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
             symbol="libfoo.so",
             description="The old snapshot's ... found 2 record(s): Bar, Foo.",
+            affected_symbols=["Bar", "Foo"],
         )
         first_identity = resolve_change_identity(first)
         second_identity = resolve_change_identity(second)
         assert first_identity.primary_id == second_identity.primary_id
-        assert "Foo" not in first_identity.primary_id
-        assert all("Foo" not in a for a in first_identity.aliases)
+
+    def test_header_binary_context_mismatch_old_and_new_side_stay_distinct(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence, round 2: _mismatch_change can emit
+        # TWO findings from one comparison -- one for the old snapshot, one
+        # for the new -- each with its OWN mismatched-record set, but the
+        # SAME symbol=snapshot.library on both. Treating this kind as fully
+        # batch-shaped (clearing entity_symbol/dropping description like
+        # visibility_leak/allocator_replacement) previously collapsed both
+        # findings to the same primary_id regardless of their actual
+        # (different) evidence -- a real collision between two distinct
+        # findings, not just an unnecessary specificity degrade.
+        old_side = Change(
+            kind=ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+            symbol="libfoo.so",
+            description="The old snapshot's ... found 2 record(s): Foo, Bar.",
+            affected_symbols=["Foo", "Bar"],
+        )
+        new_side = Change(
+            kind=ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+            symbol="libfoo.so",
+            description="The new snapshot's ... found 1 record(s): Baz.",
+            affected_symbols=["Baz"],
+        )
+        old_identity = resolve_change_identity(old_side)
+        new_identity = resolve_change_identity(new_side)
+        assert old_identity.primary_id != new_identity.primary_id
 
     def test_per_symbol_gnu_unique_transition_is_still_canonical(self) -> None:
         # Regression guard: _check_binding_change's genuine per-symbol

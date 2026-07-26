@@ -692,25 +692,42 @@ _BATCH_SHAPED_OLD_VALUES = {
 #: discriminators (via ``description``) and fragment into separate
 #: ``primary_id``s for the same logical finding.
 #:
-#: ``header_binary_context_mismatch`` joins this set for the same reason
-#: (Codex review, fresh evidence): ``diff_layout_coherence.py``'s
-#: ``_mismatch_change`` is the sole producer, fires once per side with
-#: ``symbol=snapshot.library`` (the library name, not a per-entity symbol),
-#: and embeds up to five uncorroborated record names sampled from
-#: ``dwarf_layout_coherence_mismatches`` into ``description`` -- if that
-#: tuple's own order ever varies for otherwise-identical evidence (its
-#: upstream ``backfill_dwarf_layout`` call site doesn't document a sort
-#: guarantee), the sampled prose would fragment one logical finding into
-#: separate ``primary_id``s, the same risk already fixed for
-#: ``visibility_leak``.
+#: ``header_binary_context_mismatch`` is deliberately NOT in this set,
+#: unlike the two cases above -- see :data:`_STRUCTURED_EVIDENCE_KIND_SLUGS`
+#: below for why blanket batch-shaped treatment is wrong for it (Codex
+#: review, fresh evidence, round 2: it would collapse two genuinely
+#: different findings -- old-side and new-side -- into one identity).
 _ALWAYS_BATCH_SHAPED_KIND_SLUGS = frozenset(
     {
         "allocator_replacement_added",
         "allocator_replacement_removed",
         "visibility_leak",
-        "header_binary_context_mismatch",
     }
 )
+
+#: ``header_binary_context_mismatch``: unlike the always-batch-shaped kinds
+#: above, ``diff_layout_coherence.py``'s ``_mismatch_change`` can legitimately
+#: emit TWO findings from a single comparison -- one for the old snapshot,
+#: one for the new -- each with its OWN, possibly entirely different,
+#: mismatched-record set, but the same ``symbol=snapshot.library`` value on
+#: both (Codex review, fresh evidence, round 2). Treating this kind as
+#: batch-shaped (clearing ``entity_symbol``/dropping ``description``, as
+#: this module already does for the two kinds above) would make both
+#: findings resolve to the identical primary_id regardless of their actual
+#: content -- a real dedup collision between two distinct findings, not
+#: just a specificity degrade. ``Change.affected_symbols`` (unlike
+#: ``description``, whose up-to-five-name sample is order-dependent prose)
+#: carries the finding's COMPLETE mismatched-record set as structured data
+#: -- :func:`_change_discriminator` sorts it for these kinds instead of
+#: using ``description``, so two orderings of the *same* set still collide
+#: (fixing the original order-sensitivity report) while two *different*
+#: sets (e.g. the old-side vs. new-side case) reliably do not. The one
+#: residual gap this doesn't close: if both sides happen to have the exact
+#: same mismatched-record set, they still share a primary_id -- accepted as
+#: this heuristic's documented boundary, the same ambiguity-safe bias as
+#: everywhere else in this module, rather than inventing a synthetic
+#: "which side" marker this ``Change`` has no real field for.
+_STRUCTURED_EVIDENCE_KIND_SLUGS = frozenset({"header_binary_context_mismatch"})
 
 
 def _is_batch_shaped_change(change: Change, kind_value: str) -> bool:
@@ -857,6 +874,14 @@ def _change_discriminator(
     category = _EQUIVALENT_CHANGE_CATEGORIES.get(kind_value)
     if category is not None:
         return f"category:{category}"
+    # header_binary_context_mismatch: change.affected_symbols carries this
+    # finding's complete mismatched-record set as structured data (unlike
+    # description's order-dependent five-name sample) -- sorting it makes
+    # the discriminator order-independent while still varying whenever the
+    # actual evidence differs (see _STRUCTURED_EVIDENCE_KIND_SLUGS).
+    if kind_value in _STRUCTURED_EVIDENCE_KIND_SLUGS:
+        evidence = ",".join(sorted(change.affected_symbols or ()))
+        return f"evidence:{evidence}"
     parts = [
         kind_value,
         _stringify_change_value(change.old_value),
