@@ -6,6 +6,21 @@ model and component surface; `docs/contribute/plans/g30-github-actions-integrati
 carries the phased backlog that implements it.
 **Decision maker:** Nikolay Petrov
 
+**Amendments:**
+
+- **2026-07-26:** The CLI commands this ADR describes as separate root verbs
+  (`build-output validate`/`baseline-libraries`, `project-targets validate`,
+  `run-plan generate`/`to-aggregate-manifest`) were consolidated by
+  [ADR-054](054-cli-project-integration-surface-consolidation.md) into a
+  single `project` group (`project validate-build`/`project validate`/
+  `project plan`) plus a new `aggregate --run-plan` option;
+  `build-output baseline-libraries` and `run-plan to-aggregate-manifest`
+  were dropped as CLI surface entirely (the former is a library-function
+  call now, the latter folds into `aggregate --run-plan`). The domain model
+  below is unchanged — only the command names in this ADR's own examples
+  predate that consolidation; treat ADR-054 as authoritative for current
+  CLI invocation syntax.
+
 ---
 
 ## Context

@@ -13,24 +13,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Root command-surface behavior tests (ADR-043).
+"""Root command-surface behavior tests (ADR-043, consolidated by ADR-054).
 
-The pre-1.0 CLI reset requires the public root surface to show *exactly*
-``dump``, ``compare``, ``scan``, ``deps``, ``compat`` — plus ``aggregate``
-(the multi-target CI fan-in gate), ``build-output`` (the G30 P1.1
-``build-output.json`` validator group), ``project-targets`` (the G30
-P1.5 ``targets:``/``bundles:``/``profiles:``/``baseline:`` validator group),
-``run-plan`` (the G30 P1.4 run-plan generator group), and ``plan`` (the
-ADR-050 D3 ``--dump-manifest`` diagnostic, G32 Phase B), all added
-afterward — with no hidden aliases, and no deprecated shims for
-the deleted commands
-(``appcompat``, ``plugin-check``, ``baseline``, ``collect``, ``merge``,
+The pre-1.0 CLI reset required the public root surface to show *exactly*
+``dump``, ``compare``, ``scan``, ``deps``, ``compat``, plus ``aggregate``
+(the multi-target CI fan-in gate) added afterward. G30/G32 then grew three
+more root groups (``build-output``, ``project-targets``, ``run-plan``) and a
+``plan`` diagnostic command one artifact at a time — by the time all four
+existed, the root surface had drifted back into mirroring an internal
+pipeline (config -> build-output -> run-plan -> aggregate) instead of
+user-facing operations, the exact failure mode ADR-043 reset the CLI to
+avoid. ADR-054 consolidates those four into one ``project`` group
+(``project validate``/``validate-build``/``plan``) and folds the standalone
+``plan --dump-manifest`` diagnostic into ``dump --dump-manifest --dry-run``;
+``build-output baseline-libraries`` and ``run-plan to-aggregate-manifest``
+are dropped from the public CLI entirely (the former stays a library
+function, the latter is now `aggregate --run-plan`).
+
+The public root surface is therefore *exactly* ``dump``, ``compare``,
+``scan``, ``deps``, ``compat``, ``aggregate``, ``project`` — with no hidden
+aliases, and no deprecated shims for the deleted commands (``appcompat``,
+``plugin-check``, ``baseline``, ``collect``, ``merge``,
 ``recommend-collect-mode``, ``debian-symbols``, ``doctor``, ``config``,
 ``init``, ``surface-report``, ``pr-comment``, ``suggest-suppressions``,
-``probe``). This module pins that contract as an executable behavior test,
-distinct from ``test_cli_surface_diff.py`` (which exercises the
-CLI-surface-dump scripts used by the CI gate) and ``test_cli_contract.py``
-(the Tier-2 chokepoint gate).
+``probe``, ``build-output``, ``project-targets``, ``run-plan``, ``plan``).
+This module pins that contract as an executable behavior test, distinct
+from ``test_cli_surface_diff.py`` (which exercises the CLI-surface-dump
+scripts used by the CI gate) and ``test_cli_contract.py`` (the Tier-2
+chokepoint gate).
 """
 
 from __future__ import annotations
@@ -51,10 +61,7 @@ _PUBLIC_COMMANDS = frozenset(
         "deps",
         "compat",
         "aggregate",
-        "build-output",
-        "project-targets",
-        "run-plan",
-        "plan",
+        "project",
     }
 )
 
@@ -73,6 +80,10 @@ _REMOVED_COMMANDS = (
     "pr-comment",
     "suggest-suppressions",
     "probe",
+    "build-output",
+    "project-targets",
+    "run-plan",
+    "plan",
 )
 
 

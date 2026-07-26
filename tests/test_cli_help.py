@@ -82,6 +82,50 @@ def test_configure_rich_help_calls_ensure_utf8_streams(
     assert calls == [True]
 
 
+# ── deduplicate: False (CI incident: panels corrupted by repeated renders) ──
+#
+# rich-click's own command/option-group resolver defaults `deduplicate` to
+# True and, when it thinks it sees the same name in two panels, calls
+# `list.remove()` directly on the panel dict's own `commands`/`options` list
+# -- not a copy. Every panel here is a module-level literal built once and
+# reused for every `--help` render `configure_rich_help()` (which itself
+# only runs once, at `abicheck.cli` import time) registers it under. Given
+# enough `--help` renders in one process, rich-click eventually perceives a
+# spurious cross-call duplicate and permanently deletes panel entries for
+# the rest of that process -- this reproduced as a CI-only failure of
+# `test_cli_root_surface.py::test_help_groups_commands_by_role` under the
+# full pytest-xdist suite (never in isolation), where "Workflow
+# composition"/"Project integration" silently vanished from `--help` output
+# after enough prior renders in the same worker (ADR-054 PR review).
+
+
+def test_all_command_panels_disable_deduplicate() -> None:
+    for panels in cli_help.COMMAND_GROUPS.values():
+        for panel in panels:
+            assert panel.get("deduplicate") is False, panel
+
+
+def test_all_option_panels_disable_deduplicate() -> None:
+    for panels in cli_help.OPTION_GROUPS.values():
+        for panel in panels:
+            assert panel.get("deduplicate") is False, panel
+
+
+def test_root_help_panels_survive_many_repeated_renders() -> None:
+    """Regression test for the CI incident above: many repeated `--help`
+    renders in one process must never erode the registered panels -- every
+    render must show the identical, complete set of named panels."""
+    runner = CliRunner()
+    first = runner.invoke(main, ["--help"]).output
+    assert "Core analysis" in first
+    assert "Workflow composition" in first
+    assert "Project integration" in first
+    assert "Legacy compatibility" in first
+    for _ in range(50):
+        later = runner.invoke(main, ["--help"]).output
+        assert later == first
+
+
 # ── `compare --help-all` second-level disclosure (G21.8 / collapse M2) ───────
 
 

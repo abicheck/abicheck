@@ -6,6 +6,15 @@ component surface; [G32](../plans/g32-comparability-contract-and-multi-tu-manife
 carries the phased implementation backlog.
 **Decision maker:** (pending — recorded per repository convention.)
 
+**Amendments:**
+
+- **2026-07-26:** D3's standalone `plan --dump-manifest` diagnostic command
+  was folded into `dump --dump-manifest --dry-run` by
+  [ADR-054](054-cli-project-integration-surface-consolidation.md) — the
+  `scope_fingerprint` contract below is unchanged, only its CLI entry point
+  moved (a second, parallel "resolve, don't execute" vocabulary next to
+  `--dry-run` was avoidable drift).
+
 ---
 
 ## Context
