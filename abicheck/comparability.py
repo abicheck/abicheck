@@ -1196,10 +1196,30 @@ def _scope_growth_corroborated(
     content that is actually new to the declared surface, not merely
     re-routed between the two provenance mechanisms "headers" treats as
     equivalent.
+
+    Requiring ``scope_fingerprint`` to merely differ is not enough on its
+    own (Codex review, PR #641 follow-up, eighth P1): ``scope_fingerprint``
+    hashes ALL of :data:`SCOPE_FIELD_KEYS` together, including
+    ``public_header_dirs``, which is wholly unrelated to whether the
+    *declared header set* actually grew. An unrelated
+    ``public_header_dirs`` addition (e.g. a new ``-I`` search directory,
+    with the declared ``headers`` set completely unchanged) makes
+    ``scope_fingerprint`` differ and trivially satisfies the ``all(...)``
+    additive-superset check below (an unchanged ``headers`` field is a
+    same-value "superset" of itself), so it could corroborate a
+    ``header_sequence``/``include_sequence`` waiver for exactly the silent-
+    false-negative scenario this function exists to catch — the very
+    ``headers`` field the sequence carve-outs need evidence about never
+    moved at all. Requiring ``headers`` specifically to differ closes this:
+    a genuine header-set addition always changes ``headers``, so this adds
+    no new restriction for the real F8 scenario, only for the case where
+    the fingerprint moved for an unrelated reason.
     """
     if old_contract.scope_fingerprint is None or new_contract.scope_fingerprint is None:
         return False
     if old_contract.scope_fingerprint == new_contract.scope_fingerprint:
+        return False
+    if old_contract.scope_fields.get("headers") == new_contract.scope_fields.get("headers"):
         return False
     return all(
         _scope_field_is_additive_superset(

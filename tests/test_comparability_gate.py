@@ -24,6 +24,7 @@ from abicheck.comparability import (
     _header_sequence_is_additive_reorder_free,
     _include_sequence_is_additive_owned_growth,
     _scope_field_is_additive_superset,
+    _scope_growth_corroborated,
     _sha256_of,
     check_contracts_comparable,
     compute_extraction_contract,
@@ -994,6 +995,58 @@ def test_gate_include_sequence_carve_out_declines_without_scope_corroboration(
     assert old.contract.profile_fields["include_sequence"] != new.contract.profile_fields[
         "include_sequence"
     ]
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_header_sequence_carve_out_declines_when_only_public_header_dirs_grew(
+    tmp_path,
+):
+    # Codex review, PR #641 follow-up (eighth P1): scope_fingerprint hashes
+    # ALL of SCOPE_FIELD_KEYS together (headers AND public_header_dirs), so
+    # an unrelated public_header_dirs addition alone -- with the declared
+    # "headers" set completely unchanged -- makes scope_fingerprint differ
+    # and trivially satisfies _scope_growth_corroborated's all(...) check
+    # (an unchanged field is a same-value "superset" of itself). That let a
+    # header_sequence growth get corroborated even though the "headers"
+    # field the carve-out actually needs evidence about never moved at all
+    # -- the exact silent-false-negative shape
+    # test_gate_header_sequence_carve_out_declines_without_scope_corroboration
+    # above already guards against, just reached via a different route
+    # (public_header_dirs instead of scope_fingerprint being unchanged
+    # entirely). x.h is declared identically on both sides (old via
+    # --public-header, new via -H) so this is a real, previously-silent
+    # false negative: a real removal inside x.h between old and new would
+    # be invisible, not reported.
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    x_old = _write(tmp_path / "v1" / "x.h", "int h(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    x2 = _write(tmp_path / "v2" / "x.h", "int h(void);\n")
+    d1 = tmp_path / "d1"
+    d2 = tmp_path / "d2"
+    d3 = tmp_path / "d3"
+    for d in (d1, d2, d3):
+        d.mkdir(parents=True, exist_ok=True)
+    old = _snap(
+        compute_extraction_contract(
+            declared_headers=[a, b],
+            public_header_paths=[x_old],
+            public_header_dirs=[d1, d2],
+            l2_frontend_ran=True,
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            declared_headers=[a2, b2, x2],
+            public_header_dirs=[d1, d2, d3],
+            l2_frontend_ran=True,
+        )
+    )
+    assert old.contract.scope_fields["headers"] == new.contract.scope_fields["headers"]
+    assert old.contract.scope_fingerprint != new.contract.scope_fingerprint
+    assert not _scope_growth_corroborated(old.contract, new.contract)
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
 
