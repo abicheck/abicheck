@@ -234,6 +234,37 @@ def _bare_type_name(identity: str) -> str:
     return identity[split_at + 2 :]
 
 
+def _non_stdlib_signature_spellings(
+    non_stdlib_identities: frozenset[str],
+) -> frozenset[str]:
+    """Every spelling a real dumper backend could use in a signature to
+    name *some* non-stdlib record: its full identity, plus its bare
+    (namespace-unqualified, see :func:`_bare_type_name`) alias when that
+    differs.
+
+    Deliberately broader than :func:`_spelling_index`'s own ``record_index``
+    return value — an ambiguous bare alias (shared by two or more distinct
+    non-stdlib records) is still included here even though ``record_index``
+    itself drops it (Codex review, fresh evidence): a non-stdlib record
+    like ``api::vector<int>`` is spelled bare as ``"vector<int>"`` in a real
+    signature, and a stdlib candidate like ``std::vector<int>`` can
+    independently strip to that exact same bare spelling. Checking a
+    stdlib stripped spelling only against *full* non-stdlib identities
+    missed this collision entirely, since ``"vector<int>"`` never equals
+    ``"api::vector<int>"`` — letting a signature naming the unrelated user
+    type also mark the real ``std::vector<int>`` as directly referenced.
+    Whether that bare alias is ambiguous or not is irrelevant here: either
+    way it is a real spelling *some* non-stdlib record can be named by, so
+    a stdlib candidate reducing to it must still be rejected as a possible
+    collision (same false-negative-over-false-positive principle as every
+    other collision guard in this module).
+    """
+    spellings = set(non_stdlib_identities)
+    for identity in non_stdlib_identities:
+        spellings.add(_bare_type_name(identity))
+    return frozenset(spellings)
+
+
 def _spelling_index(
     stdlib_identities: list[str], non_stdlib_identities: frozenset[str]
 ) -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]]:
@@ -258,17 +289,19 @@ def _spelling_index(
     in the same text.
 
     A stdlib candidate's stripped spelling that collides with a real,
-    unrelated non-stdlib record's own identity is dropped (Codex review,
+    unrelated non-stdlib record's own identity *or bare alias* (see
+    :func:`_non_stdlib_signature_spellings`) is dropped (Codex review,
     fresh evidence): a library can happen to define its own public type
     with the exact bare spelling a stdlib candidate reduces to after
-    stripping (e.g. its own top-level ``vector<int, ...>``), and a
-    signature naming that unrelated user type must not be misread as a
-    direct stdlib reference — silently missing that stdlib candidate here
-    (a false negative) is far safer than attributing an unrelated type's
-    layout change to it (a false positive). Multiple *stdlib* identities can
-    legitimately share one spelling (e.g. two distinct namespaces both
-    reducing to the same bare form) — every one of them is recorded, not
-    just the first.
+    stripping (e.g. its own top-level ``vector<int, ...>``, or a
+    namespace-qualified ``api::vector<int>`` whose *bare* signature
+    spelling is the same ``"vector<int>"``), and a signature naming that
+    unrelated user type must not be misread as a direct stdlib reference —
+    silently missing that stdlib candidate here (a false negative) is far
+    safer than attributing an unrelated type's layout change to it (a
+    false positive). Multiple *stdlib* identities can legitimately share
+    one spelling (e.g. two distinct namespaces both reducing to the same
+    bare form) — every one of them is recorded, not just the first.
 
     A non-stdlib record's own bare (namespace-unqualified, see
     :func:`_bare_type_name`) alias is dropped instead of recorded when it
@@ -280,11 +313,12 @@ def _spelling_index(
     its own implementation-only churn as publicly reachable. Each record's
     own full identity is never ambiguous this way and is always kept.
     """
+    non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
     stdlib_index: dict[str, set[str]] = {}
     for identity in stdlib_identities:
         stdlib_index.setdefault(identity, set()).add(identity)
         stripped = _stripped_signature_spelling(identity)
-        if stripped is not None and stripped not in non_stdlib_identities:
+        if stripped is not None and stripped not in non_stdlib_spellings:
             stdlib_index.setdefault(stripped, set()).add(identity)
 
     record_index: dict[str, set[str]] = {}
@@ -322,15 +356,24 @@ def _typedef_spelling_targets(
     ``RecordType`` identities, just one level up, on the alias name itself.
 
     A stripped key that collides with a real non-stdlib record's own
-    identity, or with a *different* typedef's target, is dropped rather
-    than recorded (same false-negative-over-false-positive principle as
+    identity *or bare alias* (see :func:`_non_stdlib_signature_spellings`),
+    or with a *different* typedef's target, is dropped rather than
+    recorded (same false-negative-over-false-positive principle as
     ``_spelling_index``): an ambiguous resolution is worse than none.
+    Checking only full non-stdlib identities missed a real collision
+    (Codex review, fresh evidence): a non-stdlib record like ``api::string``
+    is spelled bare as ``"string"`` in a real signature, the same bare
+    spelling the ``"std::string"`` typedef key strips to — without also
+    checking bare aliases, a signature naming the unrelated user type would
+    incorrectly resolve through this typedef target to ``std::string``'s
+    real backing record, unfiltering stdlib layout churn that isn't real.
     """
+    non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
     index: dict[str, str] = dict(typedefs)
     stripped_candidates: dict[str, set[str]] = {}
     for key, target in typedefs.items():
         stripped = _stripped_signature_spelling(key)
-        if stripped is None or stripped in non_stdlib_identities:
+        if stripped is None or stripped in non_stdlib_spellings:
             continue
         stripped_candidates.setdefault(stripped, set()).add(target)
     for stripped, targets in stripped_candidates.items():

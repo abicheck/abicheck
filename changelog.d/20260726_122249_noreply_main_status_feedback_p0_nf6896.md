@@ -282,3 +282,26 @@
   its qualified-template-argument bare alias, and a wrapper-with-no-fields
   case that can only pass via the independent nested-spelling match (not
   the field-walk fallback).
+- **`type_reachability.py`'s collision guards missed a bare-alias case on
+  both the stdlib-stripping and typedef-stripping paths** (Codex review,
+  fresh evidence): both guards checked a stripped/typedef spelling only
+  against *full* non-stdlib record identities, not against the bare
+  (namespace-unqualified) alias a real dumper backend actually spells that
+  record with in a signature. A non-stdlib record like `api::vector<int>`
+  is spelled bare as `"vector<int>"`, the same bare spelling
+  `std::vector<int>` reduces to after namespace-stripping — since
+  `"vector<int>"` never equals the full identity `"api::vector<int>"`, the
+  old check let a signature naming the unrelated user type also mark the
+  real `std::vector<int>` as directly referenced. The identical gap
+  existed one level up on the typedef-key stripping path: `api::string`
+  spelled bare as `"string"` collides with what the `"std::string"`
+  typedef key strips to. Fixed with a new `_non_stdlib_signature_spellings()`
+  helper (full identity plus bare alias, deliberately keeping an ambiguous
+  bare alias that `_spelling_index`'s own `record_index` drops — it's
+  still a real spelling *some* non-stdlib record can be named by) used by
+  both `_spelling_index`'s stdlib-stripping loop and
+  `_typedef_spelling_targets`'s typedef-stripping loop. New regression
+  tests cover the collision set itself and both end-to-end paths
+  (bare-aliased non-stdlib type vs. an unrelated stdlib record with the
+  same bare spelling, through both the direct-record and typedef-alias
+  routes).

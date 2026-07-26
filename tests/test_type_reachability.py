@@ -30,6 +30,7 @@ from abicheck.model import (
 from abicheck.type_reachability import (
     _bare_type_name,
     _compile_spelling_pattern,
+    _non_stdlib_signature_spellings,
     _stripped_signature_spelling,
     _typedef_spelling_targets,
     directly_referenced_stdlib_types,
@@ -1274,3 +1275,78 @@ class TestNestedStdlibSpellingWithinNonStdlibWrapperIdentity:
             types=[RecordType(name="std::string", kind="class")],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
+class TestNonStdlibBareAliasCollisionWithStdlibStrippedSpelling:
+    def test_non_stdlib_signature_spellings_includes_bare_alias(self) -> None:
+        """Codex review, fresh evidence: a non-stdlib record's own full
+        identity is namespace-qualified, but a real dumper backend spells
+        it bare in a signature -- the collision set must include that bare
+        form too, not just the full identity, or a stdlib candidate
+        stripping to the same bare spelling slips through undetected."""
+        spellings = _non_stdlib_signature_spellings(frozenset({"api::vector<int>"}))
+        assert spellings == frozenset({"api::vector<int>", "vector<int>"})
+
+    def test_non_stdlib_signature_spellings_keeps_ambiguous_bare_alias(self) -> None:
+        """Unlike record_index (which drops an ambiguous bare alias
+        shared by 2+ distinct records), the collision set must still
+        include it -- it is a real spelling some non-stdlib record can be
+        named by, regardless of which one a matching signature means."""
+        spellings = _non_stdlib_signature_spellings(
+            frozenset({"api::Inner", "detail::Inner"})
+        )
+        assert "Inner" in spellings
+
+    def test_bare_aliased_non_stdlib_type_does_not_unfilter_unrelated_stdlib_vector(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: api::vector<int> is spelled bare
+        as "vector<int>" in a real signature -- the same bare spelling
+        std::vector<int> reduces to after namespace-stripping. A public
+        function taking api::vector<int> by value must not incorrectly
+        mark the unrelated std::vector<int> as directly referenced just
+        because both share that bare spelling."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="vector<int>")],
+            types=[
+                RecordType(
+                    name="vector<int>",
+                    kind="class",
+                    qualified_name="api::vector<int>",
+                ),
+                RecordType(name="std::vector<int>", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_bare_aliased_non_stdlib_type_does_not_resolve_through_typedef_collision(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: the same collision, but through
+        the typedef-key stripping path -- api::string is spelled bare as
+        "string", the same bare spelling the "std::string" typedef key
+        strips to. A public function taking api::string by value must not
+        incorrectly resolve through that typedef target to std::string's
+        real backing record."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="string")],
+            types=[
+                RecordType(
+                    name="string",
+                    kind="class",
+                    qualified_name="api::string",
+                ),
+                RecordType(
+                    name="std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >",
+                    kind="class",
+                ),
+            ],
+        )
+        snap.typedefs = {
+            "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
+        }
+        assert directly_referenced_stdlib_types(snap) == frozenset()

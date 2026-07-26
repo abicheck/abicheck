@@ -729,6 +729,24 @@ Once a root command genuinely clears the bar above, pick the right home:
   scanned separately over each declaration, so one pattern's match can
   never mask the other's.
 
+  **A third real gap found in the same pass** (Codex review, fresh
+  evidence): both the stdlib-stripping collision guard (in
+  `_spelling_index`) and the typedef-key stripping collision guard (in
+  `_typedef_spelling_targets`) checked a stripped spelling only against
+  *full* non-stdlib record identities, not against the bare
+  (namespace-unqualified) alias a real backend actually spells that record
+  with. A non-stdlib record like `api::vector<int>` is spelled bare as
+  `"vector<int>"` — the same bare spelling `std::vector<int>` reduces to
+  after namespace-stripping — so a signature naming the unrelated user
+  type by its bare spelling incorrectly marked the real `std::vector<int>`
+  as directly referenced too; the identical gap existed one level up for
+  `api::string`/`"std::string"`'s typedef key. Fixed with a new
+  `_non_stdlib_signature_spellings()` helper (full identity plus bare
+  alias — deliberately keeping an ambiguous bare alias that
+  `_spelling_index`'s own `record_index` drops, since it's still a real
+  spelling *some* non-stdlib record can be named by) shared by both
+  collision guards.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a
