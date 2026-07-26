@@ -107,12 +107,64 @@ class TestDirectlyReferencedStdlibTypes:
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
 
     def test_stdlib_type_used_as_public_field_is_directly_referenced(self) -> None:
+        """MyPublicType must itself be reachable from a public function
+        before its field counts as a reachability root (Codex review: a
+        record's fields are only consulted once the record itself is
+        confirmed reachable, not for every record in the snapshot)."""
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
+            functions=[_fn("foo", return_type="MyPublicType")],
             types=[
                 RecordType(
                     name="MyPublicType",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_unreachable_record_field_is_not_a_reachability_root(self) -> None:
+        """Codex review, fresh evidence: the previous version scanned every
+        non-stdlib record's fields unconditionally -- a purely internal
+        record that nothing public actually reaches (the default
+        ScopeOrigin.UNKNOWN a DWARF-only snapshot retains for such a type)
+        must not make its field's stdlib type look directly referenced."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api")],
+            types=[
+                RecordType(
+                    name="InternalCache",
+                    kind="class",
+                    fields=[TypeField(name="v", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_transitively_reachable_record_field_is_a_reachability_root(
+        self,
+    ) -> None:
+        """A record reached only *transitively* -- via another already-
+        reachable record's field, not directly from a function signature --
+        must still have its own fields walked."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="Outer")],
+            types=[
+                RecordType(
+                    name="Outer",
+                    kind="class",
+                    fields=[TypeField(name="inner", type="Inner")],
+                ),
+                RecordType(
+                    name="Inner",
                     kind="class",
                     fields=[TypeField(name="s", type="std::string")],
                 ),
@@ -201,12 +253,16 @@ class TestDirectlyReferencedStdlibTypes:
 
     def test_field_scan_continues_across_multiple_non_stdlib_types(self) -> None:
         """A stdlib type not found in any function signature, and not in
-        the first non-stdlib type's fields, must still be found via a
-        *later* non-stdlib type's fields -- covers the multi-type field
-        scan loop actually iterating past its first entry."""
+        the first *reachable* non-stdlib type's fields, must still be found
+        via a *later* reachable non-stdlib type's fields -- covers the
+        worklist actually processing more than one queued record."""
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
+            functions=[
+                _fn("first", return_type="FirstPublicType"),
+                _fn("second", return_type="SecondPublicType"),
+            ],
             types=[
                 RecordType(
                     name="FirstPublicType",
@@ -310,10 +366,14 @@ class TestDirectlyReferencedStdlibTypes:
         separate record-field scan loop bypassed the origin check
         entirely -- a non-stdlib record retained from a private header
         must not make its field types count as public reachability
-        roots either."""
+        roots either. The record is made reachable via a public function
+        (matching the reachability-closure fix) so this test isolates the
+        origin check specifically, rather than passing vacuously because
+        nothing reaches the record at all."""
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
+            functions=[_fn("foo", return_type="InternalImplDetail")],
             types=[
                 RecordType(
                     name="InternalImplDetail",
@@ -332,6 +392,7 @@ class TestDirectlyReferencedStdlibTypes:
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
+            functions=[_fn("foo", return_type="LibcWrapperDetail")],
             types=[
                 RecordType(
                     name="LibcWrapperDetail",
@@ -351,6 +412,7 @@ class TestDirectlyReferencedStdlibTypes:
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
+            functions=[_fn("foo", return_type="MyPublicType")],
             types=[
                 RecordType(
                     name="MyPublicType",
@@ -614,3 +676,67 @@ class TestCompileSpellingPattern:
         pattern = _compile_spelling_pattern(["std::string"])
         assert pattern is not None
         assert pattern.search("const std::string &")
+
+
+class TestDirectlyReferencedStdlibTypesEdgeCases:
+    def test_empty_param_type_string_is_skipped(self) -> None:
+        """Covers _scan's empty-string guard directly -- an empty type
+        string (e.g. a malformed/partial snapshot) must not be scanned."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    params=[
+                        Param(name="unused", type=""),
+                        Param(name="s", type="std::string"),
+                    ],
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_scan_breaks_once_everything_found_before_later_functions(self) -> None:
+        """Once every stdlib candidate is found, later functions in
+        iteration order must not be scanned at all -- covers the top-of-loop
+        early-exit break."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("first", params=[Param(name="s", type="std::string")]),
+                _fn("second", params=[Param(name="s", type="std::string")]),
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_record_reached_twice_is_not_requeued(self) -> None:
+        """A non-stdlib record reached via two independent paths (directly
+        from a function signature, and as a field of another reachable
+        record) must only be queued once -- covers the "already reached,
+        skip" branch."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("first", return_type="Shared"),
+                _fn("second", return_type="Outer"),
+            ],
+            types=[
+                RecordType(
+                    name="Shared",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(
+                    name="Outer",
+                    kind="class",
+                    fields=[TypeField(name="shared", type="Shared")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})

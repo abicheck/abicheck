@@ -305,6 +305,53 @@ def _stdlib_type_unreferenced_stays_filtered() -> tuple[AbiSnapshot, AbiSnapshot
     return old, new
 
 
+def _internal_record_field_stdlib_churn_stays_filtered() -> tuple[
+    AbiSnapshot, AbiSnapshot
+]:
+    # Codex review, fresh evidence: an InternalCache-shaped record that no
+    # public function reaches (default ScopeOrigin.UNKNOWN -- the common
+    # case, since origin classification is opt-in) must not become a
+    # reachability root just because it exists in the snapshot. Guards the
+    # reachability-closure fix specifically -- distinct from
+    # stdlib_type_unreferenced_stays_filtered above, which has no owning
+    # record at all.
+    old = _snap(
+        "1",
+        functions=[_fn("api")],
+        types=[
+            _rec(
+                "InternalCache",
+                size=64,
+                fields=[("v", "vector<int, std::allocator<int> >")],
+            ),
+            RecordType(
+                name="vector<int, std::allocator<int> >",
+                kind="class",
+                size_bits=192,
+                qualified_name="std::vector<int, std::allocator<int> >",
+            ),
+        ],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api")],
+        types=[
+            _rec(
+                "InternalCache",
+                size=64,
+                fields=[("v", "vector<int, std::allocator<int> >")],
+            ),
+            RecordType(
+                name="vector<int, std::allocator<int> >",
+                kind="class",
+                size_bits=256,
+                qualified_name="std::vector<int, std::allocator<int> >",
+            ),
+        ],
+    )
+    return old, new
+
+
 # --- enum-reachability + pointer/opaque precision (internal-noise) ------------
 # These lock in the by-value-vs-pointer (ADR-024 §D3) and enum/typedef
 # reachability behaviour the corpus previously left uncovered (see the NOTE
@@ -727,6 +774,11 @@ CORPUS: list[Case] = [
         "stdlib_type_unreferenced_stays_filtered",
         True,
         _stdlib_type_unreferenced_stays_filtered,
+    ),
+    Case(
+        "internal_record_field_stdlib_churn_stays_filtered",
+        True,
+        _internal_record_field_stdlib_churn_stays_filtered,
     ),
     # enum reachability + pointer/opaque precision — internal-noise polarity.
     Case("internal_enum_value_changed", True, _internal_enum_value_changed),
@@ -1181,6 +1233,7 @@ CASE_CATEGORY: dict[str, str] = {
     "cross_stdlib_embedded_layout_diverges": "stdlib-impl",
     # direct vs. transitive stdlib type reachability (status-review item 3)
     "stdlib_type_unreferenced_stays_filtered": "stdlib-direct-reference",
+    "internal_record_field_stdlib_churn_stays_filtered": "stdlib-direct-reference",
     "public_stdlib_type_used_directly_layout_changed": "stdlib-direct-reference",
     # versioned-symbol scheme / multi-.so bundle
     "versioned_scheme_internal_churn": "versioned-scheme",

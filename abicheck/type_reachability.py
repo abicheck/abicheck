@@ -59,7 +59,7 @@ from .model import ScopeOrigin, Visibility
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:
-    from .model import AbiSnapshot
+    from .model import AbiSnapshot, RecordType
 
 __all__ = [
     "directly_referenced_stdlib_types",
@@ -189,22 +189,41 @@ def _stripped_signature_spelling(identity: str) -> str | None:
     return None
 
 
+def _generic_spellings(identity: str) -> frozenset[str]:
+    """All spellings a *non*-stdlib record's *identity* might appear as in a
+    signature: itself, and (if namespace/enclosing-class-qualified) its
+    trailing segment after the last ``::`` — mirrors ``surface_graph.py``'s
+    own alias convention for exactly this case, since a non-stdlib record
+    carries no fixed, recognizable namespace prefix the way
+    ``STDLIB_TYPE_NAMESPACE_PREFIXES`` gives stdlib candidates."""
+    spellings = {identity}
+    if "::" in identity:
+        spellings.add(identity.rsplit("::", 1)[1])
+    return frozenset(spellings)
+
+
 def _spelling_index(
     stdlib_identities: list[str], non_stdlib_identities: frozenset[str]
 ) -> dict[str, frozenset[str]]:
-    """spelling -> {identity, ...} that spelling proves directly referenced.
+    """spelling -> {identity, ...} that spelling proves reachable.
 
-    A stripped spelling that collides with a real, unrelated non-stdlib
-    record's own identity is dropped (Codex review, fresh evidence): a
-    library can happen to define its own public type with the exact bare
-    spelling a stdlib candidate reduces to after stripping (e.g. its own
-    top-level ``vector<int, ...>``), and a signature naming that unrelated
-    user type must not be misread as a direct stdlib reference — silently
-    missing that stdlib candidate here (a false negative) is far safer than
-    attributing an unrelated type's layout change to it (a false positive).
-    Multiple stdlib identities can legitimately share one spelling (e.g. two
-    distinct namespaces both reducing to the same bare form after stripping)
-    — every one of them is recorded, not just the first.
+    Covers both stdlib candidates (the ultimate targets) and non-stdlib
+    records (intermediate reachability-closure nodes — see
+    :func:`directly_referenced_stdlib_types`'s worklist) in one combined
+    index so a single compiled pattern can scan every declaration once.
+
+    A stdlib candidate's stripped spelling that collides with a real,
+    unrelated non-stdlib record's own identity is dropped (Codex review,
+    fresh evidence): a library can happen to define its own public type
+    with the exact bare spelling a stdlib candidate reduces to after
+    stripping (e.g. its own top-level ``vector<int, ...>``), and a
+    signature naming that unrelated user type must not be misread as a
+    direct stdlib reference — silently missing that stdlib candidate here
+    (a false negative) is far safer than attributing an unrelated type's
+    layout change to it (a false positive). Multiple identities can
+    legitimately share one spelling (e.g. two distinct namespaces both
+    reducing to the same bare form) — every one of them is recorded, not
+    just the first.
     """
     index: dict[str, set[str]] = {}
     for identity in stdlib_identities:
@@ -212,6 +231,9 @@ def _spelling_index(
         stripped = _stripped_signature_spelling(identity)
         if stripped is not None and stripped not in non_stdlib_identities:
             index.setdefault(stripped, set()).add(identity)
+    for identity in non_stdlib_identities:
+        for spelling in _generic_spellings(identity):
+            index.setdefault(spelling, set()).add(identity)
     return {spelling: frozenset(ids) for spelling, ids in index.items()}
 
 
@@ -280,21 +302,40 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     ``origin`` is ``ScopeOrigin.PRIVATE_HEADER``/``SYSTEM_HEADER``/
     ``GENERATED`` — linkage and origin are independent axes (ADR-024 D1),
     so a function only ever declared in a private/system/generated header
-    is rejected here too, before its signature is ever scanned. The same
-    ``origin`` check applies to the record-field scan below (Codex review,
-    fresh evidence): ``RecordType`` carries the identical provenance axis,
-    and a non-stdlib record retained only from a private/system/generated
-    header must not make its own field types count as reachability roots
-    either.
+    is rejected here too, before its signature is ever scanned.
+
+    A non-stdlib record's own fields are only consulted once that record
+    itself is confirmed reachable from a public root — by direct mention in
+    a public function's own signature, or transitively through another
+    already-reachable record's fields (Codex review, fresh evidence: the
+    previous version scanned *every* non-stdlib record's fields
+    unconditionally, so a purely internal, never-actually-reachable record
+    — e.g. one a DWARF-only snapshot retains with the default
+    ``ScopeOrigin.UNKNOWN`` even though nothing public touches it — could
+    still make an unrelated stdlib type look directly referenced). A
+    record's own ``origin`` being ``PRIVATE_HEADER``/``SYSTEM_HEADER``/
+    ``GENERATED`` still excludes its fields from the walk, same as before.
+    Deliberately does **not** also gate on pointer-vs-by-value use the way
+    a first read might expect (an earlier review round raised this): this
+    module intentionally mirrors ``surface.py``'s own documented ADR-024 §D3
+    position — a pointer-reached, non-opaque stdlib type is still
+    layout-observable elsewhere (a consumer can dereference or allocate it
+    by value), so demoting it here would risk hiding a real break. The safe
+    half of that precision (a pointer-only-reached *opaque* handle) is
+    already handled downstream by the existing opaque-size-change filter
+    (``diff_filtering._filter_opaque_size_changes``, gated on
+    ``RecordType.is_opaque``), not by this reachability computation.
     """
     stdlib_identities: list[str] = []
     non_stdlib_identities: set[str] = set()
+    non_stdlib_records: dict[str, RecordType] = {}
     for t in snapshot.types:
         identity = _record_identity(t.name, t.qualified_name)
         if identity.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
             stdlib_identities.append(identity)
         else:
             non_stdlib_identities.add(identity)
+            non_stdlib_records[identity] = t
     if not stdlib_identities:
         return frozenset()
 
@@ -309,15 +350,30 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
 
     referenced: set[str] = set()
     remaining = set(stdlib_identities)
+    reached_records: set[str] = set()
+    worklist: list[str] = []
 
     def _scan(type_string: str) -> None:
-        if not remaining or not type_string:
+        """Record every stdlib/non-stdlib identity *type_string* names;
+        newly-reached non-stdlib records are queued for their own fields to
+        be walked in turn."""
+        if not type_string:
             return
         for match in pattern.finditer(type_string):
-            referenced.update(spelling_index.get(match.group(0), ()))
-        remaining.difference_update(referenced)
+            for identity in spelling_index.get(match.group(0), ()):
+                if identity in remaining:
+                    referenced.add(identity)
+                    remaining.discard(identity)
+                elif (
+                    identity in non_stdlib_identities
+                    and identity not in reached_records
+                ):
+                    reached_records.add(identity)
+                    worklist.append(identity)
 
     for fn in snapshot.functions:
+        if not remaining:
+            break
         if fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
             continue
         if fn.visibility != Visibility.PUBLIC:
@@ -327,20 +383,12 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
         _scan(fn.return_type)
         for param in fn.params:
             _scan(param.type)
-        if not remaining:
-            break
 
-    if remaining:
-        for rec in snapshot.types:
-            if _record_identity(rec.name, rec.qualified_name).startswith(
-                STDLIB_TYPE_NAMESPACE_PREFIXES
-            ):
-                continue
-            if rec.origin in _NON_PUBLIC_ORIGINS:
-                continue
-            for f in rec.fields:
-                _scan(f.type)
-            if not remaining:
-                break
+    while worklist and remaining:
+        rec = non_stdlib_records[worklist.pop()]
+        if rec.origin in _NON_PUBLIC_ORIGINS:
+            continue
+        for f in rec.fields:
+            _scan(f.type)
 
     return frozenset(referenced)

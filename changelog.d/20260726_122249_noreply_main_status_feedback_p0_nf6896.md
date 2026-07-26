@@ -158,3 +158,38 @@
   on the synthetic worst case, verified). A future pass could eliminate it
   safely by threading a shared per-comparison context through the detector
   registry — a bigger, separate structural change.
+- **`type_reachability.py`'s record-field scan now requires actual
+  reachability from a public root** (Codex review, fresh evidence): the
+  previous version scanned *every* non-stdlib record's fields
+  unconditionally (excluding only confirmed-private-origin ones) rather
+  than restricting to records the public surface actually reaches — a
+  purely internal record a DWARF-only snapshot retains with the default
+  `ScopeOrigin.UNKNOWN` (the common case, since origin classification is
+  opt-in) could make an unrelated stdlib type look directly referenced
+  just by existing in the snapshot with a matching-spelled field. Fixed
+  with a proper worklist-based closure: a non-stdlib record's fields are
+  only walked once that record is itself confirmed reachable, either by
+  direct mention in a public, non-hidden, non-private-origin function's
+  own signature, or transitively through another already-reachable
+  record's fields. New FP-rate corpus case
+  `internal_record_field_stdlib_churn_stays_filtered` guards this
+  specifically (distinct from `stdlib_type_unreferenced_stays_filtered`,
+  which has no owning record at all).
+
+  A second finding from the same review round — gating signature
+  reachability on pointer-vs-by-value use (a `std::vector<int> *`
+  parameter shouldn't unfilter `std::vector<int>`'s layout) — was
+  investigated and **not implemented**: it would regress this codebase's
+  own established, ADR-024 §D3-documented anti-hiding position.
+  `surface.py`'s own reachability closure deliberately does *not* apply
+  pointer-vs-value precision either, since "a pointer-reached type whose
+  full definition is public is still layout-observable (a consumer can
+  dereference/allocate it by value), so demoting it at this stage would
+  hide a real break" — the safe half of that precision (a pointer-only-
+  reached *opaque* handle) is already delivered downstream by the
+  existing opaque-size-change filter
+  (`diff_filtering._filter_opaque_size_changes`, gated on
+  `RecordType.is_opaque`), confirmed by reading that filter directly.
+  Applying the suggested pointer-depth gate here would create exactly the
+  false-negative risk that filter's own design note warns against, for a
+  precision axis this module was never meant to duplicate.
