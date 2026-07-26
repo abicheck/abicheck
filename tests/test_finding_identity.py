@@ -493,6 +493,48 @@ class TestResolveChangeIdentity:
         assert rich.tier == IDENTITY_TIER_NORMALIZED
         assert rich.primary_id == l0.primary_id
 
+    def test_dwarf_ast_equivalent_type_size_kinds_collide(self) -> None:
+        # Codex review: diff_filtering._DWARF_TO_AST_EQUIV already treats
+        # STRUCT_SIZE_CHANGED (DWARF) and TYPE_SIZE_CHANGED (AST) as one
+        # logical event for the same type -- this identity must collide too.
+        dwarf = resolve_change_identity(
+            Change(
+                kind=ChangeKind.STRUCT_SIZE_CHANGED,
+                symbol="MyStruct",
+                description="sizeof(MyStruct) changed (DWARF)",
+                old_value="8",
+                new_value="16",
+            )
+        )
+        ast = resolve_change_identity(
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="MyStruct",
+                description="MyStruct layout changed (AST)",
+                old_value="8",
+                new_value="16",
+            )
+        )
+        assert dwarf.tier == IDENTITY_TIER_NORMALIZED
+        assert dwarf.primary_id == ast.primary_id
+
+    def test_dwarf_ast_equivalent_field_removed_kinds_collide(self) -> None:
+        dwarf = resolve_change_identity(
+            Change(
+                kind=ChangeKind.STRUCT_FIELD_REMOVED,
+                symbol="MyStruct",
+                description="field 'x' removed (DWARF)",
+            )
+        )
+        ast = resolve_change_identity(
+            Change(
+                kind=ChangeKind.TYPE_FIELD_REMOVED,
+                symbol="MyStruct",
+                description="field 'x' removed (AST)",
+            )
+        )
+        assert dwarf.primary_id == ast.primary_id
+
     def test_type_name_resembling_a_mangling_is_not_treated_as_canonical(self) -> None:
         # Codex review: a type literally named "_Zebra" structurally passes
         # the Itanium prefix/character-set check, but TYPE_SIZE_CHANGED is
@@ -522,10 +564,15 @@ class TestResolveChangeIdentity:
         assert identity.tier == IDENTITY_TIER_NORMALIZED
 
     def test_old_and_new_value_distinguish_otherwise_identical_findings(self) -> None:
+        # TYPE_FIELD_ADDED, not TYPE_SIZE_CHANGED: the latter is now in
+        # _EQUIVALENT_CHANGE_CATEGORIES (it collides with STRUCT_SIZE_CHANGED
+        # by design, see test_dwarf_ast_equivalent_type_size_kinds_collide),
+        # so it can't also be used to test the general "old/new value
+        # distinguishes findings of a kind with no equivalence pairing" case.
         base = {
-            "kind": ChangeKind.TYPE_SIZE_CHANGED,
+            "kind": ChangeKind.TYPE_FIELD_ADDED,
             "symbol": "MyStruct",
-            "description": "size changed",
+            "description": "field added",
         }
         a = resolve_change_identity(Change(old_value="8", new_value="16", **base))
         b = resolve_change_identity(Change(old_value="16", new_value="32", **base))

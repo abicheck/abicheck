@@ -461,12 +461,16 @@ def _is_symbol_level_kind(kind_value: str) -> bool:
     )
 
 
-#: Change kinds ``diff_filtering._deduplicate_cross_detector`` already
-#: treats as one logical event reported by two different detectors (its
-#: local ``_DEDUP_CATEGORIES`` mapping) -- mirrored here, not imported, so
-#: this leaf module stays independent of the diff layer (future wiring work
-#: has ``diff_filtering`` depend on this module, not the reverse). Keep the
-#: two mappings in sync if either changes.
+#: Change kinds ``diff_filtering`` already treats as one logical event
+#: reported by two different detectors -- mirrored here (not imported, so
+#: this leaf module stays independent of the diff layer; future wiring work
+#: has ``diff_filtering`` depend on this module, not the reverse). Keep in
+#: sync with the two mappings this generalizes:
+#: ``_deduplicate_cross_detector``'s local ``_DEDUP_CATEGORIES``
+#: (rich-vs-L0 function/variable add/remove, symbol-version-node pairs) and
+#: module-level ``_DWARF_TO_AST_EQUIV`` (DWARF ``struct_*``/AST ``type_*``
+#: pairs for the same type -- e.g. ``STRUCT_SIZE_CHANGED``/
+#: ``TYPE_SIZE_CHANGED``, Codex review).
 _EQUIVALENT_CHANGE_CATEGORIES = {
     "func_removed": "func_removal",
     "func_removed_elf_only": "func_removal",
@@ -475,6 +479,16 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     "var_added": "var_addition",
     "symbol_version_node_removed": "version_def_removal",
     "symbol_version_defined_removed": "version_def_removal",
+    "struct_size_changed": "type_size_change",
+    "type_size_changed": "type_size_change",
+    "struct_alignment_changed": "type_alignment_change",
+    "type_alignment_changed": "type_alignment_change",
+    "struct_field_offset_changed": "type_field_offset_change",
+    "type_field_offset_changed": "type_field_offset_change",
+    "struct_field_removed": "type_field_removal",
+    "type_field_removed": "type_field_removal",
+    "struct_field_type_changed": "type_field_type_change",
+    "type_field_type_changed": "type_field_type_change",
 }
 
 
