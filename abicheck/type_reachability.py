@@ -695,14 +695,14 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     """
     stdlib_identities: list[str] = []
     non_stdlib_identities: set[str] = set()
-    non_stdlib_records: dict[str, RecordType] = {}
+    non_stdlib_records: dict[str, list[RecordType]] = {}
     for t in snapshot.types:
         identity = _record_identity(t.name, t.qualified_name)
         if identity.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
             stdlib_identities.append(identity)
         else:
             non_stdlib_identities.add(identity)
-            non_stdlib_records[identity] = t
+            non_stdlib_records.setdefault(identity, []).append(t)
     if not stdlib_identities:
         return frozenset()
 
@@ -804,18 +804,18 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
         _scan(var.type)
 
     while worklist and remaining:
-        rec = non_stdlib_records[worklist.pop()]
-        if rec.origin in _NON_PUBLIC_ORIGINS:
-            continue
-        for f in rec.fields:
-            _scan(f.type)
-        # Both direct and virtual bases are ABI-reachable through the
-        # derived type (virtual inheritance still embeds the base
-        # subobject + vtable path), same as surface.py's own closure
-        # (Codex review, fresh evidence): a public Derived inheriting a
-        # non-stdlib Base whose own field is a stdlib record was
-        # otherwise never reached, since only rec.fields was followed.
-        for base in (*rec.bases, *rec.virtual_bases):
-            _scan(base)
+        for rec in non_stdlib_records[worklist.pop()]:
+            if rec.origin in _NON_PUBLIC_ORIGINS:
+                continue
+            for f in rec.fields:
+                _scan(f.type)
+            # Both direct and virtual bases are ABI-reachable through the
+            # derived type (virtual inheritance still embeds the base
+            # subobject + vtable path), same as surface.py's own closure
+            # (Codex review, fresh evidence): a public Derived inheriting a
+            # non-stdlib Base whose own field is a stdlib record was
+            # otherwise never reached, since only rec.fields was followed.
+            for base in (*rec.bases, *rec.virtual_bases):
+                _scan(base)
 
     return frozenset(referenced)

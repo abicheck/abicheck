@@ -1184,6 +1184,32 @@ Once a root command genuinely clears the bar above, pick the right home:
   encodes. Owner recovery (`owner_class_of()`, which only ever consumes
   `comps[:-1]`, dropping the leaf entirely) is unaffected either way.
 
+  **A fifteenth finding pointed at a data-model assumption this module's
+  own new code introduced without verifying, contradicted by an existing
+  sibling.** `directly_referenced_stdlib_types()` built `non_stdlib_records`
+  as a plain `dict[str, RecordType]` keyed by identity — when
+  `snapshot.types` contains multiple entries sharing the same identity
+  (e.g. a complete definition alongside an ODR-duplicate or incomplete
+  declaration), a later entry silently overwrote an earlier one, so a
+  public signature reaching that identity walked only the survivor (Codex
+  review, fresh evidence). `surface.py`'s own `record_by_name` index —
+  the established reference this module has mirrored throughout every
+  finding above — already anticipates exactly this by keying on a *list*
+  of records per identity (`dict[str, list[RecordType]]`) and walking
+  every one (`for rec_node in rec_nodes: ...`), not a single winner; this
+  module's new dict introduced a real regression relative to that already-
+  correct sibling pattern, not a hypothetical edge case. Confirmed
+  empirically both orderings (the complete definition first, and the
+  complete definition last): whichever entry didn't survive the dict
+  overwrite, if it carried a `std::` field the survivor lacked, that field
+  was silently missed. Fixed by changing `non_stdlib_records` to
+  `dict[str, list[RecordType]]` (appending instead of overwriting) and
+  walking every record for a reached identity in the worklist loop,
+  checking each one's own `origin` independently (a private-origin
+  duplicate still excludes only itself, not a public-origin sibling
+  sharing the same identity) — exactly mirroring `surface.py`'s own
+  per-record walk.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a

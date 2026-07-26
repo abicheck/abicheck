@@ -636,3 +636,18 @@
   explicit start/end window unit test, and the conversion-operator
   overload-grouping false positive end-to-end. Full suite green, 100%
   module coverage, FP-rate gate stays 0 FP/0 FN.
+- **A duplicate record identity in `snapshot.types` could silently lose a
+  real stdlib field reference** (Codex review, fresh evidence):
+  `directly_referenced_stdlib_types()`'s own `non_stdlib_records` index was
+  a plain dict keyed by identity, so when two `RecordType` entries shared
+  the same identity (e.g. a complete definition alongside an ODR-duplicate
+  or incomplete declaration), a later entry silently overwrote an earlier
+  one — a public signature reaching that identity walked only the
+  survivor. `surface.py`'s own established `record_by_name` index already
+  keys on a *list* of records per identity for exactly this reason; this
+  module's new dict was a real regression relative to that pattern, not a
+  hypothetical edge case. Fixed by changing the index to
+  `dict[str, list[RecordType]]` and walking every record for a reached
+  identity, checking each one's own origin independently. New regression
+  tests cover both orderings and the origin-filtering interaction. Full
+  suite green, 100% module coverage, FP-rate gate stays 0 FP/0 FN.

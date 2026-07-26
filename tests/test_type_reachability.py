@@ -1291,6 +1291,97 @@ class TestBareTypeNameTemplateArguments:
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
 
 
+class TestDuplicateRecordIdentityWalksAllEntries:
+    """Codex review, fresh evidence: when snapshot.types contains multiple
+    RecordType entries sharing the same identity (e.g. a complete
+    definition alongside an ODR-duplicate or incomplete declaration --
+    surface.py's own record_by_name index already anticipates this by
+    keying on a *list* of records per identity, not a single one), a plain
+    dict keyed by identity kept only the last entry seen, so a public
+    signature reaching that identity walked only the survivor. If an
+    earlier (now-discarded) entry carried a std:: field the survivor
+    lacked, the field's real stdlib layout change was silently filtered."""
+
+    def test_earlier_duplicate_with_the_stdlib_field_is_still_walked(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("use_foo", return_type="Foo")],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="Foo", kind="class", fields=[]),  # later, incomplete
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_later_duplicate_with_the_stdlib_field_is_still_walked(self) -> None:
+        """Guard against a fix that only handles one ordering."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("use_foo", return_type="Foo")],
+            types=[
+                RecordType(name="Foo", kind="class", fields=[]),  # earlier, incomplete
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_private_origin_duplicate_stays_excluded_while_public_sibling_is_walked(
+        self,
+    ) -> None:
+        """Guard against over-correcting: each duplicate's own origin must
+        still be checked independently, not waived just because a sibling
+        with the same identity exists."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("use_foo", return_type="Foo")],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[],
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_all_duplicates_private_origin_stays_filtered(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("use_foo", return_type="Foo")],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+
 class TestNestedStdlibSpellingWithinNonStdlibWrapperIdentity:
     def test_stdlib_type_embedded_directly_in_public_signature_via_wrapper_identity(
         self,
