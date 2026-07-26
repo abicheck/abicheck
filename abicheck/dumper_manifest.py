@@ -193,11 +193,39 @@ def run_tu_loop(
     implies ``required=True`` (:mod:`abicheck.dump_manifest`), so an optional
     TU's silently-skipped failure can never drop an entity the merged
     snapshot claims to speak for.
+
+    **Two deliberately different "public" sets are threaded through this
+    function** (Codex review, PR #635 round 14) -- conflating them was a
+    real bug: *resolved_public_paths*/*resolved_public_dirs* (``roots`` +
+    *public_header_paths*/*public_header_dirs*) feed each TU's own
+    :func:`run_tu_fragment` call, where they scope constant extraction the
+    same roots-are-always-public way the legacy CLI's ``-H``/``--header``
+    already does (see :class:`abicheck.dumper_castxml._CastxmlParser`'s own
+    docstring) -- but :func:`merge_tu_fragments` gets only the manifest's
+    *explicit* ``public_header_paths``/``public_header_dirs`` (``roots``
+    excluded), because that is what the *later*, authoritative
+    ``apply_provenance`` call in ``dumper.py`` classifies origin against
+    too (:mod:`abicheck.dump_manifest`'s own docstring: ``roots`` is a
+    *scope* declaration, D1's ``scope_fingerprint`` input, not an ADR-015
+    provenance input -- "a manifest with public headers but no separate
+    provenance fields behaves exactly like a legacy dump -H foo.h
+    invocation with no --public-header", i.e. every declaration stays
+    ``UNKNOWN``). Passing the roots-augmented set into the merge step
+    instead would let :func:`abicheck.tu_merge._more_public_of` treat a
+    root-only declaration as public during the merge, keep *that* TU's
+    ``source_location`` as the merged entity's representative, and then
+    have the later ``apply_provenance`` call -- which never considered
+    ``roots`` public to begin with -- classify the very same declaration
+    as private/unknown, hiding a real public API change even though the
+    identical declaration also reached this manifest through a genuinely
+    public header in another TU.
     """
     resolved_public_paths = [str(r) for r in roots] + [
         str(p) for p in public_header_paths
     ]
     resolved_public_dirs = [str(d) for d in public_header_dirs]
+    explicit_public_paths = [str(p) for p in public_header_paths]
+    explicit_public_dirs = [str(d) for d in public_header_dirs]
 
     fragments: list[TuFragment] = []
     for tu in tus:
@@ -235,8 +263,8 @@ def run_tu_loop(
 
     return merge_tu_fragments(
         fragments,
-        public_header_paths=resolved_public_paths,
-        public_header_dirs=resolved_public_dirs,
+        public_header_paths=explicit_public_paths,
+        public_header_dirs=explicit_public_dirs,
     )
 
 

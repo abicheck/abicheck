@@ -420,6 +420,24 @@ def test_merge_fragments_prefers_public_header_provenance():
     assert merged.functions[0].source_location == "include/api.h:1"
 
 
+def test_merge_fragments_keeps_public_provenance_when_the_first_sorted_tu_is_public():
+    # The mirror of the case above: TU "a" (sorted first) is itself the
+    # public one this time, TU "b" is private -- `_more_public_of` must
+    # short-circuit on `a` without needing to fall through to check `b`.
+    a = TuFragment(
+        tu_name="a",
+        functions=(_fn("f", "_Z1fv", source_location="include/api.h:1"),),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(_fn("f", "_Z1fv", source_location="internal/detail.h:1"),),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert merged.functions[0].source_location == "include/api.h:1"
+
+
 def test_merge_fragments_function_keeps_parameter_names_from_the_winning_side():
     # A private `void f(int internal_name)` in TU "a" and the identical
     # public `void f(int public_name)` in TU "b" must merge to a function

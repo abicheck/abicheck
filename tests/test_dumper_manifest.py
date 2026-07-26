@@ -287,7 +287,13 @@ def _make_stub_header_ast_parser(calls: list, *, fail_for: frozenset = frozenset
     return _stub
 
 
-def _tu(name: str, header: str, *includes: str, required: bool = True, contributes: bool = True) -> TranslationUnit:
+def _tu(
+    name: str,
+    header: str,
+    *includes: str,
+    required: bool = True,
+    contributes: bool = True,
+) -> TranslationUnit:
     return TranslationUnit(
         name=name,
         forced_includes=(Path(header),),
@@ -421,6 +427,43 @@ def test_run_tu_loop_reconciles_identical_entity_across_tus():
         exported_static=set(),
     )
     assert [fn.name for fn in merged.functions] == ["shared"]
+
+
+def test_run_tu_loop_merge_prefers_explicit_public_path_over_root():
+    # `roots` is a *scope* declaration (D1's scope_fingerprint input), not
+    # an ADR-015 provenance input -- the merge step's public-surface
+    # preference must match what the later, authoritative apply_provenance
+    # call (dumper.py) classifies origin against: the manifest's *explicit*
+    # public_header_paths/public_header_dirs only, roots excluded. Feeding
+    # the roots-augmented set into the merge instead lets a root-only
+    # declaration wrongly "win" the merge's provenance-representative slot
+    # over one reached through a genuinely public header, only for
+    # apply_provenance to then reclassify it private/unknown downstream,
+    # hiding a real public API change (Codex review, PR #635 round 14).
+    def _stub(headers, extra_includes, **kwargs):
+        marker = str(headers[0]) if headers else "<empty>"
+        location = "root.h:1" if marker == "root.h" else "public/api.h:1"
+        fn = Function(
+            name="shared",
+            mangled="_Z6sharedv",
+            return_type="void",
+            source_location=location,
+        )
+        return _StubParser(functions=(fn,))
+
+    tus = (_tu("a", "root.h"), _tu("b", "public/api.h"))
+    merged = run_tu_loop(
+        tus,
+        header_ast_parser=_stub,
+        roots=[Path("root.h")],
+        public_header_paths=[Path("public/api.h")],
+        backend="auto",
+        compiler="c++",
+        exported_dynamic=set(),
+        exported_static=set(),
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].source_location == "public/api.h:1"
 
 
 def test_run_tu_loop_raises_on_genuinely_conflicting_entity_across_tus():
@@ -799,9 +842,7 @@ class TestManifestIncludeOwnershipAndScopeFingerprint:
                 TranslationUnit(
                     name="main",
                     forced_includes=(header,),
-                    includes=(
-                        IncludeEntry(path=src_dir, project_owned=project_owned),
-                    ),
+                    includes=(IncludeEntry(path=src_dir, project_owned=project_owned),),
                 ),
             ),
         )
@@ -822,11 +863,19 @@ class TestManifestIncludeOwnershipAndScopeFingerprint:
             new_dir, priv_content="#define PRIV_V2 2\n", project_owned=True
         )
         old_snap = dump(
-            old_so, [], version="old", compiler="cc", header_backend="clang",
+            old_so,
+            [],
+            version="old",
+            compiler="cc",
+            header_backend="clang",
             dump_manifest=old_manifest,
         )
         new_snap = dump(
-            new_so, [], version="new", compiler="cc", header_backend="clang",
+            new_so,
+            [],
+            version="new",
+            compiler="cc",
+            header_backend="clang",
             dump_manifest=new_manifest,
         )
         assert old_snap.contract is not None and new_snap.contract is not None
@@ -863,15 +912,25 @@ class TestManifestIncludeOwnershipAndScopeFingerprint:
             bare_dir, priv_content="#define X 1\n", project_owned=False
         )
         owned_snap = dump(
-            owned_so, [], version="1.0", compiler="cc", header_backend="clang",
+            owned_so,
+            [],
+            version="1.0",
+            compiler="cc",
+            header_backend="clang",
             dump_manifest=owned_manifest,
         )
         bare_snap = dump(
-            bare_so, [], version="1.0", compiler="cc", header_backend="clang",
+            bare_so,
+            [],
+            version="1.0",
+            compiler="cc",
+            header_backend="clang",
             dump_manifest=bare_manifest,
         )
         assert owned_snap.contract is not None and bare_snap.contract is not None
-        assert owned_snap.contract.profile_fields["include_sequence"] == '["0:label:src"]'
+        assert (
+            owned_snap.contract.profile_fields["include_sequence"] == '["0:label:src"]'
+        )
         assert bare_snap.contract.profile_fields["include_sequence"].startswith(
             '["0:ext:sha256:'
         )
@@ -919,11 +978,19 @@ class TestManifestIncludeOwnershipAndScopeFingerprint:
             ),
         )
         base_snap = dump(
-            so, [], version="1.0", compiler="cc", header_backend="clang",
+            so,
+            [],
+            version="1.0",
+            compiler="cc",
+            header_backend="clang",
             dump_manifest=base_manifest,
         )
         with_pub_dir_snap = dump(
-            so, [], version="1.0", compiler="cc", header_backend="clang",
+            so,
+            [],
+            version="1.0",
+            compiler="cc",
+            header_backend="clang",
             dump_manifest=with_pub_dir_manifest,
         )
         assert base_snap.contract is not None and with_pub_dir_snap.contract is not None
@@ -995,16 +1062,28 @@ class TestManifestIncludeOwnershipAndScopeFingerprint:
             new_root, priv_content="#define PRIV_V2 2\n"
         )
         old_snap = dump(
-            old_so, [], version="old", compiler="cc", header_backend="clang",
+            old_so,
+            [],
+            version="old",
+            compiler="cc",
+            header_backend="clang",
             dump_manifest=old_manifest,
         )
         new_snap = dump(
-            new_so, [], version="new", compiler="cc", header_backend="clang",
+            new_so,
+            [],
+            version="new",
+            compiler="cc",
+            header_backend="clang",
             dump_manifest=new_manifest,
         )
         assert old_snap.contract is not None and new_snap.contract is not None
-        assert old_snap.contract.profile_fields["include_sequence"] == '["0:label:../src"]'
-        assert new_snap.contract.profile_fields["include_sequence"] == '["0:label:../src"]'
+        assert (
+            old_snap.contract.profile_fields["include_sequence"] == '["0:label:../src"]'
+        )
+        assert (
+            new_snap.contract.profile_fields["include_sequence"] == '["0:label:../src"]'
+        )
         assert (
             old_snap.contract.profile_fingerprint
             == new_snap.contract.profile_fingerprint
