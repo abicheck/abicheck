@@ -190,10 +190,11 @@ _SCOPE_SINGLE_ENTRY_SENTINELS = frozenset({"<single-header>", "<single-header-di
 # too, since profile_fingerprint tracks declared-header ORDER as a genuine
 # extraction-context fact distinct from scope_fingerprint's order-independent
 # declared SET -- see compute_extraction_contract's docstring) is allowed to
-# treat as non-fatal, and only when the new sequence, with exactly the
-# newly-added headers removed (in order), reconstructs the old sequence
-# exactly -- proving no EXISTING header was reordered relative to another,
-# only new ones appended/inserted.
+# treat as non-fatal, and only when the new sequence extends the old one with
+# new entries strictly TRAILING the old sequence, unchanged -- proving every
+# EXISTING header's preprocessing context (the headers parsed before it) is
+# byte-for-byte identical to before, not merely that existing headers keep
+# their relative order to each other.
 _HEADER_SEQUENCE_FIELDS = frozenset({"header_sequence"})
 
 
@@ -202,9 +203,23 @@ def _header_sequence_is_additive_reorder_free(
 ) -> bool:
     """Whether *new_value* (``profile_fields["header_sequence"]``, a
     json-encoded order-preserving-deduplicated header identity list) is
-    *old_value* with only new entries appended/inserted -- never with an
-    EXISTING header reordered relative to another (a genuine,
-    profile-relevant risk this carve-out must not paper over). Declines
+    *old_value* with new entries appended STRICTLY AFTER it, unchanged --
+    never with a new header inserted before or between existing ones, and
+    never with an EXISTING header reordered relative to another (Codex
+    review, PR #641 follow-up, seventh P1).
+
+    Trailing-append is the only shape that's actually safe: the aggregate
+    driver TU the dumper generates parses declared headers sequentially, so
+    a new header's macros/pragmas can change how every header parsed AFTER
+    it resolves. Merely preserving the *relative* order of the existing
+    headers to each other (this function's original, insufficient check)
+    is not enough -- ``[a.h, c.h]`` -> ``[a.h, b.h, c.h]`` keeps ``a.h``
+    before ``c.h`` on both sides, but ``c.h`` is now parsed with ``b.h``'s
+    macros/pragmas already in effect, a genuinely different extraction
+    context that can produce a real, non-additive ABI difference despite
+    looking like a pure addition. Only requiring every new entry to land
+    strictly after the entire unchanged old sequence rules this out: the
+    old sequence's own internal parsing context never changes. Declines
     (like :func:`_scope_field_is_additive_superset`) whenever either side
     is the ``<single-header>`` sentinel, since there is no real order to
     verify there.
@@ -219,11 +234,9 @@ def _header_sequence_is_additive_reorder_free(
         return False
     if len(new_list) == 1 and new_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
         return False
-    old_set = set(old_list)
-    if not set(new_list) >= old_set:
+    if len(new_list) < len(old_list):
         return False
-    filtered = [h for h in new_list if h in old_set]
-    return filtered == old_list
+    return new_list[: len(old_list)] == old_list
 
 
 # The only profile_fields key the include-sequence-owned-growth carve-out
@@ -1298,15 +1311,21 @@ def check_contracts_comparable(
     :func:`compute_extraction_contract`), so the exact same "pure addition"
     case would otherwise still raise ``ProfileMismatchError`` immediately
     after the scope carve-out waives it. A ``profile_fingerprint`` mismatch
-    confined to ``header_sequence`` does not raise when the new sequence,
-    with exactly the newly-added headers removed (in order), reconstructs
-    the old sequence exactly (see
-    :func:`_header_sequence_is_additive_reorder_free`) — proving no
-    *existing* header was reordered relative to another, only new ones
-    appended/inserted. A reorder of existing headers entangled with growth
-    (a genuine profile-relevant risk — header order can change how a later
-    header's macros/pragmas resolve) still raises, same as any other
-    profile drift this carve-out doesn't cover. **Also requires
+    confined to ``header_sequence`` does not raise when the new sequence is
+    the old sequence, byte-for-byte unchanged, with new entries appended
+    STRICTLY AFTER it (see :func:`_header_sequence_is_additive_reorder_free`)
+    — proving every *existing* header's own preprocessing context (the
+    headers parsed before it) is identical to before, not merely that
+    existing headers keep their relative order to each other. A new header
+    inserted before or between existing ones (Codex review, PR #641
+    follow-up, seventh P1) still raises even though it superficially looks
+    additive, since it changes what an existing header downstream of the
+    insertion point is parsed after — the same "reorder of existing headers"
+    risk this carve-out was always meant to exclude, just reached via
+    insertion rather than a literal swap. A reorder of existing headers
+    entangled with growth (the same genuine profile-relevant risk) still
+    raises too, same as any other profile drift this carve-out doesn't
+    cover. **Also requires
     :func:`_scope_growth_corroborated` (Codex review, PR #641 follow-up,
     P1):** an additive-shaped ``header_sequence`` on its own is not
     sufficient — a header already declared identically on both sides via

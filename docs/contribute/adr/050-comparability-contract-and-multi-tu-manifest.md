@@ -2004,6 +2004,42 @@ both scope and profile) reproducing arbitrary/unrelated fingerprints
 alongside genuinely additive-shaped fields — all six proven to fail
 without the fix. Full fast unit suite green, mypy/ruff clean.
 
+**An eleventh review pass** (Codex, one P1) found that the header-sequence
+carve-out's own definition of "additive" was too permissive:
+
+- **Mid-sequence or leading insertion was wrongly treated as safe as a
+  trailing append.** `_header_sequence_is_additive_reorder_free` originally
+  only checked that the *existing* headers kept their relative order to
+  each other (`[a.h, c.h]` -> `[a.h, b.h, c.h]` passed, since `a.h` still
+  precedes `c.h`). But the aggregate driver TU parses declared headers
+  sequentially, so inserting `b.h` between them means `c.h` is now parsed
+  with `b.h`'s macros/pragmas already in effect — a genuinely different
+  extraction context than before, even though the shape superficially
+  looks like a pure addition. The same risk applies to insertion *before*
+  all existing headers (`[b.h, c.h]` -> `[a.h, b.h, c.h]`): `b.h`'s own
+  parsing context changes even though the existing headers' relative order
+  to each other is untouched. Confirmed by direct repro before any fix:
+  both shapes returned `True`. Fixed by replacing the "existing headers
+  keep their relative order" check with a strictly stronger one: the new
+  sequence must be the old sequence, byte-for-byte unchanged, with new
+  entries appended *only* after it (`new_list[:len(old_list)] ==
+  old_list`) — proving every existing header's own preprocessing context
+  is identical to before, not merely that existing headers didn't swap
+  places. This is a narrower, more conservative definition of "additive"
+  than the carve-out originally used; only a strict trailing append is
+  waived now, matching the shape the real pvxs F8 scenario (and every
+  other test in this file building genuine `compute_extraction_contract`
+  end-to-end scenarios) already produces, so no real-world carve-out
+  outcome regresses — only one existing unit test, which had specifically
+  pinned the too-permissive mid-sequence-insertion behavior as `True`,
+  needed its expectation flipped to `False` (and renamed to match).
+
+New regression tests: the previously-passing mid-sequence-insertion test
+is now a `..._false_for_insertion_in_middle` case (flipped expectation,
+proven to fail against the pre-fix code), plus a new
+`..._false_for_insertion_before_all` case for the leading-insertion shape.
+Full fast unit suite green, mypy/ruff clean.
+
 ### D3. Manifest and real multi-TU dump
 
 New `abicheck/dump_manifest.py`: a strict YAML parser (unknown fields are
