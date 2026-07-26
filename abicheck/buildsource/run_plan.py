@@ -173,20 +173,48 @@ def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
     profile-specific frontend selection -- deliberately out of scope here;
     see AGENTS.md's "Known gaps" entry, "Toolchain-profile compiler-family
     rendering -- narrowly fixed, not the full execution contract").
+
+    **Explicit-empty-override sentinel (Codex review follow-up).** When the
+    GCC-family filtering above drops every field a profile actually set
+    (e.g. only ``stdlib``/``target`` declared, no ``standard``/
+    ``abi_macros``/``args``), a plain ``""`` would be indistinguishable
+    downstream from "this profile declared no ``compile:`` overlay at
+    all" -- ``check-project.yml``'s matrix step does
+    ``gcc-options: ${{ matrix.compile_gcc_options || inputs.gcc-options }}``,
+    and GitHub Actions expression truthiness treats an empty string and an
+    absent property identically (both falsy), so an empty result would
+    silently fall back to the workflow-global ``gcc-options`` -- which, in
+    a mixed GCC/Clang matrix, can be exactly the Clang-only flags this
+    filtering exists to keep away from a GCC cell, reintroducing the same
+    bug through the workflow's fallback instead of this function. Returning
+    a single space instead is truthy in GHA's falsy rules (so the per-cell
+    override wins over the fallback) yet inert once actually used as argv:
+    ``dumper.py``'s ``--gcc-options`` handling re-splits the composed
+    string with ``shlex.split()``, and ``shlex.split(" ") == []``, same as
+    ``shlex.split("")`` -- zero extra flags either way.
     """
     family = compile_spec.compiler_family.strip().lower()
     is_gcc = family in _GCC_FAMILY_NAMES
     parts: list[str] = []
+    filtered_a_set_field = False
     if compile_spec.standard:
         parts.append(f"-std={compile_spec.standard}")
-    if compile_spec.stdlib and not is_gcc:
-        parts.append(f"-stdlib={compile_spec.stdlib}")
-    if compile_spec.target and not is_gcc:
-        parts.append(f"--target={compile_spec.target}")
+    if compile_spec.stdlib:
+        if is_gcc:
+            filtered_a_set_field = True
+        else:
+            parts.append(f"-stdlib={compile_spec.stdlib}")
+    if compile_spec.target:
+        if is_gcc:
+            filtered_a_set_field = True
+        else:
+            parts.append(f"--target={compile_spec.target}")
     for name in sorted(compile_spec.abi_macros):
         value = compile_spec.abi_macros[name]
         parts.append(f"-D{name}={value}" if value else f"-D{name}")
     parts.extend(compile_spec.args)
+    if not parts and filtered_a_set_field:
+        return " "
     return " ".join(parts)
 
 

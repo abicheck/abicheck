@@ -770,7 +770,10 @@ class TestComposeGccOptionsFamilyAware:
 
     def test_gcc_family_matching_is_case_insensitive(self) -> None:
         spec = self._spec(compiler_family="GCC", stdlib="libstdc++")
-        assert self._compose(spec) == ""
+        # Not "" -- stdlib was set and filtered, so this is the explicit-
+        # empty-override sentinel (see test_gcc_family_filtered_to_nothing_
+        # returns_truthy_sentinel below), not "no override was declared".
+        assert self._compose(spec) == " "
 
     def test_clang_family_keeps_stdlib_and_target(self) -> None:
         spec = self._spec(
@@ -802,6 +805,55 @@ class TestComposeGccOptionsFamilyAware:
             args=["-fno-rtti"],
         )
         assert self._compose(spec) == "-std=gnu++17 -DFOO=1 -fno-rtti"
+
+    def test_gcc_family_filtered_to_nothing_returns_truthy_sentinel(self) -> None:
+        """A GCC profile that declares ONLY stdlib/target (both dropped by
+        the family filter, no standard/abi_macros/args left standing) must
+        NOT compose to plain "" -- check-project.yml's matrix step does
+        `gcc-options: ${{ matrix.compile_gcc_options || inputs.gcc-options }}`,
+        and GHA expression truthiness treats "" the same as an absent
+        property, so an empty result would silently fall back to the
+        workflow-global gcc-options -- reintroducing the exact Clang-only
+        flags this filtering exists to keep off a GCC cell, in a mixed
+        GCC/Clang matrix where the global default targets the Clang cell
+        (Codex review follow-up on the family-aware fix)."""
+        spec = self._spec(
+            compiler_family="gcc", stdlib="libstdc++", target="x86_64-linux-gnu"
+        )
+        result = self._compose(spec)
+        assert result != ""
+        assert result.strip() == ""  # inert: shlex.split(result) == []
+        import shlex
+
+        assert shlex.split(result) == []
+
+    def test_gcc_family_filtered_to_nothing_sentinel_is_truthy_in_to_dict(self) -> None:
+        """The sentinel must actually survive RunPlanCheck.to_dict()'s own
+        truthiness-gated `if self.compile_gcc_options:` -- confirming the
+        JSON key (and therefore the GHA matrix property) is present, not
+        omitted, for this cell."""
+        check = RunPlanCheck(
+            compile_gcc_options=_compose_gcc_options(
+                ProfileCompileSpec(compiler_family="gcc", stdlib="libstdc++")
+            )
+        )
+        assert "compile_gcc_options" in check.to_dict()
+
+    def test_no_fields_set_at_all_still_returns_empty_string(self) -> None:
+        """Distinct from the sentinel case above: a compile: overlay that
+        sets nothing family-filterable at all (e.g. only `binding`) has
+        nothing to signal an "explicit empty override" for, so it stays
+        plain "" -- to_dict() omits the key and the existing "no override,
+        use the workflow global" fallback behavior is unchanged."""
+        spec = self._spec(compiler_family="gcc", binding="gcc14")
+        assert self._compose(spec) == ""
+
+    def test_non_gcc_family_never_produces_the_sentinel(self) -> None:
+        """The sentinel is specific to fields the GCC-family filter dropped
+        -- an empty Clang/unset-family spec (nothing set at all) has no
+        filtered field either, so it's still plain ""."""
+        assert self._compose(self._spec(compiler_family="clang")) == ""
+        assert self._compose(self._spec()) == ""
 
 
 class TestToolchainMatrixFixtureExample:

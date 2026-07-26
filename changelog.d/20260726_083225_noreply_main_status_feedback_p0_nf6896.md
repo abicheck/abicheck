@@ -43,6 +43,18 @@
   (confirmed against GCC 14.2). `compiler_family: clang` and an unset
   `compiler_family` (the pre-existing default, still consumed by castxml's
   own Clang-based emulation frontend either way) are unaffected.
+- **Fixed a correctness gap the GCC-family fix above itself introduced:** a
+  GCC profile setting only `stdlib`/`target` (both dropped by the filter,
+  nothing else configured) used to compose to plain `""`, indistinguishable
+  downstream from "no `compile:` overlay at all." `check-project.yml`'s
+  matrix step does `gcc-options: ${{ matrix.compile_gcc_options ||
+  inputs.gcc-options }}`, and GitHub Actions expression truthiness treats
+  `""` the same as an absent property, so the empty result silently fell
+  back to the workflow-global `gcc-options` — reintroducing the exact
+  Clang-only flags this filtering exists to keep off a GCC cell, in a mixed
+  GCC/Clang matrix. `_compose_gcc_options` now returns a single space
+  instead in that specific case: truthy for the `||` fallback check, yet
+  inert once actually used as argv (`shlex.split(" ") == []`).
 
 ### Documentation
 

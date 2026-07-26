@@ -468,7 +468,21 @@ Pick the right home:
   hatch for ABI-relevant flags this codebase cannot enumerate a priori
   (GCC/Clang/MSVC each have their own vocabulary), and a strict allowlist
   would need that vocabulary built out first — its own scoped project, not
-  a reactive expansion of this fix. Still **not** implemented, and out of
+  a reactive expansion of this fix. A fourth review round caught a
+  correctness gap the family-aware `_compose_gcc_options()` fix itself
+  introduced: a GCC profile that sets only `stdlib`/`target` (both dropped
+  by the filter, nothing else configured) used to compose to plain `""`,
+  indistinguishable downstream from "no `compile:` overlay at all" —
+  `check-project.yml`'s matrix step does `gcc-options: ${{
+  matrix.compile_gcc_options || inputs.gcc-options }}`, and GitHub Actions
+  expression truthiness treats `""` the same as an absent property, so the
+  empty result silently fell back to the workflow-global `gcc-options`,
+  which in a mixed GCC/Clang matrix can carry exactly the Clang-only flags
+  this filtering exists to keep off the GCC cell — reintroducing the bug
+  through the workflow fallback instead of the function. Fixed by returning
+  a single space instead: truthy for that `||` check, yet inert once
+  actually used as argv (`shlex.split(" ") == []`, same as
+  `shlex.split("")`). Still **not** implemented, and out of
   scope for that fix (each needs its own
   scoped design, not a drive-by extension of the same narrow correction):
   a real toolchain-identity probe that validates a resolved `binding`'s
