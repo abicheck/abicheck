@@ -1,51 +1,94 @@
 # Case 42: Type Alignment Changed (standalone alignas)
 
-**Category:** Type Layout / DWARF | **Verdict:** BREAKING
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
-## What this case is about
+## Verdict and consumer impact
 
-v1 defines `CacheBlock` with `aligned(8)`. v2 increases alignment to
-`aligned(64)` for cache-line optimization. The fields and their types are
-**identical** — only the alignment attribute changes.
+v1 defines `CacheBlock` with `__attribute__((aligned(8)))`. v2 increases the
+alignment requirement to `aligned(64)` for cache-line optimization. The
+fields and their types are identical — only the alignment attribute
+changes. Old binaries allocate `CacheBlock` (on the stack, in arrays, via
+`malloc`) with 8-byte alignment guarantees; a v2 library built to assume
+64-byte alignment (e.g. using aligned SIMD loads/stores) can fault on
+strict-alignment architectures, and violates the alignment contract even
+where it doesn't immediately crash.
 
-This is a clean, isolated alignment change (unlike case41 which bundles
-alignment with type removal and enum changes).
+## Old/new diff
 
-## What breaks at binary level
+| bad.h (v1) | good.h (v2) |
+|------------|-------------|
+| `typedef struct __attribute__((aligned(8))) { char data[56]; long checksum; } CacheBlock;` | `typedef struct __attribute__((aligned(64))) { char data[56]; long checksum; } CacheBlock;` |
 
-- **sizeof may change**: Compilers pad structs to a multiple of their alignment.
-  `aligned(64)` makes `sizeof(CacheBlock)` = 64 (padded to alignment boundary).
-  With `aligned(8)` it's also 64 here, but the ABI contract about where the
-  struct can live in memory changes.
-- **Stack allocation misaligned**: Old binaries allocate `CacheBlock` with 8-byte
-  alignment. The v2 library may use SIMD instructions (e.g., `vmovdqa`) that
-  require 64-byte alignment → SIGBUS / SIGSEGV.
-- **Array stride changes**: If sizeof changes, `&blocks[i]` computes wrong offsets.
-- **malloc alignment**: `malloc` typically returns 16-byte aligned memory.
-  64-byte aligned structs need `aligned_alloc(64, sizeof(CacheBlock))`.
-
-## What abicheck detects
-
-- **`TYPE_ALIGNMENT_CHANGED`**: Detected via DWARF `DW_AT_alignment` or
-  inferred from `DW_AT_byte_size` changes caused by alignment padding.
-
-**Overall verdict: BREAKING**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g bad.c  -include bad.h  -o libbad.so
-gcc -shared -fPIC -g good.c -include good.h -o libgood.so
-
-python3 -m abicheck.cli dump libbad.so  -o /tmp/v1.json
-python3 -m abicheck.cli dump libgood.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → BREAKING: TYPE_ALIGNMENT_CHANGED
+gcc -shared -fPIC -g bad.c  -include bad.h  -o libfoo_v1.so
+gcc -shared -fPIC -g good.c -include good.h -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
+## Expected abicheck finding
 
-Use opaque types so callers never allocate or embed the struct directly:
+```text
+Verdict: BREAKING (exit 4)
+
+- type_alignment_changed: Alignment changed: CacheBlock (64 -> 512 bits)
+  > Misaligned access can cause bus errors on strict architectures or
+    silent data corruption with SIMD.
+  Affected symbols: block_checksum, block_init, block_process
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's `DW_AT_alignment` attribute (or the alignment
+inferred from `DW_AT_byte_size` padding) records `CacheBlock`'s required
+alignment for both versions; abicheck reads this straight from debug info
+compiled with `-g`, no public headers required.
+
+## Why abicheck catches it
+
+abicheck's DWARF-based type differ reads each struct's alignment attribute
+(or the alignment implied by its padded size) from `DW_TAG_structure_type`
+and compares it across versions, independent of whether any field or
+field-offset actually moved — an alignment-only change like this one would
+be invisible to a diff that only looks at member offsets and total size.
+
+## Runtime failure demonstration
+
+**Severity: BREAKING (alignment contract violation; effect is
+architecture-dependent).**
+
+```bash
+# Build v1 library + app (app is compiled against v1's aligned(8) layout)
+gcc -shared -fPIC -g bad.c -include bad.h -o libv1.so
+gcc -g app.c -L. -lv1 -Wl,-rpath,. -o app_v1
+./app_v1
+# → block_process = 4 (expected 4)
+# → OK on this arch (BREAKING in strict sense: alignment ABI changed)
+
+# Swap in v2 library (no recompile)
+gcc -shared -fPIC -g good.c -include good.h -o libv1.so
+./app_v1
+# → block_process = 4 (expected 4)
+# → OK on this arch (BREAKING in strict sense: alignment ABI changed)
+```
+
+**Why this doesn't crash here, and why it's still BREAKING:** x86-64's
+memory subsystem tolerates most misaligned accesses transparently (at a
+performance cost, or none at all for `char`/`long`-only fields like this
+one), so this exact test does not observably fail on this architecture —
+consistent with `app.c`'s own comment. The alignment mismatch is still
+undefined behavior per the C standard, and the same scenario reliably
+faults with `SIGBUS` on strict-alignment architectures (ARM without
+unaligned-access support, RISC-V) or with any code path that relies on the
+alignment guarantee (aligned SIMD loads/stores against `CacheBlock`
+instances). abicheck reports it as BREAKING because the alignment *contract*
+changed, not because every possible caller crashes on every architecture.
+
+## Safe redesign
+
+Use opaque types so callers never allocate or embed the struct directly —
+the library, not the caller, then controls alignment:
 
 ```c
 /* header */
@@ -59,29 +102,21 @@ CacheBlock* block_alloc(void) {
 }
 ```
 
-## Real-world examples
+**Real-world example:** DPDK packet buffers require cache-line alignment
+(64 bytes); Intel TBB / oneTBB uses `alignas(64)` for scalable allocator
+metadata. Changing alignment in a public struct after release has broken
+ABI in several multimedia libraries (FFmpeg, GStreamer) for exactly this
+reason.
 
-- DPDK packet buffers require cache-line alignment (64 bytes).
-- Intel TBB / oneTBB uses `alignas(64)` for scalable allocator metadata.
-- Changing alignment in a public struct after release broke ABI in several
-  multimedia libraries (FFmpeg, GStreamer).
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 
 - [C11 alignas / _Alignas](https://en.cppreference.com/w/c/language/_Alignas)
 - [GCC __attribute__((aligned))](https://gcc.gnu.org/onlinedocs/gcc/Common-Type-Attributes.html)
-
-## Real Failure Demo
-
-**Severity: BAD PRACTICE / ABI BREAK**
-
-```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case42_type_alignment_changed_app case42_type_alignment_changed_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case42_type_alignment_changed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case42_type_alignment_changed/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# block_process = 0 (expected 4) / WRONG RESULT: alignment change caused array stride/layout mismatch
-```
