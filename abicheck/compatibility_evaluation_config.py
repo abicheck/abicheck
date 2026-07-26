@@ -108,11 +108,19 @@ class ValueProvenance:
 
 @dataclass(frozen=True)
 class ImmutableIdentity:
-    """Identity of a versioned, replayable base/preset/pack/provider impl."""
+    """Identity of a versioned, replayable base/preset/pack/provider impl.
+
+    ``sha256`` is required, not optional: every worked example in ADR-049 D6/
+    D7 shows a populated digest alongside ``id``/``version`` (e.g.
+    ``{id: strict_abi, version: 1, sha256: "..."}``), and D6 states plainly
+    that "every selected provider/base/preset/pack or rule set carries an
+    immutable identity/version/digest" for exact replay. An identity with no
+    digest cannot detect drift if the same id/version is redefined.
+    """
 
     id: str
     version: int
-    sha256: str | None = None
+    sha256: str
 
 
 # --------------------------------------------------------------------------

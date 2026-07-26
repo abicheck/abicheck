@@ -41,15 +41,19 @@ from abicheck.contract_relevance_types import ContractMode, SelectorLayer
 from abicheck.severity import SeverityConfig, SeverityLevel
 
 
+def _identity(
+    id: str, version: int = 1, sha256: str = "test-digest"
+) -> ImmutableIdentity:
+    return ImmutableIdentity(id=id, version=version, sha256=sha256)
+
+
 def _minimal_config(**overrides) -> CompatibilityEvaluationConfig:
     fields = dict(
         contract=ContractConfig(mode=ContractMode.PUBLIC),
         evidence=EvidenceConfig(),
         surface=SurfaceConfig(),
         assurance=AssuranceConfig(),
-        policy=CompatibilityPolicyConfig(
-            base=ImmutableIdentity(id="strict_abi", version=1)
-        ),
+        policy=CompatibilityPolicyConfig(base=_identity("strict_abi")),
         gate=GateConfig(),
         suppressions=SuppressionConfig(),
     )
@@ -74,7 +78,7 @@ class TestConstruction:
     def test_policy_overrides_use_verdict_enum(self):
         cfg = _minimal_config(
             policy=CompatibilityPolicyConfig(
-                base=ImmutableIdentity(id="strict_abi", version=1),
+                base=_identity("strict_abi"),
                 overrides={"soname_bump_recommended": Verdict.BREAKING},
             )
         )
@@ -103,16 +107,16 @@ class TestImmutability:
     def test_mutating_caller_dict_after_construction_does_not_leak_in(self):
         overrides = {"soname_bump_recommended": Verdict.BREAKING}
         policy = CompatibilityPolicyConfig(
-            base=ImmutableIdentity(id="strict_abi", version=1), overrides=overrides
+            base=_identity("strict_abi"), overrides=overrides
         )
         overrides["symbol_removed"] = Verdict.COMPATIBLE
         assert "symbol_removed" not in policy.overrides
 
     def test_mutating_caller_list_after_construction_does_not_leak_in(self):
-        packs = [ImmutableIdentity(id="rust_c_ffi", version=1)]
+        packs = [_identity("rust_c_ffi")]
         contract = ContractConfig(mode=ContractMode.PUBLIC, packs=packs)
-        packs.append(ImmutableIdentity(id="another_pack", version=1))
-        assert contract.packs == (ImmutableIdentity(id="rust_c_ffi", version=1),)
+        packs.append(_identity("another_pack"))
+        assert contract.packs == (_identity("rust_c_ffi"),)
 
     def test_sequence_fields_are_tuples(self):
         cfg = _minimal_config(surface=SurfaceConfig(internal_namespaces=["detail"]))
@@ -195,6 +199,20 @@ class TestEvidenceProviderRequirement:
         assert evidence.providers[0].capability == "active_ast"
 
 
+class TestImmutableIdentityRequiresDigest:
+    # ADR-049 D6/D7: every worked example shows a populated digest alongside
+    # id/version ({id: strict_abi, version: 1, sha256: "..."}) -- an identity
+    # with no digest cannot detect drift if the same id/version is
+    # redefined, so sha256 is a required field, not optional.
+    def test_missing_sha256_is_a_type_error(self):
+        with pytest.raises(TypeError):
+            ImmutableIdentity(id="strict_abi", version=1)  # type: ignore[call-arg]
+
+    def test_sha256_round_trips(self):
+        identity = _identity("strict_abi", sha256="abc123")
+        assert identity.sha256 == "abc123"
+
+
 class TestPackVersionedIdentity:
     # ADR-049 D6: "every selected provider/base/preset/pack or rule set
     # carries an immutable identity/version/digest" -- packs must be able to
@@ -203,26 +221,26 @@ class TestPackVersionedIdentity:
     def test_contract_packs_carry_versioned_identity(self):
         contract = ContractConfig(
             mode=ContractMode.PUBLIC,
-            packs=[ImmutableIdentity(id="rust_c_ffi", version=2, sha256="deadbeef")],
+            packs=[_identity("rust_c_ffi", version=2, sha256="deadbeef")],
         )
         assert contract.packs[0].version == 2
         assert contract.packs[0].sha256 == "deadbeef"
 
     def test_policy_packs_carry_versioned_identity(self):
         policy = CompatibilityPolicyConfig(
-            base=ImmutableIdentity(id="strict_abi", version=1),
-            packs=[ImmutableIdentity(id="qt_kde_cpp", version=3)],
+            base=_identity("strict_abi"),
+            packs=[_identity("qt_kde_cpp", version=3)],
         )
         assert policy.packs[0].id == "qt_kde_cpp"
         assert policy.packs[0].version == 3
 
     def test_gate_packs_carry_versioned_identity(self):
-        gate = GateConfig(packs=[ImmutableIdentity(id="security_hardening", version=1)])
+        gate = GateConfig(packs=[_identity("security_hardening")])
         assert gate.packs[0].id == "security_hardening"
 
     def test_two_revisions_of_same_named_pack_are_distinguishable(self):
-        v1 = ImmutableIdentity(id="rust_c_ffi", version=1, sha256="aaa")
-        v2 = ImmutableIdentity(id="rust_c_ffi", version=2, sha256="bbb")
+        v1 = _identity("rust_c_ffi", version=1, sha256="aaa")
+        v2 = _identity("rust_c_ffi", version=2, sha256="bbb")
         assert v1 != v2
         contract_v1 = ContractConfig(mode=ContractMode.PUBLIC, packs=[v1])
         contract_v2 = ContractConfig(mode=ContractMode.PUBLIC, packs=[v2])
