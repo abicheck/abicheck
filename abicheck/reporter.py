@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -32,7 +33,7 @@ from .checker_policy import (
     ChangeKind,
     EvidenceStatus,
     HasKind,
-    evidence_status_for_change,
+    evidence_status_for_result,
     impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
@@ -324,7 +325,9 @@ def _to_json_leaf(
         )
         if reviewer_action is not None:
             entry["reviewer_action"] = reviewer_action
-        evidence_status = evidence_status_for_change(cast(HasKind, c))
+        evidence_status = evidence_status_for_result(
+            cast(HasKind, c), result.evidence_tiers
+        )
         if evidence_status is not None:
             entry["evidence_status"] = evidence_status.value
         # ADR-027 A4: keep the modulation audit trail in leaf mode too, so a
@@ -366,6 +369,7 @@ def _to_json_leaf(
             policy=effective_policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
+            evidence_tiers=result.evidence_tiers,
         )
         for c in non_type_changes
     ]
@@ -517,7 +521,11 @@ def _to_json_root_cause(
     # never drift from each other.
     entry_by_id = {
         id(c): _change_to_dict(
-            c, policy=effective_policy, kind_sets=eff_sets, policy_file=result.policy_file
+            c,
+            policy=effective_policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+            evidence_tiers=result.evidence_tiers,
         )
         for c in changes
     }
@@ -810,6 +818,7 @@ def _add_changes_block(
             policy=effective_policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
+            evidence_tiers=result.evidence_tiers,
         )
         for c in changes
     ]
@@ -1024,6 +1033,7 @@ def _change_to_dict(
     | None = None,
     policy_file: object | None = None,
     evidence_status_override: EvidenceStatus | None = None,
+    evidence_tiers: Sequence[str] = (),
 ) -> dict[str, object]:
     """Convert a Change to a JSON-serializable dict with impact and metadata.
 
@@ -1032,6 +1042,13 @@ def _change_to_dict(
     ``appcompat_to_json`` marks every finding it already proved a specific
     consumer depends on as ``EvidenceStatus.CONSUMER_PROVEN``, regardless of
     the finding's own kind.
+
+    ``evidence_tiers`` is the owning comparison's ``DiffResult.evidence_tiers``
+    (P0 evidence-provider audit) — when a caller has it (most do; the
+    default ``()`` reads as "unknown", not "absent", matching
+    :func:`~.checker_policy.has_binary_evidence`'s own convention), it
+    downgrades an otherwise ``ARTIFACT_PROVEN`` status to ``UNATTRIBUTED``
+    for a comparison positively known to have never examined a real binary.
     """
     kind = getattr(c, "kind", None)
     if isinstance(kind, ChangeKind) and kind_sets:
@@ -1050,7 +1067,7 @@ def _change_to_dict(
         severity = "unknown"
     evidence_status = evidence_status_override
     if evidence_status is None and isinstance(kind, ChangeKind):
-        evidence_status = evidence_status_for_change(cast(HasKind, c))
+        evidence_status = evidence_status_for_result(cast(HasKind, c), evidence_tiers)
     d: dict[str, object] = {
         "kind": kind.value if kind else "",
         "symbol": getattr(c, "symbol", ""),

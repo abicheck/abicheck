@@ -655,6 +655,17 @@ class ChangeKind(str, Enum):
     PUBLIC_NOT_EXPORTED = "public_not_exported"  # public header declares an export obligation the binary does not provide → RISK
     HEADER_BUILD_CONTEXT_MISMATCH = "header_build_context_mismatch"  # headers parsed without the build's ABI-relevant context → API_BREAK
     PRIVATE_HEADER_LEAK = "private_header_leak"  # a public header pulls in a private/non-installed header → RISK
+    # P0 evidence-coherence audit — emitted directly by checker.compare() (not
+    # the crosscheck engine above; needs no L3/L4 evidence, only the always-
+    # available clang-L2-backend + DWARF dump path), when either side's
+    # AbiSnapshot.dwarf_layout_coherence == "mismatch": at least one record
+    # backfill_dwarf_layout() found a uniquely-named DWARF counterpart for
+    # but rejected as not corroborating (kind/field disagreement). Never
+    # BREAKING on its own — the uncorroborated record already stays header-
+    # only/incomplete rather than merged, so no incorrect layout data
+    # reaches the diff; this only flags that the analysis had a reduced-
+    # confidence spot. RISK, matching AC-008/009's evidence-coherence kinds.
+    HEADER_BINARY_CONTEXT_MISMATCH = "header_binary_context_mismatch"  # DWARF-vs-header-AST layout backfill found an uncorroborated record → RISK
     ODR_TYPE_VARIANT = "odr_type_variant"  # one type has divergent per-TU layouts (L4 ODR conflict) → API_BREAK
     PUBLIC_TO_INTERNAL_DEPENDENCY = "public_to_internal_dependency"  # public API reaches an internal (non-public) entity via the L5 graph → RISK
     # Single-release hygiene audit (ADR-035 D8). Intra-version "bad ABI hygiene"
@@ -1080,6 +1091,17 @@ class EvidenceStatus(str, Enum):
       changed (see ``reporter.appcompat_to_json``).
     - ``NOT_CHECKABLE`` — the finding **is** the "missing evidence" signal
       (``ChangeKind.EVIDENCE_REQUIRED_MISSING``, ADR-033 D7), not a break.
+    - ``UNATTRIBUTED`` — a kind-level ``ARTIFACT_PROVEN`` classification
+      whose *comparison* is positively known to have never examined a real
+      binary artifact at all (``DiffResult.evidence_tiers`` populated with
+      only ``"header"``, e.g. a Python-API caller comparing hand-built or
+      loaded snapshots) — see :func:`evidence_status_for_result`. This is
+      the one place a *comparison-level* signal (not the finding's own
+      kind) is allowed to downgrade the status, because it doesn't
+      re-litigate whether the *kind itself* is classified correctly (the
+      BREAKING_KINDS/API_BREAK_KINDS/RISK_KINDS partition stays untouched)
+      — it only refuses to claim proof by an artifact that provably was
+      never looked at (P0 evidence-provider audit).
 
     ``COMPATIBLE``/``NO_CHANGE`` findings (additions, clean comparisons) carry
     no status — nothing to explain the epistemic strength of.
@@ -1090,6 +1112,33 @@ class EvidenceStatus(str, Enum):
     CONTEXTUAL_RISK = "contextual_risk"
     CONSUMER_PROVEN = "consumer_proven"
     NOT_CHECKABLE = "not_checkable"
+    UNATTRIBUTED = "unattributed"
+
+
+#: Evidence tiers (``DiffResult.evidence_tiers``) that constitute real
+#: binary-level evidence, as opposed to a pure header/declaration surface
+#: with no artifact ever examined. Single source of truth for both
+#: :func:`evidence_status_for_result` and ``semver.recommend_release`` —
+#: mirrors ``confidence._detect_evidence_tiers``.
+BINARY_EVIDENCE_TIERS: frozenset[str] = frozenset(
+    {"elf", "dwarf", "dwarf_advanced", "pe", "macho"}
+)
+
+
+def has_binary_evidence(evidence_tiers: Sequence[str]) -> bool:
+    """Whether *evidence_tiers* includes at least one binary-level source.
+
+    An **empty** sequence means the field was never populated — typically a
+    ``DiffResult`` built directly rather than via ``checker.compare()`` (many
+    unit tests do this, as does any older caller). That is "unknown", not
+    "absent": treated as having binary evidence so existing callers that
+    don't populate this field keep their prior behaviour. Only a
+    *non-empty* tier list containing nothing but ``"header"`` is a genuine,
+    positive signal that no binary was ever examined.
+    """
+    if not evidence_tiers:
+        return True
+    return bool(set(evidence_tiers) & BINARY_EVIDENCE_TIERS)
 
 
 # ---------------------------------------------------------------------------
@@ -1419,6 +1468,39 @@ def evidence_status_for_change(change: HasKind) -> EvidenceStatus | None:
     if kind in RISK_KINDS:
         return EvidenceStatus.CONTEXTUAL_RISK
     return None
+
+
+def evidence_status_for_result(
+    change: HasKind, evidence_tiers: Sequence[str] = ()
+) -> EvidenceStatus | None:
+    """:func:`evidence_status_for_change`, refined by one comparison-level
+    fact: whether this comparison ever actually examined a real binary
+    artifact (``DiffResult.evidence_tiers``, P0 evidence-provider audit).
+
+    ``ARTIFACT_PROVEN`` means "L0/L1/L2 artifact evidence confirms a shipped
+    ABI break" (see :class:`EvidenceStatus`) — but the kind-only classifier
+    can't see whether *this run* actually had that evidence, only that the
+    detector emitting this kind is only ever supposed to run with it. A
+    comparison built from hand-loaded/hand-built snapshots and never routed
+    through a real binary (``evidence_tiers == ["header"]``, e.g. a direct
+    Python-API caller) can still surface a BREAKING_KINDS finding — the
+    partition itself isn't wrong, but claiming that specific run's finding
+    is "artifact_proven" would be. Downgrades exactly that case to
+    :attr:`EvidenceStatus.UNATTRIBUTED`; every other kind/tier combination is
+    unchanged from :func:`evidence_status_for_change`.
+
+    *evidence_tiers* defaults to ``()`` — the "unknown" case
+    :func:`has_binary_evidence` already treats as "assume evidence was
+    examined", so a caller that can't easily thread
+    ``DiffResult.evidence_tiers`` through gets the exact same result as
+    calling :func:`evidence_status_for_change` directly.
+    """
+    status = evidence_status_for_change(change)
+    if status is EvidenceStatus.ARTIFACT_PROVEN and not has_binary_evidence(
+        evidence_tiers
+    ):
+        return EvidenceStatus.UNATTRIBUTED
+    return status
 
 
 def compute_verdict(

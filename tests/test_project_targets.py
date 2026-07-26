@@ -806,6 +806,97 @@ def test_cli_validate_json_output(tmp_path: Path) -> None:
     assert '"ok": true' in result.output
 
 
+# ── --toolchain-bindings (P1 toolchain-profile audit) ───────────────────────
+
+
+def _bindings_config(tmp_path: Path, binding: str) -> Path:
+    config_path = tmp_path / ".abicheck.yml"
+    config_path.write_text(
+        "targets:\n"
+        "  libfoo:\n"
+        "    kind: library\n"
+        "    binary_pattern: lib/libfoo.so\n"
+        "profiles:\n"
+        "  linux-gcc14:\n"
+        "    compile:\n"
+        f"      binding: {binding}\n"
+    )
+    return config_path
+
+
+def test_cli_validate_toolchain_bindings_resolves(tmp_path: Path) -> None:
+    config_path = _bindings_config(tmp_path, "gcc14")
+    bindings_path = tmp_path / "bindings.yml"
+    bindings_path.write_text(
+        "schema: abicheck.toolchain-bindings/v1\n"
+        "bindings:\n"
+        "  gcc14: /opt/gcc-14/bin/g++\n"
+    )
+    result = CliRunner().invoke(
+        main,
+        [
+            "project-targets",
+            "validate",
+            str(config_path),
+            "--toolchain-bindings",
+            str(bindings_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "OK" in result.output
+
+
+def test_cli_validate_toolchain_bindings_reports_unresolved(tmp_path: Path) -> None:
+    config_path = _bindings_config(tmp_path, "gcc14")
+    bindings_path = tmp_path / "bindings.yml"
+    bindings_path.write_text(
+        "schema: abicheck.toolchain-bindings/v1\nbindings:\n  clang20: /opt/llvm/bin/clang++\n"
+    )
+    result = CliRunner().invoke(
+        main,
+        [
+            "project-targets",
+            "validate",
+            str(config_path),
+            "--toolchain-bindings",
+            str(bindings_path),
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    assert "gcc14" in result.output
+    assert "not declared in the bindings file" in result.output
+
+
+def test_cli_validate_toolchain_bindings_malformed_file_is_usage_error(
+    tmp_path: Path,
+) -> None:
+    config_path = _bindings_config(tmp_path, "gcc14")
+    bindings_path = tmp_path / "bindings.yml"
+    bindings_path.write_text("schema: wrong-schema/v1\nbindings: {}\n")
+    result = CliRunner().invoke(
+        main,
+        [
+            "project-targets",
+            "validate",
+            str(config_path),
+            "--toolchain-bindings",
+            str(bindings_path),
+        ],
+    )
+    assert result.exit_code == 64, result.output
+
+
+def test_cli_validate_without_toolchain_bindings_flag_ignores_binding(
+    tmp_path: Path,
+) -> None:
+    # Backward compatible: a profile declaring a binding with no
+    # --toolchain-bindings given is not itself a validation error (the
+    # bindings file is a separately-trusted, opt-in input).
+    config_path = _bindings_config(tmp_path, "gcc14")
+    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    assert result.exit_code == 0, result.output
+
+
 def test_cli_validate_malformed_yaml_is_usage_error(tmp_path: Path) -> None:
     config_path = tmp_path / ".abicheck.yml"
     config_path.write_text("targets:\n  libfoo:\n    kind: bogus-kind\n")

@@ -87,6 +87,20 @@ on:
         description: 'Artifact name the generated run-plan.json is uploaded under.'
         type: string
         default: 'run-plan'
+      toolchain-bindings-path:
+        description: >-
+          Path (relative to the repository root) to a trusted
+          toolchain-bindings file (schema abicheck.toolchain-bindings/v1,
+          P1 toolchain-profile audit) resolving profiles.<id>.compile.binding
+          logical ids to exact executable paths, forwarded to `abicheck
+          run-plan generate --toolchain-bindings`. Empty (default) skips
+          binding resolution entirely -- every cell's gcc-path stays this
+          workflow's own gcc-path input, unchanged from before this option
+          existed. A profile's compile.standard/stdlib/target/abi_macros/
+          args are composed into that cell's gcc-options regardless of this
+          input (they need no trusted-path resolution).
+        type: string
+        default: ''
       report-artifact-prefix:
         description: 'Each check''s report is uploaded under an artifact named <this><sanitized-check-id>.'
         type: string
@@ -122,7 +136,11 @@ on:
 
       # ── Shared analysis options, forwarded to every check-target cell ────
       # (a per-cell override of any of these is out of scope for this first
-      # version -- see docs/reference/reusable-workflows.md).
+      # version -- see docs/reference/reusable-workflows.md. EXCEPTION:
+      # gcc-path/gcc-options below now get a per-cell override from that
+      # cell's profiles.<id>.compile overlay, via toolchain-bindings-path
+      # above -- P1 toolchain-profile audit. Every other option here stays
+      # workflow-global-only.)
       header:
         type: string
         default: ''
@@ -313,9 +331,13 @@ jobs:
           CONFIG_PATH: ${{ inputs.config-path }}
           PROJECT: ${{ inputs.project != '' && inputs.project || github.repository }}
           HEAD_SHA: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
+          TOOLCHAIN_BINDINGS_PATH: ${{ inputs.toolchain-bindings-path }}
         run: |
           set -euo pipefail
           args=()
+          if [[ -n "$TOOLCHAIN_BINDINGS_PATH" ]]; then
+            args+=(--toolchain-bindings "$TOOLCHAIN_BINDINGS_PATH")
+          fi
           if [[ -d build-outputs ]]; then
             while IFS= read -r -d '' bo_file; do
               bo_dir="$(dirname "$bo_file")"
@@ -675,9 +697,19 @@ jobs:
           new-include: ${{ inputs.new-include }}
           lang: ${{ inputs.lang }}
           ast-frontend: ${{ inputs.ast-frontend }}
-          gcc-path: ${{ inputs.gcc-path }}
+          # P1 toolchain-profile audit: this cell's profiles.<id>.compile
+          # overlay (run-plan generate --toolchain-bindings), when the
+          # profile declares one, takes precedence over these workflow-
+          # global inputs -- the whole point of a per-profile compile
+          # overlay is that it, not one shared flag set, drives that
+          # profile's compiler invocation. A profile with no overlay (or a
+          # run-plan generated without --toolchain-bindings, so
+          # compile_gcc_path stays empty) falls back to the global input
+          # unchanged, so an existing project with no profiles.*.compile
+          # block sees no behavior change at all.
+          gcc-path: ${{ matrix.compile_gcc_path || inputs.gcc-path }}
           gcc-prefix: ${{ inputs.gcc-prefix }}
-          gcc-options: ${{ inputs.gcc-options }}
+          gcc-options: ${{ matrix.compile_gcc_options || inputs.gcc-options }}
           sysroot: ${{ inputs.sysroot }}
           sources: ${{ inputs.sources }}
           build-info: ${{ inputs.build-info }}

@@ -1,11 +1,17 @@
 """Exact AST producer/compiler identity and cache-key regression tests."""
 
 import os
+import shutil
 
 import pytest
 
 from abicheck.dumper import _cache_key, _tool_identity
-from abicheck.dumper_toolchain import _compiler_family_from_toolchain, _resolved_tool
+from abicheck.dumper_toolchain import (
+    _compiler_family_from_toolchain,
+    _resolved_tool,
+    _tool_identity_metadata,
+    _tool_target_triple,
+)
 
 
 def test_frontend_binary_identity_is_part_of_key(tmp_path):
@@ -86,6 +92,69 @@ def test_bare_missing_tool_does_not_resolve_from_cwd(tmp_path, monkeypatch):
 
     assert "unavailable=FileNotFoundError" in identity
     assert "tool not found on PATH" in identity
+
+
+class TestToolTargetTriple:
+    """``-dumpmachine`` probing (P1 toolchain-provenance audit) —
+    ``_tool_identity_metadata``'s ``target_triple`` key, which flows into a
+    snapshot's ``ast_toolchain``/``compiler_target_triple``."""
+
+    @pytest.mark.skipif(shutil.which("gcc") is None, reason="gcc not on PATH")
+    def test_real_gcc_reports_a_target_triple(self):
+        selected, _real, _stat, digest = _resolved_tool("gcc")
+        triple = _tool_target_triple(selected, digest)
+        assert triple
+        assert "-" in triple  # e.g. x86_64-linux-gnu, x86_64-pc-linux-gnu
+
+    @pytest.mark.skipif(shutil.which("gcc") is None, reason="gcc not on PATH")
+    def test_tool_identity_metadata_includes_target_triple_for_gcc(self):
+        metadata = _tool_identity_metadata("gcc")
+        assert "target_triple" in metadata
+        assert metadata["target_triple"]
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX executable-script fixture")
+    def test_flag_unsupported_by_tool_omits_target_triple_key(self, tmp_path):
+        tool = tmp_path / "no-dumpmachine-tool"
+        tool.write_text(
+            "#!/bin/sh\necho unknown option >&2\nexit 1\n", encoding="utf-8"
+        )
+        tool.chmod(0o755)
+
+        metadata = _tool_identity_metadata(str(tool))
+
+        assert "target_triple" not in metadata
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX executable-script fixture")
+    def test_tool_target_triple_returns_stripped_output(self, tmp_path):
+        tool = tmp_path / "fake-gcc"
+        tool.write_text(
+            '#!/bin/sh\nif [ "$1" = "-dumpmachine" ]; then echo "  x86_64-linux-gnu  "; '
+            "else echo fake-version; fi\n",
+            encoding="utf-8",
+        )
+        tool.chmod(0o755)
+        selected, _real, _stat, digest = _resolved_tool(str(tool))
+
+        triple = _tool_target_triple(selected, digest)
+
+        assert triple == "x86_64-linux-gnu"
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX executable-script fixture")
+    def test_tool_target_triple_returns_none_on_timeout(self, tmp_path, monkeypatch):
+        import subprocess as subprocess_module
+
+        from abicheck import dumper_toolchain
+
+        tool = tmp_path / "hanging-tool"
+        tool.write_text("#!/bin/sh\nsleep 100\n", encoding="utf-8")
+        tool.chmod(0o755)
+
+        def _raise_timeout(*_args, **_kwargs):
+            raise subprocess_module.TimeoutExpired(cmd="hanging-tool", timeout=10)
+
+        monkeypatch.setattr(dumper_toolchain.subprocess, "run", _raise_timeout)
+
+        assert _tool_target_triple(str(tool), "irrelevant-digest") is None
 
 
 class TestCompilerFamilyFromToolchain:

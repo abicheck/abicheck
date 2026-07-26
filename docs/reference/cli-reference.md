@@ -393,6 +393,7 @@ Validate CONFIG's targets:/bundles:/profiles:/baseline: block (ADR-047 §3).
 |---|:--:|---|---|
 | `--format` | no | `text` | Output format for the validation report. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
+| `--toolchain-bindings` | no | — | Path to a trusted toolchain-bindings file (schema abicheck.toolchain-bindings/v1) to additionally check every declared profiles.<id>.compile.binding against. Loaded only from this explicit path — never auto-discovered, per the untrusted-config trust boundary ProfileCompileSpec.binding documents. |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
 ## `run-plan`
@@ -416,6 +417,7 @@ Generate run-plan.json from CONFIG's targets:/bundles:/profiles: block.
 | `--build-output` | no | — | One contract profile's abicheck-build/ directory (containing build-output.json), as profile\_id=path/to/dir. Repeatable — pass one per profile referenced by CONFIG's checks:. |
 | `--project` | no | `` | Project identifier recorded in run-plan.json, e.g. owner/repo. |
 | `--head-sha` | no | `` | Candidate commit SHA recorded in run-plan.json. |
+| `--toolchain-bindings` | no | — | Path to a trusted toolchain-bindings file (schema abicheck.toolchain-bindings/v1). Every declared profiles.<id>.compile.binding is checked against it (an unresolvable binding is a generation error, same severity as an unresolvable build-output target); each resolved cell's compile\_gcc\_path is populated from it. Omitting this flag skips the check entirely and leaves compile\_gcc\_path empty on every cell — backward compatible, matching `project-targets validate --toolchain-bindings`. |
 | `--format` | no | `json` | Output format for the generated run-plan. Choices: `json`, `text`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |

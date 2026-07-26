@@ -66,6 +66,25 @@ BUILDSOURCE_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "binary may be mis-scoped (AC-009). A source-tooling risk, never an "
               "artifact-proven ABI break: relink/rebuild the source surface "
               "per-DSO against this binary's own exports."),
+    # P0 evidence-coherence audit follow-up: not itself sourced from the
+    # buildsource L3/L4/L5 layers (dumper_layout_backfill.py's DWARF-vs-
+    # header-AST corroboration needs no build evidence at all -- it runs
+    # on any ordinary clang-L2-backend + DWARF dump). Grouped here purely
+    # to stay under change_registry.py's AI-readiness line-count hard cap,
+    # alongside the AC-008/AC-009 evidence-coherence kinds above, which it
+    # is the same class of signal as (see abicheck/semver.py's
+    # _COHERENCE_CONFLICT_KINDS, which groups all three).
+    _E("header_binary_context_mismatch", _R,
+       impact="A record's header-AST declaration and its DWARF debug-info "
+              "counterpart could not be corroborated as the same declaration "
+              "(disagreeing kind, or no field/base overlap) even though a "
+              "uniquely-named DWARF candidate existed. That record's layout is "
+              "not backfilled and stays header-only/incomplete rather than "
+              "merged, so no incorrect size/offset data reaches this "
+              "comparison -- but any real layout change on that specific "
+              "record is invisible to this analysis. Re-dump with matching "
+              "compile context, or investigate the named record(s) directly "
+              "(see the snapshot's dwarf_layout_coherence_mismatches)."),
     # G31 Phase B (ADR-048) — graph-node reconciliation outcomes. See
     # buildsource.graph_reconcile for the matching algorithm and
     # checker_policy.ChangeKind for the authority-rule note.

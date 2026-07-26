@@ -1335,6 +1335,69 @@ class TestFromHeadersProvenance:
         mock_try_dwarf.assert_not_called()
 
 
+class TestDwarfLayoutCoherencePopulation:
+    """_dump_elf must forward backfill_dwarf_layout's DwarfLayoutCoherence
+    result onto the snapshot when the clang header backend actually had DWARF
+    to corroborate against (dwarf_layout_types_or_empty returned non-empty,
+    so backfill_dwarf_layout's coherence return is a real object, not None) —
+    see the P0 evidence-coherence audit follow-up."""
+
+    def test_clang_backend_with_dwarf_populates_coherence_status(
+        self, tmp_path: Path
+    ) -> None:
+        from unittest.mock import MagicMock, patch
+
+        import abicheck.elf_metadata as _elfmod
+        from abicheck import dumper
+        from abicheck.dumper_clang import _ClangAstParser
+        from abicheck.dumper_layout_backfill import DwarfLayoutCoherence
+        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        so = tmp_path / "lib.so"
+        so.write_bytes(b"\x7fELF")
+
+        parser = MagicMock(spec=_ClangAstParser)
+        parser.parse_functions.return_value = []
+        parser.parse_variables.return_value = []
+        parser.parse_types.return_value = []
+        parser.parse_enums.return_value = []
+        parser.parse_typedefs.return_value = []
+        parser.parse_constants.return_value = []
+
+        coherence = DwarfLayoutCoherence(status="mismatch", mismatched=("Foo",))
+
+        with (
+            patch.object(
+                dumper, "_pyelftools_exported_symbols", return_value=({"foo"}, set())
+            ),
+            patch.object(
+                _elfmod, "parse_elf_metadata", return_value=_elfmod.ElfMetadata()
+            ),
+            patch.object(
+                dumper,
+                "_elf_classify_symbols",
+                return_value=({"foo"}, {"foo"}, set(), set()),
+            ),
+            patch.object(
+                dumper,
+                "_resolve_debug_metadata",
+                return_value=(DwarfMetadata(), AdvancedDwarfMetadata()),
+            ),
+            patch.object(dumper, "_header_ast_parser", return_value=parser),
+            patch.object(
+                dumper, "dwarf_layout_types_or_empty", return_value=["placeholder"]
+            ),
+            patch.object(dumper, "backfill_dwarf_layout", return_value=([], coherence)),
+            patch.object(dumper, "_populate_elf_visibility", lambda snap: None),
+        ):
+            snap = dumper._dump_elf(
+                so, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="clang"
+            )
+        assert snap.dwarf_layout_coherence == "mismatch"
+        assert snap.dwarf_layout_coherence_mismatches == ("Foo",)
+
+
 class TestFormatHandlerRegistry:
     """C3: the binary-format handler registry is the single source of truth for
     magic recognition + dump() dispatch."""

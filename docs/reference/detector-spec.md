@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (394 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (395 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -146,6 +146,7 @@ One row per `ChangeKind` (394 total). Columns fuse the verdict partition (`check
 | `glibcxx_dual_abi_flip_detected` | quality | `COMPATIBLE` | `warning` | L0 | `glibcxx_dual_abi_flip_detected` | [case104](examples/case104_glibcxx_dual_abi_flip.md) |
 | `handle_type_changed` | breaking | `BREAKING` | `error` | unspecified | `handle_type_changed` | — |
 | `hash_style_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `hash_style_removed` | — |
+| `header_binary_context_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `header_binary_context_mismatch` | — |
 | `header_build_context_mismatch` | api_break | `API_BREAK` | `warning` | L3 | `header_build_context_mismatch` | [case148](examples/case148_xcheck_header_build_mismatch.md) |
 | `header_parse_context_drift` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `header_parse_context_drift` | — |
 | `hidden_friend_added` | addition | `COMPATIBLE` | `warning` | unspecified | `hidden_friend_added` | — |

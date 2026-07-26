@@ -167,6 +167,24 @@ class TestEvidenceStatusInJson:
         d = json.loads(to_json(r))
         assert d["changes"][0]["evidence_status"] == "not_checkable"
 
+    def test_breaking_change_with_no_binary_evidence_is_unattributed(self):
+        # P0 evidence-provider audit: a comparison positively known to have
+        # never examined a real binary (evidence_tiers == ["header"], e.g.
+        # hand-built/loaded snapshots) must not claim "artifact_proven" for
+        # an otherwise-BREAKING_KINDS finding.
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
+        r = _result(Verdict.BREAKING, changes=[c])
+        r.evidence_tiers = ["header"]
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["evidence_status"] == "unattributed"
+
+    def test_breaking_change_with_binary_evidence_stays_artifact_proven(self):
+        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
+        r = _result(Verdict.BREAKING, changes=[c])
+        r.evidence_tiers = ["header", "elf"]
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["evidence_status"] == "artifact_proven"
+
     def test_report_schema_version_matches_constant(self):
         from abicheck.schemas import REPORT_SCHEMA_VERSION
 

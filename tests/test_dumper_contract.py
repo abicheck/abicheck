@@ -113,6 +113,69 @@ def test_attach_extraction_contract_with_malformed_gcc_options_does_not_raise(
     assert snap.contract is not None
 
 
+def _attach_resolved_standard(
+    tmp_path: Path, *, ast_resolved_standard: str | None, from_headers: bool = True
+) -> AbiSnapshot:
+    header = tmp_path / "api.h"
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=from_headers,
+        ast_resolved_standard=ast_resolved_standard,
+    )
+    _attach_extraction_contract(
+        snap,
+        headers=[header],
+        extra_includes=None,
+        gcc_options=None,
+        gcc_option_tokens=(),
+        lang="c++",
+        public_headers=None,
+        public_header_dirs=None,
+    )
+    return snap
+
+
+class TestResolvedStandardFeedsProfileFingerprint:
+    """P0 evidence-provider audit: two dumps with no explicit -std= must not
+    silently share a profile_fingerprint when the C++20 requires/concept
+    heuristic forced a different resolved standard on only one side --
+    check_contracts_comparable had nothing to catch that divergence on
+    before ast_resolved_standard (schema v15) started feeding this."""
+
+    def test_resolved_standard_changes_profile_fingerprint(
+        self, tmp_path: Path
+    ) -> None:
+        plain = _attach_resolved_standard(tmp_path, ast_resolved_standard=None)
+        forced_cxx20 = _attach_resolved_standard(
+            tmp_path, ast_resolved_standard="gnu++20"
+        )
+        assert plain.contract is not None
+        assert forced_cxx20.contract is not None
+        assert (
+            plain.contract.profile_fingerprint
+            != forced_cxx20.contract.profile_fingerprint
+        )
+
+    def test_same_resolved_standard_matches(self, tmp_path: Path) -> None:
+        a = _attach_resolved_standard(tmp_path, ast_resolved_standard="gnu++17")
+        b = _attach_resolved_standard(tmp_path, ast_resolved_standard="gnu++17")
+        assert a.contract is not None
+        assert b.contract is not None
+        assert a.contract.profile_fingerprint == b.contract.profile_fingerprint
+
+    def test_resolved_standard_ignored_when_not_from_headers(
+        self, tmp_path: Path
+    ) -> None:
+        # A DWARF/symbols-only snapshot never ran an L2 frontend, so its
+        # ast_resolved_standard (if any leaked through) must not feed the
+        # profile fingerprint -- from_headers=False gates l2_frontend_ran.
+        snap = _attach_resolved_standard(
+            tmp_path, ast_resolved_standard="gnu++20", from_headers=False
+        )
+        assert snap.contract is None or snap.contract.profile_fingerprint is None
+
+
 def _attach(
     tmp_path: Path,
     extra_includes: list[Path],

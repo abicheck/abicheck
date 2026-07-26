@@ -19,6 +19,8 @@
   "dependency_info": null,
   "dwarf": null,
   "dwarf_advanced": null,
+  "dwarf_layout_coherence": null,
+  "dwarf_layout_coherence_mismatches": [],
   "elf": {
     "abi_flags": [],
     "bind_now": false,
@@ -163,7 +165,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 15,
+  "schema_version": 16,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

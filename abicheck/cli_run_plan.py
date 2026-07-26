@@ -42,6 +42,11 @@ from .buildsource.project_targets import (
     validate_project_targets,
 )
 from .buildsource.run_plan import RunPlan, generate_run_plan, to_aggregate_manifest
+from .buildsource.toolchain_bindings import (
+    BindingsFileError,
+    check_profile_bindings_resolve,
+    load_bindings_file,
+)
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_options import output_options, verbose_option
 
@@ -117,6 +122,22 @@ def _parse_build_output_specs(
     default="",
     help="Candidate commit SHA recorded in run-plan.json.",
 )
+@click.option(
+    "--toolchain-bindings",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Path to a trusted toolchain-bindings file (schema "
+        "abicheck.toolchain-bindings/v1). Every declared "
+        "profiles.<id>.compile.binding is checked against it (an "
+        "unresolvable binding is a generation error, same severity as an "
+        "unresolvable build-output target); each resolved cell's "
+        "compile_gcc_path is populated from it. Omitting this flag skips "
+        "the check entirely and leaves compile_gcc_path empty on every "
+        "cell — backward compatible, matching `project-targets validate "
+        "--toolchain-bindings`."
+    ),
+)
 @output_options(
     ["json", "text"],
     default="json",
@@ -128,6 +149,7 @@ def run_plan_generate_cmd(
     build_output_specs: tuple[str, ...],
     project: str,
     head_sha: str,
+    toolchain_bindings: Path | None,
     fmt: str,
     output: Path | None,
     verbose: bool,
@@ -143,13 +165,25 @@ def run_plan_generate_cmd(
     resolved cell's ``check_id`` is
     ``target@profile#baseline_channel@requested_depth`` (ADR-047 §7).
 
+    With ``--toolchain-bindings``, each resolved cell's profile
+    ``compile.binding`` (if declared) additionally resolves into that
+    cell's ``compile_gcc_path`` — an unresolvable declared binding is a
+    generation error, the same severity as an unresolvable build-output
+    target. Every cell's profile ``compile`` overlay (``standard``/
+    ``stdlib``/``target``/``abi_macros``/``args``) is always composed into
+    ``compile_gcc_options`` regardless of ``--toolchain-bindings`` (P1
+    toolchain-profile audit).
+
     \b
     Exit codes:
       0   Generated with no coverage-gap errors (warnings may still exist).
       1   A required/explicit check could not be resolved against the
-          supplied --build-output directories.
-      64  Usage error (CONFIG or a --build-output value is unreadable, or
-          CONFIG fails project-targets validation).
+          supplied --build-output directories, or (with
+          --toolchain-bindings) a declared profiles.<id>.compile.binding
+          does not resolve against it.
+      64  Usage error (CONFIG, a --build-output value, or
+          --toolchain-bindings is unreadable, or CONFIG fails
+          project-targets validation).
     """
     _setup_verbosity(verbose)
 
@@ -179,9 +213,25 @@ def run_plan_generate_cmd(
         )
 
     build_outputs = _parse_build_output_specs(build_output_specs)
+
+    resolved_bindings: dict[str, str] | None = None
+    binding_errors: list[str] = []
+    if toolchain_bindings is not None:
+        try:
+            bindings_file = load_bindings_file(toolchain_bindings)
+        except BindingsFileError as exc:
+            raise click.UsageError(str(exc)) from exc
+        resolved_bindings = bindings_file.bindings
+        binding_errors = check_profile_bindings_resolve(parsed.profiles, bindings_file)
+
     plan, report = generate_run_plan(
-        parsed, build_outputs, project=project, head_sha=head_sha
+        parsed,
+        build_outputs,
+        project=project,
+        head_sha=head_sha,
+        resolved_bindings=resolved_bindings,
     )
+    report.errors.extend(binding_errors)
 
     for e in report.errors:
         click.echo(f"error: {e}", err=True)
