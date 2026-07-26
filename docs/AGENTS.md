@@ -225,11 +225,17 @@ generated: false
 
 **Rollout status**: front matter is populated today only on the pages
 referenced by `docs/_meta/topics.yaml` (the pilot topic set above) — it is
-not yet required repo-wide. Extend both files together when you add a new
-topic to the registry; don't add front matter to an unrelated page as a
-drive-by, since an orphaned `canonical_for`/`summarizes` entry not backed by
-a `topics.yaml` topic is exactly the kind of unchecked claim this schema
-exists to prevent silently accumulating.
+not yet required repo-wide for *existing* pages, which may migrate
+incrementally. Extend both files together when you add a new topic to the
+registry; don't add front matter to an unrelated page as a drive-by, since
+an orphaned `canonical_for`/`summarizes` entry not backed by a
+`topics.yaml` topic is exactly the kind of unchecked claim this schema
+exists to prevent silently accumulating. Every **newly created** manual
+public page must carry front matter from the day it's added, though — at
+minimum `doc_type`/`level`/`lifecycle`, plus `canonical_for` if it's the
+new canonical owner of a topic you're registering in the same change; a
+brand-new page starting without it is exactly the debt this pilot is
+meant to stop accumulating, not something to defer to a later cleanup.
 
 ## When does a new fact need a new page?
 
