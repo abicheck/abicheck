@@ -1309,9 +1309,7 @@ def perform_elf_dump(
     # `dump --header <dir>` baseline and a live `compare --header <dir>`
     # candidate of the identical header set agree on scope_fingerprint
     # instead of spuriously raising ScopeMismatchError.
-    from .header_utils import split_public_header_inputs
-
-    _, scope_header_dirs = split_public_header_inputs(list(headers)) if headers else ([], [])
+    #
     # P3: auto-add the public-header roots so a -H umbrella resolves its own
     # relative includes without a separate -I. resolve_inferred_header_roots
     # picks the search bucket: plain -I (high priority, so an umbrella that pulls
@@ -1320,7 +1318,13 @@ def perform_elf_dump(
     # so generated/shim headers from -p/--gcc-options keep priority, but still
     # above the standard system dirs) when the compile context supplies its own
     # includes — see its docstring.
-    from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
+    from .header_utils import (
+        deferred_token_dirs,
+        resolve_inferred_header_roots,
+        split_public_header_inputs,
+    )
+
+    _, scope_header_dirs = split_public_header_inputs(list(headers)) if headers else ([], [])
 
     inc_extra, deferred = (
         resolve_inferred_header_roots(

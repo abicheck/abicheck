@@ -170,6 +170,49 @@ class TestTargetGraphChannel:
             {"target://common", "target://libfoo", "target://libbar"}
         )
 
+    def test_interface_dependency_is_a_hard_stop_not_looked_past(self):
+        """Pins current behavior (code review, PR #632): folding is
+        per-direct-dependent, not fully transitive through a non-absorbed
+        kind. `iface` directly depends on the OBJECT_LIBRARY `obj`, so
+        `obj`'s sources fold into `iface` (an OBJECT_LIBRARY folds into ANY
+        direct dependent, regardless of the dependent's own kind) -- but
+        `iface` itself is INTERFACE, not in _ABSORBED_KINDS, so when `app`
+        walks its own dependency on `iface`, that's a hard stop: `app`'s walk
+        neither folds `iface`'s (inherited) sources in nor continues past it
+        to `obj`. A real OBJECT_LIBRARY sitting *behind* an INTERFACE
+        dependency is therefore NOT folded into a target two hops away, even
+        though CMake usage-requirement propagation through an INTERFACE
+        library can, in practice, still cause that object library's objects
+        to end up linked into whatever ultimately depends on the interface
+        target. Documented as current, deliberately-scoped behavior -- not
+        asserted here to be the only correct design, just the one this code
+        implements today."""
+        ev = BuildEvidence(
+            targets=[
+                Target(
+                    id="target://app",
+                    kind=TargetKind.EXECUTABLE,
+                    source_files=["src/main.cpp"],
+                    dependencies=["target://iface"],
+                ),
+                Target(
+                    id="target://iface",
+                    kind=TargetKind.INTERFACE,
+                    dependencies=["target://obj"],
+                ),
+                Target(
+                    id="target://obj",
+                    kind=TargetKind.OBJECT_LIBRARY,
+                    source_files=["src/obj.cpp"],
+                ),
+            ]
+        )
+        attr = attribute_sources_to_targets(ev)
+        assert attr["src/main.cpp"] == frozenset({"target://app"})
+        # Attributed to obj itself and to iface (obj's direct dependent) --
+        # but NOT to app, two hops away through the INTERFACE hard stop.
+        assert attr["src/obj.cpp"] == frozenset({"target://obj", "target://iface"})
+
     def test_dependency_cycle_does_not_infinite_loop(self):
         # Pathological/malformed input (a real build graph is a DAG) -- the
         # visited-set guard must still terminate and produce a sane result.
@@ -241,6 +284,41 @@ class TestLinkUnitGraphChannel:
                     output="build/app",
                     kind="executable",
                     inputs=["build/libstatic.a"],
+                ),
+            ],
+        )
+        attr = attribute_sources_to_targets(ev)
+        assert attr["src/a.cpp"] == frozenset({"output://app"})
+
+    def test_multi_hop_static_library_link_unit_chain_resolves(self):
+        # Symmetric with the target-graph channel's own two-hop
+        # object_library -> static_library -> shared_library test
+        # (test_object_library_folds_transitively_through_static_library) --
+        # the link-unit channel's own transitive resolution must go more
+        # than one static-library hop deep too: libbase.a is itself an
+        # input to libmid.a, which is an input to the terminal executable.
+        ev = BuildEvidence(
+            compile_units=[
+                CompileUnit(id="cu://a", source="src/a.cpp", output="build/a.o"),
+            ],
+            link_units=[
+                LinkUnit(
+                    id="link://build/libbase.a",
+                    output="build/libbase.a",
+                    kind="static_library",
+                    inputs=["build/a.o"],
+                ),
+                LinkUnit(
+                    id="link://build/libmid.a",
+                    output="build/libmid.a",
+                    kind="static_library",
+                    inputs=["build/libbase.a"],
+                ),
+                LinkUnit(
+                    id="link://build/app",
+                    output="build/app",
+                    kind="executable",
+                    inputs=["build/libmid.a"],
                 ),
             ],
         )

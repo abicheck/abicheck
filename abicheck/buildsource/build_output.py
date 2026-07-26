@@ -624,7 +624,16 @@ def _inferred_evidence_projection_issues(
         # to zero matches and hard-fail validation.
         expected_identities = {f"target://{t.id}"}
         if t.binary:
-            expected_identities.add(f"output://{PurePosixPath(t.binary).name}")
+            # normalize_source_path first (backslash -> forward slash), not a
+            # raw PurePosixPath(t.binary).name -- link_attribution.py builds
+            # this identity the same way (normalize_source_path(lu.output)
+            # before taking .name), and a Windows-style t.binary would
+            # otherwise never match: PurePosixPath treats a backslash as an
+            # ordinary character, not a separator, so .name would return the
+            # whole string instead of just the basename (code review finding).
+            expected_identities.add(
+                f"output://{PurePosixPath(normalize_source_path(t.binary)).name}"
+            )
         matched = sum(
             1
             for tu in tus

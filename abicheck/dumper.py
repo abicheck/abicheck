@@ -1342,11 +1342,13 @@ def dump(
         gcc_option_tokens=gcc_option_tokens,
         lang=lang,
         public_headers=effective_public_headers,
-        public_header_dirs=list(
-            dict.fromkeys(
-                [*(effective_public_header_dirs or []), *(scope_header_dirs or [])]
-            )
-        ),
+        # Union, duplicates and all -- compute_extraction_contract's own
+        # _normalize() already folds through a set before sorting, so
+        # pre-deduping here would only be redundant work (code review).
+        public_header_dirs=[
+            *(effective_public_header_dirs or []),
+            *(scope_header_dirs or []),
+        ],
         extra_include_labels=extra_include_labels,
         dump_manifest=dump_manifest,
     )

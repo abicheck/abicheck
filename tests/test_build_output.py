@@ -737,6 +737,69 @@ class TestInferredEvidenceProjection:
         report = validate_build_output(root)
         assert report.ok, report.errors
 
+    def test_make_style_attribution_with_backslash_binary_path_passes(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression pin (code review, PR #632): the output://{basename}
+        identity built from ``t.binary`` must normalize backslashes the same
+        way ``link_attribution.py`` normalizes ``LinkUnit.output`` before
+        taking the basename, or a Windows-style ``t.binary`` never matches --
+        ``PurePosixPath`` treats a bare backslash as an ordinary character,
+        not a separator, so an un-normalized ``.name`` would return the
+        whole string instead of just the basename."""
+        from abicheck.buildsource.build_evidence import (
+            BuildEvidence,
+            CompileUnit,
+            LinkUnit,
+        )
+
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        binary_rel = "artifacts\\lib\\libfoo.so"
+        digest = _binary(root, binary_rel)
+        pack_dir = root / "evidence" / "abicheck_inputs"
+        (pack_dir / "source_facts").mkdir(parents=True)
+        (pack_dir / "manifest.json").write_text(json.dumps({"kind": "abicheck_inputs"}))
+        (pack_dir / "source_facts" / "tu0.jsonl").write_text(
+            json.dumps({"tu_id": "cu://src/foo.cpp", "source": "src/foo.cpp"}) + "\n"
+        )
+        evidence = BuildEvidence(
+            compile_units=[
+                CompileUnit(id="cu://src/foo.cpp", source="src/foo.cpp", output="src/foo.o"),
+            ],
+            link_units=[
+                LinkUnit(
+                    id="link://libfoo.so",
+                    output="libfoo.so",
+                    kind="shared_library",
+                    inputs=["src/foo.o"],
+                ),
+            ],
+        )
+        _write_attribution(root, "evidence/attribution.json", evidence)
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": binary_rel,
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "evidence/abicheck_inputs",
+                                "projection": "inferred",
+                                "attribution_path": "evidence/attribution.json",
+                            },
+                        }
+                    ],
+                    "digests": {binary_rel: f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert report.ok, report.errors
+
     def test_shared_pack_across_two_inferred_targets_passes(self, tmp_path: Path) -> None:
         """The defining case 'declared' rejects outright: two targets
         pointing at the SAME physical evidence.path, both 'inferred' — must
