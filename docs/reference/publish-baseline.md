@@ -34,14 +34,29 @@ Neither workflow re-reads the project's `.abicheck.yml`. Every library a
 contract profile's build produced — and whether it is a release-bundle
 member — is already recorded in that profile's own `build-output.json`
 (`targets[].id`, `.binary`, `.public_header_roots`/`.generated_header_roots`,
-`.bundle`). `abicheck build-output baseline-libraries DIRECTORY` (backed by
-`abicheck.buildsource.baseline_publish.derive_baseline_libraries`) projects
-that straight into `actions/baseline`'s `libraries` JSON array — one entry
-per target, `stage_binary: true` set exactly for targets whose `bundle`
-field is non-empty.
+`.bundle`). `abicheck.buildsource.baseline_publish.derive_baseline_libraries`
+projects that straight into `actions/baseline`'s `libraries` JSON array — one
+entry per target, `stage_binary: true` set exactly for targets whose
+`bundle` field is non-empty.
+
+> **Not a CLI command.** This used to be `abicheck build-output
+> baseline-libraries DIRECTORY`; [ADR-054](../contribute/adr/054-cli-project-integration-surface-consolidation.md)
+> removed it from the public CLI — it was a wire-format adapter for exactly
+> these two workflows' `actions/baseline` input, not a general-purpose
+> operation. Both workflows now call the function directly:
 
 ```bash
-abicheck build-output baseline-libraries abicheck-build-linux-x86_64-gcc/
+python3 -c "
+import json
+from pathlib import Path
+from abicheck.buildsource.baseline_publish import derive_baseline_libraries
+from abicheck.buildsource.build_output import load_build_output
+
+directory = Path('abicheck-build-linux-x86_64-gcc')
+build_output = load_build_output(directory)
+report = derive_baseline_libraries(build_output, directory)
+Path('baseline-libraries.json').write_text(json.dumps(report.to_dict()))
+"
 ```
 
 ```json
@@ -55,9 +70,12 @@ abicheck build-output baseline-libraries abicheck-build-linux-x86_64-gcc/
 }
 ```
 
-Exit codes: `0` every target resolved; `1` one or more targets could not be
-resolved (missing/escaping binary or header path — see `errors`); `64`
-usage error (`DIRECTORY` is not a readable `build-output.json`).
+`report.ok` is `True` when every target resolved; `False` when one or more
+targets could not be resolved (missing/escaping binary or header path — see
+`report.errors`). `load_build_output` raises `FileNotFoundError`/`ValueError`
+when `DIRECTORY` is not a readable `build-output.json` — both workflows
+catch that and skip writing `baseline-libraries.json` at all, deferring to
+their own follow-up step's "was not produced" error.
 
 ## Bundle members: why `stage_binary` matters
 

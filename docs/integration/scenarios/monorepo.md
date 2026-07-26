@@ -30,7 +30,7 @@ targets:
         depth: headers
 ```
 
-> **No built-in changed-path filter yet.** `abicheck run-plan generate`
+> **No built-in changed-path filter yet.** `abicheck project plan`
 > ([Run Plan Schema](../../reference/run-plan-schema.md)) does not currently
 > accept a `--changed-path`/`--since` selector to filter `checks[]` down to
 > only the components a given diff touched — every declared target's checks

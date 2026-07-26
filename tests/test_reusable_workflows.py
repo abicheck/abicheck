@@ -365,9 +365,10 @@ class TestCheckProjectStepOrdering:
 
 
 class TestCheckProjectFailsLoudOnEmptyRunPlan:
-    """An empty run-plan.json (checks[] == []) is only a WARNING from
-    `abicheck run-plan generate`, not an error -- but `check`/`aggregate`
-    are both gated on has-checks == 'true', so an empty run used to skip
+    """`abicheck project plan` is fail-closed by default on an empty
+    checks[] (ADR-054), but this workflow's plan step passes --allow-empty
+    so it degrades to a WARNING instead -- `check`/`aggregate` are both
+    gated on has-checks == 'true', so an empty run would otherwise skip
     both and report the whole workflow as a success having gated nothing.
     The `no-checks` job exists to fail that case loud instead (self-review
     finding, not from an external review round)."""
@@ -407,35 +408,29 @@ class TestCheckProjectMatrixWiring:
         steps = _steps(data["jobs"]["plan"])
         plan_step = next(s for s in steps if s.get("name") == "Generate run-plan.json")
         run = plan_step["run"]
-        assert "run-plan generate" in run
+        assert "project plan" in run
+        assert "--allow-empty" in run
         assert "plan.get('checks'" in run or "checks = plan.get" in run
 
 
 class TestCheckProjectAggregateManifestProjection:
-    """ADR-047 §5's required sub-task: project run-plan.json to
-    `aggregate --manifest`'s wire shape using each check's own check_id,
-    not the bare target name, via `abicheck run-plan to-aggregate-manifest`
-    -- never passing run-plan.json straight through to `aggregate`."""
+    """ADR-047 §5's required sub-task: aggregate matches reports by each
+    check's own check_id, not the bare target name -- via `abicheck
+    aggregate --run-plan run-plan.json`, which projects run-plan.json to
+    the expected-target set internally (ADR-054), no separate projection
+    step or intermediate manifest file."""
 
-    def test_aggregate_job_calls_the_projection_command(self) -> None:
+    def test_aggregate_command_consumes_run_plan_directly(self) -> None:
         data = _load(CHECK_PROJECT)
         steps = _steps(data["jobs"]["aggregate"])
-        project_step = next(
-            s
+        assert not any(
+            s.get("name") == "Project run-plan.json to an aggregate manifest"
             for s in steps
-            if s.get("name") == "Project run-plan.json to an aggregate manifest"
         )
-        assert "run-plan to-aggregate-manifest" in project_step["run"]
-
-    def test_aggregate_command_consumes_the_projected_manifest_not_run_plan_directly(
-        self,
-    ) -> None:
-        data = _load(CHECK_PROJECT)
-        steps = _steps(data["jobs"]["aggregate"])
         aggregate_step = next(s for s in steps if s.get("name") == "Run aggregate")
         run = aggregate_step["run"]
-        assert "aggregate-manifest.json" in run
-        assert "run-plan.json" not in run.replace("run-plan.json --", "")
+        assert "--run-plan run-plan.json" in run
+        assert "aggregate-manifest.json" not in run
 
 
 class TestCheckProjectArtifactNaming:
@@ -829,7 +824,7 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
 
     def test_plan_step_forwards_toolchain_bindings_path_when_set(self) -> None:
         """Generate run-plan.json's shell step must actually pass
-        --toolchain-bindings through to `abicheck run-plan generate` when
+        --toolchain-bindings through to `abicheck project plan` when
         the workflow input is non-empty -- otherwise the input above would
         be silently inert."""
         data = _load(CHECK_PROJECT)
