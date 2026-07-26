@@ -91,14 +91,18 @@ passes an already-loaded *resolved_bindings* mapping to
 ``--toolchain-bindings`` file is the CLI layer's job, same split as
 ``build_outputs`` above); with no mapping, or a binding id absent from it,
 ``compile_gcc_path`` stays empty and a caller's own ``gcc-path``/global
-fallback applies. ``compiler_family``/``compiler_version`` are deliberately
-**not** projected into any forwarded field yet -- ``compiler_family``
-selects a toolchain only through ``binding`` (there is no separate "pick a
-family" invocation flag), and ``compiler_version`` is a *constraint* (e.g.
-``">=14.0,<15"``), not a value to pass through; verifying a resolved
-binding's actual version against it needs a real toolchain-identity probe
-(subprocess), which stays out of this module by design -- a documented gap,
-not an oversight.
+fallback applies. ``compiler_family`` selects a toolchain only through
+``binding`` (there is no separate "pick a family" invocation flag); the P0
+toolchain-profile-rendering audit additionally consults it inside
+:func:`_compose_gcc_options` to drop the two Clang-only flag spellings
+(``-stdlib=``/``--target=``) an explicit ``compiler_family: gcc`` cannot
+accept, but that is the full extent of family-awareness here -- there is
+still no per-family argv resolver (MSVC ``/std:``/``/D`` spellings, e.g.)
+and ``compiler_version`` is still not projected anywhere. ``compiler_version``
+is a *constraint* (e.g. ``">=14.0,<15"``), not a value to pass through;
+verifying a resolved binding's actual version against it needs a real
+toolchain-identity probe (subprocess), which stays out of this module by
+design -- a documented gap, not an oversight.
 """
 
 from __future__ import annotations
@@ -131,6 +135,20 @@ def _opt_str(value: Any, default: str = "") -> str:
     return str(value) if isinstance(value, str) and value else default
 
 
+#: ``compiler_family`` values (case-insensitively matched) for which
+#: :func:`_compose_gcc_options` omits ``-stdlib=``/``--target=`` --
+#: Clang-driver spellings a real GCC binary does not accept (confirmed
+#: against GCC 14.2: ``g++ -stdlib=libstdc++`` and ``g++
+#: --target=x86_64-linux-gnu`` both fail with "unrecognized command-line
+#: option"). Left unfiltered when ``compiler_family`` is empty/unset (the
+#: pre-existing default, still forwarded to castxml's own Clang-based
+#: ``--castxml-cc-gnu``/``--castxml-cc-msvc`` emulation frontend, which
+#: tolerates both spellings regardless of emulated family -- see
+#: ``source_extractors/castxml.py::build_castxml_command``) or ``"clang"``
+#: (both flags are native Clang spellings).
+_GCC_FAMILY_NAMES = frozenset({"gcc", "g++", "gnu"})
+
+
 def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
     """Compose ``compile_spec``'s standard/stdlib/target/abi_macros/args axes
     into one space-joined extra-flags string, forwarded verbatim as
@@ -145,13 +163,25 @@ def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
     deterministic output; ``args`` are appended verbatim, in declared
     order, last -- the operator's own explicit escape hatch wins over the
     structured axes this function derives flags from.
+
+    **Family-aware since the P0 toolchain-profile-rendering audit:** an
+    explicit ``compiler_family: gcc`` (see :data:`_GCC_FAMILY_NAMES`) drops
+    ``-stdlib=``/``--target=`` -- see that data's docstring for why. This is
+    a narrow, confirmed-safe correction, not the full family-specific argv
+    resolver the toolchain-profile-execution-contract work still owes
+    (compiler_version enforcement, a real MSVC ``/std:``/``/D`` renderer,
+    profile-specific frontend selection -- deliberately out of scope here;
+    see AGENTS.md's "Known gaps" entry, "Toolchain-profile compiler-family
+    rendering -- narrowly fixed, not the full execution contract").
     """
+    family = compile_spec.compiler_family.strip().lower()
+    is_gcc = family in _GCC_FAMILY_NAMES
     parts: list[str] = []
     if compile_spec.standard:
         parts.append(f"-std={compile_spec.standard}")
-    if compile_spec.stdlib:
+    if compile_spec.stdlib and not is_gcc:
         parts.append(f"-stdlib={compile_spec.stdlib}")
-    if compile_spec.target:
+    if compile_spec.target and not is_gcc:
         parts.append(f"--target={compile_spec.target}")
     for name in sorted(compile_spec.abi_macros):
         value = compile_spec.abi_macros[name]

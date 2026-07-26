@@ -33,12 +33,16 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.buildsource.build_output import BuildOutput, BuildOutputTarget
-from abicheck.buildsource.project_targets import ProjectTargetsConfig
+from abicheck.buildsource.project_targets import (
+    ProfileCompileSpec,
+    ProjectTargetsConfig,
+)
 from abicheck.buildsource.run_plan import (
     RUN_PLAN_KIND_BUNDLE,
     RUN_PLAN_KIND_TARGET,
     RunPlan,
     RunPlanCheck,
+    _compose_gcc_options,
     generate_run_plan,
     to_aggregate_manifest,
 )
@@ -743,6 +747,63 @@ class TestProfileCompileOverlayProjection:
         assert check.compile_gcc_options == "-std=gnu++20"
 
 
+class TestComposeGccOptionsFamilyAware:
+    """P0 toolchain-profile-rendering audit: an explicit ``compiler_family:
+    gcc`` must not emit ``-stdlib=``/``--target=`` -- Clang-driver spellings
+    a real GCC binary rejects (confirmed against GCC 14.2 manually; see
+    AGENTS.md's "Known gaps" entry, "Toolchain-profile compiler-family
+    rendering", and tests/fixtures/run_plan/toolchain_matrix/README.md)."""
+
+    _compose = staticmethod(_compose_gcc_options)
+
+    def _spec(self, **kw: object) -> ProfileCompileSpec:
+        return ProfileCompileSpec(**kw)  # type: ignore[arg-type]
+
+    def test_gcc_family_omits_stdlib_and_target(self) -> None:
+        spec = self._spec(
+            compiler_family="gcc",
+            standard="gnu++17",
+            stdlib="libstdc++",
+            target="x86_64-linux-gnu",
+        )
+        assert self._compose(spec) == "-std=gnu++17"
+
+    def test_gcc_family_matching_is_case_insensitive(self) -> None:
+        spec = self._spec(compiler_family="GCC", stdlib="libstdc++")
+        assert self._compose(spec) == ""
+
+    def test_clang_family_keeps_stdlib_and_target(self) -> None:
+        spec = self._spec(
+            compiler_family="clang",
+            standard="gnu++20",
+            stdlib="libc++",
+            target="x86_64-linux-gnu",
+        )
+        assert self._compose(spec) == (
+            "-std=gnu++20 -stdlib=libc++ --target=x86_64-linux-gnu"
+        )
+
+    def test_unset_family_keeps_prior_default_behaviour(self) -> None:
+        """Backward compat: with no compiler_family declared at all, the
+        (castxml-consumed) output is unchanged from before this audit."""
+        spec = self._spec(
+            standard="gnu++17", stdlib="libstdc++", target="x86_64-linux-gnu"
+        )
+        assert self._compose(spec) == (
+            "-std=gnu++17 -stdlib=libstdc++ --target=x86_64-linux-gnu"
+        )
+
+    def test_gcc_family_still_emits_standard_macros_and_args(self) -> None:
+        spec = self._spec(
+            compiler_family="gcc",
+            standard="gnu++17",
+            stdlib="libstdc++",
+            abi_macros={"FOO": "1"},
+            args=["-fno-rtti"],
+        )
+        assert self._compose(spec) == "-std=gnu++17 -DFOO=1 -fno-rtti"
+
+
 class TestToolchainMatrixFixtureExample:
     """Loads the committed toolchain-matrix reference example
     (``tests/fixtures/run_plan/toolchain_matrix/``, task #9) — not an inline
@@ -781,7 +842,10 @@ class TestToolchainMatrixFixtureExample:
 
         gcc = by_profile["linux-gcc14"]
         assert gcc.compile_gcc_path == "/opt/gcc-14.2.0/bin/g++"
-        assert gcc.compile_gcc_options == "-std=gnu++17 -stdlib=libstdc++"
+        # compiler_family: gcc drops -stdlib= (Clang-only spelling, P0
+        # toolchain-profile-rendering audit) even though .abicheck.yml
+        # declares compile.stdlib: libstdc++ -- see this fixture's README.
+        assert gcc.compile_gcc_options == "-std=gnu++17"
 
         clang = by_profile["linux-clang20"]
         assert clang.compile_gcc_path == "/opt/llvm-20/bin/clang++"
@@ -811,10 +875,7 @@ class TestToolchainMatrixFixtureExample:
         assert result.exit_code == 0, result.output
         data = json.loads(result.stdout)
         by_profile = {c["profile_id"]: c for c in data["checks"]}
-        assert (
-            by_profile["linux-gcc14"]["compile_gcc_options"]
-            == "-std=gnu++17 -stdlib=libstdc++"
-        )
+        assert by_profile["linux-gcc14"]["compile_gcc_options"] == "-std=gnu++17"
         assert (
             by_profile["linux-clang20"]["compile_gcc_options"]
             == "-std=gnu++20 -stdlib=libc++ -DMATRIXDEMO_ABI_V2=1 -fno-rtti"

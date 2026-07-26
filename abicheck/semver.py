@@ -141,10 +141,24 @@ class ReleaseRecommendation:
     rationale: str
     state: ReleaseRecommendationState = ReleaseRecommendationState.ACTIONABLE
 
-    def to_dict(self) -> dict[str, str]:
-        """Serialise for JSON reports (additive ``release_recommendation`` key)."""
+    def to_dict(self) -> dict[str, str | None]:
+        """Serialise for JSON reports (additive ``release_recommendation`` key).
+
+        ``version_bump`` is ``null`` when :attr:`state` is ``UNAVAILABLE`` —
+        the confident-looking ``"major"`` literal previously survived
+        serialization even though the docstring/rationale explain abicheck
+        could not confirm it, which let automation blindly act on a bump it
+        had no real evidence for. The still-plausible bump is only in
+        ``rationale`` prose then; ``self.bump`` itself (and ``headline()``)
+        keep the pre-serialization value for human-facing callers that
+        already gate on ``state``.
+        """
         return {
-            "version_bump": self.bump.value,
+            "version_bump": (
+                None
+                if self.state == ReleaseRecommendationState.UNAVAILABLE
+                else self.bump.value
+            ),
             "soname_action": self.soname.value,
             "rationale": self.rationale,
             "state": self.state.value,

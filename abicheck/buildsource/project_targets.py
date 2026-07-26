@@ -441,7 +441,47 @@ class BundleSpec:
         return cls(id=name, targets=[str(t) for t in targets], checks=checks)
 
 
-def _safe_profile_atom(where: str, key: str, value: str) -> str:
+#: Flags that reach a compiler frontend's own plugin/response-file/spec-
+#: substitution machinery rather than an ABI-relevant compile axis. Each is
+#: a single whitespace-free atom (so ``_safe_profile_atom``'s smuggling
+#: check alone does not reject it) that either loads arbitrary code into the
+#: compiler process (``-Xclang``/``-load``/``-fplugin=``/``-fpass-plugin=``),
+#: re-expands attacker-controlled file content into more argv
+#: (``@response-file``), or substitutes the compiler driver's own trusted
+#: built-in command line for one read from disk (``-specs=``/``-wrapper``).
+#: ``profiles.<id>.compile.args`` is documented (this module's docstring,
+#: ``ProfileCompileSpec``'s own docstring) as a "normalized extra args"
+#: escape hatch for ABI-relevant flags an auto-discovered, untrusted
+#: ``.abicheck.yml`` may declare — never an executable-code path. Checked as
+#: an exact match or a prefix (for the ``=``-joined spellings) against each
+#: ``args`` atom; case-sensitive, matching how compiler CLIs themselves
+#: parse these flags.
+_DANGEROUS_ARG_PREFIXES = (
+    "-Xclang",
+    "-load",
+    "-fplugin=",
+    "-fplugin-arg-",
+    "-fpass-plugin=",
+    "-specs=",
+    "-specs",
+    "-wrapper",
+    "@",
+)
+
+
+def _reject_dangerous_arg(where: str, key: str, value: str) -> None:
+    if any(value == p or value.startswith(p) for p in _DANGEROUS_ARG_PREFIXES):
+        raise ValueError(
+            f"{where}.{key} entry {value!r} is not allowed: it reaches a "
+            "compiler plugin/response-file/spec-substitution mechanism, not "
+            "an ABI-relevant compile flag — an auto-discovered "
+            "profiles.compile.args cannot declare executable configuration"
+        )
+
+
+def _safe_profile_atom(
+    where: str, key: str, value: str, *, reject_dangerous: bool = False
+) -> str:
     """Reject a compiler-option atom that could smuggle multiple flags/args.
 
     Mirrors ``buildsource.inline.BuildConfig``'s own ``_safe_compile_atom``:
@@ -453,9 +493,17 @@ def _safe_profile_atom(where: str, key: str, value: str) -> str:
     YAML scalar become several argv tokens (e.g. ``"gnu++17 -Xclang -load
     ./evil.so"``), so it is rejected here at parse time regardless of whether
     a consumer resolves this field into argv yet.
+
+    ``reject_dangerous`` additionally runs :func:`_reject_dangerous_arg` —
+    set only for ``args`` (the one field appended to compiler argv as
+    standalone flags rather than folded into a fixed ``-std=``/``-D<name>=``
+    prefix, so it is the sole atom-level plugin/response-file injection
+    vector; see :data:`_DANGEROUS_ARG_PREFIXES`).
     """
     if not value or any(ch.isspace() for ch in value):
         raise ValueError(f"{where}.{key} must be a single option atom, got {value!r}")
+    if reject_dangerous:
+        _reject_dangerous_arg(where, key, value)
     return value
 
 
@@ -573,7 +621,7 @@ class ProfileCompileSpec:
         for a in args_raw:
             if not isinstance(a, str):
                 raise ValueError(f"{where}.args must be a list of strings, got {a!r}")
-            args.append(_safe_profile_atom(where, "args", a))
+            args.append(_safe_profile_atom(where, "args", a, reject_dangerous=True))
 
         return cls(
             compiler_family=str_fields.get("compiler_family", ""),

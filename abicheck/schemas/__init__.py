@@ -227,7 +227,20 @@ from typing import Any
 #:       cap), and ``occurrence_id`` (a hash over the path's edges' own graph
 #:       occurrences, independent of ``description`` text). All absent for
 #:       the common single-candidate/no-occurrence-data case.
-REPORT_SCHEMA_VERSION = "2.19"
+#:   2.20: ``release_recommendation.version_bump`` gains ``null`` as a valid
+#:       value (P0 evidence-recommendation-honesty audit): previously the
+#:       field always serialized a plausible-looking ``"major"`` literal even
+#:       when ``state`` was ``"unavailable"`` (no real evidence backs the
+#:       bump), which let automation reading ``version_bump`` alone act on a
+#:       release action abicheck explicitly could not confirm. Now
+#:       ``version_bump`` is ``null`` whenever ``state == "unavailable"``;
+#:       the still-plausible bump, if any, remains readable from
+#:       ``rationale`` prose. A consumer that only reads ``state`` (as the
+#:       2.14 addition intended) is unaffected; a consumer that reads
+#:       ``version_bump`` without checking ``state`` first must now handle
+#:       ``null``, which is why this is a relaxed-constraint MINOR bump, not
+#:       a MAJOR one (the enum widened, no existing value changed meaning).
+REPORT_SCHEMA_VERSION = "2.20"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

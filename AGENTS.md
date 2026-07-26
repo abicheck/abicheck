@@ -427,6 +427,31 @@ Pick the right home:
   can be slotted into CRITICAL/HIGH without restructuring, but there is
   only one maintainer today — don't read the tiering as "these are reviewed
   by different people," it isn't, yet.
+- **Toolchain-profile compiler-family rendering — narrowly fixed, not the
+  full execution contract.** An external audit found `run_plan.py`'s
+  `_compose_gcc_options()` composing `-stdlib=`/`--target=` unconditionally
+  for any `profiles.<id>.compile` overlay, even when
+  `compile.compiler_family: gcc` — both are Clang-driver-only spellings a
+  real GCC binary rejects (confirmed against GCC 14.2). That specific
+  correctness bug is fixed: those two flags are now omitted whenever
+  `compiler_family` resolves to a GCC family name (case-insensitive
+  `gcc`/`g++`/`gnu`); `clang` and an unset `compiler_family` (the
+  pre-existing default) are unaffected. The same audit flagged a real trust-
+  boundary gap in `profiles.<id>.compile.args`: the existing whitespace-
+  smuggling check (`_safe_profile_atom`) rejected one YAML scalar expanding
+  into multiple argv tokens, but not a single, whitespace-free dangerous
+  atom (`-Xclang`, `-load`, `-fplugin=`, `-fpass-plugin=`, `-specs=`,
+  `-wrapper`, `@response-file`) — each now individually rejected. Still
+  **not** implemented, and out of scope for that fix (each needs its own
+  scoped design, not a drive-by extension of the same narrow correction):
+  a real toolchain-identity probe that validates a resolved `binding`'s
+  actual compiler family/version/target against the profile's declared
+  constraints (`compiler_version` is still parsed but never checked against
+  anything); a profile-specific AST frontend (there is still only one
+  global `--ast-frontend`); and a genuine family-specific argv resolver —
+  in particular MSVC `/std:`/`/D` spellings, which this fix does not
+  attempt (no `compiler_family: msvc` caller/test exists yet to validate
+  against, and a wrong guess here is worse than the pre-existing gap).
 - **Deferred entirely, not attempted this pass** (heavier structural
   changes, each needing its own scoped design rather than a drive-by
   addition):

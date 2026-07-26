@@ -25,7 +25,8 @@ that gate: a supported range for CastXML itself plus a minimum bundled/linked
 Clang major, checked once before the L2 scan runs.
 
 The floor targets the legacy PyPI ``castxml`` distribution specifically
-(last released as 0.4.5 in 2018, with no bundled-Clang metadata at all) —
+(last released as 0.4.5 in September 2022, with no bundled-Clang metadata
+at all) —
 that is exactly what this gate is meant to catch and reject by default. The
 floor is *not* pinned to conda-forge's current ``castxml`` feedstock line: the
 CastXML Superbuild (github.com/CastXML/CastXMLSuperbuild, what
