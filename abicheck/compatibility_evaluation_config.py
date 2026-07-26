@@ -391,6 +391,15 @@ class CompatibilityPolicyConfig:
     overrides: Mapping[str, Verdict] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.base, ImmutableIdentity):
+            raise TypeError(
+                "CompatibilityPolicyConfig.base must be an ImmutableIdentity, "
+                f"not {self.base!r} -- the `base: ImmutableIdentity` "
+                "annotation isn't runtime-enforced, so an untyped service/"
+                "manifest adapter could otherwise pass a bare slug (e.g. "
+                '"strict_abi") through to a config that cannot support exact '
+                "replay (ADR-049 D6)."
+            )
         unknown = sorted(set(self.overrides) - _VALID_CHANGE_KIND_SLUGS)
         if unknown:
             raise ValueError(
@@ -446,6 +455,12 @@ class GateConfig:
                 f"{sorted(_VALID_EXIT_CODE_SCHEMES)} (ADR-037 D12; 'auto' is "
                 "a resolution-time choice, not a valid resolved value), got "
                 f"{self.exit_code_scheme!r}"
+            )
+        if self.preset is not None and not isinstance(self.preset, ImmutableIdentity):
+            raise TypeError(
+                "GateConfig.preset must be an ImmutableIdentity or None, not "
+                f"{self.preset!r} -- same replay-exactness gap as "
+                "CompatibilityPolicyConfig.base (ADR-049 D6)."
             )
         object.__setattr__(
             self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)

@@ -117,6 +117,13 @@ class TestConstruction:
                 overrides={"func_removed": "break"},
             )
 
+    def test_raw_string_base_is_rejected(self):
+        # base: ImmutableIdentity isn't runtime-enforced -- an untyped
+        # service/manifest adapter passing a bare slug through would freeze
+        # a config that can't support exact replay.
+        with pytest.raises(TypeError, match="CompatibilityPolicyConfig.base"):
+            CompatibilityPolicyConfig(base="strict_abi")  # type: ignore[arg-type]
+
 
 class TestContractConfigUnresolvedBehavior:
     # ADR-049 D9: unresolved_behavior is a closed two-value vocabulary
@@ -522,6 +529,20 @@ class TestGateConfigExitCodeScheme:
     def test_unsupported_value_is_a_value_error(self):
         with pytest.raises(ValueError, match="exit_code_scheme"):
             GateConfig(exit_code_scheme="severty")
+
+    def test_none_preset_is_accepted(self):
+        gate = GateConfig()
+        assert gate.preset is None
+
+    def test_real_identity_preset_is_accepted(self):
+        gate = GateConfig(preset=_identity("strict_gate"))
+        assert gate.preset == _identity("strict_gate")
+
+    def test_raw_string_preset_is_rejected(self):
+        # Same class of gap as CompatibilityPolicyConfig.base: preset:
+        # ImmutableIdentity | None isn't runtime-enforced.
+        with pytest.raises(TypeError, match="GateConfig.preset"):
+            GateConfig(preset="strict_gate")  # type: ignore[arg-type]
 
 
 class TestDigestedItems:
