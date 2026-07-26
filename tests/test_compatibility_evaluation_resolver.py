@@ -533,6 +533,23 @@ class TestDetectPackConflicts:
         with pytest.raises(TypeError, match="detect_pack_conflicts"):
             detect_pack_conflicts([], explicit_overrides={2: "legacy"})  # type: ignore[dict-item]
 
+    def test_unhashable_explicit_override_value_is_rejected(self):
+        # Codex review, fresh evidence: this function only ever does
+        # `field_name in explicit_overrides` (a key-only membership check),
+        # so an unhashable value (e.g. {"exit_code_scheme": []}) previously
+        # passed through silently and still exempted the field from
+        # conflict detection -- two packs assigning conflicting values
+        # would return successfully even though no real override value was
+        # ever validated.
+        with pytest.raises(TypeError, match="detect_pack_conflicts"):
+            detect_pack_conflicts(
+                [
+                    (_pack("security_hardening"), {"exit_code_scheme": "severity"}),
+                    (_pack("release_governance"), {"exit_code_scheme": "legacy"}),
+                ],
+                explicit_overrides={"exit_code_scheme": []},  # type: ignore[dict-item]
+            )
+
     def test_non_mapping_explicit_overrides_is_rejected(self):
         # Codex review: the `Mapping[str, Hashable]` annotation isn't
         # runtime-enforced -- an untyped pack adapter passing a plain

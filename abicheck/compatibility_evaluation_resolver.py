@@ -414,6 +414,23 @@ def detect_pack_conflicts(
             "detect_pack_conflicts: explicit_overrides keys must be str, "
             f"not: {non_string_override_keys}"
         )
+    # The `Hashable` annotation on values isn't runtime-enforced either --
+    # an unhashable value (e.g. {"exit_code_scheme": []}) can never be a
+    # genuinely resolved final override, but this function only ever does
+    # `field_name in explicit_overrides` (a key-only membership check), so
+    # an unhashable *value* previously passed through silently and still
+    # exempted the field from conflict detection even though no real
+    # override value was ever validated (Codex review, fresh evidence) --
+    # the same defense-in-depth pack assignment values already get.
+    for override_field_name, override_value in explicit_overrides.items():
+        try:
+            hash(override_value)
+        except TypeError as exc:
+            raise TypeError(
+                "detect_pack_conflicts: explicit_overrides value for field "
+                f"{override_field_name!r} must be hashable, not "
+                f"{override_value!r} ({exc})."
+            ) from exc
     by_field: dict[str, list[tuple[ImmutableIdentity, Hashable]]] = {}
     for identity, assignments in pack_assignments:
         # A future untyped pack-manifest adapter supplying a bare/decoded
