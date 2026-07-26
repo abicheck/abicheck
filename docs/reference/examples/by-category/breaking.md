@@ -90,7 +90,7 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case115_bit_int_width_changed](../case115_bit_int_width_changed.md) | _BitInt(N) Width Change (C23 64 → 128) | 🔴 BREAKING | Breaking |
 | [case116_atomic_qualifier_changed](../case116_atomic_qualifier_changed.md) | _Atomic Qualifier Added (C11) | 🔴 BREAKING | Breaking |
 | [case117_no_unique_address](../case117_no_unique_address.md) | [[no_unique_address]] Layout Overlay (no dedicated ChangeKind) | 🔴 BREAKING | Breaking |
-| [case121_kernel_btf_struct_field_added](../case121_kernel_btf_struct_field_added.md) | Kernel BTF struct grows a field (out-of-tree module break) | 🔴 BREAKING | Breaking |
+| [case121_kernel_btf_struct_field_added](../case121_kernel_btf_struct_field_added.md) | Kernel BTF Struct Field Growth | 🔴 BREAKING | Breaking |
 | [case126_sycl_device_impl_ptr](../case126_sycl_device_impl_ptr.md) | SYCL `device` Impl Pointer — `shared_ptr` → Raw Pointer | 🔴 BREAKING | Breaking |
 | [case127_data_object_size_changed](../case127_data_object_size_changed.md) | Exported Data Object Size Changed | 🔴 BREAKING | Breaking |
 | [case129_struct_return_convention](../case129_struct_return_convention.md) | Struct-Return Convention Change | 🔴 BREAKING | Breaking |

@@ -168,7 +168,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case118_internal_struct_field_added_scoped](case118_internal_struct_field_added_scoped.md) | Internal Struct Gains a Field (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
 | [case119_internal_struct_field_removed_scoped](case119_internal_struct_field_removed_scoped.md) | Internal Struct Loses a Field (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
 | [case120_internal_struct_reordered_scoped](case120_internal_struct_reordered_scoped.md) | Internal Struct Fields Reordered (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
-| [case121_kernel_btf_struct_field_added](case121_kernel_btf_struct_field_added.md) | Kernel BTF struct grows a field (out-of-tree module break) | 🔴 BREAKING | Breaking |
+| [case121_kernel_btf_struct_field_added](case121_kernel_btf_struct_field_added.md) | Kernel BTF Struct Field Growth | 🔴 BREAKING | Breaking |
 | [case122_template_signature_uninstantiated](case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case123_default_argument_removed](case123_default_argument_removed.md) | Default Argument Removed | 🟠 API_BREAK | API Break |
 | [case124_header_constant_value_changed](case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
