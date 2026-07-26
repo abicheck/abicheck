@@ -1,69 +1,76 @@
 # Case 166: Method Ref-Qualifier Added (`str()` → `str() &`)
 
-**Category:** Function Signature / Mangling | **Verdict:** BREAKING
+**Category:** Function Signature / Mangling | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-v2 adds an **lvalue ref-qualifier** to `MessageBuilder::str()`:
+v2 adds an **lvalue ref-qualifier** to `MessageBuilder::str()`. The
+motivation is sound API hardening — `MessageBuilder().str()` returns a
+pointer into a temporary that dies at the end of the expression, and `&`
+makes that dangling call a compile error — but the ref-qualifier is part of
+the Itanium mangling, encoded right after the CV-qualifiers in the
+nested-name. The old symbol `_ZN14MessageBuilder3strEv` vanishes from the
+library entirely (the new one is `_ZNR14MessageBuilder3strEv`), so every
+existing binary fails at load time with an undefined-symbol error —
+recompilation is mandatory even though no call site's *source* changed.
 
-```cpp
-const char* str();      // v1: callable on lvalues and rvalues
-const char* str() &;    // v2: lvalue-only
+## Old/new diff
+
+| v1.h | v2.h |
+|------|------|
+| `const char* str();` (`_ZN14MessageBuilder3strEv`) | `const char* str() &;` (`_ZNR14MessageBuilder3strEv`) |
+
+## abicheck command
+
+```bash
+g++ -shared -fPIC -g v1.cpp -o libv1.so
+g++ -shared -fPIC -g v2.cpp -o libv2.so
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --ast-frontend clang
 ```
 
-The motivation is sound API hardening: `MessageBuilder().str()` returns a
-pointer into a temporary that dies at the end of the expression, and the `&`
-qualifier makes that dangling call a compile error. But the ref-qualifier is
-part of the Itanium mangling — it is encoded right after the CV-qualifiers in
-the nested-name:
+## Expected abicheck finding
 
-| Declaration | Mangled symbol |
-|---|---|
-| `str()` | `_ZN14MessageBuilder3strEv` |
-| `str() &` | `_ZN`**`R`**`14MessageBuilder3strEv` |
-| `str() &&` | `_ZN`**`O`**`14MessageBuilder3strEv` |
+```text
+Verdict: BREAKING (exit 4)
 
-The old symbol vanishes from the library, so every existing binary fails at
-load time with an undefined-symbol error — a source-level annotation that is
-invisible at any call site becomes a hard ABI break.
+- func_removed: Public function removed: str
+  > Old binaries call a symbol that no longer exists; dynamic linker
+    will refuse to load or crash at call site.
+- func_ref_qual_changed: Ref-qualifier changed: str ('' → '&')
+  > Ref-qualifier (&/&&) on a member function changed; this alters the
+    Itanium C++ ABI mangled name and overload resolution, so old
+    binaries link to the wrong symbol or fail to resolve it.
 
-## Why this matters
-
-- **Ref-qualifiers look "free".** Unlike changing a parameter type, adding
-  `&`/`&&` doesn't change what well-behaved callers write, so it routinely
-  slips through review as a harmless tightening. It renames the symbol
-  exactly like adding `const` does (case 22).
-- **The `&&`-overload pattern is spreading.** Modern APIs add
-  `value() &&`-style move-out accessors (as `std::optional`/`std::expected`
-  do); retrofitting qualifiers onto an *existing* exported out-of-line method
-  is where the break happens. Header-only/inline methods are immune — exported
-  ones are not.
-- **Both directions break.** Removing a qualifier renames the symbol right
-  back (`ctor_explicit`-style one-way doors don't apply here).
-
-## Code diff
-
-```cpp
-// v1
-class MessageBuilder {
-public:
-    MessageBuilder& append(const char* part);
-    const char* str();            // _ZN14MessageBuilder3strEv
-};
-
-// v2
-class MessageBuilder {
-public:
-    MessageBuilder& append(const char* part);
-    const char* str() &;          // _ZNR14MessageBuilder3strEv  ← new symbol!
-};
+Additions:
+- func_added: New public function: str
 ```
 
-## Real Failure Demo
+abicheck matches the removed and added declarations by (name, parameters)
+and reports the pair as `func_ref_qual_changed` instead of leaving an
+unexplained removed+added pair unlinked.
+
+## Minimum evidence
+
+`min_evidence: L2` — released castxml versions do not emit a ref-qualifier
+attribute on the AST node, so abicheck needs the public header AST plus the
+Itanium mangling (`_ZNR…`/`_ZNO…`) to recover the qualifier; DWARF alone
+does not carry it. castxml is the documented default backend for this
+evidence layer; clang (`--ast-frontend clang`, used above) is a supported
+alternative AST frontend for hosts without castxml installed.
+
+## Why abicheck catches it
+
+abicheck parses the public header AST for each side's `str()` declaration
+and cross-references the mangled symbol name in `.dynsym`; the ref-qualifier
+bit recovered from the mangling (`R` = `&`, `O` = `&&`, absent = unqualified)
+lets it link the "removed" old symbol and "added" new symbol as one
+`func_ref_qual_changed` event rather than an opaque removal/addition pair.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-**Scenario:** compile app against v1, link to v2 `.so` without recompiling.
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
 
 ```bash
 # Build old library + app
@@ -78,39 +85,25 @@ g++ -shared -fPIC -g v2.cpp -o liblib.so
 # → ./app: symbol lookup error: ./app: undefined symbol: _ZN14MessageBuilder3strEv
 ```
 
-The app aborts before `main()` finishes symbol binding — the classic
-undefined-symbol loader failure.
+**Why CRITICAL:** the app aborts before `main()` finishes symbol binding —
+the classic undefined-symbol loader failure — even though no call site in
+the app's source changed.
 
-## How to fix
+## Safe redesign
 
-1. **Add, don't replace**: keep the unqualified `str()` exported (possibly as a
-   deprecated out-of-line definition forwarding to the qualified one) until the
-   next SONAME bump.
+1. **Add, don't replace**: keep the unqualified `str()` exported (possibly
+   as a deprecated out-of-line definition forwarding to the qualified one)
+   until the next SONAME bump.
 2. **Qualify at birth**: decide `&`/`&&` when the method is first shipped;
    qualifiers on day one cost nothing.
 3. **SONAME bump** if the hardening must land now.
 
-## Real-world example
-
-This is the same mechanics as the `const`-qualifier break (case 22), which the
-KDE binary-compatibility policy lists among the "you cannot..." rules: *any*
-change to a function's cv- or ref-qualification changes the mangled name. The
-`&&`-qualified accessor idiom popularized by `std::optional::value() &&`
-(C++17) made retrofit-qualifying older accessors a recurring temptation in
-library changelogs.
-
-## abicheck detection
-
-abicheck matches the removed and added declarations by (name, parameters) and
-reports `func_ref_qual_changed` (BREAKING) — `'' → '&'` — instead of leaving
-an unexplained removed+added pair. Detection needs the header AST
-(`min_evidence: L2`): released castxml versions do not emit a ref-qualifier
-attribute, so abicheck recovers it from the Itanium mangling (`_ZNR…`/`_ZNO…`).
-
-```bash
-abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
-# Verdict: BREAKING (func_ref_qual_changed: str, (none) → &)
-```
+**Real-world example:** this is the same mechanics as a `const`-qualifier
+break, which the KDE binary-compatibility policy lists among the "you
+cannot..." rules: *any* change to a function's cv- or ref-qualification
+changes the mangled name. The `&&`-qualified accessor idiom popularized by
+`std::optional::value() &&` (C++17) made retrofit-qualifying older
+accessors a recurring temptation in library changelogs.
 
 ## References
 
