@@ -818,6 +818,24 @@ contract evaluator changes the gate.
 
 **Gate:** rich+L0 conservation and dedup properties; no detector fact loss.
 
+**Progress:** the tiered identity resolver (`abicheck/finding_identity.py`)
+is done — `resolve_function_identity`/`resolve_variable_identity`/
+`resolve_change_identity` generalize the mangled-primary + name-based
+extern-C fallback already hand-rolled in `diff_symbols._diff_functions`
+into one documented canonical/normalized/reduced-tier primitive, following
+the same principle ADR-045 established for flat type matching
+(`diff_helpers.TypeMap`) and ADR-048 for L5 source-graph nodes
+(`buildsource/entity_identity.py`). Deliberately not wired into any live
+comparison path yet — `diff_symbols.py`'s old/new function and variable
+matching and `diff_filtering.py`'s `_deduplicate_cross_detector` dedup key
+are unchanged. Still remaining: wiring a call site to actually consult it
+(a real refactor against the existing hand-tuned matching logic and its
+extensive golden/FP-rate/tier-accuracy test coverage, not a drive-by
+change), and the fact-conservation property test itself (a Hypothesis
+check that no old-side symbol silently vanishes without either a matched
+new-side counterpart or an emitted removal finding) — this module is only
+the identity primitive that gate will consume.
+
 ### Phase 3 — shadow contract evaluator
 
 Implement a leaf `contract_surface`/`contract_evaluation` module with no CLI

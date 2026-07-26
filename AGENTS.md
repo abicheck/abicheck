@@ -156,6 +156,17 @@ Core pipeline (in order of data flow):
    - `diff_filtering.py` — deduplication and redundancy removal
    - `diff_versioning.py` — symbol version checks
    - `diff_sycl.py` — SYCL-specific diffs
+   - `finding_identity.py` — ADR-049 Phase 2: tiered canonical/normalized/
+     reduced identity resolution for flat (L0-L2) findings
+     (`resolve_function_identity`/`resolve_variable_identity`/
+     `resolve_change_identity`), generalizing the mangled-primary +
+     name-based extern-C fallback already hand-rolled in
+     `diff_symbols._diff_functions`. Mirrors the "most specific available
+     identity, ambiguity-safe fallback" principle ADR-045 established for
+     flat type matching (`diff_helpers.TypeMap`) and ADR-048 established for
+     L5 source-graph nodes (`buildsource/entity_identity.py`). Pure, leaf,
+     not yet wired into any live old/new matching or dedup path — see
+     `docs/contribute/plans/public-contract-default.md`'s Phase 2 section
 4. **Detection** — classify changes
    - `detectors.py` — individual detection rules
    - `detector_registry.py` — registry pattern for detectors
