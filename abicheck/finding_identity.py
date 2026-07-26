@@ -120,6 +120,59 @@ def is_real_mangled_name(mangled_name: str | None, plain_name: str | None) -> bo
 #: rather than scanning free text for embedded tokens.
 _ITANIUM_MANGLED_RE = re.compile(r"\A_Z[A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*\Z")
 
+#: The fixed, enumerable Itanium ABI ``<operator-name>`` two-letter codes
+#: (``nw`` = ``operator new``, ``pl`` = ``operator+``, ``cv`` = a conversion
+#: operator, ...) -- used only to recognize a *global* operator overload
+#: (``_Znwm``) as a real encoding start, not a full operator-name grammar.
+_ITANIUM_OPERATOR_CODES = frozenset(
+    {
+        "nw", "na", "dl", "da", "ps", "ng", "ad", "de", "co", "pl", "mi",
+        "ml", "dv", "rm", "an", "or", "eo", "aS", "pL", "mI", "mL", "dV",
+        "rM", "aN", "oR", "eO", "ls", "rs", "lS", "rS", "eq", "ne", "lt",
+        "gt", "le", "ge", "ss", "nt", "aa", "oo", "cm", "pm", "pt", "cl",
+        "ix", "qu", "cv", "li",
+    }
+)  # fmt: skip
+
+
+def _looks_like_itanium_encoding(rest: str) -> bool:
+    """Whether *rest* (``mangled_name`` with the ``_Z`` prefix and any
+    clone suffix already stripped) plausibly starts a real Itanium
+    ``<encoding>`` production, not just any ``_Z``-prefixed string.
+
+    A best-effort structural check on the *first* production only --
+    NOT a full Itanium grammar parser (that is exactly what an external
+    demangler exists to do, and :func:`normalize_mangled_name` deliberately
+    avoids calling one; see its docstring). Rejects a `_Z`-prefixed token
+    like ``_Zebra`` that passes the coarse character-class check but does
+    not start any real encoding (Codex review: prevents a type/C-symbol
+    name that merely resembles a mangling from being promoted to the
+    CANONICAL tier). A production this function doesn't recognize (a
+    template-args-only start, an obscure vendor extension, ...) only
+    degrades to the NORMALIZED tier -- the same ambiguity-safe-fallback
+    bias as everywhere else in this module -- so under-recognition here is
+    safe, over-recognition is the only failure mode that matters.
+    """
+    if not rest:
+        return False
+    if rest[0].isdigit():  # <source-name>: digit-prefixed length
+        return True
+    if rest[0] in "NZ":  # <nested-name> / <local-name>
+        return True
+    if rest[0] == "L" and len(rest) > 1 and rest[1].isdigit():
+        # GCC internal-linkage prefix (_ZL7g_count) + <source-name>
+        return True
+    if rest[0] == "T" and len(rest) > 1 and rest[1] in "VITSFWJ":
+        # <special-name>: vtable/typeinfo/typename/VTT/...
+        return True
+    if rest[0] == "G" and len(rest) > 1 and rest[1] in "VR":
+        # guard variable / reference temporary
+        return True
+    if rest[0] == "S" and len(rest) > 1 and (rest[1].isalnum() or rest[1] == "_"):
+        # substitution-abbreviated std:: name
+        return True
+    return rest[:2] in _ITANIUM_OPERATOR_CODES
+
 
 def normalize_mangled_name(
     mangled_name: str | None, plain_name: str | None
@@ -135,16 +188,22 @@ def normalize_mangled_name(
     the comparison) -- a mangled name that only degrades to the NORMALIZED
     tier on a host with no demangler installed would silently change
     identity across CI runners or between a contributor's laptop and CI.
-    Itanium ``_Z...`` and MSVC ``?...`` manglings are therefore both
-    accepted on their prefix + character-set convention alone
-    (best-effort, matches how the rest of the codebase already treats
-    MSVC-mangled names it cannot independently demangle).
+    Itanium ``_Z...`` names are validated structurally
+    (:func:`_looks_like_itanium_encoding`) rather than merely on the ``_Z``
+    prefix and character set alone. MSVC ``?...`` manglings have no such
+    check available (no demangler in this codebase to cross-check against
+    at all) and are accepted on the prefix convention alone (best-effort,
+    matches how the rest of the codebase already treats MSVC-mangled names
+    it cannot independently demangle).
     """
     if not is_real_mangled_name(mangled_name, plain_name):
         return None
     assert mangled_name is not None  # for type-checkers; guarded above
     if mangled_name.startswith("_Z"):
-        return mangled_name if _ITANIUM_MANGLED_RE.match(mangled_name) else None
+        if not _ITANIUM_MANGLED_RE.match(mangled_name):
+            return None
+        rest = mangled_name[2:].split(".", 1)[0]  # drop clone suffix
+        return mangled_name if _looks_like_itanium_encoding(rest) else None
     if mangled_name.startswith("?"):
         return mangled_name
     return None
@@ -282,9 +341,10 @@ _SYMBOL_LEVEL_KIND_PREFIXES = ("func_", "var_", "ifunc_", "symbol_")
 
 #: Individually-named kinds that don't share one of the prefixes above but
 #: are still unambiguously about one function/variable symbol (Codex
-#: review: ``VIRTUAL_METHOD_ADDED``/``CALLING_CONVENTION_CHANGED`` were
-#: flagged as missing). Not claimed to be an exhaustive audit of all ~395
-#: `ChangeKind` values -- extend as gaps are found.
+#: review: ``VIRTUAL_METHOD_ADDED``/``CALLING_CONVENTION_CHANGED``/
+#: ``METHOD_ACCESS_CHANGED`` were flagged as missing). Not claimed to be an
+#: exhaustive audit of all ~395 `ChangeKind` values -- extend as gaps are
+#: found.
 _SYMBOL_LEVEL_KIND_SLUGS = frozenset(
     {
         "virtual_method_added",
@@ -292,6 +352,7 @@ _SYMBOL_LEVEL_KIND_SLUGS = frozenset(
         "value_abi_trait_changed",
         "hidden_friend_added",
         "hidden_friend_removed",
+        "method_access_changed",
     }
 )
 

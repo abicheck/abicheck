@@ -24,6 +24,7 @@ from abicheck.finding_identity import (
     IDENTITY_TIER_NORMALIZED,
     IDENTITY_TIER_REDUCED,
     FindingIdentity,
+    _looks_like_itanium_encoding,
     is_real_mangled_name,
     normalize_mangled_name,
     normalized_signature,
@@ -50,9 +51,40 @@ class TestIsRealMangledName:
         assert is_real_mangled_name("", "foo") is False
 
 
+class TestLooksLikeItaniumEncoding:
+    def test_empty_string_is_rejected(self) -> None:
+        assert _looks_like_itanium_encoding("") is False
+
+
 class TestNormalizeMangledName:
     def test_itanium_mangling_that_demangles_is_accepted(self) -> None:
         assert normalize_mangled_name(_ITANIUM_MANGLED, "foo") == _ITANIUM_MANGLED
+
+    def test_itanium_lookalike_with_no_real_encoding_is_rejected(self) -> None:
+        # Codex review: "_Zebra" passes the coarse _Z + character-class
+        # check but does not start any real Itanium <encoding> production.
+        assert normalize_mangled_name("_Zebra", None) is None
+
+    def test_global_operator_new_mangling_is_accepted(self) -> None:
+        # operator new(unsigned long) -- a real mangling that starts with
+        # an <operator-name> two-letter code ("nw"), not a digit/N/L/T/G/S,
+        # so the encoding-start check must not reject it.
+        assert normalize_mangled_name("_Znwm", None) == "_Znwm"
+
+    def test_vtable_special_name_is_accepted(self) -> None:
+        assert normalize_mangled_name("_ZTV6Widget", None) == "_ZTV6Widget"
+
+    def test_guard_variable_special_name_is_accepted(self) -> None:
+        assert normalize_mangled_name("_ZGVfoo", None) == "_ZGVfoo"
+
+    def test_nested_name_is_accepted(self) -> None:
+        assert (
+            normalize_mangled_name("_ZN6Widget8getValueEv", None)
+            == "_ZN6Widget8getValueEv"
+        )
+
+    def test_std_substitution_abbreviated_name_is_accepted(self) -> None:
+        assert normalize_mangled_name("_ZSt3foo", None) == "_ZSt3foo"
 
     def test_extern_c_bare_name_is_rejected(self) -> None:
         assert normalize_mangled_name("foo", "foo") is None
@@ -284,6 +316,20 @@ class TestResolveChangeIdentity:
             symbol=_ITANIUM_MANGLED,
             description="cdecl -> fastcall",
             qualified_name="foo",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_CANONICAL
+
+    def test_method_access_changed_is_canonical(self) -> None:
+        # Codex review: two overloaded methods undergoing the same access
+        # transition must not collapse onto one primary id via a shared
+        # qualified name -- their distinct mangled symbols must stay
+        # authoritative.
+        change = Change(
+            kind=ChangeKind.METHOD_ACCESS_CHANGED,
+            symbol=_ITANIUM_MANGLED,
+            description="public -> protected",
+            qualified_name="Widget::getValue",
         )
         identity = resolve_change_identity(change)
         assert identity.tier == IDENTITY_TIER_CANONICAL
