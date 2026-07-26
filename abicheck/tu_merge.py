@@ -752,6 +752,56 @@ def _more_public_of(
     return b if origin_b == ScopeOrigin.PUBLIC_HEADER else a
 
 
+def _other_is_strictly_less_public(
+    base: _T,
+    other: _T,
+    *,
+    header_segs: list[tuple[str, ...]],
+    dir_segs: list[tuple[str, ...]],
+    have_public_set: bool,
+) -> bool:
+    """Whether *other* is definitively *less* public than *base* -- i.e.
+    :func:`_more_public_of` picked *base* specifically because it classifies
+    as ``PUBLIC_HEADER`` and *other* does not (not merely an arbitrary
+    tu_name-ordered tie-break between two equally-classified, or
+    unclassifiable, sides).
+
+    A capability only *other*'s declaration grants -- most concretely, a
+    default argument (Codex review, PR #635 round 17) -- must not be
+    attributed to the merged, *base*-provenanced declaration when this is
+    ``True``: a private-only header redeclaring ``f(int)`` (the public
+    signature) as ``f(int = 42)`` does not give the library's actual public
+    consumers -- who only ever see the public header -- the ability to call
+    ``f()`` with no argument; unioning that default in anyway would make
+    the merged snapshot claim a capability the public API never granted,
+    and later removing/changing that private-only default would then
+    surface as a false ``PARAM_DEFAULT_VALUE_REMOVED``/``CHANGED`` finding
+    against the public surface. When public/private status can't be
+    determined at all (``have_public_set`` is ``False``) or both sides
+    classify the same way, this returns ``False`` and every other
+    optional-fact union in this module keeps its existing, symmetric
+    behavior -- this narrower check exists only for the one case where we
+    can concretely prove *other* is the less-visible side.
+    """
+    if not have_public_set:
+        return False
+    origin_base = classify_origin(
+        header_from_location(base.source_location),
+        header_segs,
+        dir_segs,
+        have_public_set=have_public_set,
+    )
+    if origin_base != ScopeOrigin.PUBLIC_HEADER:
+        return False
+    origin_other = classify_origin(
+        header_from_location(other.source_location),
+        header_segs,
+        dir_segs,
+        have_public_set=have_public_set,
+    )
+    return origin_other != ScopeOrigin.PUBLIC_HEADER
+
+
 def _with_more_public_provenance(
     winner: _T,
     other: _T,
@@ -942,10 +992,26 @@ def _merge_functions(
     # messages are not a conflict (Codex review, PR #635 round 13) -- see
     # `_pick_deprecated`.
     deprecated = _pick_deprecated(base, other)
+    # A default argument only `other` declares must NOT be pulled onto
+    # `base` when `other` is definitively the less-public side -- a default
+    # argument grants callers a real capability (calling without that
+    # parameter), and a private-only redeclaration adding one does not
+    # extend that capability to the library's actual public consumers, who
+    # never see it (Codex review, PR #635 round 17) -- see
+    # `_other_is_strictly_less_public`.
+    other_is_private = _other_is_strictly_less_public(
+        base,
+        other,
+        header_segs=header_segs,
+        dir_segs=dir_segs,
+        have_public_set=have_public_set,
+    )
     merged_params: list[Param] = [
         replace(
             p_base,
-            default=p_base.default if p_base.default is not None else p_other.default,
+            default=p_base.default
+            if (p_base.default is not None or other_is_private)
+            else p_other.default,
         )
         for p_base, p_other in zip(base.params, other.params, strict=True)
     ]

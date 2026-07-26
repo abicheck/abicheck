@@ -475,11 +475,19 @@ def test_merge_fragments_function_keeps_parameter_names_from_the_winning_side():
     assert winner.params[0].name == "public_name"
 
 
-def test_merge_fragments_function_unions_default_from_the_losing_side_onto_winning_names():
-    # The public side ("b") wins both provenance and parameter names, but a
-    # default argument only the private side ("a") declared must still be
-    # unioned in -- the "keep the winning side's identity" fix must not
-    # regress the separate "union whichever side has a default" behavior.
+def test_merge_fragments_function_does_not_leak_default_from_private_side_onto_public_winner():
+    # The public side ("b") wins both provenance and parameter names, and a
+    # default argument only the *private* side ("a") declares must NOT be
+    # pulled onto it: a private-only header adding `= 0` to a parameter the
+    # public header declares without a default does not give the library's
+    # real public consumers -- who never see the private header -- the
+    # ability to call `f()` with that argument omitted. Unioning it in
+    # anyway would misrepresent the public API's actual capability and
+    # make a later change to the private-only default surface as a false
+    # PARAM_DEFAULT_VALUE_REMOVED/CHANGED finding against the public
+    # surface (Codex review, PR #635 round 17 -- this test previously
+    # asserted the opposite, unioning-favorable behavior; that was itself
+    # the bug).
     a = TuFragment(
         tu_name="a",
         functions=(
@@ -507,9 +515,104 @@ def test_merge_fragments_function_unions_default_from_the_losing_side_onto_winni
     )
     assert len(merged.functions) == 1
     winner = merged.functions[0]
-    assert winner.params[0].default == "0"
+    assert winner.params[0].default is None
     assert winner.source_location == "include/api.h:1"
     assert winner.params[0].name == "public_name"
+
+
+def test_merge_fragments_function_unions_default_from_public_side_onto_private_winner():
+    # The mirror case: the *public* side ("b") is the one declaring the
+    # default this time. A default the public header itself grants must
+    # still reach the merged declaration regardless of which side
+    # _more_public_of happened to pick as the structural "base" --
+    # here "a" (private) sorts first and has no public-header context of
+    # its own to lose to, so it wins as the deterministic tie-break, but
+    # the public side's own default is not something to discard.
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="internal_name", type="int")],
+                source_location="internal/detail.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="public_name", type="int", default="0")],
+                source_location="include/api.h:1",
+            ),
+        ),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.functions) == 1
+    winner = merged.functions[0]
+    assert winner.source_location == "include/api.h:1"
+    assert winner.params[0].default == "0"
+
+
+def test_merge_fragments_function_unions_default_when_neither_side_is_public():
+    # public_header_paths *is* supplied, but neither TU's declaration
+    # matches it -- base is only the arbitrary tu_name tie-break, not a
+    # proven-public side, so _other_is_strictly_less_public must not treat
+    # `other` as less public than it (there's nothing to be less public
+    # *than*), and the default still unions in as before round 17.
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="n", type="int", default="0")],
+                source_location="internal/one.h:1",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "f",
+                "_Z1fi",
+                params=[Param(name="n", type="int")],
+                source_location="internal/two.h:1",
+            ),
+        ),
+    )
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].params[0].default == "0"
+
+
+def test_merge_fragments_function_unions_default_when_public_status_is_unknown():
+    # With no public_header_paths/public_header_dirs supplied at all,
+    # _other_is_strictly_less_public can't prove anything about either
+    # side, so the pre-round-17 "union whichever side has a default"
+    # behavior is unchanged -- the narrower private-leak check only
+    # applies when public status is actually known.
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn("f", "_Z1fi", params=[Param(name="n", type="int", default="0")]),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(_fn("f", "_Z1fi", params=[Param(name="n", type="int")]),),
+    )
+    merged = merge_fragments([a, b])
+    assert len(merged.functions) == 1
+    assert merged.functions[0].params[0].default == "0"
 
 
 def test_merge_fragments_without_public_set_keeps_deterministic_default():
