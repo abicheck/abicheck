@@ -94,6 +94,20 @@ class TestConstruction:
                 overrides={"totally_made_up_kind": Verdict.BREAKING},
             )
 
+    def test_non_string_override_key_is_rejected(self):
+        # Codex review: a non-str key mixed with a real str key (e.g.
+        # overrides={123: Verdict.BREAKING, "bogus": Verdict.BREAKING})
+        # previously reached `sorted(set(self.overrides) -
+        # _VALID_CHANGE_KIND_SLUGS)` unvalidated, crashing with
+        # "TypeError: '<' not supported between instances of 'str' and
+        # 'int'" instead of the deliberate configuration error this
+        # constructor exists to produce.
+        with pytest.raises(TypeError, match=r"CompatibilityPolicyConfig\.overrides"):
+            CompatibilityPolicyConfig(
+                base=_identity("strict_abi"),
+                overrides={123: Verdict.BREAKING, "bogus": Verdict.BREAKING},  # type: ignore[dict-item]
+            )
+
     def test_raw_string_override_value_is_rejected(self):
         # The Mapping[str, Verdict] annotation isn't runtime-enforced -- an
         # untyped adapter passing the enum's own string value must still be

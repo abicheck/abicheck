@@ -251,6 +251,16 @@ class TestFieldCandidateLayerProperty:
         candidate = _candidate(SelectorLayer.RUN_RECIPE, ContractMode.PUBLIC)
         assert candidate.layer is SelectorLayer.RUN_RECIPE
 
+    def test_raw_mapping_provenance_is_rejected(self):
+        # Codex review: an untyped manifest/API adapter passing decoded
+        # provenance directly (e.g. FieldCandidate(provenance={}, value=
+        # "public")) was previously accepted outright -- resolve_field()
+        # would then crash with AttributeError reaching `.layer` instead of
+        # the deliberate configuration error the effective-config types
+        # already produce for this same class of gap.
+        with pytest.raises(TypeError, match=r"FieldCandidate\.provenance"):
+            FieldCandidate(provenance={}, value=ContractMode.PUBLIC)  # type: ignore[arg-type]
+
 
 class TestRunProfileFieldScoping:
     # ADR-049 D7 scopes RUN_PROFILE precedence to "execution fields only"

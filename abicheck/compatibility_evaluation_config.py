@@ -654,6 +654,20 @@ class CompatibilityPolicyConfig:
                 '"strict_abi") through to a config that cannot support exact '
                 "replay (ADR-049 D6)."
             )
+        # A non-str key (e.g. overrides={123: Verdict.BREAKING}) previously
+        # reached `sorted()` below unvalidated, crashing with
+        # "TypeError: '<' not supported between instances of 'str' and
+        # 'int'" when mixed with a real str key, instead of the deliberate
+        # configuration error this constructor exists to produce (Codex
+        # review).
+        non_string_keys = sorted(
+            repr(k) for k in self.overrides if not isinstance(k, str)
+        )
+        if non_string_keys:
+            raise TypeError(
+                "CompatibilityPolicyConfig.overrides keys must be str, not: "
+                f"{non_string_keys}"
+            )
         unknown = sorted(set(self.overrides) - _VALID_CHANGE_KIND_SLUGS)
         if unknown:
             raise ValueError(

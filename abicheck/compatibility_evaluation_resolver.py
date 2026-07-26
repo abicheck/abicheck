@@ -118,6 +118,19 @@ class FieldCandidate:
     provenance: ValueProvenance
     value: Hashable
 
+    def __post_init__(self) -> None:
+        # An untyped manifest/API adapter passing decoded provenance
+        # directly (e.g. FieldCandidate(provenance={}, value="public")) was
+        # previously accepted outright -- resolve_field() would then crash
+        # with AttributeError reaching `.layer` instead of the deliberate
+        # configuration error the effective-config types already produce
+        # for this same class of gap (Codex review).
+        if not isinstance(self.provenance, ValueProvenance):
+            raise TypeError(
+                "FieldCandidate.provenance must be a ValueProvenance, not "
+                f"{self.provenance!r}."
+            )
+
     @property
     def layer(self) -> SelectorLayer:
         return self.provenance.layer
