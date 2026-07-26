@@ -15,7 +15,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   explicit CLI/API value (`LegacyAliasConflictError`, with an opt-out for
   the documented `--policy`/`--policy-file` compatibility exception).
   Equivalent duplicate values at the same tier are accepted, matching D7.
-  This is pure resolution logic only — no front end (CLI, `.abicheck.yml`,
-  service/API) constructs `FieldCandidate`s from real input yet; see
-  `docs/contribute/plans/public-contract-default.md` for the remaining
-  Phase 1 wiring work.
+  Conflict validation checks every populated precedence tier, not only the
+  winning one, so a conflict shadowed behind a higher-precedence override is
+  still caught immediately. A candidate whose `SelectorLayer` isn't covered
+  by any precedence tier now raises a `ValueError` instead of silently
+  vanishing from resolution — `SelectorLayer` is documented as extensible,
+  so this guards against a future new layer being added there without a
+  matching resolver update. This is pure resolution logic only — no front
+  end (CLI, `.abicheck.yml`, service/API) constructs `FieldCandidate`s from
+  real input yet; see `docs/contribute/plans/public-contract-default.md`
+  for the remaining Phase 1 wiring work.

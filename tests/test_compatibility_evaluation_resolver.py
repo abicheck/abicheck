@@ -197,3 +197,22 @@ class TestFieldCandidateLayerProperty:
     def test_layer_reads_through_to_provenance(self):
         candidate = _candidate(SelectorLayer.RUN_RECIPE, ContractMode.PUBLIC)
         assert candidate.layer is SelectorLayer.RUN_RECIPE
+
+
+class TestUnknownSelectorLayer:
+    # SelectorLayer is documented as extensible; a new member added there
+    # without a matching _PRECEDENCE_TIERS update must fail loudly rather
+    # than silently vanish from resolution (BUILT_IN_DEFAULT always matches
+    # some tier, so the unknown-layer candidate would otherwise just be
+    # dropped with no error).
+    class _FutureLayer:
+        name = "FUTURE_ADAPTER"
+        value = "future_adapter"
+
+    def test_candidate_outside_all_precedence_tiers_raises(self):
+        bad_candidate = FieldCandidate(
+            provenance=ValueProvenance(layer=self._FutureLayer()),  # type: ignore[arg-type]
+            value=ContractMode.PUBLIC,
+        )
+        with pytest.raises(ValueError, match="not represented in any"):
+            resolve_field("contract.mode", [bad_candidate], default=_default())

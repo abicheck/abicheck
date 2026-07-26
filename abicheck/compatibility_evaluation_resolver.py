@@ -72,6 +72,13 @@ _PRECEDENCE_TIERS: tuple[frozenset[SelectorLayer], ...] = (
 
 _EXPLICIT_LAYERS = frozenset({SelectorLayer.EXPLICIT_CLI, SelectorLayer.API_REQUEST})
 
+# SelectorLayer is documented as extensible (contract_relevance_types.py) --
+# a new member added there without updating _PRECEDENCE_TIERS above must not
+# silently vanish from resolution (BUILT_IN_DEFAULT always matches, so the
+# candidate would just be dropped with no error). resolve_field() checks
+# every candidate's layer against this set up front.
+_KNOWN_LAYERS: frozenset[SelectorLayer] = frozenset().union(*_PRECEDENCE_TIERS)
+
 
 @dataclass(frozen=True)
 class FieldCandidate:
@@ -161,7 +168,13 @@ def resolve_field(
     surface later merely because a higher-precedence override is removed --
     and :class:`LegacyAliasConflictError` if an explicit CLI/API value
     disagrees with a legacy-alias value for the same field, unless
-    ``require_legacy_alias_agreement=False``.
+    ``require_legacy_alias_agreement=False``. Also raises a plain
+    ``ValueError`` if any candidate's layer is not covered by
+    ``_PRECEDENCE_TIERS`` -- a resolver/enum mismatch, not a D7 usage error,
+    but one that must fail loudly rather than silently dropping the
+    candidate (``BUILT_IN_DEFAULT`` always matches some tier, so an unknown
+    layer would otherwise resolve to a default or another candidate's value
+    with no indication the caller's selection was ignored).
     """
     if default.layer is not SelectorLayer.BUILT_IN_DEFAULT:
         raise ValueError(
@@ -170,6 +183,16 @@ def resolve_field(
         )
 
     all_candidates = (*candidates, default)
+
+    for candidate in all_candidates:
+        if candidate.layer not in _KNOWN_LAYERS:
+            raise ValueError(
+                f"{field_name}: candidate uses SelectorLayer.{candidate.layer.name}, "
+                "which is not represented in any _PRECEDENCE_TIERS entry -- "
+                "compatibility_evaluation_resolver.py must be updated when "
+                "SelectorLayer gains a new member, or this candidate would "
+                "be silently dropped from resolution"
+            )
 
     if require_legacy_alias_agreement:
         explicit = [c for c in all_candidates if c.layer in _EXPLICIT_LAYERS]
