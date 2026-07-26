@@ -1306,3 +1306,22 @@ def test_legacy_scope_fingerprint_unaffected_by_translation_units_field(tmp_path
     new = compute_extraction_contract(declared_headers=[new_h])
     assert old.scope_fingerprint == new.scope_fingerprint
     assert old.scope_fields["translation_units"] == "[]"
+
+
+def test_legacy_scope_fingerprint_matches_pre_translation_units_algorithm(tmp_path):
+    # Codex review, PR #636: a persisted, pre-upgrade .abi.json baseline's
+    # contract.scope_fingerprint is a bare hash string frozen at dump time
+    # (never recomputed on load) -- a fresh, post-upgrade dump of the
+    # IDENTICAL legacy header set must hash to the exact same value the
+    # pre-upgrade algorithm (headers + public_header_dirs only, no
+    # translation_units field folded in at all) would have produced, or an
+    # ordinary "compare a committed baseline against a fresh dump" workflow
+    # spuriously trips ScopeMismatchError after nothing about the header set
+    # itself changed.
+    from abicheck.comparability import SCOPE_FIELD_KEYS, _sha256_of
+
+    h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
+    contract = compute_extraction_contract(declared_headers=[h])
+    pre_upgrade_hash = _sha256_of(*[contract.scope_fields[k] for k in SCOPE_FIELD_KEYS])
+    assert contract.scope_fingerprint == pre_upgrade_hash
+    assert SCOPE_FIELD_KEYS == ("headers", "public_header_dirs")

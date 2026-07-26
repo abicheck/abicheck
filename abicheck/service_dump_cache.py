@@ -99,6 +99,22 @@ def _dump_is_cacheable(
     material below — the part a filesystem content walk structurally cannot
     see (renaming a TU, or flipping ``contributes_to_abi``, changes nothing
     a content hash would notice). See :func:`cached_run_dump`.
+
+    **Only when every translation unit is ``required`` (Codex review, PR
+    #636).** A ``required=False`` TU's failure degrades ``run_tu_loop`` to a
+    logged diagnostic instead of failing the whole dump (ADR-050 D3) — the
+    resulting snapshot then successfully returns with that TU's declarations
+    silently absent, by design. A purely *transient* failure (a flaky
+    castxml crash, momentary resource contention) produces the identical
+    "successful but degraded" snapshot on that one run; caching it would let
+    that transient blip stick around indefinitely — served back on every
+    subsequent identical-input run — instead of self-healing the next time
+    the same manifest happens to dump cleanly. A manifest containing any
+    optional TU is therefore never cached at all (the same conservative
+    "fall through to a live dump" default every other risky shape above
+    already gets), regardless of whether this particular run actually hit a
+    failure — cacheability can't depend on a per-run outcome the cache
+    lookup happens *before* extraction even runs.
     """
     return (
         pdb_path is None
@@ -110,7 +126,19 @@ def _dump_is_cacheable(
         and not debug_presence_only
         and compile is None
         and not include_labels
+        and (dump_manifest is None or _manifest_all_tus_required(dump_manifest))
     )
+
+
+def _manifest_all_tus_required(dump_manifest: Any) -> bool:
+    """Whether every translation unit in *dump_manifest* is ``required=True``.
+
+    Typed ``Any`` (like :func:`_manifest_cache_paths`/
+    :func:`_manifest_public_headers`) so :func:`_dump_is_cacheable`'s own
+    untyped ``dump_manifest: object | None`` parameter doesn't need an
+    unsound cast just to read this.
+    """
+    return all(tu.required for tu in dump_manifest.translation_units)
 
 
 def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:

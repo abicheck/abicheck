@@ -165,8 +165,11 @@ PROFILE_FIELD_KEYS = (
 SCOPE_FIELD_KEYS = (
     "headers",
     "public_header_dirs",
-    "translation_units",
 )
+#: Appended to SCOPE_FIELD_KEYS for a manifest-driven scope_fingerprint only
+#: (never the legacy path) -- see compute_extraction_contract's own note on
+#: why this can't simply join SCOPE_FIELD_KEYS unconditionally.
+_MANIFEST_SCOPE_FIELD_KEYS = (*SCOPE_FIELD_KEYS, "translation_units")
 
 # The only profile_fields keys the platform-identity carve-out (ADR-050
 # Phase A) is allowed to treat as non-fatal, and only when the snapshots'
@@ -934,13 +937,36 @@ def compute_extraction_contract(
         scope_fields = {
             "headers": json.dumps(_scope_header_identities),
             "public_header_dirs": json.dumps(_scope_public_header_dirs),
-            # "[]" (not manifest-driven) for the legacy path -- a constant,
-            # so two legacy-vs-legacy comparisons are unaffected by this
-            # field's mere presence; a real value here only ever comes from
-            # a --dump-manifest side (manifest_tu_scope_field).
+            # Present in scope_fields (so it's visible for reporting/
+            # debugging either way) but deliberately NOT always folded into
+            # scope_fingerprint itself -- see the manifest_tu_scope branch
+            # below (Codex review, PR #636).
             "translation_units": manifest_tu_scope or "[]",
         }
-        scope_fingerprint = _sha256_of(*[scope_fields[k] for k in SCOPE_FIELD_KEYS])
+        # A non-manifest (legacy) dump's scope_fingerprint is computed from
+        # exactly the same field set as before this ADR's D6/G32-Phase-E
+        # translation_units addition -- SCOPE_FIELD_KEYS alone, never
+        # _MANIFEST_SCOPE_FIELD_KEYS (Codex review, PR #636). A persisted,
+        # pre-upgrade `.abi.json` baseline's contract.scope_fingerprint is a
+        # bare hash string frozen at dump time (serialization.py never
+        # recomputes it on load); an abicheck upgrade that folded a new
+        # constant field into every legacy fingerprint would change what a
+        # *freshly* dumped snapshot of the identical header set hashes to,
+        # without changing the old persisted baseline's already-stored
+        # value -- spuriously tripping ScopeMismatchError on the single most
+        # common workflow (compare a committed/CI-cached baseline against a
+        # fresh dump), a regression this ADR exists to prevent, not cause.
+        # A manifest-driven fingerprint has no such installed base to
+        # protect: the manifest path's own scope_fingerprint algorithm was
+        # incomplete -- missing exactly this TU-level data -- until this
+        # same change, so there is no correctly-comparable prior value a
+        # manifest baseline could have been relying on.
+        _fingerprint_keys = (
+            _MANIFEST_SCOPE_FIELD_KEYS
+            if manifest_tu_scope is not None
+            else SCOPE_FIELD_KEYS
+        )
+        scope_fingerprint = _sha256_of(*[scope_fields[k] for k in _fingerprint_keys])
 
     return ExtractionContract(
         profile_fingerprint=profile_fingerprint,

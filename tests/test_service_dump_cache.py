@@ -43,6 +43,19 @@ def _cacheable_kwargs(**overrides):
     return base
 
 
+class _FakeManifest:
+    """Minimal ``.translation_units``-shaped stand-in for a real
+    ``DumpManifest`` -- just enough for ``_manifest_all_tus_required`` to
+    read, without needing a full ``parse_manifest`` round-trip."""
+
+    def __init__(self, *, all_required: bool) -> None:
+        class _Tu:
+            def __init__(self, required: bool) -> None:
+                self.required = required
+
+        self.translation_units = [_Tu(True), _Tu(all_required)]
+
+
 class TestDumpIsCacheable:
     def test_plain_shape_is_cacheable(self):
         assert _dump_is_cacheable(**_cacheable_kwargs()) is True
@@ -89,8 +102,16 @@ class TestDumpIsCacheable:
         # ADR-050 D3/D6 (G32 Phase E): a manifest-driven dump used to be
         # unconditionally excluded; it is now cacheable like any other plain
         # shape once the cache key covers the manifest's own scope.
-        kwargs = _cacheable_kwargs(dump_manifest=object())
+        kwargs = _cacheable_kwargs(dump_manifest=_FakeManifest(all_required=True))
         assert _dump_is_cacheable(**kwargs) is True
+
+    def test_dump_manifest_with_optional_tu_not_cacheable(self):
+        # Codex review, PR #636: a required=False TU's failure degrades to a
+        # logged diagnostic rather than failing the dump, so a transient
+        # failure could otherwise get permanently cached as a "successful"
+        # but silently-degraded snapshot.
+        kwargs = _cacheable_kwargs(dump_manifest=_FakeManifest(all_required=False))
+        assert _dump_is_cacheable(**kwargs) is False
 
 
 class TestDumpCacheExtraKey:
@@ -762,6 +783,11 @@ class TestCachedRunDumpManifest:
         assert len(calls) == 2
 
     def test_contributes_to_abi_flip_invalidates_manifest_cache(self, tmp_path):
+        # Both variants keep every TU required=True (contributes_to_abi=False
+        # doesn't force required=False, only the reverse implication holds)
+        # so BOTH manifests stay cacheable -- otherwise a required=False TU
+        # would make `old` uncacheable on its own and this would stop
+        # actually exercising cache-key sensitivity to the flag flip at all.
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF fake content")
         self._write_header(tmp_path, "a.h", "int f(void);\n")
@@ -770,14 +796,14 @@ class TestCachedRunDumpManifest:
             "roots: [a.h]\ntranslation_units:\n"
             "  - name: tu_a\n    forced_includes: [a.h]\n"
             "  - name: tu_b\n    forced_includes: [a.h]\n"
-            "    required: false\n    contributes_to_abi: false\n",
+            "    contributes_to_abi: false\n",
         )
         new = self._manifest(
             tmp_path,
             "roots: [a.h]\ntranslation_units:\n"
             "  - name: tu_a\n    forced_includes: [a.h]\n"
             "  - name: tu_b\n    forced_includes: [a.h]\n"
-            "    required: true\n    contributes_to_abi: true\n",
+            "    contributes_to_abi: true\n",
         )
         calls: list[int] = []
 
