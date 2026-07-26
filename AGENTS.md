@@ -174,6 +174,13 @@ Core pipeline (in order of data flow):
      `CompatibilityEvaluationConfig` typed object (contract/evidence/surface/
      assurance/policy/gate/suppressions + field-level `ValueProvenance`).
      Shape only — no resolver wires a CLI/config/recipe front end to it yet
+   - `compatibility_evaluation_resolver.py` — ADR-049 Phase 1 slice 2: the
+     field-level precedence resolver (`resolve_field`) implementing D7's
+     `explicit_cli/api_request > legacy_alias > run_recipe > run_profile >
+     project_config > built_in_default` tier order over already-collected
+     `FieldCandidate`s, plus the conflicting-values/legacy-alias-disagreement
+     usage-error rules. Pure resolution logic — no front end constructs
+     candidates from real argv/config/recipe input yet
 6. **Reporting** — output results
    - `reporter.py` — JSON/Markdown/text output
    - `html_report.py` — HTML reports
