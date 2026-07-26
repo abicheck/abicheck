@@ -166,6 +166,10 @@ Core pipeline (in order of data flow):
    - `policy_file.py` — YAML policy profiles
    - `suppression.py` — suppression rules (YAML + ABICC formats)
    - `severity.py` — severity configuration
+   - `contract_relevance_types.py` — ADR-049 Phase 0: reserved contract-mode/
+     relevance vocabulary, reason-code registry, and snapshot/decision schema
+     versions. Leaf module; not yet wired into detection, policy, or reports
+     (see `docs/contribute/plans/public-contract-default.md`)
 6. **Reporting** — output results
    - `reporter.py` — JSON/Markdown/text output
    - `html_report.py` — HTML reports
