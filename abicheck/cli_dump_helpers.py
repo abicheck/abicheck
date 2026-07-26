@@ -1471,6 +1471,16 @@ def perform_elf_dump(
             debug_info_path=debug_info_path,
             dump_manifest=dump_manifest,
             extra_include_labels=include_labels,
+            # This call bypasses service.run_dump (which already threads
+            # compile.frontend_context into dumper.dump for the scan/compare/
+            # PE/Mach-O paths) -- without this, `dump --frontend-context
+            # device` silently fell back to dumper.dump's own "host" default
+            # instead of forwarding the request (Codex review, PR #636).
+            frontend_context=(
+                compile_context.frontend_context
+                if compile_context is not None
+                else "host"
+            ),
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         # The header parse itself failed -- nothing downstream (including a

@@ -113,3 +113,12 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   itself fails after `os.replace()` already failed (only `_atomic_copy` had
   this test) — added, closing a Codecov-flagged patch-coverage gap (no
   behavior change).
+- The native `dump` CLI command's ELF path (`cli_dump_helpers.
+  perform_elf_dump`) bypasses `service.run_dump` (which already threads
+  `compile.frontend_context` into `dumper.dump` for the `scan`/`compare`/
+  PE/Mach-O paths) and calls `dumper.dump` directly — that direct call
+  omitted `frontend_context` entirely, so `dump --frontend-context device`
+  silently produced an ordinary host-context snapshot instead of forwarding
+  the request. Fixed by threading `compile_context.frontend_context` (or
+  `"host"` when no compile context was resolved) into that call too (Codex
+  review).

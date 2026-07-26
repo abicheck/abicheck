@@ -181,3 +181,40 @@ def test_scan_frontend_context_device_reaches_dumper_dump(tmp_path):
             compile=CompileContext(frontend_context="device"),
         )
     assert mock_dump.call_args.kwargs["frontend_context"] == "device"
+
+
+def test_dump_cli_elf_path_forwards_frontend_context_to_dumper_dump(tmp_path, runner):
+    """Codex review, PR #636: unlike `scan`/`compare` (which resolve through
+    `service.run_dump`/`service._dump_elf`, both of which already thread
+    `compile.frontend_context` into `dumper.dump`), the native `dump` CLI
+    command's ELF path calls `cli_dump_helpers.perform_elf_dump`, which bypasses
+    `service.run_dump` and calls `dumper.dump` directly. That direct call used
+    to omit `frontend_context` entirely, so `dump --frontend-context device`
+    silently produced a host-context snapshot instead of forwarding the
+    request or failing.
+
+    `dump` is imported into `cli_dump_helpers`'s own module namespace (`from
+    .dumper import dump`), so the mock must patch it there -- patching
+    `abicheck.dumper.dump` would not affect the name already bound in
+    `cli_dump_helpers`.
+    """
+    from unittest.mock import patch
+
+    from abicheck.model import AbiSnapshot
+
+    so = _elf_stub(tmp_path / "lib.so")
+    hdr = tmp_path / "api.h"
+    hdr.write_text("void f();\n")
+    snap = AbiSnapshot(library="lib", version="1.0")
+    with patch("abicheck.cli_dump_helpers.dump", return_value=snap) as mock_dump:
+        result = runner.invoke(
+            main,
+            [
+                "dump", str(so),
+                "-H", str(hdr),
+                "--frontend-context", "device",
+                "--gcc-path", "icpx",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert mock_dump.call_args.kwargs["frontend_context"] == "device"
