@@ -909,6 +909,85 @@ def test_merge_fragments_type_raises_on_both_opaque_conflicting_kind():
     assert excinfo.value.entity_key == ("type", "X")
 
 
+def test_merge_fragments_type_raises_on_conflicting_alignment_between_opaque_and_definition():
+    # castxml populates alignment_bits even for an opaque/incomplete record
+    # when the forward declaration itself carries an explicit
+    # __attribute__((aligned(16))) -- an ABI-relevant fact independent of
+    # the member layout, so this forward declaration is not interchangeable
+    # with a naturally 4-byte-aligned definition (Codex review, PR #635
+    # round 15).
+    forward = RecordType(name="X", kind="struct", is_opaque=True, alignment_bits=128)
+    definition = RecordType(
+        name="X",
+        kind="struct",
+        fields=[TypeField(name="v", type="int")],
+        alignment_bits=32,
+    )
+    a = TuFragment(tu_name="a", types=(forward,))
+    b = TuFragment(tu_name="b", types=(definition,))
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    assert excinfo.value.entity_key == ("type", "X")
+
+
+def test_merge_fragments_type_raises_on_conflicting_alignment_reversed_definition_first():
+    # The mirror of the case above: the definition is `a` (sorts first),
+    # the opaque forward declaration is `b` -- exercises the merge
+    # branch's other ordering.
+    definition = RecordType(
+        name="X",
+        kind="struct",
+        fields=[TypeField(name="v", type="int")],
+        alignment_bits=32,
+    )
+    forward = RecordType(name="X", kind="struct", is_opaque=True, alignment_bits=128)
+    a = TuFragment(tu_name="a", types=(definition,))
+    b = TuFragment(tu_name="b", types=(forward,))
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+
+
+def test_merge_fragments_type_raises_on_conflicting_alignment_between_two_opaque():
+    forward_a = RecordType(name="X", kind="struct", is_opaque=True, alignment_bits=128)
+    forward_b = RecordType(name="X", kind="struct", is_opaque=True, alignment_bits=32)
+    a = TuFragment(tu_name="a", types=(forward_a,))
+    b = TuFragment(tu_name="b", types=(forward_b,))
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+
+
+def test_merge_fragments_type_reconciles_matching_alignment_between_opaque_and_definition():
+    forward = RecordType(name="X", kind="struct", is_opaque=True, alignment_bits=32)
+    definition = RecordType(
+        name="X",
+        kind="struct",
+        fields=[TypeField(name="v", type="int")],
+        alignment_bits=32,
+    )
+    a = TuFragment(tu_name="a", types=(forward,))
+    b = TuFragment(tu_name="b", types=(definition,))
+    merged = merge_fragments([a, b])
+    assert len(merged.types) == 1
+    assert merged.types[0].alignment_bits == 32
+
+
+def test_merge_fragments_type_reconciles_unset_alignment_on_definition_side():
+    # alignment_bits=None means "not captured", not "no alignment" -- a
+    # None side contributes no information and must not be treated as a
+    # conflict with the other side's captured value.
+    forward = RecordType(name="X", kind="struct", is_opaque=True, alignment_bits=128)
+    definition = RecordType(
+        name="X", kind="struct", fields=[TypeField(name="v", type="int")]
+    )
+    a = TuFragment(tu_name="a", types=(forward,))
+    b = TuFragment(tu_name="b", types=(definition,))
+    merged = merge_fragments([a, b])
+    assert len(merged.types) == 1
+
+
 # ---------------------------------------------------------------------------
 # Round 8 (Codex review, PR #635): deprecated unioned across ordinary
 # redeclarations (not just forward-decl/definition pairs), and a

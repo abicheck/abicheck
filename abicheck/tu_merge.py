@@ -1011,6 +1011,32 @@ def _record_kinds_compatible(a_kind: str, b_kind: str) -> bool:
     return a_kind == b_kind or {a_kind, b_kind} <= {"struct", "class"}
 
 
+def _record_alignments_compatible(
+    a_alignment: int | None, b_alignment: int | None
+) -> bool:
+    """Whether two :class:`RecordType` declarations' ``alignment_bits`` are
+    compatible -- at most one side committing to a non-``None`` value, or
+    both agreeing, is an ordinary redeclaration; two different non-``None``
+    values are a genuine ABI conflict, not something to silently discard
+    one side of (Codex review, PR #635 round 15).
+
+    Unlike ``fields``/``bases``/``is_abstract`` -- which castxml only
+    populates for a complete definition -- ``alignment_bits`` is captured
+    from castxml's ``align`` XML attribute *unconditionally*, including for
+    an opaque/incomplete record (`abicheck/dumper_castxml.py`'s
+    ``_build_record_type``), because an explicit
+    ``__attribute__((aligned(N)))`` on a bare forward declaration is itself
+    an ABI-relevant fact independent of the member layout: ``struct
+    __attribute__((aligned(16))) X;`` in one TU and a naturally
+    4-byte-aligned ``struct X { ... };`` definition in another are not
+    interchangeable redeclarations of the same type, even though
+    :func:`_merge_types`'s opaque-vs-definition branches would otherwise
+    accept the pair and silently keep only the definition's (weaker)
+    alignment.
+    """
+    return a_alignment is None or b_alignment is None or a_alignment == b_alignment
+
+
 def _merge_types(
     a: RecordType,
     b: RecordType,
@@ -1061,6 +1087,8 @@ def _merge_types(
     if a.is_opaque and b.is_opaque:
         if not _record_kinds_compatible(a.kind, b.kind):
             return None
+        if not _record_alignments_compatible(a.alignment_bits, b.alignment_bits):
+            return None
         winner, loser = (a, b) if a.kind <= b.kind else (b, a)
         return _with_more_public_provenance(
             winner,
@@ -1072,6 +1100,8 @@ def _merge_types(
     if a.is_opaque and not b.is_opaque:
         if not _record_kinds_compatible(a.kind, b.kind):
             return None
+        if not _record_alignments_compatible(a.alignment_bits, b.alignment_bits):
+            return None
         return _with_more_public_provenance(
             b,
             a,
@@ -1081,6 +1111,8 @@ def _merge_types(
         )
     if b.is_opaque and not a.is_opaque:
         if not _record_kinds_compatible(a.kind, b.kind):
+            return None
+        if not _record_alignments_compatible(a.alignment_bits, b.alignment_bits):
             return None
         return _with_more_public_provenance(
             a,
