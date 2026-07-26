@@ -446,10 +446,13 @@ _SYMBOL_LEVEL_KIND_PREFIXES = (
 
 #: Individually-named kinds that don't share one of the prefixes above but
 #: are still unambiguously about one function/variable symbol (Codex
-#: review, four rounds: ``VIRTUAL_METHOD_ADDED``/``CALLING_CONVENTION_CHANGED``/
+#: review, five rounds: ``VIRTUAL_METHOD_ADDED``/``CALLING_CONVENTION_CHANGED``/
 #: ``METHOD_ACCESS_CHANGED``/``DEFAULT_ARGUMENT_CHANGED``/the two
-#: function-template ``TEMPLATE_*_TYPE_CHANGED`` kinds were flagged as
-#: missing in turn).
+#: function-template ``TEMPLATE_*_TYPE_CHANGED`` kinds/``TLS_VAR_SIZE_CHANGED``/
+#: ``PROTECTED_VISIBILITY_CHANGED`` were flagged as missing in turn -- the
+#: last two verified against ``diff_platform.py``'s ``_diff_tls_symbols``/
+#: ``_diff_protected_visibility``, both of which pass a real exported
+#: variable's mangled name as ``symbol=sym_name``).
 #:
 #: This allowlist-of-individual-kinds approach has a structural limit: it
 #: can only ever be as complete as whatever review has spot-checked so far
@@ -475,6 +478,8 @@ _SYMBOL_LEVEL_KIND_SLUGS = frozenset(
         "default_argument_changed",
         "template_param_type_changed",
         "template_return_type_changed",
+        "tls_var_size_changed",
+        "protected_visibility_changed",
     }
 )
 

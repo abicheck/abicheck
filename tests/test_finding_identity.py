@@ -440,6 +440,52 @@ class TestResolveChangeIdentity:
         identity = resolve_change_identity(change)
         assert identity.tier == IDENTITY_TIER_CANONICAL
 
+    def test_tls_var_size_changed_identity_is_stable_across_evidence_tiers(
+        self,
+    ) -> None:
+        # Codex review: diff_platform.py's _diff_tls_symbols passes a real
+        # exported variable's mangled name as Change.symbol, and
+        # _enrich_source_locations (diff_filtering.py) fills in
+        # qualified_name for any change whenever a rich snapshot has the
+        # matching variable -- TLS_VAR_SIZE_CHANGED wasn't in the
+        # symbol-level allowlist, so the L0 (no qualified_name) and rich
+        # (qualified_name populated) findings for the SAME variable would
+        # resolve to different NORMALIZED-tier identities instead of
+        # sharing one CANONICAL mangled-based identity.
+        l0 = Change(
+            kind=ChangeKind.TLS_VAR_SIZE_CHANGED,
+            symbol=_ITANIUM_MANGLED,
+            description="TLS variable size changed",
+            old_value="4",
+            new_value="8",
+        )
+        rich = Change(
+            kind=ChangeKind.TLS_VAR_SIZE_CHANGED,
+            symbol=_ITANIUM_MANGLED,
+            description="TLS variable size changed",
+            old_value="4",
+            new_value="8",
+            qualified_name="ns::x",
+        )
+        l0_identity = resolve_change_identity(l0)
+        rich_identity = resolve_change_identity(rich)
+        assert l0_identity.tier == IDENTITY_TIER_CANONICAL
+        assert rich_identity.tier == IDENTITY_TIER_CANONICAL
+        assert l0_identity.primary_id == rich_identity.primary_id
+
+    def test_protected_visibility_changed_is_canonical(self) -> None:
+        # Regression guard: diff_platform.py's _diff_protected_visibility
+        # has the same producer shape (symbol=sym_name, a real mangled
+        # variable name) as TLS_VAR_SIZE_CHANGED above.
+        change = Change(
+            kind=ChangeKind.PROTECTED_VISIBILITY_CHANGED,
+            symbol=_ITANIUM_MANGLED,
+            description="default -> protected",
+            qualified_name="ns::x",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_CANONICAL
+
     def test_version_node_label_resembling_a_mangling_is_not_canonical(self) -> None:
         # Codex review: diff_versioning.py's SYMBOL_VERSION_NODE_REMOVED
         # stores a version-node label (e.g. "GLIBC_2.17") in Change.symbol,
