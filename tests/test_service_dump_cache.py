@@ -827,6 +827,39 @@ class TestCachedRunDumpManifest:
         )
         assert len(calls) == 2
 
+    def test_frontend_context_change_invalidates_manifest_cache(self, tmp_path):
+        # ADR-050 D5 (G32 Phase D, Codex review): a manifest's own
+        # frontend_context selects a genuinely different AST (host vs.
+        # device) -- manifest_tu_scope_field only covers per-TU fields, so
+        # without folding this manifest-level field into the cache key too,
+        # two manifests differing only here would share a cached snapshot.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        old = self._manifest(
+            tmp_path,
+            "frontend_context: host\nroots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        new = self._manifest(
+            tmp_path,
+            "frontend_context: device\nroots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=old
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=new
+        )
+        assert len(calls) == 2
+
     def test_tu_includes_reorder_invalidates_manifest_cache(self, tmp_path):
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF fake content")

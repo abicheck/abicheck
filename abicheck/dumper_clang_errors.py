@@ -38,7 +38,7 @@ from typing import Any
 from . import deadline
 from .dumper_cache import _atomic_copy, _atomic_write
 from .errors import SnapshotError
-from .sycl_context import decode_frontend_contexts, select_frontend_context
+from .sycl_context import decode_and_select_frontend_context
 
 log = logging.getLogger(__name__)
 
@@ -518,14 +518,16 @@ def _parse_clang_ast_result(
     encoding pass.
 
     ``dpcpp_capable`` (ADR-050 D5, G32 Phase D) routes *ast_path* through
-    :mod:`abicheck.sycl_context`'s multi-document decoder/selector instead of
-    a bare single-document ``json.load`` — *ast_path* holds a concatenated
+    :func:`abicheck.sycl_context.decode_and_select_frontend_context` instead
+    of a bare single-document ``json.load`` — *ast_path* holds a concatenated
     host+device document stream in that case, one ``clang -ast-dump=json``
-    document per ``-cc1`` compilation pass. The cache then stores only the
-    *selected* single document (keyed by *frontend_context*, see
-    ``dumper._clang_header_dump``'s cache key), not the whole raw stream, so
-    the cache-hit read-back path (a bare ``json.loads``) needs no changes for
-    either case.
+    document per ``-cc1`` compilation pass. That function (rather than the
+    separate decode-then-select two-step) never retains a non-matching
+    pass's full AST tree, since a DPC++ header's per-pass dump can itself
+    reach multi-GB size. The cache then stores only the *selected* single
+    document (keyed by *frontend_context*, see ``dumper._clang_header_dump``'s
+    cache key), not the whole raw stream, so the cache-hit read-back path (a
+    bare ``json.loads``) needs no changes for either case.
     """
     if result.returncode != 0:
         raise SnapshotError(
@@ -552,8 +554,9 @@ def _parse_clang_ast_result(
     deadline.check()
     if dpcpp_capable:
         stdout_text = ast_path.read_text(encoding="utf-8")
-        contexts = decode_frontend_contexts(stdout_text, result.stderr or "")
-        selected = select_frontend_context(contexts, frontend_context)
+        selected = decode_and_select_frontend_context(
+            stdout_text, result.stderr or "", frontend_context
+        )
         root = selected.ast
     else:
         try:

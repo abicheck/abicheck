@@ -66,6 +66,24 @@ class TestSerialization:
         assert snap2.ast_toolchain == snap.ast_toolchain
         assert snap2.ast_fallback_reason == snap.ast_fallback_reason
 
+    def test_frontend_context_kind_roundtrips(self):
+        # ADR-050 D5 (G32 Phase D, Codex review): snapshot_to_dict already
+        # wrote this field, but snapshot_from_dict never read it back, so a
+        # persisted/cached host-vs-device snapshot silently lost the tag on
+        # every save/load or cache-hit round-trip.
+        snap = AbiSnapshot(
+            library="libsample.so.2", version="2.3.1", frontend_context_kind="device"
+        )
+        snap2 = snapshot_from_dict(snapshot_to_dict(snap))
+        assert snap2.frontend_context_kind == "device"
+
+    def test_frontend_context_kind_missing_key_loads_as_none(self):
+        # Every pre-Phase-D snapshot lacks this key entirely.
+        payload = snapshot_to_dict(_sample_snap())
+        payload.pop("frontend_context_kind", None)
+        snap = snapshot_from_dict(payload)
+        assert snap.frontend_context_kind is None
+
     def test_malformed_ast_toolchain_metadata_is_ignored(self):
         payload = snapshot_to_dict(_sample_snap())
         payload["ast_toolchain"] = None

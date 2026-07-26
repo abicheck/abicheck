@@ -141,6 +141,12 @@ def _manifest_all_tus_required(dump_manifest: Any) -> bool:
     return all(tu.required for tu in dump_manifest.translation_units)
 
 
+def _manifest_frontend_context(dump_manifest: Any) -> str:
+    """*dump_manifest*'s own ``frontend_context`` (ADR-050 D5), typed
+    ``Any`` for the same reason as :func:`_manifest_all_tus_required`."""
+    return dump_manifest.frontend_context  # type: ignore[no-any-return]
+
+
 def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
     """Derive ``(headers, includes)``-shaped path lists from *dump_manifest*
     for :func:`abicheck.snapshot_cache._cache_key`'s existing content-hash
@@ -476,7 +482,18 @@ def cached_run_dump(
         from .comparability import manifest_tu_scope_field
 
         _cache_headers, _cache_includes = _manifest_cache_paths(dump_manifest)
-        _manifest_extra = manifest_tu_scope_field(dump_manifest)
+        # ADR-050 D5 (G32 Phase D): the manifest's own frontend_context
+        # ("host"/"device") is authoritative and selects a genuinely
+        # different AST (dumper_manifest.resolve_header_ast_result) --
+        # manifest_tu_scope_field only covers per-TU fields, so without
+        # folding this manifest-level field in too, two manifests differing
+        # only in frontend_context would hash identically and silently
+        # share a cached host/device snapshot across requests (Codex
+        # review).
+        _manifest_extra = (
+            f"{manifest_tu_scope_field(dump_manifest)}\x00"
+            f"{_manifest_frontend_context(dump_manifest)}"
+        )
         _uses_ast = True
         # dumper.dump() itself replaces the caller-supplied public_headers/
         # public_header_dirs with the manifest's own public_header_paths/

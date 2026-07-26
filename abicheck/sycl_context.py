@@ -146,13 +146,28 @@ def select_frontend_context(
     never by ``target`` triple pattern-matching (diagnostic-only, see
     :class:`FrontendContext`).
     """
-    matches = [c for c in contexts if c.kind == requested_kind]
+    matches = _select_matches(contexts, requested_kind)
+    available = sorted({c.kind for c in contexts})
+    return _one_match_or_raise(matches, len(contexts), available, requested_kind)
+
+
+def _select_matches(
+    contexts: list[FrontendContext], requested_kind: str
+) -> list[FrontendContext]:
+    return [c for c in contexts if c.kind == requested_kind]
+
+
+def _one_match_or_raise(
+    matches: list[FrontendContext],
+    total_decoded: int,
+    available_kinds: list[str],
+    requested_kind: str,
+) -> FrontendContext:
     if not matches:
-        available = sorted({c.kind for c in contexts})
         raise AstContextMissingError(
             f"no AST context with kind={requested_kind!r} found among "
-            f"{len(contexts)} decoded context(s) (available kinds: "
-            f"{available!r}). Did you mean --frontend-context "
+            f"{total_decoded} decoded context(s) (available kinds: "
+            f"{available_kinds!r}). Did you mean --frontend-context "
             f"{'device' if requested_kind == 'host' else 'host'}?"
         )
     if len(matches) > 1:
@@ -163,3 +178,78 @@ def select_frontend_context(
             "request to a specific target."
         )
     return matches[0]
+
+
+def decode_and_select_frontend_context(
+    stdout: str, stderr: str, requested_kind: str
+) -> FrontendContext:
+    """Fused decode+select: parses only as much of *stdout* as needed and
+    never retains a non-matching document's full AST tree (Codex review).
+
+    :func:`decode_frontend_contexts` builds every document into a Python
+    ``dict`` up front, including every kind the caller will discard a
+    moment later -- fine for tests exercising the decoder generically, but
+    wasteful for the one real production caller
+    (``dumper_clang_errors._parse_clang_ast_result``): a DPC++ header can
+    legitimately produce a multi-GB AST per pass (this module's own
+    `tests/fixtures/g32/README.md` capture notes an accidental 2.5GB dump
+    from one stray ``#include <sycl/sycl.hpp>``), and holding a host pass's
+    full tree merely to throw it away after selecting the device pass (or
+    vice versa) multiplies peak memory by the pass count for no reason.
+
+    This still requires a full linear scan through *stdout* (the stdlib
+    ``json`` decoder has no way to locate a document's end without parsing
+    it), so it does not change worst-case scan *time* -- only which parsed
+    documents survive long enough to be retained. A document whose ``kind``
+    doesn't match *requested_kind* is parsed (to find where the next
+    document starts and to still catch a genuinely truncated/malformed
+    document at that position) and then immediately dropped, letting the
+    garbage collector reclaim it rather than accumulating in a list
+    alongside every other decoded document.
+
+    Behaves identically to ``select_frontend_context(decode_frontend_
+    contexts(stdout, stderr), requested_kind)`` for every outcome
+    (including the count-mismatch/truncated-document/three-outcome-
+    selection errors) -- only the memory profile differs.
+    """
+    invocations = list(_CC1_INVOCATION_RE.finditer(stderr))
+    decoder = json.JSONDecoder()
+    matches: list[FrontendContext] = []
+    pos = 0
+    length = len(stdout)
+    doc_count = 0
+    while pos < length:
+        stripped = stdout[pos:].lstrip()
+        pos += len(stdout[pos:]) - len(stripped)
+        if pos >= length:
+            break
+        try:
+            doc, end = decoder.raw_decode(stdout, pos)
+        except json.JSONDecodeError as exc:
+            raise SnapshotError(
+                "DPC++ frontend produced a truncated or malformed AST "
+                f"document stream at offset {pos}: {exc}"
+            ) from exc
+        if doc_count < len(invocations):
+            invocation = invocations[doc_count]
+            if invocation.group("kind") == requested_kind:
+                matches.append(
+                    FrontendContext(
+                        kind=requested_kind,
+                        target=invocation.group("target"),
+                        ast=doc,
+                    )
+                )
+        doc_count += 1
+        pos = end
+    if doc_count != len(invocations):
+        raise SnapshotError(
+            f"DPC++ frontend produced {doc_count} AST document(s) but "
+            f"{len(invocations)} `-cc1 ... -fsycl-is-(host|device)` "
+            "invocation(s) were observed on its `-v` stderr output -- "
+            "cannot correlate documents to a host/device kind. This "
+            "frontend invocation must always pass `-v` alongside "
+            "`-ast-dump=json` for DPC++-capable compilers."
+        )
+    available = sorted({inv.group("kind") for inv in invocations})
+    return _one_match_or_raise(matches, doc_count, available, requested_kind)

@@ -1000,6 +1000,17 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # snapshot predating this field) loads as None, same as every other
     # additive optional field.
     contract = _extraction_contract_from_dict(d.get("contract"))
+    # ADR-050 D5 (G32 Phase D) — resolved SYCL/DPC++ "host"/"device" kind.
+    # Missing key (every pre-Phase-D snapshot) loads as None (Codex review:
+    # snapshot_to_dict already writes this field, but snapshot_from_dict
+    # never read it back, so a persisted/cached host-vs-device snapshot
+    # silently lost the tag on every round-trip).
+    raw_frontend_context_kind = d.get("frontend_context_kind")
+    frontend_context_kind = (
+        raw_frontend_context_kind
+        if isinstance(raw_frontend_context_kind, str)
+        else None
+    )
 
     snap = AbiSnapshot(
         library=d["library"],
@@ -1037,6 +1048,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         ast_fallback_reason=ast_fallback_reason,
         ast_toolchain_supported=ast_toolchain_supported,
         ast_toolchain_unsupported_reasons=ast_toolchain_unsupported_reasons,
+        frontend_context_kind=frontend_context_kind,
         ast_resolved_standard=ast_resolved_standard,
         ast_cplusplus_macro=ast_cplusplus_macro,
         ast_compile_args=ast_compile_args,

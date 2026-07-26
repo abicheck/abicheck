@@ -29,6 +29,7 @@ from abicheck.errors import (
 )
 from abicheck.sycl_context import (
     FrontendContext,
+    decode_and_select_frontend_context,
     decode_frontend_contexts,
     select_frontend_context,
 )
@@ -139,3 +140,83 @@ def test_decode_tolerates_whitespace_between_documents() -> None:
     )
     contexts = decode_frontend_contexts(stdout, stderr)
     assert [c.kind for c in contexts] == ["device", "host"]
+
+
+# ── decode_and_select_frontend_context: fused decode+select (Codex review) ──
+# Memory-frugal production path -- must behave identically to the separate
+# decode_frontend_contexts()+select_frontend_context() two-step for every
+# outcome, only without retaining a non-matching pass's full AST tree.
+
+
+def test_fused_select_device_matches_two_step_result() -> None:
+    stdout, stderr = _real_stdout_stderr()
+    fused = decode_and_select_frontend_context(stdout, stderr, "device")
+    two_step = select_frontend_context(
+        decode_frontend_contexts(stdout, stderr), "device"
+    )
+    assert fused.kind == two_step.kind == "device"
+    assert fused.target == two_step.target == "spir64-unknown-unknown"
+    assert fused.ast == two_step.ast
+
+
+def test_fused_select_host_matches_two_step_result() -> None:
+    stdout, stderr = _real_stdout_stderr()
+    fused = decode_and_select_frontend_context(stdout, stderr, "host")
+    two_step = select_frontend_context(decode_frontend_contexts(stdout, stderr), "host")
+    assert fused.kind == two_step.kind == "host"
+    assert fused.target == two_step.target == "x86_64-unknown-linux-gnu"
+    assert fused.ast == two_step.ast
+
+
+def test_fused_select_zero_matches_raises_missing() -> None:
+    stdout, stderr = _real_stdout_stderr()
+    with pytest.raises(AstContextMissingError, match="device"):
+        # The real fixture has no second device pass sharing this made-up
+        # kind, so this exercises the fused function's own missing-kind path
+        # against real correlated stderr/stdout, not a synthetic doc.
+        decode_and_select_frontend_context(stdout, stderr, "bogus-kind")
+    with pytest.raises(AstContextMissingError):
+        decode_and_select_frontend_context("", "", "host")
+
+
+def test_fused_select_ambiguous_raises() -> None:
+    stdout = (
+        '{"kind": "TranslationUnitDecl", "inner": []}\n'
+        '{"kind": "TranslationUnitDecl", "inner": []}'
+    )
+    stderr = (
+        ' "clang" -cc1 -triple spir64 -fsycl-is-device foo\n'
+        ' "clang" -cc1 -triple spir64_x86_64 -fsycl-is-device foo\n'
+    )
+    with pytest.raises(AstContextAmbiguousError, match="spir64"):
+        decode_and_select_frontend_context(stdout, stderr, "device")
+
+
+def test_fused_select_rejects_truncated_document() -> None:
+    stdout = '{"kind": "TranslationUnitDecl", "inner": ['  # truncated
+    with pytest.raises(SnapshotError, match="truncated or malformed"):
+        decode_and_select_frontend_context(stdout, "", "host")
+
+
+def test_fused_select_rejects_document_count_mismatch_with_invocations() -> None:
+    stdout = '{"kind": "TranslationUnitDecl", "inner": []}'
+    with pytest.raises(SnapshotError, match="cannot correlate"):
+        decode_and_select_frontend_context(stdout, "", "host")
+
+
+def test_fused_select_does_not_retain_non_matching_document_ast() -> None:
+    """The whole point of the fused path: a non-matching pass's AST must
+    never survive into the returned FrontendContext or anywhere else this
+    function holds a reference to -- only the selected document's tree is
+    kept, so a huge discarded pass is eligible for GC immediately."""
+    stdout = (
+        '{"kind": "TranslationUnitDecl", "huge": "discarded-device-payload"}\n'
+        '{"kind": "TranslationUnitDecl", "small": "host-payload"}'
+    )
+    stderr = (
+        ' "clang" -cc1 -triple spir64-unknown-unknown -fsycl-is-device foo\n'
+        ' "clang" -cc1 -triple x86_64-unknown-linux-gnu -fsycl-is-host foo\n'
+    )
+    selected = decode_and_select_frontend_context(stdout, stderr, "host")
+    assert selected.ast == {"kind": "TranslationUnitDecl", "small": "host-payload"}
+    assert "huge" not in selected.ast

@@ -47,3 +47,22 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `scan`/`dump`/`compare` all thread the resolved `CompileContext.
   frontend_context` through to `dumper.dump`, so `scan --frontend-context
   device` reaches this selector the same way `dump`/`compare` do.
+
+### Fixed
+
+- The whole-snapshot dump cache key for a `--dump-manifest` dump did not
+  include the manifest's own `frontend_context` — a manifest changed only
+  from `host` to `device` (or vice versa) could silently return a stale
+  cached snapshot from the *other* context instead of running the selector
+  (Codex review).
+- `snapshot_from_dict` never read back `AbiSnapshot.frontend_context_kind`,
+  so a persisted or cache-hit host/device snapshot silently lost the tag on
+  every save/load round-trip even though `snapshot_to_dict` already wrote it
+  (Codex review).
+- `abicheck.sycl_context` gained `decode_and_select_frontend_context`, a
+  fused decode+select entry point used by the real `dumper_clang_errors`
+  production path: it never retains a non-matching pass's full parsed AST
+  tree, unlike the separate decode-then-select two-step, which built every
+  document (including every one the caller was about to discard) up front —
+  a real memory-multiplication risk for a DPC++ header, whose per-pass AST
+  dump can itself reach multi-GB size (Codex review).
