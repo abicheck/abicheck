@@ -258,8 +258,26 @@ YAML:
 
 Fixed with one more regression test (`test_gnu_debug_local_name_is_exempt`)
 and the two `uses:` lines below now SHA-pinned. Full fast unit suite (19558
-passed / 30 skipped / 4 xfailed), mypy/ruff clean — this is the final state
-of the fix.
+passed / 30 skipped / 4 xfailed), mypy/ruff clean at this point.
+
+**A sixth review pass** (`chatgpt-codex-connector`) found that
+`_STDLIB_LOCAL_NAME_RE` still didn't handle *recursively nested*
+`<local-name>` productions: a lambda or local class defined inside a stdlib
+function is itself "local" to that function, so a `static` local to the
+lambda's own call operator mangles with one extra leading `Z` per nesting
+level before the qualifiers/namespace — e.g. real GCC output for
+`std::outer()::{lambda()#1}::operator()() const::x` is
+`_ZZZSt5outervENKUlvE_clEvE1x` (three `Z`s, not the one `_ZZ...` handled so
+far). Fixed by allowing any number of extra leading `Z`s
+(`^_ZZZ*N?[rVK]{0,3}[RO]?...`) before the qualifier/namespace check — safe
+because none of the recognized namespace markers themselves start with `Z`,
+so a chain that bottoms out at a non-stdlib function (a lambda inside the
+library-under-test's own code) still correctly fails to match. New
+regression tests: `test_nested_stdlib_lambda_local_name_is_exempt` (the
+exact GCC example above) and `test_nested_library_owned_lambda_local_name_still_fires`
+(the same nesting shape, but rooted in a `pvxs::` function — must still
+fire). Full fast unit suite (19562 passed / 30 skipped / 4 xfailed),
+mypy/ruff clean — this is the final state of the fix.
 
 ## CI / GitHub Action integration — verified end-to-end
 

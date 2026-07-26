@@ -158,8 +158,22 @@ LOCAL_NAME_PREFIX = "_ZZ"
 # stdlib/runtime implementation namespace elsewhere in this module (see
 # ``_STDLIB_TYPE_NAMESPACE_PREFIXES`` below) -- so a local static in one of
 # its functions must be recognized here too, the same way ``9__gnu_cxx`` is.
+#
+# ``Z*`` after the mandatory ``_ZZ`` handles *recursively nested*
+# <local-name> productions (Codex review, PR #641): a lambda or local class
+# defined inside a stdlib function is itself "local" to that function, so a
+# static local to the LAMBDA's own call operator mangles with one additional
+# leading ``Z`` per nesting level before the qualifiers/namespace -- e.g. GCC
+# emits ``std::outer()::{lambda()#1}::operator()() const::x`` as
+# ``_ZZZSt5outervENKUlvE_clEvE1x`` (three ``Z``s: the mandatory one plus one
+# for the lambda's own nested local-name). Stripping any number of extra
+# ``Z``s before checking for the namespace marker is safe: none of the
+# markers below start with ``Z``, so this can't spuriously swallow real
+# content, and a chain that bottoms out at a NON-stdlib function (e.g. a
+# lambda inside the library-under-test's own code) still correctly fails to
+# match afterward.
 _STDLIB_LOCAL_NAME_RE = re.compile(
-    r"^_ZZN?[rVK]{0,3}[RO]?"
+    r"^_ZZZ*N?[rVK]{0,3}[RO]?"
     r"(?:St|Sa|Sb|Ss|Si|So|Sd|3std|9__gnu_cxx|11__gnu_debug|10__cxxabiv1|7__cxx11)"
 )
 

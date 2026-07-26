@@ -103,10 +103,22 @@ def test_is_local_name_symbol_false(name: str) -> None:
         # namespace elsewhere (_STDLIB_TYPE_NAMESPACE_PREFIXES); a local
         # static in one of its functions must match here too.
         "_ZZN11__gnu_debug6vectorIiSaIiEE9push_backERKiE1x",
+        # Codex review, PR #641: a recursively-nested <local-name> -- a
+        # static local to a lambda's own call operator, where the lambda is
+        # itself local to a stdlib function (std::outer()). Real GCC output.
+        "_ZZZSt5outervENKUlvE_clEvE1x",
     ],
 )
 def test_is_stdlib_local_name_symbol_true(name: str) -> None:
     assert is_stdlib_local_name_symbol(name)
+
+
+def test_is_stdlib_local_name_symbol_nested_but_user_owned_false() -> None:
+    # Same recursive-nesting shape as the stdlib case above, but the
+    # outermost function belongs to the library under test (pvxs::foo), not
+    # the C++ runtime -- must NOT be classified as stdlib-owned even though
+    # it also carries multiple leading Zs.
+    assert not is_stdlib_local_name_symbol("_ZZZN4pvxs3fooEvENKUlvE_clEvE1x")
 
 
 @pytest.mark.parametrize(

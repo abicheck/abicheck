@@ -522,6 +522,26 @@ class TestObjectAlignmentReduced:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
 
+    # Codex review, PR #641: a recursively-nested <local-name> -- a static
+    # local to a lambda's own call operator, where the lambda is itself
+    # local to a stdlib function (real GCC output for
+    # std::outer()::{lambda()#1}::operator()() const::x).
+    def test_nested_stdlib_lambda_local_name_is_exempt(self):
+        sym = "_ZZZSt5outervENKUlvE_clEvE1x"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
+
+    # Same nesting shape, but the outer function belongs to the library
+    # under test, not the C++ runtime -- must still fire.
+    def test_nested_library_owned_lambda_local_name_still_fires(self):
+        sym = "_ZZZN4pvxs3fooEvENKUlvE_clEvE1x"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
     def test_real_mangled_data_object_still_fires(self):
         # The exemption is by RTTI prefix, not "looks mangled": a genuine
         # namespace-scoped global variable (_ZN…E, not _ZT*) is real data whose
