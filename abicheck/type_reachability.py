@@ -145,7 +145,12 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     ``origin`` is ``ScopeOrigin.PRIVATE_HEADER``/``SYSTEM_HEADER``/
     ``GENERATED`` — linkage and origin are independent axes (ADR-024 D1),
     so a function only ever declared in a private/system/generated header
-    is rejected here too, before its signature is ever scanned.
+    is rejected here too, before its signature is ever scanned. The same
+    ``origin`` check applies to the record-field scan below (Codex review,
+    fresh evidence): ``RecordType`` carries the identical provenance axis,
+    and a non-stdlib record retained only from a private/system/generated
+    header must not make its own field types count as reachability roots
+    either.
     """
     stdlib_names = [
         t.name
@@ -182,6 +187,8 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     if remaining:
         for rec in snapshot.types:
             if rec.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
+                continue
+            if rec.origin in _NON_PUBLIC_ORIGINS:
                 continue
             for f in rec.fields:
                 _scan(f.type)

@@ -71,7 +71,12 @@
   retain a function whose `visibility` is still `PUBLIC` but whose defining
   header sits outside the public set — linkage and origin are independent
   axes (ADR-024 D1), so this excludes it too, using the same
-  `_NON_PUBLIC_ORIGINS` set `idioms.py` already established.
+  `_NON_PUBLIC_ORIGINS` set `idioms.py` already established. The record-field
+  scan gets the identical `origin` check (Codex review, fresh evidence): it
+  had bypassed `_NON_PUBLIC_ORIGINS` entirely even though `RecordType`
+  carries the same provenance axis as `Function` — a non-stdlib record kept
+  only from a private/system/generated header must not make its own field
+  types count as reachability roots either.
   Not yet wired into any live detector — see `AGENTS.md`'s
   "Known gaps" for why retrofitting the ~15 existing call sites needs its
   own scoped, individually-verified follow-up.

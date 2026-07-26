@@ -300,6 +300,67 @@ class TestDirectlyReferencedStdlibTypes:
         )
         assert directly_referenced_stdlib_types(snap) == frozenset()
 
+    def test_private_header_origin_record_field_does_not_count_as_direct_reference(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence beyond the function-origin fix:
+        RecordType carries the same origin provenance axis, and the
+        separate record-field scan loop bypassed the origin check
+        entirely -- a non-stdlib record retained from a private header
+        must not make its field types count as public reachability
+        roots either."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            types=[
+                RecordType(
+                    name="InternalImplDetail",
+                    kind="struct",
+                    fields=[TypeField(name="s", type="std::string")],
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_system_header_origin_record_field_does_not_count_as_direct_reference(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            types=[
+                RecordType(
+                    name="LibcWrapperDetail",
+                    kind="struct",
+                    fields=[TypeField(name="s", type="std::string")],
+                    origin=ScopeOrigin.SYSTEM_HEADER,
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_public_header_origin_record_field_still_counts_as_direct_reference(
+        self,
+    ) -> None:
+        """Guard against over-excluding the record-field path too."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            types=[
+                RecordType(
+                    name="MyPublicType",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
     def test_public_header_origin_still_counts_as_direct_reference(self) -> None:
         """Guard against over-excluding: PUBLIC_HEADER (and the UNKNOWN
         default used when no --public-header set is supplied) must still be
