@@ -508,6 +508,20 @@ class TestDetectPackConflicts:
                 ]
             )
 
+    def test_non_mapping_pack_assignments_is_rejected(self):
+        # Codex review: an untyped pack-manifest adapter supplying a decoded
+        # non-mapping assignment block (e.g. (identity, ["contract.mode"]))
+        # previously reached `.items()` unvalidated, crashing with
+        # "AttributeError: 'list' object has no attribute 'items'" instead
+        # of the deliberate configuration error this function exists to
+        # produce -- the same gap already closed for explicit_overrides.
+        with pytest.raises(TypeError, match="detect_pack_conflicts"):
+            detect_pack_conflicts(
+                [
+                    (_pack("rust_c_ffi"), ["contract.mode"]),  # type: ignore[list-item]
+                ]
+            )
+
     def test_non_mapping_explicit_overrides_is_rejected(self):
         # Codex review: the `Mapping[str, Hashable]` annotation isn't
         # runtime-enforced -- an untyped pack adapter passing a plain

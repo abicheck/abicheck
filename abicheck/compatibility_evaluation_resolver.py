@@ -412,6 +412,18 @@ def detect_pack_conflicts(
                 "detect_pack_conflicts: every pack identity must be an "
                 f"ImmutableIdentity, not {identity!r}."
             )
+        # An untyped pack-manifest adapter supplying a decoded non-mapping
+        # assignment block (e.g. (identity, ["contract.mode"])) previously
+        # reached `.items()` unvalidated, crashing with "AttributeError:
+        # 'list' object has no attribute 'items'" instead of the deliberate
+        # configuration error this function exists to produce -- the same
+        # gap already closed for explicit_overrides above (Codex review).
+        if not isinstance(assignments, Mapping):
+            raise TypeError(
+                "detect_pack_conflicts: every pack's assignments must be a "
+                f"Mapping[str, Hashable], not {assignments!r} (from pack "
+                f"{identity!r})."
+            )
         for field_name, value in assignments.items():
             # A non-str field/ChangeKind-slug key (e.g. an untyped pack
             # adapter supplying {2: "legacy"}) previously reached
