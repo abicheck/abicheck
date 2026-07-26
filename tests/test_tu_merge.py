@@ -332,6 +332,7 @@ def test_merge_fragments_empty_returns_empty_result():
         ast_fallback_reason=None,
         ast_toolchain_supported=None,
         ast_toolchain_unsupported_reasons=(),
+        frontend_context_kind=None,
     )
 
 

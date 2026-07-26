@@ -2576,7 +2576,23 @@ verdict-producing comparison, so it doesn't fit the example catalog's
 
 ---
 
-## Phase D — SYCL/DPC++ host vs. device AST context selection
+## Phase D (done) — SYCL/DPC++ host vs. device AST context selection
+
+**Status: done.** All acceptance criteria below are implemented and tested:
+`sycl_context.py`'s decoder/selector (tested against Phase 0's real `icpx`
+capture, `tests/fixtures/g32/dpcpp/`); `dumper_clang._is_dpcpp_family_binary`
++ `dumper.py`'s `_clang_header_dump`/`_header_ast_parser` wiring (positive
+non-SYCL fallback-gating, non-`host`-on-plain-frontend hard fail); the
+resolved `kind` folded into `AbiSnapshot.frontend_context_kind` and
+`comparability.compute_extraction_contract`'s hashed `profile_fingerprint`
+(gated on non-`None`); Phase B's blanket `device` rejection lifted in
+`dump_manifest.py` and `cli_options.resolve_compile_context`, plus a fix to
+`merge_compile_config`'s silent `frontend_context` drop when folding a
+`.abicheck.yml` `compile:` block; `scan`/`dump`/`compare` all thread the
+resolved `CompileContext.frontend_context` through to `dumper.dump`. See
+`tests/test_sycl_context.py`, `tests/test_dumper_clang.py`'s DPC++ wiring
+tests, `tests/test_comparability.py`'s `frontend_context_kind` tests, and
+`tests/test_cli_frontend_context.py`.
 
 Implements ADR-050 D5. Independent of Phase C's merge work. **Depends on
 Phase 0, Phase A, *and* Phase B — not Phase 0 alone, and not a "soft"

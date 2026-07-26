@@ -298,6 +298,16 @@ def _parser_ast_unsupported_reasons(parser: Any) -> list[str]:
     return list(getattr(parser, "_abicheck_ast_unsupported_reasons", []) or [])
 
 
+def _parser_frontend_context_kind(parser: Any) -> str | None:
+    """ADR-050 D5, G32 Phase D: the resolved SYCL/DPC++ ``kind``
+    (``"host"``/``"device"``) a DPC++-capable clang invocation's
+    ``sycl_context`` selection resolved to, or ``None`` for an ordinary,
+    non-DPC++ parse -- mirrors :func:`_parser_ast_toolchain`'s own
+    ``getattr`` pattern for parser-stamped metadata."""
+    value = getattr(parser, "_abicheck_frontend_context_kind", None)
+    return str(value) if value else None
+
+
 #: Standard-mandated ``__cplusplus`` literal for every C++ edition this
 #: project's own force_cpp20 path or a user's explicit ``-std=`` can name.
 #: Keyed on the edition token alone (the part after the final ``+``/``c++``),

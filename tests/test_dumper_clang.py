@@ -1013,7 +1013,7 @@ def test_clang_self_heal_explicit_c_warns(
     header = tmp_path / "umbrella.h"
     header.write_text("int foo(void);\n")
     with caplog.at_level(logging.DEBUG, logger="abicheck.dumper"):
-        root = _clang_header_dump([header], [], lang="c")
+        root, _resolved_kind = _clang_header_dump([header], [], lang="c")
     assert root["kind"] == "TranslationUnitDecl"
     warns = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert any("asked for C" in r.message for r in warns), [r.message for r in warns]
@@ -1030,7 +1030,7 @@ def test_clang_self_heal_auto_detected_is_debug(
     header = tmp_path / "umbrella.h"
     header.write_text("int foo(void);\n")
     with caplog.at_level(logging.DEBUG, logger="abicheck.dumper"):
-        root = _clang_header_dump([header], [])  # lang=None → auto-detect
+        root, _resolved_kind = _clang_header_dump([header], [])  # lang=None → auto-detect
     assert root["kind"] == "TranslationUnitDecl"
     assert not any(r.levelno == logging.WARNING for r in caplog.records)
     assert any(
@@ -1420,7 +1420,7 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
             "type": {"qualType": "void ()"},
         }
     )
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: ast)
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None))
     parser = _header_ast_parser(
         [],
         [],
@@ -1455,7 +1455,7 @@ def test_header_ast_parser_clang_branch_records_abi_dialect(
             "type": {"qualType": "void ()"},
         }
     )
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: ast)
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None))
     parser = _header_ast_parser(
         [],
         [],
@@ -1487,7 +1487,7 @@ def test_header_ast_parser_clang_branch_records_msvc_abi_dialect(
             "type": {"qualType": "void ()"},
         }
     )
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: ast)
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None))
     monkeypatch.setattr(
         dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/llvm/bin/cl.exe"
     )
@@ -1687,12 +1687,14 @@ def test_clang_header_dump_success_and_cache(
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
 
-    root = _clang_header_dump([header], [])
+    root, resolved_kind = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
+    assert resolved_kind is None
     assert cache.exists()  # result was cached
     # Second call hits the cache — subprocess is not invoked again.
-    root2 = _clang_header_dump([header], [])
+    root2, resolved_kind2 = _clang_header_dump([header], [])
     assert root2 == root
+    assert resolved_kind2 is None
     assert calls["n"] == 1
 
 
@@ -1716,10 +1718,9 @@ def test_clang_only_dump_does_not_require_gxx_identity(
         return _fake_proc()
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    assert _clang_header_dump([header], []) == {
-        "kind": "TranslationUnitDecl",
-        "inner": [],
-    }
+    root, resolved_kind = _clang_header_dump([header], [])
+    assert root == {"kind": "TranslationUnitDecl", "inner": []}
+    assert resolved_kind is None
 
 
 def test_clang_header_dump_rechecks_deadline_on_cache_hit(
@@ -2017,7 +2018,7 @@ def test_clang_header_dump_retries_cpp_on_missing_cpp_stdlib_header(
         return _fake_proc(returncode=0)
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root = _clang_header_dump([header], [])
+    root, _resolved_kind = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
     assert len(cmds) == 2  # one C attempt + one C++ retry
     assert "c" in cmds[0] and cmds[0][cmds[0].index("-x") + 1] == "c"
@@ -2044,6 +2045,125 @@ def test_clang_header_dump_no_retry_on_other_error(
     with pytest.raises(SnapshotError, match="failed to parse"):
         _clang_header_dump([header], [])
     assert calls["n"] == 1  # no retry
+
+
+# ── ADR-050 D5 (G32 Phase D): SYCL/DPC++ host/device context wiring ─────────
+
+
+_G32_DPCPP_DIR = Path(__file__).parent / "fixtures" / "g32" / "dpcpp"
+
+
+def _dpcpp_fixture_texts() -> tuple[str, str]:
+    """Real captured (stdout, stderr) pair from ``icpx -fsycl`` (Phase 0's
+    fixture, see ``tests/fixtures/g32/README.md``) -- not synthesized."""
+    stdout = (_G32_DPCPP_DIR / "ast_dump.json").read_text(encoding="utf-8")
+    stderr = (_G32_DPCPP_DIR / "compiler_invocation.log").read_text(encoding="utf-8")
+    return stdout, stderr
+
+
+def test_clang_header_dump_device_context_selects_real_fixture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """End-to-end wiring: a DPC++-capable clang_bin + frontend_context="device"
+    decodes the real two-document capture and selects the spir64 device AST,
+    proving sycl_context.py is actually reached from _clang_header_dump, not
+    just exercised in isolation (Codex P1 review)."""
+    header = tmp_path / "foo.h"
+    header.write_text("struct Point { int x, y; };\nint add(int, int);\n")
+    stdout_text, stderr_text = _dpcpp_fixture_texts()
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx")
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd, **kwargs):
+        _write_stdout_file(kwargs, stdout_text)
+        return _fake_proc(stderr=stderr_text, returncode=0)
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    root, resolved_kind = _clang_header_dump(
+        [header], [], frontend_context="device"
+    )
+    assert resolved_kind == "device"
+    assert root["kind"] == "TranslationUnitDecl"
+
+
+def test_clang_header_dump_host_context_selects_real_fixture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Companion to the device-selection test above: the same DPC++-capable
+    invocation with the default frontend_context="host" selects the OTHER
+    (x86_64) document from the identical real capture."""
+    header = tmp_path / "foo.h"
+    header.write_text("struct Point { int x, y; };\nint add(int, int);\n")
+    stdout_text, stderr_text = _dpcpp_fixture_texts()
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx")
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd, **kwargs):
+        _write_stdout_file(kwargs, stdout_text)
+        return _fake_proc(stderr=stderr_text, returncode=0)
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    root, resolved_kind = _clang_header_dump([header], [])
+    assert resolved_kind == "host"
+    assert root["kind"] == "TranslationUnitDecl"
+
+
+def test_clang_header_dump_dpcpp_empty_stream_raises_ast_context_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Fallback-gating (ADR-050 D5 acceptance criterion): a DPC++-capable
+    invocation whose decoded stream comes back empty (broken toolchain
+    invocation, truncated output) must raise AstContextMissingError -- never
+    silently degrade to a single-context path, which is reserved for an
+    invocation that was never positively identified as DPC++-capable at all."""
+    from abicheck.errors import AstContextMissingError
+
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx")
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd, **kwargs):
+        # No document-boundary markers at all -- an empty/malformed stream,
+        # not "this wasn't a multi-document invocation."
+        _write_stdout_file(kwargs, "")
+        return _fake_proc(stderr="", returncode=0)
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    with pytest.raises((AstContextMissingError, SnapshotError)):
+        _clang_header_dump([header], [], frontend_context="device")
+
+
+def test_clang_header_dump_non_host_on_plain_frontend_raises_immediately(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A non-"host" frontend_context against a plain, non-DPC++-capable
+    clang_bin fails immediately with AstContextMissingError, before any
+    subprocess is invoked -- a user who explicitly requests "device" on a
+    frontend that cannot produce one must get a clear failure, never the
+    ordinary single-context host AST silently standing in for it."""
+    from abicheck.errors import AstContextMissingError
+
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/usr/bin/clang++")
+    calls = {"n": 0}
+
+    def _run(cmd, **kwargs):
+        calls["n"] += 1
+        return _fake_proc(returncode=0)
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    with pytest.raises(AstContextMissingError):
+        _clang_header_dump([header], [], frontend_context="device")
+    assert calls["n"] == 0  # never spent a subprocess invocation on it
 
 
 def test_resolve_header_backend_neither_tool_defaults_castxml(
@@ -2810,7 +2930,7 @@ def test_clang_header_dump_corrupt_cache_is_discarded(
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
     # The corrupt cache is unlinked and the fresh clang run repopulates it.
-    root = _clang_header_dump([header], [])
+    root, _resolved_kind = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
 
 

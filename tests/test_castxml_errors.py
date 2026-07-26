@@ -638,7 +638,7 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: sentinel)
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (sentinel, None))
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     parser = _header_ast_parser(
@@ -665,7 +665,7 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: sentinel)
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (sentinel, None))
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     parser = _header_ast_parser(
@@ -722,7 +722,7 @@ def test_header_ast_parser_clang_backend_returns_clang_parser(tmp_path, monkeypa
     from abicheck.dumper import _ClangAstParser, _header_ast_parser
 
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "clang")
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: {})
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: ({}, None))
 
     parser = _header_ast_parser(
         [Path("a.h")], [], backend="clang", **_ast_parser_kwargs(tmp_path)

@@ -11,13 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""ADR-050 D3/D5 (G32 Phase B) — the `--frontend-context host|device` flag.
+"""ADR-050 D3/D5 (G32 Phase B/D) — the `--frontend-context host|device` flag.
 
 Shared by `dump`/`compare`/`scan` via `cli_options.compile_context_options`
 and resolved through the single `cli_options.resolve_compile_context` choke
-point. Only "host" is honored this phase -- "device" is a syntactically
-valid click.Choice value (so a manifest-idiom-consistent flag exists ahead
-of Phase D) but is rejected at resolution time, not silently treated as host.
+point. Phase B shipped with "device" syntactically valid (click.Choice) but
+rejected at resolution time -- Phase D's `sycl_context` selector is what
+makes a "device" request meaningful, so it lifts that blanket rejection
+here. A "device" request the underlying compiler/invocation can't actually
+satisfy now fails from the real extraction pipeline
+(`AstContextMissingError`/`AstContextAmbiguousError`, see
+`test_sycl_context.py` and `test_dumper_clang.py`'s DPC++ wiring tests),
+not from a blanket CLI-level reject.
 """
 
 from __future__ import annotations
@@ -43,15 +48,22 @@ def _elf_stub(path: Path) -> Path:
 
 
 @pytest.mark.parametrize("cmd", ["dump", "compare", "scan"])
-def test_frontend_context_device_rejected(tmp_path, runner, cmd):
+def test_frontend_context_device_no_longer_blanket_rejected(tmp_path, runner, cmd):
+    """ADR-050 D5 (G32 Phase D): Phase B's blanket "not supported yet"
+    rejection is lifted now that `sycl_context.py`'s selector exists. These
+    ELF stubs have no headers, so the header AST frontend never runs and
+    "device" has nothing to select from; whatever failure results (e.g. an
+    invalid ELF file) must not be Phase B's old resolution-time reject --
+    proving the restriction is actually gone, not just given a new message.
+    """
     so1 = _elf_stub(tmp_path / "a.so")
     args = [cmd, str(so1)]
     if cmd == "compare":
         args.append(str(_elf_stub(tmp_path / "b.so")))
     args += ["--frontend-context", "device"]
     result = runner.invoke(main, args)
-    assert result.exit_code != 0
-    assert "not supported yet" in result.output
+    assert "not supported yet" not in result.output
+    assert "--frontend-context" not in result.output
 
 
 def test_frontend_context_invalid_value_rejected_by_click(tmp_path, runner):
@@ -113,20 +125,59 @@ def test_resolve_compile_context_defaults_to_host():
     assert cc.frontend_context == "host"
 
 
-def test_resolve_compile_context_rejects_device():
+def test_resolve_compile_context_accepts_device():
+    """ADR-050 D5 (G32 Phase D): "device" is a normally-accepted value now
+    that `sycl_context.py`'s selector exists -- the request itself may
+    still fail later, from the real extraction pipeline, if the underlying
+    compiler/invocation can't actually produce a device context."""
     import click
 
     ctx = click.Context(click.Command("x"))
-    with pytest.raises(click.UsageError, match="not supported yet"):
-        resolve_compile_context(
-            ctx,
-            gcc_path=None, gcc_prefix=None, gcc_options=None,
-            gcc_option_tokens=(), sysroot=None, nostdinc=False,
-            header_backend="auto", includes=(), build_config=None,
-            frontend_context="device",
-        )
+    cc, _ = resolve_compile_context(
+        ctx,
+        gcc_path=None, gcc_prefix=None, gcc_options=None,
+        gcc_option_tokens=(), sysroot=None, nostdinc=False,
+        header_backend="auto", includes=(), build_config=None,
+        frontend_context="device",
+    )
+    assert cc.frontend_context == "device"
 
 
 def test_compile_context_frontend_context_field_defaults_to_host():
     assert CompileContext().frontend_context == "host"
     assert CompileContext(frontend_context="device").frontend_context == "device"
+
+
+def test_scan_frontend_context_device_reaches_dumper_dump(tmp_path):
+    """ADR-050 D5 (G32 Phase D) acceptance criterion: `scan --frontend-context
+    device` threads the request all the way into the L2 header frontend via
+    `compile_context_options`/`resolve_compile_context`, the same path `dump`/
+    `compare` use -- closing the loop Phase B's blanket rejection opened.
+
+    `scan_engine.run_scan_core` resolves its ELF input via
+    `service.resolve_input(..., is_elf=True, compile=...)`, which reaches
+    `abicheck.dumper.dump` through `service._dump_elf`; mocking `dump` itself
+    (the same technique `test_service_unit.py::test_elf_forwards_provenance_
+    to_dumper` uses for `public_headers`/`public_header_dirs`) lets this test
+    assert the kwarg reaches that exact call, without needing a real DPC++
+    toolchain in this environment.
+    """
+    from unittest.mock import patch
+
+    from abicheck.model import AbiSnapshot
+    from abicheck.service import resolve_input
+
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+    hdr = tmp_path / "api.h"
+    hdr.write_text("void f();\n")
+    snap = AbiSnapshot(library="lib", version="1.0")
+    with patch("abicheck.dumper.dump", return_value=snap) as mock_dump:
+        resolve_input(
+            so,
+            headers=[hdr],
+            includes=[],
+            is_elf=True,
+            compile=CompileContext(frontend_context="device"),
+        )
+    assert mock_dump.call_args.kwargs["frontend_context"] == "device"

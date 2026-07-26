@@ -63,6 +63,7 @@ from .dumper_toolchain import (
     _parser_ast_supported,
     _parser_ast_toolchain,
     _parser_ast_unsupported_reasons,
+    _parser_frontend_context_kind,
 )
 from .model import EnumType, Function, RecordType, Variable
 from .tu_fragment import (
@@ -183,6 +184,7 @@ def run_tu_fragment(
     public_header_paths: list[str],
     public_dir_paths: list[str],
     extra_hash_dirs: tuple[Path, ...] = (),
+    frontend_context: str = "host",
 ) -> TuFragment:
     """Run one castxml/clang invocation for *tu* via *header_ast_parser*
     (``dumper._header_ast_parser``, injected -- see this module's own
@@ -218,6 +220,7 @@ def run_tu_fragment(
         public_header_paths=public_header_paths,
         public_dir_paths=public_dir_paths,
         extra_hash_dirs=extra_hash_dirs,
+        frontend_context=frontend_context,
     )
     return TuFragment(
         tu_name=tu.name,
@@ -234,6 +237,7 @@ def run_tu_fragment(
         ast_toolchain_unsupported_reasons=tuple(
             _parser_ast_unsupported_reasons(parser)
         ),
+        frontend_context_kind=_parser_frontend_context_kind(parser),
     )
 
 
@@ -255,6 +259,7 @@ def _run_tu_fragments(
     public_header_paths: list[str],
     public_dir_paths: list[str],
     extra_hash_dirs: tuple[Path, ...],
+    frontend_context: str = "host",
 ) -> list[TuFragment]:
     """Run :func:`run_tu_fragment` for every TU in *tus*, under a
     RAM-aware thread pool (ADR-050 D6, G32 Phase E) instead of a fully
@@ -311,6 +316,7 @@ def _run_tu_fragments(
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
             extra_hash_dirs=extra_hash_dirs,
+            frontend_context=frontend_context,
         )
 
     def _handle_failure(tu: TranslationUnit) -> None:
@@ -402,6 +408,7 @@ def run_tu_loop(
     exported_dynamic: set[str],
     exported_static: set[str],
     extra_hash_dirs: tuple[Path, ...] = (),
+    frontend_context: str = "host",
 ) -> MergedTuFragments:
     """Run every TU in *tus* (one castxml/clang invocation each) and merge
     the results via :func:`merge_tu_fragments` -- ADR-050 D3's "one
@@ -468,6 +475,7 @@ def run_tu_loop(
         public_header_paths=resolved_public_paths,
         public_dir_paths=resolved_public_dirs,
         extra_hash_dirs=extra_hash_dirs,
+        frontend_context=frontend_context,
     )
 
     return merge_tu_fragments(
@@ -498,6 +506,7 @@ class ElfHeaderAstResult:
     ast_toolchain_unsupported_reasons: tuple[str, ...]
     is_clang: bool
     provenance_headers: tuple[Path, ...]
+    frontend_context_kind: str | None = None
 
 
 def resolve_header_ast_result(
@@ -520,6 +529,7 @@ def resolve_header_ast_result(
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
     extra_hash_dirs: tuple[Path, ...] = (),
+    frontend_context: str = "host",
 ) -> ElfHeaderAstResult:
     """Run the header-AST parse for one dump -- manifest-driven (one
     invocation per TU, merged) when *dump_manifest* is given, otherwise the
@@ -560,6 +570,13 @@ def resolve_header_ast_result(
             exported_dynamic=exported_dynamic,
             exported_static=exported_static,
             extra_hash_dirs=extra_hash_dirs,
+            # A manifest's own frontend_context field is authoritative for
+            # every one of its TUs (ADR-050 D3's parse-time rule already
+            # forces one compiler/target per manifest) -- it takes
+            # precedence over the caller's own requested value, mirroring
+            # how public_header_paths/public_header_dirs above already
+            # prefer the manifest's own fields.
+            frontend_context=dump_manifest.frontend_context,
         )
         provenance_headers = tuple(dump_manifest.roots)
     else:
@@ -586,6 +603,7 @@ def resolve_header_ast_result(
             + [str(h) for h in (public_headers or [])],
             public_dir_paths=[str(d) for d in (public_header_dirs or [])],
             extra_hash_dirs=extra_hash_dirs,
+            frontend_context=frontend_context,
         )
         merged = MergedTuFragments(
             functions=fragment.functions,
@@ -599,6 +617,7 @@ def resolve_header_ast_result(
             ast_fallback_reason=fragment.ast_fallback_reason,
             ast_toolchain_supported=fragment.ast_toolchain_supported,
             ast_toolchain_unsupported_reasons=fragment.ast_toolchain_unsupported_reasons,
+            frontend_context_kind=fragment.frontend_context_kind,
         )
         provenance_headers = tuple(headers)
 
@@ -614,6 +633,7 @@ def resolve_header_ast_result(
         ast_fallback_reason=merged.ast_fallback_reason,
         ast_toolchain_supported=merged.ast_toolchain_supported,
         ast_toolchain_unsupported_reasons=merged.ast_toolchain_unsupported_reasons,
+        frontend_context_kind=merged.frontend_context_kind,
         is_clang=merged.ast_producer == "clang",
         provenance_headers=provenance_headers,
     )

@@ -162,6 +162,13 @@ PROFILE_FIELD_KEYS = (
     "include_sequence",
     "header_sequence",
 )
+#: Appended to PROFILE_FIELD_KEYS only when a dump actually went through a
+#: DPC++-capable frontend (ADR-050 D5, G32 Phase D) -- never for an ordinary
+#: clang/castxml dump, so every pre-Phase-D profile_fingerprint stays
+#: byte-for-byte unchanged (the identical "don't break legacy fingerprints"
+#: discipline manifest_tu_scope's own SCOPE_FIELD_KEYS/_MANIFEST_SCOPE_FIELD_KEYS
+#: split already established).
+_FRONTEND_CONTEXT_PROFILE_FIELD_KEYS = (*PROFILE_FIELD_KEYS, "frontend_context_kind")
 SCOPE_FIELD_KEYS = (
     "headers",
     "public_header_dirs",
@@ -598,6 +605,7 @@ def compute_extraction_contract(
     public_header_paths: Sequence[Path] = (),
     public_header_dirs: Sequence[Path] = (),
     manifest_tu_scope: str | None = None,
+    frontend_context_kind: str | None = None,
 ) -> ExtractionContract | None:
     """Compute one side's :class:`ExtractionContract`, for either the legacy
     non-manifest CLI path or a ``--dump-manifest`` (ADR-050 D1/D3).
@@ -870,9 +878,15 @@ def compute_extraction_contract(
             "pass_through_flags": json.dumps(normalized_pass_through),
             "include_sequence": json.dumps(slot_tokens),
             "header_sequence": json.dumps(header_sequence),
+            "frontend_context_kind": frontend_context_kind or "",
         }
+        _profile_fingerprint_keys = (
+            _FRONTEND_CONTEXT_PROFILE_FIELD_KEYS
+            if frontend_context_kind is not None
+            else PROFILE_FIELD_KEYS
+        )
         profile_fingerprint = _sha256_of(
-            *[profile_fields[k] for k in PROFILE_FIELD_KEYS]
+            *[profile_fields[k] for k in _profile_fingerprint_keys]
         )
 
     scope_fingerprint: str | None = None
@@ -1563,7 +1577,7 @@ def check_contracts_comparable(
             raise ProfileMismatchError(reason)
         differing = {
             k
-            for k in PROFILE_FIELD_KEYS
+            for k in _FRONTEND_CONTEXT_PROFILE_FIELD_KEYS
             if old_fields.get(k, "") != new_fields.get(k, "")
         }
         # A differing key OUTSIDE PROFILE_FIELD_KEYS entirely -- a newer

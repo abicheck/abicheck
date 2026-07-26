@@ -296,6 +296,7 @@ def merge_fragments(
             ast_fallback_reason=None,
             ast_toolchain_supported=None,
             ast_toolchain_unsupported_reasons=(),
+            frontend_context_kind=None,
         )
 
     # Fixed, content-derived order (tu_name, never the caller's own sequence
@@ -462,6 +463,7 @@ def merge_fragments(
         ast_fallback_reason=representative.ast_fallback_reason,
         ast_toolchain_supported=representative.ast_toolchain_supported,
         ast_toolchain_unsupported_reasons=representative.ast_toolchain_unsupported_reasons,
+        frontend_context_kind=representative.frontend_context_kind,
     )
 
 

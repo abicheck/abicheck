@@ -136,6 +136,7 @@ def _try_header_scoped_dump(
                 lang=lang_arg,
                 header_backend=header_backend,
                 extra_hash_dirs=deferred_dirs,
+                frontend_context=cc.frontend_context,
             )
         else:
             snap = _dumper_macho(
@@ -153,6 +154,7 @@ def _try_header_scoped_dump(
                 lang=lang_arg,
                 header_backend=header_backend,
                 extra_hash_dirs=deferred_dirs,
+                frontend_context=cc.frontend_context,
             )
     except deadline.DeadlineExceeded:
         # A --budget deadline expiring mid-parse is not "this header backend is

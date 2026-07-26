@@ -73,6 +73,7 @@
   "enums": [],
   "fact_provenance": {},
   "from_headers": true,
+  "frontend_context_kind": null,
   "functions": [
     {
       "access": "public",

@@ -33,11 +33,12 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from . import deadline
-from .dumper_cache import _atomic_copy
+from .dumper_cache import _atomic_copy, _atomic_write
 from .errors import SnapshotError
+from .sycl_context import decode_frontend_contexts, select_frontend_context
 
 log = logging.getLogger(__name__)
 
@@ -496,6 +497,8 @@ def _parse_clang_ast_result(
     ast_path: Path,
     *,
     cache_write: bool = True,
+    dpcpp_capable: bool = False,
+    frontend_context: str = "host",
 ) -> dict[str, Any]:
     """Validate a completed clang AST-dump, parse its JSON, and cache the tree.
 
@@ -508,10 +511,21 @@ def _parse_clang_ast_result(
     pathological header's AST dump can be hundreds of MB to multiple GB (P0
     SVS field report), and buffering that in a subprocess pipe capture on top
     of the dict this function builds would double peak memory for no reason.
-    The cache write below copies *ast_path* directly (streamed, via
-    :func:`_atomic_copy`) rather than re-serializing *root* with
-    ``json.dumps`` — same reasoning, plus it avoids a second (and generally
-    larger, due to whitespace/key-order differences) in-memory encoding pass.
+    The plain (non-DPC++) cache write below copies *ast_path* directly
+    (streamed, via :func:`_atomic_copy`) rather than re-serializing *root*
+    with ``json.dumps`` — same reasoning, plus it avoids a second (and
+    generally larger, due to whitespace/key-order differences) in-memory
+    encoding pass.
+
+    ``dpcpp_capable`` (ADR-050 D5, G32 Phase D) routes *ast_path* through
+    :mod:`abicheck.sycl_context`'s multi-document decoder/selector instead of
+    a bare single-document ``json.load`` — *ast_path* holds a concatenated
+    host+device document stream in that case, one ``clang -ast-dump=json``
+    document per ``-cc1`` compilation pass. The cache then stores only the
+    *selected* single document (keyed by *frontend_context*, see
+    ``dumper._clang_header_dump``'s cache key), not the whole raw stream, so
+    the cache-hit read-back path (a bare ``json.loads``) needs no changes for
+    either case.
     """
     if result.returncode != 0:
         raise SnapshotError(
@@ -536,42 +550,56 @@ def _parse_clang_ast_result(
     # sinking that cost) so a budget that expired while clang was still
     # exiting successfully doesn't silently run well past it (Codex review).
     deadline.check()
-    try:
-        with open(ast_path, "rb") as fh:  # bytes: json detects encoding
-            root = json.load(fh)
-    except ValueError as exc:
-        # "Extra data" means a second top-level JSON value follows the first —
-        # a driver flag that runs more than one -cc1 pass for this one compile
-        # (each with its own -Xclang -ast-dump=json) writes each pass's full
-        # document to this same stdout stream, back-to-back with no
-        # separator. A bare -fsycl is the known case (device pass + host
-        # pass; handled by auto-appending -fsycl-host-only, see
-        # dumper._needs_sycl_host_only), but any other multi-target offload
-        # flag (e.g. -fopenmp-targets=) that this codebase does not yet
-        # special-case would fail the same way — naming the likely cause here
-        # turns a cryptic byte-offset error into an actionable one.
-        hint = ""
-        if isinstance(exc, json.JSONDecodeError) and exc.msg == "Extra data":
-            hint = (
-                " -- this looks like more than one JSON document on stdout, "
-                "which happens when a compiler flag makes clang run multiple "
-                "-cc1 passes for one compile (e.g. a bare '-fsycl' without "
-                "'-fsycl-host-only'/'-fsycl-device-only', or an OpenMP/CUDA "
-                "offload target flag); pin a single compilation pass or use "
-                "--ast-frontend castxml"
-            )
-        raise SnapshotError(
-            f"clang AST output was not valid JSON: {exc}{hint}"
-        ) from exc
-    # json.load() above can itself consume the remaining budget on a
-    # multi-GB AST; re-check before the (also non-trivial, streamed) cache
-    # copy so an expired deadline doesn't still complete it and hand the
-    # caller a result for downstream AST walking (CodeRabbit review, PR #591).
+    if dpcpp_capable:
+        stdout_text = ast_path.read_text(encoding="utf-8")
+        contexts = decode_frontend_contexts(stdout_text, result.stderr or "")
+        selected = select_frontend_context(contexts, frontend_context)
+        root = selected.ast
+    else:
+        try:
+            with open(ast_path, "rb") as fh:  # bytes: json detects encoding
+                root = json.load(fh)
+        except ValueError as exc:
+            # "Extra data" means a second top-level JSON value follows the
+            # first — a driver flag that runs more than one -cc1 pass for
+            # this one compile (each with its own -Xclang -ast-dump=json)
+            # writes each pass's full document to this same stdout stream,
+            # back-to-back with no separator. A bare -fsycl is the known
+            # case (device pass + host pass; handled by auto-appending
+            # -fsycl-host-only, see dumper._needs_sycl_host_only), but any
+            # other multi-target offload flag (e.g. -fopenmp-targets=) that
+            # this codebase does not yet special-case would fail the same
+            # way — naming the likely cause here turns a cryptic byte-offset
+            # error into an actionable one. dpcpp_capable=True routes around
+            # this branch entirely (handled above via sycl_context instead),
+            # so this hint only ever fires for a driver/flag combination this
+            # codebase doesn't already know how to route to a single pass.
+            hint = ""
+            if isinstance(exc, json.JSONDecodeError) and exc.msg == "Extra data":
+                hint = (
+                    " -- this looks like more than one JSON document on stdout, "
+                    "which happens when a compiler flag makes clang run multiple "
+                    "-cc1 passes for one compile (e.g. a bare '-fsycl' without "
+                    "'-fsycl-host-only'/'-fsycl-device-only', or an OpenMP/CUDA "
+                    "offload target flag); pin a single compilation pass or use "
+                    "--ast-frontend castxml"
+                )
+            raise SnapshotError(
+                f"clang AST output was not valid JSON: {exc}{hint}"
+            ) from exc
+    # json.load()/decode_frontend_contexts() above can itself consume the
+    # remaining budget on a multi-GB AST; re-check before the (also
+    # non-trivial) cache write so an expired deadline doesn't still complete
+    # it and hand the caller a result for downstream AST walking
+    # (CodeRabbit review, PR #591).
     deadline.check()
     if cache_write:
         try:
-            _atomic_copy(ast_path, cached)
+            if dpcpp_capable:
+                _atomic_write(cached, json.dumps(root).encode("utf-8"))
+            else:
+                _atomic_copy(ast_path, cached)
         except OSError:
             pass
     deadline.check()
-    return cast("dict[str, Any]", root)
+    return root

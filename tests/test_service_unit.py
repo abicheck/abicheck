@@ -2279,7 +2279,7 @@ class TestRunDumpHeaderGraph:
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=ast) as mock_ast,
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)) as mock_ast,
         ):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
         mock_ast.assert_called_once()
@@ -2341,7 +2341,7 @@ class TestRunDumpHeaderGraph:
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=ast) as mock_ast,
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)) as mock_ast,
         ):
             result = run_dump(p, "pe", [hdr_dir], [], "1.0", "c++")
         mock_ast.assert_called_once()
@@ -2367,7 +2367,7 @@ class TestRunDumpHeaderGraph:
 
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=ast),
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
                 lambda _b: "/usr/bin/clang++",
@@ -2411,7 +2411,7 @@ class TestRunDumpHeaderGraph:
 
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=ast),
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
                 lambda _b: "/usr/bin/clang++",
@@ -2469,7 +2469,7 @@ class TestRunDumpHeaderGraph:
 
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=ast),
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
                 lambda _b: "/usr/bin/clang++",

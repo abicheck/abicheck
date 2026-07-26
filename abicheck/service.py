@@ -884,7 +884,10 @@ def _attach_header_graph(
             # inferred root would reuse a stale cached AST (Codex review;
             # mirrors _dump_elf's own deferred_dirs handling).
             deferred_dirs = tuple(deferred_token_dirs(deferred))
-        ast_root = _clang_header_dump(
+        # This internal semantic header graph (G29 Phase A) always uses the
+        # default "host" context -- it's a best-effort secondary graph, not
+        # part of ADR-050 D5's host/device selection surface.
+        ast_root, _resolved_kind = _clang_header_dump(
             resolved_headers,
             eff_includes,
             compiler="cc" if lang == "c" else "c++",
@@ -1238,6 +1241,7 @@ def _dump_elf(
             debug_info_path=debug_info_path,
             extra_include_labels=include_labels,
             dump_manifest=dump_manifest,
+            frontend_context=cc.frontend_context,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc

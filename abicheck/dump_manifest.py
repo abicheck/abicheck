@@ -68,11 +68,12 @@ duplicate TU ``name``, the ``contributes_to_abi=True ⇒ required=True``
 invariant (a TU whose declarations feed the ABI model cannot also be
 allowed to fail silently — "optional but contributes" is the exact shape
 that produces a false removal), and a declared ``frontend_context`` other
-than ``"host"`` (Phase D, not this phase, adds a real host/device
-selector — accepting the field now but rejecting any non-default value
-gives Phase D somewhere to plug in without a later schema change, while
-never handing back a snapshot a caller could mistake for device-derived
-before that selector exists).
+than ``"host"``/``"device"`` (ADR-050 D5, G32 Phase D: the manifest's own
+``frontend_context`` is authoritative for every TU it describes, resolved
+for real via ``sycl_context.select_frontend_context`` in the dump
+pipeline — a request the underlying compiler/invocation can't actually
+satisfy raises ``AstContextMissingError``/``AstContextAmbiguousError``
+rather than silently falling back to a different context).
 
 A manifest declaring TUs with different compilers/target triples is
 impossible to express in the first place, by construction: ``compiler``/
@@ -111,9 +112,12 @@ _TU_FIELDS = frozenset(
 #: Accepted keys on a mapping-form ``includes`` entry (``{path: ..., project_owned: true}``).
 _INCLUDE_MAPPING_FIELDS = frozenset({"path", "project_owned"})
 
-#: The only ``frontend_context`` value this phase can honor — Phase D adds
-#: the real host/device selector; see this module's own docstring.
-_SUPPORTED_FRONTEND_CONTEXTS = frozenset({"host"})
+#: ``frontend_context`` values this schema accepts. ADR-050 D5 (G32 Phase D)
+#: adds ``"device"`` alongside the original ``"host"`` -- both are resolved
+#: for real via ``sycl_context.select_frontend_context`` in the dump pipeline
+#: (``dumper._clang_header_dump``), which raises a clear error itself when a
+#: non-DPC++ compiler or a syntax-only invocation can't satisfy the request.
+_SUPPORTED_FRONTEND_CONTEXTS = frozenset({"host", "device"})
 
 
 def _load_yaml_strict(text: str, *, source: str) -> Any:

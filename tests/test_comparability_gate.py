@@ -729,6 +729,62 @@ def test_gate_raises_profile_mismatch_error_on_profile_drift(tmp_path):
         check_contracts_comparable(old, new)
 
 
+def test_frontend_context_kind_mismatch_differs_profile_fingerprint_and_gate_raises():
+    """ADR-050 D5 (G32 Phase D) acceptance criterion: an old/new pair
+    extracted with frontend_context_kind="host" on one side and "device" on
+    the other, otherwise identical, must produce different profile
+    fingerprints and be rejected by the comparability gate -- proving the
+    resolved kind actually reaches compute_extraction_contract's hash, not
+    just sycl_context.py's own selection logic."""
+    old_contract = compute_extraction_contract(
+        l2_frontend_ran=True,
+        compiler_family="clang",
+        target_triple="spir64-unknown-unknown",
+        frontend_context_kind="host",
+    )
+    new_contract = compute_extraction_contract(
+        l2_frontend_ran=True,
+        compiler_family="clang",
+        target_triple="spir64-unknown-unknown",
+        frontend_context_kind="device",
+    )
+    assert old_contract.profile_fingerprint != new_contract.profile_fingerprint
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(_snap(old_contract), _snap(new_contract))
+
+
+def test_frontend_context_kind_same_on_both_sides_matches_profile_fingerprint():
+    """Companion/control: the routine case (both sides request the same
+    frontend_context) must not be broken by folding the resolved kind into
+    the hash."""
+    old_contract = compute_extraction_contract(
+        l2_frontend_ran=True,
+        compiler_family="clang",
+        frontend_context_kind="device",
+    )
+    new_contract = compute_extraction_contract(
+        l2_frontend_ran=True,
+        compiler_family="clang",
+        frontend_context_kind="device",
+    )
+    assert old_contract.profile_fingerprint == new_contract.profile_fingerprint
+    check_contracts_comparable(_snap(old_contract), _snap(new_contract))  # no raise
+
+
+def test_frontend_context_kind_none_matches_pre_phase_d_fingerprint():
+    """A None frontend_context_kind (every pre-Phase-D dump, and every
+    ordinary non-SYCL dump today) must produce byte-for-byte the same
+    profile_fingerprint as calling compute_extraction_contract without the
+    parameter at all -- the gating this whole field's addition depends on."""
+    with_none = compute_extraction_contract(
+        l2_frontend_ran=True, compiler_family="clang", frontend_context_kind=None
+    )
+    without_param = compute_extraction_contract(
+        l2_frontend_ran=True, compiler_family="clang"
+    )
+    assert with_none.profile_fingerprint == without_param.profile_fingerprint
+
+
 def test_gate_is_lenient_when_neither_side_has_a_contract():
     check_contracts_comparable(_snap(None), _snap(None))  # must not raise
 

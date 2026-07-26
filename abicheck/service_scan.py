@@ -163,9 +163,10 @@ class CompileContext:
     nostdinc: bool = False
     frontend: str = "auto"  # --ast-frontend (auto/castxml/clang)
     # --frontend-context (ADR-050 D3/D5): which AST context the L2 header
-    # frontend should target. "host" is the only value this phase can honor
-    # (Phase D adds the real device/DPC++ selector; see dump_manifest.py's
-    # own docstring for the manifest-field half of this same rule).
+    # frontend should target -- "host" (default) or "device" (SYCL/DPC++
+    # offload target, real selector in sycl_context.py; see
+    # dump_manifest.py's own docstring for the manifest-field half of this
+    # same rule).
     frontend_context: str = "host"
 
     @property

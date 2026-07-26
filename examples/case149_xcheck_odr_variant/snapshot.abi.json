@@ -83,6 +83,7 @@
   "enums": [],
   "fact_provenance": {},
   "from_headers": true,
+  "frontend_context_kind": null,
   "functions": [],
   "git_commit": null,
   "git_tag": null,

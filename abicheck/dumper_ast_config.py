@@ -33,9 +33,15 @@ def _cache_key(
     frontend_identity: str = "",
     compiler_identity: str = "",
     force_cpp20: bool = False,
+    frontend_context: str = "host",
 ) -> str:
     h = hashlib.sha256()
     h.update(f"backend={backend}".encode())
+    # A "host" vs "device" request against the identical inputs resolves to
+    # a genuinely different AST (ADR-050 D5, G32 Phase D) -- must not share
+    # a cache entry. Harmless for castxml/plain-clang callers, which only
+    # ever pass the default "host".
+    h.update(f"frontend_context={frontend_context}".encode())
     h.update(f"frontend_identity={frontend_identity}".encode())
     h.update(f"compiler_identity={compiler_identity}".encode())
     for p in sorted(str(x.resolve()) for x in headers):

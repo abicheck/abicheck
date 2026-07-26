@@ -131,6 +131,24 @@ def _is_intel_sycl_driver(path: str) -> bool:
     return Path(path).stem.lower() in _CLANG_FAMILY_ALIAS_NAMES
 
 
+def _is_dpcpp_family_binary(path: str) -> bool:
+    """Whether *path* is specifically Intel's DPC++-capable compiler
+    (``icx``/``icpx``/``dpcpp``/``dpcpp-cl``) — narrower than
+    :func:`_is_clang_family_binary`, which also matches plain ``clang``/
+    ``clang++`` (not SYCL/``-fsycl``-capable). Used to decide whether a
+    clang header-AST invocation should add ``-fsycl -v`` and route its
+    output through :mod:`abicheck.sycl_context`'s multi-document decoder
+    (ADR-050 D5, G32 Phase D) instead of the plain single-document path.
+
+    Same underlying name set as :func:`_is_intel_sycl_driver` (PR #643) --
+    kept as a separate function since the two checks serve distinct
+    call sites (single-pass host-only collapsing vs. multi-pass host/device
+    selection) with independent docstrings/callers, not because the
+    underlying test differs.
+    """
+    return Path(path).stem.lower() in _CLANG_FAMILY_ALIAS_NAMES
+
+
 #: Intel's legacy, now-deprecated "dpcpp"/"dpcpp-cl" driver names predate the
 #: unified icx/icpx compiler and its explicit ``-fsycl`` opt-in: "dpcpp" was
 #: historically the SYCL-specific entry point (Intel's own migration guidance

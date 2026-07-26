@@ -227,4 +227,13 @@ def _attach_extraction_contract(
             if dump_manifest is not None and snapshot.from_headers
             else None
         ),
+        # ADR-050 D5, G32 Phase D: the resolved SYCL/DPC++ "host"/"device"
+        # kind -- read directly off the snapshot, the same way every other
+        # field above reads snapshot.ast_toolchain, rather than threaded as
+        # a separate parameter. None for an ordinary (non-DPC++) dump, so
+        # profile_fingerprint's hashed-field set is untouched for every
+        # pre-Phase-D dump (see compute_extraction_contract's own gating).
+        frontend_context_kind=(
+            snapshot.frontend_context_kind if snapshot.from_headers else None
+        ),
     )

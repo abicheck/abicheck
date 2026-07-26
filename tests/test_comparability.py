@@ -26,9 +26,7 @@ from abicheck.comparability import (
     manifest_tu_scope_field,
 )
 from abicheck.dump_manifest import parse_manifest
-from abicheck.elf_metadata import ElfMetadata
-from abicheck.errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
-from abicheck.macho_metadata import MachoMetadata
+from abicheck.errors import SnapshotError
 from abicheck.model import AbiSnapshot, ExtractionContract
 
 
