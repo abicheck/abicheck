@@ -598,6 +598,64 @@ class TestResolveChangeIdentity:
         assert first_identity.primary_id == second_identity.primary_id
         assert first_identity.tier == IDENTITY_TIER_REDUCED
 
+    def test_batch_change_ignores_enrichment_derived_qualified_name_too(
+        self,
+    ) -> None:
+        # Codex review: _enrich_source_locations runs on every Change and
+        # can populate qualified_name by looking up change.symbol -- for a
+        # batch-shaped change that symbol is the arbitrary sample, so an
+        # enrichment hit derives qualified_name from the sample too,
+        # leaking it back in even with entity_symbol cleared. Two batch
+        # changes differing only in their (enrichment-derived)
+        # qualified_name must still resolve to the same identity.
+        first = Change(
+            kind=ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
+            symbol=_ITANIUM_MANGLED,
+            description="1 GNU_UNIQUE export(s)",
+            old_value="(no GNU_UNIQUE exports)",
+            new_value="1 GNU_UNIQUE export(s)",
+            qualified_name="ns::foo",
+        )
+        second = Change(
+            kind=ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
+            symbol="_ZN3FooC1Ev",
+            description="1 GNU_UNIQUE export(s)",
+            old_value="(no GNU_UNIQUE exports)",
+            new_value="1 GNU_UNIQUE export(s)",
+            qualified_name="ns::Foo::Foo",
+        )
+        first_identity = resolve_change_identity(first)
+        second_identity = resolve_change_identity(second)
+        assert first_identity.primary_id == second_identity.primary_id
+        assert not any(a.startswith("qualified:") for a in first_identity.aliases)
+
+    def test_allocator_replacement_kinds_are_batch_shaped(self) -> None:
+        # Codex review: diff_platform_elf_symbols.py's
+        # _diff_allocator_replacement has the same "arbitrary sample as
+        # spokesperson" shape as _check_gained_gnu_unique -- it fires once
+        # per release, sampling the alphabetically-first affected allocator
+        # export into both symbol and (via the description_template's
+        # {detail}) description. Unlike SYMBOL_BINDING_BECAME_UNIQUE, these
+        # two kinds have no per-symbol sibling detector at all, so every
+        # emission is batch-shaped.
+        first = Change(
+            kind=ChangeKind.ALLOCATOR_REPLACEMENT_ADDED,
+            symbol="_Znwm",
+            description="Global allocator replacement introduced: _Znwm",
+            new_value="1",
+        )
+        second = Change(
+            kind=ChangeKind.ALLOCATOR_REPLACEMENT_ADDED,
+            symbol="_ZdlPv",
+            description="Global allocator replacement introduced: _ZdlPv",
+            new_value="1",
+        )
+        first_identity = resolve_change_identity(first)
+        second_identity = resolve_change_identity(second)
+        assert first_identity.primary_id == second_identity.primary_id
+        assert "_Znwm" not in first_identity.primary_id
+        assert all("_Znwm" not in a for a in first_identity.aliases)
+
     def test_per_symbol_gnu_unique_transition_is_still_canonical(self) -> None:
         # Regression guard: _check_binding_change's genuine per-symbol
         # SYMBOL_BINDING_BECAME_UNIQUE emission -- a real SymbolBinding value

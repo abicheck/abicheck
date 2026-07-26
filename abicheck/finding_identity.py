@@ -560,14 +560,36 @@ _BATCH_SHAPED_OLD_VALUES = {
     "symbol_binding_became_unique": "(no GNU_UNIQUE exports)",
 }
 
+#: Kinds with no per-symbol sibling detector at all -- every emission is
+#: batch-shaped, so no value-based sentinel is needed to tell it apart from
+#: a legitimate per-entity finding (unlike :data:`_BATCH_SHAPED_OLD_VALUES`'s
+#: kinds, which share a slug with a genuine per-symbol detector).
+#: ``diff_platform_elf_symbols.py``'s ``_diff_allocator_replacement`` is the
+#: concrete case (Codex review): it fires once per release when a build
+#: newly gains/loses a global allocator replacement, sampling the
+#: alphabetically-first affected allocator export into both ``symbol`` and
+#: (via ``detail``) ``description`` -- the exact same "arbitrary sample as
+#: spokesperson" shape as the GNU_UNIQUE case above, just with no
+#: SymbolBinding-style sibling to disambiguate against, since these two
+#: ``ChangeKind`` values have exactly one producer each (verified: no other
+#: ``make_change`` call site in the codebase emits either kind).
+_ALWAYS_BATCH_SHAPED_KIND_SLUGS = frozenset(
+    {
+        "allocator_replacement_added",
+        "allocator_replacement_removed",
+    }
+)
+
 
 def _is_batch_shaped_change(change: Change, kind_value: str) -> bool:
     """True when *change* is a library-level/batch finding, not a per-entity one.
 
-    See :data:`_BATCH_SHAPED_OLD_VALUES` -- gates :func:`resolve_change_identity`
-    against promoting a batch finding's sampled symbol to a CANONICAL entity
-    identity.
+    See :data:`_BATCH_SHAPED_OLD_VALUES`/:data:`_ALWAYS_BATCH_SHAPED_KIND_SLUGS`
+    -- gates :func:`resolve_change_identity` against promoting a batch
+    finding's sampled symbol to a CANONICAL entity identity.
     """
+    if kind_value in _ALWAYS_BATCH_SHAPED_KIND_SLUGS:
+        return True
     sentinel = _BATCH_SHAPED_OLD_VALUES.get(kind_value)
     return sentinel is not None and change.old_value == sentinel
 
@@ -707,10 +729,18 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     # is `None` for a batch-shaped change so every downstream identity/alias
     # below naturally omits the sample instead of needing its own check.
     entity_symbol = None if is_batch else change.symbol
+    # `_enrich_source_locations` runs on every Change and can populate
+    # `qualified_name` by looking up `change.symbol` -- for a batch-shaped
+    # change that symbol is the arbitrary sample, so an enrichment hit
+    # would derive `qualified_name` from the sample too, leaking it right
+    # back in even with `entity_symbol` cleared above (Codex review: caught
+    # for the sibling `_diff_allocator_replacement` batch kinds, but the
+    # same channel exists for every batch-shaped kind).
+    qualified_name = None if is_batch else change.qualified_name
     is_symbol_level = _is_symbol_level_kind(kind_value) and not is_batch
     # For a symbol-level change, `entity_symbol` (the raw exported name) is
-    # the more tier-stable NORMALIZED-tier basis than `change.qualified_name`
-    # -- mirroring `resolve_symbol_identity`'s identical extern-C preference
+    # the more tier-stable NORMALIZED-tier basis than `qualified_name` --
+    # mirroring `resolve_symbol_identity`'s identical extern-C preference
     # for entity identity. `_enrich_source_locations` scope-qualifies a
     # namespaced extern "C" removal's `qualified_name` ("ns::foo") whenever a
     # rich snapshot has the matching declaration, while the equivalent L0/
@@ -723,7 +753,7 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     qn = (
         entity_symbol
         if is_symbol_level and entity_symbol
-        else change.qualified_name or entity_symbol or ""
+        else qualified_name or entity_symbol or ""
     )
     # A batch-shaped change's `description` embeds the same arbitrary
     # sample as `symbol` (Codex review, round 2 on this same finding) --
@@ -738,7 +768,7 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
 
     real_mangled = None
     if is_symbol_level:
-        real_mangled = normalize_mangled_name(change.symbol, change.qualified_name)
+        real_mangled = normalize_mangled_name(change.symbol, qualified_name)
 
     # Every alias below is qualified with `discriminator`, matching `primary`/
     # `sig`: a bare `mangled:<x>`/`symbol:<x>`/`qualified:<x>` alias would
@@ -753,8 +783,8 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
         aliases.append(f"mangled:{real_mangled}\x1f{discriminator}")
     if entity_symbol:
         aliases.append(f"symbol:{entity_symbol}\x1f{discriminator}")
-    if change.qualified_name:
-        aliases.append(f"qualified:{change.qualified_name}\x1f{discriminator}")
+    if qualified_name:
+        aliases.append(f"qualified:{qualified_name}\x1f{discriminator}")
     aliases.append(sig)
     if change.source_location:
         aliases.append(f"relsrc:{rel}\x1f{discriminator}")
