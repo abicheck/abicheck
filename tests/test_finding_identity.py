@@ -428,6 +428,32 @@ class TestResolveFunctionIdentity:
             != resolve_function_identity(overload_b).primary_id
         )
 
+    def test_parameter_type_spelling_is_canonicalized(self) -> None:
+        # Codex review: castxml ("char const*") and clang's -ast-dump=json
+        # ("char const *") spell an otherwise-identical parameter type
+        # differently -- a real, confirmed cross-producer discrepancy
+        # (name_classification.canonicalize_type_name's own docstring,
+        # diff_symbols._params_differ already compares through it). Without
+        # canonicalizing here, the same declaration seen from two producers
+        # would get different NORMALIZED-tier signatures, fragmenting
+        # identity the same way an uncanonicalized qualified_name would.
+        castxml_spelling = Function(
+            name="foo",
+            mangled=None,
+            return_type="void",
+            params=[Param(name="s", type="char const*")],
+        )
+        clang_spelling = Function(
+            name="foo",
+            mangled=None,
+            return_type="void",
+            params=[Param(name="s", type="char const *")],
+        )
+        assert (
+            resolve_function_identity(castxml_spelling).primary_id
+            == resolve_function_identity(clang_spelling).primary_id
+        )
+
 
 class TestResolveVariableIdentity:
     def test_mangled_variable_is_canonical(self) -> None:

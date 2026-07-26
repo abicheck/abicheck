@@ -63,6 +63,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .name_classification import canonicalize_type_name
+
 if TYPE_CHECKING:
     from .checker_types import Change
     from .model import Function, Variable
@@ -408,7 +410,18 @@ def resolve_function_identity(func: Function) -> FindingIdentity:
         ()
         if func.is_extern_c
         else (
-            *(p.type for p in func.params),
+            # canonicalize_type_name: castxml ("char const*") and clang's
+            # -ast-dump=json ("char const *") spell an otherwise-identical
+            # parameter type differently -- name_classification.py's own
+            # docstring documents this as a real, confirmed cross-producer
+            # discrepancy, and diff_symbols.py's _params_differ already
+            # compares parameter types through this function for exactly
+            # that reason. Without it, the same declaration seen from two
+            # producers would get different NORMALIZED-tier signatures
+            # here, fragmenting identity across evidence tiers the same
+            # way an uncanonicalized qualified_name/source_location would
+            # (Codex review).
+            *(canonicalize_type_name(p.type) for p in func.params),
             f"const:{func.is_const}",
             f"volatile:{func.is_volatile}",
             f"ref:{func.ref_qualifier}",
