@@ -327,6 +327,46 @@ class TestResolveChangeIdentity:
         identity = resolve_change_identity(change)
         assert identity.tier == IDENTITY_TIER_CANONICAL
 
+    def test_version_node_label_resembling_a_mangling_is_not_canonical(self) -> None:
+        # Codex review: diff_versioning.py's SYMBOL_VERSION_NODE_REMOVED
+        # stores a version-node label (e.g. "GLIBC_2.17") in Change.symbol,
+        # not a real exported symbol -- even if that label happened to look
+        # like an Itanium mangling, it must not be promoted to CANONICAL and
+        # aliased alongside an actual function's mangled name.
+        change = Change(
+            kind=ChangeKind.SYMBOL_VERSION_NODE_REMOVED,
+            symbol=_ITANIUM_MANGLED,
+            description="version node removed",
+            old_value=_ITANIUM_MANGLED,
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_NORMALIZED
+
+    def test_batch_rename_synthetic_id_is_not_canonical(self) -> None:
+        # diff_symbols.py's _emit_batch_rename stores a synthetic
+        # "batch_rename:<prefix>*" identifier, never a real symbol.
+        change = Change(
+            kind=ChangeKind.SYMBOL_RENAMED_BATCH,
+            symbol="batch_rename:_Z*",
+            description="5 symbols renamed",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_NORMALIZED
+
+    def test_symbol_moved_version_node_is_still_canonical(self) -> None:
+        # Regression guard: SYMBOL_MOVED_VERSION_NODE lives in the same file
+        # as the version-node-label kinds above but carries a real exported
+        # symbol (diff_versioning.py: symbol=sym_name) -- it must stay
+        # entity-bearing, not get swept into the same exclusion.
+        change = Change(
+            kind=ChangeKind.SYMBOL_MOVED_VERSION_NODE,
+            symbol=_ITANIUM_MANGLED,
+            description="moved to a new version node",
+            qualified_name="foo",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_CANONICAL
+
     def test_method_access_changed_is_canonical(self) -> None:
         # Codex review: two overloaded methods undergoing the same access
         # transition must not collapse onto one primary id via a shared

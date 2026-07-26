@@ -413,13 +413,40 @@ _SYMBOL_LEVEL_KIND_SLUGS = frozenset(
     }
 )
 
+#: ``symbol_*`` kinds that are the one exception to "``symbol_*`` is always
+#: entity-bearing" -- their ``Change.symbol`` is a version-node/requirement
+#: label (``diff_versioning.py``/``diff_platform_elf_symbols.py``: e.g.
+#: ``symbol=node`` where ``node`` is a string like ``"GLIBC_2.17"``) or a
+#: synthetic batch identifier (``diff_symbols.py``'s ``_emit_batch_rename``:
+#: ``symbol=f"batch_rename:{prefix}*"``), never a real exported function or
+#: variable name (Codex review: a version label or batch id that happens to
+#: resemble a mangling must not be promoted to CANONICAL and aliased
+#: alongside an actual function's mangled name). Verified per-kind against
+#: the actual ``make_change(..., symbol=...)`` call site, not inferred from
+#: the slug alone -- ``symbol_moved_version_node``/
+#: ``symbol_version_alias_changed`` also live in ``diff_versioning.py``/
+#: ``diff_platform.py`` but pass a real exported symbol name and are
+#: correctly NOT in this set.
+_NON_ENTITY_SYMBOL_KIND_SLUGS = frozenset(
+    {
+        "symbol_version_defined_removed",
+        "symbol_version_defined_added",
+        "symbol_version_required_added",
+        "symbol_version_required_added_compat",
+        "symbol_version_required_removed",
+        "symbol_version_node_removed",
+        "symbol_renamed_batch",
+    }
+)
+
 
 #: ``resolve_change_identity`` only attempts to interpret ``change.symbol``
-#: as a mangled name when its kind matches one of the two sets above -- a
-#: type-level kind's ``symbol`` is a type name (e.g. a type named
-#: ``_Zebra`` structurally resembles an Itanium mangling but is not one),
-#: and ``change.qualified_name`` -- the signal that would normally catch
-#: this via ``normalize_mangled_name``'s mangled-vs-plain-name check -- is
+#: as a mangled name when its kind matches one of the two sets above (and
+#: is not in :data:`_NON_ENTITY_SYMBOL_KIND_SLUGS`) -- a type-level kind's
+#: ``symbol`` is a type name (e.g. a type named ``_Zebra`` structurally
+#: resembles an Itanium mangling but is not one), and
+#: ``change.qualified_name`` -- the signal that would normally catch this
+#: via ``normalize_mangled_name``'s mangled-vs-plain-name check -- is
 #: documented as unset for exactly this case (``Change.qualified_name``'s
 #: docstring: "None when no matching Function record was found (e.g.
 #: type-level changes)"), so it cannot be relied on alone (Codex review).
@@ -427,6 +454,8 @@ _SYMBOL_LEVEL_KIND_SLUGS = frozenset(
 #: to the NORMALIZED tier, never a wrong CANONICAL promotion -- the same
 #: ambiguity-safe-fallback bias as everywhere else in this module.
 def _is_symbol_level_kind(kind_value: str) -> bool:
+    if kind_value in _NON_ENTITY_SYMBOL_KIND_SLUGS:
+        return False
     return kind_value.startswith(_SYMBOL_LEVEL_KIND_PREFIXES) or (
         kind_value in _SYMBOL_LEVEL_KIND_SLUGS
     )
