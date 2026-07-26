@@ -64,10 +64,10 @@ path, not the nav position.
   verdict→exit-code chain); `reference/exit-codes.md` stays the exhaustive
   per-command authority.
 - `use/` — task-oriented how-to docs (GitHub Action, CLI flags, policy
-  files, suppression, output formats). Nav is grouped basics-first: Start
-  Here → Everyday Use → CI & Gating → Specialised Checks → Integrations &
-  Migration. `troubleshooting.md` lives here but is navigated under
-  **Development**.
+  files, suppression, output formats, `troubleshooting.md`). Nav is grouped
+  basics-first: Start Here → Everyday Use → CI & Gating → Specialised
+  Checks → Integrations & Migration; `troubleshooting.md` is navigated
+  under **Everyday Use**, alongside the other day-to-day pages.
 - `reference/` — exhaustive, looked-up-not-read-linearly material:
   - curated reference (change kinds, exit codes, platforms, tool comparison,
     ABICC format compliance) at the top level, navigated as its own

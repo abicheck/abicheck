@@ -56,7 +56,7 @@ don't match the build environment of the analyzed `.so`:
 - Pass the same include dirs the library was built with: `-I include/ -I deps/include/`.
 - Pass the same preprocessor macros: `--gcc-options "-DFEATURE_X=1 -DNDEBUG"`.
 - Best option: feed the real build flags from `compile_commands.json` with `-p build/`
-  (see [CLI Usage → Build-context capture](../use/cli-usage.md)).
+  (see [CLI Usage → Build-context capture](cli-usage.md)).
 - For pure C libraries, add `--lang c` (the default is `c++`).
 
 ### castxml aborts in system headers (`_Float32`, `__assume__`)

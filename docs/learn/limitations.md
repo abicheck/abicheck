@@ -350,7 +350,7 @@ castxml supports.
 
 ## Troubleshooting
 
-See [troubleshooting.md](../contribute/troubleshooting.md) for a diagnostic decision tree
+See [troubleshooting.md](../use/troubleshooting.md) for a diagnostic decision tree
 covering common false positives, false negatives, and unexpected verdicts.
 
 ---

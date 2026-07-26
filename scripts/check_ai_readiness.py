@@ -764,19 +764,19 @@ def check_doc_count_sync(f: Findings) -> None:
             r"bundled/linked Clang `>=(\d+)`",
         ),
         (
-            DOCS / "troubleshooting.md",
+            DOCS / "use/troubleshooting.md",
             "CastXML policy minimum version (version-gate section)",
             MIN_CASTXML,
             r"supported range \(currently `>=(\d+\.\d+\.\d+),<\d+\.\d+\.\d+`",
         ),
         (
-            DOCS / "troubleshooting.md",
+            DOCS / "use/troubleshooting.md",
             "CastXML policy exclusive-upper-bound version (version-gate section)",
             MAX_CASTXML,
             r"supported range \(currently `>=\d+\.\d+\.\d+,<(\d+\.\d+\.\d+)`",
         ),
         (
-            DOCS / "troubleshooting.md",
+            DOCS / "use/troubleshooting.md",
             "CastXML policy minimum bundled Clang major version (version-gate section)",
             MIN_CASTXML_CLANG_MAJOR,
             r"bundled/linked Clang `>=(\d+)`",
