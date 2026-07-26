@@ -195,9 +195,11 @@ rejection case caught in a later review pass — see below),
 `tests/test_coverage_extension_elf.py::TestObjectAlignmentReduced::test_stdlib_local_name_symbol_is_exempt`
 (uses the exact real mangled name from this run) and
 `test_library_owned_local_name_symbol_still_fires` (the Codex-flagged case).
-Full fast unit suite (19543 passed / 30 skipped / 4 xfailed, `--cov-branch`
-96–98% line/branch coverage on both touched modules), `mypy abicheck/`, and
-`ruff check abicheck/ tests/` all clean after the final revision.
+Full fast unit suite (19543 passed at this point / 30 skipped / 4 xfailed,
+`--cov-branch` 96–98% line/branch coverage on both touched modules), `mypy
+abicheck/`, and `ruff check abicheck/ tests/` all clean at this point in the
+review (see two more rounds of fixes below — 19556 passed is the true final
+count).
 
 **Further refined after two more PR review passes** (`chatgpt-codex-connector`,
 `coderabbitai`): the qualifier character class was missing the `r` (restrict)
@@ -209,6 +211,34 @@ ref-qualifier as separate, correctly-bounded groups) and the full
 `10__cxxabiv1` literal, with regression tests pinning both the
 previously-unmatched restrict-qualified case and the previously-over-matched
 truncated one.
+
+**A fourth review pass** (`chatgpt-codex-connector`, `coderabbitai`) found two
+more gaps in the same narrowed exemption:
+
+- The exemption fired unconditionally, even when the snapshot **under
+  comparison is itself the C++ runtime** (`libstdc++`/`libc++`/`libc++abi`)
+  — there a `std::`/`__cxxabiv1::` local static *is* the library-under-test's
+  own ABI surface, not leaked toolchain noise, exactly the distinction
+  `model.stdlib_namespaces_excluded`/`dumper_elf_symbols._elf_classify_symbols`
+  already draw elsewhere for other detectors. Fixed by gating
+  `is_stdlib_local_name_symbol(sym_name)` on
+  `stdlib_namespaces_excluded(old, new)` in `_check_object_alignment_reduced`
+  — the exemption now only applies when *neither* side is identified as the
+  C++ runtime itself.
+- `_STDLIB_LOCAL_NAME_RE` missed the Itanium ABI's **standard-substitution**
+  codes for extremely common `std::` templates (`Sa`=`std::allocator`,
+  `Sb`=`std::basic_string`, `Ss`=`std::string`, `Si`/`So`/`Sd`=`std::istream`/
+  `ostream`/`iostream`) — a local static inside e.g.
+  `std::allocator<int>::f() const` mangles via `Sa`, occupying the exact
+  grammar slot the bare `St` substitution does, so it was silently missed.
+  Added to the alternation.
+
+Both confirmed and fixed in the same PR, with new regression tests: a
+`library="libstdc++.so.6"` snapshot pair proving the alignment finding still
+fires when the runtime is the thing under test, and one parametrized case
+per standard-substitution code. Full fast unit suite (19556 passed / 30
+skipped / 4 xfailed), mypy/ruff clean after this revision too — this is the
+final state of the fix.
 
 ## CI / GitHub Action integration — verified end-to-end
 
@@ -335,7 +365,7 @@ whole library.
 - **Fixed & tested in this branch:** F9 (a second, differently-mangled
   RTTI-adjacent alignment false positive — Itanium local-name-production
   symbols, scoped to the stdlib-owned subset after PR review). Full fast
-  unit suite green (19543 passed / 30 skipped / 4 xfailed), mypy/ruff clean.
+  unit suite green (19556 passed / 30 skipped / 4 xfailed), mypy/ruff clean.
 - **Verified working, no code change needed:** the full 1.4.0→1.5.0→1.5.1→
   1.5.2 tag-to-tag matrix (real, from-scratch EPICS Base R7.0.10 + pvxs
   builds — the acceptance spike's "still owed" step); the abicheck GitHub

@@ -46,9 +46,13 @@ from abicheck.elf_metadata import (
 from abicheck.model import AbiSnapshot, Variable
 
 
-def _snap(elf: ElfMetadata, variables: list[Variable] | None = None) -> AbiSnapshot:
+def _snap(
+    elf: ElfMetadata,
+    variables: list[Variable] | None = None,
+    library: str = "libtest.so.1",
+) -> AbiSnapshot:
     return AbiSnapshot(
-        library="libtest.so.1",
+        library=library,
         version="1.0",
         functions=[],
         variables=variables or [],
@@ -470,6 +474,43 @@ class TestObjectAlignmentReduced:
         new = _elf(symbols=[_obj(sym, alignment=8)])
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
+    # Codex review, PR #641: the stdlib exemption must NOT apply when the
+    # snapshot under comparison IS the C++ runtime itself (libstdc++/libc++) —
+    # there a std:: local static is the library UNDER TEST's own ABI surface,
+    # not leaked toolchain noise, mirroring model.stdlib_namespaces_excluded's
+    # existing runtime-vs-leaked-dependency distinction used elsewhere.
+    def test_stdlib_local_name_symbol_still_fires_when_runtime_is_under_test(self):
+        sym = "_ZZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames"
+        old = _elf(symbols=[_obj(sym, alignment=512)])
+        new = _elf(symbols=[_obj(sym, alignment=128)])
+        r = compare(
+            _snap(old, library="libstdc++.so.6"),
+            _snap(new, library="libstdc++.so.6"),
+        )
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
+    # CodeRabbit review, PR #641: the regex must also recognize the Itanium
+    # ABI's standard-substitution codes for common std:: templates -- a local
+    # static inside e.g. std::allocator<int>::f() const mangles via the `Sa`
+    # substitution (not the bare `St`), occupying the exact grammar slot `St`
+    # does.
+    @pytest.mark.parametrize(
+        "sym",
+        [
+            "_ZZNKSaIiE1fEvE1x",  # std::allocator<int>
+            "_ZZNSbIcSt11char_traitsIcESaIcEE1fEvE1x",  # std::basic_string
+            "_ZZNKSs1fEvE1x",  # std::string
+            "_ZZNKSi1fEvE1x",  # std::istream
+            "_ZZNKSo1fEvE1x",  # std::ostream
+            "_ZZNKSd1fEvE1x",  # std::iostream
+        ],
+    )
+    def test_stdlib_standard_substitution_local_name_is_exempt(self, sym):
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r), sym
 
     def test_real_mangled_data_object_still_fires(self):
         # The exemption is by RTTI prefix, not "looks mangled": a genuine

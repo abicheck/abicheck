@@ -34,7 +34,7 @@ from .diff_versioning import (  # noqa: F401 — re-exported for existing caller
     _parse_abi_version_tag as _parse_abi_version_tag,
 )
 from .elf_metadata import SymbolBinding, SymbolType
-from .model import AbiSnapshot
+from .model import AbiSnapshot, stdlib_namespaces_excluded
 from .name_classification import is_stdlib_local_name_symbol
 
 # Module-level constant: ELF visibility values that form the default<->protected pair (case51).
@@ -616,6 +616,16 @@ def _check_object_alignment_reduced(
     regardless of scope (not an inferred address heuristic), so a local-name
     symbol's size change stays a meaningful signal there.
 
+    Additionally gated on stdlib_namespaces_excluded(old, new) (Codex review,
+    PR #641): when the snapshot under comparison IS the C++ runtime itself
+    (libstdc++/libc++/libc++abi -- is_cxx_runtime_library), a std::/
+    __cxxabiv1:: local static is the library UNDER TEST's own ABI surface,
+    not leaked toolchain noise, mirroring the same runtime-vs-leaked-
+    dependency distinction model.stdlib_namespaces_excluded and
+    dumper_elf_symbols._elf_classify_symbols already apply elsewhere. Without
+    this gate, ABI-checking libstdc++.so against itself would silently
+    suppress a real alignment regression in its own std:: local statics.
+
     st_value-derived alignment is address-placement evidence, not a declared
     one: adding an unrelated neighbouring global can shift a symbol's link-time
     address (and therefore its apparent low-bit alignment) with no change to
@@ -636,7 +646,7 @@ def _check_object_alignment_reduced(
         return []
     if sym_name.startswith(("_ZTV", "_ZTI", "_ZTS", "_ZTT")):
         return []
-    if is_stdlib_local_name_symbol(sym_name):
+    if stdlib_namespaces_excluded(old, new) and is_stdlib_local_name_symbol(sym_name):
         return []
     old_align = getattr(s_old, "value_alignment", 0)
     new_align = getattr(s_new, "value_alignment", 0)

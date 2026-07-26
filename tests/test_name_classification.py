@@ -89,6 +89,15 @@ def test_is_local_name_symbol_false(name: str) -> None:
         # member function's local name must also match -- an earlier version
         # of the qualifier character class omitted 'r' entirely.
         "_ZZNr10__cxxabiv116__enum_type_infoD2Ev1x",
+        # Codex review, PR #641: Itanium standard-substitution codes for
+        # common std:: templates (Sa/Sb/Ss/Si/So/Sd) occupy the exact
+        # grammar slot the bare `St` substitution does, and must match too.
+        "_ZZNKSaIiE1fEvE1x",  # std::allocator<int>
+        "_ZZNSbIcSt11char_traitsIcESaIcEE1fEvE1x",  # std::basic_string
+        "_ZZNKSs1fEvE1x",  # std::string
+        "_ZZNKSi1fEvE1x",  # std::istream
+        "_ZZNKSo1fEvE1x",  # std::ostream
+        "_ZZNKSd1fEvE1x",  # std::iostream
     ],
 )
 def test_is_stdlib_local_name_symbol_true(name: str) -> None:

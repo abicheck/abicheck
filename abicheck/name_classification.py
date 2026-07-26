@@ -143,8 +143,19 @@ LOCAL_NAME_PREFIX = "_ZZ"
 # public inline function's local static (e.g. ``_ZZN4somelib...``) must NOT
 # match here, since its alignment genuinely matters to consumers (see
 # LOCAL_NAME_PREFIX's docstring above).
+#
+# The alternation also includes the Itanium ABI's *standard substitution*
+# codes for extremely common std:: templates -- ``Sa`` (std::allocator),
+# ``Sb`` (std::basic_string), ``Ss`` (std::string), ``Si``/``So``/``Sd``
+# (std::istream/ostream/iostream) -- not just the bare ``St`` (::std::)
+# substitution (CodeRabbit review, PR #641): a local static inside e.g.
+# ``std::allocator<int>::f() const`` mangles as ``_ZZNKSaIiE1fEvE1x``, where
+# ``Sa`` occupies the exact grammar position ``St`` would, so it was missed
+# entirely by the earlier version and left the alignment false positive live
+# for this common class of stdlib type.
 _STDLIB_LOCAL_NAME_RE = re.compile(
-    r"^_ZZN?[rVK]{0,3}[RO]?(?:St|3std|9__gnu_cxx|10__cxxabiv1|7__cxx11)"
+    r"^_ZZN?[rVK]{0,3}[RO]?"
+    r"(?:St|Sa|Sb|Ss|Si|So|Sd|3std|9__gnu_cxx|10__cxxabiv1|7__cxx11)"
 )
 
 # Length-prefixed Itanium namespace components (``<len><name>``) for the
