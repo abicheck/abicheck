@@ -308,6 +308,20 @@ class TestUnknownSelectorLayer:
         with pytest.raises(ValueError, match="not represented in any"):
             resolve_field("contract.mode", [bad_candidate], default=_default())
 
+    def test_typo_string_layer_raises_value_error_not_attribute_error(self):
+        # ValueProvenance.layer's SelectorLayer annotation isn't
+        # runtime-enforced -- an untyped API/manifest adapter could pass a
+        # plain, typo'd string through. Formatting used to assume `.name`
+        # exists (true for a real/duck-typed enum, false for a bare str),
+        # crashing with AttributeError instead of the documented ValueError
+        # (Codex review).
+        bad_candidate = FieldCandidate(
+            provenance=ValueProvenance(layer="explict_cli"),  # type: ignore[arg-type]
+            value=ContractMode.PUBLIC,
+        )
+        with pytest.raises(ValueError, match="not represented in any"):
+            resolve_field("contract.mode", [bad_candidate], default=_default())
+
 
 class TestDetectPackConflicts:
     # ADR-049 D8: "Two selected packs that assign incompatible values to the
@@ -369,7 +383,10 @@ class TestDetectPackConflicts:
             [
                 (
                     _pack("rust_c_ffi"),
-                    {"func_removed": Verdict.BREAKING, "func_added": Verdict.COMPATIBLE},
+                    {
+                        "func_removed": Verdict.BREAKING,
+                        "func_added": Verdict.COMPATIBLE,
+                    },
                 ),
                 (
                     _pack("qt_kde_cpp"),

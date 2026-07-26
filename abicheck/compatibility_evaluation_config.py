@@ -242,6 +242,11 @@ class ContractConfig:
     #: contributes the orthogonal coverage exit 1) or ``"warn"`` (the only
     #: ordinary mechanism for accepting incomplete contract coverage).
     unresolved: str = "not_checkable"
+    #: Explicit-overlay root selectors (ADR-049 D2: "roots selected by
+    #: explicit overlays" contribute to the ``public`` domain's set of
+    #: roots). An unordered selection, like ``packs``/``providers`` below --
+    #: canonicalized (sorted+deduped) for the same D7 equivalent-input
+    #: equality guarantee, not left in insertion order via ``_frozen_tuple``.
     overlays: tuple[str, ...] = ()
     #: Contract/language packs (e.g. ``rust_c_ffi``) defining an FFI
     #: boundary and its closure (ADR-049 D8). Versioned identities, not bare
@@ -266,7 +271,9 @@ class ContractConfig:
                 f"{sorted(_VALID_UNRESOLVED_BEHAVIORS)} (ADR-049 D9), got "
                 f"{self.unresolved!r}"
             )
-        object.__setattr__(self, "overlays", _frozen_tuple(self.overlays))
+        object.__setattr__(
+            self, "overlays", _canonical_tuple(self.overlays, key=lambda s: s)
+        )
         object.__setattr__(
             self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)
         )

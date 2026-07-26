@@ -143,6 +143,20 @@ class TestContractConfigUnresolvedBehavior:
         with pytest.raises(TypeError, match="ContractConfig.mode"):
             ContractConfig(mode="public")  # type: ignore[arg-type]
 
+    def test_overlays_order_does_not_affect_equality(self):
+        # ADR-049 D2: overlays contribute to a set of selected public
+        # roots -- like packs/providers, an unordered selection, so two
+        # equivalent selections in different orders must compare equal
+        # (D7's equivalent-input equality guarantee).
+        forward = ContractConfig(mode=ContractMode.PUBLIC, overlays=("a", "b"))
+        backward = ContractConfig(mode=ContractMode.PUBLIC, overlays=("b", "a"))
+        assert forward == backward
+        assert forward.overlays == ("a", "b")
+
+    def test_overlays_duplicates_are_collapsed(self):
+        contract = ContractConfig(mode=ContractMode.PUBLIC, overlays=("a", "a", "b"))
+        assert contract.overlays == ("a", "b")
+
 
 class TestImmutability:
     def test_top_level_is_frozen(self):

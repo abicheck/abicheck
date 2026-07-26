@@ -221,8 +221,19 @@ def resolve_field(
 
     for candidate in all_candidates:
         if candidate.layer not in _KNOWN_LAYERS:
+            # `.name` assumes a real (or duck-typed enum-shaped) layer --
+            # ValueProvenance.layer's `SelectorLayer` annotation isn't
+            # runtime-enforced, so an untyped API/manifest adapter could
+            # otherwise pass a plain string (e.g. a typo'd layer name) and
+            # crash with AttributeError here instead of the documented
+            # ValueError (Codex review). getattr falls back to repr() for
+            # anything without a `.name` attribute.
+            layer_name = getattr(candidate.layer, "name", None)
+            layer_desc = (
+                f"SelectorLayer.{layer_name}" if layer_name else repr(candidate.layer)
+            )
             raise ValueError(
-                f"{field_name}: candidate uses SelectorLayer.{candidate.layer.name}, "
+                f"{field_name}: candidate uses {layer_desc}, "
                 "which is not represented in any _PRECEDENCE_TIERS entry -- "
                 "compatibility_evaluation_resolver.py must be updated when "
                 "SelectorLayer gains a new member, or this candidate would "
@@ -291,7 +302,9 @@ class PackConflictError(ValueError):
     """
 
     def __init__(
-        self, field_name: str, contributors: Sequence[tuple[ImmutableIdentity, Hashable]]
+        self,
+        field_name: str,
+        contributors: Sequence[tuple[ImmutableIdentity, Hashable]],
     ) -> None:
         self.field_name = field_name
         self.contributors = tuple(contributors)
