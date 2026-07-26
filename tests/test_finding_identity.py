@@ -222,6 +222,13 @@ class TestNormalizeMangledName:
         # incomplete.
         assert normalize_mangled_name("_ZZ1fvE", "_ZZ1fvE") is None
 
+    def test_local_name_with_invalid_digit_entity_suffix_is_rejected(self) -> None:
+        # Codex review, fresh evidence, round 2: a merely non-empty suffix
+        # after the terminator isn't enough -- "_ZZ1fvE0" has one trailing
+        # byte, but "0" is a zero-length <source-name>, not a valid entity
+        # name, so c++filt leaves it undecoded too.
+        assert normalize_mangled_name("_ZZ1fvE0", "_ZZ1fvE0") is None
+
     def test_local_name_with_no_terminator_is_rejected(self) -> None:
         assert normalize_mangled_name("_ZZnonsense", "_ZZnonsense") is None
         assert normalize_mangled_name("_ZZ", "_ZZ") is None

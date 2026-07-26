@@ -302,8 +302,13 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
             # by a non-empty entity name. "_ZZ1fvE" has a terminator (the
             # trailing E) but nothing after it, so it previously passed
             # the shared N/Z check above despite being incomplete (Codex
-            # review, fresh evidence).
-            return e_index + 1 < len(rest)
+            # review, fresh evidence). A merely non-empty suffix isn't
+            # enough either: "_ZZ1fvE0" has one trailing byte, but "0" is
+            # a zero-length <source-name> and not a valid entity name --
+            # reuse _operand_looks_valid's same digit-prefixed check
+            # (Codex review, fresh evidence, round 2).
+            suffix = rest[e_index + 1 :]
+            return bool(suffix) and _operand_looks_valid(suffix)
         return True
     if rest[0] == "L" and len(rest) > 1 and rest[1].isdigit():
         # GCC internal-linkage prefix (_ZL7g_count) + <source-name>
