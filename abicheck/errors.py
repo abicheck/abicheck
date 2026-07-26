@@ -119,6 +119,49 @@ class ManifestValidationError(AbicheckError, ValueError):
     """
 
 
+class TuMergeError(SnapshotError):
+    """Raised by :func:`abicheck.tu_merge.merge_fragments` when two
+    translation-unit fragments from one manifest-driven dump declare the
+    same :func:`abicheck.tu_fragment.entity_key` in a way that cannot be
+    trivially reconciled (ADR-050 D4, G32 Phase C).
+
+    A subclass of :class:`SnapshotError` — existing ``except SnapshotError``
+    handling around ``dump()``/``compare()`` already treats it as an
+    ordinary extraction failure, the same precedent :class:`HeaderToolchainError`/
+    :class:`IncompatibleSnapshotSchemaError` already document, matching the
+    ADR's own "producing an extraction failure the same way a required TU's
+    compile failure already does" (D3). ``code`` is one of:
+
+    - ``"INCONSISTENT_DECLARATION"`` — two TUs' declarations for the same
+      entity disagree in a way that isn't a forward-declaration/definition
+      pair, a plain redeclaration, or a default-argument-only difference
+      (e.g. differing return type, layout, or calling convention).
+    - ``"HETEROGENEOUS_ABI_CONTEXT"`` — the manifest's *declared*
+      compiler/target is uniform (``dump_manifest.py``'s parse-time rule
+      already guarantees that, D3), but the TUs were extracted by
+      different AST producers -- e.g. ``--ast-frontend auto``'s per-TU
+      fallback landed one TU on castxml and another on clang within the
+      same manifest.
+
+    These are extraction-time conflict codes, not
+    :class:`~abicheck.checker_policy.ChangeKind` members, despite reading
+    like one — see :mod:`abicheck.tu_merge`'s module docstring for why.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        entity_key: tuple[str, str],
+        tu_names: tuple[str, ...],
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.entity_key = entity_key
+        self.tu_names = tu_names
+
+
 class UnsupportedCastxmlVersionError(SnapshotError):
     """Raised when a CastXML build outside the supported version range would
     be used for an authoritative L2 scan, before any header is parsed.

@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-050 D3 (G32 Phase B) — the per-TU header-AST invocation loop and the
-minimal placeholder merge across translation units.
+"""ADR-050 D3/D4 (G32 Phase B/C) — the per-TU header-AST invocation loop and
+the real compatible merge across translation units.
 
 Lives in a sibling module, not inline in ``dumper.py``, because ``dumper.py``
 has essentially no headroom left before the AI-readiness file-size gate's
@@ -32,25 +32,24 @@ parameter below -- the exact same "pass the function in rather than import
 it" technique ``dumper_hybrid.run_hybrid_dump(dump_fn, ...)`` already uses
 for the identical reason (see that module's own docstring).
 
-**Merge scope, this phase only**: :func:`merge_tu_fragments` is
-*deliberately* the "no conflicts possible" placeholder the ADR's Phase B
-scope calls for -- concatenate every TU fragment's entities and raise
-:class:`abicheck.errors.SnapshotError` the moment the same ``entity_key``
-(see :func:`entity_key`) appears in more than one fragment, regardless of
-whether the two declarations would actually be compatible (e.g. a forward
-declaration in one TU and its full definition in another). Real
-compatible-merge handling -- union provenance, keep the richer declaration
-when the two sides are ODR-compatible -- is ADR-050 D4 (G32 Phase C's
-``tu_merge.py``/``TuMergeError``), not this module; this phase ships
-deliberately strict so an accepted-but-wrong merge never silently produces a
-snapshot with entities dropped or overwritten.
+**Merge scope**: ``TuFragment``/``MergedTuFragments``/``entity_key`` live in
+the leaf module :mod:`abicheck.tu_fragment` (not here) so that both this
+module and :mod:`abicheck.tu_merge` -- which implements the real
+compatible-merge lattice (ADR-050 D4: union provenance, keep the richer
+declaration when two TUs' declarations are ODR-compatible; reject with
+:class:`abicheck.errors.TuMergeError` otherwise) -- can depend on those
+shapes without ``dumper_manifest -> tu_merge -> dumper_manifest`` forming an
+import cycle. ``merge_tu_fragments`` below is :func:`abicheck.tu_merge.merge_fragments`
+re-exported under its original Phase B name, kept as a stable public alias
+of the same callable now that its placeholder ("any repeat is an error")
+implementation has been replaced by the real one.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -62,8 +61,13 @@ from .dumper_toolchain import (
     _parser_ast_toolchain,
     _parser_ast_unsupported_reasons,
 )
-from .errors import SnapshotError
 from .model import EnumType, Function, RecordType, Variable
+from .tu_fragment import (
+    MergedTuFragments as MergedTuFragments,
+    TuFragment as TuFragment,
+    entity_key as entity_key,
+)
+from .tu_merge import merge_fragments as merge_tu_fragments
 
 if TYPE_CHECKING:
     from .dumper_castxml import _CastxmlParser
@@ -74,171 +78,13 @@ log = logging.getLogger(__name__)
 #: rather than imported, see this module's own docstring.
 HeaderAstParserFn = Callable[..., "_CastxmlParser | _ClangAstParser"]
 
-
-@dataclass(frozen=True)
-class TuFragment:
-    """One translation unit's own header-AST parse, normalized to plain
-    model entities (not raw AST) -- ADR-050 D3's "each producing a
-    normalized ``TuFragment``".
-
-    ``ast_producer``/``ast_toolchain``/``ast_fallback_reason``/
-    ``ast_toolchain_supported``/``ast_toolchain_unsupported_reasons`` mirror
-    the same per-parser provenance fields ``dumper._dump_elf``/``_dump_pe``/
-    ``_dump_macho`` already stamp onto a single-TU ``AbiSnapshot`` -- kept
-    per-fragment here (not just on the merged result) since a future
-    heterogeneous-toolchain diagnostic (D4's ``HETEROGENEOUS_ABI_CONTEXT``)
-    needs each TU's own value to compare, even though D3's own parse-time
-    rule already forces one compiler/target per manifest today.
-    """
-
-    tu_name: str
-    functions: tuple[Function, ...] = ()
-    variables: tuple[Variable, ...] = ()
-    types: tuple[RecordType, ...] = ()
-    enums: tuple[EnumType, ...] = ()
-    typedefs: dict[str, str] = field(default_factory=dict)
-    constants: dict[str, str] = field(default_factory=dict)
-    ast_producer: str = "castxml"
-    ast_toolchain: dict[str, str] = field(default_factory=dict)
-    ast_fallback_reason: str | None = None
-    ast_toolchain_supported: bool | None = None
-    ast_toolchain_unsupported_reasons: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class MergedTuFragments:
-    """The placeholder-merge result across every contributing TU's
-    :class:`TuFragment` -- concatenated entity lists/dicts, plus one
-    representative fragment's AST provenance (see :func:`merge_tu_fragments`
-    for why using any single contributing fragment's provenance is correct,
-    not just convenient, under D3's own single-compiler-per-manifest rule).
-    """
-
-    functions: tuple[Function, ...]
-    variables: tuple[Variable, ...]
-    types: tuple[RecordType, ...]
-    enums: tuple[EnumType, ...]
-    typedefs: dict[str, str]
-    constants: dict[str, str]
-    ast_producer: str
-    ast_toolchain: dict[str, str]
-    ast_fallback_reason: str | None
-    ast_toolchain_supported: bool | None
-    ast_toolchain_unsupported_reasons: tuple[str, ...]
-
-
-def entity_key(kind: str, name: str) -> tuple[str, str]:
-    """The cross-TU identity a duplicate is detected against.
-
-    Deliberately just ``(kind, name)`` -- for a :class:`Function`/
-    :class:`Variable`, *name* is its mangled linker symbol (already
-    excludes return type for every C++ mangling scheme this repo targets,
-    and equals the plain name for C, which has no mangling); for a
-    :class:`RecordType`/:class:`EnumType`/a typedef/a constant, *name* is
-    the model's own (already possibly namespace-qualified) ``name``/dict
-    key. ADR-050 D4's own text is explicit that ``entity_key`` "deliberately
-    excludes return type" for exactly this reason -- folding it in would
-    turn a same-TU return-type edit into an unrelated add+remove pair
-    instead of one detected change, so this helper never looks at
-    ``return_type``/``type`` at all.
-    """
-    return (kind, name)
-
-
-def _fragment_entity_keys(fragment: TuFragment) -> list[tuple[str, str]]:
-    keys: list[tuple[str, str]] = []
-    keys.extend(entity_key("function", fn.mangled) for fn in fragment.functions)
-    keys.extend(entity_key("variable", var.mangled) for var in fragment.variables)
-    keys.extend(entity_key("type", rt.name) for rt in fragment.types)
-    keys.extend(entity_key("enum", en.name) for en in fragment.enums)
-    keys.extend(entity_key("typedef", name) for name in fragment.typedefs)
-    keys.extend(entity_key("constant", name) for name in fragment.constants)
-    return keys
-
-
-def merge_tu_fragments(fragments: Sequence[TuFragment]) -> MergedTuFragments:
-    """Concatenate *fragments* into one :class:`MergedTuFragments`, raising
-    :class:`abicheck.errors.SnapshotError` the moment the same
-    :func:`entity_key` is produced by more than one fragment.
-
-    This is ADR-050 D3's own explicitly-scoped placeholder ("Phase B ships
-    with a minimal 'no conflicts possible' merge... as a placeholder,
-    replaced by Phase C's real compatible-merge lattice") -- it does not
-    attempt to tell an ODR-safe pair (forward declaration + full definition
-    across two TUs) apart from a genuine conflict; *any* repeat is an error
-    here, on purpose, until D4's ``tu_merge.py`` lands.
-    """
-    functions: list[Function] = []
-    variables: list[Variable] = []
-    types: list[RecordType] = []
-    enums: list[EnumType] = []
-    typedefs: dict[str, str] = {}
-    constants: dict[str, str] = {}
-    seen: dict[tuple[str, str], str] = {}
-
-    for fragment in fragments:
-        # Checked against `seen` from *earlier* fragments only -- a single
-        # TU's own parser output can legitimately repeat a key (e.g. two
-        # destructors both falling back to castxml's synthesized no-mangled-
-        # name marker within the same TU, already tolerated by today's
-        # flat single-TU dump); only a repeat *introduced by a later TU*
-        # is this placeholder's concern.
-        fragment_keys = _fragment_entity_keys(fragment)
-        for key in fragment_keys:
-            if key in seen:
-                kind, name = key
-                raise SnapshotError(
-                    f"translation unit {fragment.tu_name!r} redeclares {kind} "
-                    f"{name!r}, already produced by translation unit "
-                    f"{seen[key]!r} -- ADR-050 Phase B does not yet merge "
-                    "compatible cross-TU redeclarations (forward declaration "
-                    "+ definition, etc.); that lands in Phase C's tu_merge.py "
-                    "(ADR-050 D4). Until then, the same declaration may only "
-                    "be reachable from one contributing translation unit."
-                )
-        for key in fragment_keys:
-            seen[key] = fragment.tu_name
-        functions.extend(fragment.functions)
-        variables.extend(fragment.variables)
-        types.extend(fragment.types)
-        enums.extend(fragment.enums)
-        typedefs.update(fragment.typedefs)
-        constants.update(fragment.constants)
-
-    if not fragments:
-        return MergedTuFragments(
-            functions=(),
-            variables=(),
-            types=(),
-            enums=(),
-            typedefs={},
-            constants={},
-            ast_producer="castxml",
-            ast_toolchain={},
-            ast_fallback_reason=None,
-            ast_toolchain_supported=None,
-            ast_toolchain_unsupported_reasons=(),
-        )
-
-    # Any contributing fragment's AST provenance is representative: ADR-050
-    # D3 rejects a manifest declaring different compilers/target triples
-    # across TUs at parse time (dump_manifest.py -- compiler/target are
-    # base-profile-only fields), so every fragment here was produced by the
-    # same toolchain by construction.
-    representative = fragments[0]
-    return MergedTuFragments(
-        functions=tuple(functions),
-        variables=tuple(variables),
-        types=tuple(types),
-        enums=tuple(enums),
-        typedefs=typedefs,
-        constants=constants,
-        ast_producer=representative.ast_producer,
-        ast_toolchain=representative.ast_toolchain,
-        ast_fallback_reason=representative.ast_fallback_reason,
-        ast_toolchain_supported=representative.ast_toolchain_supported,
-        ast_toolchain_unsupported_reasons=representative.ast_toolchain_unsupported_reasons,
-    )
+# Re-exported for backward compatibility: TuFragment/MergedTuFragments/
+# entity_key used to be defined here (G32 Phase B) and moved to the leaf
+# module abicheck.tu_fragment (G32 Phase C) so both this module and
+# abicheck.tu_merge could depend on them without an import cycle -- see this
+# module's own docstring. merge_tu_fragments is now a direct alias of
+# abicheck.tu_merge.merge_fragments, the real compatible-merge
+# implementation (ADR-050 D4), under its original Phase B name.
 
 
 def run_tu_fragment(
@@ -347,11 +193,39 @@ def run_tu_loop(
     implies ``required=True`` (:mod:`abicheck.dump_manifest`), so an optional
     TU's silently-skipped failure can never drop an entity the merged
     snapshot claims to speak for.
+
+    **Two deliberately different "public" sets are threaded through this
+    function** (Codex review, PR #635 round 14) -- conflating them was a
+    real bug: *resolved_public_paths*/*resolved_public_dirs* (``roots`` +
+    *public_header_paths*/*public_header_dirs*) feed each TU's own
+    :func:`run_tu_fragment` call, where they scope constant extraction the
+    same roots-are-always-public way the legacy CLI's ``-H``/``--header``
+    already does (see :class:`abicheck.dumper_castxml._CastxmlParser`'s own
+    docstring) -- but :func:`merge_tu_fragments` gets only the manifest's
+    *explicit* ``public_header_paths``/``public_header_dirs`` (``roots``
+    excluded), because that is what the *later*, authoritative
+    ``apply_provenance`` call in ``dumper.py`` classifies origin against
+    too (:mod:`abicheck.dump_manifest`'s own docstring: ``roots`` is a
+    *scope* declaration, D1's ``scope_fingerprint`` input, not an ADR-015
+    provenance input -- "a manifest with public headers but no separate
+    provenance fields behaves exactly like a legacy dump -H foo.h
+    invocation with no --public-header", i.e. every declaration stays
+    ``UNKNOWN``). Passing the roots-augmented set into the merge step
+    instead would let :func:`abicheck.tu_merge._more_public_of` treat a
+    root-only declaration as public during the merge, keep *that* TU's
+    ``source_location`` as the merged entity's representative, and then
+    have the later ``apply_provenance`` call -- which never considered
+    ``roots`` public to begin with -- classify the very same declaration
+    as private/unknown, hiding a real public API change even though the
+    identical declaration also reached this manifest through a genuinely
+    public header in another TU.
     """
     resolved_public_paths = [str(r) for r in roots] + [
         str(p) for p in public_header_paths
     ]
     resolved_public_dirs = [str(d) for d in public_header_dirs]
+    explicit_public_paths = [str(p) for p in public_header_paths]
+    explicit_public_dirs = [str(d) for d in public_header_dirs]
 
     fragments: list[TuFragment] = []
     for tu in tus:
@@ -387,7 +261,11 @@ def run_tu_loop(
                 exc_info=True,
             )
 
-    return merge_tu_fragments(fragments)
+    return merge_tu_fragments(
+        fragments,
+        public_header_paths=explicit_public_paths,
+        public_header_dirs=explicit_public_dirs,
+    )
 
 
 @dataclass(frozen=True)
