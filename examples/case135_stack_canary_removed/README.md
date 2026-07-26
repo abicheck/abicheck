@@ -1,54 +1,96 @@
 # Case 135: Stack Canary Removed
 
-**Category:** ELF / Security | **Verdict:** COMPATIBLE_WITH_RISK
+**Category:** ELF / Security | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
-## What this case is about
+## Verdict and consumer impact
 
-Both libraries export the same functions with the same signatures. v1 is
-compiled with **`-fstack-protector-all`**, so every function (including
-`process()`, which has an on-stack buffer) gets a stack-smashing guard — a
-canary written on entry and checked before return via a reference to
-`__stack_chk_fail`. v2 is compiled with **`-fno-stack-protector`**, removing
-all canaries and the `__stack_chk_fail` dependency.
-
-Stack canaries detect contiguous stack buffer overflows before a corrupted
-return address is used. Dropping them is a security regression even though the
+Both libraries export the same functions with the same signatures — every
+existing consumer keeps working, no recompilation needed. v1 is compiled
+with **`-fstack-protector-all`**, so every function (including `process()`,
+which has an on-stack buffer) gets a stack-smashing guard — a canary
+written on entry and checked before return via a reference to
+`__stack_chk_fail`. v2 is compiled with **`-fno-stack-protector`**,
+removing all canaries and the `__stack_chk_fail` dependency. Stack canaries
+detect contiguous stack buffer overflows before a corrupted return address
+is used, so dropping them is a security regression even though the
 functional ABI (symbols, types, layout) is unchanged.
 
-## What abicheck detects
+## Old/new diff
 
-- **`STACK_CANARY_REMOVED`**: the stack-protector guard references present in v1
-  are gone in v2. Classified as a deployment/security risk, not an ABI break.
+| v1.c | v2.c |
+|------|------|
+| `void process(char *out, const char *in) { char buf[64]; ... }`<br>(compiled `-fstack-protector-all`) | *(identical source)*<br>(compiled `-fno-stack-protector`) |
 
-(The compare may also note `symbol_version_required_removed` — a side effect of
-dropping the `__stack_chk_fail@GLIBC` dependency.)
-
-**Overall verdict: COMPATIBLE_WITH_RISK.**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g -O2 v1.c -o libv1.so -fstack-protector-all
-gcc -shared -fPIC -g -O2 v2.c -o libv2.so -fno-stack-protector
-
-# v1 references __stack_chk_fail; v2 does not
-nm -D libv1.so | grep __stack_chk_fail
-nm -D libv2.so | grep __stack_chk_fail || echo "no canary in v2"
-
-python3 -m abicheck.cli dump libv1.so -o v1.json
-python3 -m abicheck.cli dump libv2.so -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-# → COMPATIBLE_WITH_RISK + STACK_CANARY_REMOVED
+gcc -shared -fPIC -g -O2 v1.c -o libfoo_v1.so -fstack-protector-all
+gcc -shared -fPIC -g -O2 v2.c -o libfoo_v2.so -fno-stack-protector
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
+## Expected abicheck finding
 
-Build release shared objects with at least `-fstack-protector-strong`. Distro
-hardening policies require it.
+```text
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
 
-## Real Failure Demo
+- stack_canary_removed: Stack canary removed: -fstack-protector no longer
+  referenced
+```
 
-**Severity: SECURITY / BAD PRACTICE**
+Also reported as a side effect of dropping the canary (quality/toolchain
+findings, non-blocking): `symbol_version_required_removed` and
+`imported_symbol_removed` for `__stack_chk_fail@GLIBC_2.4`, which v2 no
+longer imports.
 
-`process()` still runs and produces the same output, but a buffer overflow that
-v1 would have caught at return time now goes undetected in v2.
+## Minimum evidence
+
+`min_evidence: L0` — whether a function references `__stack_chk_fail` is
+visible directly from the ELF dynamic-symbol/relocation table; no debug
+info or headers needed.
+
+## Why abicheck catches it
+
+abicheck scans each binary's imported dynamic symbols for
+`__stack_chk_fail`; its presence on one side and absence on the other is
+reported as a stack-protector regression straight from L0 ELF evidence.
+
+## Runtime failure demonstration
+
+**No observable effect on existing binaries.** `process()`/`compute()`
+produce identical output before and after the swap — this is a hardening
+regression that only matters if `process()`'s buffer is actually
+overflowed, which normal input never triggers:
+
+```bash
+gcc -shared -fPIC -g -O2 v1.c -o libfoo.so -fstack-protector-all
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → process -> hello
+# → compute(7) = 50
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g -O2 v2.c -o libfoo.so -fno-stack-protector
+./app
+# → process -> hello       (unchanged)
+# → compute(7) = 50        (unchanged)
+```
+
+A buffer overflow that v1 would catch at return time (aborting the
+process before a corrupted return address is used) goes undetected in v2 —
+observable only under an actual overflow, not normal operation.
+
+## Safe redesign
+
+Build release shared objects with at least `-fstack-protector-strong`.
+Distro hardening policies require it; don't let it silently regress to
+`-fno-stack-protector` in a release build.
+
+## Cross-tool comparison
+
+`abidiff` compares ABI XML dumps (symbols and types) and has no concept of
+compiler-inserted stack-protector instrumentation, so it reports no
+difference at all between these two libraries. Hardening-lint tools
+(`checksec`) catch the canary regression but don't do ABI diffing, so a
+genuine symbol/type break shipped in the same release would slip past
+them. abicheck reports both from one pass over the binary.
