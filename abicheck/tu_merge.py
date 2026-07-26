@@ -555,6 +555,54 @@ def _union_optional_fact(a: str | None, b: str | None) -> tuple[bool, str | None
     return True, a if a is not None else b
 
 
+def _merge_contract_attributes(
+    a: list[str] | None, b: list[str] | None
+) -> tuple[bool, list[str] | None]:
+    """Union two :class:`Function`'s ``contract_attributes`` lists -- an
+    additive attribute one TU's redeclaration carries and another doesn't
+    (e.g. clang accepts ``int f(int);`` alongside a later
+    ``[[nodiscard]] int f(int);`` redeclaration, normalized here as
+    ``warn_unused_result``) is exactly as routine a cross-TU difference as
+    ``deprecated``, not a structural disagreement (Codex review, PR #635).
+
+    ``None`` means "not captured" (an older snapshot, or a dumper without
+    attribute support -- see :attr:`Function.contract_attributes`'s own
+    docstring), not "captured, empty" (that's ``[]``) -- so a ``None`` side
+    contributes no information and the other side's value (however
+    incomplete) is kept as-is, the same "missing means unknown, defer to
+    whichever side actually captured something" treatment
+    :func:`_union_optional_fact` gives every other optional fact here.
+
+    Each token already carries its own arguments where relevant (e.g.
+    ``nonnull(1)``, ``format(printf,1,2)`` -- see
+    :func:`abicheck.dumper_clang._clang_contract_attributes`), so two
+    tokens from the same attribute family (the text before any ``(``, e.g.
+    both ``nonnull(...)``) that aren't byte-identical describe genuinely
+    different arguments for the same attribute and are a real conflict,
+    not something to silently prefer one side of -- an unrecognized/
+    unparsed token has no family boundary to find and is compared whole.
+    A token present in only one TU's list is purely additive and is kept.
+    """
+    if a is None:
+        return True, b
+    if b is None:
+        return True, a
+
+    def _family(token: str) -> str:
+        paren = token.find("(")
+        return token if paren == -1 else token[:paren]
+
+    a_families = {_family(token) for token in a}
+    merged = set(a)
+    for token in b:
+        if token in merged:
+            continue
+        if _family(token) in a_families:
+            return False, None
+        merged.add(token)
+    return True, sorted(merged)
+
+
 def _blank_provenance(entity: _T) -> _T:
     """Blank *entity*'s ``source_location``/``source_header``/``origin``/
     ``deprecated`` for an equality comparison.
@@ -780,13 +828,26 @@ def _merge_functions(
     # preserve whatever the header spells) -- so they're blanked here
     # alongside `default`, the same "not ABI-relevant, don't let it block a
     # routine cross-TU redeclaration" treatment (Codex review, PR #635).
-    # Only the *comparison* ignores them -- the merged declaration's own
+    # `contract_attributes` is blanked for the same reason as `deprecated`
+    # below -- an additive attribute (e.g. `[[nodiscard]]`) one TU's
+    # redeclaration carries and another doesn't is routine, not a
+    # disagreement (Codex review, PR #635 round 11) -- and unioned back in
+    # explicitly afterwards via `_merge_contract_attributes`.
+    # Only the *comparison* ignores these -- the merged declaration's own
     # parameter names come from `base` below, not blanked ones.
     a_bare = _blank_provenance(
-        replace(a, params=[replace(p, name="", default=None) for p in a.params])
+        replace(
+            a,
+            params=[replace(p, name="", default=None) for p in a.params],
+            contract_attributes=None,
+        )
     )
     b_bare = _blank_provenance(
-        replace(b, params=[replace(p, name="", default=None) for p in b.params])
+        replace(
+            b,
+            params=[replace(p, name="", default=None) for p in b.params],
+            contract_attributes=None,
+        )
     )
     if a_bare != b_bare:
         return None
@@ -798,6 +859,11 @@ def _merge_functions(
     # rejected.
     deprecated_ok, deprecated = _union_optional_fact(a.deprecated, b.deprecated)
     if not deprecated_ok:
+        return None
+    attrs_ok, contract_attributes = _merge_contract_attributes(
+        a.contract_attributes, b.contract_attributes
+    )
+    if not attrs_ok:
         return None
     base = _more_public_of(
         a,
@@ -824,7 +890,12 @@ def _merge_functions(
         )
         for p_base, p_other in zip(base.params, other.params, strict=True)
     ]
-    return replace(base, params=merged_params, deprecated=deprecated)
+    return replace(
+        base,
+        params=merged_params,
+        deprecated=deprecated,
+        contract_attributes=contract_attributes,
+    )
 
 
 def _merge_variables(

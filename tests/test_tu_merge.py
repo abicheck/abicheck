@@ -923,6 +923,86 @@ def test_merge_fragments_function_raises_on_conflicting_deprecated_message():
     assert excinfo.value.code == INCONSISTENT_DECLARATION
 
 
+def test_merge_fragments_function_unions_additive_contract_attribute():
+    # clang accepts `int f(int);` alongside a later
+    # `[[nodiscard]] int f(int);` redeclaration -- routine, not a conflict.
+    a = _fn("f", "_Z1fi", contract_attributes=["warn_unused_result"])
+    b = _fn("f", "_Z1fi", contract_attributes=[])
+    merged = merge_fragments(
+        [
+            TuFragment(tu_name="a", functions=(a,)),
+            TuFragment(tu_name="b", functions=(b,)),
+        ]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].contract_attributes == ["warn_unused_result"]
+
+
+def test_merge_fragments_function_treats_unset_contract_attributes_as_unknown():
+    # None ("not captured") contributes no information -- the other side's
+    # value, however incomplete, is kept as-is rather than forcing a match.
+    a = _fn("f", "_Z1fi", contract_attributes=None)
+    b = _fn("f", "_Z1fi", contract_attributes=["nonnull(1)"])
+    merged = merge_fragments(
+        [
+            TuFragment(tu_name="a", functions=(a,)),
+            TuFragment(tu_name="b", functions=(b,)),
+        ]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].contract_attributes == ["nonnull(1)"]
+
+
+def test_merge_fragments_function_treats_other_side_unset_contract_attributes_as_unknown():
+    # The mirror of the a=None case above -- b=None must be equally "no
+    # information", not "definitely no attributes".
+    a = _fn("f", "_Z1fi", contract_attributes=["nonnull(1)"])
+    b = _fn("f", "_Z1fi", contract_attributes=None)
+    merged = merge_fragments(
+        [
+            TuFragment(tu_name="a", functions=(a,)),
+            TuFragment(tu_name="b", functions=(b,)),
+        ]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].contract_attributes == ["nonnull(1)"]
+
+
+def test_merge_fragments_function_unions_contract_attributes_with_shared_token():
+    # A token both sides already agree on ("nonnull(1)") is deduplicated,
+    # not doubled; a genuinely new, unrelated token ("warn_unused_result")
+    # from the other side is still additive.
+    a = _fn("f", "_Z1fi", contract_attributes=["nonnull(1)", "noreturn"])
+    b = _fn("f", "_Z1fi", contract_attributes=["nonnull(1)", "warn_unused_result"])
+    merged = merge_fragments(
+        [
+            TuFragment(tu_name="a", functions=(a,)),
+            TuFragment(tu_name="b", functions=(b,)),
+        ]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].contract_attributes == [
+        "nonnull(1)",
+        "noreturn",
+        "warn_unused_result",
+    ]
+
+
+def test_merge_fragments_function_raises_on_conflicting_contract_attribute_args():
+    # Same attribute family ("format"), different arguments -- a genuine
+    # conflict, not an additive difference.
+    a = _fn("f", "_Z1fPKcz", contract_attributes=["format(printf,1,2)"])
+    b = _fn("f", "_Z1fPKcz", contract_attributes=["format(scanf,1,2)"])
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments(
+            [
+                TuFragment(tu_name="a", functions=(a,)),
+                TuFragment(tu_name="b", functions=(b,)),
+            ]
+        )
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+
+
 def test_merge_fragments_variable_unions_deprecated_across_ordinary_redeclaration():
     a = _var("g_old", "g_old", deprecated="use g_new instead")
     b = _var("g_old", "g_old")
