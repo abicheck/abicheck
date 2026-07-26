@@ -45,7 +45,12 @@
   analyzed checks at all (every check for it unavailable, whether required
   or optional) is never described as "clean" — it was simply never checked,
   so claiming otherwise would assert confidence the result doesn't have
-  (Codex review).
+  (Codex review). The "affected" text branch also now surfaces
+  `unanalyzed_profiles` when they coexist with an affected sibling profile
+  on the same target — a profile with a real break and a profile with no
+  analyzed result at all were both being folded into one "checked on X, Y"
+  clause, wrongly implying the unanalyzed one produced a result too (Codex
+  review).
 - **`abicheck/type_reachability.py`**: a new, additive building block for
   status-review item 3 ("direct vs. transitive type reachability").
   `directly_referenced_stdlib_types()` computes, from a snapshot alone,
@@ -60,6 +65,13 @@
   for cross-reference purposes but are not part of the public ABI surface
   this helper models, and treating them the same as a public function would
   turn an internal implementation signature into a stdlib ABI dependency
-  that isn't real. Not yet wired into any live detector — see `AGENTS.md`'s
+  that isn't real. A function's `origin` (`ScopeOrigin.PRIVATE_HEADER`/
+  `SYSTEM_HEADER`/`GENERATED`) is checked alongside `visibility` for the
+  same reason (Codex review, fresh evidence): public-header scoping can
+  retain a function whose `visibility` is still `PUBLIC` but whose defining
+  header sits outside the public set — linkage and origin are independent
+  axes (ADR-024 D1), so this excludes it too, using the same
+  `_NON_PUBLIC_ORIGINS` set `idioms.py` already established.
+  Not yet wired into any live detector — see `AGENTS.md`'s
   "Known gaps" for why retrofitting the ~15 existing call sites needs its
   own scoped, individually-verified follow-up.

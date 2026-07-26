@@ -961,6 +961,27 @@ class TestProfileMatrix:
         assert "no analyzed result on any checked profile" in text
         assert "clean" not in text.split("Profile matrix:")[1].split("Coverage:")[0]
 
+    def test_profile_matrix_affected_entry_still_surfaces_unanalyzed_sibling(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review: one profile is BREAKING (affected) while a sibling
+        optional profile never reported at all (unanalyzed). The affected
+        branch must still surface the unanalyzed one instead of implying
+        "checked on" both profiles produced a result."""
+        broken = "libfoo@linux-gcc14#release@headers"
+        never_reports = "libfoo@windows-msvc#release@headers"  # optional
+        _write_report(tmp_path, broken, "BREAKING")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(broken, optional=(never_reports,)),
+        )
+        (entry,) = r.profile_matrix
+        assert entry.affected_profiles == ("linux-gcc14",)
+        assert entry.unanalyzed_profiles == ("windows-msvc",)
+        text = r.render_text()
+        assert "libfoo: affected on linux-gcc14" in text
+        assert "no analyzed result on windows-msvc" in text
+
 
 class TestAggregateCLI:
     def _run(self, args):

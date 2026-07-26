@@ -728,6 +728,12 @@ class AggregateResult:
                         f"{', '.join(entry.affected_profiles)} "
                         f"(checked on {', '.join(entry.profiles)})"
                     )
+                    if unanalyzed:
+                        # An affected profile and an unanalyzed one can
+                        # coexist on the same target -- don't let "checked
+                        # on" imply the unanalyzed one produced a result too
+                        # (Codex review).
+                        line += f"; no analyzed result on {', '.join(unanalyzed)}"
                 elif not unanalyzed:
                     line = (
                         f"  {entry.base_target}: clean on all checked profiles "

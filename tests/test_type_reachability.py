@@ -22,6 +22,7 @@ from abicheck.model import (
     Function,
     Param,
     RecordType,
+    ScopeOrigin,
     TypeField,
     Visibility,
 )
@@ -36,6 +37,7 @@ def _fn(
     return_type: str = "void",
     params: list[Param] | None = None,
     visibility: Visibility = Visibility.PUBLIC,
+    origin: ScopeOrigin = ScopeOrigin.UNKNOWN,
 ) -> Function:
     return Function(
         name=name,
@@ -43,6 +45,7 @@ def _fn(
         return_type=return_type,
         params=params or [],
         visibility=visibility,
+        origin=origin,
     )
 
 
@@ -240,6 +243,80 @@ class TestDirectlyReferencedStdlibTypes:
             types=[RecordType(name="std::string", kind="class")],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_private_header_origin_does_not_count_as_direct_reference(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: public-header scoping can retain a
+        function whose visibility is still PUBLIC but whose origin is
+        PRIVATE_HEADER -- linkage and origin are independent axes, so this
+        must be excluded even though the hidden-visibility fix alone does
+        not catch it."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "internal_helper",
+                    params=[Param(name="s", type="std::string")],
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_system_header_origin_does_not_count_as_direct_reference(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "libc_wrapper",
+                    return_type="std::string",
+                    origin=ScopeOrigin.SYSTEM_HEADER,
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_generated_header_origin_does_not_count_as_direct_reference(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "moc_generated_fn",
+                    params=[Param(name="s", type="std::string")],
+                    origin=ScopeOrigin.GENERATED,
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_public_header_origin_still_counts_as_direct_reference(self) -> None:
+        """Guard against over-excluding: PUBLIC_HEADER (and the UNKNOWN
+        default used when no --public-header set is supplied) must still be
+        treated as a valid reachability root."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    params=[Param(name="s", type="std::string")],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
 
     def test_elf_only_function_signature_does_not_count_as_direct_reference(
         self,

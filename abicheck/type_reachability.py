@@ -53,7 +53,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .model import Visibility
+from .model import ScopeOrigin, Visibility
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:
@@ -63,6 +63,18 @@ __all__ = [
     "directly_referenced_stdlib_types",
     "type_string_references_name",
 ]
+
+# Provenance origins that are confidently NOT part of the public header
+# surface (same set as idioms.py's _NON_PUBLIC_ORIGINS, ADR-024/027) -- a
+# function retained from one of these headers is not a public reachability
+# root even when Visibility.PUBLIC (linkage and origin are independent axes;
+# Codex review). EXPORT_ONLY/UNKNOWN are deliberately not included here:
+# EXPORT_ONLY means "exported, no header at all" rather than "confidently
+# private", and UNKNOWN is the no-public-header-set default that must stay
+# inclusive so this degrades to the pre-provenance behaviour.
+_NON_PUBLIC_ORIGINS = frozenset(
+    {ScopeOrigin.PRIVATE_HEADER, ScopeOrigin.SYSTEM_HEADER, ScopeOrigin.GENERATED}
+)
 
 
 def type_string_references_name(type_string: str, name: str) -> bool:
@@ -127,7 +139,13 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     purposes even though it is not part of the public ABI surface this
     helper is meant to model, and treating its signature as equivalent to a
     public one would turn an internal implementation detail into a
-    stdlib-ABI dependency that isn't real.
+    stdlib-ABI dependency that isn't real. Same reasoning applies to
+    ``origin`` (Codex review, fresh evidence): public-header scoping can
+    retain a function whose ``visibility`` is still ``PUBLIC`` but whose
+    ``origin`` is ``ScopeOrigin.PRIVATE_HEADER``/``SYSTEM_HEADER``/
+    ``GENERATED`` — linkage and origin are independent axes (ADR-024 D1),
+    so a function only ever declared in a private/system/generated header
+    is rejected here too, before its signature is ever scanned.
     """
     stdlib_names = [
         t.name
@@ -152,6 +170,8 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
         if fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
             continue
         if fn.visibility != Visibility.PUBLIC:
+            continue
+        if fn.origin in _NON_PUBLIC_ORIGINS:
             continue
         _scan(fn.return_type)
         for param in fn.params:
