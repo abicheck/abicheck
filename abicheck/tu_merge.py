@@ -155,7 +155,15 @@ def merge_fragments(
     types = _flatten(
         _merge_group(
             ((f.tu_name, rt) for f in ordered for rt in f.types),
-            key_fn=lambda rt: entity_key("type", rt.name),
+            # RecordType.name is deliberately bare (namespace lives in
+            # qualified_name -- see RecordType's own docstring); keying on
+            # the bare name alone would collide `one::X` and `two::X` into
+            # one spurious INCONSISTENT_DECLARATION conflict (Codex review,
+            # PR #635). Falls back to the bare name when qualified_name is
+            # unset (global-scope types, or a producer that never captured
+            # it), matching every other merge key's "None means unknown,
+            # don't invent structure" convention.
+            key_fn=lambda rt: entity_key("type", rt.qualified_name or rt.name),
             merge_fn=partial(
                 _merge_types,
                 header_segs=header_segs,
@@ -167,7 +175,10 @@ def merge_fragments(
     enums = _flatten(
         _merge_group(
             ((f.tu_name, en) for f in ordered for en in f.enums),
-            key_fn=lambda en: entity_key("enum", en.name),
+            # Same bare-name-collision fix as RecordType above (Codex
+            # review, PR #635) -- EnumType.name is likewise bare, with the
+            # namespace in qualified_name.
+            key_fn=lambda en: entity_key("enum", en.qualified_name or en.name),
             merge_fn=partial(
                 _merge_enums,
                 header_segs=header_segs,
@@ -376,6 +387,49 @@ def _more_public_of(
     return b if origin_b == ScopeOrigin.PUBLIC_HEADER else a
 
 
+def _with_more_public_provenance(
+    winner: _T,
+    other: _T,
+    *,
+    header_segs: list[tuple[str, ...]],
+    dir_segs: list[tuple[str, ...]],
+    have_public_set: bool,
+) -> _T:
+    """Return *winner* -- the structurally-complete side of a forward-
+    declaration/definition merge (:func:`_merge_types`/:func:`_merge_enums`)
+    -- with its provenance possibly overridden from *other* (the forward
+    declaration) when *other* classifies as more public.
+
+    :func:`_more_public_of` alone isn't enough here: unlike the
+    already-identical-modulo-provenance case it's built for, *winner* and
+    *other* are structurally different (fields/members differ by
+    construction -- that's the whole point of a forward-decl/definition
+    pair), so simply calling it and returning whichever side "wins" would
+    silently drop the winner's richer structural facts whenever the forward
+    declaration happens to be the public one. A public header commonly
+    forward-declares a type whose full definition lives only in a private
+    implementation header -- keeping the definition's fields/size/members
+    is still correct, but the merged entity's *provenance* must reflect the
+    public forward declaration, or ``apply_provenance`` reads a genuinely
+    public type as private (Codex review, PR #635 follow-up).
+    """
+    provenance_source = _more_public_of(
+        winner,
+        other,
+        header_segs=header_segs,
+        dir_segs=dir_segs,
+        have_public_set=have_public_set,
+    )
+    if provenance_source is winner:
+        return winner
+    return replace(  # type: ignore[type-var]
+        winner,
+        source_location=other.source_location,  # type: ignore[attr-defined]
+        source_header=other.source_header,  # type: ignore[attr-defined]
+        origin=other.origin,  # type: ignore[attr-defined]
+    )
+
+
 def _merge_functions(
     a: Function,
     b: Function,
@@ -472,14 +526,35 @@ def _merge_types(
     merges to the definition, **provided the two agree on ``kind``**
     (``struct``/``class``/``union``) -- a `union X;` forward declaration is
     not compatible with a `struct X { ... };` definition even though both
-    key on the bare name ``X`` (Codex review, PR #635). Two complete
-    (non-opaque) definitions must be identical (modulo provenance) to
-    merge; if they disagree, that is a genuine ODR conflict.
+    key on the bare name ``X`` (Codex review, PR #635). The definition's
+    structural facts (fields, size, ...) always win, but its *provenance*
+    prefers whichever side classifies as public (:func:`_with_more_public_provenance`)
+    -- a public header commonly forward-declares a type whose full
+    definition lives only in a private implementation header, and the
+    merged entity must still read as public. Two complete (non-opaque)
+    definitions must be identical (modulo provenance) to merge; if they
+    disagree, that is a genuine ODR conflict.
     """
     if a.is_opaque and not b.is_opaque:
-        return b if a.kind == b.kind else None
+        if a.kind != b.kind:
+            return None
+        return _with_more_public_provenance(
+            b,
+            a,
+            header_segs=header_segs,
+            dir_segs=dir_segs,
+            have_public_set=have_public_set,
+        )
     if b.is_opaque and not a.is_opaque:
-        return a if a.kind == b.kind else None
+        if a.kind != b.kind:
+            return None
+        return _with_more_public_provenance(
+            a,
+            b,
+            header_segs=header_segs,
+            dir_segs=dir_segs,
+            have_public_set=have_public_set,
+        )
     if _blank_provenance(a) == _blank_provenance(b):
         return _more_public_of(
             a,
@@ -505,17 +580,32 @@ def _merge_enums(
     merges to the definition, **provided the two agree on
     ``underlying_type``/``is_scoped``** -- ``enum E : int;`` is not
     compatible with ``enum E : unsigned { X };`` even though the forward
-    declaration has no members to compare (Codex review, PR #635). Two
-    non-empty member lists must agree (modulo provenance) to merge.
+    declaration has no members to compare (Codex review, PR #635). Like
+    :func:`_merge_types`, the definition's ``members`` always win but its
+    provenance prefers whichever side is public
+    (:func:`_with_more_public_provenance`). Two non-empty member lists must
+    agree (modulo provenance) to merge.
     """
     if not a.members and b.members:
         if a.underlying_type != b.underlying_type or a.is_scoped != b.is_scoped:
             return None
-        return b
+        return _with_more_public_provenance(
+            b,
+            a,
+            header_segs=header_segs,
+            dir_segs=dir_segs,
+            have_public_set=have_public_set,
+        )
     if not b.members and a.members:
         if a.underlying_type != b.underlying_type or a.is_scoped != b.is_scoped:
             return None
-        return a
+        return _with_more_public_provenance(
+            a,
+            b,
+            header_segs=header_segs,
+            dir_segs=dir_segs,
+            have_public_set=have_public_set,
+        )
     if _blank_provenance(a) == _blank_provenance(b):
         return _more_public_of(
             a,

@@ -247,6 +247,92 @@ def test_merge_fragments_without_public_set_keeps_deterministic_default():
     assert merged.functions[0].source_location == "a.h:1"
 
 
+def test_merge_fragments_types_with_same_bare_name_different_namespace_do_not_collide():
+    # RecordType.name is deliberately bare; the namespace lives in
+    # qualified_name. Two genuinely unrelated types sharing a leaf name
+    # ("one::X" and "two::X") must not spuriously conflict just because
+    # both key on the bare name "X".
+    one_x = RecordType(
+        name="X",
+        kind="struct",
+        qualified_name="one::X",
+        fields=[TypeField(name="a", type="int")],
+    )
+    two_x = RecordType(
+        name="X",
+        kind="struct",
+        qualified_name="two::X",
+        fields=[TypeField(name="b", type="double")],
+    )
+    a = TuFragment(tu_name="a", types=(one_x,))
+    b = TuFragment(tu_name="b", types=(two_x,))
+    merged = merge_fragments([a, b])
+    assert {t.qualified_name for t in merged.types} == {"one::X", "two::X"}
+
+
+def test_merge_fragments_enums_with_same_bare_name_different_namespace_do_not_collide():
+    from abicheck.model import EnumMember
+
+    one_e = EnumType(
+        name="E", qualified_name="one::E", members=[EnumMember(name="A", value=0)]
+    )
+    two_e = EnumType(
+        name="E", qualified_name="two::E", members=[EnumMember(name="B", value=0)]
+    )
+    a = TuFragment(tu_name="a", enums=(one_e,))
+    b = TuFragment(tu_name="b", enums=(two_e,))
+    merged = merge_fragments([a, b])
+    assert {e.qualified_name for e in merged.enums} == {"one::E", "two::E"}
+
+
+def test_merge_fragments_type_forward_decl_provenance_wins_over_private_definition():
+    # A public header forward-declares Point; the full definition lives
+    # only in a private implementation header. The merged type must keep
+    # the definition's fields but the *public* forward declaration's
+    # source_location -- otherwise apply_provenance would read a genuinely
+    # public type as private.
+    public_forward = RecordType(
+        name="Point", kind="struct", is_opaque=True, source_location="include/api.h:1"
+    )
+    private_definition = RecordType(
+        name="Point",
+        kind="struct",
+        fields=[TypeField(name="x", type="int")],
+        source_location="internal/detail.h:9",
+    )
+    a = TuFragment(tu_name="a", types=(public_forward,))
+    b = TuFragment(tu_name="b", types=(private_definition,))
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.types) == 1
+    winner = merged.types[0]
+    assert winner.fields == private_definition.fields
+    assert winner.source_location == "include/api.h:1"
+
+
+def test_merge_fragments_enum_forward_decl_provenance_wins_over_private_definition():
+    from abicheck.model import EnumMember
+
+    public_forward = EnumType(
+        name="Color", members=[], source_location="include/api.h:1"
+    )
+    private_definition = EnumType(
+        name="Color",
+        members=[EnumMember(name="RED", value=0)],
+        source_location="internal/detail.h:9",
+    )
+    a = TuFragment(tu_name="a", enums=(public_forward,))
+    b = TuFragment(tu_name="b", enums=(private_definition,))
+    merged = merge_fragments(
+        [a, b], public_header_paths=["include/api.h"], public_header_dirs=[]
+    )
+    assert len(merged.enums) == 1
+    winner = merged.enums[0]
+    assert winner.members == private_definition.members
+    assert winner.source_location == "include/api.h:1"
+
+
 def test_merge_fragments_type_raises_on_conflicting_kind_for_opaque_pair():
     # A `union X;` forward declaration is not compatible with a
     # `struct X { ... };` definition, even though both key on the bare
