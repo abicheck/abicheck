@@ -374,9 +374,10 @@ the last two fixes:
   recommendation today would run a workflow that never exercises the fix.
   Since this PR hasn't merged yet, there is no mainline commit that has both
   the gate and F9 simultaneously other than this PR's own branch tip. The
-  pin below now targets that (this PR's HEAD as of the commit fixing this),
-  with the same "retarget once released" caveat as before, made more
-  explicit: this is a temporary, PR-scoped reference, not a stable target.
+  pin below now targets `612e481f` (this PR's HEAD as of the commit fixing
+  this finding, PR #641), with the same "retarget once released" caveat as
+  before, made more explicit: this is a temporary, PR-scoped reference, not
+  a stable target.
 - `is_stdlib_local_name_symbol()` classified **any** `std::`-nested local
   name as stdlib-owned, including a **user's own specialization** of a
   standard customization-point template (e.g. `template<> struct
@@ -426,7 +427,7 @@ jobs:
         with: { fetch-depth: 0 }
       - name: Build old + new (EPICS Base + both pvxs refs, -g -Og)
         run: ./ci/build-two-refs.sh   # produces old/lib/<arch> and new/lib/<arch>
-      - uses: abicheck/abicheck@c9e135a3233b6d45e9571533f71293fde458a469  # main, 2026-07-26 (see note below -- no release tag yet ships --diagnostic-comparison)
+      - uses: abicheck/abicheck@612e481fc709b144967c66a030d52ba9be38448f  # PR #641 HEAD, 2026-07-26 (temporary -- see note below; retarget to a release once one ships this PR's fixes)
         with:
           old-library: old/lib/linux-x86_64/${{ matrix.lib }}.so
           new-library: new/lib/linux-x86_64/${{ matrix.lib }}.so
