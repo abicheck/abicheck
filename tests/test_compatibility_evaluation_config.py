@@ -108,6 +108,19 @@ class TestConstruction:
                 overrides={123: Verdict.BREAKING, "bogus": Verdict.BREAKING},  # type: ignore[dict-item]
             )
 
+    def test_non_mapping_overrides_is_rejected(self):
+        # CodeRabbit review: a non-Mapping overrides (e.g. a list of valid
+        # slugs) previously sailed through the key/value checks -- which
+        # only iterate -- then crashed with "AttributeError: 'list' object
+        # has no attribute 'items'" at the `.items()` call further down,
+        # instead of the deliberate configuration error this constructor
+        # exists to produce.
+        with pytest.raises(TypeError, match=r"CompatibilityPolicyConfig\.overrides"):
+            CompatibilityPolicyConfig(
+                base=_identity("strict_abi"),
+                overrides=["func_removed"],  # type: ignore[arg-type]
+            )
+
     def test_raw_string_override_value_is_rejected(self):
         # The Mapping[str, Verdict] annotation isn't runtime-enforced -- an
         # untyped adapter passing the enum's own string value must still be
@@ -1047,3 +1060,16 @@ class TestCompatibilityEvaluationConfigProvenanceValidation:
             }
         )
         assert cfg.provenance["contract.mode"].layer is SelectorLayer.EXPLICIT_CLI
+
+    def test_non_mapping_provenance_is_rejected(self) -> None:
+        # CodeRabbit review: a non-Mapping provenance (e.g. a list of
+        # ValueProvenance) previously reached `.items()` unvalidated,
+        # crashing with "AttributeError: 'list' object has no attribute
+        # 'items'" instead of the deliberate configuration error this
+        # constructor exists to produce.
+        with pytest.raises(
+            TypeError, match=r"CompatibilityEvaluationConfig\.provenance"
+        ):
+            _minimal_config(
+                provenance=[ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI)]
+            )

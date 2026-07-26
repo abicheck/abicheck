@@ -678,6 +678,20 @@ class CompatibilityPolicyConfig:
                 '"strict_abi") through to a config that cannot support exact '
                 "replay (ADR-049 D6)."
             )
+        # A non-Mapping overrides (e.g. a list of valid slugs) previously
+        # sailed through the key/value checks below -- which only iterate --
+        # then crashed with "AttributeError: 'list' object has no attribute
+        # 'items'" at the `.items()` call further down, instead of the
+        # deliberate configuration error this constructor exists to produce
+        # (CodeRabbit review).
+        if not isinstance(self.overrides, Mapping):
+            raise TypeError(
+                "CompatibilityPolicyConfig.overrides must be a Mapping[str, "
+                f"Verdict], not {self.overrides!r} -- the `Mapping[str, "
+                "Verdict]` annotation isn't runtime-enforced, so an untyped "
+                "adapter passing e.g. a list of slugs would otherwise crash "
+                "deep inside this constructor instead of at the boundary."
+            )
         # A non-str key (e.g. overrides={123: Verdict.BREAKING}) previously
         # reached `sorted()` below unvalidated, crashing with
         # "TypeError: '<' not supported between instances of 'str' and
@@ -861,6 +875,16 @@ class CompatibilityEvaluationConfig:
             raise TypeError(
                 "CompatibilityEvaluationConfig.suppressions must be a "
                 f"SuppressionConfig or None, not {self.suppressions!r}."
+            )
+        # A non-Mapping provenance (e.g. a list of ValueProvenance) previously
+        # reached `.items()` below unvalidated, crashing with "AttributeError:
+        # 'list' object has no attribute 'items'" instead of the deliberate
+        # configuration error this constructor exists to produce (CodeRabbit
+        # review).
+        if not isinstance(self.provenance, Mapping):
+            raise TypeError(
+                "CompatibilityEvaluationConfig.provenance must be a "
+                f"Mapping[str, ValueProvenance], not {self.provenance!r}."
             )
         # An untyped adapter supplying a raw provenance value (e.g.
         # provenance={"contract.mode": {}}) was previously accepted by
