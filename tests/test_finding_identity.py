@@ -66,6 +66,14 @@ class TestNormalizeMangledName:
             normalize_mangled_name("_Znotreallymangled!!", "notreallymangled!!") is None
         )
 
+    def test_gcc_clone_suffix_is_accepted(self) -> None:
+        # CodeRabbit review: GCC clone symbols (_Z3fooi.isra.0,
+        # .constprop.0, .cold, ...) are real manglings that
+        # demangle._MANGLED_TOKEN_RE already recognizes via a repeated
+        # dotted suffix; this module's no-tool structural check must too.
+        cloned = f"{_ITANIUM_MANGLED}.isra.0"
+        assert normalize_mangled_name(cloned, "foo") == cloned
+
     def test_neither_prefix_is_rejected(self) -> None:
         assert normalize_mangled_name("some_random_string", "foo") is None
 

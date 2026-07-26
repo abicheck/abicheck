@@ -32,8 +32,10 @@ from abicheck.compatibility_evaluation_resolver import (
 from abicheck.contract_relevance_types import ContractMode, SelectorLayer
 
 
-def _pack(id: str, version: int = 1, sha256: str = "test-digest") -> ImmutableIdentity:
-    return ImmutableIdentity(id=id, version=version, sha256=sha256)
+def _pack(
+    pack_id: str, version: int = 1, sha256: str = "test-digest"
+) -> ImmutableIdentity:
+    return ImmutableIdentity(id=pack_id, version=version, sha256=sha256)
 
 
 def _candidate(layer: SelectorLayer, value, **provenance_kwargs) -> FieldCandidate:

@@ -113,10 +113,12 @@ def is_real_mangled_name(mangled_name: str | None, plain_name: str | None) -> bo
 
 #: Structural (no external tool) check that *mangled_name* has the shape of
 #: an Itanium mangled name: ``_Z`` followed by the restricted character set
-#: Itanium mangling actually uses (matches ``demangle._MANGLED_TOKEN_RE``'s
-#: character class, anchored to the whole string here rather than scanning
-#: free text for embedded tokens).
-_ITANIUM_MANGLED_RE = re.compile(r"\A_Z[A-Za-z0-9_$]+\Z")
+#: Itanium mangling actually uses, plus GCC's dotted clone-suffix convention
+#: (``.isra.0``, ``.constprop.0``, ``.cold``, ...) -- matches
+#: ``demangle._MANGLED_TOKEN_RE``'s character class and repeated dotted
+#: suffix exactly (CodeRabbit review), anchored to the whole string here
+#: rather than scanning free text for embedded tokens.
+_ITANIUM_MANGLED_RE = re.compile(r"\A_Z[A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*\Z")
 
 
 def normalize_mangled_name(

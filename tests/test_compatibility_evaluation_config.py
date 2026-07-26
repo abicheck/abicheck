@@ -43,9 +43,9 @@ from abicheck.severity import SeverityConfig, SeverityLevel
 
 
 def _identity(
-    id: str, version: int = 1, sha256: str = "test-digest"
+    identity_id: str, version: int = 1, sha256: str = "test-digest"
 ) -> ImmutableIdentity:
-    return ImmutableIdentity(id=id, version=version, sha256=sha256)
+    return ImmutableIdentity(id=identity_id, version=version, sha256=sha256)
 
 
 def _minimal_config(**overrides) -> CompatibilityEvaluationConfig:
@@ -307,7 +307,7 @@ class TestImmutableIdentityRequiresDigest:
     def test_empty_string_id_is_rejected(self):
         # An identity with no name can't say what its digest represents --
         # the same replay-exactness guarantee sha256 already carries.
-        with pytest.raises(ValueError, match="ImmutableIdentity.id"):
+        with pytest.raises(ValueError, match=r"ImmutableIdentity\.id"):
             ImmutableIdentity(id="", version=1, sha256="abc123")
 
 

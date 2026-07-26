@@ -26,7 +26,7 @@ class TestUntouchedFlag:
     # either spelling of the flag -- resolution must fall through to the
     # built-in default regardless of the (click-default) boolean value.
     def test_default_true_value_resolves_to_default_layer(self):
-        mode, prov = resolve_legacy_contract_mode(
+        _mode, prov = resolve_legacy_contract_mode(
             scope_public_headers=True, scope_public_headers_is_explicit=False
         )
         assert prov.layer is SelectorLayer.BUILT_IN_DEFAULT
