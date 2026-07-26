@@ -344,7 +344,26 @@ does one single-pair `compare` per library — the same operand shape this
 report's "CI / GitHub Action integration" section above actually ran and
 verified, not a new untested shape — and reuses this repo's own
 already-audited pins for `actions/checkout` and
-`github/codeql-action/upload-sarif`:
+`github/codeql-action/upload-sarif`.
+
+**One more correction, from an eighth review pass** (`chatgpt-codex-connector`):
+the `abicheck/abicheck` pin itself was wrong on release grounds, not just
+security grounds. Checked directly against this repo's own history: the
+ADR-050 D2 comparability gate and `--diagnostic-comparison` flag this whole
+F8 section is built around landed in `c4f34df` (2026-07-25) — **after**
+*both* `v0.4.0` (2026-07-01) and the current latest release `v0.5.0`
+(2026-07-16). Pinning to either tag's commit would have meant the pinned
+Action predates the feature entirely: without `extra-args:
+'--diagnostic-comparison'` it wouldn't fail closed on the F8 mismatch the
+way this section describes (that behavior didn't exist yet), and adding the
+flag would fail with an unknown-option error (the flag didn't exist yet
+either) — exactly the opposite of what the surrounding prose promises.
+Since no released tag contains the feature yet, the pin below instead
+targets `main`'s current tip (`c9e135a`, this PR's own base commit, which
+does contain `c4f34df` and the flag) — genuinely illustrative of the intended
+integration today, not something to copy-paste as a permanent pin: once a
+release ships the feature (and once this PR's F9 fix merges), retarget to
+that release's tag/commit instead.
 
 ```yaml
 # .github/workflows/abi.yml (for epics-base/pvxs)
@@ -367,7 +386,7 @@ jobs:
         with: { fetch-depth: 0 }
       - name: Build old + new (EPICS Base + both pvxs refs, -g -Og)
         run: ./ci/build-two-refs.sh   # produces old/lib/<arch> and new/lib/<arch>
-      - uses: abicheck/abicheck@7bbc3ca44d7548bb52c73ef6af6b2476ce51549b  # v0.4.0
+      - uses: abicheck/abicheck@c9e135a3233b6d45e9571533f71293fde458a469  # main, 2026-07-26 (see note below -- no release tag yet ships --diagnostic-comparison)
         with:
           old-library: old/lib/linux-x86_64/${{ matrix.lib }}.so
           new-library: new/lib/linux-x86_64/${{ matrix.lib }}.so
