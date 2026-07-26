@@ -132,8 +132,11 @@ class ContractConfig:
     unresolved: str = "not_checkable"
     overlays: tuple[str, ...] = ()
     #: Contract/language packs (e.g. ``rust_c_ffi``) defining an FFI
-    #: boundary and its closure (ADR-049 D8).
-    packs: tuple[str, ...] = ()
+    #: boundary and its closure (ADR-049 D8). Versioned identities, not bare
+    #: slugs: ADR-049 D6 requires "every selected provider/base/preset/pack
+    #: or rule set carries an immutable identity/version/digest" so a pack
+    #: revised under the same name can still be told apart for exact replay.
+    packs: tuple[ImmutableIdentity, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "overlays", _frozen_tuple(self.overlays))
@@ -201,7 +204,7 @@ class CompatibilityPolicyConfig:
     """
 
     base: ImmutableIdentity
-    packs: tuple[str, ...] = ()
+    packs: tuple[ImmutableIdentity, ...] = ()
     overrides: Mapping[str, Verdict] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -219,7 +222,7 @@ class GateConfig:
 
     exit_code_scheme: str = "severity"
     preset: ImmutableIdentity | None = None
-    packs: tuple[str, ...] = ()
+    packs: tuple[ImmutableIdentity, ...] = ()
     severity: SeverityConfig = field(default_factory=SeverityConfig)
 
     def __post_init__(self) -> None:

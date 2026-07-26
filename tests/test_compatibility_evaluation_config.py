@@ -109,10 +109,10 @@ class TestImmutability:
         assert "symbol_removed" not in policy.overrides
 
     def test_mutating_caller_list_after_construction_does_not_leak_in(self):
-        packs = ["rust_c_ffi"]
+        packs = [ImmutableIdentity(id="rust_c_ffi", version=1)]
         contract = ContractConfig(mode=ContractMode.PUBLIC, packs=packs)
-        packs.append("another_pack")
-        assert contract.packs == ("rust_c_ffi",)
+        packs.append(ImmutableIdentity(id="another_pack", version=1))
+        assert contract.packs == (ImmutableIdentity(id="rust_c_ffi", version=1),)
 
     def test_sequence_fields_are_tuples(self):
         cfg = _minimal_config(surface=SurfaceConfig(internal_namespaces=["detail"]))
@@ -193,6 +193,40 @@ class TestEvidenceProviderRequirement:
         )
         assert isinstance(evidence.providers, tuple)
         assert evidence.providers[0].capability == "active_ast"
+
+
+class TestPackVersionedIdentity:
+    # ADR-049 D6: "every selected provider/base/preset/pack or rule set
+    # carries an immutable identity/version/digest" -- packs must be able to
+    # distinguish two revisions of a pack sharing the same name, for exact
+    # replay of a persisted decision.
+    def test_contract_packs_carry_versioned_identity(self):
+        contract = ContractConfig(
+            mode=ContractMode.PUBLIC,
+            packs=[ImmutableIdentity(id="rust_c_ffi", version=2, sha256="deadbeef")],
+        )
+        assert contract.packs[0].version == 2
+        assert contract.packs[0].sha256 == "deadbeef"
+
+    def test_policy_packs_carry_versioned_identity(self):
+        policy = CompatibilityPolicyConfig(
+            base=ImmutableIdentity(id="strict_abi", version=1),
+            packs=[ImmutableIdentity(id="qt_kde_cpp", version=3)],
+        )
+        assert policy.packs[0].id == "qt_kde_cpp"
+        assert policy.packs[0].version == 3
+
+    def test_gate_packs_carry_versioned_identity(self):
+        gate = GateConfig(packs=[ImmutableIdentity(id="security_hardening", version=1)])
+        assert gate.packs[0].id == "security_hardening"
+
+    def test_two_revisions_of_same_named_pack_are_distinguishable(self):
+        v1 = ImmutableIdentity(id="rust_c_ffi", version=1, sha256="aaa")
+        v2 = ImmutableIdentity(id="rust_c_ffi", version=2, sha256="bbb")
+        assert v1 != v2
+        contract_v1 = ContractConfig(mode=ContractMode.PUBLIC, packs=[v1])
+        contract_v2 = ContractConfig(mode=ContractMode.PUBLIC, packs=[v2])
+        assert contract_v1 != contract_v2
 
 
 class TestGateSeverityDefault:
