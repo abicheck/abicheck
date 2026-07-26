@@ -234,9 +234,21 @@ def resolve_function_identity(func: Function) -> FindingIdentity:
     ``diff_symbols._diff_functions`` relies on (Codex review). A
     non-extern-C function with no real mangling (e.g. a DWARF-only
     snapshot) can genuinely be overloaded, so param types still
-    disambiguate there.
+    disambiguate there -- along with ``is_const``/``is_volatile``/
+    ``ref_qualifier``, which alone distinguish legal overloads with
+    otherwise identical names and parameter types (``void f()`` vs.
+    ``void f() const``, ``void f() &`` vs. ``void f() &&``; Codex review).
     """
-    param_types = () if func.is_extern_c else tuple(p.type for p in func.params)
+    param_types = (
+        ()
+        if func.is_extern_c
+        else (
+            *(p.type for p in func.params),
+            f"const:{func.is_const}",
+            f"volatile:{func.is_volatile}",
+            f"ref:{func.ref_qualifier}",
+        )
+    )
     return resolve_symbol_identity(
         mangled=func.mangled,
         name=func.name,
@@ -258,42 +270,100 @@ def resolve_variable_identity(var: Variable) -> FindingIdentity:
     )
 
 
+#: ChangeKind slugs that are unambiguously "about one function/variable
+#: symbol" (see ``checker_policy.py``'s ``func_*``/``var_*``/``ifunc_*``
+#: naming convention -- verified exhaustively against the current enum).
+#: ``resolve_change_identity`` only attempts to interpret ``change.symbol``
+#: as a mangled name for these -- a type-level kind's ``symbol`` is a type
+#: name (e.g. a type named ``_Zebra`` structurally resembles an Itanium
+#: mangling but is not one), and ``change.qualified_name`` -- the signal
+#: that would normally catch this via ``normalize_mangled_name``'s
+#: mangled-vs-plain-name check -- is documented as unset for exactly this
+#: case (``Change.qualified_name``'s docstring: "None when no matching
+#: Function record was found (e.g. type-level changes)"), so it cannot be
+#: relied on alone (Codex review). Missing a real symbol-level kind here
+#: only means an unnecessary degrade to the NORMALIZED tier, never a wrong
+#: CANONICAL promotion -- the same ambiguity-safe-fallback bias as
+#: everywhere else in this module.
+_SYMBOL_LEVEL_KIND_PREFIXES = ("func_", "var_", "ifunc_")
+
+
+#: Change kinds ``diff_filtering._deduplicate_cross_detector`` already
+#: treats as one logical event reported by two different detectors (its
+#: local ``_DEDUP_CATEGORIES`` mapping) -- mirrored here, not imported, so
+#: this leaf module stays independent of the diff layer (future wiring work
+#: has ``diff_filtering`` depend on this module, not the reverse). Keep the
+#: two mappings in sync if either changes.
+_EQUIVALENT_CHANGE_CATEGORIES = {
+    "func_removed": "func_removal",
+    "func_removed_elf_only": "func_removal",
+    "func_added": "func_addition",
+    "var_removed": "var_removal",
+    "var_added": "var_addition",
+    "symbol_version_node_removed": "version_def_removal",
+    "symbol_version_defined_removed": "version_def_removal",
+}
+
+
+def _change_discriminator(change: Change, kind_value: str) -> str:
+    """The part of a finding's identity that tells it apart from another
+    finding sharing the same symbol.
+
+    Most kinds need the full ``(kind, old_value, new_value, description)``
+    tuple -- e.g. ``FUNC_RETURN_CHANGED`` and ``FUNC_PARAMS_CHANGED`` on the
+    same function must not collide (Codex review). But a handful of kind
+    *pairs* in :data:`_EQUIVALENT_CHANGE_CATEGORIES` are one logical event
+    under two different detectors' own wording (e.g. ``FUNC_REMOVED`` vs.
+    ``FUNC_REMOVED_ELF_ONLY``) -- those must collide on symbol + category
+    alone, ignoring the detector-specific kind/old/new/description text, or
+    this identity could never actually perform the rich/L0 reconciliation
+    it is meant to drive once wired in (Codex review).
+    """
+    category = _EQUIVALENT_CHANGE_CATEGORIES.get(kind_value)
+    if category is not None:
+        return f"category:{category}"
+    return "\x1f".join(
+        (
+            kind_value,
+            change.old_value or "",
+            change.new_value or "",
+            change.description or "",
+        )
+    )
+
+
 def resolve_change_identity(change: Change) -> FindingIdentity:
     """Tiered identity for an already-emitted flat finding
     (:class:`~abicheck.checker_types.Change`).
 
     ``change.symbol`` doubles as "mangled name or type name" (see
-    ``Change``'s docstring) -- ``change.qualified_name`` stands in for the
-    "plain name" :func:`normalize_mangled_name` needs to tell a real
-    mangling apart from a bare symbol that merely rode in ``symbol``
-    (matching how ``extern "C"`` producers report the two as equal). A
-    type-level change's ``symbol`` is a type name, not a mangling, so it
-    never passes that check and correctly degrades to the NORMALIZED tier.
+    ``Change``'s docstring); mangled-name interpretation is therefore only
+    attempted for :data:`_SYMBOL_LEVEL_KIND_PREFIXES` kinds, never for a
+    type-level change whose ``symbol`` merely happens to look like a
+    mangling (Codex review).
 
     Unlike :func:`resolve_function_identity`/:func:`resolve_variable_identity`
     (which identify one *entity*, so a bare mangled name is already
     unambiguous), this identifies one *finding* -- two distinct findings
-    routinely share a symbol (e.g. ``FUNC_RETURN_CHANGED`` and
-    ``FUNC_PARAMS_CHANGED`` both on ``foo``). The change's kind/old/new
-    value/description are therefore folded into ``primary_id`` at every
-    tier, including CANONICAL, mirroring the discriminator
-    ``reporter_markdown._finding_id`` already established as the minimal
-    set that disambiguates one finding from another on the same symbol
-    (Codex review: a bare ``mangled:<symbol>`` canonical id would collapse
-    unrelated findings and violate this module's stated dedup-key
+    routinely share a symbol. :func:`_change_discriminator` is folded into
+    ``primary_id`` at every tier, including CANONICAL, mirroring the
+    discriminator ``reporter_markdown._finding_id`` already established as
+    the minimal set that disambiguates one finding from another on the same
+    symbol (Codex review: a bare ``mangled:<symbol>`` canonical id would
+    collapse unrelated findings and violate this module's stated dedup-key
     contract).
     """
     kind_value = str(getattr(change.kind, "value", change.kind))
     qn = change.qualified_name or change.symbol or ""
-    sig = normalized_signature(
-        qn,
-        kind_value,
-        (change.old_value or "", change.new_value or "", change.description or ""),
-    )
+    discriminator = _change_discriminator(change, kind_value)
+    sig = f"sig:{qn}\x1f{discriminator}"
     rel = source_relative_identity(change.source_location or "", change.symbol or "")
 
+    real_mangled = None
+    if kind_value.startswith(_SYMBOL_LEVEL_KIND_PREFIXES):
+        real_mangled = normalize_mangled_name(change.symbol, change.qualified_name)
+
     aliases: list[str] = []
-    real_mangled = normalize_mangled_name(change.symbol, change.qualified_name)
     if real_mangled:
         aliases.append(f"mangled:{real_mangled}")
     if change.symbol:
@@ -305,23 +375,14 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
         aliases.append(f"relsrc:{rel}")
 
     if real_mangled:
-        primary = f"mangled:{real_mangled}\x1f{sig}"
+        primary = f"mangled:{real_mangled}\x1f{discriminator}"
         return FindingIdentity(primary, IDENTITY_TIER_CANONICAL, tuple(aliases))
 
     if qn:
         return FindingIdentity(sig, IDENTITY_TIER_NORMALIZED, tuple(aliases))
 
     basis = "\x1f".join(
-        str(x)
-        for x in (
-            change.symbol,
-            kind_value,
-            change.source_location,
-            change.old_value,
-            change.new_value,
-            change.description,
-        )
-        if x
+        str(x) for x in (change.symbol, discriminator, change.source_location) if x
     )
     digest = hashlib.sha256(f"synthetic\x00{basis}".encode()).hexdigest()[:32]
     synthetic = f"synthetic:sha256:{digest}"

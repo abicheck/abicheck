@@ -62,7 +62,9 @@ class TestNormalizeMangledName:
         assert normalize_mangled_name(msvc, "foo") == msvc
 
     def test_itanium_prefixed_garbage_with_invalid_characters_is_rejected(self) -> None:
-        assert normalize_mangled_name("_Znotreallymangled!!", "notreallymangled!!") is None
+        assert (
+            normalize_mangled_name("_Znotreallymangled!!", "notreallymangled!!") is None
+        )
 
     def test_neither_prefix_is_rejected(self) -> None:
         assert normalize_mangled_name("some_random_string", "foo") is None
@@ -185,9 +187,10 @@ class TestResolveFunctionIdentity:
             return_type="int",
             params=[Param(name="x", type="int"), Param(name="y", type="int")],
         )
-        assert resolve_function_identity(one_param).primary_id != resolve_function_identity(
-            two_params
-        ).primary_id
+        assert (
+            resolve_function_identity(one_param).primary_id
+            != resolve_function_identity(two_params).primary_id
+        )
 
     def test_extern_c_identity_is_stable_across_a_parameter_change(self) -> None:
         # Codex review: diff_symbols._diff_functions matches extern "C"
@@ -213,12 +216,31 @@ class TestResolveFunctionIdentity:
         assert before_identity.tier == IDENTITY_TIER_NORMALIZED
         assert before_identity.primary_id == after_identity.primary_id
 
+    def test_const_qualifier_distinguishes_otherwise_identical_overloads(self) -> None:
+        # Codex review: `void f()` vs `void f() const` share a name and an
+        # (empty) param-type tuple when neither has a real mangling.
+        non_const = Function(name="f", mangled="f", return_type="void")
+        const = Function(name="f", mangled="f", return_type="void", is_const=True)
+        assert (
+            resolve_function_identity(non_const).primary_id
+            != resolve_function_identity(const).primary_id
+        )
+
+    def test_ref_qualifier_distinguishes_otherwise_identical_overloads(self) -> None:
+        lvalue = Function(name="f", mangled="f", return_type="void", ref_qualifier="&")
+        rvalue = Function(name="f", mangled="f", return_type="void", ref_qualifier="&&")
+        assert (
+            resolve_function_identity(lvalue).primary_id
+            != resolve_function_identity(rvalue).primary_id
+        )
+
     def test_overloads_sharing_a_bare_name_are_distinguished_by_mangling(self) -> None:
         overload_a = Function(name="foo", mangled="_Z3fooi", return_type="int")
         overload_b = Function(name="foo", mangled="_Z3food", return_type="int")
-        assert resolve_function_identity(overload_a).primary_id != resolve_function_identity(
-            overload_b
-        ).primary_id
+        assert (
+            resolve_function_identity(overload_a).primary_id
+            != resolve_function_identity(overload_b).primary_id
+        )
 
 
 class TestResolveVariableIdentity:
@@ -267,6 +289,67 @@ class TestResolveChangeIdentity:
         assert return_changed.tier == IDENTITY_TIER_CANONICAL
         assert params_changed.tier == IDENTITY_TIER_CANONICAL
         assert return_changed.primary_id != params_changed.primary_id
+
+    def test_equivalent_removal_kinds_collide_on_the_same_mangled_symbol(self) -> None:
+        # Codex review: diff_filtering._deduplicate_cross_detector already
+        # treats FUNC_REMOVED (rich detector) and FUNC_REMOVED_ELF_ONLY (L0)
+        # as one logical event for the same symbol -- this identity must
+        # collide too, or it can never drive that same reconciliation once
+        # wired in, even though the two detectors report different
+        # descriptions/old-new values for what is the same event.
+        rich = resolve_change_identity(
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol=_ITANIUM_MANGLED,
+                description="foo removed (header no longer declares it)",
+                qualified_name="foo",
+            )
+        )
+        l0 = resolve_change_identity(
+            Change(
+                kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
+                symbol=_ITANIUM_MANGLED,
+                description="foo removed (ELF export gone)",
+                qualified_name="foo",
+            )
+        )
+        assert rich.tier == IDENTITY_TIER_CANONICAL
+        assert rich.primary_id == l0.primary_id
+
+    def test_equivalent_removal_kinds_collide_without_mangling_too(self) -> None:
+        rich = resolve_change_identity(
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="MyStruct",
+                description="removed (header)",
+            )
+        )
+        l0 = resolve_change_identity(
+            Change(
+                kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
+                symbol="MyStruct",
+                description="removed (ELF)",
+            )
+        )
+        assert rich.tier == IDENTITY_TIER_NORMALIZED
+        assert rich.primary_id == l0.primary_id
+
+    def test_type_name_resembling_a_mangling_is_not_treated_as_canonical(self) -> None:
+        # Codex review: a type literally named "_Zebra" structurally passes
+        # the Itanium prefix/character-set check, but TYPE_SIZE_CHANGED is
+        # not a symbol-level kind -- change.qualified_name is documented as
+        # unset for type-level changes, so this can't be caught via the
+        # mangled-vs-plain-name check alone.
+        change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="_Zebra",
+            description="size changed",
+            old_value="8",
+            new_value="16",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_NORMALIZED
+        assert not identity.primary_id.startswith("mangled:")
 
     def test_type_level_change_degrades_to_normalized(self) -> None:
         change = Change(
@@ -320,7 +403,9 @@ class TestResolveChangeIdentity:
 class TestFindingIdentityToDict:
     def test_round_trips_fields(self) -> None:
         identity = FindingIdentity(
-            primary_id="mangled:_Z3fooi", tier=IDENTITY_TIER_CANONICAL, aliases=("a", "b")
+            primary_id="mangled:_Z3fooi",
+            tier=IDENTITY_TIER_CANONICAL,
+            aliases=("a", "b"),
         )
         assert identity.to_dict() == {
             "primary_id": "mangled:_Z3fooi",
