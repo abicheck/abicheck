@@ -710,4 +710,18 @@ class CompatibilityEvaluationConfig:
     provenance: Mapping[str, ValueProvenance] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        # An untyped manifest/API adapter supplying the decoded suppression
+        # block as a raw mapping was previously accepted and retained as-is
+        # instead of a SuppressionConfig -- the supposedly-immutable config
+        # could then change when the caller mutates that mapping, and an
+        # evaluator expecting `.rules`/`.sha256` attribute access would get
+        # the wrong interface (Codex review) -- same class of gap as
+        # EvidenceConfig.variants/SurfaceConfig.explicit_scope.
+        if self.suppressions is not None and not isinstance(
+            self.suppressions, SuppressionConfig
+        ):
+            raise TypeError(
+                "CompatibilityEvaluationConfig.suppressions must be a "
+                f"SuppressionConfig or None, not {self.suppressions!r}."
+            )
         object.__setattr__(self, "provenance", _frozen_mapping(self.provenance))

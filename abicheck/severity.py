@@ -239,25 +239,21 @@ def effective_verdict_for_change(
     eff = getattr(change, "effective_verdict", None)
     if isinstance(eff, Verdict):
         raw_v = _raw_verdict_for_kind(kind, base_sets)
-        if (
-            _has_frozen_namespace_violation(change)
-            and _VERDICT_ORDER.index(eff) < _VERDICT_ORDER.index(raw_v)
-        ):
+        if _has_frozen_namespace_violation(change) and _VERDICT_ORDER.index(
+            eff
+        ) < _VERDICT_ORDER.index(raw_v):
             return raw_v
         return eff
 
     overrides = (
-        getattr(policy_file, "overrides", None)
-        if policy_file is not None
-        else None
+        getattr(policy_file, "overrides", None) if policy_file is not None else None
     )
     if overrides and kind in overrides:
         base_v = effective_category(change, *base_sets)
         override_v = cast(Verdict, overrides[kind])
-        if (
-            _has_frozen_namespace_violation(change)
-            and _VERDICT_ORDER.index(override_v) < _VERDICT_ORDER.index(base_v)
-        ):
+        if _has_frozen_namespace_violation(change) and _VERDICT_ORDER.index(
+            override_v
+        ) < _VERDICT_ORDER.index(base_v):
             return base_v
         return override_v
     sets = _resolve_kind_sets(policy, kind_sets)
@@ -274,7 +270,10 @@ def classify_effective_change(
     """Classify one change, preserving per-finding verdict guards."""
     sets = _resolve_kind_sets(policy, kind_sets)
     verdict = effective_verdict_for_change(
-        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        change,
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
     )
     if verdict == Verdict.BREAKING:
         return IssueCategory.ABI_BREAKING
@@ -309,6 +308,28 @@ class SeverityConfig:
     potential_breaking: SeverityLevel = SeverityLevel.WARNING
     quality_issues: SeverityLevel = SeverityLevel.WARNING
     addition: SeverityLevel = SeverityLevel.INFO
+
+    def __post_init__(self) -> None:
+        # The four annotations aren't runtime-enforced, so an untyped
+        # manifest/API adapter (e.g. compatibility_evaluation_config.py's
+        # GateConfig, which only validates the outer isinstance(...,
+        # SeverityConfig)) could otherwise construct
+        # SeverityConfig(abi_breaking="erorr") -- has_errors() would then
+        # treat an ABI-breaking finding as non-error (potentially making a
+        # release gate green on a real break), and describe() would crash
+        # on the raw string's missing .value (Codex review).
+        for field_name in (
+            "abi_breaking",
+            "potential_breaking",
+            "quality_issues",
+            "addition",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, SeverityLevel):
+                raise TypeError(
+                    f"SeverityConfig.{field_name} must be a SeverityLevel, "
+                    f"not {value!r}."
+                )
 
     def level_for(self, category: IssueCategory) -> SeverityLevel:
         """Return the configured severity level for *category*.
@@ -546,7 +567,10 @@ def compute_exit_code(
     worst = 0
     for change in changes:
         cat = classify_effective_change(
-            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+            change,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
         )
         if config.level_for(cat) == SeverityLevel.ERROR:
             code = _CATEGORY_EXIT_CODES[cat]
@@ -586,7 +610,10 @@ def categorize_changes(
 
     for c in changes:
         cat = classify_effective_change(
-            c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+            c,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
         )
         if cat == IssueCategory.ABI_BREAKING:
             abi.append(c)
@@ -705,10 +732,17 @@ def compute_gate_decision(
         )
 
     exit_code = compute_exit_code(
-        changes, severity_config, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        changes,
+        severity_config,
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
     )
     categorized = categorize_changes(
-        changes, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        changes,
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
     )
     blocking_categories = tuple(
         cat.value

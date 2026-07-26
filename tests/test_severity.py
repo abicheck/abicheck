@@ -157,6 +157,21 @@ class TestSeverityConfig:
         assert "abi_breaking: error" in desc
         assert "addition: info" in desc
 
+    @pytest.mark.parametrize(
+        "field_name",
+        ["abi_breaking", "potential_breaking", "quality_issues", "addition"],
+    )
+    def test_non_severity_level_field_is_rejected(self, field_name: str) -> None:
+        # Codex review: an untyped manifest/API adapter (e.g.
+        # compatibility_evaluation_config.py's GateConfig, which only
+        # validates the outer isinstance(..., SeverityConfig)) could
+        # otherwise construct SeverityConfig(abi_breaking="erorr") --
+        # has_errors() would then treat an ABI-breaking finding as
+        # non-error, and describe() would crash on the raw string's
+        # missing .value.
+        with pytest.raises(TypeError, match=rf"SeverityConfig\.{field_name}"):
+            SeverityConfig(**{field_name: "erorr"})
+
 
 # ---------------------------------------------------------------------------
 # resolve_severity_config

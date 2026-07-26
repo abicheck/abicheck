@@ -853,3 +853,18 @@ class TestSuppressionConfigDigest:
         assert no_source.suppressions is None
         assert selected_empty.suppressions is not None
         assert no_source != selected_empty
+
+    def test_raw_mapping_suppressions_is_rejected(self):
+        # Codex review: an untyped manifest/API adapter supplying the
+        # decoded suppression block as a raw mapping was previously
+        # accepted and retained as-is instead of a SuppressionConfig -- the
+        # supposedly immutable config could then change when the caller
+        # mutates the mapping, and an evaluator expecting .rules/.sha256
+        # attribute access would get the wrong interface. Same class of
+        # gap as EvidenceConfig.variants/SurfaceConfig.explicit_scope.
+        with pytest.raises(
+            TypeError, match=r"CompatibilityEvaluationConfig\.suppressions"
+        ):
+            _minimal_config(
+                suppressions={"rules": ["ignore-internal-symbol"], "sha256": "abc"}  # type: ignore[arg-type]
+            )
