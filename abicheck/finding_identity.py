@@ -314,11 +314,25 @@ def resolve_symbol_identity(
     fact: a tier is claimed only when its corresponding input is present.
     """
     qn = qualified_name or name or ""
-    sig = normalized_signature(qn, kind, param_types)
+    real_mangled = normalize_mangled_name(mangled, name)
+
+    # A present-but-not-a-verified-mangling `mangled` value is more
+    # tier-stable than `qualified_name`/`name` for the NORMALIZED-tier
+    # basis: it is the raw, literal exported symbol -- diff_symbols.py's
+    # existing old/new maps are keyed by this same value for every
+    # function/variable, mangled or not (Codex review, generalized from
+    # the extern "C" function case to cover variables too, since
+    # ``Variable`` has no ``is_extern_c`` field to gate a narrower fix on).
+    # `qualified_name`/`name` is comparatively less stable: a DWARF-derived
+    # record scope-qualifies a namespaced C-linkage entity ("ns::foo"),
+    # while a symbols-only fallback snapshot of the SAME export has no
+    # scope info to qualify with at all ("foo") -- using `qn` here would
+    # fragment the same entity's identity across evidence tiers.
+    normalized_basis = mangled if (mangled and not real_mangled) else qn
+    sig = normalized_signature(normalized_basis, kind, param_types)
     rel = source_relative_identity(source_location, name or qn)
 
     aliases: list[str] = []
-    real_mangled = normalize_mangled_name(mangled, name)
     if real_mangled:
         aliases.append(f"mangled:{real_mangled}")
     if name:
@@ -380,23 +394,15 @@ def resolve_function_identity(func: Function) -> FindingIdentity:
             f"ref:{func.ref_qualifier}",
         )
     )
-    # extern "C" linkage strips namespace qualification from the exported
-    # symbol entirely, so func.mangled is stable across evidence tiers --
-    # func.name is not: a DWARF-derived record scope-qualifies a namespaced
-    # extern "C" function ("ns::foo"), while a symbols-only fallback
-    # snapshot of the SAME export has no scope info to qualify with at all
-    # ("foo", dwarf_snapshot.py's Function(name=qualified_name if scope
-    # else name) vs. dumper_elf_fallback.py's Function(name=sym)). Using
-    # func.name here would fragment the NORMALIZED-tier identity across
-    # tiers for exactly the entity this primitive exists to reconcile
-    # (Codex review); func.mangled -- the raw, tier-independent exported
-    # symbol -- is what diff_symbols._diff_functions's primary mangled-key
-    # match already relies on for this same case.
-    qualified_name = func.mangled if func.is_extern_c else func.name
+    # qualified_name=func.name: resolve_symbol_identity itself prefers
+    # func.mangled over this whenever mangled is present but not a
+    # verified mangling (the extern "C"/C-linkage case), so a namespaced
+    # extern "C" function's identity is already tier-stable without
+    # special-casing is_extern_c here.
     return resolve_symbol_identity(
         mangled=func.mangled,
         name=func.name,
-        qualified_name=qualified_name,
+        qualified_name=func.name,
         kind="function",
         param_types=param_types,
         source_location=func.source_location or "",

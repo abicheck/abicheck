@@ -373,6 +373,23 @@ class TestResolveVariableIdentity:
         identity = resolve_variable_identity(var)
         assert identity.tier == IDENTITY_TIER_NORMALIZED
 
+    def test_extern_c_variable_identity_is_stable_across_evidence_tiers(self) -> None:
+        # Codex review: Variable has no is_extern_c field, so this can't be
+        # gated the same way resolve_function_identity's extern-C case is --
+        # instead resolve_symbol_identity itself prefers `mangled` whenever
+        # it's present but not a verified mangling, which covers variables
+        # too. A namespaced C-linkage variable's DWARF-derived record
+        # scope-qualifies var.name ("ns::x"), while a symbols-only fallback
+        # snapshot of the SAME export has no scope info ("x") -- both must
+        # still resolve to the same identity.
+        rich = Variable(name="ns::x", mangled="x", type="int")
+        l0_fallback = Variable(name="x", mangled="x", type="int")
+        rich_identity = resolve_variable_identity(rich)
+        l0_identity = resolve_variable_identity(l0_fallback)
+        assert rich_identity.tier == IDENTITY_TIER_NORMALIZED
+        assert l0_identity.tier == IDENTITY_TIER_NORMALIZED
+        assert rich_identity.primary_id == l0_identity.primary_id
+
 
 class TestResolveChangeIdentity:
     def test_symbol_slug_kind_with_mangled_symbol_is_canonical(self) -> None:
