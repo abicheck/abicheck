@@ -44,12 +44,13 @@ Usage::
 Notes:
 - ``--policy-file`` overrides ``--policy`` when both are supplied.
 - Checks are always executed; only verdict classification changes.
-- Unknown kind names emit a warning and are skipped.
+- An unknown ``ChangeKind`` slug is a hard load error (ADR-049 D8):
+  warning-and-skip is unsafe because a renamed or misspelled kind can
+  silently disable a release rule.
 """
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -62,8 +63,6 @@ from .checker_policy import (
     policy_kind_sets,
 )
 from .errors import PolicyError
-
-log = logging.getLogger(__name__)
 
 # Severity name -> Verdict mapping
 _SEVERITY_MAP: dict[str, Verdict] = {
@@ -207,10 +206,16 @@ def _parse_overrides(overrides_raw: Any, path: Path) -> dict[ChangeKind, Verdict
         overrides[kind] = verdict
 
     if unknown_kinds:
-        log.warning(
-            "policy file %s: unknown ChangeKind slugs (skipped): %s",
-            path,
-            ", ".join(sorted(unknown_kinds)),
+        # ADR-049 D8: "An unknown ChangeKind in a custom policy is a hard
+        # load error; warning-and-skip is unsafe because a renamed kind can
+        # silently disable a release rule." A silently-skipped override for
+        # e.g. a renamed `func_removed` slug would leave that kind on its
+        # (possibly stricter) base-policy verdict with no indication the
+        # override was ever dropped.
+        raise PolicyError(
+            f"Unknown ChangeKind slugs in {path}: {sorted(unknown_kinds)}. "
+            "Rename or remove them -- see `abicheck --help` or "
+            "docs/reference/change-kinds.md for valid slugs."
         )
     if unknown_severities:
         raise PolicyError(
@@ -401,14 +406,11 @@ class PolicyFile:
 
         Raises:
             ValueError: If the file is malformed, ``base_policy`` is not a string,
-                has an unknown policy name, ``overrides`` is not a mapping, or
-                contains invalid severity strings.
+                has an unknown policy name, ``overrides`` is not a mapping,
+                contains an unknown ``ChangeKind`` slug (ADR-049 D8: a hard
+                load error, not a warning), or contains invalid severity
+                strings.
             OSError: If the file cannot be read.
-
-        Note:
-            Unknown kind names in ``overrides`` emit a ``log.warning`` and are
-            skipped — they do not raise. This is intentional to tolerate typos
-            in large policy files without aborting the run.
         """
         try:
             import yaml
