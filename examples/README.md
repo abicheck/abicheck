@@ -447,9 +447,9 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [186](case186_c_api_pointee_const_abi_neutral/README.md) | C API Pointee const-Qualification Is ABI-Neutral | No Change | ✅ NO_CHANGE |
 | [187](case187_public_struct_private_field_type/README.md) | Public Struct Field Retyped to an Internal Type | Breaking | 🔴 BREAKING (bad practice) |
 | [188](case188_public_class_private_base_class/README.md) | Public Class Gains a Private Base Class | Breaking | 🔴 BREAKING (bad practice) |
-| [189](case189_public_function_private_parameter_type/README.md) | _public_function_private_parameter_type — Public function parameter retyped to an internal type | Breaking | 🔴 BREAKING (bad practice) |
+| [189](case189_public_function_private_parameter_type/README.md) | Public Function Parameter Retyped to an Internal Type | Breaking | 🔴 BREAKING (bad practice) |
 | [190](case190_public_inline_function_references_internal_constant/README.md) | _public_inline_function_references_internal_constant — Public inline function newly reads an internal constant | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [191](case191_header_only_graph_field_type/README.md) | _header_only_graph_field_type — Same finding, proven with a genuine confirmed-zero (no coverage trick) | Breaking | 🔴 BREAKING (bad practice) |
+| [191](case191_header_only_graph_field_type/README.md) | Public Struct Gains a Field of a Private Type (Header-Only Graph) | Breaking | 🔴 BREAKING (bad practice) |
 | [192](case192_call_graph_break_survives_suppression/README.md) | Call-graph-reachable break survives a broad internal-namespace suppression | Breaking | 🔴 BREAKING |
 | [193](case193_ordinary_exported_fn_call_not_reachable/README.md) | An ordinary exported function's internal call is not public-reachable | Breaking | 🔴 BREAKING |
 | [194](case194_header_graph_rename_reconciled/README.md) | _header_graph_rename_reconciled — Internal dependency target renamed, safely reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
