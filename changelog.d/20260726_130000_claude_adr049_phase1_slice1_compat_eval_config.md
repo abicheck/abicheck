@@ -26,4 +26,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `GateConfig` is constructed, so it's excluded here). `ValueProvenance`
   gains `shadowed_legacy`, populated by the resolver's `--policy`/
   `--policy-file` exception path to retain the suppressed legacy
-  candidate's provenance for audit/replay (D7).
+  candidate's provenance for audit/replay (D7). `ImmutableIdentity.id`
+  rejects the empty string, the same replay-exactness guarantee already
+  applied to `sha256`. `CompatibilityPolicyConfig.overrides` now rejects
+  unknown `ChangeKind` slugs (D8: a hard load error) regardless of which
+  front end constructs it directly, matching `policy_file.py`'s
+  `PolicyFile.load()` — not only the YAML-loading path.

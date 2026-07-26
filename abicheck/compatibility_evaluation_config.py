@@ -50,6 +50,7 @@ from types import MappingProxyType
 from typing import Any, TypeVar
 
 from .change_registry_types import Verdict
+from .checker_policy import ChangeKind
 from .contract_relevance_types import ContractMode, SelectorLayer
 from .severity import SeverityConfig
 
@@ -101,6 +102,13 @@ _VALID_UNRESOLVED_BEHAVIORS = frozenset({"not_checkable", "warn"})
 # click.Choice is {"auto", "legacy", "severity"}, but "auto" is resolved to
 # one of the other two before an effective GateConfig is ever constructed.
 _VALID_EXIT_CODE_SCHEMES = frozenset({"legacy", "severity"})
+
+# ADR-049 D8: "An unknown ChangeKind in a custom policy is a hard load
+# error" -- policy_file.py's PolicyFile.load() already enforces this for
+# --policy-file YAML; CompatibilityPolicyConfig.overrides must reject the
+# same typo'd/renamed slug regardless of which front end (service/API/
+# manifest adapter) constructs it directly, not only the YAML path.
+_VALID_CHANGE_KIND_SLUGS: frozenset[str] = frozenset(k.value for k in ChangeKind)
 
 
 # --------------------------------------------------------------------------
@@ -181,6 +189,13 @@ class ImmutableIdentity:
     sha256: str
 
     def __post_init__(self) -> None:
+        if not self.id:
+            raise ValueError(
+                "ImmutableIdentity.id must be non-empty (ADR-049 D6): a "
+                "persisted provider/base/preset/pack needs its identity "
+                "name to say what the digest represents, the same "
+                "replay-exactness guarantee sha256 already carries."
+            )
         _require_nonempty_digest(self.sha256, owner="ImmutableIdentity")
 
 
@@ -352,6 +367,13 @@ class CompatibilityPolicyConfig:
     overrides: Mapping[str, Verdict] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        unknown = sorted(set(self.overrides) - _VALID_CHANGE_KIND_SLUGS)
+        if unknown:
+            raise ValueError(
+                f"CompatibilityPolicyConfig.overrides has unknown "
+                f"ChangeKind slugs: {unknown} (ADR-049 D8: a hard load "
+                "error, matching policy_file.py's PolicyFile.load)"
+            )
         object.__setattr__(
             self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)
         )

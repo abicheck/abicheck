@@ -84,6 +84,16 @@ class TestConstruction:
         )
         assert cfg.policy.overrides["soname_bump_recommended"] is Verdict.BREAKING
 
+    def test_unknown_change_kind_slug_in_overrides_is_rejected(self):
+        # ADR-049 D8: an unknown ChangeKind is a hard load error regardless
+        # of which front end constructs the override -- not only
+        # policy_file.py's YAML path.
+        with pytest.raises(ValueError, match="totally_made_up_kind"):
+            CompatibilityPolicyConfig(
+                base=_identity("strict_abi"),
+                overrides={"totally_made_up_kind": Verdict.BREAKING},
+            )
+
 
 class TestContractConfigUnresolvedBehavior:
     # ADR-049 D9: unresolved_behavior is a closed two-value vocabulary
@@ -293,6 +303,12 @@ class TestImmutableIdentityRequiresDigest:
         # A present-but-empty digest is exactly as useless as a missing one.
         with pytest.raises(ValueError, match="non-empty digest"):
             ImmutableIdentity(id="strict_abi", version=1, sha256="")
+
+    def test_empty_string_id_is_rejected(self):
+        # An identity with no name can't say what its digest represents --
+        # the same replay-exactness guarantee sha256 already carries.
+        with pytest.raises(ValueError, match="ImmutableIdentity.id"):
+            ImmutableIdentity(id="", version=1, sha256="abc123")
 
 
 class TestPackVersionedIdentity:
