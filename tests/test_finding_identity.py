@@ -65,6 +65,13 @@ class TestNormalizeMangledName:
         # check but does not start any real Itanium <encoding> production.
         assert normalize_mangled_name("_Zebra", None) is None
 
+    def test_source_name_with_declared_length_too_long_is_rejected(self) -> None:
+        # Codex review: "9" claims a 9-byte name but only "abc" (3) follows.
+        assert normalize_mangled_name("_Z9abc", None) is None
+
+    def test_local_linkage_source_name_with_invalid_length_is_rejected(self) -> None:
+        assert normalize_mangled_name("_ZL9abc", None) is None
+
     def test_global_operator_new_mangling_is_accepted(self) -> None:
         # operator new(unsigned long) -- a real mangling that starts with
         # an <operator-name> two-letter code ("nw"), not a digit/N/L/T/G/S,

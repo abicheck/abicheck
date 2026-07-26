@@ -135,6 +135,30 @@ _ITANIUM_OPERATOR_CODES = frozenset(
 )  # fmt: skip
 
 
+_SOURCE_NAME_LENGTH_RE = re.compile(r"\A[0-9]+")
+
+
+def _valid_source_name(rest: str) -> bool:
+    """Whether a leading ``<source-name>`` production (``<number>``
+    followed by exactly that many bytes, e.g. ``3foo``) has a declared
+    length *rest* actually has room for.
+
+    Catches ``_Z9abc`` -- passes a bare "starts with a digit" check, but
+    the ``9`` claims nine following bytes and only three (``abc``) are
+    there, so it is not a valid encoding (Codex review, round 2 on this
+    exact production). Only checks that at least the declared number of
+    bytes exist, not that they form a further-valid identifier/that
+    whatever trails them is valid too -- a real ``<source-name>`` may be
+    followed by more encoding (template args, parameter types, ...) this
+    function does not parse.
+    """
+    m = _SOURCE_NAME_LENGTH_RE.match(rest)
+    assert m is not None  # only called when rest[0].isdigit()
+    declared_len = int(m.group())
+    identifier = rest[m.end() :]
+    return len(identifier) >= declared_len
+
+
 def _looks_like_itanium_encoding(rest: str) -> bool:
     """Whether *rest* (``mangled_name`` with the ``_Z`` prefix and any
     clone suffix already stripped) plausibly starts a real Itanium
@@ -144,24 +168,30 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
     NOT a full Itanium grammar parser (that is exactly what an external
     demangler exists to do, and :func:`normalize_mangled_name` deliberately
     avoids calling one; see its docstring). Rejects a `_Z`-prefixed token
-    like ``_Zebra`` that passes the coarse character-class check but does
-    not start any real encoding (Codex review: prevents a type/C-symbol
-    name that merely resembles a mangling from being promoted to the
-    CANONICAL tier). A production this function doesn't recognize (a
-    template-args-only start, an obscure vendor extension, ...) only
-    degrades to the NORMALIZED tier -- the same ambiguity-safe-fallback
-    bias as everywhere else in this module -- so under-recognition here is
-    safe, over-recognition is the only failure mode that matters.
+    like ``_Zebra`` (no real production starts with a bare letter) or
+    ``_Z9abc`` (claims a 9-byte name, has 3) that pass a coarser check but
+    are not real encodings (Codex review, two rounds). A production this
+    function doesn't recognize or fully validate (an obscure vendor
+    extension, a length-invalid ``<source-name>`` *nested* inside an
+    ``N...E`` production, template-args internals, ...) only degrades to
+    the NORMALIZED tier -- the same ambiguity-safe-fallback bias as
+    everywhere else in this module, and the accepted boundary of this
+    heuristic: it validates the top-level production's shape and its own
+    declared length, not every length recursively nested inside it. A
+    fully grammar-correct implementation is out of scope for this
+    additive, not-yet-wired primitive -- that is exactly the job an
+    external demangler exists to do, deliberately not called here (see
+    :func:`normalize_mangled_name`'s docstring).
     """
     if not rest:
         return False
     if rest[0].isdigit():  # <source-name>: digit-prefixed length
-        return True
+        return _valid_source_name(rest)
     if rest[0] in "NZ":  # <nested-name> / <local-name>
         return True
     if rest[0] == "L" and len(rest) > 1 and rest[1].isdigit():
         # GCC internal-linkage prefix (_ZL7g_count) + <source-name>
-        return True
+        return _valid_source_name(rest[1:])
     if rest[0] == "T" and len(rest) > 1 and rest[1] in "VITSFWJ":
         # <special-name>: vtable/typeinfo/typename/VTT/...
         return True
