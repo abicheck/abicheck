@@ -52,10 +52,10 @@ With less input, abicheck degrades gracefully *down the staircase* rather than f
 
 ## Installation
 
-**Full installation (recommended)** — conda-forge bundles `abicheck` with `castxml` as a run dependency, so header AST analysis (L2) is available without a separate `castxml` install. The feedstock does **not** pull in a C/C++ compiler as a run dependency, and its `castxml >=0.6.3` floor is looser than abicheck's own `>=0.6.11` version gate (see below) — a fresh `conda create` can land a `castxml` build old enough that abicheck's own gate then rejects it; pin `castxml>=0.6.11` explicitly if that happens:
+**Full installation (recommended)** — conda-forge bundles `abicheck` with `castxml` as a run dependency, so header AST analysis (L2) is available without a separate `castxml` install. The feedstock does **not** pull in a C/C++ compiler as a run dependency, and its `castxml >=0.6.3` floor is looser than abicheck's own `>=0.6.11` version gate — pin `castxml>=0.6.11` explicitly, as shown below, so a fresh environment doesn't land a `castxml` build old enough for abicheck's own gate to then reject it:
 
 ```bash
-conda create -n abicheck -c conda-forge python=3.12 abicheck
+conda create -n abicheck -c conda-forge python=3.12 abicheck "castxml>=0.6.11"
 conda activate abicheck
 ```
 

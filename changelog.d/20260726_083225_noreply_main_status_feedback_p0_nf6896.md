@@ -85,6 +85,17 @@
   <options>` is clang-cl's own "forward to the linker" escape hatch — the
   cl-mode spelling of the already-blocked `-Wl,` mechanism — blocked for
   the same LTO-linker-plugin reason.
+- **`release_recommendation`'s JSON Schema now enforces the
+  `version_bump`/`state` pairing it only documented in prose** (schema
+  2.21, `compare_report.schema.json` and its `docs/reference/schemas/v1/`
+  mirror): an `allOf`/`if`/`then` pair requires `version_bump: null` iff
+  `state == "unavailable"`. 2.20 widened `version_bump`'s type to accept
+  `null` but didn't tie that to `state` at the schema level, so a
+  producer bug emitting a mismatched pair (e.g. a concrete bump alongside
+  `state: "unavailable"`) would still validate; every real producer
+  already only emits the paired combination, so this tightens validation
+  without changing what a conformant report looks like (CodeRabbit
+  review).
 
 ### Documentation
 
@@ -93,12 +104,18 @@
   its `castxml >=0.6.3` floor is looser than abicheck's own `>=0.6.11`
   version gate. Also corrected the legacy PyPI `castxml` package's last
   release date (0.4.5 shipped September 2022, not 2018) here and in
-  `castxml_policy.py`'s docstring.
+  `castxml_policy.py`'s docstring. The recommended `conda create` command
+  now pins `castxml>=0.6.11` directly instead of only mentioning the pin
+  in prose (CodeRabbit review).
 - **`docs/use/output-formats.md`'s `release_recommendation` JSON-gating
   example now checks `state` before `version_bump`**, and documents that
   `version_bump` is `null` when `state` is `"unavailable"` — the previous
   example gated on `version_bump` alone and showed only the always-present
-  `"major"` case, which is no longer true after the honesty fix above.
+  `"major"` case, which is no longer true after the honesty fix above. The
+  example now branches with an explicit `if .state == "actionable"`/`elif
+  "review"`/`else` chain instead of just formatting all three fields
+  unconditionally, so it actually demonstrates the gating it describes
+  (CodeRabbit review).
 - **`tests/scenarios/release_management.yaml`'s `SC-RELEASE-RECOMMENDATION`
   scenario's documented `expected`/narrative now match what
   `test_sc_release_recommendation` actually asserts** (`state: unavailable`,

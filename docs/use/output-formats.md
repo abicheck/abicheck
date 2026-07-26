@@ -633,13 +633,25 @@ The recommendation is **policy-aware** (it honours `--policy` and
 
 In **JSON** output the recommendation is always present (no flag needed) under
 the `release_recommendation` key, so CI and agents can gate on it — **check
-`state` first**:
+`state` first**, before ever reading `version_bump`:
 
 ```bash
 abicheck compare old.so new.so -H include/ --format json \
-  | jq -r '.release_recommendation | "\(.state): \(.version_bump) (\(.soname_action))"'
-# actionable: major (bump_required)
+  | jq -r '.release_recommendation
+      | if .state == "actionable" then
+          "release: bump \(.version_bump), soname \(.soname_action)"
+        elif .state == "review" then
+          "needs human review: \(.rationale)"
+        else
+          "no confirmed evidence: \(.rationale)"
+        end'
+# release: bump major, soname bump_required
 ```
+
+The `elif`/`else` branches never read `.version_bump` — for `"review"` it's
+still a real value but unconfirmed against binary evidence, and for
+`"unavailable"` it's `null` (schema 2.20+); either way the branch that treats
+it as actionable is exactly the one this example skips.
 
 `state` is one of `actionable` (act on `version_bump`/`soname_action`
 directly), `review` (a source/API break was found but no binary evidence

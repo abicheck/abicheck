@@ -284,7 +284,17 @@
         "soname_action": { "type": "string", "enum": ["bump_required", "bump_performed", "bump_missing", "no_bump_needed", "not_determined"], "description": "'not_determined' added in schema 2.14: a BREAKING verdict whose comparison either carried no ELF/PE/Mach-O/DWARF evidence at all, or also raised an evidence-coherence RISK finding (compile_context_conflict / source_surface_dso_mismatch) that leaves the analysis's own build/source context internally inconsistent." },
         "rationale": { "type": "string" },
         "state": { "type": "string", "enum": ["actionable", "review", "unavailable"], "description": "Schema 2.14. How much weight the recommendation itself can bear, independent of what it recommends: 'actionable' (act on it), 'review' (a source/API break was found but no binary evidence confirms a SONAME action either way), or 'unavailable' (a BREAKING verdict with no ELF/PE/Mach-O/DWARF evidence at all, or either a BREAKING or API_BREAK verdict co-occurring with a compile_context_conflict/source_surface_dso_mismatch coherence finding — abicheck cannot confirm a binary action, or vouch that the analysis's own evidence is self-consistent)." }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "const": "unavailable" } }, "required": ["state"] },
+          "then": { "properties": { "version_bump": { "const": null } }, "required": ["version_bump"] }
+        },
+        {
+          "if": { "properties": { "version_bump": { "const": null } }, "required": ["version_bump"] },
+          "then": { "properties": { "state": { "const": "unavailable" } }, "required": ["state"] }
+        }
+      ]
     },
     "layer_coverage": {
       "type": "array",

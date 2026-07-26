@@ -240,7 +240,18 @@ from typing import Any
 #:       ``version_bump`` without checking ``state`` first must now handle
 #:       ``null``, which is why this is a relaxed-constraint MINOR bump, not
 #:       a MAJOR one (the enum widened, no existing value changed meaning).
-REPORT_SCHEMA_VERSION = "2.20"
+#:   2.21: ``release_recommendation`` gains an ``allOf``/``if``/``then`` pair
+#:       enforcing ``version_bump == null`` iff ``state == "unavailable"``
+#:       (CodeRabbit review, PR #639). 2.20 widened ``version_bump``'s type
+#:       to accept ``null`` but did not, at the schema level, tie that to
+#:       ``state`` — a producer bug could in principle emit
+#:       ``version_bump: null`` with ``state: "actionable"``, or a concrete
+#:       bump with ``state: "unavailable"``, and still validate. Every real
+#:       producer (``ReleaseRecommendation.to_dict()``) already only emits
+#:       the paired combination, so this tightens validation without
+#:       changing what a conformant report looks like — a MINOR bump, not
+#:       MAJOR, same reasoning as 2.20 itself.
+REPORT_SCHEMA_VERSION = "2.21"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
