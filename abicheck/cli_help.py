@@ -301,6 +301,39 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
 }
 
 
+def _disable_cross_panel_dedup(groups: dict[str, list[dict[str, object]]]) -> None:
+    """Stamp ``deduplicate: False`` onto every panel dict in *groups*.
+
+    rich-click's ``CommandGroupDict``/``OptionGroupDict`` both default
+    ``deduplicate`` to ``True``: when the *same* option/command name appears
+    in more than one panel, its resolver (``rich_panel._resolve_panels_from_config``)
+    calls ``list.remove()`` **on the panel dict's own ``commands``/``options``
+    list object** to drop the later duplicate -- not a copy. None of our
+    panels intentionally rely on that (each name here is listed in exactly
+    one panel), so this is a no-op for rendered output either way -- but
+    leaving the default on is a live landmine: every panel list here is a
+    module-level literal, built once and reused for every subsequent
+    ``--help`` render in the process (`configure_rich_help()` itself only
+    runs once, at :mod:`abicheck.cli` import time). Given enough distinct
+    root-help renders in one process (any full test session invoking
+    ``CliRunner().invoke(main, ["--help"])`` repeatedly, e.g. under
+    pytest-xdist), rich-click's resolver eventually perceives a
+    (spurious, cross-call) duplicate and permanently deletes entries from
+    these panels for the rest of the process -- observed as CI-only,
+    order-dependent panel corruption (`Workflow composition`/`Project
+    integration` silently vanishing) that never reproduced in an isolated
+    run (CI incident, ADR-054 PR review). Disabling dedup entirely removes
+    the mutation path, independent of root-causing rich-click's own caching.
+    """
+    for panels in groups.values():
+        for panel in panels:
+            panel["deduplicate"] = False
+
+
+_disable_cross_panel_dedup(COMMAND_GROUPS)
+_disable_cross_panel_dedup(OPTION_GROUPS)
+
+
 def _ensure_utf8_streams() -> None:
     """Reconfigure stdout/stderr to UTF-8 on Windows, where they otherwise are not.
 
