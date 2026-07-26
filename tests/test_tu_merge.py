@@ -888,6 +888,141 @@ def test_merge_fragments_type_raises_on_both_opaque_conflicting_kind():
 
 
 # ---------------------------------------------------------------------------
+# Round 8 (Codex review, PR #635): deprecated unioned across ordinary
+# redeclarations (not just forward-decl/definition pairs), and a
+# TU-order-independent `kind` for the both-opaque struct/class merge.
+# ---------------------------------------------------------------------------
+
+
+def test_merge_fragments_function_unions_deprecated_across_ordinary_redeclaration():
+    # Two otherwise-identical function redeclarations, only one of which
+    # carries [[deprecated]] -- a routine cross-TU redeclaration, not a
+    # conflict, the same as differing provenance.
+    a = _fn("old_api", "_Z7old_apiv", deprecated="use new_api instead")
+    b = _fn("old_api", "_Z7old_apiv")
+    merged = merge_fragments(
+        [
+            TuFragment(tu_name="a", functions=(a,)),
+            TuFragment(tu_name="b", functions=(b,)),
+        ]
+    )
+    assert len(merged.functions) == 1
+    assert merged.functions[0].deprecated == "use new_api instead"
+
+
+def test_merge_fragments_function_raises_on_conflicting_deprecated_message():
+    a = _fn("old_api", "_Z7old_apiv", deprecated="reason one")
+    b = _fn("old_api", "_Z7old_apiv", deprecated="reason two")
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments(
+            [
+                TuFragment(tu_name="a", functions=(a,)),
+                TuFragment(tu_name="b", functions=(b,)),
+            ]
+        )
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+
+
+def test_merge_fragments_variable_unions_deprecated_across_ordinary_redeclaration():
+    a = _var("g_old", "g_old", deprecated="use g_new instead")
+    b = _var("g_old", "g_old")
+    merged = merge_fragments(
+        [
+            TuFragment(tu_name="a", variables=(a,)),
+            TuFragment(tu_name="b", variables=(b,)),
+        ]
+    )
+    assert len(merged.variables) == 1
+    assert merged.variables[0].deprecated == "use g_new instead"
+
+
+def test_merge_fragments_variable_raises_on_conflicting_deprecated_message():
+    a = _var("g_old", "g_old", deprecated="reason one")
+    b = _var("g_old", "g_old", deprecated="reason two")
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments(
+            [
+                TuFragment(tu_name="a", variables=(a,)),
+                TuFragment(tu_name="b", variables=(b,)),
+            ]
+        )
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+
+
+def test_merge_fragments_type_unions_deprecated_across_two_full_definitions():
+    # Both sides fully defined (non-opaque), identical modulo provenance and
+    # deprecated -- exercises _merge_identical_modulo_provenance's
+    # deprecated union, distinct from the opaque/definition path.
+    a_def = RecordType(
+        name="X",
+        kind="struct",
+        fields=[TypeField(name="v", type="int")],
+        deprecated="old",
+    )
+    b_def = RecordType(
+        name="X", kind="struct", fields=[TypeField(name="v", type="int")]
+    )
+    merged = merge_fragments(
+        [
+            TuFragment(tu_name="a", types=(a_def,)),
+            TuFragment(tu_name="b", types=(b_def,)),
+        ]
+    )
+    assert len(merged.types) == 1
+    assert merged.types[0].deprecated == "old"
+
+
+def test_merge_fragments_type_raises_on_conflicting_deprecated_for_two_full_definitions():
+    a_def = RecordType(
+        name="X",
+        kind="struct",
+        fields=[TypeField(name="v", type="int")],
+        deprecated="reason one",
+    )
+    b_def = RecordType(
+        name="X",
+        kind="struct",
+        fields=[TypeField(name="v", type="int")],
+        deprecated="reason two",
+    )
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments(
+            [
+                TuFragment(tu_name="a", types=(a_def,)),
+                TuFragment(tu_name="b", types=(b_def,)),
+            ]
+        )
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+
+
+def test_merge_fragments_type_opaque_kind_is_independent_of_tu_name_order():
+    # `class X;` and `struct X;`, both opaque -- the surviving `kind` must
+    # be a function of the two kind strings alone (lexicographically
+    # smallest, "class"), never of which TU's name happens to sort first.
+    # The discriminating case is TU "a" (sorts first) holding the `struct`
+    # declaration: the old, pre-round-8 behavior picked whichever side was
+    # `a` unconditionally, so it would have kept "struct" here -- the fix
+    # must still produce "class" regardless.
+    forward_class = RecordType(name="X", kind="class", is_opaque=True)
+    forward_struct = RecordType(name="X", kind="struct", is_opaque=True)
+
+    struct_sorts_first = merge_fragments(
+        [
+            TuFragment(tu_name="a", types=(forward_struct,)),
+            TuFragment(tu_name="b", types=(forward_class,)),
+        ]
+    )
+    class_sorts_first = merge_fragments(
+        [
+            TuFragment(tu_name="a", types=(forward_class,)),
+            TuFragment(tu_name="b", types=(forward_struct,)),
+        ]
+    )
+    assert struct_sorts_first.types[0].kind == "class"
+    assert class_sorts_first.types[0].kind == "class"
+
+
+# ---------------------------------------------------------------------------
 # Real end-to-end: G32 Phase 0's own committed odr_safe/odr_conflict fixtures
 # ---------------------------------------------------------------------------
 

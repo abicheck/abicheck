@@ -512,9 +512,27 @@ def _merge_scalar_group(
     return merged
 
 
+def _union_optional_fact(a: str | None, b: str | None) -> tuple[bool, str | None]:
+    """Union an optional string fact (e.g. ``deprecated``) that must either
+    agree or have at most one side set, the same "at most one side commits
+    to a value" shape :func:`_merge_functions`'s ``default``-argument union
+    and :func:`_merge_variables`'s ``value`` union already give their own
+    optional facts.
+
+    Returns ``(True, value)`` when compatible -- both ``None``, only one
+    side set, or both set to the identical value -- and ``(False, None)``
+    on a genuine conflict (two differing non-``None`` values), which the
+    caller must treat as an :class:`~abicheck.errors.TuMergeError`, not
+    silently prefer one side's fact over the other's.
+    """
+    if a is not None and b is not None and a != b:
+        return False, None
+    return True, a if a is not None else b
+
+
 def _blank_provenance(entity: _T) -> _T:
-    """Blank *entity*'s ``source_location``/``source_header``/``origin`` for
-    an equality comparison.
+    """Blank *entity*'s ``source_location``/``source_header``/``origin``/
+    ``deprecated`` for an equality comparison.
 
     Every one of the four model types this module compares
     (:class:`Function`/:class:`Variable`/:class:`RecordType`/:class:`EnumType`)
@@ -528,9 +546,23 @@ def _blank_provenance(entity: _T) -> _T:
     own "declaration + redeclaration" trivial-merge case -- the routine
     shape of a real multi-TU manifest, not an edge case -- spuriously
     conflict on every ordinary cross-TU redeclaration.
+
+    ``deprecated`` gets the same treatment for the same reason: one TU
+    seeing ``[[deprecated]]`` on an otherwise-identical redeclaration that
+    another TU sees without it is exactly as routine as differing
+    provenance, not a structural disagreement -- picking it up is a union,
+    not an equality requirement (Codex review, PR #635 round 8; every
+    caller of this function unions ``deprecated`` explicitly via
+    :func:`_union_optional_fact` afterwards, the same way
+    :func:`_with_more_public_provenance` already does for the
+    forward-declaration/definition case).
     """
     return replace(  # type: ignore[type-var]
-        entity, source_location=None, source_header=None, origin=ScopeOrigin.UNKNOWN
+        entity,
+        source_location=None,
+        source_header=None,
+        origin=ScopeOrigin.UNKNOWN,
+        deprecated=None,
     )
 
 
@@ -619,15 +651,9 @@ def _with_more_public_provenance(
     their own optional facts) rather than arbitrarily preferring one
     message over the other.
     """
-    if (
-        winner.deprecated is not None
-        and other.deprecated is not None
-        and winner.deprecated != other.deprecated
-    ):
+    ok, deprecated = _union_optional_fact(winner.deprecated, other.deprecated)
+    if not ok:
         return None
-    deprecated = (
-        winner.deprecated if winner.deprecated is not None else other.deprecated
-    )
     provenance_source = _more_public_of(
         winner,
         other,
@@ -648,6 +674,51 @@ def _with_more_public_provenance(
     if merged.deprecated != deprecated:
         merged = replace(merged, deprecated=deprecated)  # type: ignore[type-var]
     return merged
+
+
+def _merge_identical_modulo_provenance(
+    a: _T,
+    b: _T,
+    *,
+    header_segs: list[tuple[str, ...]],
+    dir_segs: list[tuple[str, ...]],
+    have_public_set: bool,
+) -> _T | None:
+    """Merge two same-``entity_key`` declarations that are required to be
+    identical except for provenance/``deprecated`` -- the "two complete
+    definitions" branch shared by :func:`_merge_types`/:func:`_merge_enums`
+    (a struct/enum with fields/members on both sides; an ordinary function/
+    variable redeclaration goes through :func:`_merge_functions`/
+    :func:`_merge_variables` instead, which have their own param-default/
+    value unions alongside this same ``deprecated`` treatment).
+
+    ``deprecated`` is blanked out of the equality check by
+    :func:`_blank_provenance` -- one TU seeing ``[[deprecated]]`` on an
+    otherwise-identical redeclaration is a union, not a disagreement, the
+    same "ordinary redeclaration" case :func:`_with_more_public_provenance`
+    already handles for the forward-declaration/definition pair (Codex
+    review, PR #635 round 8) -- so it must be unioned back in explicitly
+    here, rejecting a genuine conflict (two differing non-``None``
+    messages) the same way every other optional-fact union in this module
+    does.
+    """
+    if _blank_provenance(a) != _blank_provenance(b):
+        return None
+    ok, deprecated = _union_optional_fact(a.deprecated, b.deprecated)
+    if not ok:
+        return None
+    winner = _more_public_of(
+        a,
+        b,
+        header_segs=header_segs,
+        dir_segs=dir_segs,
+        have_public_set=have_public_set,
+    )
+    return (
+        winner
+        if winner.deprecated == deprecated
+        else replace(winner, deprecated=deprecated)  # type: ignore[type-var]
+    )
 
 
 def _merge_functions(
@@ -694,6 +765,15 @@ def _merge_functions(
     )
     if a_bare != b_bare:
         return None
+    # `deprecated` is blanked by `_blank_provenance` above (not required to
+    # match for an ordinary redeclaration -- only one TU's declaration may
+    # carry `[[deprecated]]`), so it must be unioned back in explicitly
+    # here, same treatment as `default` above (Codex review, PR #635 round
+    # 8): a genuine conflict (two differing non-`None` messages) is still
+    # rejected.
+    deprecated_ok, deprecated = _union_optional_fact(a.deprecated, b.deprecated)
+    if not deprecated_ok:
+        return None
     base = _more_public_of(
         a,
         b,
@@ -719,7 +799,7 @@ def _merge_functions(
         )
         for p_base, p_other in zip(base.params, other.params, strict=True)
     ]
-    return replace(base, params=merged_params)
+    return replace(base, params=merged_params, deprecated=deprecated)
 
 
 def _merge_variables(
@@ -743,6 +823,13 @@ def _merge_variables(
     b_bare = _blank_provenance(replace(b, value=None))
     if a_bare != b_bare:
         return None
+    # Union `deprecated` the same way `value` above is unioned -- blanked by
+    # `_blank_provenance` for the equality check, so it must be restored
+    # explicitly here, rejecting a genuine conflict (Codex review, PR #635
+    # round 8).
+    deprecated_ok, deprecated = _union_optional_fact(a.deprecated, b.deprecated)
+    if not deprecated_ok:
+        return None
     value = a.value if a.value is not None else b.value
     base = _more_public_of(
         a,
@@ -751,7 +838,7 @@ def _merge_variables(
         dir_segs=dir_segs,
         have_public_set=have_public_set,
     )
-    return replace(base, value=value)
+    return replace(base, value=value, deprecated=deprecated)
 
 
 def _record_kinds_compatible(a_kind: str, b_kind: str) -> bool:
@@ -806,14 +893,25 @@ def _merge_types(
     ... };` definition, and was previously rejected as
     ``INCONSISTENT_DECLARATION`` purely because the class-key-compatibility
     check below was only reached when exactly one side was opaque (Codex
-    review, PR #635 round 7).
+    review, PR #635 round 7). When the two (compatible) class-keys differ,
+    the survivor's ``kind`` is picked by comparing the two spellings
+    directly (``min("class", "struct")``), never by which side happens to
+    be ``a``/``b`` -- passing ``a`` unconditionally would make the merged
+    ``kind`` depend on which TU's name sorts first, so adding a third TU
+    with an alphabetically-earlier ``tu_name`` that redundantly forward-
+    declares the same type with the other (still-compatible) class-key
+    would flip the reported ``kind`` between two snapshots that describe
+    the identical set of declarations, producing a spurious
+    ``SOURCE_LEVEL_KIND_CHANGED`` between them (Codex review, PR #635
+    round 8).
     """
     if a.is_opaque and b.is_opaque:
         if not _record_kinds_compatible(a.kind, b.kind):
             return None
+        winner, loser = (a, b) if a.kind <= b.kind else (b, a)
         return _with_more_public_provenance(
-            a,
-            b,
+            winner,
+            loser,
             header_segs=header_segs,
             dir_segs=dir_segs,
             have_public_set=have_public_set,
@@ -838,15 +936,13 @@ def _merge_types(
             dir_segs=dir_segs,
             have_public_set=have_public_set,
         )
-    if _blank_provenance(a) == _blank_provenance(b):
-        return _more_public_of(
-            a,
-            b,
-            header_segs=header_segs,
-            dir_segs=dir_segs,
-            have_public_set=have_public_set,
-        )
-    return None
+    return _merge_identical_modulo_provenance(
+        a,
+        b,
+        header_segs=header_segs,
+        dir_segs=dir_segs,
+        have_public_set=have_public_set,
+    )
 
 
 def _merge_enums(
@@ -889,12 +985,10 @@ def _merge_enums(
             dir_segs=dir_segs,
             have_public_set=have_public_set,
         )
-    if _blank_provenance(a) == _blank_provenance(b):
-        return _more_public_of(
-            a,
-            b,
-            header_segs=header_segs,
-            dir_segs=dir_segs,
-            have_public_set=have_public_set,
-        )
-    return None
+    return _merge_identical_modulo_provenance(
+        a,
+        b,
+        header_segs=header_segs,
+        dir_segs=dir_segs,
+        have_public_set=have_public_set,
+    )
