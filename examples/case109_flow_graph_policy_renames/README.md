@@ -1,66 +1,120 @@
 # Case 109: flow::graph Policy Tag Renames
 
-**Category:** Source API / regression suite | **Verdict:** 🔴 BREAKING (policy escalated source break)
+**Category:** Source API / regression suite | **Verdict:** 🔴 BREAKING (policy-escalated source break)
 
-## Compatibility classification
-
-- **Binary ABI impact:** None — the `.so` files are byte-identical between v1 and v2 (deliberate: no template instantiations in v1.cpp/v2.cpp), so an already-built consumer binary keeps linking and running unmodified.
-- **Source compatibility impact:** BREAKING — the renamed policy tags and dropped instantiation-anchor typedef stop resolving against v2 headers.
-- **Semantic verdict (by the project's own API_BREAK/BREAKING definitions):** `API_BREAK` — a recompile-only failure with no impact on already-built binaries.
-- **Policy severity:** `BREAKING` in `ground_truth.json` — `typedef_removed`/`type_removed` are generic detectors that conservatively classify every such removal as BREAKING by default policy, without distinguishing "this symbol never existed in the binary to begin with" from an actual layout/link break.
-
-## What breaks
+## Verdict and consumer impact
 
 A header-only set of policy-tag types (`queueing`, `rejecting`) used as
 template parameters for `function_node` is renamed wholesale
-(`buffering_policy`, `backpressure_policy`). The instantiation anchor
-typedef (`queue_node`) is also dropped and replaced. Consumer source
-that wrote any of the v1 names fails to compile against v2 headers.
+(`buffering_policy`, `backpressure_policy`), and the instantiation-anchor
+typedef `queue_node` is dropped. Because these are header-only tag types
+that v1.cpp/v2.cpp deliberately never instantiate, **no exported library
+symbol changes** — the `.so` files are binary-identical and an
+already-deployed consumer binary keeps running unmodified. The break is
+purely at recompilation: any consumer source that references the v1 names
+fails to build against v2's headers. `ground_truth.json` records the
+enforced verdict as `BREAKING` because the generic `typedef_removed` /
+`type_removed` detectors that fire here conservatively classify every such
+removal as BREAKING by default policy — the underlying compatibility fact
+is API_BREAK (recompile-only), not a binary break.
 
-Because the offending types are header-only template parameter tags,
-**no exported library symbol changes**: the `mylib_flow_run` ABI is
-identical between v1 and v2. The .so will continue to link with old
-consumers, but any rebuild against the new headers breaks.
+## Old/new diff
 
-## Why this matters
-
-Mirrors oneTBB 2021's reshuffle of `tbb::flow::*` policy types — a
-documented historical break from the upstream maintainers.
-
-## How abicheck catches it
-
-The diff exposes:
-
-- `TYPEDEF_REMOVED`: `queue_node`
-- `TYPE_REMOVED`: `queueing`, `rejecting`
-- `TYPE_ADDED`: `buffering_policy`, `backpressure_policy`
-- `TYPEDEF_ADDED` (informational): `buffer_node`
-
-That set is enough to reach the canonical API_BREAK fact without any new
-detector — but the catalog's default policy conservatively escalates
-generic `typedef_removed`/`type_removed` findings to `BREAKING` (see
-"Compatibility classification" above), so `ground_truth.json` records
-`BREAKING` as the enforced severity. Use `member_name` / `type_pattern`
-suppressions if a downstream consumer wants to silence informational
-additions.
-
-## Code diff
-
-| v1 | v2 |
-|----|------|
+| v1.h | v2.h |
+|------|------|
 | `struct queueing {};` | `struct buffering_policy {};` |
 | `struct rejecting {};` | `struct backpressure_policy {};` |
 | `typedef function_node<queueing> queue_node;` | `typedef function_node<buffering_policy> buffer_node;` |
 
-## How to fix (as a library maintainer)
+## abicheck command
 
-- Stage renames across a deprecation cycle: in release N–1, declare the
-  new names and add `using queueing = buffering_policy;` aliases marked
+```bash
+g++ -std=c++17 -shared -fPIC -g -fno-eliminate-unused-debug-types v1.cpp -o libfoo_v1.so
+g++ -std=c++17 -shared -fPIC -g -fno-eliminate-unused-debug-types v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_removed: Type removed: mylib::flow::queueing
+  > Old code references a type that no longer exists; compilation or link
+    failure.
+- type_removed: Type removed: mylib::flow::rejecting
+
+Additions:
+- type_added: New type: mylib::flow::buffering_policy
+- type_added: New type: mylib::flow::backpressure_policy
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — the policy tags are never instantiated anywhere in
+either `.cpp`, so by default GCC omits their DWARF entirely (there being no
+code that references them) and a plain `-g` build reproduces `NO_CHANGE`,
+not the documented break. `-fno-eliminate-unused-debug-types` is what makes
+the L1 floor real here: it tells GCC to keep DWARF `DW_TAG_structure_type`
+entries for types declared but never used, which is enough for abicheck's
+DWARF diff to see the rename. (`typedef_removed` on `queue_node` itself
+needs L2 header evidence — GCC does not emit unused-typedef DWARF even with
+that flag — but the two `type_removed` findings above are already enough to
+reach the same BREAKING verdict `ground_truth.json` expects.)
+
+## Why abicheck catches it
+
+DWARF's `DW_TAG_structure_type` entries record every declared struct by
+name, independent of whether it's ever instantiated, as long as the
+debug-info emission isn't pruned as dead. abicheck's type diff walks those
+entries directly and reports `queueing`/`rejecting` as removed and
+`buffering_policy`/`backpressure_policy` as added.
+
+## Runtime failure demonstration
+
+**Severity: source break only — no binary impact**
+
+**Scenario:** the `.so` is unaffected by the header rename; only
+recompilation against the new headers breaks.
+
+```bash
+# Build v1 lib + app (app.cpp uses the v1 policy names via v1.h)
+g++ -shared -fPIC -g v1.cpp -o libfoo.so
+g++ -std=c++17 -I. app.cpp -L. -lfoo -Wl,-rpath,. -o app
+./app; echo $?
+# → exit 1 (mylib_flow_run-equivalent: queue_node::run(0) == 1)
+
+# Swap in v2 (no recompile) — no observable effect on the running binary,
+# the .so is byte-identical:
+g++ -shared -fPIC -g v2.cpp -o libfoo.so
+./app; echo $?
+# → exit 1, unchanged
+
+# Source rebuild against the v2 header is what actually breaks:
+sed 's/v1.h/v2.h/' app.cpp > app_v2.cpp
+g++ -std=c++17 -I. -c app_v2.cpp -o app_v2.o
+# → error: 'queueing' is not a member of 'mylib::flow'
+# → error: 'queue_node' is not a member of 'mylib::flow'
+```
+
+**Why source-only:** `queueing`/`rejecting`/`queue_node` are compile-time-only
+tag types; nothing about their name appears in the compiled `.so`'s symbol
+table, so a binary built against v1 keeps working forever — but nobody can
+rebuild that binary against v2's headers using the old names.
+
+## Safe redesign
+
+- Stage renames across a deprecation cycle: in release N–1, declare the new
+  names and add `using queueing = buffering_policy;` aliases marked
   `[[deprecated]]`. In release N, remove the old tags.
-- Audit downstream consumers (build farms, sample repos) before
-  removing legacy aliases — header-only renames look invisible to
-  binary-only ABI checkers, so a "compiles for me" test sweep on
-  representative consumers is the only reliable signal.
+- Audit downstream consumers (build farms, sample repos) before removing
+  legacy aliases — header-only renames look invisible to binary-only ABI
+  checkers, so a "compiles for me" test sweep on representative consumers is
+  the only reliable signal.
+
+**Real-world example:** mirrors oneTBB 2021's reshuffle of `tbb::flow::*`
+node policy types — a documented historical break from the upstream
+maintainers.
 
 ## References
 

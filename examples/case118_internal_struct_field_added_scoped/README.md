@@ -1,41 +1,106 @@
-# Case 118: Internal struct gains a field (non-public, scoped)
+# Case 118: Internal Struct Gains a Field (Non-Public, Scoped)
 
-**Category:** Public-surface scoping (ADR-024) | **Verdict:** ✅ NO_CHANGE (exit 0, with `--scope-public-headers`)
+**Category:** Public-Surface Scoping (ADR-024) | **Verdict:** ✅ NO_CHANGE
 
-## What changes
+## Verdict and consumer impact
 
-`struct InternalStats` gains a new field (`int errors;`). That is a real
-layout change for `InternalStats` — but `InternalStats` is **not part of the
-public ABI surface**: no public, header-declared, exported function takes,
-returns, or otherwise reaches it. The public API (`Point`, `translate`) is
-unchanged.
+`struct InternalStats` gains a new field (`int errors;`) between v1 and v2 —
+a real layout change to that struct. But `InternalStats` is declared in the
+header only for other translation units *inside* the library; no public,
+exported function (`translate()`) takes, returns, or otherwise reaches it.
+Nothing a consumer can legally depend on — `Point`/`translate()` — changed,
+so no existing binary is affected. Reporting the `InternalStats` layout
+change under public-surface scoping would be a false positive.
 
-## Why this is not a false positive
+## Old/new diff
 
-A consumer can only depend on what the public API exposes. Since nothing public
-reaches `InternalStats`, growing it cannot break any caller that uses only
-`translate()`/`Point`. Reporting it would be a **false positive**.
+| v1.h | v2.h |
+|------|------|
+| `struct InternalStats { int calls; };` | `struct InternalStats { int calls; int errors; };` |
+| `Point translate(Point p, int dx, int dy);` *(unchanged)* | `Point translate(Point p, int dx, int dy);` *(unchanged)* |
 
-With ADR-024 public-surface scoping enabled, abicheck resolves the public
-surface (symbols with `PUBLIC` visibility + their reachable type closure) and
-moves the `InternalStats` layout change to the *filtered* audit ledger rather
-than reporting it. Internal-type *leaks* (a private type reachable from a public
-API) are never hidden — only genuinely non-public changes are filtered.
+## abicheck command
 
 ```bash
-abicheck compare libfoo_v1.so libfoo_v2.so -H v1.h \
-    --scope-public-headers --show-filtered
-# verdict: NO_CHANGE (exit 0)
-# filtered ledger lists: type_size_changed: InternalStats
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so \
+  --header old=v1.h --header new=v2.h \
+  --ast-frontend clang --gcc-path "$(command -v clang)" \
+  --scope-public-headers --show-filtered
 ```
 
-Without `--scope-public-headers`, the same comparison reports the
-`InternalStats` layout change — useful when you intend to audit the entire
-exported surface, not just the public-header API.
+## Expected abicheck finding
 
-## How to fix
+```text
+Verdict: NO_CHANGE (exit 0)
 
-N/A — this is the intended, compatible outcome for changes confined to
-internal types. If `InternalStats` were actually used by a public API, the
-reachability closure would keep it on the surface and the change would be
-reported.
+_No ABI changes detected._
+
+Filtered as non-public ABI surface (1 finding, --scope-public-headers):
+  - type_field_added_compatible: InternalStats (non-public-type)
+```
+
+`--show-filtered` is what surfaces the filtered-ledger line above; without
+it the report shows only the clean `NO_CHANGE` verdict. Dropping
+`--scope-public-headers` entirely reports the `InternalStats` field
+addition as an ordinary (compatible) change instead of filtering it — useful
+when auditing the whole exported surface rather than just the public-header
+API.
+
+## Minimum evidence
+
+`min_evidence: L2` — telling `InternalStats` apart from a genuinely public
+type requires the public header AST: DWARF alone (L1) sees every struct the
+compiler emitted debug info for and can't tell which ones are reachable from
+an exported declaration. castxml is the documented default header/AST
+backend; this environment used the supported alternative Clang AST frontend
+(`--ast-frontend clang`) to produce that evidence, since castxml itself
+isn't installed here.
+
+## Why abicheck catches it (and doesn't report it)
+
+With `-H`/`--header` the header AST parser records which declarations are
+public. abicheck then resolves the public surface — exported symbols plus
+their reachable type closure — and computes `InternalStats`'s layout change
+against that closure (ADR-024). Because `InternalStats` is never reached
+from `translate()` or any other exported declaration, the layout change is
+routed to the filtered/audit ledger instead of the reported findings, and
+the verdict stays `NO_CHANGE`. Internal-type *leaks* (a private type
+reachable from a public API) are never hidden this way — only changes to
+types genuinely absent from the public closure are filtered.
+
+## Runtime failure demonstration
+
+No observable effect on existing binaries — this is the intended, compatible
+outcome. Building `app.c` against v1 and swapping in the v2 `.so` without
+recompiling produces identical output both times:
+
+```bash
+gcc -shared -fPIC -g v1.c -o libfoo.so
+gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → translate -> (11, 22)
+
+gcc -shared -fPIC -g v2.c -o libfoo.so   # swap, no recompile
+./app
+# → translate -> (11, 22)   (unchanged)
+```
+
+## Safe redesign
+
+N/A — this is the pattern to follow, not to avoid. Keeping internal
+bookkeeping types out of the reachable closure of the public API (or moving
+them out of the installed header entirely, into a private header) is exactly
+what lets them evolve freely without triggering false-positive ABI-break
+reports.
+
+## Cross-tool comparison
+
+`abidiff`/ABICC have no equivalent of ADR-024 public-surface scoping — both
+tools diff every type present in the debug info regardless of reachability
+from an exported declaration, so a plain `abidiff v1.xml v2.xml` on these
+two `.so` files would report the `InternalStats` field addition (as a
+compatible/non-breaking change, since it's an append-only addition) rather
+than recognizing it as out-of-surface and NO_CHANGE. `abidw`/`abidiff` are
+not installed in this environment, so no such output is reproduced here.

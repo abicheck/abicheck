@@ -2,76 +2,107 @@
 
 **Category:** Class Removal | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
 An entire publicly-exported class — `task_scheduler_init` — is removed in v2.
 Every consumer that referenced the class (constructed it, called its members,
-or held it by value) gets `undefined symbol` at load time, and source code
-fails to compile against the new headers.
+or held it by value) gets `undefined symbol` at load time against the new
+`.so`, and source code fails to compile against the new headers.
+Recompilation cannot fix an already-deployed binary.
 
-## Real Failure Demo
+## Old/new diff
+
+| v1.h | v2.h |
+|------|------|
+| `class task_scheduler_init { ... };` | *(removed)* |
+| `explicit task_scheduler_init(int max_threads = automatic);` | *(removed)* |
+| `void initialize(int); void terminate(); bool is_active() const;` | *(removed)* |
+| — | `int active_concurrency();` (replacement helper) |
+
+## abicheck command
+
+```bash
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_removed: Type removed: mylib::task_scheduler_init
+  > Old code references a type that no longer exists; compilation or link
+    failure.
+- func_removed_elf_only: Elf_only function removed: task_scheduler_init(int)
+  > (and 6 more, one per public ctor/dtor/method) Exported function symbol
+    removed from the binary; old binaries that link or dlsym() it can fail
+    even without header evidence.
+
+Additions:
+- func_added: New public function: mylib::active_concurrency()
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — the class's constructors, destructor, and methods are
+all defined (and therefore present in DWARF) in `v1.cpp`; removing the whole
+class drops their debug-info entries and their exported symbols together.
+No public headers are needed to see the break, though `-g` is required so
+the *Runtime failure demonstration* below can build a matching app.
+
+## Why abicheck catches it
+
+DWARF records `task_scheduler_init` as a `DW_TAG_class_type` with its member
+functions as child `DW_TAG_subprogram` DIEs; when the class disappears from
+v2's compilation unit entirely, abicheck's DWARF-based diff reports both the
+type and every one of its exported members as removed.
+
+## Runtime failure demonstration
 
 **Severity: BREAKING**
 
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
+
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build \
-  --target case107_task_scheduler_init_removed_app case107_task_scheduler_init_removed_v2
+# Build old library + app
+g++ -shared -fPIC -g v1.cpp -o libfoo.so
+g++ -g app.cpp -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → active = 1 (expect 1)
+# → active = 0 (expect 0)
 
-/tmp/abicheck-examples-build/case107_task_scheduler_init_removed/app_v1
-# active = 1 (expect 1)
-# active = 0 (expect 0)
-
-# Runtime replacement: a binary linked against v1 fails when v2 is substituted
-# under the old library name.
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case107_task_scheduler_init_removed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case107_task_scheduler_init_removed/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# ./app_v1: symbol lookup error: ./app_v1: undefined symbol: _ZN5mylib19task_scheduler_initD1Ev
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g v2.cpp -o libfoo.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol:
+#   _ZN5mylib19task_scheduler_initD1Ev
 
 # Source rebuild against the v2 header also fails because the class is gone.
-tmp=$(mktemp -d)
-cp examples/case107_task_scheduler_init_removed/app.cpp "$tmp/app.cpp"
-cp examples/case107_task_scheduler_init_removed/v2.h "$tmp/v1.h"
-g++ -std=c++17 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
-# error: 'task_scheduler_init' is not a member of 'mylib'
+g++ -std=c++17 -I. -DINCLUDE_V2 -c app.cpp -o app.o  # (swap app's #include to v2.h)
+# → error: 'task_scheduler_init' is not a member of 'mylib'
 ```
 
-## Why this matters
+**Why BREAKING:** the destructor symbol `task_scheduler_init::~task_scheduler_init()`
+that `app`'s stack-unwind path needs no longer exists in v2's dynamic symbol
+table; the runtime linker refuses to resolve it and the process never starts.
 
-This fixture mirrors the single largest hard ABI break in TBB's history: classic TBB
-deprecated `tbb::task_scheduler_init` in 2020 and *removed* it in oneTBB
-2021.1, alongside the entire `tbb::task` low-level API. The replacements
-(`tbb::global_control`, `tbb::task_arena`) have different lifetimes and
-semantics.
-
-Real-world consequence: every Boost build that linked TBB, every HPC code
-using `task_scheduler_init` directly, and every downstream package had to
-either pin to classic TBB or rewrite its initialization path.
-
-## Code diff
-
-| v1 | v2 |
-|----|------|
-| `class task_scheduler_init { ... };` | *(removed)* |
-| `task_scheduler_init(int)` | *(removed)* |
-| `terminate()` / `is_active()` | *(removed)* |
-
-## How abicheck catches it
-
-The existing `FUNC_REMOVED` / `TYPE_REMOVED` detectors fire on every
-public symbol the class exported. This case exists as a *named regression
-fixture* so the canonical TBB removal pattern stays exercised in CI.
-
-## How to fix
+## Safe redesign
 
 Don't remove publicly-exported classes in a minor release. The oneTBB
-migration showed the only safe path:
+migration (the real-world case this fixture mirrors) shows the only safe
+path:
 1. Major SONAME bump (`libtbb.so.2` → `libtbb.so.12`).
 2. Concurrent shipping of compatibility headers via a separate package
    (`tbb_preview`) for a transition release.
 3. Strong documentation of the migration with mechanical replacements.
+
+**Real-world example:** classic TBB deprecated `tbb::task_scheduler_init` in
+2020 and fully removed it in oneTBB 2021.1, alongside the entire `tbb::task`
+low-level API (see case108). Every Boost build that linked TBB, every HPC
+code using `task_scheduler_init` directly, and every downstream package had
+to either pin to classic TBB or rewrite its initialization path.
 
 ## References
 
