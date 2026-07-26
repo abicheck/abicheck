@@ -1,34 +1,146 @@
-# Case 115: _BitInt(N) width change (C23 64 → 128)
+# Case 115: _BitInt(N) Width Change (C23 64 → 128)
 
-**Category:** Binary ABI break / C23 | **Verdict:** 🔴 BREAKING
+**Category:** Modern C/C++ Contract | **Verdict:** 🔴 BREAKING
 
-## What changed
+## Verdict and consumer impact
 
-`v1` uses C23 `_BitInt(64)` for an accumulator's storage, parameter, and
-return type. `v2` widens it to `_BitInt(128)`. The bit width N is part of the
-type: it determines the storage size of the `Accumulator` struct and the
-calling-convention treatment of the by-value parameter and return.
+`v1`'s `Accumulator` stores a C23 `_BitInt(64)`; `v2` widens it to
+`_BitInt(128)`. The bit width `N` is part of the type — it sets the struct's
+storage size and the calling-convention treatment of any by-value parameter
+or return of that type. A consumer built against v1 allocates an 8-byte
+`Accumulator` and passes/reads 64-bit values; against v2 the library expects
+16 bytes of storage and a 128-bit-wide argument/return, so the struct layout,
+the `delta` parameter of `acc_add()`, and the return of `acc_value()` are all
+misinterpreted. Recompilation against v2 is mandatory.
 
-A consumer built against v1 passes/reads a 64-bit value where the v2 library
-expects 128 bits, so arguments, the struct field, and the returned value are
-all miscompiled.
+## Old/new diff
 
-(128 bits is the maximum `_BitInt` width clang supports, keeping *this* limit
-portable — but `_BitInt` itself is C23, and as of this writing the CI/dev
-toolchain's GCC does not implement it at all (`-std=c2x`/`-std=gnu2x` reject
-`_BitInt` outright, not just width 128), so this fixture is GCC-unbuildable
-regardless of width; only a `_BitInt`-capable Clang builds it —
-`requires_feature: _BitInt` in `ground_truth.json` gates the case
-accordingly. CastXML's own bundled Clang frontend is also too old to parse
-`_BitInt`, independent of which compiler built the `.so` — `dump` needs
-`--ast-frontend clang` (a system Clang) for this case's headers.)
+| v1.h | v2.h |
+|------|------|
+| `typedef struct { _BitInt(64) acc; } Accumulator;` | `typedef struct { _BitInt(128) acc; } Accumulator;` |
+| `void acc_add(Accumulator *a, _BitInt(64) delta);` | `void acc_add(Accumulator *a, _BitInt(128) delta);` |
+| `_BitInt(64) acc_value(const Accumulator *a);` | `_BitInt(128) acc_value(const Accumulator *a);` |
 
-## How abicheck catches it
+## abicheck command
 
-`bit_int_width_changed` fires for each public slot (parameter, return, or
-field) whose `_BitInt(N)` width changes — or that migrates to/from `_BitInt`.
+```bash
+clang -std=c2x -shared -fPIC -g v1.c -o libfoo_v1.so
+clang -std=c2x -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so \
+  --header old=v1.h --header new=v2.h \
+  --ast-frontend clang --gcc-path "$(command -v clang)"
+```
 
-## Files
-- `v1.h` / `v2.h` — `_BitInt(64)` vs `_BitInt(128)` declarations
-- `v1.c` / `v2.c` — the two library builds
-- `app.c` — consumer built against the 64-bit interface
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: Accumulator (64 -> 128 bits)
+  > Old code allocates or copies the type with the old size;
+    heap/stack corruption, out-of-bounds access.
+  Affected symbols: acc_add, acc_value
+
+- type_field_type_changed: Field type changed: Accumulator::acc
+  (_BitInt(64) -> _BitInt(128))
+  > Field has different size or representation; old code
+    misinterprets the data.
+
+- bit_int_width_changed: _BitInt change on parameter 'delta' of
+  'acc_add': _BitInt width changed 64 -> 128
+  > The bit width determines the storage size and calling-convention
+    treatment, so old code reads/writes the value with the wrong width.
+
+- bit_int_width_changed: _BitInt change on field 'acc' of
+  'Accumulator': _BitInt width changed 64 -> 128
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's struct-size and field-size facts alone already
+put the verdict at BREAKING (`type_size_changed`/`type_field_type_changed`
+fire from a plain `-g` build with no headers). The dedicated
+`bit_int_width_changed` classification shown above, however, needs the
+public header AST in this toolchain: clang's DWARF emits `DW_AT_name
+("_BitInt")` for the base type with the width only recorded in
+`DW_AT_byte_size`, not spelled into the name, so the width comparison that
+names this specific `ChangeKind` runs on the header-derived type spelling
+(`_BitInt(64)` / `_BitInt(128)`) rather than the DWARF one. castxml is the
+documented default header/AST backend; its bundled Clang frontend cannot
+parse C23 `_BitInt` at all, so this case needs a supported alternative AST
+frontend (`--ast-frontend clang`, backed by a system Clang capable of C23) to
+reach that evidence.
+
+## Why abicheck catches it
+
+DWARF records each struct's total byte size, so the 64→128-bit growth is
+visible from debug info alone. The header AST additionally carries the
+literal `_BitInt(N)` spelling for the field and the `acc_add` parameter,
+letting the dedicated `bit_int_width_changed` detector name the change
+precisely instead of only reporting the generic layout/field-type kinds.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL** (the mismatch is real; this minimal reproducer
+happens not to crash — see the note below)
+
+**Scenario:** compile `app.c` against v1, swap in v2 `.so` without recompile.
+
+```bash
+# Build old library + app (GCC has no C23 _BitInt support; use clang)
+clang -std=c2x -shared -fPIC -g v1.c -o libfoo.so
+clang -std=c2x -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
+./app; echo "exit: $?"
+# → exit: 5
+
+# Swap in new library (no recompile)
+clang -std=c2x -shared -fPIC -g v2.c -o libfoo.so
+./app; echo "exit: $?"
+# → exit: 5   (same, in this trivial reproducer)
+```
+
+**Why the exit code doesn't change here:** `app.c` only calls `acc_add(&a,
+5)` once on a zero-initialized accumulator and returns the low bits of
+`acc_value()`, which happen to come out as `5` either way in this
+toolchain's register layout — so this particular one-shot call doesn't
+happen to visibly crash or misreport. The ABI mismatch is still real:
+`app`'s stack allocates `sizeof(Accumulator)` per **v1** (8 bytes), but v2's
+`acc_add`/`acc_value` read and write it as a 16-byte `_BitInt(128)`, and a
+128-bit value uses a different SysV parameter-passing class than a 64-bit
+one. A less trivial consumer (multiple accumulators on the stack, or a
+non-zero `delta` chosen to exercise the extra 64 bits) reads/writes past the
+old allocation or receives garbage in the unread high bits — this is exactly
+the class of break that a static ABI diff catches even when a minimal
+smoke-test consumer doesn't happen to observe it at runtime.
+
+## Safe redesign
+
+Never change the bit width of a public `_BitInt(N)` type, struct field, or
+by-value parameter/return in place — it's as disruptive as changing `int` to
+`long long` in the public ABI. Introduce a new function/type name (e.g.
+`acc_add128`/`Accumulator128`) and deprecate the old one over a SONAME cycle,
+or hide the field entirely behind an opaque pointer (see case07's
+PIMPL note) so its concrete width never appears in the public struct layout.
+
+**Real-world example:** the same hazard as any fixed-width-integer widening
+in a public struct (e.g. a hash accumulator moving `uint64_t` → `__int128`
+internals) — C23's `_BitInt(N)` makes arbitrary bit widths first-class, so
+this failure mode now applies to widths that weren't previously expressible
+as builtin types.
+
+## Cross-tool comparison
+
+`abidw`/`abidiff`/`abi-compliance-checker` are not installed in this
+environment, so no cross-tool output is reproduced here. For reference, the
+equivalent libabigail invocation would be:
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+Note that libabigail's own DWARF reader would hit the same `DW_AT_name
+("_BitInt")` width-loss described above — it can report the struct/field
+size change, but the bit-width-specific framing this case demonstrates is
+an abicheck-specific `ChangeKind`.
