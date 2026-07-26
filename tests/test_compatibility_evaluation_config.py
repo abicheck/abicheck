@@ -676,6 +676,24 @@ class TestDigestedItems:
         with pytest.raises(ValueError, match="non-empty digest"):
             DigestedItems(sha256="", items=["linux-x86_64"])
 
+    def test_non_string_sha256_is_rejected(self):
+        # Codex review: a non-str, truthy sha256 previously passed the
+        # truthiness-only check outright, claiming a SHA-256 identity while
+        # actually serializing a number.
+        with pytest.raises(TypeError, match=r"DigestedItems\.sha256"):
+            DigestedItems(sha256=123, items=["linux-x86_64"])  # type: ignore[arg-type]
+
+    def test_scalar_string_items_is_rejected(self):
+        # Codex review: a bare str (items="linux-x86_64") would otherwise
+        # iterate into characters instead of raising, causing later
+        # evaluation to search the wrong variants.
+        with pytest.raises(TypeError, match="bare str"):
+            DigestedItems(sha256="abc", items="linux-x86_64")  # type: ignore[arg-type]
+
+    def test_non_string_item_element_is_rejected(self):
+        with pytest.raises(TypeError, match="str"):
+            DigestedItems(sha256="abc", items=[123])  # type: ignore[list-item]
+
     def test_empty_items_still_requires_a_digest(self):
         # An explicitly selected source that resolves to zero items is not
         # the same as no source at all -- it still needs its digest so a
@@ -749,6 +767,14 @@ class TestSuppressionConfigDigest:
     def test_empty_string_sha256_is_rejected(self):
         with pytest.raises(ValueError, match="non-empty digest"):
             SuppressionConfig(sha256="", rules=["ignore-internal-symbol"])
+
+    def test_non_string_sha256_is_rejected(self):
+        with pytest.raises(TypeError, match=r"SuppressionConfig\.sha256"):
+            SuppressionConfig(sha256=123, rules=["ignore-internal-symbol"])  # type: ignore[arg-type]
+
+    def test_scalar_string_rules_is_rejected(self):
+        with pytest.raises(TypeError, match="bare str"):
+            SuppressionConfig(sha256="abc", rules="ignore-internal-symbol")  # type: ignore[arg-type]
 
     def test_selected_but_empty_rules_still_requires_a_digest(self):
         selected_but_empty = SuppressionConfig(

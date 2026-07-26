@@ -61,7 +61,37 @@ def _frozen_mapping(m: Mapping[str, object]) -> MappingProxyType[str, object]:
     return MappingProxyType(dict(m))
 
 
-def _frozen_tuple(s: Sequence[object]) -> tuple[object, ...]:
+def _frozen_tuple(s: Sequence[_T], *, element_type: type[_T]) -> tuple[_T, ...]:
+    """Freeze *s* into a tuple, preserving order (unlike :func:`_canonical_tuple`).
+
+    Used for content-digested/deterministically-ordered fields
+    (``DigestedItems.items``, ``SuppressionConfig.rules``,
+    ``ValueProvenance.selected_by``) where order is itself part of what the
+    digest verifies -- canonicalizing here would paper over a resolver bug
+    rather than model real equivalence (unlike ``overlays``/``packs``, an
+    unordered *selection* ``_canonical_tuple`` sorts+dedupes).
+
+    Rejects a bare ``str``/``bytes`` the same way ``_canonical_tuple`` does:
+    passed where a collection is expected (e.g. ``DigestedItems(items=
+    "linux-x86_64")``), Python would otherwise iterate it into individual
+    characters instead of raising (Codex review). ``element_type`` is
+    required (unlike ``_canonical_tuple``'s optional one, which has call
+    sites both with and without it) since every current caller has a known
+    element type to validate against; it rejects any element that isn't an
+    instance, the same way ``_canonical_tuple``'s does.
+    """
+    if isinstance(s, (str, bytes)):
+        raise TypeError(
+            f"Expected a sequence of items, not a bare {type(s).__name__} "
+            f"{s!r} -- iterating a string/bytes value yields individual "
+            "characters, not the intended elements; wrap a single value in "
+            "a list/tuple explicitly."
+        )
+    invalid = [item for item in s if not isinstance(item, element_type)]
+    if invalid:
+        raise TypeError(
+            f"Every element must be a {element_type.__name__}, not: {invalid!r}"
+        )
     return tuple(s)
 
 
@@ -118,6 +148,12 @@ def _canonical_tuple(
 
 
 def _require_nonempty_digest(sha256: str, *, owner: str) -> None:
+    # Codex review: a non-str, truthy sha256 (e.g. DigestedItems(sha256=123))
+    # previously passed the truthiness check outright, claiming a SHA-256
+    # identity while actually serializing a number -- unable to provide the
+    # exact-replay/content-drift guarantee this field exists for.
+    if not isinstance(sha256, str):
+        raise TypeError(f"{owner}.sha256 must be a str, not {sha256!r}.")
     if not sha256:
         raise ValueError(
             f"{owner}.sha256 must be a non-empty digest (ADR-049 D6): an "
@@ -197,7 +233,11 @@ class ValueProvenance:
     shadowed_legacy: ValueProvenance | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "selected_by", _frozen_tuple(self.selected_by))
+        object.__setattr__(
+            self,
+            "selected_by",
+            _frozen_tuple(self.selected_by, element_type=SelectedByEntry),
+        )
 
 
 # --------------------------------------------------------------------------
@@ -274,7 +314,7 @@ class DigestedItems:
     items: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "items", _frozen_tuple(self.items))
+        object.__setattr__(self, "items", _frozen_tuple(self.items, element_type=str))
         _require_nonempty_digest(self.sha256, owner="DigestedItems")
 
 
@@ -601,7 +641,7 @@ class SuppressionConfig:
     rules: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "rules", _frozen_tuple(self.rules))
+        object.__setattr__(self, "rules", _frozen_tuple(self.rules, element_type=str))
         _require_nonempty_digest(self.sha256, owner="SuppressionConfig")
 
 
