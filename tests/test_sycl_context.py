@@ -319,6 +319,41 @@ def test_from_path_does_not_retain_non_matching_document_ast(tmp_path: Path) -> 
     assert "huge" not in selected.ast
 
 
+def test_from_path_skips_parsing_non_matching_malformed_document(
+    tmp_path: Path,
+) -> None:
+    """P1 (Codex review): a definitely-non-matching document's *kind* is
+    known positionally from stderr alone, before its content is ever looked
+    at -- so it must never be json.loads-parsed at all, not even
+    transiently alongside an already-selected match. Proven by making the
+    non-matching (device) document bracket-balanced but otherwise invalid
+    JSON: if it were parsed, this would raise SnapshotError instead of
+    returning the matching host document."""
+    stdout = '{,}\n{"kind": "TranslationUnitDecl", "small": "host-payload"}'
+    stderr = (
+        ' "clang" -cc1 -triple spir64-unknown-unknown -fsycl-is-device foo\n'
+        ' "clang" -cc1 -triple x86_64-unknown-linux-gnu -fsycl-is-host foo\n'
+    )
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_text(stdout, encoding="utf-8")
+    selected = decode_and_select_frontend_context_from_path(
+        ast_path, stderr, "host", chunk_size=8
+    )
+    assert selected.ast == {"kind": "TranslationUnitDecl", "small": "host-payload"}
+
+
+def test_fused_select_skips_parsing_non_matching_malformed_document() -> None:
+    """Same property as the from-path variant above, over the in-memory
+    fused path."""
+    stdout = '{,}\n{"kind": "TranslationUnitDecl", "small": "host-payload"}'
+    stderr = (
+        ' "clang" -cc1 -triple spir64-unknown-unknown -fsycl-is-device foo\n'
+        ' "clang" -cc1 -triple x86_64-unknown-linux-gnu -fsycl-is-host foo\n'
+    )
+    selected = decode_and_select_frontend_context(stdout, stderr, "host")
+    assert selected.ast == {"kind": "TranslationUnitDecl", "small": "host-payload"}
+
+
 def test_from_path_ambiguous_stops_at_second_match_with_tiny_chunk_size(
     tmp_path: Path,
 ) -> None:

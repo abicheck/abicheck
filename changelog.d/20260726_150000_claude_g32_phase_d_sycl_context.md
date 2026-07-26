@@ -220,3 +220,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   merge that ever saw diverging per-TU host/device resolution fails loudly
   instead of silently misrepresenting the merged snapshot's provenance
   (CodeRabbit review).
+- `sycl_context._select_from_document_stream`'s selection loop always
+  `json.loads`-parsed every document in a multi-pass DPC++ stream into a
+  full dict, even ones it already knew (positionally, from `stderr`'s own
+  `-cc1` invocation lines, before ever looking at the document's content)
+  could not possibly match the requested `frontend_context` kind. A
+  non-matching multi-GB pass's dict was therefore built and briefly live in
+  memory *at the same time* as an already-selected multi-GB match's dict —
+  real peak-memory doubling on exactly the large DPC++ captures this module
+  exists to support. `_iter_json_documents` now yields each document's raw
+  text instead of a parsed dict, and the selector only calls `json.loads`
+  when a document's kind matches the request (or has no correlated
+  invocation at all, so its kind can't be ruled out in advance) — a
+  definitely-non-matching document is never parsed, not even transiently
+  (Codex review).
