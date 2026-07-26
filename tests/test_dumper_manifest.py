@@ -594,6 +594,86 @@ def test_run_tu_fragments_cancels_pending_futures_promptly_on_required_failure(
     assert cancelled_promptly
 
 
+def test_run_tu_fragments_raises_promptly_without_waiting_for_running_siblings(
+    monkeypatch,
+):
+    """Codex review, PR #636 follow-up: cancelling not-yet-started futures
+    promptly (the test above) is not enough on its own -- ``already-running``
+    futures can't be force-killed, and the pool code documents that they are
+    meant to be "left to finish" in the background rather than block the
+    required TU's failure from surfacing. But wrapping the pool in
+    ``with ThreadPoolExecutor(...) as pool:`` means the ``with``-block's own
+    ``__exit__`` calls ``shutdown(wait=True)`` when the failure propagates out
+    of it -- silently re-imposing exactly the block the pool was designed to
+    avoid, so a required failure sits behind a still-running (never
+    cancellable) sibling's full duration before the caller ever sees it.
+
+    Deterministic via a manually-held Event (not wall-clock timing): the
+    calling thread must observe the raised exception while "slow" is still
+    deliberately blocked, proving ``_run_tu_fragments`` did not wait on it.
+    """
+    import threading
+
+    from abicheck.dumper_manifest import _run_tu_fragments
+    from abicheck.errors import SnapshotError
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
+
+    slow_release = threading.Event()
+    raised = threading.Event()
+
+    def _stub(headers, extra_includes, **kwargs):
+        name = Path(headers[0]).stem
+        if name == "slow":
+            slow_release.wait(timeout=5)
+            return _StubParser(functions=(_fn("slow"),))
+        if name == "bad":
+            return _StubParser(fail=True)
+        return _StubParser(functions=(_fn(name),))
+
+    tus = (_tu("slow", "slow.h"), _tu("bad", "bad.h", required=True))
+
+    def _run() -> None:
+        try:
+            _run_tu_fragments(
+                tus,
+                header_ast_parser=_stub,
+                backend="auto",
+                compiler="c++",
+                gcc_path=None,
+                gcc_prefix=None,
+                gcc_options=None,
+                gcc_option_tokens=(),
+                sysroot=None,
+                nostdinc=False,
+                lang=None,
+                exported_dynamic=set(),
+                exported_static=set(),
+                public_header_paths=[],
+                public_dir_paths=[],
+                extra_hash_dirs=(),
+            )
+        except SnapshotError:
+            pass
+        finally:
+            raised.set()
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    try:
+        raised_promptly = raised.wait(timeout=5)
+        # The whole point: "slow" must still be blocked when the caller
+        # already saw the failure -- otherwise this would vacuously pass on
+        # the buggy with-block-blocks-on-exit code too, just slower.
+        still_blocked = not slow_release.is_set()
+    finally:
+        slow_release.set()
+        t.join(timeout=5)
+    assert raised_promptly
+    assert still_blocked
+
+
 def test_run_tu_fragments_propagates_active_deadline_into_pool_workers(monkeypatch):
     """Codex review, PR #636: ``contextvars`` don't cross a
     ``ThreadPoolExecutor`` boundary, so a worker submitted from inside an

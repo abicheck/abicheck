@@ -78,3 +78,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `_deadline_bound_worker`; fixed the same way here by capturing
   `deadline.current_deadline_ts()` on the submitting thread and
   re-establishing it inside each worker with `deadline.with_deadline_ts`.
+- `dumper_manifest._run_tu_fragments` wrapped its pool in
+  `with ThreadPoolExecutor(...) as pool:` — cancelling not-yet-started
+  futures on a required failure happened promptly, but the `with` block's
+  own `__exit__` still called the executor's default `shutdown(wait=True)`
+  as the exception propagated out of it, blocking the calling thread until
+  every already-running (uncancellable) sibling finished anyway. So a
+  required TU's failure sat behind a still-running, merely-slow sibling's
+  full duration before the caller ever saw it — silently re-imposing the
+  exact wait the completion-order/cancellation fix above was meant to avoid.
+  Fixed by managing the executor's lifetime manually instead of via `with`,
+  calling `shutdown(wait=False)` on a required failure right after
+  cancelling pending futures, so the diagnostic surfaces immediately while
+  any already-running sibling is left to finish in the background (Codex
+  review, PR #636 follow-up).

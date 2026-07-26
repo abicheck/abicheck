@@ -363,28 +363,40 @@ def _run_tu_fragments(
         with deadline.with_deadline_ts(deadline_ts):
             return _run_one(tu)
 
+    # Deliberately NOT a `with ThreadPoolExecutor(...) as pool:` block: that
+    # context manager's __exit__ calls shutdown(wait=True), which blocks
+    # until every already-running future finishes -- silently re-imposing
+    # the wait a required failure is supposed to skip past. A still-running
+    # sibling can't be force-killed from here regardless, so waiting on it
+    # only delays the diagnostic and keeps burning its CPU/RAM for nothing
+    # (Codex review, PR #636 follow-up).
+    pool = ThreadPoolExecutor(max_workers=jobs)
     results: list[TuFragment | None] = [None] * len(tus)
-    with ThreadPoolExecutor(max_workers=jobs) as pool:
-        future_to_index = {
-            pool.submit(_run_one_with_deadline, tu): i for i, tu in enumerate(tus)
-        }
-        for fut in as_completed(future_to_index):
-            idx = future_to_index[fut]
-            tu = tus[idx]
-            try:
-                results[idx] = fut.result()
-            except Exception:
-                if tu.required:
-                    # Cancel whatever hasn't started yet (best effort -- a
-                    # future already running its subprocess can't be
-                    # force-killed from here) before propagating, so the
-                    # pool doesn't keep burning RAM/CPU on TUs whose output
-                    # is about to be discarded anyway. An optional TU's
-                    # failure, by contrast, must not cancel its siblings --
-                    # the loop is meant to keep collecting the rest.
-                    for other_fut in future_to_index:
-                        other_fut.cancel()
+    future_to_index = {
+        pool.submit(_run_one_with_deadline, tu): i for i, tu in enumerate(tus)
+    }
+    for fut in as_completed(future_to_index):
+        idx = future_to_index[fut]
+        tu = tus[idx]
+        try:
+            results[idx] = fut.result()
+        except Exception:
+            if tu.required:
+                # Cancel whatever hasn't started yet (best effort -- a
+                # future already running its subprocess can't be
+                # force-killed from here) and shut down without waiting on
+                # whatever's still running -- a `with`-managed executor's
+                # implicit shutdown(wait=True) on exit would silently
+                # re-impose exactly that wait (Codex review, PR #636
+                # follow-up). An optional TU's failure, by contrast, must
+                # not cancel its siblings -- the loop is meant to keep
+                # collecting the rest.
+                for other_fut in future_to_index:
+                    other_fut.cancel()
+                pool.shutdown(wait=False)
                 _handle_failure(tu)
+            _handle_failure(tu)
+    pool.shutdown(wait=True)
     fragments.extend(r for r in results if r is not None)
     return fragments
 
