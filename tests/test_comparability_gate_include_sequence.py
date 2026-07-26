@@ -217,3 +217,28 @@ def test_include_sequence_additive_owned_growth_true_when_new_pair_matches_scope
     old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
     new = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")])])
     assert _include_sequence_is_additive_owned_growth(old, new, frozenset({"c.h"}))
+
+
+def test_include_sequence_additive_owned_growth_false_for_duplicated_newly_owned_pair():
+    # Codex review, PR #641 follow-up (fourteenth P2): `_slot_token_for_
+    # ancestor`'s real `owned` construction always emits a deduplicated
+    # pair list, so a duplicated newly-appended pair (e.g. "c.h" listed
+    # twice) is never genuine evidence. The `{tuple(p) for p in pairs}`
+    # set conversion silently collapses that duplication away, so without
+    # a duplicate check first, this duplicated evidence still authorized
+    # the waiver. Confirmed by direct repro before any fix: this was
+    # accepted as safe growth.
+    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
+    new = json.dumps(
+        [f"0:hdrs:{json.dumps([['a.h', 'a.h'], ['c.h', 'c.h'], ['c.h', 'c.h']])}"]
+    )
+    assert not _include_sequence_is_additive_owned_growth(old, new, frozenset({"c.h"}))
+
+
+def test_include_sequence_additive_owned_growth_false_for_duplicated_old_pair():
+    # Same gap as above, for a duplicate already present on the old side.
+    old = json.dumps([f"0:hdrs:{json.dumps([['a.h', 'a.h'], ['a.h', 'a.h']])}"])
+    new = json.dumps(
+        [f"0:hdrs:{json.dumps([['a.h', 'a.h'], ['a.h', 'a.h'], ['c.h', 'c.h']])}"]
+    )
+    assert not _include_sequence_is_additive_owned_growth(old, new, frozenset({"c.h"}))

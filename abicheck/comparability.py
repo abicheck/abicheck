@@ -425,9 +425,14 @@ def _slot_indices_match_position(slots: list[str]) -> bool:
             return False
         if idx != str(i):
             return False
-        if rest.startswith("ext:") and not _is_valid_digest_payload(rest[len("ext:") :]):
+        if rest.startswith("ext:") and not _is_valid_digest_payload(
+            rest[len("ext:") :]
+        ):
             return False
-        if rest.startswith(_OWNED_HEADER_TOKEN_PREFIX) and rest != _OWNED_HEADER_SINGLE_SENTINEL:
+        if (
+            rest.startswith(_OWNED_HEADER_TOKEN_PREFIX)
+            and rest != _OWNED_HEADER_SINGLE_SENTINEL
+        ):
             pairs = _json_load_list(rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
             if pairs is None or not all(_is_owned_header_pair(p) for p in pairs):
                 return False
@@ -471,7 +476,10 @@ def _include_sequence_is_additive_owned_growth(
         return False
     if len(old_slots) != len(new_slots):
         return False
-    if not (_slot_indices_match_position(old_slots) and _slot_indices_match_position(new_slots)):
+    if not (
+        _slot_indices_match_position(old_slots)
+        and _slot_indices_match_position(new_slots)
+    ):
         return False
     for old_slot, new_slot in zip(old_slots, new_slots):
         if old_slot == new_slot:
@@ -506,8 +514,22 @@ def _include_sequence_is_additive_owned_growth(
             and all(_is_owned_header_pair(p) for p in new_pairs)
         ):
             return False
-        old_owned = {tuple(p) for p in old_pairs}
-        new_owned = {tuple(p) for p in new_pairs}
+        # Reject a duplicated pair before the set conversion below collapses
+        # it away (Codex review, PR #641 follow-up, fourteenth P2):
+        # `_slot_token_for_ancestor`'s real `owned` construction always
+        # emits a deduplicated pair list, so a duplicate -- e.g. a newly
+        # appended ("c.h", "c.h") listed twice -- is never genuine evidence.
+        # `{tuple(p) for p in pairs}` silently discards that duplication,
+        # so without this check a malformed, duplicated newly-owned pair
+        # would still authorize the waiver instead of failing closed.
+        old_tuples = [tuple(p) for p in old_pairs]
+        new_tuples = [tuple(p) for p in new_pairs]
+        if len(old_tuples) != len(set(old_tuples)) or len(new_tuples) != len(
+            set(new_tuples)
+        ):
+            return False
+        old_owned = set(old_tuples)
+        new_owned = set(new_tuples)
         if not new_owned >= old_owned:
             return False
         newly_owned = new_owned - old_owned
@@ -1389,7 +1411,9 @@ def _scope_growth_corroborated(
         return False
     if old_contract.scope_fingerprint == new_contract.scope_fingerprint:
         return False
-    if old_contract.scope_fields.get("headers") == new_contract.scope_fields.get("headers"):
+    if old_contract.scope_fields.get("headers") == new_contract.scope_fields.get(
+        "headers"
+    ):
         return False
     return all(
         _scope_field_is_additive_superset(
@@ -1650,10 +1674,14 @@ def check_contracts_comparable(
     ):
         if not (
             _fingerprint_matches_fields(
-                old_contract.scope_fingerprint, old_contract.scope_fields, SCOPE_FIELD_KEYS
+                old_contract.scope_fingerprint,
+                old_contract.scope_fields,
+                SCOPE_FIELD_KEYS,
             )
             and _fingerprint_matches_fields(
-                new_contract.scope_fingerprint, new_contract.scope_fields, SCOPE_FIELD_KEYS
+                new_contract.scope_fingerprint,
+                new_contract.scope_fields,
+                SCOPE_FIELD_KEYS,
             )
         ):
             # Neither carve-out below may be trusted: at least one side's
