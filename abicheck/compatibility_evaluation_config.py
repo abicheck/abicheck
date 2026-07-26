@@ -251,6 +251,15 @@ class ContractConfig:
     packs: tuple[ImmutableIdentity, ...] = ()
 
     def __post_init__(self) -> None:
+        if not isinstance(self.mode, ContractMode):
+            raise TypeError(
+                f"ContractConfig.mode must be a ContractMode member, not "
+                f"{self.mode!r} -- the `mode: ContractMode` annotation isn't "
+                "runtime-enforced, so an untyped service/manifest/API "
+                "adapter could otherwise pass a typo'd string (e.g. "
+                '"pubic") through to a state with no defined '
+                "contract-membership semantics (ADR-049 D2)."
+            )
         if self.unresolved not in _VALID_UNRESOLVED_BEHAVIORS:
             raise ValueError(
                 f"ContractConfig.unresolved must be one of "

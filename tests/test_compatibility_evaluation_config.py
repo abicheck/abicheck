@@ -135,6 +135,14 @@ class TestContractConfigUnresolvedBehavior:
         with pytest.raises(ValueError, match="unresolved"):
             ContractConfig(mode=ContractMode.PUBLIC, unresolved="warning")
 
+    def test_raw_string_mode_is_rejected(self):
+        # The `mode: ContractMode` annotation isn't runtime-enforced -- an
+        # untyped adapter passing a typo'd string (or the enum's own string
+        # value) must still be rejected, matching the CompatibilityPolicyConfig
+        # overrides Verdict check.
+        with pytest.raises(TypeError, match="ContractConfig.mode"):
+            ContractConfig(mode="public")  # type: ignore[arg-type]
+
 
 class TestImmutability:
     def test_top_level_is_frozen(self):
