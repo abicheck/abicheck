@@ -173,6 +173,22 @@ def _is_gnu_compiler_resource_dir(path: str) -> bool:
     return False
 
 
+def _is_gnu_compiler_resource_dir_for_existing(d: str) -> bool:
+    """Symlink-aware wrapper around :func:`_is_gnu_compiler_resource_dir`.
+
+    Only correct to call once the caller already knows *d* exists on disk
+    (:func:`_probe_gnu_system_includes` checks ``Path(d).is_dir()`` first) —
+    see that function's docstring for the full reasoning on why the raw
+    string and ``os.path.realpath(d)`` are combined differently depending on
+    whether *d* contains a literal ``..`` component.
+    """
+    if ".." in Path(d).parts:
+        return _is_gnu_compiler_resource_dir(os.path.realpath(d))
+    return _is_gnu_compiler_resource_dir(d) or _is_gnu_compiler_resource_dir(
+        os.path.realpath(d)
+    )
+
+
 def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
     """Probe *cc_bin* for the system include dirs it would search (best-effort).
 
@@ -200,15 +216,31 @@ def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
     ``.parts``) — never both via ``or``:
 
     - **No ``..`` at all** (the compiler reported the directory verbatim,
-      possibly itself a symlink): trust the *raw* string. A terminal
-      symlink — the canonical ``.../lib/gcc/<triple>/<ver>/include`` path
-      itself symlinked to storage outside any ``lib/gcc`` hierarchy — must
-      still classify as GCC's resource dir by the name it was reported
-      under; ``realpath`` would resolve straight past that lexical evidence
-      and wrongly keep it, feeding clang GCC's incompatible intrinsics
-      headers (Codex review, round 2 — confirmed with a real symlink where
-      the raw classifier returns ``True`` and a realpath-only classifier
-      would have returned ``False``).
+      possibly itself a symlink): check *both* the raw string and its
+      ``realpath`` — reject if *either* matches (an ``or``, safe here since
+      there is no ``..`` to make the lexical form ambiguous). Two
+      independent, mirror-image hazards need both directions covered:
+      (a) a terminal symlink — the canonical
+      ``.../lib/gcc/<triple>/<ver>/include`` path itself symlinked to
+      storage outside any ``lib/gcc`` hierarchy — must still classify as
+      GCC's resource dir by the name it was reported under; ``realpath``
+      alone would resolve straight past that lexical evidence and wrongly
+      keep it, feeding clang GCC's incompatible intrinsics headers (Codex
+      review, round 2 — confirmed with a real symlink where the raw
+      classifier returns ``True`` and a realpath-only classifier would have
+      returned ``False``); (b) the mirror case — an arbitrary alias path
+      (e.g. ``/opt/toolchain/include``, nothing resource-shaped about the
+      name itself) that is a symlink *to* the real resource dir — must
+      classify as a resource dir too; the raw string alone would miss that
+      evidence entirely, wrongly keeping GCC's intrinsics headers under an
+      innocuous-looking alias (Codex review, round 8 — confirmed with a
+      real symlink where the raw classifier returns ``False`` and the
+      realpath classifier returns ``True``). Neither direction is safe to
+      skip, but combining them with ``or`` here introduces no new false
+      positive: a real libstdc++/libc dir's own raw name or its resolved
+      target coincidentally matching the *exact* GCC resource shape would
+      have to be GCC's own resource dir to begin with (round 3 already
+      established the shape is that precise).
     - **``..`` is present**: trust *only* ``os.path.realpath(d)`` — safe and
       cheap since ``Path(d).is_dir()`` (short-circuiting ``and``, evaluated
       first) has already confirmed ``d`` exists. Once a path traverses a
@@ -230,8 +262,10 @@ def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
 
     :func:`_is_gnu_compiler_resource_dir` itself stays pure/string-only and
     testable against synthetic paths that don't exist on disk either way —
-    this ``..``-presence decision lives here, in the one caller that already
-    knows the path exists and can afford a ``realpath`` syscall.
+    this ``..``-presence decision lives in
+    :func:`_is_gnu_compiler_resource_dir_for_existing`, called only from
+    here, the one place that already knows the path exists and can afford a
+    ``realpath`` syscall.
 
     Bounded by the tighter of its own 15s cap and the active deadline, and
     process-group-safe on timeout, same as the main clang/castxml subprocess
@@ -262,10 +296,7 @@ def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
     return [
         d
         for d in _parse_gnu_include_search_dirs(proc.stderr or "")
-        if Path(d).is_dir()
-        and not _is_gnu_compiler_resource_dir(
-            os.path.realpath(d) if ".." in Path(d).parts else d
-        )
+        if Path(d).is_dir() and not _is_gnu_compiler_resource_dir_for_existing(d)
     ]
 
 

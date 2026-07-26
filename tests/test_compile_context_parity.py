@@ -723,6 +723,47 @@ def test_probe_gnu_system_includes_drops_terminal_symlinked_resource_dir(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason=_SYMLINK_SKIP_REASON)
+def test_probe_gnu_system_includes_drops_aliased_symlink_to_resource_dir(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Codex review (PR #643, round 8): the mirror case of the terminal-symlink
+    # test above. There, the raw path IS the canonical resource-dir name but
+    # is symlinked *away* from it; here the raw path is an arbitrary,
+    # non-resource-shaped alias (no '..' either) that is symlinked *to* the
+    # real resource dir. The raw string alone (round 2's fix) misses this
+    # evidence entirely and would wrongly keep GCC's intrinsics headers under
+    # the innocuous-looking alias name. Both directions must be checked when
+    # there's no '..' to make the lexical form ambiguous.
+    from abicheck import dumper_sysinc
+
+    base = tmp_path / "base"
+    real_resource_dir = base / "lib" / "gcc" / "x86_64-linux-gnu" / "13" / "include"
+    real_resource_dir.mkdir(parents=True)
+    alias = base / "opt" / "toolchain" / "include"
+    alias.parent.mkdir(parents=True)
+    alias.symlink_to(real_resource_dir, target_is_directory=True)
+
+    reported = str(alias)
+    # Sanity check the fixture actually exercises the hazard: the raw path
+    # does NOT lexically match the resource-dir shape, but its realpath does.
+    assert dumper_sysinc._is_gnu_compiler_resource_dir(reported) is False
+    assert (
+        dumper_sysinc._is_gnu_compiler_resource_dir(os.path.realpath(reported)) is True
+    )
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc, "_parse_gnu_include_search_dirs", lambda s: [reported]
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    # This alias resolves to GCC's own resource dir -- must be dropped.
+    assert out == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason=_SYMLINK_SKIP_REASON)
 def test_probe_gnu_system_includes_keeps_real_dir_via_midpath_symlink(
     monkeypatch, tmp_path: Path
 ) -> None:

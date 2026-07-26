@@ -33,6 +33,7 @@ from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
     _clang_header_dump,
+    _dpcpp_defaults_sycl_on,
     _header_ast_parser,
     _needs_sycl_host_only,
     _parse_gnu_include_search_dirs,
@@ -813,10 +814,63 @@ def test_build_clang_header_command_cpp_and_c(tmp_path: Path) -> None:
         ("icpx", ["-fno-sycl", "-fsycl"], True),
         ("icpx", ["-fsycl", "-fno-sycl", "-fsycl"], True),
         ("icpx", ["-fno-sycl"], False),
+        # Intel's legacy "dpcpp"/"dpcpp-cl" driver names imply SYCL is
+        # already on even with no -fsycl token at all (Codex review, PR
+        # #643, round 8) -- an explicit -fno-sycl still overrides that
+        # default. icx/icpx are NOT in this default-on set: they need an
+        # explicit -fsycl, same as stock clang.
+        ("dpcpp", [], True),
+        ("dpcpp-cl", [], True),
+        ("/opt/oneapi/bin/dpcpp", [], True),
+        ("DPCPP", [], True),  # case-insensitive
+        ("dpcpp.exe", [], True),  # extension stripped, still matches
+        ("dpcpp", ["-DFOO=1"], True),
+        ("dpcpp", ["-fno-sycl"], False),
+        ("dpcpp", ["-fno-sycl", "-fsycl"], True),
+        ("icx", [], False),
     ],
 )
 def test_needs_sycl_host_only(cc_bin: str, tokens: list[str], expected: bool) -> None:
     assert _needs_sycl_host_only(cc_bin, tokens) is expected
+
+
+@pytest.mark.parametrize(
+    "cc_bin,expected",
+    [
+        ("dpcpp", True),
+        ("dpcpp-cl", True),
+        ("/opt/oneapi/bin/dpcpp", True),
+        ("DPCPP", True),
+        ("dpcpp.exe", True),
+        ("icx", False),
+        ("icpx", False),
+        ("clang", False),
+        ("clang++", False),
+        ("gcc", False),
+    ],
+)
+def test_dpcpp_defaults_sycl_on(cc_bin: str, expected: bool) -> None:
+    assert _dpcpp_defaults_sycl_on(cc_bin) is expected
+
+
+def test_build_clang_header_command_dpcpp_defaults_sycl_on(tmp_path: Path) -> None:
+    # Codex review (PR #643, round 8): "dpcpp" implies SYCL is already on
+    # even with no -fsycl token at all, so it must still get
+    # -fsycl-host-only pinned -- otherwise the double-JSON-document bug
+    # this whole fix targets reappears for this driver name.
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command("dpcpp", "gnu", [], agg, force_cpp=True)
+    assert "-fsycl-host-only" in cmd
+
+
+def test_build_clang_header_command_dpcpp_explicit_fno_sycl_overrides_default(
+    tmp_path: Path,
+) -> None:
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "dpcpp", "gnu", [], agg, force_cpp=True, gcc_options="-fno-sycl"
+    )
+    assert "-fsycl-host-only" not in cmd
 
 
 def test_build_clang_header_command_appends_sycl_host_only(tmp_path: Path) -> None:

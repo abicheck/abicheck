@@ -65,6 +65,7 @@ from .dumper_castxml_probe import (
 from .dumper_clang import (
     _clang_available as _clang_available,
     _ClangAstParser as _ClangAstParser,
+    _dpcpp_defaults_sycl_on,
     _is_intel_sycl_driver,
     _resolve_clang_bin as _resolve_clang_bin,
 )
@@ -220,12 +221,18 @@ def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
     SYCL-only selector onto a non-SYCL compile — at best a no-op, at worst
     rejected by the driver as contradictory (Codex review, PR #643, round
     5). The *last* occurrence of either flag decides the effective state.
+
+    The initial state before scanning is not always "off": Intel's legacy
+    "dpcpp"/"dpcpp-cl" driver names imply SYCL is already on even with no
+    ``-fsycl`` token at all (:func:`_dpcpp_defaults_sycl_on`, Codex review,
+    PR #643, round 8) — an explicit ``-fno-sycl`` still overrides that
+    default via the same last-flag-wins scan.
     """
     if not _is_intel_sycl_driver(cc_bin):
         return False
     if "-fsycl-host-only" in tokens or "-fsycl-device-only" in tokens:
         return False
-    sycl_enabled = False
+    sycl_enabled = _dpcpp_defaults_sycl_on(cc_bin)
     for tok in tokens:
         if tok == "-fsycl":
             sycl_enabled = True

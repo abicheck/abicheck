@@ -41,7 +41,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   JSON error message to name this class of cause (multiple `-cc1` passes
   from one compile, e.g. an unpinned `-fsycl` on an Intel driver, or an
   OpenMP/CUDA offload target flag) instead of a bare byte-offset, for any
-  future flag combination that hits the same multi-document shape.
+  future flag combination that hits the same multi-document shape. Intel's
+  legacy, now-deprecated `dpcpp`/`dpcpp-cl` driver names can imply SYCL is
+  already on even with no `-fsycl` token at all (they predate `icx`/`icpx`'s
+  explicit opt-in), so `_needs_sycl_host_only`'s effective-state scan now
+  starts from `dumper_clang._dpcpp_defaults_sycl_on(cc_bin)` instead of
+  always `False` — an explicit `-fno-sycl` still overrides that default via
+  the same last-flag-wins scan (Codex review, PR #643, round 8; not
+  independently confirmed against the open-source intel/llvm driver, which
+  shows `-fsycl` defaulting to off regardless of binary name, but guarded
+  for anyway given the asymmetric cost — an unused, harmless
+  `-fsycl-host-only` on a false positive vs. silently reintroducing the
+  double-JSON-document failure on a false negative).
 - **`_is_gnu_compiler_resource_dir` (follow-up to the `normpath` fix above):
   a symlinked path component made lexical `..` collapsing wrong** — a
   symlink followed by `..` resolves relative to the symlink's *target*
@@ -53,17 +64,23 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   path (e.g. `.../lib/gcc/<triple>/<ver>/include` symlinked to storage
   outside any `lib/gcc` hierarchy) loses the lexical evidence that this is
   GCC's resource dir (round 2). Checking *both* the raw string and
-  `os.path.realpath(d)` — rejecting a directory when either matches — fixes
-  round 2 but is itself wrong once `..` is present: a *mid-path* symlink
-  (e.g. `.../lib/gcc/<triple>/<ver>/hop/../include` where `hop` symlinks
-  elsewhere) can lexically collapse right back to the resource shape while
-  physically resolving to a real, unrelated system include dir that must be
-  *kept* — checking the raw string here wrongly drops it (round 7).
-  `_probe_gnu_system_includes` now picks exactly one of the two checks
-  based on whether the raw reported string contains a literal `..`
-  component at all: no `..` → trust only the raw string (round 2's case);
-  `..` present → trust only `os.path.realpath(d)` (rounds 1 and 7's case) —
-  safe since the directory's existence (`Path(d).is_dir()`) is already
-  confirmed by that point — never both via `or`. `_is_gnu_compiler_resource_dir`
-  itself keeps its lexical-only, pure/string-testable contract for callers
-  that don't have (or need) a real path on disk.
+  `os.path.realpath(d)` unconditionally — rejecting a directory when either
+  matches — fixes round 2 but is itself wrong once `..` is present: a
+  *mid-path* symlink (e.g. `.../lib/gcc/<triple>/<ver>/hop/../include` where
+  `hop` symlinks elsewhere) can lexically collapse right back to the
+  resource shape while physically resolving to a real, unrelated system
+  include dir that must be *kept* — checking the raw string here wrongly
+  drops it (round 7). New helper
+  `_is_gnu_compiler_resource_dir_for_existing` now picks based on whether
+  the raw reported string contains a literal `..` component at all: no `..`
+  → check *both* the raw string and its `os.path.realpath(d)`, rejecting if
+  *either* matches (round 2's terminal-symlink case, plus its mirror —
+  round 8 — an arbitrary, non-resource-shaped alias symlinked *to* the real
+  resource dir, which the raw-only check alone would miss); `..` present →
+  trust *only* `os.path.realpath(d)` (rounds 1 and 7's case, where the raw
+  string can no longer be trusted in either direction once a symlink sits
+  ahead of a `..`) — safe since the directory's existence
+  (`Path(d).is_dir()`) is already confirmed by that point.
+  `_is_gnu_compiler_resource_dir` itself keeps its lexical-only,
+  pure/string-testable contract for callers that don't have (or need) a
+  real path on disk.
