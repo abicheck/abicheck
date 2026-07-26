@@ -1026,7 +1026,10 @@ def _check_stale_process_language(f: Findings) -> None:
             if fm.get("generated") is True:
                 continue
             lifecycle = fm.get("lifecycle")
-            if lifecycle in _STALE_PROCESS_LANGUAGE_EXEMPT_LIFECYCLES:
+            if (
+                isinstance(lifecycle, str)
+                and lifecycle in _STALE_PROCESS_LANGUAGE_EXEMPT_LIFECYCLES
+            ):
                 continue
 
         text = _blank_fenced_code(path.read_text(encoding="utf-8"))

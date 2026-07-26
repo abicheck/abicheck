@@ -219,7 +219,7 @@ generated: false
 | `level` | `beginner`, `intermediate`, `advanced`, or `expert`. |
 | `canonical_for` | Topic ids (from `topics.yaml`) this page is the narrative owner of. Usually empty or one entry. |
 | `summarizes` | Topic ids this page briefly references without owning — the page must link to that topic's `canonical_page` rather than re-explain it. |
-| `depends_on` | Repo-relative paths (code, CLI commands, config keys) whose change should prompt a look at this page. Informational today — a review-trigger check that diffs this against a PR's changed files is not yet wired into CI. |
+| `depends_on` | Repo-relative paths (code, CLI commands, config keys) whose change should prompt a look at this page. `scripts/check_docs_review_triggers.py` (CI: `docs-review-triggers.yml`) diffs this against a PR's changed files and posts an `::notice::` + step-summary table when they overlap — advisory only, it never fails the build (a path-prefix match is a heuristic, not proof the page is actually stale). |
 | `lifecycle` | `active`, `migration`, or `historical`. |
 | `generated` | `true` for machine-generated pages (don't hand-edit; `check_docs_contract.py` skips front-matter enforcement on these). |
 

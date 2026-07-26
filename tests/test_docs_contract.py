@@ -1432,6 +1432,24 @@ def test_stale_process_language_exempts_migration_lifecycle(
     assert f.warnings == []
 
 
+def test_stale_process_language_tolerates_non_string_lifecycle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A schema-invalid `lifecycle` (e.g. a list) is reported by the
+    front-matter schema check, not this one -- but it must not crash this
+    check via an unhashable-type `in` lookup against the exempt-lifecycles
+    frozenset, which would abort the whole docs-contract run before any
+    collected finding could be reported (PR #638 Codex review)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "page.md").write_text(
+        "---\nlifecycle: [active]\n---\n\n# Page\n\nTBD.\n", encoding="utf-8"
+    )
+    f = dc.Findings()
+    dc._check_stale_process_language(f)
+    assert len(f.warnings) == 1
+    assert "TBD" in f.warnings[0][1]
+
+
 def test_stale_process_language_reports_real_line_number(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
