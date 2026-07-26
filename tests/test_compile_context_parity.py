@@ -435,6 +435,23 @@ def test_probe_gnu_system_includes_bounded_by_local_cap_not_full_scan_budget(
         # startswith('lib') to an exact multilib-name set).
         ("/home/gcc/include", False),
         ("/opt/libfoo/gcc/x86_64-linux-gnu/13/include", False),
+        # Unresolved paths containing a literal '../' walk-back: GCC and
+        # Intel's icpx/icx report search dirs this way. The '..' segments
+        # must be normalized away before matching, or a real libstdc++/libc
+        # dir that happens to be reached by walking back out of the gcc/
+        # version dir is misclassified as the GCC resource dir it walks
+        # *through* rather than the dir it actually names.
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13", False),
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include", False),
+        (
+            "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/x86_64-linux-gnu/c++/13",
+            False,
+        ),
+        # A genuine GCC resource dir is still caught after normalization even
+        # when spelled with a redundant './'/'..' that lexically collapses
+        # back to the same resource path (not walked all the way out).
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/./include", True),
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/sub/../include-fixed", True),
     ],
 )
 def test_is_gnu_compiler_resource_dir(path: str, expected: bool) -> None:
@@ -469,6 +486,48 @@ def test_probe_gnu_system_includes_drops_gcc_resource_dir(
     )
     out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
     assert out == [str(libstdcxx), str(libc)]  # gcc resource dir filtered out
+
+
+def test_probe_gnu_system_includes_keeps_unresolved_walk_back_libstdcxx(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # GCC (and Intel's icpx/icx) report the real libstdc++ dir as an unresolved
+    # string that walks back out of the versioned gcc/ dir with literal '../'
+    # segments (e.g. '.../lib/gcc/<triple>/13/../../../../include/c++/13'),
+    # rather than the already-resolved '/usr/include/c++/13'. That must be
+    # kept, not dropped as though it were the GCC resource dir it walks
+    # *through* on the way there.
+    from abicheck import dumper_sysinc
+
+    real_libstdcxx = tmp_path / "include" / "c++" / "13"
+    real_libstdcxx.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "lib" / "gcc" / "x86_64-linux-gnu" / "13").mkdir(parents=True)
+    unresolved_libstdcxx = str(
+        tmp_path
+        / "lib"
+        / "gcc"
+        / "x86_64-linux-gnu"
+        / "13"
+        / ".."
+        / ".."
+        / ".."
+        / ".."
+        / "include"
+        / "c++"
+        / "13"
+    )
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc,
+        "_parse_gnu_include_search_dirs",
+        lambda s: [unresolved_libstdcxx],
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    assert out == [unresolved_libstdcxx]
 
 
 def test_buildconfig_compile_frontend_case_insensitive() -> None:

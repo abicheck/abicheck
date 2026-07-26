@@ -30,6 +30,7 @@ can inject them as ``-isystem``.
 Split out of :mod:`abicheck.dumper` (which is at the file-size soft limit) and
 re-exported there, so the public ``dumper._probe_*`` surface is unchanged.
 """
+
 from __future__ import annotations
 
 import os
@@ -106,10 +107,20 @@ def _is_gnu_compiler_resource_dir(path: str) -> bool:
 
     Matches the ``.../lib{,32,64,x32}/gcc[-cross]/<triple>/<ver>/include[-fixed]``
     layout by looking for a multilib library segment (:data:`_GNU_MULTILIB_DIRS`)
-    immediately followed by ``gcc``/``gcc-cross``. Pure/string-only so it is
-    unit-testable without a real toolchain.
+    immediately followed by ``gcc``/``gcc-cross``. The path is lexically
+    normalized (``os.path.normpath``) before splitting into parts: GCC and
+    Intel's icpx/icx report their ``-print-search-dirs``/``-v`` search paths
+    with the compiler's own install dir plus a literal ``../../../../`` walk
+    back up to the real location (e.g.
+    ``/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13``, which is
+    really ``/usr/include/c++/13`` — genuine libstdc++, not a GCC-internal
+    resource dir). Splitting the *unresolved* string into parts would still
+    see the ``lib``/``gcc`` segments from the walked-back-out-of prefix and
+    misclassify it. ``normpath`` only collapses ``.``/``..`` lexically (no
+    filesystem access, no symlink resolution), keeping this pure/string-only
+    and unit-testable without a real toolchain.
     """
-    parts = Path(path).parts
+    parts = Path(os.path.normpath(path)).parts
     for prev, cur in zip(parts, parts[1:]):
         if cur in _GNU_COMPILER_RESOURCE_SEGMENTS and prev in _GNU_MULTILIB_DIRS:
             return True
@@ -214,9 +225,7 @@ def _pass_through_suppresses_probe(
     if gcc_options and any(f in gcc_options for f in _PROBE_SUPPRESSING_FLAGS):
         return True
     return any(
-        tok.startswith(f)
-        for tok in gcc_option_tokens
-        for f in _PROBE_SUPPRESSING_FLAGS
+        tok.startswith(f) for tok in gcc_option_tokens for f in _PROBE_SUPPRESSING_FLAGS
     )
 
 
