@@ -262,3 +262,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   single-pass AST document could therefore still spend minutes streaming
   and scanning it before the timeout was ever reported. Now checks the
   deadline once per underlying chunk read (Codex review).
+- `sycl_context._iter_json_documents`'s `want_text` guard (above) only
+  skipped the final join — the scan itself still accumulated every chunk of
+  an unwanted document into a list until its boundary was found, so a
+  non-matching multi-GB pass still cost its own full size in memory, live
+  alongside an already-selected match's dict. Rewritten to scan from a
+  single current chunk (replaced wholesale, never appended to a list) and
+  only archive a chunk's span when the document is actually wanted,
+  decided *before* any of that document's bytes are read (from `stderr`'s
+  positional invocation list, same as before) — an unwanted document now
+  costs at most one chunk's worth of memory to scan past, not its own full
+  size (Codex review, third round).

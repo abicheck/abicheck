@@ -19,6 +19,7 @@ tests/fixtures/g32/dpcpp/ (see that directory's README.md)."""
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -381,6 +382,54 @@ def test_iter_json_documents_default_want_text_always_joins() -> None:
 
     docs = list(_iter_json_documents(_read_more))
     assert docs == ['{"a": 1}', '{"b": 2}']
+
+
+def test_iter_json_documents_discards_earlier_chunks_for_unwanted_document() -> None:
+    """P1 (Codex review, third round): want_text=False must not just skip
+    the final join -- the scan itself must never accumulate more than the
+    single chunk currently being read for an unwanted document, or a large
+    non-matching pass still costs its own full size in memory (live at the
+    same time as an already-selected match) before this generator ever gets
+    around to yielding None for it. Proven via CPython refcounts: each
+    chunk making up the unwanted (first) document must become unreferenced
+    by the generator as soon as scanning moves past it -- only the single
+    chunk still being scanned when the document ends may remain referenced.
+    """
+    unwanted_pieces = ['{"a": ', '"xx", ', '"b": 2}']  # 3 chunks, no nesting
+    wanted_text = '{"c": 3}'
+    all_chunks_src = [*unwanted_pieces, wanted_text]
+    supplied: list[str] = []
+    idx = [0]
+
+    def _read_more() -> str:
+        if idx[0] >= len(all_chunks_src):
+            return ""
+        # A fresh, non-interned string object per chunk -- refcount checks
+        # below need an object identity distinct from the source list's.
+        chunk = "".join(all_chunks_src[idx[0]])
+        supplied.append(chunk)
+        idx[0] += 1
+        return chunk
+
+    gen = _iter_json_documents(_read_more, lambda i: i == 1)
+    doc0 = next(gen)
+    assert doc0 is None
+    # Captured into plain ints first -- pytest's assertion-rewriting keeps a
+    # transient extra reference alive when getrefcount() is called directly
+    # inside an assert expression, which would otherwise mask the very gap
+    # this test exists to detect. Only this test's own `supplied` list
+    # should reference the two EARLIER chunks by now -- the generator
+    # itself must have dropped them already scanning past them, unlike the
+    # pre-fix implementation, which kept every chunk of the whole document
+    # (including these two) alive in its `chunks` list until the document's
+    # end.
+    refcount0 = sys.getrefcount(supplied[0])
+    refcount1 = sys.getrefcount(supplied[1])
+    assert refcount0 == 2
+    assert refcount1 == 2
+
+    doc1 = next(gen)
+    assert doc1 == wanted_text
 
 
 def test_fused_select_checks_deadline_during_stream() -> None:

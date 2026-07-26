@@ -200,33 +200,40 @@ def _iter_json_documents(
     Each document must be a top-level JSON **object or array** (``{...}``/
     ``[...]``) -- always true for a clang ``-ast-dump=json`` document, never
     a bare scalar. Boundary detection is a hand-rolled bracket/string-escape
-    scan over ``chunks`` (a list of not-yet-fully-consumed pieces, each
-    scanned exactly once) rather than repeatedly retrying
+    scan over the CURRENT chunk only (never a growing list of chunks, never
+    an ever-growing single ``str``): repeatedly retrying
     ``json.JSONDecoder.raw_decode`` from position 0 over an ever-growing
-    single ``str``: that approach was quadratic in a single document's size
-    for any document spanning more than one chunk (Codex review) -- each
-    incomplete ``raw_decode`` attempt re-parses the *entire* accumulated
-    buffer, and ``buf += chunk`` on an immutable ``str`` additionally
-    re-copies the whole accumulated buffer on every single append. A
-    hundreds-of-MB or multi-GB single-pass AST (this module's whole reason
-    to exist) made both costs dominate. Here, each byte is inspected exactly
-    once across the whole stream.
+    ``str`` was quadratic in a single document's size for any document
+    spanning more than one chunk (Codex review) -- each incomplete
+    ``raw_decode`` attempt re-parses the *entire* accumulated buffer, and
+    ``buf += chunk`` on an immutable ``str`` additionally re-copies the
+    whole accumulated buffer on every single append. A hundreds-of-MB or
+    multi-GB single-pass AST (this module's whole reason to exist) made
+    both costs dominate. Here, each byte is inspected exactly once across
+    the whole stream, and only ONE chunk is ever held onto beyond the
+    currently-scanned one (the collected pieces of a *wanted* document --
+    see *want_text* below).
 
     *want_text*, if given, is called with each document's 0-based index
-    BEFORE that document's text is joined -- when it returns ``False``, this
-    function still scans through the document (so the boundary of the NEXT
-    one can be found) but yields ``None`` instead of joining its chunks into
-    one string (P1, Codex review, follow-up: skipping ``json.loads`` for a
-    definitely-non-matching document, as :func:`_select_from_document_stream`
-    already did, is not enough on its own -- unconditionally joining its
-    chunks into ``doc_text`` first still materializes a full extra copy of a
-    document about to be discarded unread. The *kind* of the pass that
-    produced a document is knowable from ``stderr`` alone, positionally,
-    before this function's ``read_more`` is ever called for that document's
-    bytes at all, so a definitely-non-matching multi-GB document is now
-    never joined into one string in the first place, not just never parsed).
-    ``want_text=None`` (the default) always joins and yields the text, same
-    as before this parameter existed.
+    BEFORE that document is scanned at all -- when it returns ``False``,
+    this function still scans through the document character-by-character
+    (so the boundary of the NEXT one can be found) but discards each chunk
+    the moment it's fully consumed, never retaining more than the single
+    chunk currently being scanned, and yields ``None`` for that document
+    instead of its text (P1, Codex review, twice: skipping ``json.loads``
+    for a definitely-non-matching document, as
+    :func:`_select_from_document_stream` already did, was not enough on its
+    own, and neither was skipping just the final join -- the boundary scan
+    itself must never accumulate an unwanted document's chunks into a list
+    at all, or peak memory for a non-matching multi-GB pass is still that
+    pass's full size, live at the same time as an already-selected
+    multi-GB match's dict. The *kind* of the pass that produced a document
+    is knowable from ``stderr`` alone, positionally, before this function's
+    ``read_more`` is ever called for that document's bytes at all, so a
+    definitely-non-matching multi-GB document now costs at most one
+    chunk's worth of memory to scan past, not its own full size).
+    ``want_text=None`` (the default) always collects and yields the text,
+    same as before this parameter existed.
 
     Deliberately does NOT call ``json.loads`` here -- that decision belongs
     to the caller (:func:`_select_from_document_stream`). Only a genuinely
@@ -242,62 +249,73 @@ def _iter_json_documents(
     so a budget that expired early would otherwise still burn through the
     rest of that time before the timeout is ever reported.
     """
+    cur = ""
+    pos = 0
     eof = False
-    chunks: list[str] = []
 
-    def _fill() -> bool:
-        nonlocal eof
-        deadline.check()
-        chunk = read_more()
-        if not chunk:
-            eof = True
-            return False
-        chunks.append(chunk)
+    def _ensure_char() -> bool:
+        """Ensure ``cur[pos]`` is valid, replacing ``cur`` wholesale (never
+        appending to a list) as it's exhausted -- the just-exhausted chunk
+        becomes unreferenced and eligible for GC immediately unless the
+        caller archived a piece of it first (see *pieces* below). Returns
+        ``False`` only at genuine end of stream."""
+        nonlocal cur, pos, eof
+        while pos >= len(cur):
+            if eof:  # pragma: no cover - defensive: every call site below
+                # halts (return/raise) on this function's first False,
+                # so a second call after eof is already set never happens
+                # in practice; guarded anyway so a future call site that
+                # doesn't halt immediately can't call read_more() again
+                # past genuine end of stream.
+                return False
+            deadline.check()
+            chunk = read_more()
+            if not chunk:
+                eof = True
+                return False
+            cur = chunk
+            pos = 0
         return True
-
-    ci = 0  # index into `chunks` of the character at (ci, co)
-    co = 0
-
-    def _current() -> str | None:
-        """Character at the scan cursor, fetching more input as needed.
-        ``None`` only at genuine end of stream."""
-        nonlocal ci, co
-        while True:
-            if ci < len(chunks):
-                if co < len(chunks[ci]):
-                    return chunks[ci][co]
-                ci += 1
-                co = 0
-                continue
-            if eof or not _fill():
-                return None
 
     doc_index = 0
     while True:
-        c = _current()
-        while c is not None and c.isspace():
-            co += 1
-            c = _current()
-        if c is None:
+        if not _ensure_char():
             return  # genuine end of stream, no partial document pending
+        while cur[pos].isspace():
+            pos += 1
+            if not _ensure_char():
+                return
+        c = cur[pos]
         if c not in "{[":
             raise SnapshotError(
                 "DPC++ frontend produced a truncated or malformed AST "
                 f"document stream: expected an object/array, found {c!r}"
             )
-        start_ci, start_co = ci, co
+
+        # Decided BEFORE scanning a single byte of this document -- purely
+        # from *stderr*'s positional invocation list, never this document's
+        # own content -- so an unwanted document never accumulates chunks
+        # below at all, not even transiently.
+        wants_this = want_text is None or want_text(doc_index)
+        pieces: list[str] = []
+        piece_start = pos
 
         depth = 0
         in_string = False
         escape = False
-        end_ci = end_co = None
-        while end_ci is None:
-            c = _current()
-            if c is None:
-                raise SnapshotError(
-                    "DPC++ frontend produced a truncated or malformed AST "
-                    "document stream: unexpected end of input"
-                )
+        end_pos: int | None = None
+        while end_pos is None:
+            if pos >= len(cur):
+                if wants_this:
+                    pieces.append(cur[piece_start:])
+                if not _ensure_char():
+                    raise SnapshotError(
+                        "DPC++ frontend produced a truncated or malformed AST "
+                        "document stream: unexpected end of input"
+                    )
+                piece_start = pos  # == 0, freshly replaced `cur`
+                continue
+            c = cur[pos]
             if in_string:
                 if escape:
                     escape = False
@@ -312,35 +330,18 @@ def _iter_json_documents(
             elif c in "}]":
                 depth -= 1
                 if depth == 0:
-                    co += 1
-                    end_ci, end_co = ci, co
+                    pos += 1
+                    end_pos = pos
                     continue
-            co += 1
+            pos += 1
 
         doc_text: str | None
-        if want_text is not None and not want_text(doc_index):
-            doc_text = None
-        elif start_ci == end_ci:
-            doc_text = chunks[start_ci][start_co:end_co]
+        if wants_this:
+            pieces.append(cur[piece_start:end_pos])
+            doc_text = pieces[0] if len(pieces) == 1 else "".join(pieces)
         else:
-            doc_text = "".join(
-                (
-                    chunks[start_ci][start_co:],
-                    *chunks[start_ci + 1 : end_ci],
-                    chunks[end_ci][:end_co],
-                )
-            )
+            doc_text = None
         yield doc_text
-
-        # Drop fully-consumed chunks; keep only the (typically small,
-        # bounded by chunk size, not document size) unconsumed tail.
-        # `end_ci` is always a valid index into the pre-deletion `chunks`
-        # (it comes from a cursor that just read a real character there),
-        # so at least chunks[end_ci] itself always survives the deletion.
-        del chunks[:end_ci]
-        chunks[0] = chunks[0][end_co:]
-        ci = 0
-        co = 0
         doc_index += 1
 
 
