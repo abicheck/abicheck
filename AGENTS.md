@@ -506,8 +506,22 @@ Pick the right home:
   run the planted plugin. `/link <options>` (clang-cl's documented
   "forward options to the linker") is blocked alongside it on the same
   LTO-linker-plugin grounds as the already-blocked `-Wl,`, without a
-  from-scratch empirical repro of that specific sub-case. This denylist is
-  necessarily reactive to the delivery *mechanism*, not exhaustive over
+  from-scratch empirical repro of that specific sub-case. A sixth review
+  round found a different shape of finding again: `-cc1`/`-cc1as`, Clang's
+  internal frontend mode, only activates when `-cc1`/`-cc1as` is literally
+  the *first* argument after the program name (confirmed empirically:
+  `-cc1` anywhere else is rejected as "unknown argument", including right
+  after a leading `-I`) — but `dumper.py`'s `_build_clang_header_command`
+  builds argv as `[cc_bin, *-I dirs, --sysroot, -nostdinc, *gcc_options
+  tokens, ...]`, so a scan with no `extra_includes`/`sysroot`/`nostdinc`
+  lets a leading `-cc1` in `compile.args` genuinely land in that
+  first-argument slot. Once in cc1 mode, `-load`/`-fpass-plugin=` were
+  already blocked, but cc1 mode exposes an entirely different, much larger
+  argument namespace this denylist was never designed to enumerate — Codex
+  found `-fcas-plugin-path` (a cc1-only flag not present in every Clang
+  build) doing the identical thing. Rejected the mode switch itself rather
+  than chasing individual cc1-only flags, the same reasoning as `--config`.
+  This denylist is necessarily reactive to the delivery *mechanism*, not exhaustive over
   every dangerous flag a mechanism could carry — a real fix for the
   whack-a-mole shape of this (an allowlist of known-safe ABI flags instead
   of a denylist of known-dangerous ones) was suggested during review but

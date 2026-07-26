@@ -85,6 +85,18 @@
   <options>` is clang-cl's own "forward to the linker" escape hatch — the
   cl-mode spelling of the already-blocked `-Wl,` mechanism — blocked for
   the same LTO-linker-plugin reason.
+- **`profiles.<id>.compile.args` also rejects `-cc1`/`-cc1as` now.** Clang's
+  internal `cc1`/`cc1as` frontend mode only activates when `-cc1`/`-cc1as`
+  is literally the first argument after the program name (confirmed
+  empirically), and `dumper.py`'s `_build_clang_header_command` builds
+  argv as `[cc_bin, *-I dirs, --sysroot, -nostdinc, *gcc_options tokens,
+  ...]` — a scan with no `extra_includes`/`sysroot`/`nostdinc` lets a
+  leading `-cc1` genuinely land in that slot. Once in cc1 mode, the
+  already-blocked `-load`/`-fpass-plugin=` still work, but cc1 exposes an
+  entirely different, unenumerated argument namespace (Codex review found
+  `-fcas-plugin-path`, a cc1-only flag, doing the identical thing in a
+  Clang build that has it) — rejected the mode switch itself rather than
+  chasing individual cc1-only flags.
 - **`release_recommendation`'s JSON Schema now enforces the
   `version_bump`/`state` pairing it only documented in prose** (schema
   2.21, `compare_report.schema.json` and its `docs/reference/schemas/v1/`

@@ -1694,6 +1694,8 @@ def test_profile_compile_overlay_rejects_quoted_dangerous_arg_shlex_round_trip()
         "-B/some/dir",
         "/clang:-fplugin=./evil.so",
         "/link",
+        "-cc1",
+        "-cc1as",
     ],
 )
 def test_profile_compile_overlay_rejects_dangerous_args(dangerous_arg: str) -> None:

@@ -540,6 +540,29 @@ class BundleSpec:
 #: -- blocked for the same reason, on the same LTO-linker-plugin grounds,
 #: even without a from-scratch clang-cl empirical repro of that specific
 #: sub-case.
+#:
+#: ``-cc1``/``-cc1as`` are a different shape of finding again: Clang's
+#: driver only enters its internal ``cc1``/``cc1as`` frontend mode when
+#: ``-cc1``/``-cc1as`` is literally the *first* argument after the program
+#: name -- confirmed empirically (``clang -c t.h -o t.o -cc1 -load
+#: ./evil.so`` rejects ``-cc1`` as "unknown argument"; ``clang -I. -cc1
+#: -load ./evil.so`` does too, since ``-I`` from a real header scan's
+#: ``extra_includes`` already occupies that first-argument slot), but
+#: ``clang -cc1 -load ./evil.so -plugin foo`` (nothing before ``-cc1``)
+#: really does run the planted plugin's constructor before failing on the
+#: unresolvable plugin name. This module's caller (``dumper.py``'s
+#: ``_build_clang_header_command``) builds argv as ``[cc_bin, *-I dirs,
+#: --sysroot, -nostdinc, *gcc_options tokens, ...]`` -- when a scan has no
+#: ``extra_includes``/``sysroot``/``nostdinc`` (a header with no separate
+#: ``-I`` search path, no cross sysroot), a leading ``-cc1`` in
+#: ``compile.args`` genuinely lands in that first-argument slot. Once in
+#: cc1 mode, ``-load``/``-fpass-plugin=`` are still blocked above, but cc1
+#: mode exposes an entirely different, much larger argument namespace this
+#: denylist was never designed to enumerate (Codex review found
+#: ``-fcas-plugin-path``, a cc1-only flag not in every Clang build, doing
+#: the identical thing) -- reject the *mode switch itself*, the same
+#: "block the delivery mechanism, not every payload it could carry"
+#: reasoning as ``--config`` above.
 _DANGEROUS_ARG_PREFIXES = (
     "-Xclang",
     "-Xpreprocessor",
@@ -562,6 +585,7 @@ _DANGEROUS_ARG_PREFIXES = (
     "-B",
     "/clang:",
     "/link",
+    "-cc1",
     "@",
 )
 
