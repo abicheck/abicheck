@@ -333,6 +333,26 @@ def merge_fragments(
             tu_names=tuple(f.tu_name for f in ordered),
         )
 
+    # Same reasoning, for frontend_context_kind (CodeRabbit review): every TU
+    # is parsed under the manifest's one, uniform frontend_context request
+    # (dump_manifest.py has no per-TU override) against one, uniform compiler
+    # binary, so this should never actually diverge -- but blindly copying
+    # ordered[0]'s value below would misrepresent the merged snapshot's
+    # provenance if that ever changed, exactly like an unguarded ast_producer
+    # copy would.
+    frontend_context_kinds = {f.frontend_context_kind for f in ordered}
+    if len(frontend_context_kinds) > 1:
+        raise TuMergeError(
+            "translation units resolved different SYCL/DPC++ frontend "
+            f"contexts ({sorted(str(k) for k in frontend_context_kinds)!r}) "
+            "-- every TU in a manifest is parsed under the same requested "
+            "frontend_context by construction, so this should be "
+            "unreachable; refusing to guess a representative value.",
+            code=HETEROGENEOUS_ABI_CONTEXT,
+            entity_key=("manifest", "frontend_context_kind"),
+            tu_names=tuple(f.tu_name for f in ordered),
+        )
+
     header_segs, dir_segs, have_public_set = build_public_set(
         list(public_header_paths), list(public_header_dirs)
     )

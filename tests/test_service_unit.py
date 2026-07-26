@@ -1233,7 +1233,7 @@ class TestHeaderScopedInferredRoots:
         from abicheck.service import _try_header_scoped_dump
         from abicheck.service_scan import CompileContext
 
-        root, umb = self._umbrella(tmp_path)
+        _root, umb = self._umbrella(tmp_path)
 
         def raises_ast_context_missing(
             path, headers, extra_includes, version, compiler, **k

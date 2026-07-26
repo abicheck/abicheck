@@ -187,3 +187,36 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   *other* manifest's declared surface. New `_manifest_roots` folds the
   manifest's own ordered `roots` list into the whole-snapshot cache key as
   its own component (Codex review).
+- `dumper._header_ast_parser`'s castxml/device rejection guard only checked
+  the literal `--ast-frontend` flag, so `ABICHECK_AST_FRONTEND=castxml`
+  pinning a bare `--ast-frontend auto` request was treated the same as an
+  unpinned `auto` — silently falling through to the clang backend instead
+  of being rejected the same way an explicit `--ast-frontend castxml`
+  would be, contradicting `docs/reference/environment.md`'s own "pins the
+  AST frontend when the request is auto ... honoured verbatim" contract.
+  Now also rejects when the env var pins `castxml` (Codex review).
+- `cli_dump_helpers.render_dump_dry_run`'s manifest-mode
+  `compute_extraction_contract` call omitted both `manifest_tu_scope` and
+  `declared_includes` — the real (non-dry) manifest dump path
+  (`dumper_contract._attach_extraction_contract`) supplies both, so the
+  dry-run's printed `scope_fingerprint` preview fell back to the legacy
+  field set and could never match what a real extraction would actually
+  compute, defeating the point of a "preview the extraction contract"
+  dry-run (Codex/CodeRabbit review).
+- `dump_manifest.py`'s `frontend_context` validation error claimed
+  `"device"` was "ADR-050 Phase D (G32), not yet implemented" — stale
+  wording left over from before Phase D shipped; `_SUPPORTED_FRONTEND_
+  CONTEXTS` already accepts `"device"` (CodeRabbit review).
+- `dumper_manifest.py`'s per-TU pooled extraction loop called
+  `_handle_failure(tu)` twice on a required TU's failure — once
+  immediately after cancelling in-flight futures, and again unconditionally
+  right after, even though the first call's bare `raise` already
+  propagates before the second could run. Harmless today but confusing;
+  removed the redundant first call (CodeRabbit review).
+- `tu_merge.merge_fragments` validated cross-fragment `ast_producer`
+  consistency but blindly copied `ordered[0].frontend_context_kind`
+  without the same check — extended the existing `HETEROGENEOUS_ABI_
+  CONTEXT` guard to cover `frontend_context_kind` too, so a manifest
+  merge that ever saw diverging per-TU host/device resolution fails loudly
+  instead of silently misrepresenting the merged snapshot's provenance
+  (CodeRabbit review).

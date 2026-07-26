@@ -533,9 +533,7 @@ def _clang_header_dump(
         except (ValueError, OSError):
             cached.unlink(missing_ok=True)
         else:
-            # Loading a huge cached AST can consume the rest of the
-            # budget; re-check before handing it to the walker (Codex review).
-            deadline.check()
+            deadline.check()  # loading a huge cached AST can eat the rest of the budget
             return _cached_result, resolved_kind
 
     agg_ext = ".hpp" if force_cpp else ".h"
@@ -671,12 +669,15 @@ def _header_ast_parser(
             '"hybrid" AST frontend has no single parser here '
             "(see dumper_hybrid.run_hybrid_dump)."
         )
-    # Checked against *backend* (Codex review): "auto" also resolves to
-    # "castxml", so `resolved` alone can't tell an explicit request apart.
+    # `resolved` alone can't distinguish explicit/env-pinned/defaulted castxml;
+    # an env pin counts as explicit too (environment.md: "honoured verbatim").
+    _env_pinned_castxml = (backend or "auto").lower() == "auto" and (
+        os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower() == "castxml"
+    )
     if (
         resolved == "castxml"
         and frontend_context != "host"
-        and (backend or "auto").lower() == "castxml"
+        and ((backend or "auto").lower() == "castxml" or _env_pinned_castxml)
     ):
         raise AstContextMissingError(
             f"--frontend-context {frontend_context!r} requires the clang "
@@ -1035,9 +1036,7 @@ def _castxml_dump(
         if _cached_root is None:
             cached.unlink(missing_ok=True)
         else:
-            # Parsing a huge cached tree can consume the rest of the budget;
-            # re-check before handing it off (Codex review).
-            deadline.check()
+            deadline.check()  # parsing a huge cached tree can eat the rest of the budget
             return cast(Element, _cached_root)
 
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:

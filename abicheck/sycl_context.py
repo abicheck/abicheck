@@ -130,7 +130,7 @@ def decode_frontend_contexts(stdout: str, stderr: str) -> list[FrontendContext]:
         )
     return [
         FrontendContext(kind=m.group("kind"), target=m.group("target"), ast=doc)
-        for m, doc in zip(invocations, docs)
+        for m, doc in zip(invocations, docs, strict=True)
     ]
 
 

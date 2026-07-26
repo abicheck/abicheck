@@ -748,6 +748,35 @@ def test_header_ast_parser_auto_device_routes_to_clang_not_rejected(
     assert isinstance(parser, _ClangAstParser)
 
 
+def test_header_ast_parser_env_pinned_castxml_rejects_device_context(
+    tmp_path, monkeypatch
+):
+    """Codex review, PR #636 follow-up: ABICHECK_AST_FRONTEND=castxml with a
+    bare --ast-frontend auto (no explicit CLI flag) must be treated the same
+    as an EXPLICIT --ast-frontend castxml, not the same as plain auto with no
+    pin at all -- docs/reference/environment.md's own contract is "Pins the
+    AST frontend when the request is auto ... honoured verbatim". The
+    previous fix (routing auto+device to clang) checked only the literal
+    `backend` argument, which can't distinguish "auto defaulted to castxml"
+    from "auto was pinned to castxml by the environment" -- both produce
+    backend="auto" -- so an env pin was silently overridden by a device
+    request instead of being honored as the equivalent of an explicit flag.
+    """
+    from abicheck.dumper import _header_ast_parser
+    from abicheck.errors import AstContextMissingError
+
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "castxml")
+
+    with pytest.raises(AstContextMissingError, match="castxml"):
+        _header_ast_parser(
+            [Path("a.h")],
+            [],
+            backend="auto",
+            frontend_context="device",
+            **_ast_parser_kwargs(tmp_path),
+        )
+
+
 def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkeypatch):
     """A castxml failure that is NOT a toolchain-version signature (e.g. a bad
     header) re-raises — fallback is reserved for the recoverable case."""

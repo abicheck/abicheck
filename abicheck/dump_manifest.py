@@ -354,9 +354,8 @@ def parse_manifest(text: str, *, base_dir: Path, source: str = "<manifest>") -> 
     frontend_context = _require_str(data, "frontend_context", context=source, default="host")
     if frontend_context not in _SUPPORTED_FRONTEND_CONTEXTS:
         raise ManifestValidationError(
-            f"{source}: frontend_context {frontend_context!r} is not supported yet "
-            "-- device context selection requires ADR-050 Phase D (G32), not yet "
-            "implemented; only 'host' is accepted"
+            f"{source}: frontend_context {frontend_context!r} is not supported "
+            f"-- only {sorted(_SUPPORTED_FRONTEND_CONTEXTS)!r} are accepted"
         )
     public_header_paths = (
         _parse_path_list(data["public_header_paths"], base_dir=base_dir, context=f"{source}.public_header_paths")

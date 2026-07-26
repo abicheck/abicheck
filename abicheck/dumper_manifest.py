@@ -394,7 +394,6 @@ def _run_tu_fragments(
                 for other_fut in future_to_index:
                     other_fut.cancel()
                 pool.shutdown(wait=False)
-                _handle_failure(tu)
             _handle_failure(tu)
     pool.shutdown(wait=True)
     fragments.extend(r for r in results if r is not None)
