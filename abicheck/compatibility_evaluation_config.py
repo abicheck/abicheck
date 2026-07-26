@@ -331,6 +331,18 @@ class EvidenceProviderRequirement:
     implementation: ImmutableIdentity
 
     def __post_init__(self) -> None:
+        if not isinstance(self.required, bool):
+            raise TypeError(
+                "EvidenceProviderRequirement.required must be a bool, not "
+                f"{self.required!r} -- the `required: bool` annotation isn't "
+                "runtime-enforced, so an untyped service/manifest adapter "
+                'could otherwise pass a truthy non-bool (e.g. "false", a '
+                "non-empty string that is truthy despite reading as false) "
+                "through construction unnoticed, and mixed str/bool entries "
+                "for the same capability can fail with TypeError during "
+                "_provider_sort_key's canonical sort instead of failing "
+                "validation cleanly at construction (Codex review)."
+            )
         if not isinstance(self.implementation, ImmutableIdentity):
             raise TypeError(
                 "EvidenceProviderRequirement.implementation must be an "

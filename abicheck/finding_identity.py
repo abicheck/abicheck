@@ -526,6 +526,42 @@ def _is_symbol_level_kind(kind_value: str) -> bool:
     )
 
 
+#: A handful of ``symbol_*`` kinds are emitted by *two* different detectors
+#: under the same :class:`~abicheck.checker_policy.ChangeKind` -- one
+#: per-symbol (``change.symbol`` names the one real entity that transitioned),
+#: the other library-level/batch (an arbitrary, alphabetically-first affected
+#: symbol is sampled into ``change.symbol`` as a "spokesperson" for the whole
+#: release). ``diff_platform_elf_symbols.py``'s ``_check_gained_gnu_unique``
+#: is the concrete case: it fires once per release when a build newly turns
+#: on ``-fgnu-unique``, reporting *how many* exports gained
+#: ``STB_GNU_UNIQUE`` binding rather than describing one specific symbol's
+#: transition (Codex review). Promoting that arbitrary sample to CANONICAL
+#: would alias it against whatever *other*, unrelated finding genuinely owns
+#: that mangled name.
+#:
+#: The two shapes share a kind but never share ``old_value``: only the batch
+#: call site passes this literal sentinel (verified against the one
+#: ``make_change`` call that produces it); the sibling per-symbol detector
+#: (``_check_binding_change``) always passes a real ``SymbolBinding`` enum
+#: value (``"GLOBAL"``, ``"WEAK"``, ``"LOCAL"``, ...) as ``old``, never this
+#: sentence -- so matching on it can't misclassify a legitimate per-symbol
+#: finding.
+_BATCH_SHAPED_OLD_VALUES = {
+    "symbol_binding_became_unique": "(no GNU_UNIQUE exports)",
+}
+
+
+def _is_batch_shaped_change(change: Change, kind_value: str) -> bool:
+    """True when *change* is a library-level/batch finding, not a per-entity one.
+
+    See :data:`_BATCH_SHAPED_OLD_VALUES` -- gates :func:`resolve_change_identity`
+    against promoting a batch finding's sampled symbol to a CANONICAL entity
+    identity.
+    """
+    sentinel = _BATCH_SHAPED_OLD_VALUES.get(kind_value)
+    return sentinel is not None and change.old_value == sentinel
+
+
 #: Change kinds ``diff_filtering`` already treats as one logical event
 #: reported by two different detectors -- mirrored here (not imported, so
 #: this leaf module stays independent of the diff layer; future wiring work
@@ -626,7 +662,9 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     rel = source_relative_identity(change.source_location or "", change.symbol or "")
 
     real_mangled = None
-    if _is_symbol_level_kind(kind_value):
+    if _is_symbol_level_kind(kind_value) and not _is_batch_shaped_change(
+        change, kind_value
+    ):
         real_mangled = normalize_mangled_name(change.symbol, change.qualified_name)
 
     # Every alias below is qualified with `discriminator`, matching `primary`/

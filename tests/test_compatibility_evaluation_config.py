@@ -353,6 +353,21 @@ class TestEvidenceProviderRequirement:
                 implementation="castxml",  # type: ignore[arg-type]
             )
 
+    def test_raw_string_required_is_rejected(self):
+        # required: bool isn't runtime-enforced -- an untyped adapter
+        # passing a truthy non-bool string (e.g. "false") would otherwise be
+        # silently accepted and could raise TypeError when mixed with real
+        # bool entries during _provider_sort_key's canonical sort, instead
+        # of failing validation cleanly at construction.
+        with pytest.raises(TypeError, match="EvidenceProviderRequirement.required"):
+            EvidenceProviderRequirement(
+                capability="headers",
+                required="false",  # type: ignore[arg-type]
+                implementation=ImmutableIdentity(
+                    id="castxml", version=1, sha256="a" * 64
+                ),
+            )
+
     def test_raw_string_provider_element_is_rejected(self):
         # EvidenceConfig.providers: tuple[EvidenceProviderRequirement, ...]
         # isn't runtime-enforced per element -- a bare object would

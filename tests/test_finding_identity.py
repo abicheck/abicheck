@@ -466,6 +466,41 @@ class TestResolveChangeIdentity:
         identity = resolve_change_identity(change)
         assert identity.tier == IDENTITY_TIER_NORMALIZED
 
+    def test_batch_gnu_unique_sample_is_not_canonical(self) -> None:
+        # Codex review: diff_platform_elf_symbols.py's _check_gained_gnu_unique
+        # fires once per release and samples an arbitrary, alphabetically-first
+        # affected export into Change.symbol -- even when that sample happens
+        # to be a real Itanium mangling, it must not be promoted to CANONICAL
+        # and aliased against whatever unrelated finding genuinely owns that
+        # symbol. The batch call site's distinctive old_value sentinel is what
+        # tells this apart from _check_binding_change's genuine per-symbol
+        # SYMBOL_BINDING_BECAME_UNIQUE emission (see test right below).
+        change = Change(
+            kind=ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
+            symbol=_ITANIUM_MANGLED,
+            description="1 GNU_UNIQUE export(s)",
+            old_value="(no GNU_UNIQUE exports)",
+            new_value="1 GNU_UNIQUE export(s)",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_NORMALIZED
+
+    def test_per_symbol_gnu_unique_transition_is_still_canonical(self) -> None:
+        # Regression guard: _check_binding_change's genuine per-symbol
+        # SYMBOL_BINDING_BECAME_UNIQUE emission -- a real SymbolBinding value
+        # in old_value, never the batch sentinel above -- must stay
+        # entity-bearing, not get swept into the same exclusion.
+        change = Change(
+            kind=ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
+            symbol=_ITANIUM_MANGLED,
+            description="GLOBAL -> UNIQUE",
+            old_value="GLOBAL",
+            new_value="UNIQUE",
+            qualified_name="foo",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_CANONICAL
+
     def test_symbol_moved_version_node_is_still_canonical(self) -> None:
         # Regression guard: SYMBOL_MOVED_VERSION_NODE lives in the same file
         # as the version-node-label kinds above but carries a real exported
