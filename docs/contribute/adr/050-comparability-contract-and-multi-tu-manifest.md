@@ -1614,6 +1614,47 @@ attributable field values on `ExtractionContract` (not just the fingerprint
 hash) specifically so a later carve-out can reason about *what* changed,
 not merely *that* something did.
 
+**Correction (Codex review, PR #641 follow-up): the carve-out's original
+`return None` was placed inside the scope `if` block, exiting the whole
+function and silently skipping the profile check that follows.** A release
+that both adds a header (safely waived) *and* changes an unrelated,
+uncorroborated profile field (compiler flags, macros, include order —
+none of which any existing carve-out covers) would have been wrongly
+treated as fully comparable instead of correctly raising
+`ProfileMismatchError` for the second, genuine drift. Fixed by gating the
+carve-out into the scope condition's own boolean expression instead of an
+early return inside the block — waiving the scope mismatch now falls
+through to the profile check unconditionally, the same as an ordinary
+non-mismatching scope comparison always has.
+
+**Header-sequence-growth carve-out (Codex review, same follow-up round):
+that correction immediately exposed a second, deeper gap — the identical
+"pure addition" scenario now correctly reached the profile check, and
+promptly failed it anyway.** `profile_fields["header_sequence"]` tracks
+declared-header *order* as its own genuine extraction-context fact
+(`compute_extraction_contract`'s docstring: header order can change how a
+*later* header's macros/pragmas resolve, so it is deliberately not folded
+into scope's order-independent declared set) — and adding a header
+necessarily changes this sequence too, by construction. With only the
+scope-side carve-out, `check_contracts_comparable` still raised
+`ProfileMismatchError` on the unmodified real pvxs scenario (confirmed by
+direct repro: `declared_headers=[a,b]` → `[a,b,c]` with everything else
+held constant differed only on `header_sequence`, and still hard-failed).
+A second, symmetric carve-out closes this: a `profile_fingerprint`
+mismatch confined to `header_sequence` alone does not raise when the new
+sequence, with exactly the newly-added headers removed (preserving order),
+reconstructs the old sequence exactly
+(`_header_sequence_is_additive_reorder_free`) — proving no *existing*
+header was reordered relative to another, only new ones appended or
+inserted. A reorder of existing headers entangled with growth (e.g.
+`[a,b]` → `[b,a,c]`) still raises, since that genuinely could change what
+an earlier-declared header's parse sees. Verified end-to-end against the
+exact real pvxs F8 scenario (both carve-outs together): `check_contracts_comparable`
+now returns `None` — no exception of either kind — reproducing what the
+original F8 fix was supposed to achieve but, until this round, never
+actually did for a snapshot pair that also carries `profile_fingerprint`
+(i.e. ran the L2 frontend, the ordinary case for a real header-AST dump).
+
 ### D3. Manifest and real multi-TU dump
 
 New `abicheck/dump_manifest.py`: a strict YAML parser (unknown fields are

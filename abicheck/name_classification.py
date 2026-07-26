@@ -201,12 +201,18 @@ _STDLIB_LOCAL_NAME_RE = re.compile(
 # (e.g. `template<> inline void std::swap<MyType>(...)`, mangling as
 # `_ZZSt4swapI6MyTypeE...`) -- the same "user-authored code nominally in
 # namespace std" shape as the class-template entries, just a function
-# rather than a class member.
+# rather than a class member. Also includes `10tuple_size` (Codex review,
+# PR #641 follow-up): `std::tuple_size<MyType>` is another standard
+# customization-point template class-templates a program can legally
+# specialize for its own type (e.g. to support structured bindings), the
+# same "user-authored code nominally in namespace std" shape as `std::hash`
+# -- real GCC output for such a specialization's local static mangles as
+# `_ZZNSt10tuple_sizeI6MyTypeE1fEvE1x`.
 _USER_SPECIALIZABLE_STD_TEMPLATE_RE = re.compile(
     r"^_ZZZ*N?[rVK]{0,3}[RO]?(?:St|3std)"
     r"(?:4hash|4less|7greater|8equal_to|12not_equal_to|10less_equal|"
     r"13greater_equal|11char_traits|14numeric_limits|15iterator_traits|"
-    r"14default_delete|9formatter|4swap)I"
+    r"14default_delete|9formatter|4swap|10tuple_size)I"
 )
 
 # Length-prefixed Itanium namespace components (``<len><name>``) for the

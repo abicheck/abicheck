@@ -451,8 +451,53 @@ New regression test: `test_gate_additive_header_set_carve_out_still_checks_profi
 (the exact "additive scope + unrelated profile drift" scenario, proven to
 fail without the fix and pass with it) and a new `4swap` parametrize case
 in `test_is_stdlib_local_name_symbol_user_specialized_customization_point_false`.
-Full fast unit suite green, mypy/ruff clean — this is the final state of
-both fixes as of this branch.
+Full fast unit suite green, mypy/ruff clean.
+
+**An eleventh review pass** (`chatgpt-codex-connector`), on the same two
+fixes, found one more gap in each:
+
+- The customization-point allowlist was still missing `std::tuple_size` —
+  another standard class-template customization point (used to support
+  structured bindings) a program can legally specialize for its own type,
+  the exact same "user-authored code nominally in namespace std" shape as
+  `std::hash`/`std::swap`. Real GCC output for such a specialization's
+  local static: `_ZZNSt10tuple_sizeI6MyTypeE1fEvE1x`. Added `10tuple_size`
+  to the alternation, with a parametrized regression case.
+- **The tenth pass's own profile-check fix, verified in isolation, exposed
+  a second gap the moment it was checked against the actual real-world F8
+  scenario end-to-end: `profile_fields["header_sequence"]` (declared-header
+  *order*, tracked separately from scope's order-independent declared set —
+  see `compute_extraction_contract`) necessarily changes on the exact same
+  "pure addition" case, so `check_contracts_comparable` still raised
+  `ProfileMismatchError` immediately after correctly falling through the
+  now-fixed scope carve-out.** Confirmed by direct repro before writing any
+  fix: `declared_headers=[a,b]` → `[a,b,c]` (everything else held constant)
+  differed on `header_sequence` alone and still hard-failed — meaning F8
+  was *still* not actually fixed end-to-end for any snapshot pair that also
+  carries a `profile_fingerprint` (i.e. ran the L2 frontend — the ordinary
+  case for a real header-AST dump, not an edge case). Fixed with a second,
+  symmetric carve-out: a `profile_fingerprint` mismatch confined to
+  `header_sequence` alone does not raise when the new sequence, with
+  exactly the newly-added headers removed (preserving order), reconstructs
+  the old sequence exactly (`_header_sequence_is_additive_reorder_free`) —
+  proving no *existing* header was reordered relative to another, only new
+  ones appended/inserted. A reorder of existing headers entangled with
+  growth (`[a,b]` → `[b,a,c]`) still raises, since header order can
+  genuinely change how an earlier-declared header's macros/pragmas
+  resolve. Re-verified the real pvxs-shaped repro end-to-end with both
+  carve-outs together: `check_contracts_comparable` now returns `None` —
+  no exception of either kind — for the actual scenario this whole F8
+  section describes.
+
+New regression tests: a `10tuple_size` parametrize case, plus seven direct
+unit tests of `_header_sequence_is_additive_reorder_free` (pure append,
+mid-sequence insertion, pure reorder — declined, reorder entangled with
+growth — declined, pure removal — declined, single-header-sentinel on
+either side — declined, `None` inputs — declined) and one gate-level
+end-to-end test reproducing the full real scenario (both fingerprints
+differ, `check_contracts_comparable` returns `None`). Full fast unit suite
+green, mypy/ruff clean, 97% branch coverage on `comparability.py` — this is
+the final state of both fixes as of this branch.
 
 ```yaml
 # .github/workflows/abi.yml (for epics-base/pvxs)

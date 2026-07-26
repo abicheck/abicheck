@@ -138,6 +138,10 @@ def test_is_stdlib_local_name_symbol_nested_but_user_owned_false() -> None:
         # std::swap<MyType>(...)`) -- the same user-authored-code-in-std
         # shape as the class-template cases above, just a function.
         "_ZZSt4swapI6MyTypeEvRT_S1_E1x",
+        # Codex review, PR #641 follow-up (second gap in the same round):
+        # std::tuple_size<MyType> is another standard customization-point
+        # class template a program can legally specialize for its own type.
+        "_ZZNSt10tuple_sizeI6MyTypeE1fEvE1x",
     ],
 )
 def test_is_stdlib_local_name_symbol_user_specialized_customization_point_false(

@@ -23,6 +23,7 @@ import pytest
 from abicheck.comparability import (
     ComparabilityMismatch,
     IncludeDir,
+    _header_sequence_is_additive_reorder_free,
     check_contracts_comparable,
     compute_extraction_contract,
 )
@@ -1311,6 +1312,119 @@ def test_gate_additive_header_set_carve_out_still_checks_profile_afterward(tmp_p
     assert old.contract.profile_fingerprint != new.contract.profile_fingerprint
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
+
+
+def test_gate_header_sequence_carve_out_makes_f8_scenario_fully_comparable(tmp_path):
+    # Codex review (PR #641 follow-up, second round): compute_extraction_contract
+    # tracks declared-header ORDER in profile_fields["header_sequence"] as a
+    # genuine extraction-context fact distinct from scope_fingerprint's
+    # order-independent declared SET -- so the exact real pvxs F8 scenario
+    # (a pure header addition) unavoidably changes header_sequence too, and
+    # with only the scope-side carve-out, check_contracts_comparable still
+    # raised ProfileMismatchError on the identical "pure addition" case it
+    # had just been fixed to accept. This is the full real-world scenario
+    # end-to-end: both the scope AND profile fingerprints differ, and the
+    # pair must still be fully comparable (no exception of either kind).
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    c2 = _write(tmp_path / "v2" / "c.h", "int h(void);\n")
+    old = _snap(compute_extraction_contract(declared_headers=[a, b], l2_frontend_ran=True))
+    new = _snap(
+        compute_extraction_contract(declared_headers=[a2, b2, c2], l2_frontend_ran=True)
+    )
+    assert old.contract.scope_fingerprint != new.contract.scope_fingerprint
+    assert old.contract.profile_fingerprint != new.contract.profile_fingerprint
+    assert old.contract.profile_fields["header_sequence"] != new.contract.profile_fields[
+        "header_sequence"
+    ]
+    assert check_contracts_comparable(old, new) is None  # must not raise either error
+
+
+def test_gate_header_sequence_carve_out_still_raises_when_existing_headers_reordered(
+    tmp_path,
+):
+    # A genuine reorder of the EXISTING headers entangled with growth (b,a,c
+    # instead of a,b,c) is a real profile-relevant risk -- reordering
+    # declared headers can change how a later header's macros/pragmas
+    # resolve -- and must still raise, even though the header SET grew.
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    c2 = _write(tmp_path / "v2" / "c.h", "int h(void);\n")
+    old = _snap(compute_extraction_contract(declared_headers=[a, b], l2_frontend_ran=True))
+    new = _snap(
+        compute_extraction_contract(declared_headers=[b2, a2, c2], l2_frontend_ran=True)
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_header_sequence_carve_out_declines_when_a_side_is_single_header_sentinel(
+    tmp_path,
+):
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    old = _snap(compute_extraction_contract(declared_headers=[a], l2_frontend_ran=True))
+    new = _snap(compute_extraction_contract(declared_headers=[a2, b2], l2_frontend_ran=True))
+    with pytest.raises((ScopeMismatchError, ProfileMismatchError)):
+        check_contracts_comparable(old, new)
+
+
+# ---------------------------------------------------------------------------
+# _header_sequence_is_additive_reorder_free: unit-tested directly (mirrors
+# how _scope_field_is_additive_superset is only exercised through the gate
+# above, but the reorder-detection logic here is intricate enough to also
+# warrant pinning as a pure function)
+# ---------------------------------------------------------------------------
+
+
+def test_header_sequence_additive_reorder_free_true_for_pure_append():
+    old = json.dumps(["a.h", "b.h"])
+    new = json.dumps(["a.h", "b.h", "c.h"])
+    assert _header_sequence_is_additive_reorder_free(old, new)
+
+
+def test_header_sequence_additive_reorder_free_true_for_insertion_in_middle():
+    old = json.dumps(["a.h", "c.h"])
+    new = json.dumps(["a.h", "b.h", "c.h"])  # b.h inserted between a.h and c.h
+    assert _header_sequence_is_additive_reorder_free(old, new)
+
+
+def test_header_sequence_additive_reorder_free_false_for_pure_reorder():
+    old = json.dumps(["a.h", "b.h"])
+    new = json.dumps(["b.h", "a.h"])  # same set, no growth, but reordered
+    assert not _header_sequence_is_additive_reorder_free(old, new)
+
+
+def test_header_sequence_additive_reorder_free_false_for_reorder_entangled_with_growth():
+    old = json.dumps(["a.h", "b.h"])
+    new = json.dumps(["b.h", "a.h", "c.h"])
+    assert not _header_sequence_is_additive_reorder_free(old, new)
+
+
+def test_header_sequence_additive_reorder_free_false_for_pure_removal():
+    old = json.dumps(["a.h", "b.h", "c.h"])
+    new = json.dumps(["a.h", "b.h"])
+    assert not _header_sequence_is_additive_reorder_free(old, new)
+
+
+def test_header_sequence_additive_reorder_free_declines_on_single_header_sentinel():
+    old = json.dumps(["<single-header>"])
+    new = json.dumps(["a.h", "b.h"])
+    assert not _header_sequence_is_additive_reorder_free(old, new)
+    # Same decline when the NEW side (rather than old) is the sentinel.
+    assert not _header_sequence_is_additive_reorder_free(
+        json.dumps(["a.h", "b.h"]), json.dumps(["<single-header>"])
+    )
+
+
+def test_header_sequence_additive_reorder_free_declines_on_none():
+    assert not _header_sequence_is_additive_reorder_free(None, json.dumps(["a.h"]))
+    assert not _header_sequence_is_additive_reorder_free(json.dumps(["a.h"]), None)
 
 
 def test_gate_raises_profile_mismatch_error_on_profile_drift(tmp_path):

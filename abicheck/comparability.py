@@ -170,6 +170,45 @@ _BUILD_CONTEXT_FIELDS = frozenset({"language_standard", "macro_ops"})
 # decline instead of guessing.
 _SCOPE_SINGLE_ENTRY_SENTINELS = frozenset({"<single-header>", "<single-header-dir>"})
 
+# The only profile_fields key the header-sequence-growth carve-out (PR #641
+# follow-up, third round -- Codex review: the F8 scope carve-out's own "pure
+# header addition" case unavoidably changes profile_fields["header_sequence"]
+# too, since profile_fingerprint tracks declared-header ORDER as a genuine
+# extraction-context fact distinct from scope_fingerprint's order-independent
+# declared SET -- see compute_extraction_contract's docstring) is allowed to
+# treat as non-fatal, and only when the new sequence, with exactly the
+# newly-added headers removed (in order), reconstructs the old sequence
+# exactly -- proving no EXISTING header was reordered relative to another,
+# only new ones appended/inserted.
+_HEADER_SEQUENCE_FIELDS = frozenset({"header_sequence"})
+
+
+def _header_sequence_is_additive_reorder_free(
+    old_value: str | None, new_value: str | None
+) -> bool:
+    """Whether *new_value* (``profile_fields["header_sequence"]``, a
+    json-encoded order-preserving-deduplicated header identity list) is
+    *old_value* with only new entries appended/inserted -- never with an
+    EXISTING header reordered relative to another (a genuine,
+    profile-relevant risk this carve-out must not paper over). Declines
+    (like :func:`_scope_field_is_additive_superset`) whenever either side
+    is the ``<single-header>`` sentinel, since there is no real order to
+    verify there.
+    """
+    if old_value is None or new_value is None:
+        return False
+    old_list: list[str] = json.loads(old_value)
+    new_list: list[str] = json.loads(new_value)
+    if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
+        return False
+    if len(new_list) == 1 and new_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
+        return False
+    old_set = set(old_list)
+    if not set(new_list) >= old_set:
+        return False
+    filtered = [h for h in new_list if h in old_set]
+    return filtered == old_list
+
 
 @dataclass(frozen=True)
 class IncludeDir:
@@ -956,6 +995,24 @@ def check_contracts_comparable(
     or a disjoint set) — this carve-out only ever *widens* what counts as
     comparable, never narrows the cases the gate still correctly refuses.
 
+    **Header-sequence-growth carve-out (PR #641 follow-up, third round):**
+    waiving the scope mismatch above is not sufficient on its own — adding a
+    header also changes ``profile_fields["header_sequence"]`` (declared-header
+    *order* is a genuine extraction-context fact, tracked separately from
+    scope's order-independent declared *set*; see
+    :func:`compute_extraction_contract`), so the exact same "pure addition"
+    case would otherwise still raise ``ProfileMismatchError`` immediately
+    after the scope carve-out waives it. A ``profile_fingerprint`` mismatch
+    confined to ``header_sequence`` does not raise when the new sequence,
+    with exactly the newly-added headers removed (in order), reconstructs
+    the old sequence exactly (see
+    :func:`_header_sequence_is_additive_reorder_free`) — proving no
+    *existing* header was reordered relative to another, only new ones
+    appended/inserted. A reorder of existing headers entangled with growth
+    (a genuine profile-relevant risk — header order can change how a later
+    header's macros/pragmas resolve) still raises, same as any other
+    profile drift this carve-out doesn't cover.
+
     ``diagnostic=True`` (ADR-050's ``--diagnostic-comparison`` escape hatch)
     downgrades a hard-fail into a :class:`ComparabilityMismatch` descriptor
     returned to the caller instead of raised — the one sanctioned way to
@@ -1065,6 +1122,16 @@ def check_contracts_comparable(
             # gating it into a generic not_comparable first would only
             # discard that finding instead of letting the more specific
             # detector classify it correctly.
+            return None
+        if (
+            differing
+            and differing <= _HEADER_SEQUENCE_FIELDS
+            and _header_sequence_is_additive_reorder_free(
+                old_fields.get("header_sequence"), new_fields.get("header_sequence")
+            )
+        ):
+            # Header-sequence-growth carve-out (PR #641 follow-up, third
+            # round) -- see check_contracts_comparable's own docstring.
             return None
         reason = (
             "old and new snapshots were extracted under different compile "
