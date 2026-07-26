@@ -65,7 +65,7 @@ def _frozen_tuple(s: Sequence[object]) -> tuple[object, ...]:
 
 
 def _canonical_tuple(s: Sequence[_T], *, key: Callable[[_T], Any]) -> tuple[_T, ...]:
-    """Sort an unordered selection into a stable, order-independent tuple.
+    """Sort+dedupe an unordered selection into a stable, canonical tuple.
 
     ADR-049 D8: "Pack order never decides semantics," and D7 requires
     "equivalent semantic inputs must resolve to an equivalent object" --
@@ -73,8 +73,13 @@ def _canonical_tuple(s: Sequence[_T], *, key: Callable[[_T], Any]) -> tuple[_T, 
     order must compare equal. Sorting by a stable key (rather than leaving
     insertion order, or discarding order entirely via a set) gives both
     order-independent equality and a deterministic serialization order.
+    Also drops exact duplicates: D7 "equivalent duplicate values are
+    accepted" -- the same pack selected twice (e.g. once via a recipe
+    default, once via an explicit CLI flag) must resolve the same as
+    selecting it once. ``dict.fromkeys`` on the already-sorted sequence
+    dedupes by equality while keeping the sorted order.
     """
-    return tuple(sorted(s, key=key))
+    return tuple(dict.fromkeys(sorted(s, key=key)))
 
 
 def _require_nonempty_digest(sha256: str, *, owner: str) -> None:

@@ -324,6 +324,35 @@ class TestPackAndProviderOrderIndependence:
         assert forward == backward
 
 
+class TestPackAndProviderDeduplication:
+    # ADR-049 D7: "Equivalent duplicate values are accepted" -- the same
+    # pack/provider selected twice (e.g. once via a recipe default, once
+    # via an explicit CLI flag) must resolve the same as selecting it once.
+    def test_duplicate_pack_collapses_to_one(self):
+        pack = _identity("rust_c_ffi")
+        once = ContractConfig(mode=ContractMode.PUBLIC, packs=[pack])
+        twice = ContractConfig(mode=ContractMode.PUBLIC, packs=[pack, pack])
+        assert once == twice
+        assert twice.packs == (pack,)
+
+    def test_duplicate_pack_among_others_collapses(self):
+        a = _identity("rust_c_ffi")
+        b = _identity("qt_kde_cpp")  # sorts before "rust_c_ffi"
+        deduped = ContractConfig(mode=ContractMode.PUBLIC, packs=[a, b, a])
+        assert deduped.packs == (b, a)
+
+    def test_duplicate_provider_collapses_to_one(self):
+        req = EvidenceProviderRequirement(
+            capability="active_ast",
+            required=True,
+            implementation=_identity("clang_ast"),
+        )
+        once = EvidenceConfig(providers=[req])
+        twice = EvidenceConfig(providers=[req, req])
+        assert once == twice
+        assert twice.providers == (req,)
+
+
 class TestGateSeverityDefault:
     def test_default_gate_severity_matches_existing_defaults(self):
         # GateConfig.severity should default to the same SeverityConfig
