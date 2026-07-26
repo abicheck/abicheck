@@ -91,6 +91,13 @@ def _require_nonempty_digest(sha256: str, *, owner: str) -> None:
         )
 
 
+# ADR-049 D9's unresolved_behavior is a closed, two-value vocabulary this
+# module owns outright (every worked example in the ADR uses exactly one of
+# these two strings) -- unlike e.g. ValueProvenance.source_kind, which is
+# free-form text belonging to a not-yet-written resolver.
+_VALID_UNRESOLVED_BEHAVIORS = frozenset({"not_checkable", "warn"})
+
+
 # --------------------------------------------------------------------------
 # D7: field-level provenance.
 # --------------------------------------------------------------------------
@@ -214,6 +221,12 @@ class ContractConfig:
     packs: tuple[ImmutableIdentity, ...] = ()
 
     def __post_init__(self) -> None:
+        if self.unresolved not in _VALID_UNRESOLVED_BEHAVIORS:
+            raise ValueError(
+                f"ContractConfig.unresolved must be one of "
+                f"{sorted(_VALID_UNRESOLVED_BEHAVIORS)} (ADR-049 D9), got "
+                f"{self.unresolved!r}"
+            )
         object.__setattr__(self, "overlays", _frozen_tuple(self.overlays))
         object.__setattr__(
             self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)
@@ -231,27 +244,21 @@ def _pack_sort_key(identity: ImmutableIdentity) -> tuple[str, int, str]:
 class EvidenceProviderRequirement:
     """One evidence capability's requiredness and pinned implementation.
 
-    ``implementation`` is required whenever ``required`` is ``True``:
-    ADR-049 D6's worked example always pairs a required capability with a
-    pinned implementation (e.g. ``{capability: active_ast, required: true,
-    implementation: {id: clang_ast, version: 1, sha256: "..."}}``) -- a
-    required capability with no pinned implementation cannot be replayed
-    exactly, since there is nothing recorded to say which parser/version
-    satisfied it. An optional (enrichment) capability may have none.
+    ``implementation`` is required unconditionally, whether ``required`` is
+    ``True`` or ``False``: ADR-049 D6 states "every selected provider ...
+    carries an immutable identity/version/digest" with no carve-out for
+    optional (enrichment) providers -- ``required`` governs whether missing
+    *evidence* blocks evaluation, not whether a *selected* provider's
+    implementation is recorded for replay. A provider that was not selected
+    for a given run is represented by omitting its
+    :class:`EvidenceProviderRequirement` entry from
+    :attr:`EvidenceConfig.providers` entirely, not by an entry with
+    ``implementation=None``.
     """
 
     capability: str
     required: bool
-    implementation: ImmutableIdentity | None = None
-
-    def __post_init__(self) -> None:
-        if self.required and self.implementation is None:
-            raise ValueError(
-                "EvidenceProviderRequirement.implementation is required "
-                "when required=True (ADR-049 D6): a required capability "
-                "must be backed by a pinned, versioned implementation for "
-                "exact replay; only an optional capability may have none."
-            )
+    implementation: ImmutableIdentity
 
 
 def _provider_sort_key(
@@ -259,13 +266,7 @@ def _provider_sort_key(
 ) -> tuple[str, bool, str, int, str]:
     # implementation.sha256 breaks ties the same way _pack_sort_key's does.
     impl = req.implementation
-    return (
-        req.capability,
-        req.required,
-        impl.id if impl else "",
-        impl.version if impl else -1,
-        impl.sha256 if impl else "",
-    )
+    return (req.capability, req.required, impl.id, impl.version, impl.sha256)
 
 
 @dataclass(frozen=True)

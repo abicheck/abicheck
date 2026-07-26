@@ -763,6 +763,12 @@ or aggregate required-target coverage.
 **Gate:** docs and schemas have no `exports == all`, `PRIVATE`, hidden
 `public_contract` preset, or policy/contract conflation.
 
+**Progress:** vocabulary/reason-code/schema-version types reserved
+(`abicheck/contract_relevance_types.py`); nothing wired into detection,
+policy, the CLI, or reports yet. "Accept ADR-049" itself is still
+outstanding — the ADR is Status: Proposed with a pending decision maker, so
+this phase is partial, not done.
+
 ### Phase 1 — effective resolver
 
 Likely surfaces:
@@ -778,6 +784,15 @@ and hard errors for unknown `ChangeKind` slugs.
 
 **Gate:** every front end resolves equivalent semantic input to an equal
 `CompatibilityEvaluationConfig` and provenance receipt.
+
+**Progress:** the typed `CompatibilityEvaluationConfig` shape (slice 1,
+`abicheck/compatibility_evaluation_config.py`) and the field-level
+precedence resolver (slice 2, `abicheck/compatibility_evaluation_resolver.py`
+`resolve_field`, implementing this phase's conflicts/aliases rules) are
+done. No front end (`cli_options.py`, `.abicheck.yml`, service/API)
+constructs real `FieldCandidate`s from argv/config/recipe input yet, and
+pack-conflict detection plus the unknown-`ChangeKind`-slug hard error are
+not started.
 
 ### Phase 2 — canonical identity and fact conservation
 

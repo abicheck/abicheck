@@ -85,6 +85,24 @@ class TestConstruction:
         assert cfg.policy.overrides["soname_bump_recommended"] is Verdict.BREAKING
 
 
+class TestContractConfigUnresolvedBehavior:
+    # ADR-049 D9: unresolved_behavior is a closed two-value vocabulary
+    # ("not_checkable" default, "warn" the only opt-out) -- unlike
+    # ValueProvenance.source_kind, this field's domain is fully owned by
+    # this module, so a typo must be rejected rather than silently accepted.
+    def test_default_is_not_checkable(self):
+        contract = ContractConfig(mode=ContractMode.PUBLIC)
+        assert contract.unresolved == "not_checkable"
+
+    def test_warn_is_accepted(self):
+        contract = ContractConfig(mode=ContractMode.PUBLIC, unresolved="warn")
+        assert contract.unresolved == "warn"
+
+    def test_unsupported_value_is_a_value_error(self):
+        with pytest.raises(ValueError, match="unresolved"):
+            ContractConfig(mode=ContractMode.PUBLIC, unresolved="warning")
+
+
 class TestImmutability:
     def test_top_level_is_frozen(self):
         cfg = _minimal_config()
@@ -202,15 +220,28 @@ class TestEvidenceProviderRequirement:
         assert req.required is True
         assert req.implementation.id == "guarded_index"
 
-    def test_required_without_implementation_is_a_value_error(self):
+    def test_required_without_implementation_is_a_type_error(self):
         # ADR-049 D6: a required capability with no pinned implementation
         # cannot be replayed exactly.
-        with pytest.raises(ValueError, match="implementation is required"):
-            EvidenceProviderRequirement(capability="active_ast", required=True)
+        with pytest.raises(TypeError):
+            EvidenceProviderRequirement(capability="active_ast", required=True)  # type: ignore[call-arg]
 
-    def test_optional_capability_may_omit_implementation(self):
-        req = EvidenceProviderRequirement(capability="active_ast", required=False)
-        assert req.implementation is None
+    def test_optional_capability_still_requires_implementation(self):
+        # ADR-049 D6: "every selected provider ... carries an immutable
+        # identity/version/digest" applies regardless of required/optional --
+        # a provider not selected at all is represented by omitting its
+        # entry from EvidenceConfig.providers, not by implementation=None.
+        with pytest.raises(TypeError):
+            EvidenceProviderRequirement(capability="active_ast", required=False)  # type: ignore[call-arg]
+
+    def test_optional_capability_with_pinned_implementation(self):
+        req = EvidenceProviderRequirement(
+            capability="active_ast",
+            required=False,
+            implementation=ImmutableIdentity(id="clang_ast", version=1, sha256="abc"),
+        )
+        assert req.required is False
+        assert req.implementation.id == "clang_ast"
 
     def test_providers_tuple_is_frozen(self):
         evidence = EvidenceConfig(

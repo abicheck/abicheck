@@ -15,4 +15,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   rather than duplicating them. This is the typed-object shape only — no
   resolver constructs one of these from real CLI/`.abicheck.yml`/recipe
   input yet; see `docs/contribute/plans/public-contract-default.md` for the
-  remaining Phase 1 work.
+  remaining Phase 1 work. `ContractConfig.unresolved` validates against
+  ADR-049 D9's closed `{"not_checkable", "warn"}` vocabulary, and
+  `EvidenceProviderRequirement.implementation` is required unconditionally
+  (not only when `required=True`), matching D6's "every selected provider
+  ... carries an immutable identity/version/digest" with no optional-provider
+  carve-out.
