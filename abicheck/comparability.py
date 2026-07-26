@@ -399,6 +399,38 @@ def _sha256_of(*parts: str) -> str:
     return f"sha256:{h.hexdigest()}"
 
 
+def _fingerprint_matches_fields(
+    fingerprint: str, fields: dict[str, str], keys: tuple[str, ...]
+) -> bool:
+    """Whether *fingerprint* is exactly what :func:`compute_extraction_contract`
+    would produce from *fields* over *keys* (``SCOPE_FIELD_KEYS`` or
+    ``PROFILE_FIELD_KEYS``) -- i.e. whether this contract's stored fields
+    are actually what its own fingerprint was computed from (Codex review,
+    PR #641 follow-up, sixth P1).
+
+    Every carve-out above reasons entirely from ``scope_fields``/
+    ``profile_fields`` -- "this recognized field grew additively, so the
+    fingerprint mismatch is explained" -- but that reasoning only holds if
+    the stored fingerprint was genuinely computed from those exact fields.
+    For a snapshot dumped by this codebase's own
+    :func:`compute_extraction_contract`, that invariant always holds by
+    construction. It is NOT verified anywhere, though, so a deserialized or
+    externally constructed contract can carry a stale, fabricated, or
+    otherwise unrelated fingerprint alongside fields that merely *look*
+    additive: confirmed by direct repro before any fix -- two arbitrary,
+    unrelated fingerprint strings with ``headers`` genuinely growing from
+    ``["a.h", "b.h"]`` to ``["a.h", "b.h", "c.h"]`` made
+    :func:`check_contracts_comparable` return ``None`` (comparable) even
+    though neither fingerprint was ever verified to have anything to do
+    with those fields -- the true cause of the mismatch remains completely
+    unverified. Called on BOTH sides before any carve-out below is trusted;
+    a mismatch on either side means the fields can't be trusted to explain
+    that side's own fingerprint, so nothing reasoned from them is safe to
+    act on.
+    """
+    return fingerprint == _sha256_of(*[fields.get(k, "") for k in keys])
+
+
 def _classify_include_dirs(
     declared_headers: Sequence[Path],
     declared_includes: Sequence[IncludeDir],
@@ -1203,6 +1235,27 @@ def check_contracts_comparable(
     cross-compiler flag set for only one side), not a legitimate
     cross-architecture compare, and still raises.
 
+    **Every carve-out below is preceded by a fingerprint-authenticity check
+    (Codex review, PR #641 follow-up, sixth P1):** each side's stored
+    ``scope_fingerprint``/``profile_fingerprint`` must actually equal what
+    :func:`compute_extraction_contract` would compute from that same
+    side's own ``scope_fields``/``profile_fields`` (see
+    :func:`_fingerprint_matches_fields`). Every carve-out below reasons
+    entirely from the *fields* ("this recognized field grew additively, so
+    the fingerprint mismatch is explained") — but that reasoning is only
+    sound if the fingerprint was genuinely computed from those fields in
+    the first place. For a snapshot this codebase's own
+    :func:`compute_extraction_contract` produced, that invariant always
+    holds; it is unenforced for a deserialized or externally constructed
+    contract, though, so a stale, fabricated, or otherwise unrelated
+    fingerprint could previously sit alongside fields that merely *look*
+    additive and still be waived through — confirmed by direct repro
+    before this fix: two arbitrary, unrelated fingerprint strings with
+    ``headers`` genuinely growing additively still made this function
+    return ``None`` (comparable). A mismatch on either side here is
+    unconditionally fatal, before any of the carve-outs that follow are
+    even reached.
+
     **Additive-only header-set carve-out (PR #641 follow-up, pvxs scan F8):**
     a ``scope_fingerprint`` mismatch does not raise when *every* differing
     :data:`SCOPE_FIELD_KEYS` field on the new side is a superset of the old
@@ -1362,6 +1415,29 @@ def check_contracts_comparable(
         and new_contract.scope_fingerprint is not None
         and old_contract.scope_fingerprint != new_contract.scope_fingerprint
     ):
+        if not (
+            _fingerprint_matches_fields(
+                old_contract.scope_fingerprint, old_contract.scope_fields, SCOPE_FIELD_KEYS
+            )
+            and _fingerprint_matches_fields(
+                new_contract.scope_fingerprint, new_contract.scope_fields, SCOPE_FIELD_KEYS
+            )
+        ):
+            # Neither carve-out below may be trusted: at least one side's
+            # scope_fields don't actually produce that side's own
+            # scope_fingerprint, so nothing reasoned from those fields
+            # explains the real mismatch (Codex review, PR #641 follow-up,
+            # sixth P1) -- see _fingerprint_matches_fields's own docstring.
+            reason = (
+                "old and new snapshots do not cover the same declared "
+                "surface (scope_fingerprint mismatch), and at least one "
+                "side's scope_fields do not reproduce its own "
+                "scope_fingerprint — the comparison cannot be verified "
+                "safe."
+            )
+            if diagnostic:
+                return ComparabilityMismatch(kind="scope", reason=reason)
+            raise ScopeMismatchError(reason)
         # A differing scope_fields key OUTSIDE SCOPE_FIELD_KEYS entirely --
         # a newer schema field this build doesn't recognize -- must also
         # block the additive-only carve-out below, for the identical reason
@@ -1435,6 +1511,29 @@ def check_contracts_comparable(
     ):
         old_fields = old_contract.profile_fields
         new_fields = new_contract.profile_fields
+        if not (
+            _fingerprint_matches_fields(
+                old_contract.profile_fingerprint, old_fields, PROFILE_FIELD_KEYS
+            )
+            and _fingerprint_matches_fields(
+                new_contract.profile_fingerprint, new_fields, PROFILE_FIELD_KEYS
+            )
+        ):
+            # Neither carve-out below may be trusted: at least one side's
+            # profile_fields don't actually produce that side's own
+            # profile_fingerprint (Codex review, PR #641 follow-up, sixth
+            # P1) -- see _fingerprint_matches_fields's own docstring, and
+            # the scope-side equivalent check above.
+            reason = (
+                "old and new snapshots were extracted under different "
+                "compile contexts (profile_fingerprint mismatch), and at "
+                "least one side's profile_fields do not reproduce its own "
+                "profile_fingerprint — the comparison cannot be verified "
+                "safe."
+            )
+            if diagnostic:
+                return ComparabilityMismatch(kind="profile", reason=reason)
+            raise ProfileMismatchError(reason)
         differing = {
             k
             for k in PROFILE_FIELD_KEYS

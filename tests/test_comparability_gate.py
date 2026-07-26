@@ -17,11 +17,14 @@ from pathlib import Path
 import pytest
 
 from abicheck.comparability import (
+    SCOPE_FIELD_KEYS,
     ComparabilityMismatch,
     IncludeDir,
+    _fingerprint_matches_fields,
     _header_sequence_is_additive_reorder_free,
     _include_sequence_is_additive_owned_growth,
     _scope_field_is_additive_superset,
+    _sha256_of,
     check_contracts_comparable,
     compute_extraction_contract,
 )
@@ -41,6 +44,16 @@ def _write(path: Path, content: str) -> Path:
 
 def _snap(contract: ExtractionContract | None, **kwargs) -> AbiSnapshot:
     return AbiSnapshot(library="libfoo.so", version="1.0", contract=contract, **kwargs)
+
+
+def _real_scope_fingerprint(scope_fields: dict[str, str]) -> str:
+    """The genuine scope_fingerprint compute_extraction_contract would
+    produce for a hand-built scope_fields dict -- needed once
+    check_contracts_comparable started verifying that a contract's own
+    fingerprint actually reproduces from its own fields (Codex review, PR
+    #641 follow-up, sixth P1); a hand-typed placeholder like "s-old" no
+    longer passes that check."""
+    return _sha256_of(*[scope_fields[k] for k in SCOPE_FIELD_KEYS])
 
 
 # ---------------------------------------------------------------------------
@@ -1026,26 +1039,28 @@ def test_gate_rejects_unknown_profile_delta_even_with_a_waived_recognized_one():
         "header_sequence": json.dumps(["a.h", "b.h", "c.h"]),
         "future_field": "two",
     }
+    old_scope_fields = {
+        "headers": json.dumps(["a.h", "b.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
+    new_scope_fields = {
+        "headers": json.dumps(["a.h", "b.h", "c.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
     old = _snap(
         ExtractionContract(
             profile_fingerprint="p-old",
-            scope_fingerprint="s-old",
+            scope_fingerprint=_real_scope_fingerprint(old_scope_fields),
             profile_fields=old_fields,
-            scope_fields={
-                "headers": json.dumps(["a.h", "b.h"]),
-                "public_header_dirs": json.dumps([]),
-            },
+            scope_fields=old_scope_fields,
         )
     )
     new = _snap(
         ExtractionContract(
             profile_fingerprint="p-new",
-            scope_fingerprint="s-new",
+            scope_fingerprint=_real_scope_fingerprint(new_scope_fields),
             profile_fields=new_fields,
-            scope_fields={
-                "headers": json.dumps(["a.h", "b.h", "c.h"]),
-                "public_header_dirs": json.dumps([]),
-            },
+            scope_fields=new_scope_fields,
         )
     )
     with pytest.raises(ProfileMismatchError):
@@ -1363,26 +1378,28 @@ def test_gate_rejects_unknown_profile_delta_present_empty_vs_absent():
         "header_sequence": json.dumps(["a.h", "b.h", "c.h"]),
         # future_profile absent entirely on this side
     }
+    old_scope_fields = {
+        "headers": json.dumps(["a.h", "b.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
+    new_scope_fields = {
+        "headers": json.dumps(["a.h", "b.h", "c.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
     old = _snap(
         ExtractionContract(
             profile_fingerprint="p-old",
-            scope_fingerprint="s-old",
+            scope_fingerprint=_real_scope_fingerprint(old_scope_fields),
             profile_fields=old_fields,
-            scope_fields={
-                "headers": json.dumps(["a.h", "b.h"]),
-                "public_header_dirs": json.dumps([]),
-            },
+            scope_fields=old_scope_fields,
         )
     )
     new = _snap(
         ExtractionContract(
             profile_fingerprint="p-new",
-            scope_fingerprint="s-new",
+            scope_fingerprint=_real_scope_fingerprint(new_scope_fields),
             profile_fields=new_fields,
-            scope_fields={
-                "headers": json.dumps(["a.h", "b.h", "c.h"]),
-                "public_header_dirs": json.dumps([]),
-            },
+            scope_fields=new_scope_fields,
         )
     )
     with pytest.raises(ProfileMismatchError):
@@ -1420,3 +1437,143 @@ def test_gate_rejects_unknown_scope_delta_present_empty_vs_absent():
     )
     with pytest.raises(ScopeMismatchError):
         check_contracts_comparable(old, new)
+
+
+def test_fingerprint_matches_fields_true_for_real_computation():
+    fields = {"headers": json.dumps(["a.h", "b.h"]), "public_header_dirs": json.dumps([])}
+    real = _sha256_of(*[fields[k] for k in SCOPE_FIELD_KEYS])
+    assert _fingerprint_matches_fields(real, fields, SCOPE_FIELD_KEYS)
+
+
+def test_fingerprint_matches_fields_false_for_arbitrary_string():
+    fields = {"headers": json.dumps(["a.h", "b.h"]), "public_header_dirs": json.dumps([])}
+    assert not _fingerprint_matches_fields("not-a-real-hash", fields, SCOPE_FIELD_KEYS)
+
+
+def test_gate_rejects_scope_mismatch_when_fingerprint_does_not_match_own_fields():
+    # Codex review, PR #641 follow-up (sixth P1): every carve-out reasons
+    # entirely from scope_fields ("this recognized field grew additively,
+    # so the mismatch is explained") -- but that only holds if the stored
+    # fingerprint was genuinely computed from those fields. Confirmed by
+    # direct repro before any fix: two arbitrary, unrelated fingerprint
+    # strings with headers genuinely growing additively still made
+    # check_contracts_comparable return None.
+    old_scope_fields = {
+        "headers": json.dumps(["a.h", "b.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
+    new_scope_fields = {
+        "headers": json.dumps(["a.h", "b.h", "c.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-old",  # arbitrary, NOT a real hash of old_scope_fields
+            profile_fields={},
+            scope_fields=old_scope_fields,
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-new",  # arbitrary, NOT a real hash of new_scope_fields
+            profile_fields={},
+            scope_fields=new_scope_fields,
+        )
+    )
+    with pytest.raises(ScopeMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_rejects_scope_mismatch_unverified_fingerprint_in_diagnostic_mode_too():
+    old_scope_fields = {
+        "headers": json.dumps(["a.h", "b.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
+    new_scope_fields = {
+        "headers": json.dumps(["a.h", "b.h", "c.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-old",
+            profile_fields={},
+            scope_fields=old_scope_fields,
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-new",
+            profile_fields={},
+            scope_fields=new_scope_fields,
+        )
+    )
+    result = check_contracts_comparable(old, new, diagnostic=True)
+    assert isinstance(result, ComparabilityMismatch)
+    assert result.kind == "scope"
+
+
+def test_gate_rejects_profile_mismatch_when_fingerprint_does_not_match_own_fields():
+    old_fields = {"header_sequence": json.dumps(["a.h", "b.h"])}
+    new_fields = {"header_sequence": json.dumps(["a.h", "b.h", "c.h"])}
+    old_scope_fields = {
+        "headers": json.dumps(["a.h", "b.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
+    new_scope_fields = {
+        "headers": json.dumps(["a.h", "b.h", "c.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint="p-old",  # arbitrary, NOT a real hash of old_fields
+            scope_fingerprint=_real_scope_fingerprint(old_scope_fields),
+            profile_fields=old_fields,
+            scope_fields=old_scope_fields,
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint="p-new",  # arbitrary, NOT a real hash of new_fields
+            scope_fingerprint=_real_scope_fingerprint(new_scope_fields),
+            profile_fields=new_fields,
+            scope_fields=new_scope_fields,
+        )
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_rejects_profile_mismatch_unverified_fingerprint_in_diagnostic_mode_too():
+    old_fields = {"header_sequence": json.dumps(["a.h", "b.h"])}
+    new_fields = {"header_sequence": json.dumps(["a.h", "b.h", "c.h"])}
+    old_scope_fields = {
+        "headers": json.dumps(["a.h", "b.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
+    new_scope_fields = {
+        "headers": json.dumps(["a.h", "b.h", "c.h"]),
+        "public_header_dirs": json.dumps([]),
+    }
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint="p-old",
+            scope_fingerprint=_real_scope_fingerprint(old_scope_fields),
+            profile_fields=old_fields,
+            scope_fields=old_scope_fields,
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint="p-new",
+            scope_fingerprint=_real_scope_fingerprint(new_scope_fields),
+            profile_fields=new_fields,
+            scope_fields=new_scope_fields,
+        )
+    )
+    result = check_contracts_comparable(old, new, diagnostic=True)
+    assert isinstance(result, ComparabilityMismatch)
+    assert result.kind == "profile"

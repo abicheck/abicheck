@@ -1956,6 +1956,54 @@ libc++ inline-namespace component so the property test covers this shape
 generatively, not just the one hand-picked example. Full fast unit suite
 green, mypy/ruff clean.
 
+**A tenth review pass** (Codex, one P1) found the deepest gap yet — not
+another carve-out corner case, but a soundness gap in the whole carve-out
+framework's founding assumption:
+
+- **No carve-out ever verified that a contract's stored fingerprint was
+  actually computed from its own stored fields.** Every carve-out above
+  reasons entirely from `scope_fields`/`profile_fields` — "this recognized
+  field grew additively, so the fingerprint mismatch is explained" — but
+  that reasoning is only sound if the fingerprint genuinely reflects those
+  fields. For a snapshot `compute_extraction_contract` produced, that
+  invariant always holds by construction (the fingerprint is a hash of the
+  exact fields stored alongside it), so this was never an issue in
+  practice for the real pvxs scenario this whole review chain is about.
+  It is completely unenforced, though — confirmed by direct repro before
+  any fix: two arbitrary, unrelated fingerprint strings (`"s-old"`/
+  `"s-new"`, not real hashes of anything) alongside `headers` genuinely
+  growing additively still made `check_contracts_comparable` return `None`
+  (comparable), on both the scope and profile sides independently. Every
+  prior round's carve-out narrowing (`unknown_differing`,
+  `scope_unknown_differing`, the opaque-mismatch checks, `_FIELD_ABSENT`)
+  made the *known-fields* reasoning progressively tighter, but none of them
+  actually tied the fingerprint itself back to the fields it's supposed to
+  attribute a mismatch to.
+  Fixed with `_fingerprint_matches_fields(fingerprint, fields, keys)` —
+  recomputes `_sha256_of(*[fields.get(k, "") for k in keys])` and compares
+  against the stored fingerprint, exactly mirroring
+  `compute_extraction_contract`'s own algorithm. Called on BOTH sides,
+  for BOTH scope and profile, as the very first check inside each
+  fingerprint-mismatch branch — before `unknown_differing`/
+  `scope_unknown_differing`, before `differing`/`scope_differing`, before
+  any carve-out. A mismatch on either side is unconditionally fatal: it
+  means the fields on that side cannot be trusted to explain that side's
+  own fingerprint, so nothing reasoned from them is safe to act on.
+  Verified this doesn't regress any real-world path: every existing test
+  that expects a carve-out to succeed builds its contracts via the real
+  `compute_extraction_contract` (which always satisfies this invariant by
+  construction) rather than hand-typed placeholder fingerprints, so only
+  two existing tests (both intentionally using placeholder scope
+  fingerprints to isolate an unrelated *profile*-side check) needed
+  updating to use a real, matching scope fingerprint so execution still
+  reaches the profile check those tests actually exercise.
+
+New regression tests: two direct unit tests for `_fingerprint_matches_fields`
+itself, and four gate-level tests (raise mode and diagnostic mode, for
+both scope and profile) reproducing arbitrary/unrelated fingerprints
+alongside genuinely additive-shaped fields — all six proven to fail
+without the fix. Full fast unit suite green, mypy/ruff clean.
+
 ### D3. Manifest and real multi-TU dump
 
 New `abicheck/dump_manifest.py`: a strict YAML parser (unknown fields are
