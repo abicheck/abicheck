@@ -95,131 +95,46 @@ reference, and [Evidence &
 Detectability](../learn/evidence-and-detectability.md) for the full
 explanation of why each source changes what abicheck can prove.
 
-**Rules of thumb:**
-
-- **No `castxml`?** Drop the header flags and abicheck falls back to
-  DWARF/symbols analysis. It still works — it just catches less.
-- **Stripped binaries?** Point abicheck at separate debug files with
-  `--debug-root old=` / `--debug-root new=`, or fetch them by build-id with
-  `--debuginfod`. See [Evidence, Build-Context, and Debug Flags → Debug-info
-  resolution](../use/dump-compare-flags.md#debug-artifact-resolution).
-- **Compiler flags affect the ABI** (e.g. `-D` macros that change struct
-  layout)? Capture the build context at **dump** time with
-  `abicheck dump … -p build/` / `--compile-db` so the header AST is parsed the
-  way it was actually compiled, then compare the resulting snapshots. (These
-  build-context flags live on `dump`, not `compare`.)
+See [Evidence, Build-Context, and Debug Flags](../use/dump-compare-flags.md)
+for how to point abicheck at debug files, build context, and compiler flags
+when the default doesn't reach the layer you need.
 
 ---
 
-## 3) How should CI behave? — policy recipes
+## 3) How should CI behave?
 
-abicheck separates two independent questions: **what fails the build** (verdict
-/ severity / exit code) and **what appears in the report** (display filtering).
-Report filtering with `--show-only` is display-only — it never changes the
-verdict or exit code.
-
-### Failure policy (controls the exit code)
-
-| Desired behavior | CLI | GitHub Action |
-|---|---|---|
-| Report everything, never fail | `--severity-preset info-only` | `fail-on-breaking: false` + upload the report |
-| Fail only on **binary ABI** breaks | `--severity-preset info-only --severity-abi-breaking error` | `fail-on-breaking: true`, `fail-on-api-break: false` |
-| Fail on ABI **and** source/API breaks | default verdict gate, or explicit `--severity-*` | `fail-on-breaking: true`, `fail-on-api-break: true` |
-| Fail on accidental **API additions** too | `--severity-addition error` | `severity-addition: error` |
-| Everything is an error (strictest) | `--severity-preset strict` | `severity-preset: strict` |
-
-> **GitHub Action note:** the `severity-preset` / `severity-addition` inputs
-> apply to `compare` mode's exit code regardless of whether `old-library`/
-> `new-library` are a single pair or directories/packages — the Action forwards
-> them and recognizes the resulting `SEVERITY_ERROR` verdict (exit code `1`)
-> either way, since the underlying `compare` CLI command's severity-aware exit
-> scheme already covers both.
-
-```bash
-# Report everything, fail ONLY on binary ABI breaks
-# (i.e. source/API breaks are allowed through)
-abicheck compare old.json new.so \
-  --header new=include/ \
-  --severity-preset info-only \
-  --severity-abi-breaking error
-
-# Fail on binary ABI breaks AND new public API additions
-abicheck compare old.json new.so \
-  --header new=include/ \
-  --severity-addition error
-```
-
-### Display filter (does **not** change verdict or exit code)
-
-```bash
-# Show only additions in a review report — verdict and exit code unchanged
-abicheck compare old.json new.so \
-  --header new=include/ \
-  --show-only compatible,added
-```
-
-Full reference: [Severity Configuration](../use/severity.md). The default model is
-already "report additions but don't fail on them" — additions are classified in
-the `addition` category, which defaults to `info`.
+abicheck separates two independent questions: **what fails the build**
+(verdict/severity/exit code — `--severity-*` flags or GitHub Action
+`fail-on-*`/`severity-*` inputs) and **what appears in the report**
+(display-only `--show-only`, which never changes the verdict or exit code).
+See [Severity Configuration](../use/severity.md) for the full failure-policy
+recipe table and [Output Formats → `--show-only` filter](../use/output-formats.md#-show-only-filter)
+for display filtering.
 
 ---
 
-## 4) Which report? — output by audience
+## 4) Which report?
 
-| You need… | Format | Best for |
-|---|---|---|
-| A human-readable summary in a PR or terminal | `--format markdown` (default) | Code review, quick triage |
-| A standalone shareable report | `--format html` | Release artifacts, ABICC migration |
-| Machine-readable structured data | `--format json` | CI logic, custom gates, agents |
-| GitHub Code Scanning / SAST | `--format sarif` | Inline PR annotations, Security tab |
-| CI test dashboards | `--format junit` | GitLab CI, Jenkins, Azure DevOps, CircleCI |
-
-For large diffs, add `--report-mode leaf --show-impact` to group derived
-changes under their root cause. Full reference:
+`--format markdown` (default) for PR/terminal review, `html` for a standalone
+shareable report, `json` for CI logic/agents, `sarif` for GitHub Code
+Scanning, `junit` for CI test dashboards. Full reference, including the
+narrower bundle/package-compare format set:
 [Output Formats](../use/output-formats.md).
 
-> **Bundle/package compare formats are narrower:** a release/bundle `compare`
-> (directory/package inputs) emits only `markdown`, `json`, and `junit` —
-> **not** `sarif` or `html`. Those two formats apply to single-library
-> `compare`. For a release bundle in GitHub Code
-> Scanning, run per-library `compare --format sarif` for the libraries you want
-> to surface there.
-
 ---
 
-## 5) CI recipes by platform
+## 5) CI recipes and cadence
 
-| CI need | Pattern |
-|---|---|
-| Fast PR gate for one library | Commit/download `abi-baseline.json`; run `compare` on each PR. |
-| Release-quality baseline | Generate the baseline at release time and upload it as a release asset — see [Storing Baselines](../use/baseline-storage.md). |
-| GitHub-native | Use the [GitHub Action](../use/github-action.md); upload SARIF for the Security tab and inline annotations. |
-| GitLab / Jenkins / Azure | Emit `--format junit`; publish it to the native test dashboard (see [Output Formats → JUnit](../use/output-formats.md#junit-xml-output)). |
-| Raw shell CI (any system) | Drive the CLI directly; gate on the exit code. See [CLI Usage](../use/cli-usage.md) and [Baseline Management](../use/baseline-management.md). |
-| Offline / air-gapped | Pre-dump snapshots, then `abicheck compare old.json new.json` — no castxml or network needed. |
-| Multi-platform project | Matrix over Linux/macOS/Windows, emit JSON per platform, aggregate in a final gate job — see [GitHub Action](../use/github-action.md). |
-| Package / release validation | `compare` on RPM/Deb/tar/conda/wheel directory/package inputs, with debug/devel packages where available. |
+For GitHub Actions patterns (caching a baseline, matrices, SARIF upload,
+package comparisons) see [GitHub Action: More Recipes](../use/github-action-recipes.md);
+for a raw-shell/other-CI pattern see [CLI Usage](../use/cli-usage.md) and
+[Baseline Management](../use/baseline-management.md).
 
----
-
-## 5.5) How deep, how often — a three-tier cadence
-
-§2's accuracy ladder and §3's failure policy are *what* to check; this is
-*when* to spend on which depth. The L4/L5 cost cliff (see [Cost guide](../use/scan-levels.md#cost-guide-rules-of-thumb))
-means "always run the deepest check on every push" is rarely the right
-default — match the depth to how often the job runs:
-
-| Tier | When it runs | Depth | Why |
-|---|---|---|---|
-| **PR gate** | Every push/PR | `abicheck scan build/libfoo.so --depth source --since origin/main` (or omit `--depth` for risk-driven `auto` — see [`scan` § Let risk pick the depth](../use/scan-levels.md#let-risk-pick-the-depth-auto-localdev-only)) | Diff-seeded `source` seeded by `--since`/`--changed-path` scopes the expensive L4 replay to just the touched TUs — an order of magnitude cheaper than an unseeded whole-library `source` scan for the same verdict on a real PR diff. `auto`'s risk scoring (`risk.py`) already encodes "escalate on public-header/export-map/ABI-flag touches, de-escalate on docs/tests" as the built-in ordering — you don't need to hand-write that policy. |
-| **Nightly / scheduled** | Once a day, off the critical path | `abicheck scan build/libfoo.so --depth source` (unseeded — no `--since`/`--changed-path` — so it replays the whole library rather than a zero-TU no-op) | No diff seed to scope by, so this is the one place the L4 cost cliff is worth paying unconditionally — whole-library replay, compiler-matrix and stdlib-variant smoke, `compare --used-by` against key downstream consumers. Catches what a scoped PR gate structurally can't: breaks in files the PR didn't touch but whose *transitive* callers did. |
-| **Release** | Once per release, amortized | `abicheck dump … --sources . -o release-baseline.abi.json`, then unseeded `--depth source` `scan`/`compare` against it | Produce once, reuse for every PR gate until the next release (see [Baseline Management](../use/baseline-management.md)) — the amortized cost of a whole-library `source` scan is much lower spread across a release cycle than paid on every PR. |
-
-Every tier's report ends with a coverage block stating what actually ran
-(see [Reading the coverage block](../use/scan-levels.md#reading-the-coverage-block))
-and, per finding, an [`evidence_status`](../use/output-formats.md#per-finding-epistemic-status-evidence_status)
-label — so a cheap PR-gate run is never mistaken for a release-grade
-guarantee: it states what it checked, not just what it found.
+*How often* to run which depth (PR gate vs. nightly vs. release-amortized) is
+covered by [Source-Scan Depth → Worked examples](../use/scan-levels.md#worked-examples)
+and its [Cost guide](../use/scan-levels.md#cost-guide-rules-of-thumb) — the
+L4/L5 cost cliff means "always run the deepest check on every push" is rarely
+the right default.
 
 ---
 
