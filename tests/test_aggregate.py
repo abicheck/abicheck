@@ -907,6 +907,70 @@ class TestAggregateCLI:
         assert res.exit_code == 0
         assert json.loads(out.read_text())["status"] == "pass"
 
+    # ── --run-plan (ADR-054: folds `run-plan to-aggregate-manifest`'s former
+    # standalone command into aggregate itself) ─────────────────────────────
+
+    def test_run_plan_flag(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text(
+            json.dumps({"checks": [{"check_id": LINUX, "required": True}]})
+        )
+        res = self._run(["--run-plan", str(run_plan_path), str(tmp_path)])
+        assert res.exit_code == 0, res.output
+
+    def test_run_plan_flag_conflicts_with_manifest(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text(
+            json.dumps({"checks": [{"check_id": LINUX, "required": True}]})
+        )
+        (tmp_path / "m.json").write_text(
+            json.dumps({"targets": [{"id": LINUX, "required": True}]})
+        )
+        res = self._run(
+            [
+                "--run-plan",
+                str(run_plan_path),
+                "--manifest",
+                str(tmp_path / "m.json"),
+                str(tmp_path),
+            ]
+        )
+        assert res.exit_code == 64
+
+    def test_run_plan_flag_conflicts_with_discovered_only(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text(
+            json.dumps({"checks": [{"check_id": LINUX, "required": True}]})
+        )
+        res = self._run(
+            ["--run-plan", str(run_plan_path), "--discovered-only", str(tmp_path)]
+        )
+        assert res.exit_code == 64
+
+    def test_run_plan_flag_missing_required_exits_1(self, tmp_path: Path):
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text(
+            json.dumps({"checks": [{"check_id": LINUX, "required": True}]})
+        )
+        res = self._run(["--run-plan", str(run_plan_path), str(tmp_path)])
+        assert res.exit_code == 1
+
+    def test_run_plan_flag_empty_checks_is_usage_error(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text(json.dumps({"checks": []}))
+        res = self._run(["--run-plan", str(run_plan_path), str(tmp_path)])
+        assert res.exit_code == 64
+
+    def test_run_plan_flag_malformed_json_is_usage_error(self, tmp_path: Path):
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text("not json")
+        res = self._run(["--run-plan", str(run_plan_path), str(tmp_path)])
+        assert res.exit_code == 64
+
 
 class TestJsonSchema:
     """The `--format json` output is a versioned, published machine contract."""

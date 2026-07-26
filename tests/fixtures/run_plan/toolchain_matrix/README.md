@@ -1,6 +1,6 @@
 # Toolchain-matrix reference example
 
-Demonstrates `abicheck run-plan generate`'s `profiles.<id>.compile` overlay
+Demonstrates `abicheck project plan`'s `profiles.<id>.compile` overlay
 projection (P1 toolchain-profile audit, closing the gap
 `ProfileCompileSpec`'s own docstring once flagged: "no run-plan generator/
 toolchain resolver lives here yet"). See
@@ -36,7 +36,7 @@ cat > /tmp/matrix-demo/bo-clang20/build-output.json <<'EOF'
  "targets": [{"id": "libmatrixdemo", "binary": "build/libmatrixdemo.so"}]}
 EOF
 
-abicheck run-plan generate tests/fixtures/run_plan/toolchain_matrix/.abicheck.yml \
+abicheck project plan tests/fixtures/run_plan/toolchain_matrix/.abicheck.yml \
   --build-output linux-gcc14=/tmp/matrix-demo/bo-gcc14 \
   --build-output linux-clang20=/tmp/matrix-demo/bo-clang20 \
   --toolchain-bindings tests/fixtures/run_plan/toolchain_matrix/toolchain-bindings.yml

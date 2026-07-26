@@ -266,7 +266,7 @@ consumes it is planned but not built yet). Parsed and validated by
 `buildsource/project_targets.py`; see the
 **[Project Targets Schema reference](project-targets-schema.md)** for the
 full field-by-field schema, the `checks:` list, and the
-`abicheck project-targets validate` command.
+`abicheck project validate` command.
 
 ---
 

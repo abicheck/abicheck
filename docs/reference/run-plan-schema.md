@@ -3,7 +3,7 @@
 `run-plan.json` is the ordered list of concrete checks
 [ADR-047](../contribute/adr/047-github-actions-integration-model.md) §4/§5
 describes: one cell per `(target-or-bundle, profile, checks[] entry)`, each
-already carrying its own `check_id`. `abicheck run-plan generate` derives it
+already carrying its own `check_id`. `abicheck project plan` derives it
 from a project's [`.abicheck.yml` `targets:`/`bundles:`/`profiles:`/
 `baseline:` block](project-targets-schema.md) (G30 P1.5) plus each `contract:
 true` profile's [`build-output.json`](build-output-schema.md) (G30 P1.1).
@@ -11,8 +11,9 @@ true` profile's [`build-output.json`](build-output-schema.md) (G30 P1.1).
 `check-single.yml` invocation both consume it.
 
 > **Status.** This page documents the `run-plan.json` schema and the
-> `abicheck run-plan` CLI group shipped in G30 P1.4. See the
-> [reusable workflows reference](reusable-workflows.md) for how
+> `abicheck project plan` command shipped in G30 P1.4 (consolidated from a
+> former standalone `run-plan` CLI group by [ADR-054](../contribute/adr/054-cli-project-integration-surface-consolidation.md)).
+> See the [reusable workflows reference](reusable-workflows.md) for how
 > `check-project.yml` drives this generator and consumes its output.
 
 ## Why a separate artifact
@@ -39,7 +40,7 @@ as its own artifact means:
 [`project_targets.py`](project-targets-schema.md)'s own docstring flags the
 gap ADR-047 §3 warns about: crossing every `checks:` entry with every
 `contract: true` profile would produce impossible cells for a target that
-doesn't exist on every profile. `run-plan generate` resolves this as follows,
+doesn't exist on every profile. `project plan` resolves this as follows,
 per `checks[]` entry:
 
 - **Explicit `profiles:` selector.** Only those profiles are considered —
@@ -102,7 +103,7 @@ dicts can forward each field through with no renaming.
 [`project-targets-schema.md`'s `profiles:`](project-targets-schema.md#profiles)
 section documents the overlay itself; this generator is the "run-plan
 consumer" its `binding` field's docs promised. `compiler_family`/
-`compiler_version` are validated shape-wise by `project-targets validate`
+`compiler_version` are validated shape-wise by `project validate`
 but **not** projected into `compile_gcc_path`/`compile_gcc_options` —
 `compiler_family` only selects a toolchain through `binding` (there is no
 separate "pick a family" flag to forward; the composed `compile_gcc_options`
@@ -124,8 +125,9 @@ own inputs).
 ## CLI
 
 ```bash
-abicheck run-plan generate [CONFIG] [--build-output PROFILE=DIR ...] \
-    [--project OWNER/REPO] [--head-sha SHA] [--format json|text] [-o OUTPUT]
+abicheck project plan [CONFIG] [--build-output PROFILE=DIR ...] \
+    [--project OWNER/REPO] [--head-sha SHA] [--allow-empty] \
+    [--format json|text] [-o OUTPUT]
 ```
 
 `CONFIG` defaults to `.abicheck.yml`. `--build-output` is repeatable — one
@@ -135,23 +137,27 @@ profile's `abicheck-build-<profile>/` directory (containing
 
 | Exit | Meaning |
 |------|---------|
-| `0` | Generated with no coverage-gap errors (warnings may still exist). |
-| `1` | A required/explicit check could not be resolved against the supplied `--build-output` directories. |
-| `64` | Usage error — `CONFIG` or a `--build-output` value is unreadable, or `CONFIG` fails `project-targets validate`. |
+| `0` | Generated with no coverage-gap errors (warnings may still exist), and at least one check resolved (or `--allow-empty` was given). |
+| `1` | A required/explicit check could not be resolved against the supplied `--build-output` directories, or the run-plan resolved to zero checks without `--allow-empty` (ADR-054: fail-closed by default, so a consumer with no guard of its own doesn't silently skip every downstream check). |
+| `64` | Usage error — `CONFIG` or a `--build-output` value is unreadable, or `CONFIG` fails `project validate`. |
 
 ```bash
-abicheck run-plan to-aggregate-manifest RUN_PLAN_JSON [--head-sha SHA] [-o OUTPUT]
+abicheck aggregate REPORTS_DIR --run-plan RUN_PLAN_JSON [...]
 ```
 
-Projects `run-plan.json` down to `abicheck aggregate --manifest`'s
+`aggregate --run-plan` (ADR-054) projects `run-plan.json` down to the
+expected-target set internally — `abicheck aggregate --manifest`'s
 `{"targets": [{"id", "required"}]}` wire shape (ADR-047 §5's required
-sub-task), using each check's own `check_id` as `targets[].id` — **never**
-the bare target/bundle name. `abicheck/aggregate.py`'s manifest matching is
-an exact string comparison against each report's own `target_id`, and
-`check-target` (G30 P1.3) always writes that field as the identical
-`check_id`-shaped string; projecting to a bare name here would collide
-S17/S21's multi-profile/multi-channel same-target checks against each other
-in `aggregate`'s duplicate-target-id check.
+sub-task) — using each check's own `check_id` as the expected target id,
+**never** the bare target/bundle name. `abicheck/aggregate.py`'s target
+matching is an exact string comparison against each report's own
+`target_id`, and `check-target` (G30 P1.3) always writes that field as the
+identical `check_id`-shaped string; projecting to a bare name here would
+collide S17/S21's multi-profile/multi-channel same-target checks against
+each other in `aggregate`'s duplicate-target-id check. There is no separate
+projection command — the former standalone `run-plan to-aggregate-manifest`
+step is folded into this option, so a caller never produces (or needs to
+know about) an intermediate manifest file.
 
 ## Example
 

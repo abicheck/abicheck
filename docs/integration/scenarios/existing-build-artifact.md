@@ -24,11 +24,11 @@ abicheck-build-linux-x86_64-gcc13-release/
   headers/foo/
 ```
 
-> **No `abicheck build-output emit` helper exists yet** — author
+> **No `abicheck project emit-build` helper exists yet** — author
 > `build-output.json` by hand, or generate it from your build system's own
 > `install`/manifest step. See the
 > [schema reference](../../reference/build-output-schema.md) for the exact
-> shape and validation rules (`abicheck build-output validate` checks it
+> shape and validation rules (`abicheck project validate-build` checks it
 > before anything consumes it).
 
 ## The check
