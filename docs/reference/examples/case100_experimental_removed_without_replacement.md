@@ -59,18 +59,21 @@ Verdict: BREAKING (exit 4)
 
 ## Minimum evidence
 
-`min_evidence: L0` — the mangled symbol `_ZN3lib12experimental3barEv` is
-present in v1's `.dynsym`/DWARF and absent from v2's; no public headers
-are needed to see the removal or to classify it as "no replacement
-published" (the namespace-shape detector works from the declared
-qualified name recovered from DWARF/symbol demangling, not from header
-text). Note: this fixture's DWARF, produced by clang, records each
-function's `DW_AT_name` directly on the exported definition DIE; a GCC
-build of the same source links the definition to its declaration purely
-via `DW_AT_specification` without repeating the name, which the current
-DWARF walker doesn't yet resolve back to a qualified name — so with GCC
-this reduces to a plain `func_removed_elf_only` at L0 without the named
-finding. Either toolchain reaches the same BREAKING verdict.
+`min_evidence: L0` — the mangled symbol `_ZN3lib12experimental3barEv`
+disappearing from v2's `.dynsym` is enough on its own to reach the BREAKING
+verdict, even on a fully stripped binary with no debug info at all (as
+`func_removed_elf_only`). Classifying it specifically as "no replacement
+published" needs the declared qualified name, which the namespace-shape
+detector recovers from DWARF (L1) or header text (L2), not from the raw
+mangled symbol; no public headers are required as long as DWARF is present.
+Note: this fixture's DWARF, produced by clang, records each function's
+`DW_AT_name` directly on the exported definition DIE; a GCC build of the
+same source links the definition to its declaration purely via
+`DW_AT_specification` without repeating the name, which the current DWARF
+walker doesn't yet resolve back to a qualified name — so with GCC this
+reduces to the plain `func_removed_elf_only` finding without the named
+diagnosis, same as the fully-stripped case. Either toolchain reaches the
+same BREAKING verdict.
 
 ## Why abicheck catches it
 

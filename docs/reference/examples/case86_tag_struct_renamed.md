@@ -59,11 +59,14 @@ Verdict: BREAKING (exit 4)
 
 ## Minimum evidence
 
-`min_evidence: L0` — the exported-symbol table alone carries both halves of
-the correlation: `type_removed`/`type_added` for the empty struct (from
-DWARF, present at `-g`) plus a symbol-fingerprint rename match (identical
-code size/hash, different mangled name) for every instantiation that
-referenced it. No public headers needed.
+`min_evidence: L0` — the exported-symbol table alone is enough to reach the
+BREAKING verdict: even on a fully stripped binary, abicheck's binary
+fingerprinting matches each renamed instantiation by identical code
+size/hash and reports `func_likely_renamed`. The specific `tag_type_renamed`
+diagnosis shown above additionally needs DWARF's `type_removed`/`type_added`
+pair for the empty struct — present once the binaries are built with `-g`
+(L1) — to correlate the rename with the tag type itself rather than leaving
+it as an unexplained heuristic symbol match.
 
 ## Why abicheck catches it
 

@@ -60,9 +60,13 @@ Verdict: BREAKING (exit 4)
 
 ## Minimum evidence
 
-`min_evidence: L0` — the mangled symbols carry the version segment
-directly (`_ZN3lib3_V1...` vs `_ZN3lib3_V2...`), so the DWARF-recovered
-declared/qualified names alone are enough; no public headers are needed.
+`min_evidence: L0` — the mangled symbols disappearing from `_V1::` and
+reappearing under `_V2::` are enough on their own to reach the BREAKING
+verdict, even on a fully stripped binary with no debug info at all (as
+plain `func_removed_elf_only`/`func_added` pairs). The specific
+`inline_namespace_version_bumped` diagnosis needs the declared/qualified
+names, which abicheck recovers from DWARF (L1) or header text (L2) — no
+public headers are required as long as DWARF is present.
 `INLINE_NAMESPACE_VERSION_BUMPED` is a specialization of the existing
 symbol-table-driven `inline_namespace_moved` detector that instead fires
 from declared-name evidence, so it also works on header-only inputs and
