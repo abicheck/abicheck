@@ -1,27 +1,124 @@
-# case100 — experimental:: removed without replacement (API break)
+# Case 100: Experimental Declaration Removed Without Replacement
 
-## What this case demonstrates
+**Category:** Symbol API | **Verdict:** ❌ BREAKING
 
-A library deletes a declaration that only ever lived under
-``experimental::`` and does not republish it at a stable name. The
-consumer relied on the experimental spelling; against v2 it does not
-compile.
+## Verdict and consumer impact
 
-| v1 declares | v2 declares |
-|---|---|
-| ``lib::experimental::bar`` | (nothing with leaf ``bar``) |
+`lib::experimental::bar()` only ever lived under the `experimental::`
+namespace in v1. v2 deletes it outright with no stable-namespace
+replacement — no `lib::bar()` was ever published to migrate to. Any
+consumer that named the experimental declaration fails to link against
+v2: the mangled symbol is simply gone, and there is no successor API to
+recompile against.
 
-## Why a generic ``func_removed`` is not enough
+## Old/new diff
 
-``func_removed`` describes *what* disappeared, but at the
-namespace-shape level the question every reviewer asks is "is there a
-migration target?". The dedicated ``EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT``
-finding answers that question explicitly: the detector looked for a
-stable twin and didn't find one.
+| v1.h | v2.h |
+|------|------|
+| `namespace lib { namespace experimental { void bar(); } }` | *(removed — no `lib::bar` or any stable twin published)* |
 
-## Expected verdict
+`v2.h` keeps an unrelated `lib::unrelated()` only so the library still
+exports something; it is not a replacement for `bar()`.
 
-``API_BREAK`` — source-level break for any consumer that named the
-experimental declaration. The mangled symbol disappears too, so the
-underlying ``func_removed`` is also reported as ``BREAKING``; the
-namespace-level finding is the human-readable framing.
+## abicheck command
+
+```bash
+clang++ -std=c++17 -shared -fPIC -g v1.cpp -o liblib_v1.so
+clang++ -std=c++17 -shared -fPIC -g v2.cpp -o liblib_v2.so
+abicheck compare liblib_v1.so liblib_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+## Breaking Changes
+
+- func_removed: Public function removed: lib::experimental::bar
+  > Old binaries call a symbol that no longer exists; dynamic linker
+    will refuse to load or crash at call site.
+
+## Source-Level Breaks
+
+- experimental_removed_without_replacement: Experimental declaration
+  'lib::experimental::bar' was removed and no declaration with leaf 'bar'
+  was published at a stable namespace in the new headers.
+  > Consumers that depended on the experimental name no longer compile.
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the mangled symbol `_ZN3lib12experimental3barEv` is
+present in v1's `.dynsym`/DWARF and absent from v2's; no public headers
+are needed to see the removal or to classify it as "no replacement
+published" (the namespace-shape detector works from the declared
+qualified name recovered from DWARF/symbol demangling, not from header
+text). Note: this fixture's DWARF, produced by clang, records each
+function's `DW_AT_name` directly on the exported definition DIE; a GCC
+build of the same source links the definition to its declaration purely
+via `DW_AT_specification` without repeating the name, which the current
+DWARF walker doesn't yet resolve back to a qualified name — so with GCC
+this reduces to a plain `func_removed_elf_only` at L0 without the named
+finding. Either toolchain reaches the same BREAKING verdict.
+
+## Why abicheck catches it
+
+`func_removed` comes from the standard DWARF/symbol-table diff — `bar()`'s
+mangled name disappears between snapshots. The dedicated
+`experimental_removed_without_replacement` finding is a generic
+namespace-shape detector (`diff_namespaces.py`): for every public
+declaration whose qualified name contains an `experimental`-labeled
+segment in the old snapshot, it looks up the same leaf name in the new
+snapshot. If the experimental spelling is gone **and** no stable-namespace
+twin exists, it reports the removal as "no migration target" rather than
+a generic symbol removal — the framing a reviewer actually needs.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
+
+```bash
+# Build old library + app
+ln -sf liblib_v1.so liblib.so
+clang++ -std=c++17 app.cpp -L. -llib -Wl,-rpath,. -o app
+./app
+# → exits 0 (lib::experimental::bar() resolves and runs)
+
+# Swap in new library (no recompile)
+ln -sf liblib_v2.so liblib.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol: _ZN3lib12experimental3barEv
+```
+
+**Why CRITICAL:** `bar()` is absent from v2's exported symbols; the
+dynamic linker cannot resolve it and the process fails to start.
+
+## Safe redesign
+
+Don't delete an `experimental::` declaration outright once it has real
+consumers — either graduate it to a stable namespace (keeping the
+experimental name as a deprecated alias for one release) or, if it truly
+must be dropped, document the removal explicitly and give consumers a
+migration target before the next release, not after.
+
+**Real-world example:** a research-stage algorithm published under
+`oneapi::dpl::experimental::ranges` and pulled without ever being promoted
+to the stable surface — the "experimental" label is a real contract that
+it may disappear, but "disappear silently with nothing to migrate to" is
+still the failure mode reviewers want flagged explicitly.
+
+## Cross-tool comparison
+
+`abidiff` (binary-only) would see the same mangled-symbol removal and
+report it as a function removal; it has no notion of "experimental
+namespace" or "no stable replacement" — that framing is unique to
+abicheck's namespace-shape detector. Not re-verified numerically in this
+environment (`abidiff` is not installed here).
+
+## References
+
+- [libabigail `abidiff` manual](https://sourceware.org/libabigail/manual/abidiff.html)
+- [ELF symbol table + dynamic linking behavior](https://refspecs.linuxfoundation.org/elf/gabi4+/ch4.symtab.html)

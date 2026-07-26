@@ -1,11 +1,8 @@
-# Case 89: Inline accessor references renamed pimpl member
+# Case 89: Inline Accessor References Renamed Pimpl Member
 
-**Category:** Pimpl ABI | **Verdict:** BREAKING
+**Category:** Pimpl ABI | **Verdict:** 🔴 BREAKING
 
-## What breaks
-
-The public class exposes inline getters that reach into the pimpl
-implementation by member name:
+## Verdict and consumer impact
 
 ```cpp
 class descriptor {
@@ -16,67 +13,122 @@ private:
 };
 ```
 
-In v2, `detail::descriptor_impl::class_count_` is renamed to `n_classes_`
-during a "modernize naming" cleanup. The maintainer updates the inline
-accessor body in the header in lockstep, so:
+v2 renames `detail::descriptor_impl::class_count_` to `n_classes_` (and
+reorders the fields) as part of a "modernize naming" cleanup, updating the
+inline accessor body in lockstep. Rebuilding the library succeeds.
+Rebuilding a *new* consumer succeeds. But an **existing consumer binary**
+compiled against v1.h has the old inline body — `return
+impl_->class_count_` at its v1 byte offset — baked directly into its own
+code. Run against v2's reordered `descriptor_impl`, that inline read lands
+on a different field entirely. There is no symbol-level evidence
+(`get_class_count` is inline, no exported symbol) and no public-type layout
+change (`descriptor` still holds one pimpl pointer) — the break lives
+entirely in the gap between what the consumer's inline body assumes and
+what the new detail layout actually is.
 
-- Rebuilding the **library** succeeds.
-- Rebuilding **new consumers** against v2 headers succeeds.
-- **Existing consumer binaries** — compiled against v1.h with the old
-  inline body baked in — continue to reference `class_count_` at the
-  old offset. Linked against v2's `descriptor_impl` layout, the inline
-  access reads the wrong field (or garbage if the layout shifted).
+## Old/new diff
 
-There is no symbol-level evidence of the break: `descriptor::get_class_count`
-is inline and has no exported symbol. There is no public-type layout change:
-`descriptor` still holds one pimpl pointer. The break lives entirely in the
-gap between *what the consumer's inline body assumes* and *what the new
-detail layout actually is*.
+| v1.h (`detail::descriptor_impl`) | v2.h (`detail::descriptor_impl`) |
+|------|------|
+| `int class_count_ = 2;` | `int n_classes_ = 2;` *(offset moved)* |
+| `int max_iter_ = 100;` | `int iteration_cap_ = 100;` *(offset moved)* |
 
-## Real Failure Demo
-
-**Severity: BREAKING / LATENT INLINE ABI DRIFT**
-
-The tiny app happens to read the same value, but its inline accessor is compiled against the old `impl_->class_count_` member. A real v2 layout that reuses that slot for another field turns the inline read into stale or wrong data.
+## abicheck command
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case89_inline_accessor_renamed_pimpl_member_app case89_inline_accessor_renamed_pimpl_member_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case89_inline_accessor_renamed_pimpl_member/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case89_inline_accessor_renamed_pimpl_member/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# class_count = 2
+g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so \
+  --ast-frontend clang -H old=v1.h -H new=v2.h --lang c++
 ```
 
-## Why distinct from case35 + case47
+## Expected abicheck finding
 
-- case35 (`field_rename`) covers field renames in isolation. It does not
-  exercise the inline-consumer-baked-in-body trap.
-- case47 (`inline_to_outlined`) is the COMPATIBLE counter-case (moving an
-  inline to outlined is safe).
-- case89 is the *interaction*: field rename in a detail:: type, accessed
-  by an inline public method whose body is shipped into consumers.
+```text
+Verdict: BREAKING (exit 4)
 
-## How abicheck catches it
+- inline_body_references_renamed_member: Public class 'descriptor' has
+  inline accessors (2 found) reaching into 'mylib::detail::descriptor_impl'
+  by name. Field 'class_count_' was renamed to 'iteration_cap_' in the new
+  internal layout. Consumers compiled against the old header have the old
+  member name baked into their inline accessor bodies; running against the
+  new library reads the wrong offset or fails to resolve the member.
+  (class_count_ -> iteration_cap_)
 
-The new `inline_body_references_renamed_member` detector correlates:
+Source-Level Breaks:
+- field_renamed: descriptor_impl::class_count_ -> iteration_cap_
+- field_renamed: descriptor_impl::max_iter_ -> n_classes_
+```
 
-1. A `field_renamed` (or `type_field_removed` + `type_field_added`) on a
-   record type that lives in an internal namespace (reuses
-   `internal_leak.py::is_internal_type`).
-2. An inline public method (presence of body in DWARF, no exported
-   symbol) on a *non-internal* type whose member-access expression
-   references the old field name.
+## Minimum evidence
 
-When both halves match, emit a single
-`INLINE_BODY_REFERENCES_RENAMED_MEMBER` finding describing the chain
-`descriptor::get_class_count() (inline) → impl_->class_count_ (renamed)`.
+`min_evidence: L2` — the field rename alone (visible at L1, from DWARF
+layout) doesn't distinguish "internal detail renamed, harmless" from
+"internal detail renamed, and a public inline accessor's header-emitted
+body reaches into it by name". The public header AST is what confirms
+`descriptor::get_class_count()` is inline (its body ships into every
+consumer) and that its body's member-access expression names the exact
+field that got renamed.
 
-## Real-world reference
+## Why abicheck catches it
 
-oneDAL's pimpl idiom plus inline header accessors creates this exact
-risk surface for every `detail::*_impl` field. The class member-rename
-is invisible to users at source level but propagates into every
-consumer binary already compiled against the previous header.
+`detect_inline_body_references_renamed_member`
+(`abicheck/diff_cpp_patterns.py`) correlates two independently-unremarkable
+facts: (1) a field rename on a record type in an internal namespace
+(`detail::`, via the same `is_internal_type` reachability logic as the
+internal-leak detectors), and (2) a public class's inline method — no
+exported symbol, body only visible via DWARF/header — whose member-access
+expression names the old field. When both match, it emits one
+`inline_body_references_renamed_member` finding describing the full chain
+instead of leaving the field rename looking like harmless internal churn.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1.h (baking `impl_->class_count_` at its
+v1 offset into the app's own inline code), then swap in v2's library
+without recompiling.
+
+```bash
+# Build old library + app
+g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo.so
+g++ -g -std=c++17 -I. app.cpp -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → class_count = 2   (exit 0)
+
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo.so
+./app
+# → class_count = 100   (exit 1 — silently wrong, not a crash)
+```
+
+**Why CRITICAL:** the v2 fields were also reordered
+(`iteration_cap_`/`n_classes_` swap `max_iter_`/`class_count_`'s slots), so
+the app's v1-compiled inline read at offset 0 now lands on `iteration_cap_`
+(value `100`) instead of `class_count_` (value `2`) — silent wrong data
+with no crash, no linker error, and no source-level signal at the call
+site.
+
+## Safe redesign
+
+Never let a public inline accessor reach into a `detail::`/pimpl member by
+name — the accessor's body ships into every consumer binary and bakes in
+whatever offset the field had at compile time. Move accessors like
+`get_class_count()` out-of-line into the library (a real exported symbol
+that can be recompiled independently), or keep the pimpl type's field names
+and order frozen for the life of the ABI even during "harmless" internal
+renames.
+
+**Real-world example:** oneDAL's pimpl idiom plus inline header accessors
+creates exactly this risk surface for every `detail::*_impl` field — the
+class-member rename is invisible to users at source level but propagates
+into every consumer binary already compiled against the previous header.
+
+## Cross-tool comparison
+
+`abidiff`/ABICC can report the raw `field_renamed` on
+`detail::descriptor_impl` but have no mechanism to correlate it with a
+*public* inline accessor's header-emitted body — the internal-namespace
+rename would read as routine internal churn, with no indication that it's
+reachable from (and baked into) public consumer binaries.
