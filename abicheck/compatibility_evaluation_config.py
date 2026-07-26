@@ -220,8 +220,11 @@ class ContractConfig:
         )
 
 
-def _pack_sort_key(identity: ImmutableIdentity) -> tuple[str, int]:
-    return (identity.id, identity.version)
+def _pack_sort_key(identity: ImmutableIdentity) -> tuple[str, int, str]:
+    # sha256 breaks ties between two entries that share (id, version) but
+    # disagree on content -- without it a stable sort leaves such entries in
+    # input order, so reversing the input would produce an unequal config.
+    return (identity.id, identity.version, identity.sha256)
 
 
 @dataclass(frozen=True)
@@ -251,13 +254,17 @@ class EvidenceProviderRequirement:
             )
 
 
-def _provider_sort_key(req: EvidenceProviderRequirement) -> tuple[str, bool, str, int]:
+def _provider_sort_key(
+    req: EvidenceProviderRequirement,
+) -> tuple[str, bool, str, int, str]:
+    # implementation.sha256 breaks ties the same way _pack_sort_key's does.
     impl = req.implementation
     return (
         req.capability,
         req.required,
         impl.id if impl else "",
         impl.version if impl else -1,
+        impl.sha256 if impl else "",
     )
 
 

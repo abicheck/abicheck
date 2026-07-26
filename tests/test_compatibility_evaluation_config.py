@@ -323,6 +323,38 @@ class TestPackAndProviderOrderIndependence:
         backward = EvidenceConfig(providers=[guarded_index, active_ast])
         assert forward == backward
 
+    def test_packs_sharing_id_and_version_but_different_digest_stay_order_independent(
+        self,
+    ):
+        # Same (id, version), different content -- a sort key that stops at
+        # (id, version) ties and a stable sort would then just preserve
+        # input order, so reversing the input would produce an unequal
+        # config. The digest must break the tie.
+        conflicting_a = _identity("rust_c_ffi", sha256="content-a")
+        conflicting_b = _identity("rust_c_ffi", sha256="content-b")
+        forward = ContractConfig(
+            mode=ContractMode.PUBLIC, packs=[conflicting_a, conflicting_b]
+        )
+        backward = ContractConfig(
+            mode=ContractMode.PUBLIC, packs=[conflicting_b, conflicting_a]
+        )
+        assert forward == backward
+
+    def test_providers_sharing_impl_id_and_version_but_different_digest_stay_order_independent(
+        self,
+    ):
+        impl_a = _identity("clang_ast", sha256="content-a")
+        impl_b = _identity("clang_ast", sha256="content-b")
+        req_a = EvidenceProviderRequirement(
+            capability="active_ast", required=True, implementation=impl_a
+        )
+        req_b = EvidenceProviderRequirement(
+            capability="active_ast", required=True, implementation=impl_b
+        )
+        forward = EvidenceConfig(providers=[req_a, req_b])
+        backward = EvidenceConfig(providers=[req_b, req_a])
+        assert forward == backward
+
 
 class TestPackAndProviderDeduplication:
     # ADR-049 D7: "Equivalent duplicate values are accepted" -- the same
