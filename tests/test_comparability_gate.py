@@ -769,6 +769,53 @@ def test_gate_still_raises_when_a_new_header_lands_outside_the_old_common_root(
         check_contracts_comparable(old, new)
 
 
+def test_gate_still_raises_when_appended_header_pulls_in_new_external_dependency(
+    tmp_path,
+):
+    # Known, accepted limitation (Codex review, PR #641 follow-up, twelfth
+    # P1), NOT a correctness bug -- the same category as the common-root
+    # limitation above, not a further carve-out: an appended header that
+    # itself pulls in a NEW dependency reachable only through a non-owned
+    # "-I" directory changes that "ext:"/"sys:" slot's digest alongside the
+    # owned "hdrs:" slot's legitimate growth. Unlike "hdrs:" (which stores
+    # an explicit JSON list of (identity, relative_path) pairs, so superset
+    # growth can be verified), an "ext:"/"sys:" token is a single opaque
+    # _sha256_of digest over its ENTIRE file set -- there is no per-file
+    # identity recoverable from two hash strings to diff against each
+    # other, so "this dependency is new" can't be told apart from "this
+    # external directory's contents genuinely drifted." This is the
+    # conservative, SAFE failure mode (a real hard-fail, never a silently
+    # wrong verdict). Closing it would mean changing what an "ext:"/"sys:"
+    # slot stores (a JSON pairs list like "hdrs:", not a collapsed hash) --
+    # a profile_fingerprint wire-format change, not a carve-out tweak --
+    # diagnostic-comparison remains the correct workaround.
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    c2 = _write(tmp_path / "v2" / "c.h", "int h(void);\n")
+    extdir = tmp_path / "extdir"
+    new_dep = _write(extdir / "newdep.h", "int dep(void);\n")
+    old = _snap(
+        compute_extraction_contract(
+            declared_headers=[a, b],
+            declared_includes=[IncludeDir(extdir)],
+            depfile_resolved_paths=[a, b],
+            l2_frontend_ran=True,
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            declared_headers=[a2, b2, c2],
+            declared_includes=[IncludeDir(extdir)],
+            depfile_resolved_paths=[a2, b2, c2, new_dep],
+            l2_frontend_ran=True,
+        )
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
 def test_gate_raises_profile_mismatch_error_on_profile_drift(tmp_path):
     dep_old = _write(tmp_path / "d1" / "dep.h", "struct Dep { int x; };\n")
     dep_new = _write(tmp_path / "d2" / "dep.h", "struct Dep { int x; int y; };\n")

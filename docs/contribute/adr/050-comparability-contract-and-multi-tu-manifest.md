@@ -2040,6 +2040,37 @@ proven to fail against the pre-fix code), plus a new
 `..._false_for_insertion_before_all` case for the leading-insertion shape.
 Full fast unit suite green, mypy/ruff clean.
 
+**A twelfth review pass** (Codex, one P1) found a second gap left as a
+**documented limitation, not fixed** — the same category as the
+common-root-rebasing gap above, not a further carve-out round: an appended
+public header that itself pulls in a *new* dependency reachable only
+through a non-owned `-I` directory (an `"ext:"` slot, or the trailing
+`"sys:"` system bucket) changes that slot's digest alongside the owned
+`"hdrs:"` slot's legitimate growth. Confirmed by direct repro: `[a.h,
+b.h]` -> `[a.h, b.h, c.h]`, where `c.h` transitively includes a header
+resolved only via a separate external include directory, still raises
+`ProfileMismatchError` — the per-slot loop declines the instant a
+non-`"hdrs:"` slot differs at all, with no way to tell "this dependency is
+new, brought in solely by the accepted header addition" from "this
+external directory's contents genuinely drifted between the two
+extraction runs." Unlike the owned `"hdrs:"` slot (which stores an
+explicit, JSON-encoded list of `(identity, relative_path)` pairs precisely
+so superset growth can be verified), an `"ext:"`/`"sys:"` slot's token is
+a single opaque `_sha256_of` digest over that bucket's *entire* file set —
+by construction, there is no per-file identity recoverable from two hash
+strings to diff against each other, so "did this bucket grow strictly, or
+did an existing file's content change" is genuinely unanswerable from the
+stored data alone. Closing this safely would mean changing what an
+`"ext:"`/`"sys:"` slot stores — a JSON pairs list like `"hdrs:"` already
+uses, instead of a collapsed hash — which is a `profile_fingerprint`
+wire-format change (every existing fixture/test constructing an `"ext:"`/
+`"sys:"` token, and this file's own fingerprint-reproduction invariant,
+would need to change in lockstep), not a logic fix within the existing
+shape. That is exactly the kind of `comparability.py`-internals redesign
+this file's own conventions reserve for its own ADR treatment, the same
+bar the common-root-rebasing limitation was held to. `--diagnostic-comparison`
+remains the correct workaround for this specific scenario.
+
 ### D3. Manifest and real multi-TU dump
 
 New `abicheck/dump_manifest.py`: a strict YAML parser (unknown fields are
