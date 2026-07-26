@@ -1686,6 +1686,9 @@ def test_profile_compile_overlay_rejects_quoted_dangerous_arg_shlex_round_trip()
         "-Wa,--defsym,evil=1",
         "-Wl,-plugin=./evil.dso",
         "-Wl,--plugin=./evil.dso",
+        "--castxml-cc-gnu",
+        "--castxml-cc-gnu-c",
+        "--castxml-cc-msvc",
     ],
 )
 def test_profile_compile_overlay_rejects_dangerous_args(dangerous_arg: str) -> None:

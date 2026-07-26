@@ -632,13 +632,27 @@ The recommendation is **policy-aware** (it honours `--policy` and
 | `COMPATIBLE` (quality only) | patch | no bump needed |
 
 In **JSON** output the recommendation is always present (no flag needed) under
-the `release_recommendation` key, so CI and agents can gate on it directly:
+the `release_recommendation` key, so CI and agents can gate on it — **check
+`state` first**:
 
 ```bash
 abicheck compare old.so new.so -H include/ --format json \
-  | jq -r '.release_recommendation | "\(.version_bump) (\(.soname_action))"'
-# major (bump_required)
+  | jq -r '.release_recommendation | "\(.state): \(.version_bump) (\(.soname_action))"'
+# actionable: major (bump_required)
 ```
+
+`state` is one of `actionable` (act on `version_bump`/`soname_action`
+directly), `review` (a source/API break was found but no binary evidence
+confirms a SONAME action either way — `version_bump` is still a real value,
+route to a human), or `unavailable` (abicheck had no binary evidence at all
+to back a confident bump — **`version_bump` is `null`**, not a
+plausible-looking string, so automation that reads `version_bump` without
+checking `state` first can silently treat a real, unconfirmed break as "no
+action needed" or crash on the unexpected `null`). `rationale` always
+explains what abicheck would still recommend even when `state` isn't
+`actionable`. See the compare-report
+[JSON Schema](../reference/schemas/v1/compare_report.schema.json)'s
+`release_recommendation` object for the full field contract.
 
 ---
 

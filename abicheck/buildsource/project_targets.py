@@ -487,8 +487,25 @@ class BundleSpec:
 #: blocked prefix, not as a growing list of the individual flags it could
 #: smuggle. (Codex review, PR #639: the initial denylist
 #: omitted ``--config``, the ``--specs`` double-dash spelling of
-#: ``-specs``, and the whole ``-Wa,``/``-Wp,``/``-Wl,``/``-Xpreprocessor``/
-#: ``-Xassembler``/``-Xlinker`` subprocess-forwarding family.)
+#: ``-specs``, the whole ``-Wa,``/``-Wp,``/``-Wl,``/``-Xpreprocessor``/
+#: ``-Xassembler``/``-Xlinker`` subprocess-forwarding family, and
+#: ``--castxml-cc-``.
+#:
+#: ``--castxml-cc-`` is a different case from the rest of this list: it
+#: does not smuggle an already-blocked flag past a prefix check, it
+#: targets the trusted ``--castxml-cc-<id> <path>`` pair
+#: ``dumper_ast_config.py`` itself composes *ahead of* this denylist's
+#: ``args`` -- a second occurrence naively looks like it could replace the
+#: verified compiler path with an attacker-controlled one. Verified
+#: empirically against the installed castxml (0.6.3) that this is not
+#: actually exploitable: castxml hard-rejects any repeated
+#: ``--castxml-cc-*`` occurrence at argv-parse time --
+#: ``error: '--castxml-cc-<id>' may be given at most once!`` -- regardless
+#: of whether the ``<id>`` matches the first occurrence, so the scan fails
+#: outright rather than silently invoking a substituted binary. Blocked
+#: here anyway for defense-in-depth/a clearer abicheck-level error instead
+#: of relying on that castxml-internal invariant holding across every
+#: supported castxml version.
 _DANGEROUS_ARG_PREFIXES = (
     "-Xclang",
     "-Xpreprocessor",
@@ -507,6 +524,7 @@ _DANGEROUS_ARG_PREFIXES = (
     "-Wa,",
     "-Wp,",
     "-Wl,",
+    "--castxml-cc-",
     "@",
 )
 

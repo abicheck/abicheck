@@ -10,11 +10,20 @@ scenarios:
     narrative: >
       Before tagging a release, the maintainer asks abicheck what semantic
       version to publish. The JSON report must carry a release_recommendation
-      (version bump + SONAME action) so release automation can act on it.
+      (version bump + SONAME action + state) so release automation can act on
+      it. This scenario compares hand-built JSON snapshots with no
+      platform/ELF metadata on either side -- no binary artifact was ever
+      examined -- so abicheck cannot confirm a concrete bump: state reads
+      "unavailable" and version_bump is null (schema 2.20) rather than a
+      plausible-looking "major" automation could act on without checking
+      state first. release_recommendation.rationale still explains the
+      still-likely bump in prose. See SC-LINUX-ELF-BASELINE for the
+      binary-evidence-present case, where version_bump is a concrete value.
     flow:
       - abicheck compare old.json new.json --format json
     expected:
-      version_bump: major
+      state: unavailable
+      version_bump: null
     validates: UC-CHANGE-semver-recommendation
     automated: true
     test: test_sc_release_recommendation

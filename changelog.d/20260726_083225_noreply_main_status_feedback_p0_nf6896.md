@@ -55,6 +55,17 @@
   GCC/Clang matrix. `_compose_gcc_options` now returns a single space
   instead in that specific case: truthy for the `||` fallback check, yet
   inert once actually used as argv (`shlex.split(" ") == []`).
+- **`profiles.<id>.compile.args` also rejects `--castxml-cc-` now.** A
+  second `--castxml-cc-<id> <path>` occurrence appended after abicheck's
+  own trusted pair might look like it could replace the verified compiler
+  path with an attacker-controlled one; empirically verified against
+  castxml 0.6.3 that this is not actually exploitable (castxml
+  hard-rejects any repeated `--castxml-cc-*` occurrence at argv-parse
+  time — `error: '--castxml-cc-<id>' may be given at most once!` — so the
+  scan fails outright rather than silently invoking a substituted binary)
+  but blocked anyway for defense-in-depth and a clearer abicheck-level
+  error instead of relying on that castxml-internal invariant holding
+  across every supported version.
 
 ### Documentation
 
@@ -64,3 +75,16 @@
   version gate. Also corrected the legacy PyPI `castxml` package's last
   release date (0.4.5 shipped September 2022, not 2018) here and in
   `castxml_policy.py`'s docstring.
+- **`docs/use/output-formats.md`'s `release_recommendation` JSON-gating
+  example now checks `state` before `version_bump`**, and documents that
+  `version_bump` is `null` when `state` is `"unavailable"` — the previous
+  example gated on `version_bump` alone and showed only the always-present
+  `"major"` case, which is no longer true after the honesty fix above.
+- **`tests/scenarios/release_management.yaml`'s `SC-RELEASE-RECOMMENDATION`
+  scenario's documented `expected`/narrative now match what
+  `test_sc_release_recommendation` actually asserts** (`state: unavailable`,
+  `version_bump: null` — this scenario compares hand-built snapshots with
+  no binary evidence) instead of the stale `version_bump: major` the
+  version_bump-honesty fix above left behind; the catalog's own structural
+  check doesn't cross-validate `expected` values against the real
+  assertions, so this had silently gone stale (Codex review).
