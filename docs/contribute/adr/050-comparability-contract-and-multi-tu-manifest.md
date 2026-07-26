@@ -1865,6 +1865,49 @@ end-to-end test confirming a non-string scope field member declines
 cleanly rather than raising `TypeError`. Full fast unit suite green,
 mypy/ruff clean.
 
+**An eighth review pass** (Codex, one P1, one P2) found one more gap in
+the include-sequence carve-out's inner decode, plus the scope-side
+equivalent of a gap already closed on the profile side:
+
+- **`_include_sequence_is_additive_owned_growth`'s owned-pairs validation
+  still accepted malformed members that happened to look harmless.** The
+  sixth pass's `try`/`except TypeError` around `tuple(p)` doesn't catch a
+  bare string member like `"xx"`: strings are themselves iterable, so
+  `tuple("xx")` silently succeeds as `("x", "x")` instead of raising —
+  if that coincidentally matched an already-owned pair (or a wrong-arity
+  member sat alongside a genuinely new, valid one), the resulting set
+  comparison could look like real additive growth even though the
+  evidence was malformed, letting the gate fail open. Confirmed by direct
+  repro: `old_owned = {("x", "x")}` (a real pair) against
+  `new_owned = {tuple("xx")}` (the malformed member) satisfied
+  `new_owned >= old_owned` and the function wrongly returned `True`.
+  Fixed with a new `_is_owned_header_pair` validator (an exact two-element
+  `list`/`tuple` of `str`) checked for every member of both sides before
+  any `tuple(p)` conversion runs — the now-provably-unreachable
+  `try`/`except TypeError` around the set-comprehension is removed.
+- **The scope-side carve-out had the same opaque-mismatch gap the profile
+  side's `if not differing` check (fifth pass) already closed.**
+  `_scope_field_is_additive_superset` returns `True` on `old_value ==
+  new_value`, so calling it over *every* `SCOPE_FIELD_KEYS` entry (as the
+  carve-out did) means an entirely-*unchanged* set of known fields always
+  trivially satisfies `all(...)` — if a deserialized/externally-constructed
+  contract carries a `scope_fingerprint` that doesn't actually match what
+  this version would recompute from `scope_fields` (the same "opaque
+  hash" class of problem as the profile side), nothing recognized ever
+  explains the differing fingerprint, yet the carve-out still waived it.
+  Fixed by restricting the additive-superset check to a new
+  `scope_differing` set (only the `SCOPE_FIELD_KEYS` entries that actually
+  differ, mirroring the profile side's `differing`) and requiring it to be
+  non-empty before the carve-out can apply — an entirely-unchanged known
+  field set now correctly raises instead of being trivially "verified."
+
+New regression tests: two direct unit tests for the owned-pairs gap (a
+malformed member matching an existing pair, and a wrong-arity member
+alongside a genuinely new valid one — both proven to fail without the
+fix), and two gate-level tests for the opaque scope mismatch (raise mode
+and diagnostic mode, both proven to fail without the fix). Full fast unit
+suite green, mypy/ruff clean.
+
 ### D3. Manifest and real multi-TU dump
 
 New `abicheck/dump_manifest.py`: a strict YAML parser (unknown fields are

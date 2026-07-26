@@ -280,14 +280,35 @@ def _include_sequence_is_additive_owned_growth(
         new_pairs = _json_load_list(new_rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
         if old_pairs is None or new_pairs is None:
             return False
-        try:
-            old_owned = {tuple(p) for p in old_pairs}
-            new_owned = {tuple(p) for p in new_pairs}
-        except TypeError:
+        # Every owned pair must be an exact two-string list (Codex review,
+        # PR #641 follow-up, third P2) -- `tuple(p)` alone doesn't reject a
+        # malformed member the way it looks like it should: a bare string
+        # like "xx" is itself iterable, so `tuple("xx")` silently succeeds
+        # as `("x", "x")` instead of raising, letting malformed evidence
+        # masquerade as a legitimate owned-header pair and potentially make
+        # a bogus set comparison look like real superset growth.
+        if not (
+            all(_is_owned_header_pair(p) for p in old_pairs)
+            and all(_is_owned_header_pair(p) for p in new_pairs)
+        ):
             return False
+        old_owned = {tuple(p) for p in old_pairs}
+        new_owned = {tuple(p) for p in new_pairs}
         if not new_owned >= old_owned:
             return False
     return True
+
+
+def _is_owned_header_pair(pair: object) -> bool:
+    """Whether *pair* is a valid owned-header ``(identity, relative_path)``
+    entry: an exact two-element list/tuple of ``str`` (see
+    :func:`_slot_token_for_ancestor`'s real ``owned`` construction).
+    """
+    return (
+        isinstance(pair, (list, tuple))
+        and len(pair) == 2
+        and all(isinstance(x, str) for x in pair)
+    )
 
 
 @dataclass(frozen=True)
@@ -1191,7 +1212,17 @@ def check_contracts_comparable(
     the ``all(...)`` here only ever examines :data:`SCOPE_FIELD_KEYS`, so a
     contract carrying a field this build doesn't recognize was invisible to
     it, and could be silently waived through if ``headers``/
-    ``public_header_dirs`` happened to be equal or additive.
+    ``public_header_dirs`` happened to be equal or additive. Also rejects an
+    **opaque** ``scope_fingerprint`` mismatch (Codex review, PR #641
+    follow-up, fourth P1) — the scope-side equivalent of the opaque
+    profile-fingerprint check below: the additive-superset check only ever
+    runs over the recognized :data:`SCOPE_FIELD_KEYS` fields that actually
+    *differ*, never the ones that happen to be identical (an identical
+    field trivially passes :func:`_scope_field_is_additive_superset`'s own
+    ``old_value == new_value`` branch without needing to be checked at
+    all), so if *no* recognized field differs at all, there is nothing here
+    to positively verify and this raises rather than treating the absence
+    of any explanation as one.
 
     **Header-sequence-growth carve-out (PR #641 follow-up, third round):**
     waiving the scope mismatch above is not sufficient on its own — adding a
@@ -1324,6 +1355,24 @@ def check_contracts_comparable(
             and old_contract.scope_fields.get(k, "")
             != new_contract.scope_fields.get(k, "")
         }
+        # Which recognized SCOPE_FIELD_KEYS actually differ -- an entirely
+        # empty set here (Codex review, PR #641 follow-up, fourth P1) means
+        # NOTHING recognized explains the differing scope_fingerprint: a
+        # deserialized/externally-constructed contract can carry an opaque
+        # scope_fingerprint that doesn't match what this version would
+        # recompute from scope_fields, the scope-side equivalent of the
+        # opaque profile-fingerprint mismatch rejected below. Restricting
+        # the additive-superset check to only the fields that actually
+        # differ (rather than calling it for every SCOPE_FIELD_KEYS entry,
+        # where an unchanged field would trivially pass via
+        # _scope_field_is_additive_superset's old==new branch) makes an
+        # empty `scope_differing` impossible to satisfy silently.
+        scope_differing = {
+            key
+            for key in SCOPE_FIELD_KEYS
+            if old_contract.scope_fields.get(key, "")
+            != new_contract.scope_fields.get(key, "")
+        }
         # Additive-only header-set carve-out (PR #641 follow-up, pvxs scan
         # F8) -- see check_contracts_comparable's own docstring. Gated into
         # the *condition* itself, not a `return None` inside the block
@@ -1332,12 +1381,16 @@ def check_contracts_comparable(
         # release that both adds a header AND changes an unrelated
         # extraction-profile field (compiler flags, macros, include order)
         # must still be caught by that check, not silently waved through.
-        if scope_unknown_differing or not all(
-            _scope_field_is_additive_superset(
-                old_contract.scope_fields.get(key),
-                new_contract.scope_fields.get(key),
+        if (
+            scope_unknown_differing
+            or not scope_differing
+            or not all(
+                _scope_field_is_additive_superset(
+                    old_contract.scope_fields.get(key),
+                    new_contract.scope_fields.get(key),
+                )
+                for key in scope_differing
             )
-            for key in SCOPE_FIELD_KEYS
         ):
             reason = (
                 "old and new snapshots do not cover the same declared "

@@ -1254,3 +1254,95 @@ def test_gate_scope_carve_out_declines_instead_of_crashing_on_non_string_scope_f
     )
     with pytest.raises(ScopeMismatchError):
         check_contracts_comparable(old, new)
+
+
+def test_include_sequence_additive_owned_growth_declines_on_malformed_pair_member():
+    # Codex review, PR #641 follow-up (third P2): a bare string like "xx" is
+    # itself iterable, so `tuple("xx")` silently succeeds as `("x", "x")`
+    # instead of raising -- old_owned's one real pair happens to equal what
+    # "xx" decodes to, so without validation new_owned >= old_owned is
+    # wrongly True (the malformed member masquerades as the exact pair
+    # already owned, not evidence of anything new) and the carve-out
+    # wrongly accepts this as additive growth.
+    old = json.dumps([_hdrs_slot(0, [("x", "x")])])
+    new = json.dumps(["0:hdrs:" + json.dumps(["xx"])])
+    assert not _include_sequence_is_additive_owned_growth(old, new)
+
+
+def test_include_sequence_additive_owned_growth_declines_on_wrong_arity_pair():
+    # A genuinely new, valid pair growing alongside a malformed (3-element)
+    # one: new_owned's valid pair alone already satisfies the superset
+    # check against old_owned, so without validating each pair's arity the
+    # malformed third element is silently ignored rather than treated as
+    # untrustworthy evidence.
+    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
+    new = json.dumps(
+        [
+            "0:hdrs:"
+            + json.dumps([["a.h", "a.h"], ["b.h", "b.h", "extra"]])
+        ]
+    )
+    assert not _include_sequence_is_additive_owned_growth(old, new)
+
+
+def test_gate_rejects_opaque_scope_mismatch_with_no_recognized_differing_field():
+    # Codex review, PR #641 follow-up (fourth P1): the scope-side
+    # equivalent of the opaque profile-fingerprint mismatch rejected
+    # elsewhere -- a deserialized/externally-constructed contract can carry
+    # a scope_fingerprint that doesn't match what this version would
+    # recompute from scope_fields. If every recognized SCOPE_FIELD_KEYS
+    # field is identical between old and new, nothing here explains the
+    # differing fingerprint at all, so this must raise rather than treat
+    # "nothing changed" as "verified safe."
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-old",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h"]),
+                "public_header_dirs": json.dumps([]),
+            },
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-new",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h"]),
+                "public_header_dirs": json.dumps([]),
+            },
+        )
+    )
+    with pytest.raises(ScopeMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_rejects_opaque_scope_mismatch_in_diagnostic_mode_too():
+    old = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-old",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h"]),
+                "public_header_dirs": json.dumps([]),
+            },
+        )
+    )
+    new = _snap(
+        ExtractionContract(
+            profile_fingerprint=None,
+            scope_fingerprint="s-new",
+            profile_fields={},
+            scope_fields={
+                "headers": json.dumps(["a.h", "b.h"]),
+                "public_header_dirs": json.dumps([]),
+            },
+        )
+    )
+    result = check_contracts_comparable(old, new, diagnostic=True)
+    assert isinstance(result, ComparabilityMismatch)
+    assert result.kind == "scope"
