@@ -550,17 +550,11 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     never repeats ``Foo`` in its own return/parameter types, so without
     also seeding :func:`abicheck.diff_cxx_rules.owner_class_of` the
     previous version never queued ``Foo`` at all — a genuine layout break
-    in one of its fields would be silently missed. That recovered owner is
-    itself checked against ``STDLIB_TYPE_NAMESPACE_PREFIXES`` before being
-    scanned, the same way ``fn.name`` already is (Codex review, fresh
-    evidence): CastXML/direct-clang record a method's own ``Function.name``
-    bare (e.g. ``"touch"``, never ``"__gnu_cxx::Node::touch"``), so the
-    existing ``fn.name.startswith(...)`` guard cannot catch a retained,
-    seemingly-public method whose *owner* is itself a stdlib-internal class
-    (e.g. libstdc++'s ``__gnu_cxx::Node``) — without this second check,
-    `owner_class_of` correctly recovering that qualified owner and handing
-    it straight to `_scan` would mark the stdlib class itself as directly
-    referenced, unfiltering purely internal toolchain churn), or transitively
+    in one of its fields would be silently missed. A retained, seemingly-
+    public method whose *owner* is itself a stdlib-internal class, e.g.
+    libstdc++'s ``__gnu_cxx::Node``, is excluded from this by the
+    declaration-level stdlib-scope check above, before its owner is ever
+    computed), or transitively
     through another already-reachable record's fields/bases (Codex review,
     fresh evidence: the previous version scanned *every* non-stdlib
     record's fields unconditionally, so a purely internal,
@@ -573,6 +567,28 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     See :func:`_spelling_index` for why an ambiguous bare alias shared by
     two distinct non-stdlib records (Codex review, fresh evidence) is
     dropped rather than queuing both.
+
+    An owner recovered from :func:`abicheck.diff_cxx_rules.owner_class_of`
+    is queued only on an *exact* match against a non-stdlib record's full
+    identity — never through the general suffix-matching mechanism
+    :func:`_spelling_index`'s ``record_index`` uses for signature type
+    spellings (Codex review, fresh evidence): ``owner_class_of`` derives
+    its result by chopping the trailing ``"::"``-component off *any*
+    already-qualified declaration name or mangled-symbol scope chain, with
+    no way to tell whether what remains is really an enclosing *class* or
+    just an enclosing *namespace* — e.g. a public namespace function
+    ``api::run()`` makes ``owner_class_of`` return the bare namespace
+    fragment ``"api"``, which could coincidentally equal the *bare suffix*
+    of some unrelated internal record ``other::api``, wrongly walking that
+    record's fields. Unlike a real signature type spelling (which a
+    backend can legitimately partially-qualify per the ``Outer::Inner``
+    case below), an owner string is always either the full, exact
+    identity of a genuine class (both ``owner_class_of``'s
+    already-qualified-name path and its mangled-decomposition fallback
+    reconstruct the *complete* scope chain, never a partially-elided one)
+    or, when the function is not actually a method, semantic noise —
+    so exact-identity matching is both sufficient for every real class
+    owner and immune to the namespace-collision false positive.
     Deliberately does **not** also gate on pointer-vs-by-value use the way
     a first read might expect (an earlier review round raised this): this
     module intentionally mirrors ``surface.py``'s own documented ADR-024 §D3
@@ -666,8 +682,13 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
         for param in fn.params:
             _scan(param.type)
         owner = owner_class_of(fn)
-        if owner is not None:
-            _scan(owner)
+        if (
+            owner is not None
+            and owner in non_stdlib_identities
+            and owner not in reached_records
+        ):
+            reached_records.add(owner)
+            worklist.append(owner)
 
     for var in snapshot.variables:
         if not remaining:

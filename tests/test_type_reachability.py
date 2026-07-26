@@ -1654,3 +1654,118 @@ class TestStdlibScopeRecoveredFromMangledName:
             types=[RecordType(name="std::string", kind="class")],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
+class TestOwnerSeedExactIdentityMatchOnly:
+    def test_namespace_function_owner_does_not_match_unrelated_record_bare_suffix(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: owner_class_of derives its result
+        by chopping the trailing "::"-component off any already-qualified
+        name, with no way to tell whether what remains is a class or just
+        an enclosing namespace -- a public namespace function api::run()
+        makes owner_class_of return the bare namespace fragment "api",
+        which must not be matched against an unrelated internal record's
+        own bare-suffix spelling (other::api) just because they coincide
+        textually."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="api::run",
+                    mangled="_ZN3api3runEv",
+                    return_type="void",
+                    params=[],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="api",
+                    kind="class",
+                    qualified_name="other::api",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_genuine_class_owner_still_matches_exactly(self) -> None:
+        """Guard against over-correcting: a real class owner (an exact
+        identity match) must still be seeded normally."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="api::Foo::run",
+                    mangled="_ZN3api3Foo3runEv",
+                    return_type="void",
+                    params=[],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    qualified_name="api::Foo",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
+class TestItaniumStdSubstitution:
+    def test_standalone_st_substitution_recovers_std_scope(self) -> None:
+        """Codex review, fresh evidence: GCC/Clang use the mandatory
+        2-character "St" substitution for the first occurrence of the
+        std:: scope prefix. namespace std { void touch() {} } compiles to
+        the bare _ZSt5touchv (confirmed against a real GCC build) -- no
+        "N...E" nested-name wrapper at all, which the parser previously
+        did not recognize as scoped under std at all."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="touch",
+                    mangled="_ZSt5touchv",
+                    return_type="std::string",
+                    params=[],
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_standalone_st_substitution_variable(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            variables=[Variable(name="ping", mangled="_ZSt4ping", type="std::string")],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_nested_st_substitution_recovers_std_scope(self) -> None:
+        """namespace std { namespace detail { void foo() {} } } compiles
+        to _ZNSt6detail3fooEv (confirmed against a real GCC build) -- "St"
+        right after the "N" nested-name marker, with further components
+        following before "E"."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_ZNSt6detail3fooEv",
+                    return_type="std::string",
+                    params=[],
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()

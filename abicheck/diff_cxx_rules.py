@@ -248,9 +248,27 @@ def itanium_scope_components(mangled: str) -> list[str] | None:
         _ZNK1C3barEv                   -> ["C", "bar"]              (const member)
         _ZN3lib12experimental4sortEv   -> ["lib", "experimental", "sort"]
         _ZN3BoxIiE4sizeEv              -> ["BoxIiE", "size"]        (Box<int>::size)
+        _ZSt5touchv                    -> ["std", "touch"]          (std::touch(), no wrapper)
+        _ZNSt6detail3fooEv             -> ["std", "detail", "foo"]  (std::detail::foo())
+
+    The Itanium ABI mandates the 2-character substitution ``St`` for the
+    *first* occurrence of the ``std::`` scope prefix in a mangled name —
+    confirmed empirically against two real GCC-compiled symbols:
+    ``namespace std { void touch() {} }`` mangles to the bare ``_ZSt5touchv``
+    (``St`` directly after ``_Z``, no ``N…E`` nested-name wrapper needed for
+    a single trailing component), while ``namespace std { namespace detail {
+    void foo() {} } }`` mangles to ``_ZNSt6detail3fooEv`` (``St`` right after
+    the ``N`` nested-name marker, with further components following before
+    ``E``). Recognized only as the very first component (this parser does
+    not attempt general substitution-table resolution for the other
+    Itanium substitution abbreviations — ``Sa``/``Sb``/``Ss``/``Si``/``So``/
+    ``Sd`` — which stand for a complete template *type*, not a scope prefix
+    that can have more components appended, and are irrelevant to "what
+    scope is this declaration in").
 
     Returns ``None`` for forms it does not model (constructors/operators,
-    substitutions, non-Itanium or unmangled names) so callers fall back.
+    other substitutions, non-Itanium or unmangled names) so callers fall
+    back.
     """
     prefix = _itanium_strip_prefix(mangled)
     if prefix is None:
@@ -259,6 +277,9 @@ def itanium_scope_components(mangled: str) -> list[str] | None:
     components: list[str] = []
     i = 0
     n = len(s)
+    if s[i : i + 2] == "St":
+        components.append("std")
+        i += 2
     while i < n:
         step = _step_next_component(s, i, nested)
         if step is None:

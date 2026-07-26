@@ -401,3 +401,48 @@
   New regression tests cover both fixes (positive, negative, and
   ambiguity-guard cases); full suite green, 100% module coverage, FP-rate
   gate stays 0 FP/0 FN.
+- **`type_reachability.py`'s owner-seeding gains a correctness fix, not
+  just a missing-spelling one** (Codex review, fresh evidence, confirmed
+  with a minimal repro): `owner_class_of()` derives its result by chopping
+  the trailing `"::"`-component off any already-qualified declaration name
+  or mangled-symbol scope chain, with no way to tell whether what remains
+  is really an enclosing class or just an enclosing namespace — a public
+  namespace function `api::run()` makes `owner_class_of` return the bare
+  namespace fragment `"api"`, which the general suffix-matching mechanism
+  could then coincidentally match against an unrelated internal record's
+  own bare-suffix spelling (`other::api`), wrongly walking its fields and
+  unfiltering its layout churn. Fixed by seeding an owner only on an exact
+  match against a non-stdlib record's full identity, bypassing the
+  suffix-matching mechanism entirely for this seed — safe because,
+  unlike a genuine signature type spelling, `owner_class_of`'s result is
+  always either the complete, exact scope chain of a real class or
+  namespace noise, never a partially-elided one. While verifying this fix
+  through the full `compare()` pipeline, the identical bug pattern was
+  found to independently exist in `surface.py`'s own, separate
+  `owner_class_of`-based public-surface seeding — deliberately left
+  unfixed here and documented in `AGENTS.md`'s "Known gaps", since
+  `surface.py` is a different, foundational module this PR doesn't
+  otherwise touch and its bare-tail lookup mechanism is shared by every
+  other seed type, needing its own careful, independently-verified design.
+- **GCC/Clang's Itanium `St` substitution for the `std::` scope prefix is
+  now recognized** (Codex review, fresh evidence, confirmed against two
+  real GCC-compiled symbols): the Itanium ABI mandates the 2-character
+  substitution `St` for the *first* occurrence of `std::` in a mangled
+  name — `namespace std { void touch() {} }` compiles to the bare
+  `_ZSt5touchv` (no `N…E` nested-name wrapper at all), while `namespace
+  std { namespace detail { void foo() {} } }` compiles to
+  `_ZNSt6detail3fooEv` (`St` right after the `N` marker). Neither form was
+  previously recognized by `itanium_scope_components()`, so a bare-named
+  stdlib function/variable using this (extremely common) substitution
+  bypassed the mangled-scope-recovery guard added earlier in this PR.
+  Fixed in the shared `diff_cxx_rules.py` parser (benefiting all of its
+  callers, not just `type_reachability.py`) by recognizing `St` as the
+  first scope component when it appears at the very start of parsing —
+  deliberately not attempting general Itanium substitution-table
+  resolution for the other substitution abbreviations (`Sa`/`Sb`/`Ss`/
+  `Si`/`So`/`Sd`), which stand for a complete template type rather than a
+  scope prefix and are irrelevant to this need. New regression tests
+  cover both the standalone and nested `St` forms for both functions and
+  variables, plus the owner-seeding exact-match fix (positive and
+  negative cases). Full suite green, 100% module coverage, FP-rate gate
+  stays 0 FP/0 FN.

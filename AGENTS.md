@@ -849,6 +849,53 @@ Once a root command genuinely clears the bar above, pick the right home:
   trailing `"::"`, never matching the `"std::"` prefix string), so the
   now-redundant owner-only guard was removed.
 
+  **A sixth finding found a different shape of gap again: an owner-seeding
+  correctness bug, not a missing-spelling one.** `owner_class_of()`
+  derives its result by chopping the trailing `"::"`-component off *any*
+  already-qualified declaration name or mangled-symbol scope chain, with
+  no way to tell — from the string alone — whether what remains is really
+  an enclosing *class* or just an enclosing *namespace* (Codex review,
+  fresh evidence, confirmed with a minimal repro): a public namespace
+  function `api::run()` makes `owner_class_of` return the bare namespace
+  fragment `"api"`, which the general suffix-matching mechanism
+  (`_namespace_suffix_spellings`, added for the first finding above) could
+  then coincidentally match against an unrelated internal record's own
+  bare-suffix spelling (e.g. `other::api`), wrongly walking that record's
+  fields and unfiltering its layout churn. Fixed by seeding an owner only
+  on an *exact* match against a non-stdlib record's full identity —
+  bypassing `_spelling_index`'s `record_index`/suffix mechanism entirely
+  for this specific seed, rather than routing it through `_scan()`. This
+  is safe rather than a regression risk: unlike a genuine signature type
+  spelling (which a backend can legitimately partially-qualify, per the
+  first finding), `owner_class_of`'s result is always either the complete,
+  exact scope chain of a real class (both its already-qualified-name path
+  and its mangled-decomposition fallback reconstruct the *full* chain,
+  never a partially-elided one — DWARF always bakes the complete
+  namespace/class path into a qualified name, and Itanium mangling always
+  encodes the complete nested-name unambiguously) or, when the function
+  isn't actually a method, namespace noise — so restricting to exact
+  matching loses no real case while closing the false-positive collision.
+  While verifying this fix through the full `compare()` pipeline (not just
+  the unit level), the same class of bug was found to independently exist
+  in `surface.py`'s `compute_public_surface()` — its own, separate
+  `owner_class_of`-based seeding (`_seed_public_roots`) feeds the raw
+  owner through `_type_identifiers()` into `seed_types`, and
+  `_walk_type_closure()`'s `record_by_name` lookup is *itself* keyed by
+  bare-tail aliases (an intentional, correct mechanism for genuine type
+  references — "a short alias reached inside its own namespace resolves
+  to the namespaced record"), so the identical `"api"` vs. `other::api`
+  collision reproduces there too, confirmed with the same minimal repro
+  (`compute_public_surface` marks `"api"` — and therefore `other::api` —
+  public). **Deliberately not fixed in this pass**: `surface.py` is a
+  different, foundational module (the public-surface-scoping gate every
+  other detector in the codebase depends on) that this PR never otherwise
+  touches, and unlike the narrow `type_reachability.py` seeding path, its
+  `record_by_name` bare-tail lookup is a *shared* mechanism relied on by
+  every other seed type too — restricting it for the owner case
+  specifically needs its own careful, independently-verified design (which
+  seed paths may legitimately need the ambiguous-tail lookup and which
+  must not), not a same-PR drive-by extension of an unrelated finding.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a
