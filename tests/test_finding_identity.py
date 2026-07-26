@@ -265,12 +265,30 @@ class TestNormalizeMangledName:
         assert normalize_mangled_name("_ZSaIcE", None) == "_ZSaIcE"
         assert normalize_mangled_name("_ZS_", None) == "_ZS_"
 
+    def test_numbered_substitution_without_terminator_is_rejected(self) -> None:
+        # Codex review, fresh evidence: a numbered substitution's <seq-id>
+        # (base-36: digits then uppercase letters) is ALWAYS followed by a
+        # literal terminating "_" (e.g. "S0_", "SA_") -- "_ZS0" has the
+        # seq-id digit but no terminator and is not a complete encoding.
+        assert normalize_mangled_name("_ZS0", "_ZS0") is None
+        assert normalize_mangled_name("_ZSA", "_ZSA") is None
+
+    def test_numbered_substitution_with_terminator_is_accepted(self) -> None:
+        assert normalize_mangled_name("_ZS0_i", None) == "_ZS0_i"
+        assert normalize_mangled_name("_ZSA_i", None) == "_ZSA_i"
+
     def test_extern_c_bare_name_is_rejected(self) -> None:
         assert normalize_mangled_name("foo", "foo") is None
 
     def test_msvc_prefixed_mangling_is_accepted_on_convention_alone(self) -> None:
         msvc = "?foo@@YAHH@Z"
         assert normalize_mangled_name(msvc, "foo") == msvc
+
+    def test_bare_msvc_prefix_with_no_payload_is_rejected(self) -> None:
+        # Codex review, fresh evidence: a bare "?" has no encoded payload
+        # at all and is not a real mangling, but previously matched the
+        # prefix-only check alone.
+        assert normalize_mangled_name("?", "?") is None
 
     def test_itanium_prefixed_garbage_with_invalid_characters_is_rejected(self) -> None:
         assert (

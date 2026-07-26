@@ -151,6 +151,10 @@ _ITANIUM_OPERATOR_CODES = frozenset(
 
 _SOURCE_NAME_LENGTH_RE = re.compile(r"\A[0-9]+")
 
+#: Itanium ``<seq-id>``: base-36 (digits then uppercase letters), used only
+#: by the numbered-substitution production ``S <seq-id> _``.
+_BASE36_SEQ_ID_RE = re.compile(r"\A[0-9A-Z]+")
+
 #: A real Itanium ``<source-name>`` length prefix is never remotely close to
 #: this many digits (it would claim a billion-plus-byte identifier). Bounds
 #: the digit run *before* ``int()`` sees it -- Python raises ``ValueError``
@@ -355,6 +359,16 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
         # this check with nothing after it (Codex review, fresh evidence).
         if rest[1] == "t":
             return len(rest) > 2
+        if rest[1].isdigit() or (rest[1].isalpha() and rest[1].isupper()):
+            # Numbered substitution: <seq-id> ::= [0-9A-Z]+, ALWAYS
+            # followed by a literal terminating "_" (e.g. "S0_", "SA_") --
+            # unlike the single-letter abbreviations (Sa/Sb/Sd/Si/So/Ss)
+            # or bare "S_", which are already complete. "_ZS0" has the
+            # seq-id digit but no terminator and is not a complete
+            # encoding (Codex review, fresh evidence).
+            m = _BASE36_SEQ_ID_RE.match(rest[1:])
+            assert m is not None  # guarded by isdigit()/isupper() above
+            return rest[1 + m.end() :].startswith("_")
         return True
     # Two <operator-name> codes are not complete by themselves the way the
     # other 47 are: "cv" (conversion operator) requires a following
@@ -386,14 +400,17 @@ def _looks_structurally_mangled(value: str) -> bool:
     check available (no demangler in this codebase to cross-check against
     at all) and are accepted on the prefix convention alone (best-effort,
     matches how the rest of the codebase already treats MSVC-mangled names
-    it cannot independently demangle).
+    it cannot independently demangle) -- beyond requiring at least one
+    byte of encoded payload after the ``?``: a bare ``"?"`` has no payload
+    at all and is not a real mangling, but previously matched the prefix
+    check alone (Codex review, fresh evidence).
     """
     if value.startswith("_Z"):
         if not _ITANIUM_MANGLED_RE.match(value):
             return False
         rest = value[2:].split(".", 1)[0]  # drop clone suffix
         return _looks_like_itanium_encoding(rest)
-    return value.startswith("?")
+    return value.startswith("?") and len(value) > 1
 
 
 def normalize_mangled_name(
