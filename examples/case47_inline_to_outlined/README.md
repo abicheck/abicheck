@@ -1,79 +1,111 @@
-# Case 47: Inline Function Moved to Outlined
+# Case 47: Inline Method Moved Out-of-Line
 
 **Category:** Compatible | **Verdict:** 🟢 COMPATIBLE
 
-## What does NOT break
+## Verdict and consumer impact
 
-In v1, `Calculator::add()` is defined `inline` in the header — no exported symbol.
-In v2, it is moved out-of-line — the symbol is now exported from the `.so`.
+`Calculator::add()` is defined `inline` in v1's header, so it has no
+exported symbol — every consumer gets its own inlined copy baked into
+their binary at compile time. In v2, `add()` is moved out-of-line into
+the `.cpp` file, so the library now exports `_ZN10Calculator3addEii`.
+Consumers compiled against v1 keep using their own inlined copy (the new
+export is simply unused by them); consumers compiled against v2 call the
+newly-exported symbol. Nothing that worked before stops working — this is
+a pure addition.
 
-Consumers compiled against v1 already have the inlined body baked into their binary.
-Consumers compiled against v2 will call the exported symbol. Both work correctly.
-No existing binary breaks — this is a **FUNC_ADDED** (compatible extension).
+## Old/new diff
 
-## Why abidiff sees it as compatible
+| old/lib.hpp | new/lib.hpp |
+|-------------|-------------|
+| `inline int add(int a, int b) { return a + b; }` (no exported symbol) | `int add(int a, int b);` — body in `lib.cpp`, symbol exported |
 
-abidiff reports `Function_Symbol_Added` and exits **4** (change detected), but the
-change kind is additive. abicheck classifies as `COMPATIBLE` (FUNC_ADDED).
-
-## Code diff
-
-| v1.hpp | v2.hpp |
-|--------|--------|
-| `inline int add(int a, int b) { return a + b; }` | `int add(int a, int b);` — definition in v2.cpp |
-| No exported symbol for `add` | Symbol `_ZN10Calculator3addEii` now exported |
-
-## Real Failure Demo
-
-**Severity: ✅ BASELINE — no failure**
+## abicheck command
 
 ```bash
-g++ -shared -fPIC -g v1.cpp -o libv1.so
-g++ -shared -fPIC -g v2.cpp -o libv2.so
-
-abidw --out-file v1.abi libv1.so
-abidw --out-file v2.abi libv2.so
-abidiff v1.abi v2.abi
-echo "exit: $?"   # → 4 (FUNC_ADDED — change detected, but compatible)
-nm -D libv2.so | grep add   # → T _ZN10Calculator3addEii (now exported)
+g++ -shared -fPIC -g -std=c++17 old/lib.cpp -Iold -o libcalc_v1.so
+g++ -shared -fPIC -g -std=c++17 new/lib.cpp -Inew -o libcalc_v2.so
+abicheck compare libcalc_v1.so libcalc_v2.so
 ```
 
-## Reproduce manually
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE (exit 0)
+
+Additions:
+- func_added: New public function: Calculator::add(int, int)
+  > New function available; existing binaries are unaffected.
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the exported-symbol table alone is enough: `add`'s
+mangled symbol is absent from v1's `.dynsym` and present in v2's. No debug
+info or headers needed to see that a new public symbol appeared.
+
+## Why abicheck catches it
+
+abicheck diffs the two libraries' exported-symbol sets directly from ELF;
+a demangled symbol present only in the new snapshot is reported as
+`func_added`, a compatible addition, since no existing symbol changed or
+disappeared.
+
+## Runtime failure demonstration
+
+No observable effect on existing binaries — `add()`/`multiply()`/`subtract()`
+return identical results both before and after the swap, whether the app
+is compiled against v1's inline body or v2's exported symbol.
 
 ```bash
-g++ -shared -fPIC -g v1.cpp -o libv1.so
-g++ -shared -fPIC -g v2.cpp -o libv2.so
-abidw --headers-dir . --out-file v1.abi libv1.so
-abidw --headers-dir . --out-file v2.abi libv2.so
-abidiff v1.abi v2.abi
+# Build old library + app (compiled against v1's inline add())
+g++ -shared -fPIC -g -std=c++17 old/lib.cpp -Iold -o libcalc.so
+g++ -g -std=c++17 app.cpp -Iold -L. -lcalc -Wl,-rpath,. -o app
+./app
+# → add=5 multiply=20 subtract=8
+# → expected: 5 20 8
+
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g -std=c++17 new/lib.cpp -Inew -o libcalc.so
+./app
+# → add=5 multiply=20 subtract=8   (identical — app used its own inlined add())
+
+# Confirm the symbol table difference directly:
+nm -D libcalc_v1.so | grep add   # → (nothing — add() was inlined, no symbol)
+nm -D libcalc_v2.so | grep add   # → T _ZN10Calculator3addEii
 ```
 
-## Why this is still a risk
+## Safe redesign
 
-While ABI-compatible, moving inline→outlined is a **source-level change**: any
-consumer that relied on the inlined body being optimized away (e.g. in `constexpr`
-contexts or LTO-heavy builds) may see different behavior. Document the change.
-
-There is also a build-coordination risk that abicheck's binary-vs-binary
-COMPATIBLE verdict does not itself flag, since it compares two libraries,
-not a specific consumer's header/library pairing: a consumer compiled
-against **v2's** header (declaration only, no inline body) but linked
-against **v1's** `.so` (which never exported `add` — it was inline) gets a
-hard linker error, `undefined reference to Calculator::add(int, int)`.
-That's not an ABI break in the usual sense (no *existing* binary stops
-working), but it does mean v2's header and v2's `.so` must ship together —
-see the compatibility matrix below and case16 (`inline_to_non_inline`),
-which demonstrates the same mechanism with a free function and spells out
-that failure mode end to end.
-
-## Compatibility matrix (consumer headers × runtime library)
+This transition is already safe for the binary-vs-binary case above, but
+it does introduce a build-coordination hazard that a pure library diff
+can't see: a consumer compiled against **v2's header** (declaration only,
+no inline body) but linked against **v1's `.so`** (which never exported
+`add` — it was inline) gets a hard link error,
+`undefined reference to Calculator::add(int, int)`. That's not an ABI
+break in the usual sense — no *existing* binary stops working — but it
+does mean v2's header and v2's `.so` must ship together:
 
 | Consumer built against | Runtime `.so` | Result |
 |---|---|---|
-| v1 header (inline, no symbol) | v1 `.so` | ✅ works — caller uses its own inlined copy |
-| v1 header (inline, no symbol) | v2 `.so` (symbol exported) | ✅ works — caller's inlined copy is used; the new export is simply unused |
-| v2 header (declaration only) | v2 `.so` (symbol exported) | ✅ works — caller resolves the exported symbol |
-| v2 header (declaration only) | v1 `.so` (no symbol) | ❌ **link failure** — `add` was never exported by v1 |
+| v1 header (inline, no symbol) | v1 `.so` | works — caller uses its own inlined copy |
+| v1 header (inline, no symbol) | v2 `.so` (symbol exported) | works — caller's inlined copy is used; the new export is unused |
+| v2 header (declaration only) | v2 `.so` (symbol exported) | works — caller resolves the exported symbol |
+| v2 header (declaration only) | v1 `.so` (no symbol) | **link failure** — `add` was never exported by v1 |
 
 Only the last row fails, and it requires a specific build mismatch (new
-headers, old library) that a coordinated release naturally avoids.
+headers paired with an old library) that a coordinated release naturally
+avoids. See case16 (`inline_to_non_inline`) for the same mechanism spelled
+out end to end with a free function.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libcalc_v1.so
+abidw --out-file v2.xml libcalc_v2.so
+abidiff v1.xml v2.xml
+```
+
+## References
+
+- [Itanium C++ ABI: name mangling](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling)
+- [libabigail `abidiff` manual](https://sourceware.org/libabigail/manual/abidiff.html)

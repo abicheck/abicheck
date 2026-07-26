@@ -12,58 +12,102 @@
 
 **Category:** ABI + source break / regression suite | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
 A public member function (`insert`) loses one of its parameters between
-versions. The mangled symbol of the old overload disappears from the
-.so; the new overload has a different mangled name. Both the .so symbol
-table and any consumer source that called the old form change.
+versions. The mangled symbol of the old 2-argument overload disappears from
+the `.so`; the new 1-argument overload has a different mangled name. Any
+consumer binary that called `insert(key, rehash_hint)` gets `undefined
+symbol` at load time against v2, and any consumer source that called it
+fails to compile against v2's headers — both the link and the source break
+at once.
 
-## Why this matters
+## Old/new diff
 
-Mirrors several documented historical signature tightenings on
-`tbb::concurrent_unordered_map` (and friends) where helper / hint
-parameters were dropped or reordered between releases. These changes
-are doubly bad: they break source AND they break linking of consumers
-that were built against the old headers.
+| v1.h | v2.h |
+|------|------|
+| `void insert(int key, unsigned long rehash_hint);` | `void insert(int key);` |
 
-## How abicheck catches it
+## abicheck command
 
-The diff exposes:
+```bash
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
 
-- `FUNC_REMOVED`: old mangled `insert(int, size_t)`
-- `FUNC_ADDED`: new mangled `insert(int)` (informational; helps the
-  reporter identify a candidate replacement)
+## Expected abicheck finding
 
-`FUNC_REMOVED` on a public symbol is unconditionally BREAKING — there
-is no new detector required to flag this case.
+```text
+Verdict: BREAKING (exit 4)
 
-## Code diff
+- func_removed_elf_only: Elf_only function removed:
+  mylib::concurrent_unordered_map_int::insert(int, unsigned long)
+  > Exported function symbol removed from the binary; old binaries that
+    link or dlsym() it can fail even without header evidence.
 
-| v1 | v2 |
-|----|------|
-| `void insert(int key, std::size_t rehash_hint);` | `void insert(int key);` |
+Additions:
+- func_added: New public function:
+  mylib::concurrent_unordered_map_int::insert(int)
+```
 
-## How to fix (as a library maintainer)
+## Minimum evidence
+
+`min_evidence: L0` — the two overloads have different mangled names
+(`...insertEim` vs `...insertEi`), so the exported-symbol table alone shows
+the old symbol gone and a new one in its place. No debug info or headers
+needed; `-g` above is only there so the *Runtime failure demonstration*
+below can build a matching app.
+
+## Why abicheck catches it
+
+C++ name mangling encodes the parameter list, so a signature change
+produces a structurally different symbol. abicheck's L0 symbol-table diff
+sees the old mangled name vanish and a new one appear, and reports it as a
+public function removal (BREAKING) plus a public function addition
+(informational — helps the reporter suggest a candidate replacement).
+
+## Runtime failure demonstration
+
+**Severity: BREAKING**
+
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
+
+```bash
+# Build old library + app
+g++ -shared -fPIC -g v1.cpp -o libfoo.so
+g++ -std=c++17 -g app.cpp -L. -lfoo -Wl,-rpath,. -o app
+./app; echo $?
+# → exit 1 (m.insert(42, 8) then m.size() == 1)
+
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g v2.cpp -o libfoo.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol:
+#   _ZN5mylib28concurrent_unordered_map_int6insertEim
+
+# Source rebuild against the v2 header also fails:
+# → error: no matching function for call to 'insert(int, int)'
+```
+
+**Why BREAKING:** the app calls the 2-argument `insert`, whose mangled
+symbol is unique to the old parameter list; v2's `.so` exports only the
+1-argument overload under a different mangled name, so the dynamic linker
+cannot resolve the call and the process is killed on startup.
+
+## Safe redesign
 
 - Keep both overloads through a deprecation window: in release N–1, mark
   the hint-form overload `[[deprecated]]` and have it call into the
   hint-free implementation. In release N, remove it.
 - If the hint argument is genuinely dead, prefer making it a default
-  argument first (`std::size_t rehash_hint = 0`) — that preserves the
+  argument first (`unsigned long rehash_hint = 0`) — that preserves the
   symbol name on platforms where the mangled signature includes the
   parameter, and only later remove it.
 
-## Real failure demo
-
-```bash
-# v1 header, v1 .so:
-g++ -std=c++17 -I. app.cpp -L. -lmylib -o app   # compiles, links, runs
-
-# v2 header, v2 .so: app.cpp's 2-arg insert is gone.
-g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
-# → error: no matching function for call to 'insert(int, int)'
-```
+**Real-world example:** mirrors several documented historical signature
+tightenings on `tbb::concurrent_unordered_map` (and friends) where helper /
+hint parameters were dropped or reordered between releases.
 
 ## References
 

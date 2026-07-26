@@ -1,66 +1,103 @@
-# Case 78: task_arena::attach Tag Type Replaces Enum
+# Case 78: `task_arena::attach` Tag Type Replaces Enum
 
-**Category:** ABI + source break / regression suite | **Verdict:** 🔴 BREAKING
+**Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-An `attach_mode_t` enum and the constructor `task_arena(attach_mode_t)`
-are replaced by an empty tag struct `task_arena::attach` and a
-`task_arena(attach)` constructor. The old enum is removed entirely, the
-old constructor's mangled name is gone, and consumer source that wrote
-`task_arena ta(attach_to_current);` no longer compiles.
+An `attach_mode_t` enum plus the `task_arena(attach_mode_t)` constructor are
+replaced by an empty tag struct `task_arena::attach` and a
+`task_arena(attach)` constructor. The old enum, its members, and the old
+constructor's mangled symbol are all removed. Consumer source that wrote
+`task_arena ta(attach_to_current);` no longer compiles against v2's headers,
+and a binary compiled against v1 can't even link against v2's `.so` — the
+old constructor's mangled name is gone. Mirrors the real oneTBB 2021
+`task_arena::attach` tag-type introduction.
 
-## Why this matters
+## Old/new diff
 
-Mirrors a documented oneTBB API move from enum-value-based mode
-selection to tag-type-based selection. The motivation upstream was to
-align with modern C++ idioms (tag dispatch, `std::piecewise_construct`,
-`std::nothrow`), but the transition broke both source and ABI for any
-consumer that referenced the old API.
+| v1.h | v2.h |
+|------|------|
+| `enum attach_mode_t { no_attach=0, attach_to_current=1 };` | *(removed)* |
+| `explicit task_arena(attach_mode_t mode);` | `struct attach {}; explicit task_arena(attach tag);` |
 
-## How abicheck catches it
-
-The diff exposes:
-
-- `TYPE_REMOVED`: `attach_mode_t` (the enum)
-- `ENUM_MEMBER_REMOVED`: `no_attach`, `attach_to_current`
-- `FUNC_REMOVED`: old mangled `task_arena(attach_mode_t)`
-- `TYPE_ADDED`: `task_arena::attach`
-- `FUNC_ADDED`: new mangled `task_arena(task_arena::attach)`
-
-Any of `FUNC_REMOVED` / `TYPE_REMOVED` / `ENUM_MEMBER_REMOVED` on a
-public symbol is BREAKING under default policy, so no new detector is
-needed.
-
-## Code diff
-
-| v1 | v2 |
-|----|------|
-| `enum attach_mode_t { no_attach=0, attach_to_current=1 };` | (removed) |
-| `task_arena(attach_mode_t mode);` | `task_arena(attach tag);` |
-| (no nested types) | `struct attach {};` (nested) |
-
-## How to fix (as a library maintainer)
-
-- Ship a deprecation cycle: in release N–1, add the tag type and the
-  tag-form constructor while keeping the enum + old constructor;
-  mark the enum and old constructor `[[deprecated]]`. In release N,
-  remove the deprecated path.
-- Resist the urge to remove the old enum aggressively — tag-dispatch
-  cleanups feel "purely additive" until you measure the downstream
-  consumer fleet.
-
-## Real failure demo
+## abicheck command
 
 ```bash
-# v1 header, v1 .so:
-g++ -std=c++17 -I. app.cpp -L. -lmylib -o app   # compiles, links
-
-# v2 header, v2 .so:
-g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
-# → error: 'attach_to_current' was not declared in this scope
-#   error: no matching function for call to 'mylib::task_arena::task_arena(<unknown>)'
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- func_removed_elf_only: Elf_only function removed:
+  mylib::task_arena::task_arena(mylib::attach_mode_t)
+  > Exported function symbol removed from the binary; old binaries that
+    link or dlsym() it can fail even without header evidence.
+
+Additions:
+- func_added: New public function:
+  mylib::task_arena::task_arena(mylib::task_arena::attach)
+- type_added: New type: mylib::task_arena::attach
+```
+
+Note: the CLI warns `--scope-public-headers could not resolve the public
+surface` here because no headers were passed (the L1 floor below is
+DWARF-only) — it falls back to the full export table, which is what this
+case needs.
+
+## Minimum evidence
+
+`min_evidence: L1` — the exported-symbol table plus DWARF is enough: the
+old constructor's mangled name (encoding `attach_mode_t` as a parameter
+type) is present in v1's `.dynsym`/DWARF and absent from v2's, so
+`func_removed_elf_only` fires without any header/AST evidence. Passing
+public headers (`-H` + `--ast-frontend clang`) sharpens this further —
+the header-scoped run additionally reports `type_removed: attach_mode_t`
+and a cleaner `func_removed: task_arena` — but that extra precision isn't
+required to reach the BREAKING verdict.
+
+## Why abicheck catches it
+
+The removed constructor's mangled symbol (which itanium-encodes its
+`attach_mode_t` parameter type) simply isn't present in v2's dynamic symbol
+table — DWARF/ELF evidence alone is sufficient; `func_removed`/
+`func_removed_elf_only` is one of the `BREAKING_KINDS` under default
+policy, so no dedicated detector is needed for this case.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL — both a source break and an ABI break**
+
+**Scenario A — source break:** compiling existing consumer source against
+v2's header.
+
+```bash
+g++ -std=c++17 app.cpp -L. -lmylib -Wl,-rpath,. -o app
+# → app.cpp:5:33: error: 'attach_to_current' is not a member of 'mylib'
+#   mylib::task_arena ta(mylib::attach_to_current);
+```
+
+**Scenario B — ABI break:** a binary already compiled against v1 fails to
+link/load against v2's library, because the old constructor's mangled
+symbol no longer exists — the same failure mode as case01's plain symbol
+removal, just on a C++-mangled constructor name instead of a C function.
+
+## Safe redesign
+
+Ship a deprecation cycle instead of a hard cutover: in release *N-1*, add
+the tag type and the tag-form constructor while keeping the enum and the
+old constructor, marking the enum and old constructor
+`[[deprecated]]`. Only remove the deprecated path in release *N*. Resist
+removing the old enum aggressively — a tag-dispatch cleanup feels "purely
+additive" until measured against the downstream consumer fleet.
+
+**Real-world example:** oneTBB 2021 introduced `task_arena::attach` as a
+tag type; the transition broke both source and ABI for consumers still
+using the enum-value form.
 
 ## References
 

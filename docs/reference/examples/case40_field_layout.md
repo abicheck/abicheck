@@ -10,99 +10,132 @@
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case40_field_layout/` |
 
-**Category:** Struct Field Layout | **Verdict:** BREAKING
+**Category:** Struct Field Layout | **Verdict:** 🔴 BREAKING
 
-## What changes
+## Verdict and consumer impact
 
-| Version | Definition |
-|---------|-----------|
-| v1 | `struct Packet { int version; int sequence; int payload_size; unsigned flags:4; }` |
-| v2 | `struct Packet { long version; /* sequence removed */ int payload_size; unsigned flags:8; int priority; }` |
+`Packet` changes on four axes in one release: `version` widens from `int`
+to `long`, `sequence` is removed, the `flags` bitfield grows from 4 to 8
+bits, and a new `priority` field is appended. Together these push
+`payload_size` and `flags` to different byte offsets and grow the struct
+from 16 to 24 bytes. Any binary that allocates, copies, or reads/writes a
+`Packet` compiled against v1 is working with the wrong offsets against v2 —
+silently, with no crash to flag it. Recompilation is mandatory.
 
-## Why this is a binary ABI break
+## Old/new diff
 
-Every field-level change here corrupts the struct layout that old binaries were compiled
-against:
+| v1.h | v2.h |
+|------|------|
+| `int version;` | `long version;` (type widened) |
+| `int sequence;` | *(removed)* |
+| `int payload_size;` | `int payload_size;` (offset shifts) |
+| `unsigned flags : 4;` | `unsigned flags : 8;` (bitfield widened) |
+| — | `int priority;` (appended) |
 
-1. **`version` type changed `int` to `long`** — on LP64, `int` is 4 bytes and `long` is
-   8 bytes. The field is now twice as wide, pushing every subsequent field to a different
-   offset.
-2. **`sequence` removed** — old binaries still read/write at offset 4 expecting `sequence`,
-   but v2 has `payload_size` there (or padding from the widened `version`).
-3. **`payload_size` offset shifted** — was at offset 8 in v1, now at a different offset in
-   v2 due to the type change and removal above.
-4. **`flags` bitfield width 4 to 8** — changes how bits are packed within the storage unit.
-   Old code masks to 4 bits; new code uses 8 bits.
-5. **`priority` added** — appending a field to a struct is compatible only if no one relies
-   on `sizeof(struct Packet)` for allocation or array indexing. But combined with the
-   other changes, the struct is completely different.
+## abicheck command
 
-## Code diff
-
-```diff
- struct Packet {
--    int version;
-+    long version;
--    int sequence;
-+    /* sequence REMOVED */
-     int payload_size;
--    unsigned flags : 4;
-+    unsigned flags : 8;
-+    int priority;
- };
+```bash
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: Packet (128 -> 192 bits)
+  > Old code allocates or copies the type with the old size;
+    heap/stack corruption, out-of-bounds access.
+  Affected symbols: packet_send
+- type_field_type_changed: Field type changed: Packet::version (int -> long int)
+  > Field has different size or representation; old code misinterprets the data.
+  Affected symbols: packet_send
+- type_field_removed: Field removed: Packet::sequence
+  > Old code accesses a field that no longer exists at the expected offset;
+    reads garbage or writes out of bounds.
+  Affected symbols: packet_send
+- field_bitfield_changed: Bitfield layout changed: Packet::flags (bits=4 -> bits=8)
+  > Bit-field width or offset changed; old code reads/writes wrong bits.
+
+Additions:
+- type_field_added_compatible: Field added: Packet::priority
+  > Field appended without changing existing offsets; old code works
+    but won't initialize the new field.
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's struct-layout info (`DW_TAG_structure_type`
+size, per-member type and offset, plus `DW_AT_bit_size`/`DW_AT_data_bit_offset`
+for the bitfield) is enough to detect all four changes; no public headers
+required.
+
+## Why abicheck catches it
+
+DWARF records each struct member's type, byte offset, and (for bitfields)
+bit-size and bit-offset for both versions; abicheck compares the member
+list, per-member type/offset, and bitfield width directly from debug info,
+alongside the type's overall byte size.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
+**Scenario:** app builds a `Packet` with v1's layout and computes an
+expected checksum from its own field reads, then calls `packet_send()`
+which recomputes the same checksum from inside the library — first against
+v1's layout, then against v2's after the library is swapped.
 
 ```bash
-# Build v1 lib + app
+# Build old library + app
 gcc -shared -fPIC -g v1.c -o libfoo.so
 gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
 ./app
 # → sizeof(Packet) = 16
-# → version      = 1
-# → sequence     = 42
-# → payload_size = 1024
-# → flags        = 15
-# → packet_send  = 1
+# → expected checksum (v1 layout) = 1082
+# → packet_send()                = 1082
+# → exit 0
 
-# Swap to v2 (no recompile of app)
+# Swap in new library (no recompile)
 gcc -shared -fPIC -g v2.c -o libfoo.so
 ./app
-# → packet_send returns wrong value!
-# The app passes a v1-layout Packet (16 bytes) but the library
-# reads it as a v2-layout Packet (24+ bytes). The library reads
-# pkt->version as a long starting at offset 0, picking up both
-# the old version and sequence fields as one 8-byte value.
-# Result: corrupted data, wrong return value.
+# → sizeof(Packet) = 16
+# → expected checksum (v1 layout) = 1082
+# → packet_send()                = -263838592
+# → LAYOUT_MISMATCH: library interpreted struct with incompatible field layout
+# → exit 2
 ```
 
-**Why CRITICAL:** Struct layout is baked into every compilation unit. When the library and
-the application disagree on field offsets and sizes, every field access reads garbage.
-There is no runtime error — just silently wrong data, which is the most dangerous class
-of ABI break.
+**Why CRITICAL:** the app's `Packet` is still only 16 bytes (built against
+v1), but v2's `packet_send()` reads `version` as an 8-byte `long`,
+`payload_size`/`flags` at their new offsets, and `priority` at an offset
+past the end of the app's allocation. There is no crash — every field read
+just returns different, wrong data, which is exactly the class of ABI break
+that's hardest to notice in production.
 
-## Reproduce manually
+## Safe redesign
+
+Never change field types, remove fields, reorder fields, or resize
+bitfields in a public struct. Use an opaque pointer (`struct Packet *`)
+with accessor functions so internal layout can evolve freely, and reserve
+appending fields for the rare case where every consumer allocates through a
+library-provided constructor (never `sizeof`/stack allocation directly).
+
+**Real-world example:** wire-protocol/packet structs shared across a
+library boundary are a classic source of this bug — the C struct doubles
+as the serialization format, so any "just add one field" change silently
+reinterprets the whole struct the moment offsets shift.
+
+## Cross-tool comparison
+
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so
 abidw --out-file v1.xml libv1.so
 abidw --out-file v2.xml libv2.so
 abidiff v1.xml v2.xml
 echo "exit: $?"   # → 12 (ABI change + breaking)
 ```
-
-## How to fix
-Never change field types, remove fields, or reorder fields in a public struct.
-Use opaque pointers (`struct Packet *`) with accessor functions to allow internal layout
-evolution. If layout must change, bump the SONAME.
-
-## Runtime note
-This case now checks checksum mismatch to make field-layout reinterpretation observable at runtime (behavioral break, not guaranteed crash).
 
 ## References
 

@@ -1,80 +1,108 @@
-# Case 164 — Preprocessor-conditional field: a header false positive only build context clears
+# Case 164: Preprocessor-Conditional Field (Build-Context False Positive)
 
-**Verdict:** ⚪ COMPATIBLE (with `--reconcile-build-context`) — a context-free
-header parse **false-positives** BREAKING; the build's active defines clear it.
+**Category:** Build-Context Reconciliation (ADR-039) | **Verdict:** ✅ NO_CHANGE
+(only with `--reconcile-build-context`; a context-free header read
+misreports BREAKING)
 
-This case demonstrates ADR-039 (build-context reconciliation): a false positive
-that the `binary` and `headers` depths cannot avoid and that only **build**
-evidence resolves — the one class the depth analysis
-(`validation/false-positive-depth-analysis-2026-07.md`) identified.
+## Verdict and consumer impact
 
-## What changes
+Ground truth is `NO_CHANGE`: both v1 and v2 of `libconfig.so.1` are built
+with `-DCONFIG_KEEP_LEGACY` defined, so the shipped `Config` struct is
+identical (`{version, legacy}`, 8 bytes) on both sides — no consumer is
+affected, nothing needs recompiling. But a header-only read (no build
+evidence) sees `legacy` guarded behind `#ifdef CONFIG_KEEP_LEGACY` and,
+parsing it with the guard undefined, prunes the field from `Config`'s
+member list — reporting a `type_field_removed` **false positive**. Trusting
+that context-free read alone would fail CI on a release that changed
+nothing.
 
-A public struct gains a preprocessor guard around an existing field, and the
-project keeps shipping with that macro defined:
+## Old/new diff
 
-| Version | Public header |
-|---------|---------------|
-| v1 | `struct Config { int version; int legacy; };` |
-| v2 | `struct Config { int version;` `#ifdef CONFIG_KEEP_LEGACY` `int legacy;` `#endif` `};` |
+| v1 public header | v2 public header |
+|-------------------|-------------------|
+| `struct Config { int version; int legacy; };` | `struct Config { int version;` `#ifdef CONFIG_KEEP_LEGACY` `  int legacy;` `#endif` `};` |
 
-**Both** releases are built with `-DCONFIG_KEEP_LEGACY`, so the real, shipped ABI
-is identical (`{version, legacy}`, 8 bytes) — nothing broke.
+Both releases are compiled with `CONFIG_KEEP_LEGACY` defined — the real
+shipped layout never moves.
 
-## Why the lower depths get it wrong
-
-- **binary** (L0) — a stripped `libconfig.so.1` is byte-identical between the two
-  builds (both compiled with the macro on). L0 sees exported symbols only, no
-  type layout: it is *blind* to the conditional field and correctly reports no
-  change.
-- **headers** (L2) — castxml parses the v2 header **context-free** (with
-  `CONFIG_KEEP_LEGACY` *undefined*), so it **prunes** `legacy` from `Config`'s
-  field list. The comparison raises a **`type_field_removed` false positive**: a
-  field that looks removed but is present in every shipped build. (The record's
-  size is taken from the artifact and is unchanged — 8 bytes — so no
-  `type_size_changed` fires; only the field-presence phantom.)
-- **build** (L3) — the compile database carries `-DCONFIG_KEEP_LEGACY`. Feeding
-  that to `--reconcile-build-context` proves the guarded `legacy` field is
-  effectively present in both builds, so the phantom removal is recognised as a
-  context-free header-parse artifact and moved out of the verdict.
-
-## Reproduce
-
-The case ships two committed snapshot fixtures (`v1.abi.json`, `v2.abi.json`),
-both carrying the artifact-accurate record size (8 bytes). In v2 the context-free
-parse **prunes** `legacy` from the field list (`fields` is just `[version]`); the
-guard survives in the ADR-039 build-context evidence — the `conditional_fields`
-registry (`{"Config": {"legacy": {"guard": "CONFIG_KEEP_LEGACY", "type": "int", …}}}`) and
-`build_context_defines` (`{CONFIG_KEEP_LEGACY}`):
+## abicheck command
 
 ```bash
-# The context-free comparison — the false positive:
-abicheck compare examples/case164_preproc_conditional_field/v1.abi.json \
-                 examples/case164_preproc_conditional_field/v2.abi.json
-#   → BREAKING (type_field_removed)   ← phantom: legacy field parsed out of v2
+# Context-free header read (no build evidence) -- the false positive:
+abicheck compare v1.abi.json v2.abi.json --scope-public-headers
 
-# With build context — the false positive is cleared:
-abicheck compare examples/case164_preproc_conditional_field/v1.abi.json \
-                 examples/case164_preproc_conditional_field/v2.abi.json \
-                 --reconcile-build-context
-#   → COMPATIBLE   (the removed field is audited under --show-filtered)
+# With build-context reconciliation (ADR-039) -- the phantom clears:
+abicheck compare v1.abi.json v2.abi.json --scope-public-headers \
+  --reconcile-build-context
 ```
 
-`tests/test_diff_reconcile.py::test_case164_fixtures_reconcile` exercises exactly
-this in the fast lane.
+## Expected abicheck finding
 
-## Authority rule (ADR-028 D3)
+```text
+Without build context:
+Verdict: BREAKING (exit 4)
 
-Reconciliation never deletes an artifact-proven break. If `legacy` were removed
-**unconditionally** (or guarded on a macro the build does *not* define), the
-effective layouts would differ and the finding would stay BREAKING — see
-`tests/test_diff_reconcile.py::test_unconditional_break_is_not_reconciled`.
+- type_field_removed: Field removed: Config::legacy -- config.h:10
+  > Old code accesses a field that no longer exists at the expected offset;
+    reads garbage or writes out of bounds.
+  Affected symbols: cfg_make
 
-## Producing the conditional-field registry
+With --reconcile-build-context:
+Verdict: NO_CHANGE (exit 0)
 
-The `conditional_fields` registry and `build_context_defines` are populated by
-the collection layer (`abicheck/header_conditionals.py`) during a `dump` when a
-compile database is supplied: it harvests the active `-D` set from the compile DB
-and scans the public headers for `#ifdef`-guarded fields. This case ships the
-annotated snapshots directly so it also runs compiler-free in the fast lane. See
-[ADR-039](../../docs/contribute/adr/039-build-context-reconciliation.md).
+_No ABI changes detected._
+(--show-filtered discloses: "Reconciled as context-free header-parse
+artifacts (1 finding): type_field_removed: Config [config.h:10]")
+```
+
+## Minimum evidence
+
+`min_evidence: L3` — resolving this correctly needs the build's active
+`-D` set (`build_context_defines`), which only build evidence (a compile
+database or equivalent) carries. A header-only (L2) read parses `#ifdef`
+guards context-free and cannot know which macros the real build defines,
+so it is exactly the depth that produces the phantom here.
+
+## Why abicheck catches it
+
+The default header-AST parse evaluates `#ifdef CONFIG_KEEP_LEGACY` with
+the macro undefined, so `legacy` is absent from the parsed field list even
+though every shipped build has it. `--reconcile-build-context` cross
+references the case's `conditional_fields` registry (populated from the
+compile database's active `-D` set during a build-aware `dump`) against
+each struct's guarded members: since `CONFIG_KEEP_LEGACY` is in
+`build_context_defines` on both sides, the guarded field is proven
+present in both real builds and the phantom removal is reclassified as a
+context-free parsing artifact rather than a genuine break (ADR-028 D3: a
+reconciled finding is disclosed under `--show-filtered`, never silently
+dropped, and an *unconditional* removal — or one guarded on an undefined
+macro — is never reconciled away).
+
+## Real-world deployment scenario
+
+This is what a CI job diffing two release header snapshots sees if it
+scopes to public headers before the build system's `-D` flags are known —
+e.g. a header-only ABI-diff step that runs ahead of, or independent from,
+the actual compile. Feeding that same job the project's
+`compile_commands.json` (L3) via `--reconcile-build-context` is what turns
+"the header text changed" into "the shipped struct changed," and here the
+two answers disagree.
+
+## Safe redesign
+
+Avoid `#ifdef`-guarded fields in a public struct definition unless the
+guard is genuinely universal across every shipped configuration; if a
+field really is conditional, either drop the guard (always ship it) or
+move it behind an opaque accessor so header-only tooling never has to
+resolve preprocessor state to know the real layout. Where a guard must
+stay, publish the active `-D` set (a compile database) alongside the
+headers so ABI-diff tooling — abicheck's `--reconcile-build-context` here —
+has the evidence to resolve it instead of guessing.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` diff DWARF-carrying compiled binaries,
+not header-only snapshot pairs with a build-context overlay; this case's
+fixtures (`v1.abi.json`/`v2.abi.json` plus the `conditional_fields`/
+`build_context_defines` metadata) have no equivalent input for either
+tool, so there is nothing to reproduce with them here.

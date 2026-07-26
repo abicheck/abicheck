@@ -1,68 +1,113 @@
 # Case 56: Struct Packing Changed (pragma pack)
 
-**Category:** Type Layout / DWARF | **Verdict:** BREAKING
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
-## What this case is about
+## Verdict and consumer impact
 
-v1 defines `Record` with natural alignment (sizeof = 12, value at offset 4).
-v2 adds `#pragma pack(1)`, eliminating all padding (sizeof = 6, value at offset 1).
+v1's `Record` uses natural alignment (`sizeof(Record) = 12`, `value` at offset
+4). v2 wraps the same struct in `#pragma pack(push, 1)`, eliminating all
+padding (`sizeof(Record) = 6`, `value` at offset 1). Any binary compiled
+against v1 that allocates, copies, or indexes into `Record` reads/writes the
+wrong bytes once v2's library is loaded — a silent field-offset break, not a
+crash at load time. Recompilation against v2 is mandatory.
 
-This is a **silent ABI break** because every field (except `tag`) moves to a
-different offset, and the struct size shrinks.
+## Old/new diff
 
-## What breaks at binary level
+| bad.h (v1) | good.h (v2) |
+|------------|-------------|
+| `typedef struct { char tag; int value; char status; } Record;` (natural alignment) | `#pragma pack(push, 1)` around the same fields |
+| `sizeof(Record) = 12`, `value` at offset 4 | `sizeof(Record) = 6`, `value` at offset 1 |
 
-- **sizeof changes**: 12 → 6. Stack allocations and arrays use wrong size.
-- **Field offsets change**: `value` moves from offset 4 to offset 1.
-- **Alignment changes**: `value` is no longer naturally aligned (may cause
-  unaligned access faults on strict architectures like ARM).
-
-## What abicheck detects
-
-- **`STRUCT_PACKING_CHANGED`**: Detected via DWARF `DW_AT_byte_size` and field
-  `DW_AT_data_member_location` changes. The packing attribute itself is recorded
-  in DWARF as alignment metadata.
-
-**Overall verdict: BREAKING**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g bad.c  -include bad.h  -o libbad.so
-gcc -shared -fPIC -g good.c -include good.h -o libgood.so
-
-# Verify layout difference
-pahole libbad.so  -C Record  # → size 12, value at offset 4
-pahole libgood.so -C Record  # → size 6,  value at offset 1
-
-python3 -m abicheck.cli dump libbad.so  -o /tmp/v1.json
-python3 -m abicheck.cli dump libgood.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → BREAKING: field offsets changed
+gcc -shared -fPIC -g -include bad.h  bad.c  -o libfoo_v1.so
+gcc -shared -fPIC -g -include good.h good.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Real-world examples
+## Expected abicheck finding
 
-- Windows API headers use `#pragma pack` extensively. Mixing packed and unpacked
-  struct definitions across DLL boundaries is a common source of crashes.
-- Network protocol libraries (e.g., pcap headers) often accidentally change
-  packing when refactoring header includes.
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: Record (96 -> 48 bits)
+  > Old code allocates or copies the type with the old size;
+    heap/stack corruption, out-of-bounds access.
+  Affected symbols: record_create, record_destroy, record_get_value
+- type_field_offset_changed: Field offset changed: Record::value (32 -> 8 bits)
+  > Old code reads/writes fields at stale offsets; silent data corruption.
+- type_field_offset_changed: Field offset changed: Record::status (64 -> 40 bits)
+  > Old code reads/writes fields at stale offsets; silent data corruption.
+- struct_packing_changed: Struct packing added: Record is now __attribute__((packed))
+  > Packing attribute changed; field offsets differ from what old code expects.
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's struct-layout info (`DW_AT_byte_size` and each
+member's `DW_AT_data_member_location`) is enough to detect both the size
+shrink and every field's offset move; no public headers required, even
+though `#pragma pack` is a header-level attribute — its effect is fully
+visible in the compiled layout DWARF records.
+
+## Why abicheck catches it
+
+DWARF records each struct's total byte size and every member's byte offset
+for both versions; abicheck diffs those directly and additionally recognizes
+the packed-vs-natural alignment pattern across the two field-offset deltas as
+a `struct_packing_changed` finding.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** app compiled against v1's natural-alignment `Record` (12
+bytes, `value` at offset 4), library swapped for v2's packed `Record` (6
+bytes, `value` at offset 1) without recompiling.
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g -include bad.h bad.c -o libfoo.so
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → value = 42
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g -include good.h good.c -o libfoo.so
+./app
+# → value = 22528
+# → WRONG RESULT: struct packing/layout changed
+```
+
+**Why CRITICAL:** the app's own `Record` layout (compiled from `bad.h`)
+still expects `value` at offset 4, but v2's `record_create` writes `value`
+at offset 1 into a 6-byte allocation the app never resized. The read at
+offset 4 lands on bytes that used to be padding/`status`, producing a
+silently wrong value instead of a crash.
+
+## Safe redesign
+
+Never change a public struct's packing/alignment after release — it's an
+ABI-visible layout change even though the struct definition still
+"looks the same" at the field-list level. Use the opaque-pointer (PIMPL)
+idiom instead: expose `Record*` and let the library allocate/free it, so
+callers never embed the struct's size or layout in their own code.
+
+**Real-world example:** Windows API headers use `#pragma pack` extensively;
+mixing packed and unpacked struct definitions across DLL boundaries (e.g. a
+stale cached header on one side of the link) is a recurring source of
+silent data corruption in interop code.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 
 - [GCC: Structure Packing Pragmas](https://gcc.gnu.org/onlinedocs/gcc/Structure-Layout-Pragmas.html)
-
-## Real Failure Demo
-
-**Severity: BREAKING / WRONG RESULT**
-
-```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case56_struct_packing_changed_app case56_struct_packing_changed_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case56_struct_packing_changed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case56_struct_packing_changed/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# value = 22528 / WRONG RESULT: struct packing/layout changed
-```
+- [libabigail `abidiff` manual](https://sourceware.org/libabigail/manual/abidiff.html)

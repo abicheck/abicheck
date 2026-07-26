@@ -1,131 +1,120 @@
-# case191_header_only_graph_field_type — Same finding, proven with a genuine confirmed-zero (no coverage trick)
+# Case 191: Public Struct Gains a Field of a Private Type (Header-Only Graph)
 
-**Verdict:** 🔴 BREAKING · **Findings:** `struct_size_changed`/`type_size_changed`/`type_alignment_changed` (artifact-proven) + `public_api_internal_dependency_added` ×2 (L5, correlated) · **Evidence tier:** L1 for the verdict; L5 (the L2 header-only graph, built automatically for `--depth headers` and above) for the risk finding
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
-This is a real, compiled `v1`/`v2` example, verified end-to-end against gcc
-and clang.
+## Verdict and consumer impact
 
-## What it demonstrates
+`demo::Config` gains a field typed `detail::RawConfig*` — a type declared
+only in an internal, non-public header (`detail_private.h`, never passed as
+`--public-header`). The struct grows from 4 to 16 bytes. Any binary that
+allocates `Config` (e.g. an array on the stack) with the old size and is
+then handed a v2-compiled library writes past the end of its own
+allocation — a stack buffer overflow.
 
-This case demonstrates the same public-struct-gains-a-private-field-type
-scenario as [case187](../case187_public_struct_private_field_type/README.md)
-(`demo::Config` gains a `TYPE_HAS_FIELD_TYPE` edge to the internal
-`detail::RawConfig`) — but through a deliberately different coverage-trust
-mechanism, proven live against the L2 header-only graph (built
-automatically since G29 Phase A).
+## Old/new diff
 
-`demo::Config` starts with a single plain `int` field: zero
-`TYPE_HAS_FIELD_TYPE` edges of any `demo::`-related kind on the old side, on
-purpose — unlike case187, whose `Public` struct carries a sibling `Meta`
-field specifically so the L5 type-graph pass has a same-kind edge to confirm
-on *both* sides. Here there is no such edge to point to at all. The finding
-still fires correctly because the L2 header-only graph stamps
-`extractor_passes.header_type_graph: true` on the old-side graph, and
-`type_graph._pass_trusted_kinds` grants a header-only pass genuine
-project-wide trust for exactly the three *structural* kinds it can fully see
-in headers alone (`TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/`DECL_HAS_TYPE`) —
-so the old side's true *absence* of any such edge is trusted as a real,
-verified zero, not misread as "the pass never ran." This is the
-coverage-honesty mechanism unique to the header-only-graph path, distinct
-from the build-integrated `type_graph`/`call_graph` passes' own
-`extractor_passes["type_graph"]`/`["call_graph"]` markers (see
-`source_graph_findings._pass_trusted_kinds`/`_HEADER_FULL_VISIBILITY_KINDS`).
+| v1.h | v2.h |
+|------|------|
+| `struct Config { int value; };` | `struct Config { int value; detail::RawConfig* raw; };` |
 
-Layered underneath, adding the field also grows `Config`'s size (4 → 16
-bytes) — a genuine, artifact-level layout break on its own. abicheck
-correctly reports it as BREAKING via `struct_size_changed`/
-`type_size_changed`/`type_alignment_changed` — no build integration needed,
-the default `debug-headers` lane catches this too. The **Real Failure Demo**
-below shows the concrete runtime corruption this causes.
-
-### Why this isn't the original "invisible below L5" scenario
-
-An earlier version of this catalog modeled this case as a hand-built L5
-graph fixture, with the premise that `public_api_internal_dependency_added`
-would be the *only* finding — verdict `COMPATIBLE_WITH_RISK`, invisible to
-every lower evidence tier, the same premise the original case187/188/189
-carried. That premise does not hold here either, and for a structural reason
-that generalizes: `TYPE_HAS_FIELD_TYPE`/`TYPE_INHERITS`/`DECL_HAS_TYPE`
-edges are computed *from* the header AST, so any change that creates one is,
-by construction, a header-visible change — there is no way to add or retype
-a field/base/parameter without it also being visible to L1/L2's own layout
-or signature detectors. Only a *body-only* reference (no signature or
-layout change at all — see
-[case190](../case190_public_inline_function_references_internal_constant/README.md))
-can stay genuinely invisible outside L5, and that kind is excluded from
-header-only-graph trust for a different reason (a header-only pass can't see
-out-of-line bodies). What case191 keeps proving, honestly, is not
-invisibility but the confirmed-pass coverage mechanism above.
-
-## Why this matters
-
-`header_graph.py` exists precisely so a consumer who only has public headers
-and a binary — no build system access at all, e.g. a downstream packager
-auditing a prebuilt SDK — still gets the non-call type-dependency check, at
-the cost of weaker resolution than a full per-TU Clang replay would give
-(bare unqualified type names when falling back to the flat `AbiSnapshot`
-model; full qualified-name resolution when a `clang -ast-dump=json` header
-AST is available). Since G29 Phase A it is built automatically (no flag
-needed) whenever `--depth headers` or deeper evidence is available, for
-both `dump` and `compare`, uniformly across ELF, PE, and Mach-O input; not
-yet `scan`. (The legacy `--header-graph`/`--header-graph-includes` flags
-still exist but are hidden, deprecated no-ops kept only for a transition
-window.)
-
-## How to reproduce
+## abicheck command
 
 ```bash
 g++ -std=c++17 -shared -fPIC -g v1.cpp -o libv1.so
 g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv2.so
-
-# Default debug-headers lane: BREAKING, via the layout findings alone.
-python3 -m abicheck.cli dump libv1.so --header v1.h -o v1.json
-python3 -m abicheck.cli dump libv2.so --header v2.h -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-# → BREAKING: type_size_changed, type_alignment_changed, struct_size_changed
-
-# With --public-header set: the same BREAKING verdict, plus the L5 risk
-# finding — fired from a genuine confirmed-zero on the old side, no sibling
-# edge needed. The L2 header-only graph builds automatically, no flag needed.
-python3 -m abicheck.cli dump libv1.so --header v1.h --public-header v1.h -o v1.json
-python3 -m abicheck.cli dump libv2.so --header v2.h --public-header v2.h -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-# → BREAKING: type_size_changed, public_api_internal_dependency_added (x2)
-#   Proof paths: use_config --[DECL_HAS_TYPE]--> demo::Config
-#                --[TYPE_HAS_FIELD_TYPE]--> demo::detail::RawConfig
-#                fill_configs --[DECL_HAS_TYPE]--> demo::Config
-#                --[TYPE_HAS_FIELD_TYPE]--> demo::detail::RawConfig
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --ast-frontend clang
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
 
-**Severity: 🔴 CRITICAL — stack buffer overflow**
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: Config (32 -> 128 bits)
+  > Old code allocates or copies the type with the old size; heap/stack
+    corruption, out-of-bounds access.
+- struct_size_changed: Struct size changed: demo::Config (4 -> 16 bytes)
+
+Deployment risk (binary-compatible, review needed):
+- public_api_internal_dependency_added: Public entry 'use_config' now reaches internal
+  declaration(s)/type(s) demo::detail::RawConfig it did not before.
+  Proof path: use_config --[DECL_HAS_TYPE]--> demo::Config
+              --[TYPE_HAS_FIELD_TYPE]--> demo::detail::RawConfig
+- public_api_internal_dependency_added: Public entry 'fill_configs' now reaches
+  demo::detail::RawConfig via the same Config -> RawConfig edge
+- public_api_internal_dependency_added: Public entry 'demo::Config' now reaches
+  demo::detail::RawConfig via demo::Config --[TYPE_HAS_FIELD_TYPE]--> demo::detail::RawConfig
+
+Additions:
+- type_field_added_compatible: Field added: Config::raw
+- type_added: New type: RawConfig
+```
+
+## Minimum evidence
+
+`min_evidence: L5` — the layout break itself is already visible from DWARF
+alone (`struct_size_changed`/`type_size_changed` fire from `-g` debug info
+with no headers at all), so the verdict does not strictly need L5. What L5
+buys is the risk findings: the source graph is what names *which* internal
+type each public entry point now depends on
+(`public_api_internal_dependency_added` × 3, naming
+`demo::detail::RawConfig` and the exact `TYPE_HAS_FIELD_TYPE` edge). Unlike
+[case187](../case187_public_struct_private_field_type/README.md), `Config`'s
+old side has zero `TYPE_HAS_FIELD_TYPE` edges of any kind to begin with —
+the finding still fires correctly because the L2 header-only graph's
+confirmed-pass marker lets abicheck trust that absence as a genuine verified
+zero rather than "the pass never ran."
+
+## Why abicheck catches it
+
+DWARF records `demo::Config`'s size and member layout directly, so the
+inserted `raw` pointer field and the resulting size growth (4 → 16 bytes)
+are a direct struct-layout diff at L1. Layered on top, the header AST
+resolves `detail::RawConfig` as a type declared outside the public header
+set, and the L5 source graph — built automatically from the L2 header-only
+graph whenever header evidence is present — records
+`Config --[TYPE_HAS_FIELD_TYPE]--> demo::detail::RawConfig`, and walks that
+edge back to every public function reaching `Config`
+(`use_config`, `fill_configs`) to report that the public surface took on an
+undeclared dependency on internal code.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** app stack-allocates `Config configs[4]` sized against v1's
+4-byte `Config`; v2's `fill_configs()` writes 4 elements at its own larger
+16-byte stride into that same, smaller array.
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case191_header_only_graph_field_type_app case191_header_only_graph_field_type_v2
+# Build old library + app
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libv1.so
+g++ -std=c++17 -g app.cpp -L. -lv1 -Wl,-rpath,. -I. -o app
+./app
+# → exit 0
 
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case191_header_only_graph_field_type/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case191_header_only_graph_field_type/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1; echo "exit: $?")
-# *** stack smashing detected ***: terminated
-# exit: 134 — app_v1 stack-allocates `Config configs[4]` sized against v1's
-# 4-byte Config (16 bytes total). v2's fill_configs() writes 4 elements at
-# its own, larger 16-byte stride (64 bytes) into that same 16-byte array,
-# smashing the stack.
+# Swap in new library (no recompile)
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv1.so
+./app
+# → *** stack smashing detected ***: terminated
+# → exit 134
 ```
 
-## Sibling cases
+**Why CRITICAL:** `app` allocates `configs[4]` sized against v1's 4-byte
+`Config` (16 bytes total). v2's `fill_configs()` writes 4 elements at its
+own, larger 16-byte stride (64 bytes) into that same 16-byte array — a
+stack buffer overflow the process aborts on.
+
+## Safe redesign
+
+Either promote `detail::RawConfig` to a documented part of the API, or keep
+`demo::Config`'s field types independent of internals whose evolution
+consumers cannot track — e.g. an opaque handle or a pimpl indirection
+instead of embedding the internal type directly.
+
+## References
 
 - [case160_public_api_internal_dep_added](../case160_public_api_internal_dep_added/README.md) — same finding family via a `DECL_CALLS_DECL` edge (a public function calling an internal one), hand-built fixture.
 - [case187_public_struct_private_field_type](../case187_public_struct_private_field_type/README.md) — the same `TYPE_HAS_FIELD_TYPE` mechanism, proven with a same-kind sibling edge on both sides instead of a confirmed-pass zero.
 - [case188_public_class_private_base_class](../case188_public_class_private_base_class/README.md) — same finding family via `TYPE_INHERITS` (a private base class), real compiled example.
 - [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type/README.md) — same finding family via `DECL_HAS_TYPE` (a private parameter type), real compiled example.
-
-## How to fix
-
-Either promote `detail::RawConfig` to a documented part of the API, or keep
-`demo::Config`'s field types independent of internals whose evolution
-consumers cannot track (e.g. an opaque handle or a pimpl indirection instead
-of embedding the internal type directly).

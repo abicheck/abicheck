@@ -1,69 +1,88 @@
 # Case 41: Type-Level Changes
 
-**Category:** Type / Enum Changes | **Verdict:** BREAKING
+**Category:** Type / Enum Changes | **Verdict:** 🔴 BREAKING
 
-## What changes
+## Verdict and consumer impact
 
-| Version | Definition |
-|---------|-----------|
-| v1 | `struct LegacyConfig` exists; `AlignedBuffer` aligned to 8; `priority_t` has `PRIO_MAX=3` |
-| v2 | `LegacyConfig` removed, `NewConfig` added; `AlignedBuffer` aligned to 64; `PRIO_URGENT` inserted, `PRIO_MAX=4` |
+Four independent type-level changes land in one release: `struct
+LegacyConfig` (and the function that used it, `process_config()`) is
+removed and replaced with an unrelated `struct NewConfig`; `AlignedBuffer`'s
+required alignment grows from 8 to 64 bytes; and the `priority_t` enum
+gains a new member that shifts its `PRIO_MAX` sentinel from 3 to 4. Any
+binary that calls `process_config()`, allocates an `AlignedBuffer` at the
+old alignment, or relies on `PRIO_MAX` as a bound is broken without
+recompilation.
 
-## Why this is a binary ABI break
+## Old/new diff
 
-1. **`struct LegacyConfig` removed** — `process_config()` is also removed. Old binaries
-   that call `process_config()` get an undefined symbol error at load time.
-2. **`struct NewConfig` added** — compatible by itself (no old code references it), but
-   does not replace `LegacyConfig` for existing binaries.
-3. **`AlignedBuffer` alignment changed (8 to 64)** — old binaries allocate `AlignedBuffer`
-   on the stack with 8-byte alignment. The v2 library may assume 64-byte alignment
-   (e.g., for SIMD or cache-line operations), causing misaligned access, crashes, or
-   silent data corruption.
-4. **`PRIO_MAX` sentinel changed (3 to 4)** — old binaries using `PRIO_MAX` as an array
-   bound or loop limit will be off by one. Code checking `if (p < PRIO_MAX)` will have
-   the old value `3` baked in, missing the new `PRIO_URGENT=3` level entirely.
+| v1.h | v2.h |
+|------|------|
+| `struct LegacyConfig { int mode; int flags; };` | *(removed)* |
+| — | `struct NewConfig { int mode; int flags; int version; };` (added) |
+| `struct __attribute__((aligned(8))) AlignedBuffer` | `struct __attribute__((aligned(64))) AlignedBuffer` |
+| `PRIO_HIGH = 2, PRIO_MAX = 3` | `PRIO_HIGH = 2, PRIO_URGENT = 3, PRIO_MAX = 4` |
+| `void process_config(struct LegacyConfig *cfg);` | *(removed)* |
 
-## Code diff
+## abicheck command
 
-```diff
--struct LegacyConfig {
--    int mode;
--    int flags;
--};
-+/* LegacyConfig REMOVED */
-+
-+struct NewConfig {
-+    int mode;
-+    int flags;
-+    int version;
-+};
-
--struct __attribute__((aligned(8))) AlignedBuffer {
-+struct __attribute__((aligned(64))) AlignedBuffer {
-     char data[64];
- };
-
- typedef enum {
-     PRIO_LOW    = 0,
-     PRIO_MEDIUM = 1,
-     PRIO_HIGH   = 2,
--    PRIO_MAX    = 3
-+    PRIO_URGENT = 3,
-+    PRIO_MAX    = 4
- } priority_t;
-
--void process_config(struct LegacyConfig *cfg);
-+/* process_config removed */
+```bash
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_removed: Type removed: LegacyConfig
+  > Old code references a type that no longer exists; compilation or
+    link failure.
+  Affected symbols: process_config
+- type_alignment_changed: Alignment changed: AlignedBuffer (64 -> 512 bits)
+  > Misaligned access can cause bus errors on strict architectures or
+    silent data corruption with SIMD.
+  Affected symbols: fill_buffer
+- func_removed: Public function removed: process_config
+  > Old binaries call a symbol that no longer exists; dynamic linker
+    will refuse to load or crash at call site.
+
+Deployment Risk:
+- enum_last_member_value_changed: Enum member value changed:
+  priority_t::PRIO_MAX (3 -> 4)
+
+Additions:
+- enum_member_added: Enum member added: priority_t::PRIO_URGENT (3)
+  > New enumerator may shift subsequent values in non-fixed enums;
+    switch defaults may miss the new case.
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF carries each type's existence
+(`DW_TAG_structure_type`), alignment (`DW_AT_alignment`), and each enum's
+member list with values (`DW_TAG_enumerator`); combined with the
+exported-symbol table for `process_config`'s removal, that's enough to
+detect all four changes. No public headers required.
+
+## Why abicheck catches it
+
+DWARF records every type reachable from the library's debug info, so a
+struct present in v1's type table and absent from v2's is caught as
+`type_removed`; `DW_AT_alignment` on the struct DIE carries the alignment
+change directly; and each `DW_TAG_enumeration_type`'s enumerator list
+(name + `DW_AT_const_value`) lets abicheck diff the enum member set and
+detect that the last member's value shifted.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
 **Scenario:** compile app against v1, swap in v2 `.so` without recompile.
 
 ```bash
-# Build v1 lib + app
+# Build old library + app
 gcc -shared -fPIC -g v1.c -o libfoo.so
 gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
 ./app
@@ -71,35 +90,46 @@ gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
 # → fill_buffer (alignof=8, sizeof=64)
 # → set_priority(PRIO_HIGH=2)
 # → PRIO_MAX = 3 (sentinel)
+# → exit 0
 
-# Swap to v2 (no recompile of app)
+# Swap in new library (no recompile)
 gcc -shared -fPIC -g v2.c -o libfoo.so
 ./app
 # → ./app: symbol lookup error: ./app: undefined symbol: process_config
-#
-# If process_config reference were removed:
-# - AlignedBuffer allocated with 8-byte alignment but library expects 64
-# - PRIO_MAX is still 3 in the app but 4 in the library
+# → exit 127
 ```
 
-**Why CRITICAL:** Type removal causes immediate link failure. Alignment mismatches can
-cause SIGSEGV on architectures that enforce alignment. Enum sentinel shifts cause
-off-by-one errors in bounds checks and array sizing — a subtle, hard-to-debug corruption.
+**Why CRITICAL:** `process_config` is removed from v2's exported symbols,
+so the dynamic linker refuses to resolve it and the process cannot even
+start. Had that symbol stayed around, the app would have gone on to
+allocate `AlignedBuffer` at the wrong (8-byte) alignment against a library
+that expects 64-byte alignment, and used the stale `PRIO_MAX=3` sentinel
+against a library where `PRIO_URGENT=3` is now a valid priority — both
+silent-corruption classes of break layered underneath the hard link
+failure.
 
-## Reproduce manually
+## Safe redesign
+
+Never remove a public type or function without a SONAME bump; keep the old
+symbol deprecated for at least one cycle. Wrap alignment-sensitive types
+behind an opaque pointer so alignment changes are invisible to callers.
+Avoid using an enum's last member as an implicit array bound or loop limit
+in a public API — expose a separate `#define`/constant or a query function
+instead, so inserting a new enumerator doesn't silently move the sentinel.
+
+**Real-world example:** SIMD-oriented libraries commonly raise a buffer
+type's required alignment (e.g. for AVX-512) in a "performance" release —
+without a SONAME bump this breaks every caller that stack-allocated the
+old, more loosely aligned struct.
+
+## Cross-tool comparison
+
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so
 abidw --out-file v1.xml libv1.so
 abidw --out-file v2.xml libv2.so
 abidiff v1.xml v2.xml
 echo "exit: $?"   # → 12 (ABI change + breaking)
 ```
-
-## How to fix
-Never remove public types or functions without a SONAME bump. Use opaque types so that
-alignment changes are invisible to callers. Avoid using enum sentinel values as array
-bounds in public APIs — use a separate `#define` or function instead.
 
 ## References
 

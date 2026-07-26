@@ -40,17 +40,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: abicheck/abicheck/actions/collect-facts@v1
+      - uses: abicheck/abicheck/actions/collect-facts@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
         with:
           phase: prepare
           producer: wrapper
       - name: Build
         run: CC=abicheck-cc CXX=abicheck-cc make
-      - uses: abicheck/abicheck/actions/collect-facts@v1
+      - uses: abicheck/abicheck/actions/collect-facts@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
         with:
           phase: verify
           producer: wrapper
-      - uses: abicheck/abicheck/actions/check-target@v1
+      - uses: abicheck/abicheck/actions/check-target@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
         with:
           name: libfoo
           requested-depth: source

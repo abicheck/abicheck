@@ -161,7 +161,7 @@ the side-aware single flags and `--profile`.
   debug-resolution knobs (`--debug-format`/`--debuginfod`/`--debuginfod-url`/
   `--dwarf-only`) and `--show-redundant` move to `.abicheck.yml` (still accepted
   as hidden overrides). The toolchain family is retained. A migration table ships
-  in `docs/use/migration-0.5.md` and the CHANGELOG. This matches the
+  in `docs/use/companion-commands.md` and the CHANGELOG. This matches the
   ADR-037 precedent (hard removal of `--header-backend`).
 * The `COMPARE_FLAG_BUDGET` ledger (`cli_options.py`) is the machine-checked
   scoreboard: each collapsed concept lowers `COMPARE_FLAG_BUDGET_BASE`, and

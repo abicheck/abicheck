@@ -7,32 +7,32 @@ _29 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
-| [case15_noexcept_change](../case15_noexcept_change.md) | `noexcept` Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case15_noexcept_change](../case15_noexcept_change.md) | `noexcept` Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case50_soname_inconsistent](../case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case98_cxx_standard_floor_raised](../case98_cxx_standard_floor_raised.md) | C++ standard floor raised (build-context risk) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case98_cxx_standard_floor_raised](../case98_cxx_standard_floor_raised.md) | C++ Standard Floor Raised | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case130_exceptions_mode_flip](../case130_exceptions_mode_flip.md) | Exceptions Mode Flip (`-fno-exceptions`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case131_rtti_mode_flip](../case131_rtti_mode_flip.md) | RTTI Mode Flip (`-fno-rtti`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case132_threadsafe_statics_flip](../case132_threadsafe_statics_flip.md) | Thread-Safe Statics Mode Flip (`-fno-threadsafe-statics`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case133_tls_model_flip](../case133_tls_model_flip.md) | TLS Model Flip (`-ftls-model`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case132_threadsafe_statics_flip](../case132_threadsafe_statics_flip.md) | Thread-Safe Statics Mode Flip | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case133_tls_model_flip](../case133_tls_model_flip.md) | TLS Model Flip | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case134_relro_weakened](../case134_relro_weakened.md) | RELRO Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case135_stack_canary_removed](../case135_stack_canary_removed.md) | Stack Canary Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case152_enum_size_flag_flip](../case152_enum_size_flag_flip.md) | _enum_size_flag_flip — Enum-size flag flip (`-fshort-enums`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case153_struct_packing_flip](../case153_struct_packing_flip.md) | _struct_packing_flip — Struct-packing mode flip (`-fpack-struct`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case154_lto_mode_flip](../case154_lto_mode_flip.md) | _lto_mode_flip — LTO mode flip (`-flto`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case155_char_signedness_flip](../case155_char_signedness_flip.md) | _char_signedness_flip — Plain-`char` signedness flip (`-fsigned-char` ↔ `-funsigned-char`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case160_public_api_internal_dep_added](../case160_public_api_internal_dep_added.md) | _public_api_internal_dep_added — Public API newly depends on an internal declaration | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case161_target_dependency_added](../case161_target_dependency_added.md) | _target_dependency_added — New inter-target build/link dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case162_symbol_source_owner_changed](../case162_symbol_source_owner_changed.md) | _symbol_source_owner_changed — Exported symbol's declaring file moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case160_public_api_internal_dep_added](../case160_public_api_internal_dep_added.md) | Public API Gains an Internal Dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case161_target_dependency_added](../case161_target_dependency_added.md) | New Inter-Target Build/Link Dependency | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case162_symbol_source_owner_changed](../case162_symbol_source_owner_changed.md) | Exported Symbol's Declaring File Moved | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case165_polymorphic_nonvirtual_dtor](../case165_polymorphic_nonvirtual_dtor.md) | Polymorphic Type Without a Virtual Destructor (New Anti-Pattern) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case169_overload_added](../case169_overload_added.md) | Overload Added to a Previously Unique Function | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case170_env_runtime_floor_raised](../case170_env_runtime_floor_raised.md) | Runtime Floor Raised (glibc relink drift) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case170_env_runtime_floor_raised](../case170_env_runtime_floor_raised.md) | Runtime Floor Raised (glibc Relink Drift) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case171_static_tls_introduced](../case171_static_tls_introduced.md) | Static TLS Introduced | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case178_unnamed_type_in_public_abi](../case178_unnamed_type_in_public_abi.md) | Unnamed Type Leaks Into the Public ABI | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case179_cet_protection_weakened](../case179_cet_protection_weakened.md) | CET Protection Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case180_symbol_binding_lost_unique](../case180_symbol_binding_lost_unique.md) | Symbol Binding Lost GNU_UNIQUE | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case183_internal_version_node_churn](../case183_internal_version_node_churn.md) | Internal ELF symbol-version node churn | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case190_public_inline_function_references_internal_constant](../case190_public_inline_function_references_internal_constant.md) | _public_inline_function_references_internal_constant — Public inline function newly reads an internal constant | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case194_header_graph_rename_reconciled](../case194_header_graph_rename_reconciled.md) | _header_graph_rename_reconciled — Internal dependency target renamed, safely reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case195_header_graph_ambiguous_rename_not_reconciled](../case195_header_graph_ambiguous_rename_not_reconciled.md) | _header_graph_ambiguous_rename_not_reconciled — Ambiguous simultaneous rename, correctly NOT reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case190_public_inline_function_references_internal_constant](../case190_public_inline_function_references_internal_constant.md) | Public Inline Function References Internal Constant | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case194_header_graph_rename_reconciled](../case194_header_graph_rename_reconciled.md) | Internal Dependency Target Renamed, Safely Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case195_header_graph_ambiguous_rename_not_reconciled](../case195_header_graph_ambiguous_rename_not_reconciled.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |

@@ -1,108 +1,131 @@
 # Case 174: Secondary Vtable Group Changed
 
-**Category:** C++ Layout (DWARF/L1) | **Verdict:** BREAKING
+**Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
-## What this case is about
+## Verdict and consumer impact
 
-```cpp
-// v1                                    // v2
-struct Base1 {                           struct Base1 { ... };   // unchanged
-    virtual int f1();
-    virtual ~Base1();
-};
-struct Base2 {                           struct Base2 {
-    int helper();     // non-virtual         virtual int helper();  // <- now virtual
-};                                            virtual ~Base2();
-                                          };
-struct Derived : Base1, Base2 {};        struct Derived : Base1, Base2 {};  // BYTE-IDENTICAL
-```
+`Derived`'s own declaration — `struct Derived : Base1, Base2 {}` — is
+byte-for-byte identical in v1 and v2. Only `Base2`'s own declaration
+changes: it gains a virtual method. Under the Itanium C++ ABI that makes
+`Base2` polymorphic, so `Derived` now needs a new *secondary* vtable group
+to dispatch through a `Base2*`. Any binary compiled against v1 that embeds,
+copies, or derives from `Derived` (or takes its `sizeof`) is laid out
+incompatibly against v2 — even though nothing in `Derived`'s own source
+changed. Recompilation against v2 is mandatory.
 
-`Derived`'s own declaration — its base list, `struct Derived : Base1, Base2
-{}` — is **byte-for-byte identical** between v1 and v2. Only `Base2`'s own
-declaration changes: it gains a virtual method. Under the Itanium C++ ABI,
-`Base1` is `Derived`'s *primary* base (first polymorphic direct base — it
-shares `Derived`'s primary vtable); every other polymorphic base contributes
-its own *secondary* vtable group. In v1, `Base2` is not polymorphic, so it
-contributes nothing. In v2, `Base2` is polymorphic, so `Derived` needs a new
-secondary vtable group for it — **even though nothing about `Derived` itself
-changed.**
+## Old/new diff
 
-## Why this case exists: a cross-type effect a per-type diff cannot see
+| v1.h | v2.h |
+|------|------|
+| `struct Base1 { virtual int f1(); virtual ~Base1(); };` | `struct Base1 { virtual int f1(); virtual ~Base1(); };` *(unchanged)* |
+| `struct Base2 { int helper(); };` | `struct Base2 { virtual int helper(); virtual ~Base2(); };` |
+| `struct Derived : Base1, Base2 {};` | `struct Derived : Base1, Base2 {};` *(byte-identical)* |
 
-A naive checker that diffs `Derived`'s own declaration against itself finds
-**no difference** — same bases, same members, same everything. The only way
-to know `Derived`'s dispatch surface changed is to also know that `Base2`,
-somewhere else entirely, became polymorphic. `secondary_vtable_group_changed`
-is abicheck's DWARF-based (L1) reconstruction of exactly this: it recomputes
-each class's *ordered list of secondary vtable groups* from the current
-snapshot's base/vtable metadata on both sides, and reports when that list
-changes for a class whose own base declaration list did not move (a moved
-base is `base_class_position_changed`'s job, not this one).
-
-This case also demonstrates the change's full blast radius: `Base2` gaining
-a vtable pointer is a real, large structural event, so several other
-findings co-occur (`type_size_changed`/`type_field_added`/`type_vtable_changed`
-on `Base2` itself, `vtable_slot_count_changed`/`base_class_offset_changed`/
-`vtable_thunk_set_changed` on `Derived`). None of those name the specific
-fact `secondary_vtable_group_changed` does: which vtable group `Derived`
-now needs to satisfy dispatch through a `Base2*` — information a
-plugin/reflection framework that walks vtable groups by position needs
-directly, and that a per-type diff of `Derived` alone would never surface.
-
-## What abicheck detects
-
-- **`secondary_vtable_group_changed`** — `Derived`'s secondary vtable groups
-  went from `(none)` to `Base2`. **Evidence tier L1** — reconstructed from
-  DWARF base/vtable metadata (`bases`, `virtual_bases`, `vtable` on
-  `RecordType`); requires debug info on both sides (unlike cases 172/173,
-  this is not visible on a stripped binary — the base's polymorphism has to
-  be known, not just inferred from a symbol's size).
-
-**Overall verdict: BREAKING**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-g++ -shared -fPIC -g v1.cpp -o libv1.so
-g++ -shared -fPIC -g v2.cpp -o libv2.so
-
-python3 -m abicheck.cli dump libv1.so -o /tmp/v1.json
-python3 -m abicheck.cli dump libv2.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → BREAKING: secondary_vtable_group_changed (Derived: (none) -> Base2)
-#   (plus the type_size_changed/vtable_slot_count_changed/... companions
-#   described above)
+g++ -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
 
-**Severity: BREAKING / SILENT LAYOUT MISMATCH**
+```text
+Verdict: BREAKING (exit 4)
+
+- secondary_vtable_group_changed: Secondary vtable groups changed for
+  'Derived': (none) -> Base2
+  > A base's polymorphism changed, restructuring the derived vtable even
+    though Derived's own base declaration list never moved.
+- vptr_introduced: 'Base2' gained a vtable pointer (became polymorphic)
+- type_size_changed: Base2 (8 -> 64 bits); Derived (64 -> 128 bits)
+- vtable_slot_count_changed: Vtable for 'Derived' changed size: 40 -> 80
+  bytes (~3 -> ~8 virtual slots)
+- base_class_offset_changed: Base class 'Base2' moved within 'Derived'
+  (0 -> 64 bits)
+- vtable_thunk_set_changed: Derived::~Derived() thunk added
+- type_vtable_changed: vtable populated for Base2
+
+8 breaking findings total (1 flagged as RTTI/internal churn; 7 genuine
+public-surface breaks).
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — reconstructing `Derived`'s secondary vtable groups
+requires DWARF's base/vtable metadata (`bases`, `virtual_bases`, `vtable`
+on `RecordType`) on **both** sides, since the fact that changed lives on
+`Base2`'s own declaration, not `Derived`'s. Unlike cases 172/173, this is
+not visible on a stripped binary — `Base2`'s polymorphism has to be known
+from debug info, not inferred from a symbol's size alone.
+
+## Why abicheck catches it
+
+A per-type diff of `Derived` alone finds nothing — same bases, same
+members. abicheck's `secondary_vtable_group_changed` detector instead
+recomputes each class's *ordered list of secondary vtable groups* from the
+current snapshot's DWARF inheritance metadata on both sides and reports
+when that list changes for a class whose own base declaration list did not
+move — a cross-type effect that only becomes visible by also inspecting
+`Base2`'s declaration.
+
+## Runtime failure demonstration
+
+**Severity: BREAKING / silent layout mismatch**
+
+**Scenario:** compile app against v1's `Derived` (Base2 non-polymorphic),
+swap in v2's `.so` without recompile.
 
 ```bash
-g++ -shared -fPIC -g v1.cpp -o libv1.so
-g++ -g app.cpp -I. -L. -lv1 -Wl,-rpath,. -o app
+# Build old library + app
+g++ -shared -fPIC -g v1.cpp -o libfoo.so
+g++ -g app.cpp -I. -L. -lfoo -Wl,-rpath,. -o app
 ./app
-# app compiled with sizeof(Derived) = 8
-# loaded library reports sizeof(Derived) = 8
-# layouts agree
+# → app compiled with sizeof(Derived) = 8
+# → loaded library reports sizeof(Derived) = 8
+# → layouts agree
 
-g++ -shared -fPIC -g v2.cpp -o libv2.so
-cp libv2.so libv1.so
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g v2.cpp -o libfoo.so
 ./app
-# app compiled with sizeof(Derived) = 8
-# loaded library reports sizeof(Derived) = 16
-# MISMATCH: Base2 gained a vtable pointer underneath an unchanged Derived
-# declaration -- Derived's own diff is a no-op, yet its layout changed.
+# → app compiled with sizeof(Derived) = 8
+# → loaded library reports sizeof(Derived) = 16
+# → MISMATCH: Base2 gained a vtable pointer underneath an unchanged
+#   Derived declaration -- Derived's own diff is a no-op, yet its layout
+#   changed.
 ```
 
-## Mitigation
+**Why BREAKING:** the app's copy of `Derived` was sized and laid out
+assuming `Base2` contributes no vtable pointer; the loaded v2 library's
+`Base2` subobject now starts with one, shifting every subsequent byte and
+silently desynchronizing the two sides' idea of the object's layout.
 
-- Adding a virtual method to a base class is a break for *every* class that
-  derives from it, not just a local change to that base — audit derived
-  classes, not just the base being edited.
-- If a base might need virtual dispatch later, declare at least one virtual
-  method (even a virtual destructor) from the start, so its polymorphism
-  status is part of the class's original, versioned contract.
+## Safe redesign
+
+Adding a virtual method to a base class is a break for *every* class that
+derives from it, not just a local change to that base — audit derived
+classes, not just the base being edited. If a base might need virtual
+dispatch later, declare at least one virtual method (even a virtual
+destructor) from the start, so its polymorphism status is part of the
+class's original, versioned contract.
+
+**Real-world example:** this pattern shows up whenever a previously-plain
+mixin or interface base is retrofitted with virtual methods — e.g. adding a
+virtual `on_event()` hook to a formerly non-polymorphic utility base —
+every class that multiply-inherits from it needs a rebuild, even though the
+derived class's own source never changed.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+`abidiff`/`abidw` are not installed in this environment, so no output is
+reproduced here.
 
 ## References
 

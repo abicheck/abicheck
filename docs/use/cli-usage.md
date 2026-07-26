@@ -9,7 +9,7 @@ lifecycle: active
 generated: false
 ---
 
-# Using abicheck, Compatibility Modes, and Coverage
+# Core CLI Workflows
 
 ## What abicheck is
 
@@ -27,8 +27,9 @@ Huge thanks to both projects for pioneering ABI compatibility analysis.
 > **Not sure which command fits your situation?** See
 > [Choose Your Workflow](../start/choose-your-workflow.md) — a decision guide that maps
 > your artifacts (single library, release bundle, package, application, stripped
-> binaries…) and CI policy to the exact command and options. This page is the
-> per-command flag reference.
+> binaries…) and CI policy to the exact command and options. This page covers
+> the core `dump`/`compare` workflow; for the exhaustive, generated
+> per-command flag list see the [CLI Reference](../reference/cli-reference.md).
 
 ## How to use abicheck
 
@@ -129,30 +130,9 @@ Beyond the core `compare`/`dump` flow:
   a Python API only now (`abicheck.debian_symbols`), not a CLI subcommand — see
   [Debian Symbols File Integration](debian-symbols.md).
 
-The `--profile` shortcut and severity configuration below are core to every
-`compare` invocation, so they stay on this page.
-
-#### Severity configuration (`--severity-*`)
-
-Control exit codes and report labels by assigning severity levels to four issue
-categories:
-
-```bash
-# Block on API additions
-abicheck compare old.json new.json --severity-addition error
-
-# Everything is an error (strict)
-abicheck compare old.json new.json --severity-preset strict
-
-# Custom: breaks are errors, additions are warnings, rest is info
-abicheck compare old.json new.json \
-  --severity-abi-breaking error \
-  --severity-potential-breaking info \
-  --severity-quality-issues info \
-  --severity-addition warning
-```
-
-See the [severity guide](severity.md) for the full reference.
+`--severity-*` (controlling exit codes and report labels) is covered in full
+on [Severity Configuration](severity.md); `--profile` below is core CLI
+flag mechanics, so it stays on this page.
 
 #### `--profile`: one token for a whole workflow
 
@@ -205,112 +185,30 @@ abicheck compare ./build-old/libfoo.so new-release.json \
 
 ### 4) ABICC-compatible invocation (for migration)
 
-For teams migrating from `abi-compliance-checker` — same flags, same XML descriptors.
-See the [Migrating from ABICC](from-abicc.md) guide and the
-[ABICC Flag Reference](../reference/abicc-flags.md) for the full flag list.
+For teams migrating from `abi-compliance-checker` — same flags, same XML
+descriptors — `abicheck compat check`/`compat dump` are a drop-in
+replacement. See [Migrating from ABICC](from-abicc.md) for the full flag
+table, behavior differences (`-strict` semantics, XML descriptor format),
+and worked examples, and the
+[ABICC Flag Reference](../reference/abicc-flags.md) for the exhaustive flag
+list.
 
-```bash
-# Minimal (identical to abi-compliance-checker):
-abicheck compat check -lib foo -old old.xml -new new.xml
+## Change classification and detection coverage
 
-# With strict mode and version labels:
-abicheck compat check -lib foo -old old.xml -new new.xml -s -v1 1.0 -v2 2.0
+What each verdict (`BREAKING`/`API_BREAK`/`COMPATIBLE`/`COMPATIBLE_WITH_RISK`/`NO_CHANGE`)
+means is covered in full on [Verdicts](../learn/verdicts.md); the per-case
+matrix comparing abicheck, `abidiff`, and ABICC detection coverage across the
+example catalog is the
+[Tool Comparison & Benchmarks](../reference/tool-comparison.md) reference.
 
-# Source/API compat only (ignore ELF metadata):
-abicheck compat check -lib foo -old old.xml -new new.xml -source
+## Dependency-stack commands
 
-# Skip known symbols:
-abicheck compat check -lib foo -old old.xml -new new.xml -skip-symbols skip.txt
-```
-
-## abicheck as a drop-in replacement for ABICC
-
-abicheck intentionally supports ABICC-like CLI semantics and XML descriptor flow,
-while modernizing internals and outputs.
-
-### Why teams replace ABICC with abicheck
-
-- Python-native implementation, easier to embed and extend in CI.
-- Structured outputs (`json`, `markdown`, `sarif`) for machine + human consumption.
-- Works well in stripped-binary workflows when combined with headers.
-- Better integration path for modern C++ workflows and policy checks.
-- **Full ABICC flag parity** — `-s/-strict`, `-source`, `-skip-symbols/-skip-types`, `-v1/-v2`, `-stdout` and more.
-- **Superset detectors** — catches everything ABICC catches plus: `FUNC_DELETED`, `VAR_BECAME_CONST`, `TYPE_BECAME_OPAQUE`, `BASE_CLASS_POSITION_CHANGED`, `BASE_CLASS_VIRTUAL_CHANGED`.
-
-### Practical migration path
-
-1. Keep your existing ABICC XML descriptor generation.
-2. Replace ABICC compare call with `abicheck compat check ...` (flags are identical).
-3. Optionally move to native `dump/compare` commands for explicit snapshot control.
-4. Switch CI gates to JSON/SARIF-based policy checks.
-
-## Change classification: BREAKING vs COMPATIBLE
-
-abicheck classifies every detected change into a verdict:
-
-- **BREAKING** — binary ABI incompatibility; existing binaries will malfunction.
-- **COMPATIBLE** — informational/warning; does not break binary compatibility on its own.
-- **NO_CHANGE** — identical ABI.
-
-A change is BREAKING only when it causes binary-level failures: symbol resolution errors,
-type layout corruption, vtable mismatch, or calling convention incompatibility.
-
-Changes like enum member addition, union field addition (without growth),
-GLOBAL→WEAK binding, and IFUNC transitions are classified as **COMPATIBLE** — they are
-detected and reported for awareness but do not trigger a BREAKING verdict.
-`noexcept` removal is classified **COMPATIBLE_WITH_RISK** (binary-linkable but a
-deployment/behavioral hazard). See
-[ABI/API Handling & Recommendations](../learn/abi-api-handling.md) for the full
-rationale.
-
-## ABI/API breakages and what each tool mode can detect
-
-The per-case matrix comparing abicheck, `abidiff`, and ABICC modes across the
-catalog lives in the **[Tool Comparison & Benchmarks](../reference/tool-comparison.md)**
-reference, and every case has a full reproduction in the
-[Examples Encyclopedia](../reference/examples/index.md). The qualitative takeaway:
-
-- **API surface breaks** (removed/changed signatures): all modes generally catch these.
-- **C++ semantic contract breaks** (`noexcept`, inline/ODR): header-aware analysis is strongest.
-- **DWARF-only detail** (some anonymous/internal layout details): ABICC dump mode can be strongest when debug info exists.
-- **Policy/linking hygiene** (SONAME/versioning/visibility): best handled by a tool that includes explicit ELF policy checks.
-
-## Architecture and dependencies
-
-### 5) Full-stack dependency validation (Linux ELF)
-
-Resolve the full dependency tree, simulate symbol binding, and produce a
-stack-level ABI compatibility verdict.
-
-```bash
-# Show dependency tree + symbol binding status
-abicheck deps tree /usr/bin/python3
-abicheck deps tree /usr/bin/python3 --format json
-
-# Compare a binary's full stack across two sysroots
-abicheck deps compare usr/bin/myapp \
-    --old-root /rootfs/v1 --new-root /rootfs/v2
-
-# Include dependency info in dump/compare
-abicheck dump libfoo.so -H foo.h --follow-deps -o snap.json
-abicheck compare old.so new.so -H foo.h --follow-deps
-```
-
-The `deps tree` command resolves the transitive dependency closure and displays:
-- Dependency tree with resolution reasons (rpath, runpath, default, etc.)
-- Unresolved libraries
-- Symbol binding summary (resolved, missing, version mismatches)
-
-The `deps compare` command compares two environments and reports:
-- Loadability verdict (will the binary load?)
-- ABI risk verdict (are there breaking changes in dependencies?)
-- Per-library ABI diffs intersected with actual symbol usage
-
-The `--follow-deps` flag on `dump` and `compare` includes dependency graph
-and binding information in the output alongside the regular ABI diff.
-
-Packaging-specific integration — generating/validating/diffing Debian
-`dpkg-gensymbols`-style symbols files — is on its own page:
+`deps tree`/`deps compare` (full dependency-closure resolution and
+cross-sysroot ABI diffing, Linux ELF) and the `--follow-deps` flag are
+covered with worked examples and exit codes on
+[Migrating to the Current CLI](companion-commands.md#deps-tree). Packaging
+integration — generating/validating/diffing Debian `dpkg-gensymbols`-style
+symbols files — is its own page:
 [Debian Symbols File Integration](debian-symbols.md).
 
 ## Architecture and runtime dependencies
@@ -319,5 +217,5 @@ For the internal pipeline and module map (dumper → checker → resolver → re
 see the [Codebase Overview](../contribute/codebase-overview.md) and the
 [Architecture](../learn/architecture.md) concept page. For the runtime
 dependencies (Python 3.10+, castxml, pyelftools, …) and per-platform setup, see
-[Getting Started](../start/getting-started.md#requirements).
+[Install abicheck](../start/install.md#requirements).
 

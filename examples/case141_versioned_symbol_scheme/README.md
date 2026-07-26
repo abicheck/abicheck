@@ -2,30 +2,124 @@
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
-## What happens
+## Verdict and consumer impact
+
 The library carries its MAJOR version as a suffix on every exported symbol
-(`mylib_init_3`, `mylib_open_3`, …) — the ICU `u_<name>_<major>` convention. v2
-bumps the whole API to major 4, so **every** symbol is renamed `_3` → `_4` at
-once. Source that spells the unsuffixed name via a version macro keeps compiling,
-but the shipped `.so` drops all `_3` symbols and adds `_4` symbols.
+(`mylib_init_3`, `mylib_open_3`, … — the ICU `u_<name>_<major>`
+convention). v2 bumps the whole API to major 4, so **every** symbol is
+renamed `_3` → `_4` at once. Source that spells the unsuffixed name via a
+version macro keeps compiling, but the shipped `.so` drops all `_3`
+symbols and adds `_4` symbols — at the same SONAME, every consumer linked
+against a `_3` symbol fails to load with `undefined symbol`.
+Recompilation against the new headers is mandatory.
 
-## Why it is BREAKING
-At the same SONAME, every consumer linked against a `_3` symbol fails at load
-with `undefined symbol`. It is a real ABI break — abicheck reports the removals
-and recommends a SONAME bump.
-
-## What abicheck adds
-Because the removed symbols reappear as added symbols differing only by the
-version token, abicheck emits one advisory **`versioned_symbol_scheme_detected`**
-finding explaining that the wall of churn is a library-wide rename, not
-independent API removals. It never downgrades the artifact-proven removals;
-opt in with `compare --collapse-versioned-symbols` to reclassify the
-version-rename pairs as compatible and see the real delta.
-
-## Code diff
+## Old/new diff
 
 | v1.h | v2.h |
 |------|------|
 | `int mylib_init_3(int x);` | `int mylib_init_4(int x);` |
 | `int mylib_open_3(int x);` | `int mylib_open_4(int x);` |
 | …(6 symbols, all `_3`) | …(same 6, all `_4`) |
+
+## abicheck command
+
+```bash
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- func_removed: Public function removed: mylib_flush_3
+- func_removed: Public function removed: mylib_close_3
+- func_removed: Public function removed: mylib_write_3
+- func_removed: Public function removed: mylib_read_3
+- func_removed: Public function removed: mylib_open_3
+- func_removed: Public function removed: mylib_init_3
+  > Old binaries call a symbol that no longer exists; dynamic linker
+    will refuse to load or crash at call site.
+
+Risk:
+- versioned_symbol_scheme_detected: 6 of 6 versioned symbols are renamed
+  between releases, differing only by a version token (versioned-symbol
+  scheme: a C suffix like ICU 'u_strlen_75'->'_78' ...). The large churn
+  is likely a library-wide rename, not independent API changes.
+
+Additions:
+- func_added: New public function: mylib_flush_4 / mylib_close_4 /
+  mylib_write_4 / mylib_read_4 / mylib_open_4 / mylib_init_4
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the exported-symbol table alone shows six symbols
+present in v1 and absent from v2, and six new ones added; no debug info or
+headers needed to see the raw removals/additions.
+
+## Why abicheck catches it
+
+The dynamic symbol table is authoritative L0 evidence for the six
+`func_removed`/`func_added` pairs. On top of that, abicheck's rename
+detector recognizes that every removed/added pair differs only by the
+trailing version digit (the `versioned_symbol_scheme_detected` advisory)
+and surfaces it as one grouped risk finding explaining the churn is a
+library-wide rename — without ever downgrading the underlying
+artifact-proven `func_removed` findings. Opt in with
+`compare --collapse-versioned-symbols` to reclassify the version-rename
+pairs as compatible and see any *real* delta underneath the rename.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1's `_3`-suffixed symbols, swap in v2
+`.so` without recompile.
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g v1.c -o libmylib.so
+gcc -g app.c -I. -L. -lmylib -Wl,-rpath,. -o app
+./app
+echo $?
+# → 2   (mylib_init_3(0) + mylib_open_3(1) = 0 + 2)
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g v2.c -o libmylib.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol: mylib_open_3
+echo $?
+# → 127
+```
+
+**Why CRITICAL:** every `_3` symbol the app was linked against is gone from
+v2's dynamic symbol table; the runtime linker cannot resolve
+`mylib_open_3` and the process aborts immediately.
+
+## Safe redesign
+
+Bump the SONAME alongside a whole-API version-suffix rename, so the old and
+new symbol sets can coexist as separate shared objects
+(`libmylib.so.3`/`libmylib.so.4`) instead of silently breaking every
+consumer linked against the previous SONAME.
+
+**Real-world example:** this is exactly ICU's own convention
+(`u_strlen_75` → `u_strlen_76`, …) — ICU pairs it with a SONAME bump per
+major release for this reason.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+`abidiff` reports the same six removed/six added symbols as a pure
+symbol-set diff; it has no equivalent to `versioned_symbol_scheme_detected`
+to flag that the churn is one coordinated rename rather than six unrelated
+API changes, which is the piece abicheck adds on top of the shared
+symbol-table evidence.

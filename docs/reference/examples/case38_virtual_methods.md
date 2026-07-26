@@ -10,107 +10,146 @@
 | **Detected `ChangeKind`s** | `type_vtable_changed` |
 | **Source files** | `examples/case38_virtual_methods/` |
 
-**Category:** C++ Virtual / Deleted | **Verdict:** BREAKING
+**Category:** C++ Virtual / Deleted | **Verdict:** 🔴 BREAKING
 
-## What changes
+## Verdict and consumer impact
 
-| Version | Definition |
-|---------|-----------|
-| v1 | `transform()` is non-virtual; `validate()` is virtual; `execute()` is virtual; copy ctor is user-defined |
-| v2 | `transform()` becomes virtual; `validate()` loses virtual; `execute()` becomes pure virtual (`= 0`); copy ctor is `= delete` |
+Four independent changes land on `Processor` in one release: `transform()`
+becomes virtual, `validate()` loses virtual, `execute()` becomes pure
+virtual, and the copy constructor is `= delete`d. Each one invalidates an
+assumption baked into any binary compiled against v1 — vtable slot
+indices, the presence of a concrete `execute()` implementation, and the
+copy-constructor symbol itself. Any consumer that dispatches through a
+`Processor&`, instantiates `Processor` directly, or copies one is broken
+without recompilation.
 
-## Why this is a binary ABI break
+## Old/new diff
 
-Each change corrupts the vtable layout that existing binaries were compiled against:
+| v1.hpp | v2.hpp |
+|--------|--------|
+| `void transform(int data);` | `virtual void transform(int data);` (became virtual) |
+| `virtual void validate(int data);` | `void validate(int data);` (lost virtual) |
+| `virtual void execute();` | `virtual void execute() = 0;` (became pure virtual) |
+| `Processor(const Processor &other);` | `Processor(const Processor &other) = delete;` |
 
-1. **`transform()` became virtual** — a new vtable slot is inserted. The class gains a vptr if it didn't already have one at that offset, and existing vtable indices shift.
-2. **`validate()` lost virtual** — the vtable slot is removed. Old binaries dispatching through the vtable at the old index now call the wrong function or dereference garbage.
-3. **`execute()` became pure virtual** — the vtable slot now points to `__cxa_pure_virtual`. Any old binary that instantiates `Processor` directly (which was legal in v1) will trigger `__cxa_pure_virtual`, which calls `std::abort()` (SIGABRT), not a segmentation fault. A segfault would only occur if the vtable slot were null or corrupted.
-4. **Copy ctor deleted** — old binaries that were linked against the copy constructor symbol will get an undefined symbol error. With the default ELF lazy binding, the error occurs when the copy constructor is first called (not at process startup). To force a deterministic startup-time failure, link with `-Wl,-z,now` or set `LD_BIND_NOW=1` at runtime.
+## abicheck command
 
-## Code diff
-
-```diff
- class Processor {
- public:
--    void transform(int data);
-+    virtual void transform(int data);
-
--    virtual void validate(int data);
-+    void validate(int data);
-
--    virtual void execute();
-+    virtual void execute() = 0;
-
--    Processor(const Processor &other);
-+    Processor(const Processor &other) = delete;
-
-     Processor() = default;
-     virtual ~Processor() = default;
- };
+```bash
+g++ -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_vtable_changed: vtable changed: Processor
+  (Processor::validate(int), Processor::execute(), Processor::~Processor()
+   -> Processor::transform(int), Processor::execute(), Processor::~Processor())
+  > Vtable slot reordering; virtual dispatch calls wrong method.
+- func_removed_elf_only: Elf_only function removed: Processor::execute()
+  > Exported function symbol removed from the binary; old binaries that
+    link or dlsym() it can fail even without header evidence.
+- func_removed_elf_only: Elf_only function removed: Processor::validate(int)
+- func_removed_elf_only: Elf_only function removed:
+  Processor::Processor(Processor const&)
+- var_removed: Public variable removed: vtable for Processor
+  > Old binaries reference a global variable that no longer exists;
+    link or load failure.
+```
+
+(12 breaking findings total; abicheck flags 3 of them as RTTI-symbol churn
+typical of a missing `-fvisibility=hidden` rather than distinct public-API
+breaks — 9 are genuine public-surface breaks, matching the four source
+changes above.)
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's vtable member list (`DW_AT_vtable_elem_location`
+per virtual method) plus the exported-symbol table are enough to detect all
+four changes; no public headers required. Unlike case37, `Processor`
+already has out-of-line virtual method definitions in v1.cpp, so GCC emits
+a complete class DIE by default — no extra debug flag needed here.
+
+## Why abicheck catches it
+
+DWARF records each virtual method's vtable slot via
+`DW_AT_vtable_elem_location`; abicheck diffs the ordered vtable-slot list
+per class directly from debug info. The symbol-table view independently
+confirms `execute()`, `validate()`, and the copy constructor no longer
+exist as exported functions, and that the vtable/typeinfo/typeinfo-name
+globals for `Processor` changed.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
+**Scenario:** app instantiates `Processor` directly (legal in v1, where
+`execute()` has a concrete body) and dispatches through a `Processor&`,
+then the library is swapped for v2 without recompiling the app.
 
 ```bash
-# Build v1 lib + app (calls dispatch through Processor& to force vtable use)
+# Build old library + app
 g++ -shared -fPIC -g v1.cpp -o libprocessor.so
 g++ -g app.cpp -I. -L. -lprocessor -Wl,-rpath,. -o app
 ./app
-# → Calling transform(42)...
-# → Calling validate(10)...
-# → Calling execute()...
 # → MyProcessor::execute() called
+# → exit 0
 
-# Swap to v2 (no recompile of app)
+# Swap in new library (no recompile)
 g++ -shared -fPIC -g v2.cpp -o libprocessor.so
 ./app
-# → vtable corruption: validate() dispatches to the wrong function,
-# → and execute() may call __cxa_pure_virtual → abort (SIGABRT).
+# → pure virtual method called
+# → terminate called without an active exception
+# → Aborted
+# → exit 134
 ```
 
-**Copy constructor scenario** (separate test — `copy_ctor_demo.cpp`):
+The deleted-copy-constructor change is exercised independently
+(`copy_ctor_demo.cpp`, built against v1 where the copy ctor exists):
 
 ```bash
 g++ -g copy_ctor_demo.cpp -I. -L. -lprocessor -Wl,-rpath,. -o copy_ctor_demo
-./copy_ctor_demo          # works with v1
-# Swap to v2:
+./copy_ctor_demo          # (built against v1) → "Copy created successfully", exit 0
+# Swap to v2 (no recompile):
 g++ -shared -fPIC -g v2.cpp -o libprocessor.so
 ./copy_ctor_demo
-# → undefined symbol error for Processor copy ctor when the
-#   constructor is called (lazy binding resolves at call time).
-# To fail at startup instead: LD_BIND_NOW=1 ./copy_ctor_demo
+# → symbol lookup error: undefined symbol: _ZN9ProcessorC1ERKS_
+# → exit 127
 ```
 
-**Why CRITICAL:** Vtable layout is baked into the calling binary at compile time. Any
-change to the number or order of virtual methods silently corrupts dispatch. The deleted
-copy constructor removes a symbol entirely, causing immediate load failure. These two
-scenarios are exercised independently (`app.cpp` for vtable, `copy_ctor_demo.cpp` for
-the deleted copy constructor).
+**Why CRITICAL:** in v2, `Processor::execute()`'s vtable slot points to
+`__cxa_pure_virtual`, so any v1-compiled object built as a bare `Processor`
+aborts the process the moment `execute()` is dispatched. The deleted copy
+constructor separately removes a symbol outright, producing a hard
+load-time/link-time failure for any code path that copies a `Processor`.
 
-## Reproduce manually
+## Safe redesign
+
+Never change the virtual-ness of an existing method in a stable ABI. To add
+new virtual behavior, append a new virtual method (never reorder existing
+ones) and bump the SONAME; a pure-virtual addition is a source break for
+every existing concrete subclass and needs a major version bump. If a
+constructor must become uncopyable, do it in a new major version, not a
+patch release — the old symbol has to keep existing for one deprecation
+cycle.
+
+**Real-world example:** Qt and other GUI toolkits carefully preserve
+virtual-method order and slot count across minor releases specifically
+because plugins compiled against an older header still dispatch through
+the vtable at runtime; a reordered vtable silently breaks every
+third-party plugin.
+
+## Cross-tool comparison
+
 ```bash
-g++ -shared -fPIC -g v1.cpp -o libv1.so
-g++ -shared -fPIC -g v2.cpp -o libv2.so
 abidw --out-file v1.xml libv1.so
 abidw --out-file v2.xml libv2.so
 abidiff v1.xml v2.xml
 echo "exit: $?"   # → 12 (ABI change + breaking)
 ```
-
-## How to fix
-Never change the virtual-ness of existing methods in a stable ABI. To add new virtual
-methods, append them (do not reorder), and bump the SONAME. Pure virtual additions
-require a major version bump since they break all existing concrete subclasses.
-
-## Runtime note
-Scenario B exits with SIGABRT (signal 6, shell exit 134) when libv2.so is swapped in. `__cxa_pure_virtual` calls `std::abort()`. This is a detected break (non-zero exit), even though exit code is 134, not 2. Any non-zero exit in the runtime validator = incompatible.
-
-This app may still run after swap because it does not exercise all affected ABI surfaces (for example deleted-copy-constructor call paths) on every toolchain. The ABI contract is still BREAKING due to class/vtable changes.
 
 ## References
 

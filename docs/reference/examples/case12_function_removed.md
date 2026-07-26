@@ -10,50 +10,59 @@
 | **Detected `ChangeKind`s** | `func_removed` |
 | **Source files** | `examples/case12_function_removed/` |
 
-**Category:** Symbol API | **Abicheck verdict:** BREAKING | **Verdict:** 🔴 BREAKING
+**Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
-## What breaks
-Any binary dynamically linked against v1 will fail to load with
-`undefined symbol: fast_add` when upgraded to v2. The `.so` no longer exports
-the symbol, so pre-built binaries have nowhere to resolve it. Even if the function
-were moved to a header as an inline, already-compiled binaries cannot benefit from
-that — they need the dynamic symbol.
+## Verdict and consumer impact
 
-## Why abidiff catches it
-Reports `1 Removed function: fast_add` with exit **12** (breaking removal).
+Any binary dynamically linked against v1 fails to resolve `fast_add` after
+upgrading to v2. The `.so` no longer exports the symbol, so pre-built
+binaries have nowhere to resolve it. Even if the function were moved into a
+header as an inline, already-compiled binaries can't benefit — they still
+need the dynamic symbol that used to exist.
 
-## Code diff
+## Old/new diff
 
 | v1.c | v2.c |
 |------|------|
-| `int fast_add(int a, int b) { return a+b; }` | *(function removed from .so)* |
-| | `int other_func(int x) { return x; }` |
+| `int fast_add(int a, int b) { return a + b; }` | *(removed)* |
+| `int other_func(int x) { return x; }` | `int other_func(int x) { return x; }` |
 
-## Reproduce manually
+## abicheck command
+
 ```bash
 gcc -shared -fPIC -g v1.c -o libfoo_v1.so
 gcc -shared -fPIC -g v2.c -o libfoo_v2.so
-abidw --out-file v1.xml libfoo_v1.so
-abidw --out-file v2.xml libfoo_v2.so
-abidiff v1.xml v2.xml
-echo "exit: $?"   # → 12
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
-Keep the exported wrapper in the `.so` even if the implementation moves to an inline.
-The wrapper can simply call the inline: `int fast_add(int a, int b) { return _fast_add_impl(a,b); }`.
-Only remove it on a SONAME-bumping major release.
+## Expected abicheck finding
 
-## Real-world example
-Several C++ standard library implementors have moved functions to inlines for
-performance and then had to keep exported stubs for ABI compatibility — libstdc++'s
-`std::string` refactor in GCC 5 is the canonical cautionary tale.
+```text
+Verdict: BREAKING (exit 4)
 
-## Real Failure Demo
+- func_removed: Public function removed: fast_add
+  > Old binaries call a symbol that no longer exists; dynamic linker will
+    refuse to load or crash at call site.
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the exported-symbol table alone is enough: `fast_add`
+is present in v1's `.dynsym` and absent from v2's. No debug info or headers
+needed; `-g` above is only there so the *Runtime failure demonstration*
+below can build a matching app.
+
+## Why abicheck catches it
+
+The dynamic symbol table is authoritative L0 evidence — abicheck diffs the
+exported-symbol sets directly, no debug info or headers required.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-**Scenario:** app calls `fast_add()` compiled against v1. v2 removes it from the `.so`.
+**Scenario:** app calls `fast_add()` compiled against v1. v2 removes it
+from the `.so`.
 
 ```bash
 # Build v1 + app
@@ -69,13 +78,32 @@ gcc -shared -fPIC -g v2.c -o libfoo.so
 # → ./app: symbol lookup error: ./app: undefined symbol: fast_add
 ```
 
-**Why CRITICAL:** With default lazy binding (RTLD_LAZY), the error surfaces on the
-**first call** through the PLT — the app starts but immediately dies when `fast_add`
-is called. With `LD_BIND_NOW=1` or `RTLD_NOW`, it fails at load time. Either way,
-every binary that ever called `fast_add` is broken until recompiled against v2 headers.
+**Why CRITICAL:** with default lazy binding (`RTLD_LAZY`), the error
+surfaces on the **first call** through the PLT — the app starts but
+immediately dies when `fast_add` is called. With `LD_BIND_NOW=1` or
+`RTLD_NOW`, it fails at load time instead. Either way, every binary that
+ever called `fast_add` is broken until recompiled against v2.
 
-## Runtime behavior
-The function is removed from the .so — the dynamic linker emits an undefined symbol error at load time (with RTLD_NOW) or at first call (lazy binding). Runtime result and verdict both agree: BREAKING.
+## Safe redesign
+
+Keep the exported wrapper in the `.so` even if the implementation moves to
+an inline — the wrapper can simply call the inline:
+`int fast_add(int a, int b) { return _fast_add_impl(a, b); }`. Only remove
+it on a SONAME-bumping major release.
+
+**Real-world example:** several C++ standard library implementors have
+moved functions to inlines for performance and then had to keep exported
+stubs for ABI compatibility — libstdc++'s `std::string` refactor in GCC 5
+is the canonical cautionary tale.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+echo "exit: $?"   # → 12 (= 4 | 8: ABI change detected + breaking change)
+```
 
 ## References
 

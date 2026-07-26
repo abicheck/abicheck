@@ -1,80 +1,97 @@
-# Case 19 — Enum Member Removed
+# Case 19: Enum Member Removed
 
+**Category:** Breaking | **Verdict:** 🔴 BREAKING
 
-**Verdict:** 🔴 BREAKING
-**Verdict detail:** ABI break (symbol removed) + API break (enum value missing from header)
-**abicheck verdict: BREAKING**
+## Verdict and consumer impact
 
-## What changes
+Any code compiled against old that stores, transmits, or switches on
+`FOO`'s value (`2`) now runs against a library whose enum no longer defines
+that value. This is an ABI break (a symbol using the enum was recompiled
+around the change) and an API break (`FOO` is gone from the header). The
+value `2` doesn't stop existing at the bit level, but it's no longer a valid
+`Status` member — persisted data, protocol messages, or `switch` statements
+built around it silently mishandle it.
 
-| Version | Definition |
-|---------|-----------|
-| v1 | `enum Status { OK = 0, ERROR = 1, FOO = 2 };` |
-| v2 | `enum Status { OK = 0, ERROR = 1 };` |
+## Old/new diff
 
-## What breaks at binary level
+| old/lib.h | new/lib.h |
+|-----------|-----------|
+| `enum Status { OK = 0, ERROR = 1, FOO = 2 };` | `enum Status { OK = 0, ERROR = 1 };` |
+| old/lib.c: `get_status()` returns `FOO` | new/lib.c: `get_status()` returns `ERROR` |
 
-Removing an enum member invalidates any code that uses that member's numeric value.
-Existing binaries that were compiled with `FOO = 2` may store, transmit, or switch on
-that value. The new library no longer defines that value as a valid member of the enum.
+## abicheck command
 
-This is a **semantic ABI break**: while the remaining values (`OK`, `ERROR`) are still
-at the same numeric positions, the removed value `FOO = 2` becomes undefined in the
-new version. Persisted data, protocol messages, or configuration files that contain
-the removed value will be misinterpreted.
-
-## Consumer impact
-
-```c
-/* consumer compiled against v1 */
-enum Status s = FOO;  /* s = 2 */
-write_to_file(s);
-
-/* later, same consumer reads back value 2 with v2 library */
-/* library has no FOO — value 2 is undefined behavior */
+```bash
+gcc -shared -fPIC -g old/lib.c -Iold -o libfoo_v1.so
+gcc -shared -fPIC -g new/lib.c -Inew -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Mitigation
+## Expected abicheck finding
 
-- Never remove released enum members; mark them as deprecated instead.
-- Map legacy values deliberately in deserialization/protocol handling.
-- Use explicit sentinel values (e.g., `STATUS_MAX`) to define valid ranges.
+```text
+Verdict: BREAKING (exit 4)
 
-## Code diff
-
-```diff
--enum Status { OK = 0, ERROR = 1, FOO = 2 };
-+enum Status { OK = 0, ERROR = 1 };
+- enum_member_removed: Enum member removed: Status::FOO (2)
+  > Old code uses a constant that no longer exists; compile error for
+    source, stale value for binaries.
 ```
 
-## Real Failure Demo
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's enumeration-type debug info
+(`DW_TAG_enumeration_type` / `DW_TAG_enumerator`) records each named member
+and its value for both versions, so `-g` alone (no public headers) is enough
+to detect the removed member.
+
+## Why abicheck catches it
+
+DWARF records every enumerator name and constant value under the enum's
+`DW_TAG_enumeration_type` entry; abicheck diffs the two versions' member
+sets directly from debug info and flags a name present only in old as
+`enum_member_removed`.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-**Scenario:** app compiled with old header (has `FOO=2`) calls library that returns value 2. With v2, `FOO` is removed — the value 2 is undefined.
+**Scenario:** compile app against old (checks for `FOO`), swap in new `.so`
+without recompile.
 
 ```bash
-# Build old lib + app
+# Build old library + app
 gcc -shared -fPIC -g old/lib.c -Iold -o libstatus.so
 gcc -g app.c -Iold -L. -lstatus -Wl,-rpath,. -o app
 ./app
 # → FOO
+# → exit: 0
 
-# Swap in new lib (FOO removed, but still returns integer 2)
+# Swap in new library (no recompile)
 gcc -shared -fPIC -g new/lib.c -Inew -o libstatus.so
 ./app
-# → FOO    ← prints "FOO" because value 2 still matches the compiled switch case
-#            but in new headers this value is UNDEFINED — semantic break
-# Any consumer recompiled against new headers would get no FOO case → "UNKNOWN: 2"
+# → WRONG RESULT: expected FOO(2), got 1
+# → exit: 1
 ```
 
-**Why CRITICAL:** Old binaries still "work" but carry a time bomb — any serialized,
-stored, or transmitted value of `FOO` (integer 2) is now undefined in the new API.
-Recompiled consumers get no `FOO` case and fall through to `default`, silently
-mishandling the value.
+**Why CRITICAL:** the app's compiled-in check `if (s == FOO)` still compares
+against the constant `2`, but new's `get_status()` now returns `ERROR` (`1`)
+for the situation it used to report as `FOO` — the app silently falls into
+its mismatch branch instead of the case it was built to handle. Any consumer
+that persisted or transmitted the value `2` under the old meaning faces the
+same kind of silent misinterpretation.
 
-## Why runtime result may differ from verdict
-Enum value removal: binary compat (integers same), semantic/protocol break
+## Safe redesign
+
+Never remove a released enum member; deprecate it instead and keep its
+numeric value reserved. Map legacy values deliberately in
+deserialization/protocol handling, and use an explicit sentinel
+(`STATUS_MAX`) to define the valid range rather than relying on "whatever
+values currently exist."
+
+**Real-world example:** protocol and status-code enums that get "cleaned up"
+between releases are a recurring source of this — any peer or persisted
+record built against the old value set silently misinterprets removed
+codes.
 
 ## References
 

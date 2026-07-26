@@ -36,19 +36,22 @@ nav:
   - User Guide:
     - Start Here:
       - Getting Started: start/getting-started.md
+      - Install abicheck: start/install.md
+      - Run Your First Check: start/first-check.md
+      - Understand Your First Report: start/first-report.md
       - Choose Your Workflow: start/choose-your-workflow.md
       - 'Worked Example: Real Library': start/real-world-example.md
       - 'Scanning a Conda-Forge Package': start/scanning-conda-packages.md
     - Everyday Use:
       - CLI Usage: use/cli-usage.md
       - Evidence, Build-Context & Debug Flags: use/dump-compare-flags.md
-      - Companion Commands: use/companion-commands.md
       - Source-Scan Depth: use/scan-levels.md
       - Producing Source Facts: use/producing-source-facts.md
       - Output Formats: use/output-formats.md
       - Baseline Management: use/baseline-management.md
       - Creating and Comparing a Baseline: use/create-baseline.md
       - Storing Baselines: use/baseline-storage.md
+      - Troubleshooting: use/troubleshooting.md
     - CI & Gating:
       - CI Gating Pipeline: use/ci-gating.md
       - GitHub Action:
@@ -82,7 +85,7 @@ nav:
       - Tool Modes: use/tool-modes.md
       - Python API: use/python-api.md
       - MCP Integration: use/mcp-integration.md
-      - Upgrading to 0.5.0: use/migration-0.5.md
+      - Migrating to the Current CLI: use/companion-commands.md
       - Migrating from ABICC: use/from-abicc.md
       - Migrating from libabigail: use/from-libabigail.md
   # G30/ADR-047's scenario-first GitHub Actions integration model -- "which
@@ -192,7 +195,6 @@ nav:
       - Testing: contribute/testing.md
       - Detector Impact Contract: contribute/detector-impact-contract.md
       - Performance: contribute/performance.md
-      - Troubleshooting: contribute/troubleshooting.md
     - Roadmap & Status:
       - Goals: contribute/goals.md
       - SciPy / Scientific-Python Roadmap: contribute/scipy-scientific-python-roadmap.md
@@ -553,7 +555,8 @@ plugins:
         examples/case99_experimental_graduated.md: reference/examples/case99_experimental_graduated.md
         examples/index.md: reference/examples/index.md
         getting-started.md: start/getting-started.md
-        troubleshooting.md: contribute/troubleshooting.md
+        troubleshooting.md: use/troubleshooting.md
+        contribute/troubleshooting.md: use/troubleshooting.md
         user-guide/annotations.md: use/annotations.md
         user-guide/api-surface-intelligence.md: use/api-surface-intelligence.md
         user-guide/appcompat.md: use/appcompat.md
@@ -574,7 +577,8 @@ plugins:
         user-guide/github-action.md: use/github-action.md
         user-guide/kernel-btf.md: use/kernel-btf.md
         user-guide/mcp-integration.md: use/mcp-integration.md
-        user-guide/migration-0.5.md: use/migration-0.5.md
+        user-guide/migration-0.5.md: use/companion-commands.md
+        use/migration-0.5.md: use/companion-commands.md
         user-guide/multi-binary.md: use/multi-binary.md
         user-guide/output-formats.md: use/output-formats.md
         user-guide/plugin-systems.md: use/plugin-systems.md

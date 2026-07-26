@@ -2,23 +2,51 @@
 
 **Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
-## What breaks
-Any downstream binary that dynamically links against `helper()` will fail at runtime
-with `undefined symbol` after upgrading to v2. Even if *you* no longer use `helper()`,
-removing it from the public `.so` is an ABI contract violation.
+## Verdict and consumer impact
 
-## Why abidiff catches it
-abidiff reports `1 Removed function` and sets exit-bit 3 (value 8), giving exit code
-**12** (= 4 | 8): *ABI change detected + breaking change*.
+Any downstream binary that dynamically links against `helper()` will fail at
+runtime with `undefined symbol` after upgrading to v2. Even if *you* no
+longer use `helper()`, removing it from the public `.so` is an ABI contract
+violation — recompilation cannot fix a binary that's already deployed.
 
-## Code diff
+## Old/new diff
 
 | v1.c | v2.c |
 |------|------|
 | `int compute(int x) { return x * 2; }` | `int compute(int x) { return x * 2; }` |
 | `int helper(int x)  { return x + 1; }` | *(removed)* |
 
-## Real Failure Demo
+## abicheck command
+
+```bash
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- func_removed: Public function removed: helper
+  > Old binaries call a symbol that no longer exists; dynamic linker
+    will refuse to load or crash at call site.
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the exported-symbol table alone is enough: `helper` is
+present in v1's `.dynsym` and absent from v2's. No debug info or headers
+needed; `-g` above is only there so the *Runtime failure demonstration*
+below can build a matching app.
+
+## Why abicheck catches it
+
+The dynamic symbol table is authoritative L0 evidence — abicheck diffs the
+exported-symbol sets directly, no debug info or headers required.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
@@ -41,25 +69,27 @@ gcc -shared -fPIC -g v2.c -o libfoo.so
 **Why CRITICAL:** `helper` is removed from the dynamic symbol table in v2; the runtime
 linker cannot resolve the symbol and the process is killed immediately on startup.
 
-## Reproduce manually
-```bash
-gcc -shared -fPIC -g v1.c -o libfoo_v1.so
-gcc -shared -fPIC -g v2.c -o libfoo_v2.so
-abidw --out-file v1.xml libfoo_v1.so
-abidw --out-file v2.xml libfoo_v2.so
-abidiff v1.xml v2.xml
-echo "exit: $?"   # → 12
-```
+## Safe redesign
 
-## How to fix
 Never remove a public symbol in a minor/patch release. Deprecate with
 `__attribute__((deprecated("use compute() instead")))` and only remove on the next
 **SONAME bump** (major version).
 
-## Real-world example
-Common in C libraries during "API cleanup" refactors — OpenSSL 1.1.0 removed several
-low-level functions that were technically public, forcing all downstream packages to
-patch at once.
+**Real-world example:** common in C libraries during "API cleanup"
+refactors — OpenSSL 1.1.0 removed several low-level functions that were
+technically public, forcing all downstream packages to patch at once.
+
+## Cross-tool comparison
+
+`abidiff` also catches this (it's a pure symbol removal, the case every ABI
+diff tool is built around):
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+echo "exit: $?"   # → 12 (= 4 | 8: ABI change detected + breaking change)
+```
 
 ## References
 

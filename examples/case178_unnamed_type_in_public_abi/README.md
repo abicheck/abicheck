@@ -1,129 +1,124 @@
 # Case 178: Unnamed Type Leaks Into the Public ABI
 
-**Category:** C++ Hygiene / Deployment Risk | **Verdict:** COMPATIBLE_WITH_RISK
+**Category:** C++ Hygiene / Deployment Risk | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
 
-## What this case is about
-
-```cpp
-// v1.h                                    // v2.h (adds a convenience entry point)
-extern "C" int pick_larger(int a, int b);  extern "C" int pick_larger(int a, int b);
-                                            extern "C" int pick_by_policy(int a, int b);
-```
-
-```cpp
-// v2.cpp
-inline bool (*descending)(int, int) = [](int a, int b) { return a > b; };
-
-int pick_by_policy(int a, int b) { return descending(a, b) ? a : b; }
-```
+## Verdict and consumer impact
 
 `pick_by_policy` is a completely ordinary `extern "C"` function — its own
-name is stable. But its implementation is built from a namespace-scope
-lambda (`descending`) used as a default comparison policy, a common
-header-only convenience pattern. Because that lambda has external linkage
-(it is declared outside any function), the compiler-generated invoker for
-its closure type is exported with **default visibility**, and its Itanium
-mangling embeds the lambda's closure-type encoding:
-`_ZN10descendingMUliiE_4_FUNEii`. Storing the lambda in a plain
-function-pointer variable (rather than calling it inline through a
-template) is deliberate: an optimizing build can fully inline a
-template-dispatched call and eliminate the very symbol this case exists to
-demonstrate, but once the lambda's *address* is observably stored in
-`descending`, the compiler must keep a real, addressable out-of-line
-function for it at every optimization level.
+name is stable, and nothing about the declared ABI surface (`pick_larger`,
+`pick_by_policy`) broke. The risk is latent: `pick_by_policy` is built from
+a namespace-scope lambda (`descending`) used as a default comparison
+policy. Because that lambda has external linkage, the compiler-generated
+invoker for its closure type is exported with default visibility, and its
+Itanium mangling embeds a compiler-chosen closure-type ordinal
+(`_ZN10descendingMUliiE_4_FUNEii`) that a trivial, unrelated source reorder
+can silently rename on the next rebuild. Nobody using the stable
+`pick_by_policy()` wrapper is affected; anything that links directly
+against the raw mangled symbol is.
 
-## Why this case matters: the exported name is not a name anyone chose
+## Old/new diff
 
-The Itanium ABI mangles a lambda closure as `Ul<signature>E[<ordinal>]_` —
-an ordinal assigned by the compiler based on where it encounters the lambda
-in that translation unit. No developer wrote `descending::{lambda#1}` in the
-source; the compiler invented it. That means:
+| v1.h / v1.cpp | v2.h / v2.cpp |
+|---------------|---------------|
+| `extern "C" int pick_larger(int a, int b);` | `extern "C" int pick_larger(int a, int b);`<br>`extern "C" int pick_by_policy(int a, int b);` |
+| *(no lambda)* | `inline bool (*descending)(int, int) = [](int a, int b) { return a > b; };`<br>`int pick_by_policy(int a, int b) { return descending(a, b) ? a : b; }` |
 
-- A trivial, semantically-void source edit — reordering unrelated
-  declarations, adding another lambda earlier in the same file — can change
-  the ordinal and therefore the mangled name, even though `pick_by_policy`
-  itself did not change at all.
-- Different compiler versions or standard-library implementations may
-  mangle or number closures differently.
-- If two translation units are meant to share the "same" lambda-derived
-  type (an ODR-sensitive design), a numbering mismatch between them is a
-  silent ODR violation.
-
-Nobody using the stable `pick_by_policy()` wrapper is affected. The risk is
-for anything that depends on the raw symbol directly — a symbol-versioning
-tool that freezes the exported symbol list, a debugger/profiler script, or
-(rarely, but it happens) a second DSO in the same project that links
-directly against the mangled name because "it works today."
-
-## What abicheck detects
-
-- **`unnamed_type_in_public_abi`** — a newly-exported symbol
-  (`_ZN10descendingMUliiE_4_FUNEii`, demangled:
-  `descending::{lambda(int, int)#1}::_FUN(int, int)`) embeds an Itanium
-  unnamed-type token (`Ul...E_` for a lambda closure, `Ut..._` for an
-  anonymous struct/enum). **Evidence tier L0** — the mangled name is parsed
-  directly from the new side's exported symbol table; reported only for
-  symbols *newly introduced* this revision, so a pre-existing leak does not
-  spam every comparison.
-
-**Overall verdict: COMPATIBLE_WITH_RISK** — nothing about the declared,
-stable ABI surface (`pick_larger`, `pick_by_policy`) broke. The risk is
-latent: a future, unrelated-looking change could silently rename this
-symbol.
-
-## How to reproduce
+## abicheck command
 
 ```bash
-g++ -std=c++17 -shared -fPIC -g v1.cpp -o libv1.so
-g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv2.so
-
-python3 -m abicheck.cli dump libv1.so -o /tmp/v1.json
-python3 -m abicheck.cli dump libv2.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → COMPATIBLE_WITH_RISK: unnamed_type_in_public_abi
-#   (descending::{lambda(int, int)#1}::_FUN(int, int))
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-The finding survives at any optimization level (`-O0` through `-O2`) — the
-symbol's exact composition changes (at `-O0` GCC also emits the lambda's
-`operator()` as a separate symbol; at `-O2` only the address-taken `_FUN`
-invoker survives), but the `_FUN` invoker containing the `Ul...E_` token is
-always present once its address is stored in `descending`.
+## Expected abicheck finding
 
-## Real Failure Demo
+```text
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
+
+Deployment Risk Changes:
+- unnamed_type_in_public_abi: Unnamed type leaks into the public ABI:
+  descending::{lambda(int, int)#1}::_FUN(int, int) (lambda closure) — its
+  mangled name is compiler-ordering-fragile
+- unnamed_type_in_public_abi: Unnamed type leaks into the public ABI:
+  descending::{lambda(int, int)#1}::operator()(int, int) const (lambda
+  closure) — its mangled name is compiler-ordering-fragile
+- symbol_binding_became_unique: Symbol binding became GNU_UNIQUE: descending
+  — inhibits dlclose() on this library
+
+Additions:
+- func_added: New public function: pick_by_policy
+- var_added: New public variable: descending
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the mangled name is parsed directly from the new
+side's exported symbol table; abicheck recognizes the Itanium unnamed-type
+tokens (`Ul...E_` for a lambda closure, `Ut..._` for an anonymous
+struct/enum) without needing DWARF or headers. It is reported only for
+symbols newly introduced this revision, so a pre-existing leak does not
+spam every comparison.
+
+## Why abicheck catches it
+
+abicheck parses every newly-exported symbol's demangled name for an
+Itanium closure-type or unnamed-type token. `descending`'s `_FUN` invoker
+(and, at `-O0`, its separately-emitted `operator()`) both embed the
+`Ul<signature>E_` token that names an anonymous lambda closure — no
+developer chose this string, the compiler invented it, and abicheck flags
+it as risk precisely because the token's stability across rebuilds is not
+part of any ABI contract.
+
+## Runtime failure demonstration
+
+**Severity: informational — no observable effect on existing binaries.**
+
+**Scenario:** an app that resolves symbols purely by name at runtime
+(`dlopen`/`dlsym`), mirroring the fragile direct dependency the finding
+warns about.
 
 ```bash
 g++ -std=c++17 -shared -fPIC -g v1.cpp -o libv1.so
 g++ -std=c++17 app.cpp -o app -ldl
 ./app
-# pick_larger(3, 7) = 7
-# direct lookup of _ZN10descendingMUliiE_4_FUNEii: not present in this build
+# → pick_larger(3, 7) = 7
+# → direct lookup of _ZN10descendingMUliiE_4_FUNEii: not present in this
+#   build (expected against v1; v2 introduces it)
 
-g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv2.so
-cp libv2.so libv1.so
+# Swap in new library (no recompile)
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv1.so
 ./app
-# pick_larger(3, 7) = 7
-# direct lookup of _ZN10descendingMUliiE_4_FUNEii succeeded -- but do not
-# rely on this exact name surviving a rebuild.
+# → pick_larger(3, 7) = 7
+# → direct lookup of _ZN10descendingMUliiE_4_FUNEii succeeded -- but do
+#   not rely on this exact name surviving a rebuild.
 ```
 
-`app` looks up the raw mangled symbol by name via `dlsym`, deliberately
-mirroring the fragile direct dependency the finding warns about. The stable
-wrapper (`pick_larger`) resolves identically in both builds; the raw
-closure symbol appears only once v2 introduces it, and nothing in the
-Itanium ABI promises it will keep this exact spelling across a future
-rebuild.
+The stable wrapper (`pick_larger`) resolves identically in both builds and
+the app never crashes; the raw closure symbol simply appears once v2
+introduces it, and nothing in the Itanium ABI promises it will keep this
+exact spelling across a future, unrelated rebuild.
 
-## Mitigation
+## Safe redesign
 
-- Do not link directly against a mangled symbol containing `Ul...E_` /
-  `Ut..._` — always go through a named, stable wrapper.
-- If a lambda-derived type must be part of a stable ABI, give it a real
-  name: assign it to a named function object type, or wrap it in a named
-  `struct` instead of using it anonymously.
-- Symbol-versioning / ABI-freeze tooling should treat any newly-exported
-  `Ul`/`Ut`-bearing symbol as informational noise to exclude from a frozen
-  export list, not as a promise to keep.
+Do not link directly against a mangled symbol containing `Ul...E_` /
+`Ut..._` — always go through a named, stable wrapper. If a lambda-derived
+type must be part of a stable ABI, give it a real name: assign it to a
+named function object type, or wrap it in a named `struct` instead of
+using it anonymously. Symbol-versioning / ABI-freeze tooling should treat
+any newly-exported `Ul`/`Ut`-bearing symbol as informational noise to
+exclude from a frozen export list, not as a promise to keep.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+`abidiff`/`abidw` are not installed in this environment, so no output is
+reproduced here.
 
 ## References
 

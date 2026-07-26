@@ -10,87 +10,128 @@
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
 | **Source files** | `examples/case74_detail_base_class_changed/` |
 
-**Category:** Internal-leak | **Verdict:** BREAKING
+**Category:** Internal-leak | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-The library declares its "internal" implementation helpers inside a
-`detail::` namespace — matching the convention used by oneDAL, oneTBB,
-many Boost libraries, and the standard library's `std::__detail`:
+`mylib::detail::descriptor_base` is an "internal" base class (matching the
+`detail::`-namespace convention used by oneDAL, oneTBB, and many Boost
+libraries) that the public `mylib::knn_descriptor` inherits from. v2 adds
+an `int max_iter_` field to `descriptor_base`. From the library author's
+perspective this looks like a private change — only a `detail::` type was
+touched — but it grows `sizeof(knn_descriptor)` and shifts
+`neighbor_count_`'s offset, because the base subobject it embeds by value
+grew. Any consumer allocating or embedding `knn_descriptor` (stack or
+heap) is broken without recompilation.
 
-```cpp
-namespace mylib::detail {
-    class descriptor_base { /* ... */ };
-}
-class knn_descriptor : public detail::descriptor_base { /* ... */ };
-```
+## Old/new diff
 
-v2 adds an `int max_iter_` member to `detail::descriptor_base`. From
-the library author's perspective this is purely an internal change.
-From consumers' perspective it's a binary ABI break:
+| v1.h | v2.h |
+|------|------|
+| `class descriptor_base { int class_count_; };` | `class descriptor_base { int class_count_; int max_iter_; };` *(new field)* |
+| `class knn_descriptor : public detail::descriptor_base { int neighbor_count_; };` | *(unchanged — but `neighbor_count_`'s offset moves)* |
 
-- `sizeof(knn_descriptor)` increases by 4–8 bytes (alignment-dependent).
-- The offset of `neighbor_count_` (declared in the derived public class)
-  shifts because the base subobject grew.
-- Stack-allocated `knn_descriptor` instances in caller code overflow
-  their pre-v2 frame slots.
-- Heap-allocated objects from callers compiled against v1 headers
-  under-allocate when run against v2 binaries.
-
-## Real Failure Demo
-
-**Severity: BREAKING / MEMORY CORRUPTION**
+## abicheck command
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case74_detail_base_class_changed_app case74_detail_base_class_changed_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case74_detail_base_class_changed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case74_detail_base_class_changed/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# *** stack smashing detected ***: terminated
+g++ -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so \
+  --header old=v1.h --header new=v2.h --ast-frontend clang
 ```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: descriptor_base (32 -> 64 bits)
+  > Old code allocates or copies the type with the old size; heap/stack
+    corruption, out-of-bounds access.
+- type_field_added: Field added: descriptor_base::max_iter_
+  > New field shifts subsequent fields; old code reads wrong offsets for
+    all fields after insertion point.
+- type_size_changed: Size changed: knn_descriptor (64 -> 96 bits)
+  Affected symbols: mylib_free_descriptor, mylib_make_descriptor
+- type_field_offset_changed: Field offset changed:
+  knn_descriptor::neighbor_count_ (32 -> 64 bits)
+  Affected symbols: mylib_free_descriptor, mylib_make_descriptor
+- struct_size_changed: Struct size changed: mylib::knn_descriptor (8 -> 12 bytes)
+  > sizeof(T) changed in debug info; confirms layout break visible at
+    binary level.
+- struct_field_offset_changed: Field offset changed:
+  mylib::knn_descriptor::neighbor_count_ (+4 -> +8)
+
+Additions:
+- func_added: New public function: get_max_iter
+```
+
+The public-facing symptom is the `knn_descriptor` findings (`type_size_changed`,
+`type_field_offset_changed`, `struct_size_changed`/`struct_field_offset_changed`)
+— on this reproduction they carry the "Affected symbols" annotation pointing
+at the two factory/destroy functions, which is what makes the break visible
+to someone only skimming the *public* class, even though the header-diff
+root cause is the `detail::descriptor_base` change above it. abicheck also
+ships a dedicated `internal_type_leaks_via_public_api` synthetic finding
+that names this exact "internal base, public leak" pattern explicitly; it
+did not fire on this particular header-only (no build-integrated L3/L4/L5
+evidence) reproduction — treat the layout findings above as the reliable
+signal for this case rather than relying on that overlay alone.
+
+## Minimum evidence
+
+`min_evidence: L2` — the public headers are what let abicheck resolve
+`descriptor_base`'s fully-namespace-qualified spelling
+(`mylib::detail::descriptor_base`) and confirm it's reached by value from
+the public `knn_descriptor`; castxml is the documented default AST
+backend for this evidence layer, and clang (`--ast-frontend clang`) is a
+supported alternative frontend that recovers the same qualified-name and
+layout information used above.
 
 ## Why abicheck catches it
 
-Existing detectors already report `type_size_changed` on
-`detail::descriptor_base`. By itself that finding is easy for a
-reviewer to dismiss as "internal-only". The
-`internal_type_leaks_via_public_api` overlay added in this PR walks
-the reachability graph from every public exported symbol and surfaces
-a synthetic finding that names the *public-facing* class
-(`mylib::knn_descriptor`) together with the chain
-`knn_descriptor → base:detail::descriptor_base`, making the public
-impact impossible to miss.
+abicheck's header/AST parser records each type's namespace-qualified name
+alongside DWARF's layout facts (size, member offsets); comparing
+`descriptor_base`'s size and field list between versions surfaces the root
+change, and because `knn_descriptor` embeds `descriptor_base` by value
+(inheritance, not a pointer), the same layout shift is independently
+visible on the public class's own DWARF size/offset facts — no source
+build integration required.
 
-## Code diff
+## Runtime failure demonstration
 
-```cpp
-// v1
-namespace mylib::detail {
-class descriptor_base {
-public:
-    int class_count_;
-};
-}
+**Severity: CRITICAL**
 
-// v2 — single new field in the "internal" base
-namespace mylib::detail {
-class descriptor_base {
-public:
-    int class_count_;
-    int max_iter_;        // NEW — shifts every derived layout
-};
-}
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile —
+both a stack-allocated `knn_descriptor` and a heap-allocated one via the
+factory function.
+
+```bash
+# Build v1 and app
+g++ -shared -fPIC -g v1.cpp -o libmylib.so
+g++ -g app.cpp -L. -lmylib -Wl,-rpath,. -o app
+./app
+# → class_count   = 2 (expect 2)
+# → neighbor_count = 5 (expect 5)
+# → factory class_count = 2 (expect 2)
+
+# Swap in v2 (no recompile)
+g++ -shared -fPIC -g v2.cpp -o libmylib.so
+./app
+# → *** stack smashing detected ***: terminated
 ```
 
-## How to fix
+**Why CRITICAL:** the app stack-allocates `knn_descriptor` sized for v1's
+8-byte object; v2's constructor, running inside the swapped-in library,
+writes a 12-byte object (the grown `descriptor_base` base subobject plus
+`neighbor_count_` at its new offset) into that undersized stack slot,
+tripping the stack-protector canary and aborting the process.
 
-Treat `detail::` as a private implementation surface that is *not*
-allowed to leak through the binary interface. The two main patterns
-are pimpl (hold a pointer to an opaque struct) and a true private
-interface (forward-declared header consumers cannot include):
+## Safe redesign
+
+Treat `detail::` as a private implementation surface that must not leak
+through the binary interface. Use the Pimpl idiom so internal layout
+changes never affect the public `sizeof`:
 
 ```cpp
 // Pimpl — internal layout changes never affect the public sizeof.
@@ -105,12 +146,22 @@ private:
 };
 ```
 
+**Real-world example:** this mirrors the oneDAL pattern —
+`oneapi::dal::detail::descriptor_base<Task>` is documented as unstable,
+but its layout still leaks through public derived classes like
+`oneapi::dal::knn::descriptor` wherever pimpl isn't used.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
 ## References
 
-- Itanium C++ ABI §2.5: object layout and base subobjects.
-- oneDAL coding guidelines: `detail::` symbols are explicitly
-  documented as unstable, but the *layout* still leaks through public
-  derived classes if pimpl is not used.
+- [Itanium C++ ABI §2.5: object layout and base subobjects](https://itanium-cxx-abi.github.io/cxx-abi/abi.html)
 
 ---
 

@@ -1,4 +1,8 @@
+#ifdef INCLUDE_V2
+#include "v2.h"
+#else
 #include "v1.h"
+#endif
 #include <cstdio>
 
 int main() {

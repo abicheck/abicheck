@@ -1,22 +1,11 @@
-# case193 — An ordinary exported function's internal call is not public-reachable
+# Case 193: Ordinary Exported Function's Internal Call Is Not Public-Reachable
 
-**Verdict:** 🔴 BREAKING (without suppression) · **Finding:** `func_removed` only · **Evidence tier:** L0
+**Category:** Breaking (Source Graph / Suppression) | **Verdict:** 🔴 BREAKING (without suppression)
 
-> These cases ship committed snapshot fixtures (`old.abi.json` / `new.abi.json`)
-> with an embedded L5 source/call graph instead of a compilable v1/v2 pair.
-> `func_removed` alone is L0-detectable (`min_evidence` in `ground_truth.json`
-> reflects that, derived mechanically from `scripts/evidence_tiers.py` per
-> the corpus's own convention) — the embedded L5 graph is present so the
-> case can demonstrate its actual point, a *negative*: that the graph does
-> not manufacture an extra overlay finding here, which `expected_kinds`
-> (a positive-findings list) has no way to encode on its own. Validated
-> compiler-free by `tests/test_reachability_examples.py`.
+## Verdict and consumer impact
 
-## What it demonstrates
-
-`demo::api()` is an **ordinary, out-of-line exported function** — defined in
-a `.cpp` file, not `inline`, not a template. Its body calls an internal
-helper, `detail::log_context()`, which is removed in v2:
+`demo::api()` is an ordinary, out-of-line exported function — defined in a
+`.cpp` file, not `inline`, not a template:
 
 ```cpp
 // api.cpp — compiled into libdemo.so only, never into any consumer's binary
@@ -26,37 +15,114 @@ void demo::api() {
 }
 ```
 
-This looks structurally identical to [case192](../case192_call_graph_break_survives_suppression/README.md)
-— a public function's `DECL_CALLS_DECL` edge reaches a `detail::` decl that
-gets removed — but the outcome is the opposite. `api()`'s body is compiled
-into **`libdemo.so`'s own binary only**: a consumer links against `api()`'s
-exported symbol alone and never sees, references, or embeds
-`detail::log_context()`. If `log_context()` is removed, either `libdemo.so`'s
-own build fails first (the vendor's problem, invisible to any consumer), or
-`api()`'s recompiled body simply stops calling it — never a consumer-visible
-break either way.
+`detail::log_context()` is removed in v2. This looks structurally identical
+to [case192](../case192_call_graph_break_survives_suppression/README.md) — a
+public function calling into a `detail::` decl that gets removed — but the
+outcome is the opposite: `api()`'s body is compiled into `libdemo.so`'s own
+binary only, so a consumer linking against `api()`'s exported symbol never
+sees, references, or embeds `detail::log_context()`. The raw
+`func_removed` still makes this release BREAKING on its own (it is a genuine
+public-symbol removal on the ABI surface), but a blanket internal-namespace
+suppression rule applies cleanly to it with no reachability diagnostic —
+exactly as it should, since no consumer's binary calls the missing symbol.
 
-abicheck's L5 call-graph walk only seeds itself from entries whose **own
-body** is actually emitted into consumer code (the node's
-`consumer_compiled_body` attribute) — `api()`'s node is tagged `false` here,
-unlike `compute()`'s `true` in case192, because it is an ordinary declaration,
-not an inline/template one. The walk therefore never treats
-`detail::log_context()` as public-reachable through `api()`, and a broad
-`namespace: "demo::detail::**"` suppression rule applies **cleanly, with no
-diagnostic at all** — exactly as it should.
+## Old/new diff
 
-## Why this matters as its own case
+| v1 (conceptual) | v2 (conceptual) |
+|------|------|
+| `void demo::api() { detail::log_context(); ... }` | `detail::log_context` *(removed)* |
 
-Most functions in most libraries are exactly this shape: ordinary, exported,
-out-of-line. Without this distinction, every internal helper called from
-*any* exported function would read as "public-reachable," defeating broad
-internal-namespace suppression for the common case while chasing a rare one.
-This case is the deliberate negative-space check alongside case192's positive
-one: the L5 graph must stay quiet here, not just loud there.
+This case ships committed `AbiSnapshot` fixtures (`old.abi.json` /
+`new.abi.json`) with an embedded L5 call graph instead of a compilable
+`v1`/`v2` pair. See
+[`scripts/gen_reachability_examples.py`](../../scripts/gen_reachability_examples.py).
 
-## Reproduce
+## abicheck command
 
 ```bash
-abicheck compare old.abi.json new.abi.json                          # BREAKING (func_removed alone)
-abicheck compare old.abi.json new.abi.json --suppress suppress.yaml # NO_CHANGE -- no diagnostic
+abicheck compare old.abi.json new.abi.json
 ```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- func_removed: Public function removed: demo::detail::log_context
+  > Old binaries call a symbol that no longer exists; dynamic linker
+    will refuse to load or crash at call site.
+```
+
+Note what's *absent*: no `internal_symbol_required_by_public_api` overlay,
+unlike case192 — the call-graph walk never seeds from `api()` because its
+node is not tagged `consumer_compiled_body: true`.
+
+Applying the same shape of broad suppression rule shows the negative-space
+proof:
+
+```bash
+abicheck compare old.abi.json new.abi.json --suppress suppress.yaml
+```
+
+```text
+Verdict: NO_CHANGE (exit 0)   # applies cleanly, no diagnostic at all
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — `func_removed` alone is fully detectable from the
+exported-symbol table, no debug info or graph required. The embedded L5
+graph in this fixture exists only to demonstrate the *negative*: that the
+call-graph walk does not manufacture an extra
+`internal_symbol_required_by_public_api` overlay here, something
+`expected_kinds` (a positive-findings list) can't encode by itself.
+
+## Why abicheck catches it
+
+`func_removed` comes straight from diffing the two snapshots' exported-symbol
+sets — pure L0 evidence. Separately, abicheck's L5 call-graph walk only
+treats a callee as public-reachable when the calling node's own body is
+compiled into consumer code (`consumer_compiled_body: true`). `api()` is an
+ordinary out-of-line function, so its node is tagged `false`; the walk never
+follows its `DECL_CALLS_DECL` edge to `detail::log_context()`, and no
+reachability overlay fires.
+
+## Runtime failure demonstration
+
+There's no `app.c` here — the point of this fixture is what a build-source
+CI job sees, not a compiled crash. A consumer built against `libdemo.so` v1
+that only calls `demo::api()` never touches `detail::log_context()`
+directly: removing it either breaks `libdemo.so`'s own build (the vendor's
+problem, invisible to any consumer) or simply drops a call inside `api()`'s
+recompiled body — never a consumer-visible break through that path. What
+*is* consumer-visible is the plain symbol removal via `func_removed` itself
+if `api()` were the one removed instead; here it demonstrates that a CI
+job diffing `compile_commands.json`/build evidence across releases, with a
+standing internal-namespace suppression policy, correctly stays quiet about
+this specific removed helper rather than raising a false reachability
+alarm for the common case (an exported function calling a private one).
+
+## Safe redesign
+
+No fix needed for the reachability behavior itself — this is the intended
+common-case outcome, not a defect. `detail::log_context()`'s removal is
+still a real ABI break if it were itself part of the exported surface
+(which it is here, hence `func_removed`); treat any exported symbol removal
+with the usual deprecate-then-remove discipline regardless of whether a
+call-graph overlay also fires.
+
+**Real-world example:** most functions in most libraries are exactly this
+shape — ordinary, exported, out-of-line, calling private helpers that never
+leak into a consumer's own binary. This is the deliberate negative-space
+counterpart to case192's positive one, keeping broad internal-namespace
+suppression usable for the common case instead of chasing the rare one.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` would see the same `func_removed`-class
+finding for the plain symbol removal (both tools detect exported-symbol
+removals as their bread-and-butter case), but neither has a call-graph
+reachability model to distinguish "this internal call is baked into
+consumer binaries" (case192) from "this internal call never leaves the
+library" (this case) — that distinction, and the suppression-refusal
+behavior it enables, is unique to abicheck's L5 evidence layer (ADR-044).

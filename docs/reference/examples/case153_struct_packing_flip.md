@@ -10,36 +10,115 @@
 | **Detected `ChangeKind`s** | `struct_packing_mode_changed` |
 | **Source files** | `examples/case153_struct_packing_flip/` |
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Finding:** `struct_packing_mode_changed` · **Evidence tier:** L3
+**Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
-> These cases ship a hand-built pair of evidence-model fixtures (`old.json` +
-> `new.json`) instead of compiled `v1`/`v2` binaries, so the corpus is validated
-> compiler-free by `tests/test_l3l4l5_examples.py`. See
-> `scripts/gen_l3l4l5_examples.py`.
+## Verdict and consumer impact
 
-## What it demonstrates
+v1 and v2 have identical source and identical exported symbols — only the
+captured build flag differs: v1 was built with `-fpack-struct=8`, v2 with
+`-fpack-struct=1`. Reduced packing removes inter-member padding, so every
+member offset and the type's `sizeof` can change with no source or symbol
+change at all. A consumer compiled against the old packing reads struct
+fields at stale offsets after linking against the new library — silent
+corruption, not a link error.
 
-v1 builds with `-fpack-struct=8`, v2 with `-fpack-struct=1`. Reduced packing removes inter-member padding, so every member offset and the type's `sizeof` can change with no source or symbol change. Consumers compiled against the old packing read fields at stale offsets.
+## Old/new diff
 
-Struct packing's compiler default is *target*-dependent (GCC/Clang use natural packing; MSVC's default is `/Zp8` or `/Zp16`), so abicheck reports a flip only when **both** sides state the packing explicitly — an omitted side vs. a platform-default `/Zp` value is not treated as a change, to avoid a false finding on Visual Studio projects that merely record their default.
+| Build flags | v1 | v2 |
+|---|---|---|
+| struct packing | `-fpack-struct=8` | `-fpack-struct=1` |
 
-## Why no single artifact layer sees it
+Source and exported symbols are byte-for-byte identical between v1 and v2;
+only this compile option differs.
 
-| Source | What it sees alone |
-|--------|--------------------|
-| Binary (L0/L1) | one self-consistent build — the flag is not in the artifact |
-| Header AST (L2) | the declarations, but not the flags the library was built with |
-| **Build context (L3)** | the captured compile options — the flag flip → the finding |
+## abicheck command
 
-Nothing in the exported symbol table records the packing policy; a single build looks internally consistent. Only the L3 build flag (or the artifact/type diff of two builds) exposes the mismatch.
+The case ships `old.json`/`new.json` as hand-built `BuildEvidence` fixtures
+(the normalized L3 model `dump --build-info`/`--sources` would produce from a
+real build) rather than compiled binaries, so reproducing the finding means
+embedding each side's fixture into a snapshot's `build_source` field —
+exactly what `dump --build-info` does internally — and comparing the two:
 
-Per ADR-028 D3 a build/source-evidence finding never decides a shipped-ABI break
-on its own — the artifact diff proves any concrete break; this finding flags the
-elevated risk (or source/API break) and localizes the cause for review.
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+from abicheck.model import AbiSnapshot
+from abicheck.buildsource.pack import BuildSourcePack
+from abicheck.buildsource.build_evidence import BuildEvidence
+from abicheck.serialization import save_snapshot
 
-## How to fix
+for side in ("old", "new"):
+    d = json.loads(Path(f"{side}.json").read_text())
+    snap = AbiSnapshot(library="libdemo.so", version="1")
+    snap.build_source = BuildSourcePack(root=Path(""), build_evidence=BuildEvidence.from_dict(d))
+    save_snapshot(snap, f"{side}.abi.json")
+PY
 
-Use one packing policy across the library and its consumers. Prefer explicit `#pragma pack` / `alignas` on the specific types that need it over a global `-fpack-struct`.
+abicheck compare old.abi.json new.abi.json
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
+
+Deployment Risk Changes:
+- struct_packing_mode_changed: Runtime-model option 'struct_packing' changed: '8' -> '1'.
+  > May not be link- or runtime-compatible across consumers; the artifact
+    diff confirms any concrete break.
+```
+
+## Minimum evidence
+
+`min_evidence: L3` — the compile options themselves carry the fact. Nothing
+in the exported symbol table records the packing policy; a single build
+looks internally consistent, so only the L3 build option (or an artifact
+diff of two actual builds) exposes the mismatch.
+
+## Why abicheck catches it
+
+`abicheck compare` reads each side's normalized `BuildEvidence.build_options`
+(as embedded by `dump --build-info`/`--sources`, or supplied out-of-band via
+`--old/new-build-info`) and diffs the `struct_packing` option directly — the
+same `diff_build_evidence()` routine `tests/test_l3l4l5_examples.py`
+exercises against the committed fixtures. Struct packing's compiler default
+is target-dependent (GCC/Clang natural packing vs. MSVC's `/Zp8`/`/Zp16`),
+so abicheck reports a flip only when **both** sides state the packing
+explicitly, avoiding a false finding on a Visual Studio project that merely
+records its platform default. Per ADR-028 D3 this build-evidence finding
+never decides a shipped-ABI break on its own — it flags the elevated risk
+and localizes the cause; an artifact diff of the actual built layout is
+what would confirm a concrete break.
+
+## Runtime failure demonstration
+
+There's no compiled `app.c` consumer for this case — the failure mode is a
+build-configuration one, not a single process crash. Picture a project
+where one CMake target sets `add_compile_options(-fpack-struct=1)` for a
+size-constrained embedded build while a shared library it links stays on
+the default packing: every consumer that passes a public struct by value or
+by pointer across that boundary reads fields at the wrong offset the moment
+the two are linked together. A CI job that diffs captured build options
+(`compile_commands.json` or an equivalent record) across build
+configurations, not just across releases, is exactly what would catch this.
+
+## Safe redesign
+
+Use one packing policy across the library and its consumers. Prefer
+explicit `#pragma pack` / `alignas` on the specific types that need tight
+packing over a global `-fpack-struct` flag that silently affects every
+struct in the translation unit.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` compare built binaries (symbols + DWARF);
+neither reads compile options, so two builds from identical source under
+different `-fpack-struct` settings produce no diff for either tool unless
+the flag actually changed a concrete struct's offsets in the compiled
+output (at which point it's the resulting layout change they'd catch, not
+the flag itself). Only the L3 build-evidence layer that abicheck reads
+directly localizes the cause to the packing flag flip.
 
 ---
 

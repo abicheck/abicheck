@@ -1,54 +1,76 @@
 # Case 72: Covariant Return Type Changed
 
-**Category:** VTable / Inheritance | **Verdict:** BREAKING
+**Category:** VTable / Inheritance | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-The class hierarchy changes: a new intermediate class `Drawable` is inserted
-between `Shape` and `Circle`. This causes `Circle::clone()` to change its
-covariant return type from `Circle*` to `Drawable*`.
+v2 inserts a new intermediate class `Drawable` between `Shape` and
+`Circle`. `Circle::clone()`'s covariant return type changes from `Circle*`
+to `Drawable*`, `Circle`'s vtable grows (new `Drawable` slots plus RTTI),
+and `Circle::radius_` moves from offset 64 to offset 96 bits to make room
+for the `Drawable` subobject. A binary compiled against v1 has the old
+vtable slot count and field offsets baked in — virtual dispatch and direct
+field access both land on the wrong memory. Recompilation is mandatory.
 
-Under the Itanium C++ ABI, inserting an intermediate base class changes:
+## Old/new diff
 
-1. **Vtable layout**: `Drawable` introduces new vtable entries (its own virtual
-   functions and RTTI), shifting existing `Shape` vtable slot positions
-2. **Object layout**: `Circle`'s data members move to accommodate the `Drawable`
-   subobject, changing field offsets and `sizeof(Circle)`
-3. **Covariant return type**: `clone()` now returns `Drawable*` instead of
-   `Circle*`, so callers expecting `Circle*` get a mistyped pointer
+| v1.h | v2.h |
+|------|------|
+| `class Circle : public Shape` | `class Drawable : public Shape { ... };` |
+| `Circle *clone() const override;` | `class Circle : public Drawable` |
+| | `Drawable *clone() const override;` *(covariant return changed)* |
 
-Old binaries compiled against v1 have hardcoded vtable slot indices and field
-offsets for the `Shape → Circle` hierarchy. In v2, the `Drawable` intermediate
-class shifts everything, causing virtual dispatch to call the wrong function
-and field accesses to read garbage.
+## abicheck command
 
-This is distinct from case09 (vtable reorder within same hierarchy), case37
-(base class type changed), and case38 (virtual methods added/removed). This case
-tests **hierarchy insertion** — adding a class between existing base and derived —
-which is a particularly common real-world mistake.
+```bash
+g++ -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_field_offset_changed: Field offset changed: Circle::radius_ (64 -> 96 bits)
+  > Old code reads/writes fields at stale offsets; silent data corruption.
+- type_base_changed: Base classes changed: Circle (['Shape'] -> ['Drawable'])
+  > Base class layout change shifts derived member offsets and vtable
+    pointers; this-pointer arithmetic breaks.
+- vtable_slot_count_changed: Vtable for 'Circle' changed size: 48 -> 56 bytes
+  (~4 -> ~5 virtual slots). A virtual method was added, removed, or
+  reordered; existing binaries dispatch through fixed vtable offsets and
+  will call the wrong slot.
+
+Additions:
+- func_added / var_added / type_added for the new Drawable class and its
+  vtable/RTTI (Drawable::Drawable(), Drawable::color(), typeinfo/vtable
+  for Drawable, ...)
+```
+
+Note: on this build, `Circle::clone()`'s covariant-return change
+(`Circle*` → `Drawable*`) is subsumed by the `type_base_changed` /
+`vtable_slot_count_changed` findings above rather than surfacing as its
+own `func_return_changed` entry — the hierarchy-level break already
+captures the same underlying layout shift.
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's `DW_TAG_inheritance` entries record `Circle`'s
+base class list and `DW_TAG_structure_type` records its member offsets and
+vtable size for both versions; abicheck compares them directly from debug
+info (`-g`), no public headers required.
 
 ## Why abicheck catches it
 
-Type comparison detects the base class hierarchy change (`type_base_changed`) and
-the vtable layout change (`type_vtable_changed`). The function return type change
-from `Circle*` to `Drawable*` is also detected (`func_return_changed`).
+abicheck reads each class's DWARF base-class list and compares it between
+versions (`type_base_changed`); it also compares the `_ZTV`-backed vtable's
+symbol size to catch the added `Drawable` slots, and the struct's
+member-offset list to catch `radius_`'s shift — all from debug info, no
+header parsing needed.
 
-## Code diff
-
-```cpp
-// v1: flat hierarchy
-class Circle : public Shape {
-    Circle *clone() const override;  // covariant: returns Circle*
-};
-
-// v2: intermediate class inserted, covariant return changes
-class Drawable : public Shape { /* new */ };
-class Circle : public Drawable {
-    Drawable *clone() const override;  // covariant: returns Drawable*
-};
-```
-
-## Real Failure Demo
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
@@ -59,57 +81,54 @@ class Circle : public Drawable {
 g++ -shared -fPIC -g v1.cpp -o libshape.so
 g++ -g app.cpp -L. -lshape -Wl,-rpath,. -o app
 ./app
-# -> clone radius = 5
-# -> Expected: 5
-# -> clone area = 75
-# -> Expected: 75
+# → clone radius() = 5 (expected 5)
+# → clone area()   = 75 (expected 75)
+# → raw radius(v1 layout) = 5 (expected 5)
 
-# Build v2 (hierarchy changed, covariant return changed)
+# Swap in v2 (hierarchy changed, no recompile)
 g++ -shared -fPIC -g v2.cpp -o libshape.so
 ./app
-# -> crash or garbage (vtable layout shifted by Drawable insertion)
+# → ./app: Symbol `_ZTV6Circle' has different size in shared object,
+#   consider re-linking
+# → clone radius() = 5 (expected 5)
+# → clone area()   = 75 (expected 75)
+# → raw radius(v1 layout) = 0 (expected 5)
+# → WRONG RESULT: covariant return/hierarchy change broke old layout assumptions
 ```
 
-**Why CRITICAL:** The old binary's vtable for `Circle` was compiled with slot
-indices for the two-level hierarchy `Shape → Circle`. In v2, `Drawable` is
-inserted between them, adding new vtable entries and shifting slot positions.
-Old code dispatching through stale vtable indices calls the wrong function.
-Additionally, `sizeof(Circle)` changes due to the `Drawable` subobject, so
-the `clone()` return value points to an object with a different layout than
-the caller expects.
+**Why CRITICAL:** the dynamic linker itself warns about the vtable size
+mismatch. Virtual dispatch (`radius()`/`area()`) happens to still resolve
+correctly here because those slots didn't move, but the app's raw
+`v1`-layout struct cast reads `radius_` at the old offset 64 bits — which
+in v2 is no longer where `radius_` lives — silently returning `0` instead
+of `5`.
 
-## How to fix
+## Safe redesign
 
-Never insert classes into an existing hierarchy without bumping the SONAME.
-If the hierarchy must evolve, use composition instead of inheritance:
+Never insert a class into an existing public hierarchy without bumping the
+SONAME. Prefer composition over hierarchy insertion:
 
 ```cpp
 /* Safe: composition instead of hierarchy insertion */
 class Circle : public Shape {
-    Drawable drawable_;  /* has-a instead of is-a */
+    Drawable drawable_;              /* has-a instead of is-a */
     Circle *clone() const override;  /* covariant return unchanged */
 };
 ```
 
-Or freeze the public hierarchy and use internal delegation:
+**Real-world example:** the KDE Binary Compatibility policy explicitly
+forbids inserting intermediate classes into a public hierarchy for exactly
+this reason — LLVM's RTTI system (`isa<>`/`dyn_cast<>`) would similarly
+break if a class hierarchy shifted, since its `classof()` chain encodes the
+exact hierarchy.
 
-```cpp
-/* Preserve public ABI, change implementation */
-class Circle : public Shape {  /* public hierarchy frozen */
-    Circle *clone() const override;
-private:
-    struct Impl;  /* internal hierarchy changes hidden */
-    Impl *impl_;
-};
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
 ```
-
-## Real-world example
-
-Qt's class hierarchy is carefully designed to never insert intermediate classes
-in public hierarchies. The KDE Binary Compatibility policy explicitly forbids
-this. The COM/XPCOM interface model avoids this entirely by using flat interface
-inheritance. LLVM's RTTI system (`isa<>`, `dyn_cast<>`) would break if class
-hierarchies changed because the classof() chain encodes the exact hierarchy.
 
 ## References
 

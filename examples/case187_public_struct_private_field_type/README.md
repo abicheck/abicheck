@@ -1,93 +1,107 @@
-# case187_public_struct_private_field_type — Public struct field retyped to an internal type
+# Case 187: Public Struct Field Retyped to an Internal Type
 
-**Verdict:** 🔴 BREAKING · **Findings:** `struct_field_type_changed` (artifact-proven) + `public_api_internal_dependency_added` (L5, correlated) · **Evidence tier:** L1 for the verdict; L5 (the L2 header-only graph, built automatically for `--depth headers` and above) for the risk finding
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
-This is a real, compiled `v1`/`v2` example, verified end-to-end against gcc
-and clang.
-
-## What it demonstrates
+## Verdict and consumer impact
 
 `demo::Public::reserved` is retyped from an opaque `void*` to
 `detail::PrivateType*` — a type declared only in an internal, non-public
-header (`detail_private.h`, never passed as `--public-header`/`-H`).
+header (`detail_private.h`, never passed as `--public-header`). Old code
+that reads or writes `reserved` as a `void*` now misinterprets the pointee.
+Any consumer touching that field must recompile against v2 and, worse, has
+no documented way to know what the new pointee type actually is — it's
+declared in a header they were never told to include.
 
-This is a genuine, artifact-level ABI break on its own: old code that reads
-or writes `reserved` as a `void*` now misinterprets the pointee. abicheck
-correctly reports it as BREAKING via `struct_field_type_changed` (DWARF) and
-`type_field_type_changed` (headers) — no build integration needed, the
-default `debug-headers` lane catches this.
+## Old/new diff
 
-Layered on top, the L2 header-only graph (built automatically) additionally proves, via the L5 source
-graph, that `demo::Public` newly carries a `TYPE_HAS_FIELD_TYPE` edge to
-`demo::detail::PrivateType` — a dependency it did not have in v1 — and
-reports `public_api_internal_dependency_added`. This is *correlated context*
-on an already-detected break, not a standalone signal: it names exactly
-which internal type the public struct now depends on, which the generic
-field-type finding alone does not say.
+| v1.h | v2.h |
+|------|------|
+| `void* reserved;` | `detail::PrivateType* reserved;` *(type declared in internal `detail_private.h`)* |
 
-### Why this isn't the original "invisible below L5" scenario
-
-An earlier version of this catalog modeled this case as a hand-built L5
-graph fixture, with the premise that `public_api_internal_dependency_added`
-would be the *only* finding — verdict `COMPATIBLE_WITH_RISK`, invisible to
-every lower evidence tier. That premise was never verified against a real
-compiled example, and it does not hold: any real field-type change a person
-can see in the header is, by construction, something abicheck's existing
-type-layout detectors already catch. Only a *body-only* reference (no
-signature or field change at all — see
-[case190](../case190_public_inline_function_references_internal_constant/README.md))
-can stay genuinely invisible outside L5.
-
-## How to reproduce
+## abicheck command
 
 ```bash
 g++ -std=c++17 -shared -fPIC -g v1.cpp -o libv1.so
 g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv2.so
-
-# Default debug-headers lane: BREAKING, via struct_field_type_changed alone.
-python3 -m abicheck.cli dump libv1.so --header v1.h -o v1.json
-python3 -m abicheck.cli dump libv2.so --header v2.h -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-# → BREAKING: struct_field_type_changed, type_field_type_changed
-
-# With --public-header set: the same BREAKING verdict, plus the L5 risk
-# finding — the L2 header-only graph builds automatically, no flag needed.
-python3 -m abicheck.cli dump libv1.so --header v1.h --public-header v1.h -o v1.json
-python3 -m abicheck.cli dump libv2.so --header v2.h --public-header v2.h -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-# → BREAKING: struct_field_type_changed, public_api_internal_dependency_added
-#   Proof path: use_public --[DECL_HAS_TYPE]--> demo::Public
-#               --[TYPE_HAS_FIELD_TYPE]--> demo::detail::PrivateType
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --ast-frontend clang
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_field_type_changed: Field type changed: Public::reserved (void * -> detail::PrivateType *)
+  > Field has different size or representation; old code misinterprets the data.
+- struct_field_type_changed: Field type changed: demo::Public::reserved void *(8B) -> PrivateType *(8B)
+  > Field type changed in binary; old code misinterprets the field data.
+
+Deployment risk (binary-compatible, review needed):
+- public_api_internal_dependency_added: Public entry 'use_public' now reaches internal
+  declaration(s)/type(s) demo::detail::PrivateType it did not before.
+  Proof path: use_public --[DECL_HAS_TYPE]--> demo::Public
+              --[TYPE_HAS_FIELD_TYPE]--> demo::detail::PrivateType
+- public_api_internal_dependency_added: Public entry 'demo::Public' now reaches
+  demo::detail::PrivateType via demo::Public --[TYPE_HAS_FIELD_TYPE]--> demo::detail::PrivateType
+```
+
+## Minimum evidence
+
+`min_evidence: L5` — the field-type break itself (`struct_field_type_changed`)
+is already visible from DWARF alone (`abicheck compare libv1.so libv2.so`
+with no headers at all reports the same BREAKING verdict via
+`type_field_type_changed`), so the verdict does not strictly need L5. What L5
+buys is the second finding: the source graph is what names *which* internal
+type the public struct now depends on (`public_api_internal_dependency_added`,
+naming `demo::detail::PrivateType` and the exact edge path) — that
+correlated context requires the L2 header AST plus the L5 source-graph pass
+built on top of it, not DWARF alone.
+
+## Why abicheck catches it
+
+DWARF records `demo::Public`'s member list including each field's type, so
+the retyped `reserved` field is a direct struct-layout diff at L1. Layered
+on top, the header AST lets abicheck resolve `detail::PrivateType` as a type
+declared outside the public header set, and the L5 source graph walks the
+edge `use_public --[DECL_HAS_TYPE]--> demo::Public --[TYPE_HAS_FIELD_TYPE]-->
+demo::detail::PrivateType` to report that the public surface took on an
+undeclared dependency on an internal type — correlated context on top of
+the already-detected field-type break, not a standalone signal.
+
+## Runtime failure demonstration
 
 **Severity: INFORMATIONAL — no crash in this trivial fixture, but a real
-misinterpretation hazard in general**
+misinterpretation hazard in general.**
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case187_public_struct_private_field_type_app case187_public_struct_private_field_type_v2
+# Build old library + app
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libv1.so
+g++ -std=c++17 -g app.cpp -L. -lv1 -Wl,-rpath,. -I. -o app
+./app
+# → exit 0
 
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case187_public_struct_private_field_type/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case187_public_struct_private_field_type/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# exit 0 — this trivial app never dereferences `reserved`, so the pointer's
-# mere presence causes no visible symptom here. A real consumer that reads
-# `reserved` as its old (void*-derived) type would misinterpret the pointee.
+# Swap in new library (no recompile)
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv1.so
+./app
+# → exit 0 (identical)
 ```
 
-## Sibling cases
+This trivial app never dereferences `reserved`, so the pointer's mere
+presence causes no visible symptom here — the field-type change is real at
+the binary level even though this particular consumer doesn't observe it. A
+real consumer that reads `reserved` as its old (`void*`-derived) type would
+misinterpret the pointee.
+
+## Safe redesign
+
+Either promote `detail::PrivateType` to a documented part of the public API,
+or keep `demo::Public`'s field types independent of internals whose
+evolution consumers cannot track — e.g. an opaque handle, or a pimpl
+indirection instead of embedding the internal type directly.
+
+## References
 
 - [case160_public_api_internal_dep_added](../case160_public_api_internal_dep_added/README.md) — same finding via a `DECL_CALLS_DECL` edge (a public function calling an internal one), hand-built fixture.
 - [case188_public_class_private_base_class](../case188_public_class_private_base_class/README.md) — same finding family via `TYPE_INHERITS` (a private base class), real compiled example.
 - [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type/README.md) — same finding family via `DECL_HAS_TYPE` (a private parameter type), real compiled example.
-- [case191_header_only_graph_field_type](../case191_header_only_graph_field_type/README.md) — the same `TYPE_HAS_FIELD_TYPE` mechanism, proven via a genuine confirmed-pass zero (no sibling-edge trick) instead of case187's own `Meta` sibling field.
-
-## How to fix
-
-Either promote `detail::PrivateType` to a documented part of the API, or keep
-`demo::Public`'s field types independent of internals whose evolution
-consumers cannot track (e.g. an opaque handle or a pimpl indirection instead
-of embedding the internal type directly).
+- [case191_header_only_graph_field_type](../case191_header_only_graph_field_type/README.md) — the same `TYPE_HAS_FIELD_TYPE` mechanism, proven via a genuine confirmed-pass zero instead of case187's own `Meta` sibling field.

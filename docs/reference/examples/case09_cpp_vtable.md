@@ -10,54 +10,66 @@
 | **Detected `ChangeKind`s** | `type_vtable_changed` |
 | **Source files** | `examples/case09_cpp_vtable/` |
 
-**Category:** C++ ABI | **Verdict:** 🟡 ABI CHANGE (exit 4)
+**Category:** C++ ABI | **Verdict:** 🔴 BREAKING
 
-> **Note on abidiff 2.4.0:** Returns exit **4** even though this is a hard vtable
-> incompatibility. abidiff's text output explicitly notes:
-> `"note that this is an ABI incompatible change to the vtable of class Widget"`.
+## Verdict and consumer impact
 
-## What breaks
-Every `Widget` object contains a hidden vptr (pointer to the vtable — a static array of function pointers).
-Old code calls `widget->resize()` via vtable slot 1. After v2 inserts `recolor()` at
-slot 1, that same call dispatches to `recolor()` instead — silent wrong behavior or
-a crash.
+Every `Widget` object carries a hidden vptr into a static array of virtual
+function pointers. Old code calls `widget->resize()` via vtable slot 1.
+After v2 inserts `recolor()` at slot 1, that same call site now dispatches
+to `recolor()` instead — silent wrong behavior with no crash and no error.
 
-## Why abidiff catches it
-Reports `the vtable offset of method virtual int Widget::resize() changed from 1 to 2`
-and labels it "ABI incompatible change to the vtable."
+## Old/new diff
 
-## Code diff
-
-| v1.cpp | v2.cpp |
-|--------|--------|
+| v1.h | v2.h |
+|------|------|
 | `virtual int draw();` | `virtual int draw();` |
 | `virtual int resize();` | `virtual int recolor();`  ← **inserted** |
 | | `virtual int resize();` |
 
-## Reproduce manually
+## abicheck command
+
 ```bash
 g++ -shared -fPIC -g v1.cpp -o libwidget_v1.so
 g++ -shared -fPIC -g v2.cpp -o libwidget_v2.so
-abidw --out-file v1.xml libwidget_v1.so
-abidw --out-file v2.xml libwidget_v2.so
-abidiff v1.xml v2.xml
-echo "exit: $?"   # → 4
+abicheck compare libwidget_v1.so libwidget_v2.so
 ```
 
-## How to fix
-Only append new virtual methods — never insert them in the middle of the vtable.
-Alternatively, use the non-virtual interface (NVI) pattern: make only a few virtual
-hooks, add non-virtual public methods that call them.
+## Expected abicheck finding
 
-## Real-world example
-Qt's strict "no vtable reordering" rule is documented in their ABI compatibility
-policy. Binary-compatible Qt releases never insert virtual methods.
+```text
+Verdict: BREAKING (exit 4)
 
-## Real Failure Demo
+- type_vtable_changed: vtable changed: Widget
+  (Widget::draw(), Widget::resize() -> Widget::draw(), Widget::recolor(), Widget::resize())
+  > Vtable slot reordering; virtual dispatch calls wrong method.
+  Affected symbols: make_widget
+- vtable_slot_count_changed: Vtable for 'Widget' changed size: 32 -> 40 bytes (~2 -> ~3 virtual slots)
+  > A virtual method was added, removed, or reordered; existing binaries
+    dispatch through fixed vtable offsets and will call the wrong slot.
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's class/vtable metadata (`DW_AT_vtable_elem_location`
+on each virtual member function) records each method's vtable slot for both
+versions; `-g` alone is enough to detect the reordering, no public headers
+required.
+
+## Why abicheck catches it
+
+DWARF records the vtable slot index for every virtual method; abicheck
+compares the ordered method-to-slot mapping between versions and flags any
+class whose vtable layout changed — plus a binary-only cross-check from the
+`_ZTV` symbol's ELF size, which independently confirms the slot count grew.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-**Scenario:** app compiled with v1 vtable layout (resize at slot 1) calls `resize()`. With v2 `recolor()` is inserted at slot 1, so the app calls the wrong method.
+**Scenario:** app compiled with v1's vtable layout (`resize` at slot 1)
+calls `resize()`. With v2, `recolor()` is inserted at slot 1, so the app
+calls the wrong method.
 
 ```bash
 # Build v1 + app
@@ -71,12 +83,36 @@ g++ -g app.cpp -I. -L. -lwidget -Wl,-rpath,. -o app
 g++ -shared -fPIC -g v2.cpp -o libwidget.so
 ./app
 # → draw()   = 10 (expected 10)
-# → resize() = 99 (expected 20) ← WRONG: dispatched to recolor()!
+# → resize() = 99 (expected 20)
+# → WRONG RESULT: vtable layout changed
 ```
 
-**Why CRITICAL:** The vtable in the app's compiled code indexes `resize()` at slot 1.
-In v2 that slot now holds `recolor()` (returns 99). The wrong method is called silently —
-no crash, just completely wrong behavior.
+**Why CRITICAL:** the vtable in the app's compiled code indexes `resize()`
+at slot 1. In v2 that slot now holds `recolor()` (returns 99). The wrong
+method is called silently — no crash, just completely wrong behavior.
+
+## Safe redesign
+
+Only append new virtual methods — never insert them in the middle of the
+vtable. Alternatively, use the non-virtual interface (NVI) pattern: keep a
+few virtual hooks and add non-virtual public methods that call them.
+
+**Real-world example:** Qt's strict "no vtable reordering" rule is part of
+their documented binary-compatibility policy — binary-compatible Qt
+releases never insert virtual methods in an existing class.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libwidget_v1.so
+abidw --out-file v2.xml libwidget_v2.so
+abidiff v1.xml v2.xml
+echo "exit: $?"   # → 4
+```
+
+> **Note on abidiff 2.4.0:** returns exit **4** even though this is a hard
+> vtable incompatibility. abidiff's text output explicitly notes:
+> `"note that this is an ABI incompatible change to the vtable of class Widget"`.
 
 ## References
 

@@ -1,77 +1,105 @@
-# Case 20 — Enum Member Value Changed
+# Case 20: Enum Member Value Changed
 
+**Category:** Breaking | **Verdict:** 🔴 BREAKING
 
-**Verdict:** 🔴 BREAKING
-**Verdict detail:** ABI break (runtime value mismatch) + API break (enum value changed in header)
-**abicheck verdict: BREAKING**
+## Verdict and consumer impact
 
-## What changes
+Changing the numeric value bound to a released enumerator is a semantic ABI
+break disguised as a "just renumbering" change. Existing binaries compiled
+against old were built with `ERROR = 1` and compare, store, and transmit
+that integer. new's library still returns the constant it calls `ERROR`,
+but the value is now `99`. The symbolic name is unchanged; the meaning of
+the integer it maps to is not — any consumer built against old silently
+stops recognizing the error condition.
 
-| Version | Definition |
-|---------|-----------|
-| v1 | `enum ErrorCode { OK = 0, ERROR = 1 };` |
-| v2 | `enum ErrorCode { OK = 0, ERROR = 99 };` |
+## Old/new diff
 
-## What breaks at binary level
+| old/lib.h | new/lib.h |
+|-----------|-----------|
+| `enum ErrorCode { OK = 0, ERROR = 1 };` | `enum ErrorCode { OK = 0, ERROR = 99 };` |
 
-Changing the numeric value of an enum member is a **semantic ABI break**. Existing
-binaries were compiled with `ERROR = 1` and will pass, store, and compare that value.
-The new library interprets `ERROR` as `99` — the same symbolic name now maps to a
-different integer.
+## abicheck command
 
-This is effectively a protocol rewrite without version negotiation. Components built
-against different versions will exchange the same integer and interpret it with
-opposite semantics.
-
-## Consumer impact
-
-```c
-/* consumer compiled against v1 */
-if (result == ERROR) { /* ERROR = 1 */ }
-
-/* with v2 library, ERROR = 99 */
-/* consumer checks for value 1, library returns 99 */
-/* error condition is silently missed */
+```bash
+gcc -shared -fPIC -g old/lib.c -Iold -o libfoo_v1.so
+gcc -shared -fPIC -g new/lib.c -Inew -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so --no-scope-public-headers
 ```
 
-## Mitigation
+## Expected abicheck finding
 
-- Never reassign released enum numeric values.
-- Append new constants instead of renumbering.
-- Introduce explicit protocol versioning for cross-version communication.
+```text
+Verdict: BREAKING (exit 4)
 
-## Code diff
-
-```diff
--enum ErrorCode { OK = 0, ERROR = 1 };
-+enum ErrorCode { OK = 0, ERROR = 99 };
+- enum_member_value_changed: Enum member value changed: ErrorCode::ERROR
+  (1 -> 99)
+  > Old binaries use stale numeric values; logic comparisons and switch
+    statements silently break.
 ```
 
-## Real Failure Demo
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's enumeration-type debug info
+(`DW_TAG_enumeration_type` / `DW_TAG_enumerator`) records `ERROR`'s constant
+value for both versions, so `-g` alone (no public headers) carries the fact.
+`--no-scope-public-headers` is needed here because `ErrorCode` isn't
+referenced by any function or variable's *type* (`get_result()` returns
+plain `int`) — with no header evidence to confirm the enum is genuinely
+part of the public API, abicheck's default public-surface scoping
+conservatively withholds the finding rather than guess; passing headers (L2,
+`--ast-frontend clang` since this sandbox has no castxml) reports the same
+finding without needing that flag, since a header-declared enum is
+recognized as public even without a signature reference.
+
+## Why abicheck catches it
+
+DWARF records every enumerator name and constant value under the enum's
+`DW_TAG_enumeration_type` entry; abicheck diffs the two versions' member
+value maps directly from debug info and flags a name whose value changed
+as `enum_member_value_changed`.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-**Scenario:** app compiled with old header (`ERROR=1`) checks the return value. v2 library now returns `99` for ERROR — check silently fails.
+**Scenario:** compile app against old (checks `result == ERROR`, i.e. `1`),
+swap in new `.so` without recompile.
 
 ```bash
-# Build old lib + app
+# Build old library + app
 gcc -shared -fPIC -g old/lib.c -Iold -o liberr.so
 gcc -g app.c -Iold -L. -lerr -Wl,-rpath,. -o app
 ./app
 # → Error detected (correct)
+# → exit: 0
 
-# Swap in new lib (ERROR=99)
+# Swap in new library (no recompile)
 gcc -shared -fPIC -g new/lib.c -Inew -o liberr.so
 ./app
-# → No error? Got 99 - WRONG! (v2 changed ERROR to 99)
+# → WRONG RESULT: expected ERROR(1), got 99
+# → exit: 1
 ```
 
-**Why CRITICAL:** Error conditions are silently missed. Code that checks `if (r == ERROR)` 
-never triggers with v2 — the error goes undetected. Any protocol, file format, or 
-IPC using these integer values is broken across version boundaries.
+**Why CRITICAL:** the app's compiled-in comparison `r == ERROR` still checks
+against the constant `1`, but new's `get_result()` now returns `99` for the
+same logical error condition. The check silently fails — no crash, no
+warning, just a missed error. Any protocol, file format, or IPC that
+persisted the integer `1` under the old meaning is broken across the
+version boundary the same way.
 
-## Why runtime result may differ from verdict
-Enum value changed: integer value differs, silent wrong behavior
+## Safe redesign
+
+Never reassign a released enum member's numeric value — append new
+constants instead of renumbering existing ones. If cross-version data needs
+to change meaning, introduce explicit protocol versioning so old and new
+peers can negotiate rather than silently disagreeing on what an integer
+means.
+
+**Real-world example:** wire-format and status-code enums are especially
+exposed to this because the numeric value, not just the name, is what
+actually crosses a process or network boundary — see general protobuf
+field-number/enum-value stability guidance for the same principle applied
+to schema evolution.
 
 ## References
 

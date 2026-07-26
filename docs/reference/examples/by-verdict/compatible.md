@@ -15,25 +15,25 @@ _30 case(s)._ [← back to all examples](../index.md)
 | [case26b_union_field_added_compatible](../case26b_union_field_added_compatible.md) | Union Field Added (No Size Change) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case27_symbol_binding_weakened](../case27_symbol_binding_weakened.md) | Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case29_ifunc_transition](../case29_ifunc_transition.md) | GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case47_inline_to_outlined](../case47_inline_to_outlined.md) | Inline Function Moved to Outlined | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case47_inline_to_outlined](../case47_inline_to_outlined.md) | Inline Method Moved Out-of-Line | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case49_executable_stack](../case49_executable_stack.md) | Executable Stack (GNU_STACK RWX) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case52_rpath_leak](../case52_rpath_leak.md) | RPATH Leak (Hardcoded Build Directory) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case54_used_reserved_field](../case54_used_reserved_field.md) | Used Reserved Field | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case61_var_added](../case61_var_added.md) | Global Variable Added | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case62_type_field_added_compatible](../case62_type_field_added_compatible.md) | Type Field Added (Compatible — Opaque Struct) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case99_experimental_graduated](../case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case103_toolchain_flag_drift](../case103_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case99_experimental_graduated](../case99_experimental_graduated.md) | Experimental to Stable Graduation (Compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case103_toolchain_flag_drift](../case103_toolchain_flag_drift.md) | Toolchain Flag Drift | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case128_symbol_binding_strengthened](../case128_symbol_binding_strengthened.md) | Symbol Binding Strengthened (Weak → Global) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case136_executable_stack_removed](../case136_executable_stack_removed.md) | Executable Stack Removed (the fix direction) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case137_runpath_changed](../case137_runpath_changed.md) | DT_RUNPATH Changed | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case138_needed_added](../case138_needed_added.md) | DT_NEEDED Added | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case143_audit_accidental_export](../case143_audit_accidental_export.md) | Accidental export (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case144_audit_private_header_leak](../case144_audit_private_header_leak.md) | Private header leak (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case145_audit_unversioned_export](../case145_audit_unversioned_export.md) | Unversioned export under a versioning scheme (audit, pure L0) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case146_audit_rtti_for_internal](../case146_audit_rtti_for_internal.md) | RTTI exported for an internal type (single-release audit) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case147_scan_depth_ladder](../case147_scan_depth_ladder.md) | Depth ladder: the same input answered at three depths | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case150_xcheck_export_public_pair](../case150_xcheck_export_public_pair.md) | Bidirectional export ↔ declaration pair | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case151_xcheck_provider_matrix](../case151_xcheck_provider_matrix.md) | Provider-agreement matrix (corroboration grows with evidence) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case181_xcheck_public_to_internal_dependency](../case181_xcheck_public_to_internal_dependency.md) | Public API reaches an internal declaration | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case143_audit_accidental_export](../case143_audit_accidental_export.md) | Accidental Export (Single-Release Audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case144_audit_private_header_leak](../case144_audit_private_header_leak.md) | Private Header Leak (Single-Release Audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case145_audit_unversioned_export](../case145_audit_unversioned_export.md) | Unversioned Export Under a Versioning Scheme (Audit, Pure L0) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case146_audit_rtti_for_internal](../case146_audit_rtti_for_internal.md) | RTTI Exported for an Internal Type (Single-Release Audit) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case147_scan_depth_ladder](../case147_scan_depth_ladder.md) | Depth Ladder — the Same Input Answered at Increasing Depth | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case150_xcheck_export_public_pair](../case150_xcheck_export_public_pair.md) | Bidirectional Export ↔ Declaration Pair | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case151_xcheck_provider_matrix](../case151_xcheck_provider_matrix.md) | Provider-Agreement Matrix (Corroboration Grows With Evidence) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case181_xcheck_public_to_internal_dependency](../case181_xcheck_public_to_internal_dependency.md) | Public API Reaches an Internal Declaration | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case185_inherited_override_reuses_slot](../case185_inherited_override_reuses_slot.md) | Inherited override reuses the base's vtable slot | 🟢 COMPATIBLE | Addition (Compatible) |

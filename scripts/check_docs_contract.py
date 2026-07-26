@@ -75,18 +75,15 @@ _ALLOWED_DOC_TYPES = frozenset(
 _ALLOWED_LEVELS = frozenset({"beginner", "intermediate", "advanced", "expert"})
 _ALLOWED_LIFECYCLES = frozenset({"active", "migration", "historical"})
 
-# Generated or non-prose trees excluded from the duplicate-paragraph scan —
-# their content is either machine-generated (drift is caught by that
-# generator's own --check) or structurally repetitive by design (per-case
-# pages sharing a template).
-_DUPLICATE_SCAN_EXCLUDE_PREFIXES = (
-    "examples/case",
-    "examples/by-verdict/",
-    "examples/by-category/",
-    "reference/detector-spec.md",
-    "reference/github-action-inputs.md",
-    "schemas/",
-)
+# Non-prose trees excluded from the duplicate-paragraph scan that don't
+# carry the generated-file marker comment (see _has_generated_marker below,
+# which is the primary/generic exclusion mechanism) -- structurally
+# repetitive by design (per-case pages sharing a template) rather than
+# machine-generated. Kept as a narrow backstop, not the main mechanism: a
+# hard-coded prefix list silently goes stale when a generated tree moves
+# (this one did, from examples/ to reference/examples/ in ADR-051 Stage 4,
+# which is why _has_generated_marker is now checked unconditionally too).
+_DUPLICATE_SCAN_EXCLUDE_PREFIXES = ()
 _DUPLICATE_SCAN_EXCLUDE_NAMES = frozenset({"CLAUDE.md", "AGENTS.md"})
 
 _MIN_DUPLICATE_WORDS = 40
@@ -143,6 +140,46 @@ def _strip_fenced_code(text: str) -> str:
             i += 1
         i += 1  # skip the closing fence line itself (or EOF, harmlessly)
     return "\n".join(out)
+
+
+def _blank_fenced_code(text: str) -> str:
+    """Line-count-preserving sibling of `_strip_fenced_code`: replaces each
+    line of a fenced code block with an empty line instead of deleting it,
+    so a match found in the surrounding prose still lands on its real
+    source line number (`_strip_fenced_code` shifts everything after a
+    stripped block upward, which is fine for the word-based duplicate scan
+    but wrong for a diagnostic that reports `path:line`)."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        m = _FENCE_OPEN_RE.match(lines[i])
+        if m is None:
+            out.append(lines[i])
+            i += 1
+            continue
+        fence = m.group(1)
+        out.append("")
+        i += 1
+        closer = re.compile(rf"^[ \t]{{0,3}}{fence[0]}{{{len(fence)},}}[ \t]*$")
+        while i < n and closer.match(lines[i]) is None:
+            out.append("")
+            i += 1
+        if i < n:
+            out.append("")  # closing fence line itself
+            i += 1
+    return "\n".join(out)
+
+
+def _blank_front_matter(text: str) -> str:
+    """Line-count-preserving sibling of `_strip_front_matter` — replaces the
+    front-matter block with the same number of blank lines instead of
+    deleting it, so line numbers of the text that follows stay accurate."""
+    m = _FRONT_MATTER_RE.match(text)
+    if not m:
+        return text
+    consumed = text[: m.end()]
+    return "\n" * consumed.count("\n") + text[m.end() :]
 
 
 class Findings:
@@ -888,6 +925,8 @@ def _iter_duplicate_scan_files() -> list[Path]:
             continue
         if any(rel.startswith(prefix) for prefix in _DUPLICATE_SCAN_EXCLUDE_PREFIXES):
             continue
+        if _has_generated_marker(path):
+            continue
         files.append(path)
     return files
 
@@ -927,6 +966,87 @@ def _check_duplicate_paragraphs(f: Findings) -> None:
         )
 
 
+# Trees that are inherently historical/planning records rather than current
+# user-facing narrative -- an ADR or a plan file legitimately says "this was
+# temporary" or "not yet implemented as of this writing" about its own past
+# state, so the phrases below describing an *unfinished current page* aren't
+# a staleness signal there the way they are in start/, learn/, use/,
+# reference/, or integration/. Mirrors docs/AGENTS.md's own Layout
+# description of contribute/ as "governance-facing... archive, plans,
+# ADRs" rather than the narrative/task tree this check targets.
+_STALE_PROCESS_LANGUAGE_EXEMPT_PREFIXES = (
+    "contribute/adr/",
+    "contribute/plans/",
+    "contribute/archive/",
+)
+_STALE_PROCESS_LANGUAGE_EXEMPT_LIFECYCLES = frozenset({"migration", "historical"})
+
+# Deliberately phrase-level (not single common words like "temporary", which
+# is ordinary technical vocabulary -- "temporary directory", "temporary
+# override" -- and would be all false positives): each pattern targets a
+# specific "this page/feature is currently unfinished" claim that goes stale
+# the moment the described work actually ships, which is exactly what
+# happened to the "(being updated in parallel)" parentheticals this check
+# was added to catch (found in a documentation review, not caught by any
+# existing gate).
+_STALE_PROCESS_LANGUAGE_PATTERNS = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"being updated in parallel",
+        r"currently being (?:implemented|written|built|worked on|updated)",
+        r"work[- ]in[- ]progress",
+        r"\bWIP\b",
+        r"this (?:is|section is|page is) (?:currently )?temporary\b",
+        r"\bTBD\b",
+        r"\bTODO:",
+    )
+)
+
+
+def _check_stale_process_language(f: Findings) -> None:
+    """Flag prose that describes the *page itself* (or the feature it
+    documents) as unfinished/in-progress -- this class of claim is true only
+    until the described work ships, then silently goes stale with nothing to
+    catch it (docs-contract's other checks validate structure/links, not
+    whether a page's own status claims are still accurate). WARN-only: a hit
+    needs a human read to confirm staleness, not an automatic block."""
+    for path in sorted(DOCS.rglob("*.md")):
+        if path.name in _DUPLICATE_SCAN_EXCLUDE_NAMES:
+            continue
+        rel = path.relative_to(DOCS).as_posix()
+        if rel.startswith(_STALE_PROCESS_LANGUAGE_EXEMPT_PREFIXES):
+            continue
+        if _has_generated_marker(path):
+            continue
+        try:
+            fm = load_front_matter(path)
+        except (yaml.YAMLError, ValueError):
+            fm = None  # front-matter errors are reported by another check
+        if fm is not None:
+            if fm.get("generated") is True:
+                continue
+            lifecycle = fm.get("lifecycle")
+            if (
+                isinstance(lifecycle, str)
+                and lifecycle in _STALE_PROCESS_LANGUAGE_EXEMPT_LIFECYCLES
+            ):
+                continue
+
+        text = _blank_fenced_code(path.read_text(encoding="utf-8"))
+        text = _blank_front_matter(text)
+        for pattern in _STALE_PROCESS_LANGUAGE_PATTERNS:
+            m = pattern.search(text)
+            if m is None:
+                continue
+            line_no = text.count("\n", 0, m.start()) + 1
+            f.warn(
+                "stale-process-language",
+                f"{_rel(path)}:{line_no}: {m.group(0)!r} reads as an "
+                "in-progress/unfinished status claim -- confirm it's still "
+                "accurate, or drop it if the described work has shipped",
+            )
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -944,6 +1064,7 @@ def main() -> int:
         _check_terminology_entries(f, terms)
         _check_duplicate_term_definitions(f, terms)
     _check_duplicate_paragraphs(f)
+    _check_stale_process_language(f)
     return f.report()
 
 

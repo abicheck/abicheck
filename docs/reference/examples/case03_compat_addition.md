@@ -10,63 +10,97 @@
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `examples/case03_compat_addition/` |
 
-**Category:** Symbol API | **Verdict:** 🟢 COMPATIBLE (exit 4)
+**Category:** Symbol API | **Verdict:** ✅ COMPATIBLE
 
-## What breaks
-Nothing breaks in existing binaries — they never referenced `get_build()`. The exit
-code is still **4** because abidiff reports an ABI *change* (addition); it is
-compatible by convention.
+## Verdict and consumer impact
 
-## Why abidiff catches it
-Reports `1 Added function: get_build()` with exit **4**. The absence of exit-bit 3
-(value 8) means no breaking change.
+Nothing breaks in existing binaries — they never referenced `get_build()`.
+Adding a new exported function is the textbook backward-compatible library
+change: old consumers keep working unmodified, and new consumers can start
+using `get_build()` once they recompile against the new headers.
 
-## Code diff
+## Old/new diff
 
-| v1.c | v2.c |
-|------|------|
+| old/lib.c | new/lib.c |
+|-----------|-----------|
 | `int get_version(void) { return 1; }` | `int get_version(void) { return 1; }` |
 | *(nothing)* | `int get_build(void) { return 42; }` |
 
-## Real Failure Demo
+## abicheck command
 
-**Severity: INFORMATIONAL**
+```bash
+gcc -shared -fPIC -g old/lib.c -o libv1.so
+gcc -shared -fPIC -g new/lib.c -o libv2.so
+abicheck compare libv1.so libv2.so
+```
 
-**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE (exit 0)
+
+Additions:
+- func_added: New public function: get_build
+  > New function available; existing binaries are unaffected.
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the exported-symbol table alone is enough: `get_build`
+is present in v2's `.dynsym` and absent from v1's, with no removed or
+changed symbols. No debug info or headers needed; `-g` above is only there
+so the *Runtime failure demonstration* below can build a matching app.
+
+## Why abicheck catches it
+
+The dynamic symbol table is authoritative L0 evidence — abicheck diffs the
+exported-symbol sets directly. A symbol present only on the new side, with
+no matching removal or signature change, is classified `func_added` and
+placed in the compatible/additions bucket rather than the breaking one.
+
+## Runtime failure demonstration
+
+**Severity: INFORMATIONAL — no observable effect.**
+
+**Scenario:** compile app against old, swap in new `.so` without recompile.
 
 ```bash
 # Build old library + app
-gcc -shared -fPIC -g v1.c -o libfoo.so
+gcc -shared -fPIC -g old/lib.c -o libfoo.so
 gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
 ./app
 # → get_version() = 1
 
 # Swap in new library (no recompile)
-gcc -shared -fPIC -g v2.c -o libfoo.so
+gcc -shared -fPIC -g new/lib.c -o libfoo.so
 ./app
 # → get_version() = 1   (same — no breakage)
 ```
 
-**Why INFORMATIONAL:** adding new exports is backward-compatible; existing binaries
-continue to work unchanged because they never referenced the new symbol.
+**Why INFORMATIONAL:** adding new exports is backward-compatible; existing
+binaries continue to work unchanged because they never referenced the new
+symbol.
 
-## Reproduce manually
+## Safe redesign
+
+No fix needed — this is the correct way to extend a library API. Just keep
+the SONAME unchanged for compatible additions and bump it on breaking
+changes.
+
+**Real-world example:** glibc regularly adds new symbols (e.g.,
+`reallocarray`, `explicit_bzero`) to minor releases without bumping the
+SONAME, relying on this compatible-addition guarantee.
+
+## Cross-tool comparison
+
 ```bash
-gcc -shared -fPIC -g v1.c -o libfoo_v1.so
-gcc -shared -fPIC -g v2.c -o libfoo_v2.so
 abidw --out-file v1.xml libfoo_v1.so
 abidw --out-file v2.xml libfoo_v2.so
 abidiff v1.xml v2.xml
-echo "exit: $?"   # → 4 (compatible addition)
+echo "exit: $?"   # → 4 (abidiff's convention: any ABI change, including a
+                   #    compatible addition, sets exit-bit 2; the absence
+                   #    of bit 3 (value 8) means no breaking change)
 ```
-
-## How to fix
-No fix needed — this is the correct way to extend a library API. Just keep the SONAME
-unchanged for compatible additions and bump it on breaking changes.
-
-## Real-world example
-glibc regularly adds new symbols (e.g., `reallocarray`, `explicit_bzero`) to minor
-releases without bumping the SONAME, relying on this compatible-addition guarantee.
 
 ## References
 

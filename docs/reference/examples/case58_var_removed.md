@@ -10,74 +10,107 @@
 | **Detected `ChangeKind`s** | `var_removed` |
 | **Source files** | `examples/case58_var_removed/` |
 
-**Category:** Symbol API | **Verdict:** BREAKING
+**Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
-## What this case is about
+## Verdict and consumer impact
 
-v1 exports two global variables: `lib_version` and `lib_debug_level`.
-v2 removes `lib_debug_level` from the export table (made it `static`).
+v1 exports two global variables, `lib_version` and `lib_debug_level`. v2
+makes `lib_debug_level` `static` (renamed internally to `debug_level`),
+removing it from the export table while `get_debug()` keeps working through
+the now-private variable. Any downstream binary that references
+`lib_debug_level` directly fails to resolve the symbol at load time —
+`undefined symbol`, before `main()` even runs. Recompilation cannot fix an
+already-deployed binary.
 
-Consumers that reference `lib_debug_level` directly will fail to link or
-crash at runtime with a missing symbol error.
+## Old/new diff
 
-## What breaks at binary level
+| bad.c (v1) | good.c (v2) |
+|------------|-------------|
+| `int lib_debug_level = 0;` (exported) | `static int debug_level = 0;` (not exported) |
+| `int get_debug(void) { return lib_debug_level; }` | `int get_debug(void) { return debug_level; }` |
 
-- **Symbol lookup fails**: `lib_debug_level` is no longer in `.dynsym`.
-  The dynamic linker cannot resolve the reference → `undefined symbol` error
-  or relocation failure at program startup.
-- **Direct access patterns break**: Code that reads/writes the variable
-  (e.g., `lib_debug_level = 3`) will fail due to unresolved symbol/relocation
-  at startup, before the program begins execution.
-
-## What abicheck detects
-
-- **`VAR_REMOVED`**: The global variable symbol is absent from v2's export table.
-
-**Overall verdict: BREAKING**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g bad.c  -o libbad.so
-gcc -shared -fPIC -g good.c -o libgood.so
-
-nm -D libbad.so  | grep lib_debug_level  # → D lib_debug_level
-nm -D libgood.so | grep lib_debug_level  # → (nothing)
-
-python3 -m abicheck.cli dump libbad.so  -o /tmp/v1.json
-python3 -m abicheck.cli dump libgood.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → BREAKING: VAR_REMOVED
+gcc -shared -fPIC -g bad.c  -o libfoo_v1.so
+gcc -shared -fPIC -g good.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
+## Expected abicheck finding
 
-Keep the variable exported for backward compatibility, even if deprecated:
+```text
+Verdict: BREAKING (exit 4)
 
-```c
-int lib_debug_level __attribute__((deprecated)) = 0;
+- var_removed: Public variable removed: lib_debug_level
+  > Old binaries reference a global variable that no longer exists;
+    link or load failure.
 ```
 
-Or use a version script to control when symbols are removed.
+## Minimum evidence
+
+`min_evidence: L0` — the exported-symbol table alone is enough:
+`lib_debug_level` is a `D`/`B`-type symbol in v1's `.dynsym` and absent from
+v2's. No debug info or headers needed; `-g` above is only there so the
+*Runtime failure demonstration* below can build a matching app.
+
+## Why abicheck catches it
+
+The dynamic symbol table is authoritative L0 evidence for exported data
+symbols the same way it is for functions — abicheck diffs the exported
+variable sets directly from `.dynsym`, no debug info or headers required.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g bad.c -o libfoo.so
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → version = 1
+# → debug = 3
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g good.c -o libfoo.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol: lib_debug_level
+```
+
+**Why CRITICAL:** `lib_debug_level` is removed from the dynamic symbol table
+in v2; the runtime linker cannot resolve the app's reference to it and the
+process is killed immediately on startup, before `get_debug()` is ever
+called.
+
+## Safe redesign
+
+Never make a previously-exported global variable `static` (or otherwise
+remove it from the export table) in a minor/patch release. Deprecate it
+with `__attribute__((deprecated))` while still exporting it, or route
+external access through an accessor function (`get_debug_level()`) from the
+start so the underlying storage can move freely without touching the ABI.
+
+**Real-world example:** libraries that expose mutable global state directly
+(rather than through getters/setters) routinely get bitten by this when
+refactoring internal implementation details — the fix upstream is almost
+always "wrap it in a function and keep the old symbol as a deprecated
+alias for one release cycle."
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 
+- [ELF symbol table + dynamic linking behavior](https://refspecs.linuxfoundation.org/elf/gabi4+/ch4.symtab.html)
 - [ELF Symbol Versioning](https://www.akkadia.org/drepper/symbol-versioning)
-
-## Real Failure Demo
-
-**Severity: BREAKING / LOAD-TIME FAILURE**
-
-```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case58_var_removed_app case58_var_removed_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case58_var_removed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case58_var_removed/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# ./app_v1: symbol lookup error: ./app_v1: undefined symbol: lib_debug_level
-```
 
 ---
 

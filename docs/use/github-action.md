@@ -1,3 +1,14 @@
+---
+doc_type: how-to
+audience:
+  - ci-owner
+level: beginner
+canonical_for:
+  - github-actions-surface
+lifecycle: active
+generated: false
+---
+
 # GitHub Action
 
 abicheck ships as a reusable GitHub Action that you can add to any CI pipeline
@@ -120,6 +131,11 @@ the full verdict and unrelated changes stay as informational context. The
 `OLD`/`NEW` operands may be real library binaries or JSON snapshots that
 carry binary evidence (a `dump` of a real library, not headers-only).
 
+> A dedicated `used-by` input (space-separated, mutually exclusive with
+> `required-symbol`/`required-symbols`) was added after the `v0.5.0` release
+> — on a commit-SHA pin newer than `v0.5.0`, prefer `used-by: myapp` over
+> `extra-args` for the same effect.
+
 ### Version labels
 
 | Input | Default | Description |
@@ -221,7 +237,7 @@ extra-args: '--strict-suppressions --require-justification'
 | Input | Default | Description |
 |-------|---------|-------------|
 | `python-version` | `3.13` | Python version for setup-python |
-| `dependency-source` | *(unset — falls back to `install-deps`)* | How to install system dependencies: `conda-forge` (**default**; pixi-managed `scanner` conda-forge environment — castxml 0.7.x + whichever gcc/g++ conda-forge currently resolves as default; Linux/macOS only, no clang/bear yet), `conda-forge-gcc14` / `conda-forge-clang20` (same, pinned to an exact compiler family and major version instead of whatever's currently default — `gcc14` is Linux-only, `clang20` covers both; no clang/bear on either), `system` (apt/Homebrew + the pinned CastXML Superbuild — the previous default, still available), or `none` (skip; dependencies must already be on `PATH`). |
+| `dependency-source` | *(unset — falls back to `install-deps`)* | How to install system dependencies: `conda-forge` (**default**), `conda-forge-gcc14`, `conda-forge-clang20` (the only conda-forge source that provisions clang — see the note above), `system`, or `none`. See the [GitHub Action Inputs/Outputs Reference](../reference/github-action-inputs.md) for the exact per-value breakdown. |
 | `install-deps` | `true` | **Deprecated** — use `dependency-source` instead (kept for one release cycle; ignored if `dependency-source` is set). `true` (its own default too) maps to `dependency-source: conda-forge`, `false` maps to `dependency-source: none`. |
 | `upload-sarif` | `false` | Upload SARIF to GitHub Code Scanning. Requires `format: sarif` and `mode: compare`; any other combination is a hard error raised before any dependency install. |
 | `fail-on-breaking` | `true` | Fail step on binary ABI break |
@@ -364,7 +380,7 @@ own page:
 
 The action follows [semantic versioning](https://semver.org/). While abicheck
 is pre-1.0, pin an exact release tag (the examples in this guide use the latest,
-`v0.3.0`); a floating major tag is not published yet:
+`v0.5.0`); a floating major tag is not published yet:
 
 ```yaml
 uses: abicheck/abicheck@v0.5.0     # exact release tag (recommended, reproducible)

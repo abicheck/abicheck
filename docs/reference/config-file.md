@@ -71,104 +71,78 @@ an unknown-key error.
 
 ## Top-level keys
 
-| Key | Type | Default | Purpose |
-|-----|------|---------|---------|
-| [`build:`](#build) | mapping | — | Build-system hint and compile-DB location |
-| [`sources:`](#sources) | mapping | — | Public-header roots, excludes, L5 graph detail |
-| [`severity:`](#severity) | mapping | — | Per-category severity levels + preset |
-| [`scope:`](#scope) | mapping | — | Public-surface scoping (false-positive tuning) |
-| [`suppression:`](#suppression) | mapping | — | Suppression hygiene policy |
-| [`source:`](#source) | mapping | — | Precise S-axis (evidence method) selection |
-| [`compile:`](#compile) | mapping | — | Stable half of the L2 header compile context |
-| [`debug:`](#debug) | mapping | — | Separate-debug-file resolution (format / debuginfod / dwarf-only) |
-| [`exit_code_scheme:`](#exit_code_scheme) | string | `auto` | Which exit-code scheme `compare` uses |
-| [`version:`](#version) | integer | `0` | Config schema version (forward-compat) |
-| [`risk_rules:`](#risk_rules-and-crosschecks) | mapping | — | Path-glob risk profile (loaded via `--risk-rules`) |
-| [`crosschecks:`](#risk_rules-and-crosschecks) | mapping | — | Reserved (recognized so it does not trip the unknown-key error) |
-| [`targets:`](#targets-bundles-profiles-and-baseline) | mapping | — | CI-integration target/consumer/plugin-contract topology (G30 P1.5) |
-| [`bundles:`](#targets-bundles-profiles-and-baseline) | mapping | — | Release groups of `targets:` (G30 P1.5) |
-| [`profiles:`](#targets-bundles-profiles-and-baseline) | mapping | — | Which build lanes are ABI contracts (G30 P1.5) |
-| [`baseline:`](#targets-bundles-profiles-and-baseline) | mapping | — | Baseline-channel declarations (G30 P1.5) |
-
-Recognized keys and defaults live in `BuildConfig` (`buildsource/inline.py`).
+`build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
+`compile:`, `debug:`, `exit_code_scheme:`, `version:`, `risk_rules:`,
+`crosschecks:`, `targets:`, `bundles:`, `profiles:`, and `baseline:` are the
+recognized top-level keys. See the
+[Config Keys Reference](config-keys-reference.md) for the exhaustive,
+generated key/type list (`BuildConfig`'s own schema); the sections below
+cover what each block does, its effective defaults, and behavior that isn't
+visible from the type alone.
 
 ---
 
 ### `build:`
 
-Drives inline build/source collection. See
-[Producing source facts](../use/producing-source-facts.md) and
+Drives inline build/source collection: an advisory build-system hint
+(`system:`, default `auto`), a build-query command (`query:`) to produce a
+compile DB, and/or an explicit `compile_db:` path or glob. `query` runs
+**only** when the config is passed explicitly with `--config` (trusted) —
+never from an auto-discovered config; `--allow-build-query` is a deprecated
+no-op. See [Producing source facts](../use/producing-source-facts.md) and
 [Build & source data](../learn/build-source-data.md).
-
-| Sub-key | Type | Default | Purpose |
-|---------|------|---------|---------|
-| `system` | string | `auto` | Advisory build-system hint (e.g. `auto`, `cmake`, `bazel`, `make`, `ninja`). |
-| `query` | string | `""` | Build-query command to produce a compile DB. Runs **only** when the config is passed explicitly with `--config` (trusted); ignored from an auto-discovered config. `--allow-build-query` is a deprecated no-op. |
-| `compile_db` | string | `""` | Path (or glob) to a `compile_commands.json`. |
 
 ---
 
 ### `sources:`
 
-| Sub-key | Type | Default | Purpose |
-|---------|------|---------|---------|
-| `public_headers` | list of strings (or a single string) | `[]` | Public-header roots/globs defining the public surface. |
-| `exclude` | list of strings (or a single string) | `[]` | Paths/globs excluded from source collection. |
-| `graph` | `summary` \| `full` | `summary` | L5 source-graph detail cap (`summary` = cheap changed-scope CI graph; `full` = full replay scope). |
+Public-header roots/globs (`public_headers:`, default `[]`) defining the
+public surface, paths/globs excluded from source collection (`exclude:`,
+default `[]`), and the L5 source-graph detail cap (`graph:`, `summary`
+(default, a cheap changed-scope CI graph) or `full`, a full replay scope).
 
 ---
 
 ### `severity:`
 
-Per-category severity map consumed by `compare`. See
-[Severity](../use/severity.md) and [Exit codes](exit-codes.md).
-
-| Sub-key | Type | Default | Purpose |
-|---------|------|---------|---------|
-| `preset` | `default` \| `strict` \| `info-only` | unset | Baseline severity preset. |
-| `abi_breaking` | `error` \| `warning` \| `info` | unset | Level for the `abi_breaking` category. |
-| `potential_breaking` | `error` \| `warning` \| `info` | unset | Level for the `potential_breaking` category. |
-| `quality_issues` | `error` \| `warning` \| `info` | unset | Level for the `quality_issues` category. |
-| `addition` | `error` \| `warning` \| `info` | unset | Level for the `addition` category. |
-
-Per-category levels override the preset. When any severity value is in effect,
-`compare` uses the severity-aware exit-code path (see
-[Exit codes](exit-codes.md)).
+Per-category severity map consumed by `compare`: a baseline `preset`
+(`default`/`strict`/`info-only`) plus per-category overrides
+(`abi_breaking`/`potential_breaking`/`quality_issues`/`addition`, each
+`error`/`warning`/`info`) — per-category levels override the preset. When any
+severity value is in effect, `compare` uses the severity-aware exit-code path.
+See [Severity](../use/severity.md) and [Exit codes](exit-codes.md).
 
 ---
 
 ### `scope:`
 
-Public-surface scoping — the main false-positive control. See
+Public-surface scoping — the main false-positive control. `public:` (default
+effectively `true`) restricts analysis to the public exported surface;
+`collapse_versioned_symbols:` (default `false`) collapses symbol-versioned
+duplicates before diffing; `show_redundant:` (default `false`) disables
+redundancy filtering. `public_symbols:` is an explicit public-symbol overlay,
+additive with any CLI `--public-symbol` values — entries match **exactly**
+(the raw symbol, or a qualified name's trailing `::` segment, so `foo` also
+matches `ns::foo`); **globs/wildcards are not supported** (`mylib_*` matches
+nothing), list each symbol. See
 [API-surface intelligence](../use/api-surface-intelligence.md).
-
-| Sub-key | Type | Default (effective) | Purpose |
-|---------|------|---------------------|---------|
-| `public` | boolean | unset → `true` | Restrict analysis to the public exported surface. |
-| `collapse_versioned_symbols` | boolean | unset → `false` | Collapse symbol-versioned duplicates before diffing. |
-| `public_symbols` | list of strings | `[]` | Explicit public-symbol overlay. Additive with any CLI `--public-symbol` values. Entries are matched **exactly** — by the raw symbol, or (for a qualified name) its trailing `::` segment, so `foo` also matches `ns::foo`. **Globs/wildcards are not supported** (`mylib_*` matches nothing); list each symbol. |
-| `show_redundant` | boolean | unset → `false` | Disable redundancy filtering (show all changes, including those derived from a root type change). Demoted from `--show-redundant` (ADR-040 L2); the hidden CLI flag still overrides it. |
 
 ---
 
 ### `suppression:`
 
 Suppression **hygiene policy** (a project rule, distinct from the suppression
-*rules file* — see [Related files](#related-files-not-abicheckyml-keys)). See
-[Suppressions](../use/suppressions.md).
-
-| Sub-key | Type | Default (effective) | Purpose |
-|---------|------|---------------------|---------|
-| `strict` | boolean | unset → `false` | Treat suppression-file problems strictly. |
-| `require_justification` | boolean | unset → `false` | Require a justification on every suppression entry. |
+*rules file* — see [Related files](#related-files-not-abicheckyml-keys)):
+`strict:` (default `false`) treats suppression-file problems strictly;
+`require_justification:` (default `false`) requires a justification on every
+suppression entry. See [Suppressions](../use/suppressions.md).
 
 ---
 
 ### `source:`
 
-| Sub-key | Type | Default | Purpose |
-|---------|------|---------|---------|
-| `method` | `s0`..`s6` | unset | Pins the precise S-axis (evidence method) for power users. |
+`method:` pins the precise S-axis (evidence method, `s0`..`s6`) for power
+users.
 
 > **Use a concrete `s0`..`s6`, not `auto`.** When `compare` reads `source.method`
 > from the config (i.e. no `--depth` on the command line), the value must
@@ -187,17 +161,12 @@ See [Scan levels](../use/scan-levels.md) and the
 
 ### `compile:`
 
-The stable half of the L2 header compile context (ADR-037 D4). Per-invocation
-cross-compile flags stay CLI overrides (`CLI > config`).
-
-| Sub-key | Type | Default | Purpose |
-|---------|------|---------|---------|
-| `frontend` | `auto` \| `castxml` \| `clang` \| `hybrid` (case-insensitive) | unset | AST frontend for header parsing; `hybrid` runs castxml and clang together and merges them. |
-| `std` | string (single option atom, no whitespace) | unset | C/C++ standard, e.g. `c++17`. |
-| `include_dirs` | list of strings | `[]` | Include roots added to the compile context. |
-| `defines` | list of strings (each a single option atom) | `[]` | Preprocessor defines, e.g. `FEATURE=1`. |
-| `sysroot` | string | unset | Sysroot for header resolution. |
-| `nostdinc` | boolean | unset | Suppress the standard system include paths. |
+The stable half of the L2 header compile context (ADR-037 D4): AST
+`frontend:` (`auto`/`castxml`/`clang`/`hybrid`, case-insensitive — `hybrid`
+runs castxml and clang together and merges them), `std:` (C/C++ standard,
+e.g. `c++17`), `include_dirs:`/`defines:` (lists), `sysroot:`, and
+`nostdinc:` (boolean). Per-invocation cross-compile flags stay CLI overrides
+(`CLI > config`).
 
 > Values in `compile.std`/`compile.defines` must be a single whitespace-free
 > compiler-option atom (a config scalar cannot expand into multiple compiler
@@ -208,17 +177,15 @@ cross-compile flags stay CLI overrides (`CLI > config`).
 ### `debug:`
 
 Separate-debug-file resolution for ELF (ADR-021a), demoted off the CLI in
-ADR-040 Lever 2. These are stable per-project debug-artifact knobs; the coarse
-per-run `--debug-root` stays a visible CLI flag, while the settings below move
-here. Each corresponds to a now-hidden CLI flag that still overrides the config
-value (`CLI > config`).
-
-| Sub-key | Type | Default (effective) | Purpose (was) |
-|---------|------|---------------------|---------------|
-| `format` | `auto` \| `dwarf` \| `btf` \| `ctf` (case-insensitive) | unset → auto-pick | Force the ELF debug format for both sides (`--debug-format`). |
-| `dwarf_only` | boolean | unset → `false` | Use DWARF debug info as the primary source even when headers are available (`--dwarf-only`). |
-| `debuginfod` | boolean | unset → `false` | Enable debuginfod network resolution (`--debuginfod`). |
-| `debuginfod_url` | string | unset | debuginfod server URL, overriding `DEBUGINFOD_URLS` (`--debuginfod-url`). |
+ADR-040 Lever 2 — stable per-project debug-artifact knobs, each corresponding
+to a now-hidden CLI flag that still overrides the config value
+(`CLI > config`); the coarse per-run `--debug-root` stays a visible CLI flag.
+`format:` (`auto`/`dwarf`/`btf`/`ctf`, case-insensitive, default auto-pick)
+forces the ELF debug format for both sides (was `--debug-format`);
+`dwarf_only:` (default `false`) uses DWARF as the primary source even when
+headers are available (was `--dwarf-only`); `debuginfod:` (default `false`)
+enables debuginfod network resolution (was `--debuginfod`); `debuginfod_url:`
+overrides `DEBUGINFOD_URLS` (was `--debuginfod-url`).
 
 ---
 

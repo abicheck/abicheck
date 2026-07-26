@@ -10,55 +10,58 @@
 | **Detected `ChangeKind`s** | `value_abi_trait_changed` |
 | **Source files** | `examples/case69_trivial_to_nontrivial/` |
 
-**Category:** Calling Convention | **Verdict:** BREAKING
+**Category:** Calling Convention | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-A user-defined destructor `~Point() {}` is added to `struct Point`, changing it
-from **trivially copyable** to **non-trivially copyable**. Under the Itanium C++
-ABI (used by GCC and Clang on Linux/macOS), this fundamentally changes how the
-struct is passed to functions:
+`~Point() {}` makes `Point` non-trivially copyable. Under the Itanium C++
+ABI (GCC/Clang on Linux), a trivial `Point` is passed in FP registers
+(`%xmm0`/`%xmm1`); a non-trivial `Point` is passed via a hidden pointer
+instead. The function signature and mangled symbol name are unchanged —
+this is a pure calling-convention break, not a source-level API change —
+so source recompiles cleanly but old binaries crash or read garbage,
+because the caller and callee now disagree on where the arguments live.
 
-- **v1 (trivial):** `Point` is passed **in registers** (`%xmm0`/`%xmm1` for the
-  two doubles on x86-64 System V)
-- **v2 (non-trivial):** `Point` is passed **via hidden pointer** — the caller
-  allocates stack space, copies the struct there, and passes a pointer in `%rdi`
+## Old/new diff
 
-The function signature (`double distance(Point, Point)`) and the mangled symbol
-name are **identical** in v1 and v2. The struct size is also unchanged. Yet the
-binary calling convention is completely different. The callee reads registers
-that contain garbage (addresses instead of doubles) or vice versa.
+| v1.h | v2.h |
+|------|------|
+| `struct Point { double x; double y; };` | `struct Point { double x; double y; ~Point() {} };` |
+| *(trivially copyable → passed in registers)* | *(non-trivially copyable → passed via hidden pointer)* |
 
-This is unlike any existing case: it's not a type size change (case07/14), not a
-signature change (case02/10), not a qualifier change (case22), and not a
-visibility change (case06). The break is **invisible** to header diffing tools
-that don't analyze the trivially-copyable trait.
+## abicheck command
+
+```bash
+g++ -shared -fPIC -g v1.cpp -o libfoo_v1.so -lm
+g++ -shared -fPIC -g v2.cpp -o libfoo_v2.so -lm
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- value_abi_trait_changed: DWARF value-ABI trait changed: distance(Point, Point)
+  (p0:trivial|p1:trivial -> p0:nontrivial|p1:nontrivial)
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's parameter-type DIEs carry enough information
+(a non-trivial special member function, i.e. the user-defined destructor)
+for abicheck to reclassify `Point`'s value-ABI trait; `-g` alone is enough,
+no public headers required.
 
 ## Why abicheck catches it
 
-The type analysis detects that `Point` gained a non-trivial destructor, changing
-its ABI classification. This is reported as a value-ABI trait change
-(`value_abi_trait_changed`) — the struct's calling convention changed even though
-its layout didn't.
+abicheck inspects each parameter type's DWARF representation for
+user-declared destructors/copy/move members that make a type
+non-trivially-copyable, and compares that trait between the two versions
+per parameter of each matched function — independent of the (unchanged)
+mangled signature or struct size.
 
-## Code diff
-
-```cpp
-// v1: trivially copyable — passed in registers
-struct Point {
-    double x;
-    double y;
-};
-
-// v2: non-trivially copyable — passed via hidden pointer
-struct Point {
-    double x;
-    double y;
-    ~Point() {}   // ← this single line changes the calling convention
-};
-```
-
-## Real Failure Demo
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
@@ -69,49 +72,47 @@ struct Point {
 g++ -shared -fPIC -g v1.cpp -o libpoint.so -lm
 g++ -g app.cpp -L. -lpoint -Wl,-rpath,. -o app
 ./app
-# -> distance = 5.0
-# -> Expected: 5.0
+# → distance = 5.0
+# → Expected: 5.0
 
-# Build v2 (non-trivially copyable)
+# Swap in v2 (non-trivially copyable, no recompile)
 g++ -shared -fPIC -g v2.cpp -o libpoint.so -lm
 ./app
-# -> distance = <garbage or crash>
-# v2 expects hidden pointers in %rdi/%rsi; app passes doubles in %xmm registers
+# → Segmentation fault (core dumped)
 ```
 
-**Why CRITICAL:** The mangled name is identical, so the dynamic linker happily
-resolves the symbol. But the caller passes `Point` values in FP registers while
-the callee reads them as pointers from integer registers. The function
-dereferences what it thinks are pointers, causing a segfault or reading garbage
-memory. There is no warning whatsoever.
+**Why CRITICAL:** the mangled name is identical, so the dynamic linker
+happily resolves the symbol. The app passes `Point` values in FP registers
+(v1 convention); v2 expects hidden pointers in integer registers instead.
+The callee dereferences what it thinks are pointers, causing the segfault
+observed above — with no compiler warning at either build.
 
-## How to fix
+## Safe redesign
 
-The trivially-copyable property is part of the ABI contract. Never add
-user-defined special member functions to types that are passed by value across
-library boundaries:
-
-1. **Use a separate Pimpl class** for non-trivial cleanup
-2. **Pass by pointer/reference** instead of by value across ABI boundaries
-3. If a destructor is needed, add it from day one so the ABI is established as
-   non-trivial from the start
+Treat the trivially-copyable property as part of the ABI contract. Never
+add user-defined special member functions to a type passed by value across
+a library boundary — pass by pointer/reference instead, or add the
+destructor from day one so the ABI is established as non-trivial from the
+start:
 
 ```cpp
 /* Safe: pass by pointer, immune to trivially-copyable changes */
 double distance(const Point *a, const Point *b);
 ```
 
-## Real-world example
+**Real-world example:** this is a recurring theme in the C++ ABI stability
+debate — `std::string`/`std::unique_ptr` in libstdc++ have specific
+trivially-copyable properties that constrain their implementation, and the
+Chromium project explicitly documents which IPC types must stay trivially
+copyable for exactly this reason.
 
-This is the core issue behind the C++ ABI stability debate. The `std::string`
-and `std::unique_ptr` types in libstdc++ have specific trivially-copyable
-properties that constrain their implementation. Boost.Asio's `ip::address` type
-had this issue when executor properties were added. The Chromium project
-explicitly documents which types must remain trivially copyable for their IPC
-serialization ABI.
+## Cross-tool comparison
 
-LLVM's ABI testing suite specifically tests for trivially-copyable changes because
-they are invisible to most diff tools but cause silent corruption at runtime.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 

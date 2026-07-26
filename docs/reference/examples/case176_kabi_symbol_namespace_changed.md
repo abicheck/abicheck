@@ -10,74 +10,95 @@
 | **Detected `ChangeKind`s** | `kabi_symbol_namespace_changed` |
 | **Source files** | `examples/case176_kabi_symbol_namespace_changed/` |
 
-**Category:** Linux Kernel Module ABI | **Verdict:** BREAKING
+**Category:** Linux Kernel Module ABI (kABI) | **Verdict:** 🔴 BREAKING
 
-## What this case is about
+## Verdict and consumer impact
 
-```text
-v1.symvers:
-0x4e2f9a10	drm_mode_object_add	drivers/gpu/drm/drm	EXPORT_SYMBOL
-
-v2.symvers:
-0x4e2f9a10	drm_mode_object_add	drivers/gpu/drm/drm	EXPORT_SYMBOL_NS	DRM
-```
-
-`drm_mode_object_add` keeps the **same CRC** — its type signature is
-untouched — and the same symbol/module. The only change: it moved from a
+`drm_mode_object_add` keeps the same CRC — its type signature never moved —
+and the same symbol name and module. The only change: it moved from a
 plain `EXPORT_SYMBOL()` to `EXPORT_SYMBOL_NS(..., DRM)`, gaining an export
-*namespace*.
+*namespace*. A module built against v1 that imports
+`drm_mode_object_add` normally, without a matching `MODULE_IMPORT_NS(DRM)`
+declaration, fails to load against a v2 kernel with `drm_mode_object_add:
+exists, but namespace DRM does not match the module's imported namespaces:
+(empty)` — a load-time rejection even though nothing about the symbol's
+type changed at all. This is a distinct load gate from
+`case175`'s CRC break, with a
+different fix: add the import declaration, not rebuild against new types.
 
-## Why this case matters: a separate load-gate from the CRC
+## Old/new diff
 
-`case175_kabi_crc_changed` shows a CRC break: the symbol's type signature
-changed. This case is deliberately kept separate because the *mechanism*
-and the *fix* are different. An export namespace is a Linux kernel access
-control, independent of the CRC:
+| v1.symvers | v2.symvers |
+|------------|------------|
+| `0x4e2f9a10  drm_mode_object_add  drivers/gpu/drm/drm  EXPORT_SYMBOL` | `0x4e2f9a10  drm_mode_object_add  drivers/gpu/drm/drm  EXPORT_SYMBOL_NS  DRM` |
 
-- **CRC break** — the module's compiled expectations disagree with the
-  running kernel's actual layout. Fix: rebuild against the new headers.
-- **Namespace break** — the module's source never declared
-  `MODULE_IMPORT_NS(DRM)`. Fix: add the import declaration and rebuild —
-  even though nothing about the symbol's *type* changed at all.
+(both files also carry an unrelated, unchanged `drm_mode_object_find` line —
+abicheck correctly leaves it out of the finding.)
 
-A module built against v1 that imports `drm_mode_object_add` normally will
-fail to load against a v2 kernel with:
-
-```text
-drm_mode_object_add: exists, but namespace DRM does not match the module's
-imported namespaces: (empty)
-```
-
-— a load-time rejection that a CRC-only kABI check would not explain (the
-CRC never changed), and that a plain symbol-presence check would miss
-entirely (the symbol never disappeared).
-
-## What abicheck detects
-
-- **`kabi_symbol_namespace_changed`** — `drm_mode_object_add` gained an
-  export namespace (`(none)` → `DRM`) while its CRC, module, and GPL class
-  stayed the same. **Evidence tier L0** — read directly from
-  `Module.symvers`; only a *gained or changed* namespace is flagged (a
-  namespace being *removed* only widens who can import the symbol, so it is
-  not a break).
-
-**Overall verdict: BREAKING**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-python3 -m abicheck.cli compare v1.symvers v2.symvers
-# → BREAKING: kabi_symbol_namespace_changed (drm_mode_object_add: (none) -> DRM)
+abicheck compare v1.symvers v2.symvers
 ```
 
-## Mitigation
+## Expected abicheck finding
 
-- When introducing `EXPORT_SYMBOL_NS()` on a previously plain-exported
-  symbol, document it in the release notes for out-of-tree module
-  maintainers — `MODULE_IMPORT_NS()` is a source change even when no
-  function signature moved.
-- Prefer keeping newly-namespaced exports also available un-namespaced for
-  one deprecation cycle if wide out-of-tree consumption is expected.
+```text
+Verdict: BREAKING (exit 4)
+
+- kabi_symbol_namespace_changed: Kernel symbol namespace changed:
+  drm_mode_object_add ((none) -> DRM)
+  > A kernel-exported symbol gained or moved its export namespace
+    (EXPORT_SYMBOL_NS*). A module that does not declare the matching
+    MODULE_IMPORT_NS() fails to load, so a gained/changed namespace is a
+    load-time break for existing modules.
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — read directly from the two `Module.symvers`
+manifests' namespace column; no kernel build and no compiler are needed.
+Only a *gained or changed* namespace is flagged — a namespace being
+*removed* only widens who can import the symbol, so that direction is not
+a break.
+
+## Why abicheck catches it
+
+abicheck parses each `Module.symvers` line's five columns and diffs the
+namespace column by symbol name. `drm_mode_object_add`'s CRC, module, and
+GPL class stay identical, isolating the namespace column as the only
+delta — exactly `kabi_symbol_namespace_changed`, a finding that is
+deliberately independent from the CRC check in case175 because the
+mechanism (an access-control gate at load time, not a type mismatch) and
+the fix (`MODULE_IMPORT_NS()`, not a rebuild against new types) are both
+different.
+
+## Real-world deployment scenario
+
+This is what a CI job diffing two kernel build trees' `Module.symvers`
+across a kernel update sees when a subsystem maintainer starts
+namespacing a previously plain-exported symbol — e.g. the DRM subsystem
+gating GPU driver internals behind `EXPORT_SYMBOL_NS(..., DRM)`. A
+CRC-only kABI check would report no change at all (the CRC never moved); a
+plain symbol-presence check would also miss it (the symbol never
+disappeared). Only reading the namespace column catches the load-time
+break before an out-of-tree module's `insmod` fails in the field.
+
+## Safe redesign
+
+When introducing `EXPORT_SYMBOL_NS()` on a previously plain-exported
+symbol, document it in release notes for out-of-tree module maintainers —
+`MODULE_IMPORT_NS()` is a source change even though no function signature
+moved. Prefer keeping a newly-namespaced export also available
+un-namespaced for one deprecation cycle if wide out-of-tree consumption is
+expected.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` diff DWARF-carrying compiled binaries;
+neither reads `Module.symvers` or has a concept of kernel export
+namespaces, so there is no equivalent invocation of either tool for this
+fixture pair.
 
 ## References
 

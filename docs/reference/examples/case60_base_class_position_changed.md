@@ -10,69 +10,124 @@
 | **Detected `ChangeKind`s** | `base_class_position_changed` |
 | **Source files** | `examples/case60_base_class_position_changed/` |
 
-**Category:** C++ Layout | **Verdict:** BREAKING
+**Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
-## What this case is about
+## Verdict and consumer impact
 
-v1: `struct Widget : public Drawable, public Clickable`
-v2: `struct Widget : public Clickable, public Drawable`
+`Widget` inherits from `Drawable` and `Clickable`; v2 swaps the declaration
+order (`Clickable, Drawable` instead of `Drawable, Clickable`). In the
+Itanium C++ ABI, base subobjects are laid out in declaration order, so
+swapping them moves every base subobject — and every member declared after
+them — to a new offset, and changes the `this`-pointer adjustments baked
+into every virtual call and cross-cast. A binary compiled against v1 that
+calls into a v2 library reads and writes through stale offsets.
+Recompilation against v2 is mandatory.
 
-The base class declaration order is swapped. In C++ multiple inheritance,
-base subobjects are laid out in declaration order, so swapping them changes
-every offset in the class.
+## Old/new diff
 
-## What breaks at binary level
+| v1.cpp | v2.cpp |
+|--------|--------|
+| `struct Widget : public Drawable, public Clickable { ... }` | `struct Widget : public Clickable, public Drawable { ... }` |
 
-- **Subobject offsets swap**: Drawable subobject was at offset 0, now Clickable
-  is at offset 0 and Drawable is further into the object.
-- **Vtable pointer adjustment breaks**: Casting `Widget*` to `Drawable*` or
-  `Clickable*` uses compile-time offsets that are now wrong.
-- **Cross-cast corrupts**: `static_cast<Clickable*>(widget)` compiled against
-  v1 adjusts by the wrong offset when v2 is loaded.
-
-## What ABICheck detects
-
-- **`BASE_CLASS_POSITION_CHANGED`**: The base class list order changed,
-  detected via DWARF `DW_TAG_inheritance` entries with different offsets.
-
-**Overall verdict: BREAKING**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-g++ -shared -fPIC -g v1.cpp -o libv1.so
-g++ -shared -fPIC -g v2.cpp -o libv2.so
-
-python3 -m abicheck.cli dump libv1.so -o /tmp/v1.json
-python3 -m abicheck.cli dump libv2.so -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → BREAKING: BASE_CLASS_POSITION_CHANGED
+g++ -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Real-world examples
+## Expected abicheck finding
 
-- GUI frameworks with multiple interface inheritance (Qt, GTK+) must freeze
-  base class order once published.
-- COM-style interfaces on Linux also depend on base class order for vtable layout.
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: Widget (256 -> 320 bits)
+  > Old code allocates or copies the type with the old size; heap/stack
+    corruption, out-of-bounds access.
+  Affected symbols: widget_click, widget_create, widget_destroy, widget_draw, widget_get_id
+- type_field_offset_changed: Field offset changed: Widget::widget_id (224 -> 256 bits)
+- base_class_offset_changed: Base class 'Clickable' moved within 'Widget' (128 -> 0 bits).
+  > The this-pointer adjustment for that base and the offset of every field
+    after it shift; existing binaries read the wrong addresses.
+- base_class_offset_changed: Base class 'Drawable' moved within 'Widget' (0 -> 128 bits)
+- base_class_position_changed: Base class order reordered: Widget — this-pointer
+  adjustments changed (['Drawable', 'Clickable'] -> ['Clickable', 'Drawable'])
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF `DW_TAG_inheritance` entries record each base
+class's offset within the derived class for both versions; abicheck diffs
+those offsets and the declared base order directly from debug info, no
+public headers required.
+
+## Why abicheck catches it
+
+Each `DW_TAG_inheritance` DIE under `Widget` carries the base class type and
+its `DW_AT_data_member_location` (byte offset) within the derived object.
+abicheck compares the ordered list of bases and each base's offset between
+versions — a reordering changes both, which is exactly what
+`base_class_position_changed` and the paired `base_class_offset_changed`
+findings above encode.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL — object corruption**
+
+**Scenario:** compile app against v1 (assumes `Drawable, Clickable` layout),
+swap in v2 `.so` without recompile.
+
+```bash
+# Build old library + app
+g++ -shared -fPIC -g v1.cpp -o libfoo.so
+g++ -g app.cpp -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → draw at (10,20)
+# → clicked zone 5
+# → id = 42
+# → expected id = 42
+
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g v2.cpp -o libfoo.so
+./app
+# → clicked zone 5
+# → draw at (10,20)
+# → id = -380072416
+# → expected id = 42
+# → CORRUPTION: base-class order changed, subobject offsets mismatch
+```
+
+**Why CRITICAL:** `widget_get_id()` reads `widget_id` at the offset v2's
+compiler assigned (after the swapped base subobjects), but the app's `Widget`
+object was laid out by v1's compiler with `widget_id` at a different offset
+— the read lands on unrelated bytes, producing a garbage id. The virtual
+dispatch for `draw()`/`on_click()` also resolves through the wrong vtable
+pointer for each base, though it happens to still print correct values here.
+
+## Safe redesign
+
+Freeze base class declaration order once a class is published as part of a
+public ABI — treat reordering bases the same as reordering struct members.
+If a new base is genuinely needed, append it last, or move to a
+pointer-to-implementation design so the public type's layout never depends
+on inheritance details.
+
+**Real-world example:** GUI frameworks with multiple interface inheritance
+(Qt, GTK+) must freeze base class order once published; COM-style interfaces
+on Linux also depend on base class order for vtable layout.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 
 - [Itanium C++ ABI: class layout](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#class-types)
-
-## Real Failure Demo
-
-**Severity: BREAKING / OBJECT CORRUPTION**
-
-```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case60_base_class_position_changed_app case60_base_class_position_changed_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case60_base_class_position_changed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case60_base_class_position_changed/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# id = <garbage>; CORRUPTION: base-class order changed, subobject offsets mismatch
-```
 
 ---
 

@@ -58,7 +58,7 @@ jobs:
 
   check:
     needs: build
-    uses: abicheck/abicheck/.github/workflows/check-project.yml@v1
+    uses: abicheck/abicheck/.github/workflows/check-project.yml@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
 ```
 
 This is the same primitive S13 (package-only inputs), S17 (multiple build

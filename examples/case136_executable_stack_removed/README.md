@@ -1,51 +1,85 @@
 # Case 136: Executable Stack Removed (the fix direction)
 
-**Category:** ELF / Security | **Verdict:** COMPATIBLE
+**Category:** Quality | **Verdict:** 🟢 COMPATIBLE
 
-## What this case is about
+## Verdict and consumer impact
 
-This is the **fix** counterpart to [case49](../case49_executable_stack)
-(which goes the bad direction). v1 has an executable stack: `PT_GNU_STACK` with
-flags `RWE` (`-Wl,-z,execstack`). v2 corrects it to `RW`
-(`-Wl,-z,noexecstack`), restoring NX (No-eXecute) protection. The exported ABI
-surface is identical in both.
+This is the fix counterpart to case49 (which goes the bad direction). v1 has
+an executable stack — `PT_GNU_STACK` with flags `RWE` (`-Wl,-z,execstack`).
+v2 corrects it to `RW` (`-Wl,-z,noexecstack`), restoring NX (No-eXecute)
+protection on the process stack. The exported ABI surface is byte-identical
+between versions, so every existing binary keeps working unmodified — this
+change only tightens a security property, it never breaks a caller.
 
-Tracking the *removal* of an executable stack matters because abicheck should
-report it as a positive, compatible change (a hardening improvement), not flag
-it as a regression — the symmetric complement of detecting the regression.
+## Old/new diff
 
-## What abicheck detects
+| old/lib.c | new/lib.c |
+|-----------|-----------|
+| linked with `-Wl,-z,execstack` (`PT_GNU_STACK` = RWE) | linked with `-Wl,-z,noexecstack` (`PT_GNU_STACK` = RW) |
+| (library source is identical — see `old/lib.c` / `new/lib.c`) | |
 
-- **`EXECUTABLE_STACK_REMOVED`**: v1's `GNU_STACK` is executable (`RWE`); v2's is
-  not (`RW`). Classified as a compatible quality/security improvement.
-
-**Overall verdict: COMPATIBLE.**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so -Wl,-z,execstack
-gcc -shared -fPIC -g v2.c -o libv2.so -Wl,-z,noexecstack
-
-readelf -lW libv1.so | grep GNU_STACK   # RWE
-readelf -lW libv2.so | grep GNU_STACK   # RW
-
-python3 -m abicheck.cli dump libv1.so -o v1.json
-python3 -m abicheck.cli dump libv2.so -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-# → COMPATIBLE + EXECUTABLE_STACK_REMOVED
+gcc -shared -fPIC -g old/lib.c -o libfoo_v1.so -Wl,-z,execstack
+gcc -shared -fPIC -g new/lib.c -o libfoo_v2.so -Wl,-z,noexecstack
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
+## Expected abicheck finding
 
-Nothing to fix — v2 is the corrected artifact. Ensure all assembly inputs carry
-`.section .note.GNU-stack,"",@progbits` so the linker never unions in an
-executable stack.
+```text
+Verdict: COMPATIBLE (exit 0)
 
-## Real Failure Demo
+- executable_stack_removed: Executable stack removed: library now uses a
+  non-executable stack - NX protection restored (good practice)
+```
 
-**Severity: SECURITY IMPROVEMENT (informational)**
+## Minimum evidence
 
-Both versions run identically; v2 simply restores NX protection on the process
-stack. abicheck reports the change as compatible, distinguishing a hardening
-*improvement* from a regression.
+`min_evidence: L0` — `PT_GNU_STACK`'s flags are read directly from the ELF
+program headers; no debug info or headers are needed to see the change.
+
+## Why abicheck catches it
+
+abicheck reads each library's `PT_GNU_STACK` segment flags from the ELF
+program header table and diffs the executable bit between versions — a pure
+L0 ELF fact, tracked as the symmetric complement of the executable-stack
+*regression* case49 demonstrates, so a hardening improvement is reported as
+compatible rather than silently ignored or mis-flagged as a regression.
+
+## Runtime failure demonstration
+
+No observable effect on existing binaries — both versions run identically;
+v2 only restores NX protection on the process stack.
+
+```bash
+readelf -lW libfoo_v1.so | grep GNU_STACK
+# → GNU_STACK ... RWE 0x10
+
+readelf -lW libfoo_v2.so | grep GNU_STACK
+# → GNU_STACK ... RW  0x10
+
+gcc -shared -fPIC -g old/lib.c -o libfoo.so -Wl,-z,execstack
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → compute(7) = 50
+# → transform(3, 4) = 11
+
+gcc -shared -fPIC -g new/lib.c -o libfoo.so -Wl,-z,noexecstack
+./app
+# → compute(7) = 50
+# → transform(3, 4) = 11   ← identical
+```
+
+## Safe redesign
+
+This case *is* the safe redesign — the fix is exactly `-Wl,-z,noexecstack`
+(or, in CMake, `add_link_options(-Wl,-z,noexecstack)`), and ensuring any
+hand-written assembly inputs carry a `.section .note.GNU-stack,"",@progbits`
+marker so the linker never unions in an executable-stack requirement from an
+unmarked object file.
+
+## References
+
+- [Linux `PT_GNU_STACK` / NX stack hardening](https://www.airs.com/blog/archives/518)

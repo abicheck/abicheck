@@ -574,7 +574,9 @@ build-id resolution:
 
 There is no separate `appcompat` mode (ADR-043 folded it into `compare
 --used-by`). Check whether your application binary is affected by a library
-update by scoping a normal `compare` to it via `extra-args`:
+update by scoping a normal `compare` to it via `extra-args` (see the note in
+[GitHub Action: Application-scoped comparison](github-action.md#application-scoped-comparison-adr-043-appcompat-folded-into-compare-used-by)
+about the newer, post-`v0.5.0` dedicated `used-by` input):
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0

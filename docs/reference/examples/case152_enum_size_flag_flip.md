@@ -10,34 +10,115 @@
 | **Detected `ChangeKind`s** | `enum_size_flag_changed` |
 | **Source files** | `examples/case152_enum_size_flag_flip/` |
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Finding:** `enum_size_flag_changed` · **Evidence tier:** L3
+**Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
-> These cases ship a hand-built pair of evidence-model fixtures (`old.json` +
-> `new.json`) instead of compiled `v1`/`v2` binaries, so the corpus is validated
-> compiler-free by `tests/test_l3l4l5_examples.py`. See
-> `scripts/gen_l3l4l5_examples.py`.
+## Verdict and consumer impact
 
-## What it demonstrates
+v1 and v2 have identical source and identical exported symbols — only the
+captured build flag differs: v2 was built with `-fshort-enums`. That flag
+makes the compiler pick the smallest integer type that holds an enum's
+range, so any enum member of a public struct, enum-typed parameter, or
+enum return value can change size — and as a struct member it shifts every
+field that follows it. Nothing in the binary or the header text records
+this; it is purely a property of *how* the library was built, so consumers
+built against the old flag setting are at risk of silent layout drift the
+moment both sides stop agreeing on it.
 
-v1 builds with default (int-sized) enums, v2 adds `-fshort-enums`. The two builds have identical source and identical exported symbols; only the captured build flag differs. `-fshort-enums` makes the compiler pick the smallest integer type that holds an enum's range, so an enum member of a public struct, an enum-typed parameter, or an enum return value changes size — and as a struct member it shifts every field after it.
+## Old/new diff
 
-## Why no single artifact layer sees it
+| Build flags | v1 | v2 |
+|---|---|---|
+| enum sizing | default (int-sized) | `-fshort-enums` |
 
-| Source | What it sees alone |
-|--------|--------------------|
-| Binary (L0/L1) | one self-consistent build — the flag is not in the artifact |
-| Header AST (L2) | the declarations, but not the flags the library was built with |
-| **Build context (L3)** | the captured compile options — the flag flip → the finding |
+Source and exported symbols are byte-for-byte identical between v1 and v2;
+only this compile option differs.
 
-A symbol-only (L0) or even DWARF-only (L1) check of *one* build sees a self-consistent binary; the incompatibility only exists *between* two builds made under different enum-size assumptions, which lives in the L3 build options.
+## abicheck command
 
-Per ADR-028 D3 a build/source-evidence finding never decides a shipped-ABI break
-on its own — the artifact diff proves any concrete break; this finding flags the
-elevated risk (or source/API break) and localizes the cause for review.
+The case ships `old.json`/`new.json` as hand-built `BuildEvidence` fixtures
+(the normalized L3 model `dump --build-info`/`--sources` would produce from a
+real build) rather than compiled binaries, so reproducing the finding means
+embedding each side's fixture into a snapshot's `build_source` field —
+exactly what `dump --build-info` does internally — and comparing the two:
 
-## How to fix
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+from abicheck.model import AbiSnapshot
+from abicheck.buildsource.pack import BuildSourcePack
+from abicheck.buildsource.build_evidence import BuildEvidence
+from abicheck.serialization import save_snapshot
 
-Build the library and all its consumers with the same `-fshort-enums` setting, or avoid exposing bare enums in the ABI (use fixed-width underlying types: `enum E : int { … }`).
+for side in ("old", "new"):
+    d = json.loads(Path(f"{side}.json").read_text())
+    snap = AbiSnapshot(library="libdemo.so", version="1")
+    snap.build_source = BuildSourcePack(root=Path(""), build_evidence=BuildEvidence.from_dict(d))
+    save_snapshot(snap, f"{side}.abi.json")
+PY
+
+abicheck compare old.abi.json new.abi.json
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
+
+Deployment Risk Changes:
+- enum_size_flag_changed: Runtime-model option 'enum_size' changed: 'int' -> 'short'.
+  > May not be link- or runtime-compatible across consumers; the artifact
+    diff confirms any concrete break.
+```
+
+## Minimum evidence
+
+`min_evidence: L3` — the compile options themselves carry the fact. A
+symbol-only (L0) or even DWARF-only (L1) check of *one* build sees a
+self-consistent binary; the incompatibility only exists *between* two
+builds made under different enum-size assumptions, which lives in the L3
+build option, not in either binary alone.
+
+## Why abicheck catches it
+
+`abicheck compare` reads each side's normalized `BuildEvidence.build_options`
+(as embedded by `dump --build-info`/`--sources`, or supplied out-of-band via
+`--old/new-build-info`) and diffs the `enum_size` option directly — the same
+`diff_build_evidence()` routine `tests/test_l3l4l5_examples.py` exercises
+against the committed fixtures. Per ADR-028 D3 a build-evidence finding never
+decides a shipped-ABI break on its own; it flags the elevated risk and
+localizes the cause, and an artifact (L0/L1) diff is what would confirm any
+concrete layout break.
+
+## Runtime failure demonstration
+
+There's no compiled `app.c` consumer for this case — the failure mode is a
+CI/release-engineering one, not a single process crash. Picture a packaging
+pipeline that rebuilds `libdemo.so` for a new distro target and flips
+`-fshort-enums` along the way (a common ARM/embedded toolchain default) while
+downstream consumers keep linking against headers built for the old
+int-sized enums: any consumer that embeds an enum-typed field in a public
+struct silently reads/writes it at the wrong offset after the next rebuild.
+A CI job that diffs `compile_commands.json` (or an equivalent captured
+build-options record) across releases is exactly what would catch this
+before it reaches a consumer.
+
+## Safe redesign
+
+Build the library and all its consumers with the same `-fshort-enums`
+setting, or avoid exposing bare enums in the ABI — use fixed-width
+underlying types (`enum E : int { ... }`) so the size is pinned regardless
+of compiler flags.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` compare built binaries (symbols + DWARF);
+neither reads compile options, so a rebuild with identical source and
+identical exports under a different `-fshort-enums` setting produces no
+diff for either tool unless the flag actually changed a concrete struct's
+size (at which point it's the resulting layout change they'd catch, not the
+flag itself). Only the L3 build-evidence layer that abicheck reads directly
+localizes the cause to the flag flip.
 
 ---
 

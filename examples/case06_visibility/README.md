@@ -2,85 +2,109 @@
 
 **Category:** Visibility | **Verdict:** 🔴 BREAKING (bad practice)
 
-> **ground_truth.json:** `expected: BREAKING`, `category: breaking`
-> **checker_policy.py:** `FUNC_REMOVED` ∈ `BREAKING_KINDS`
+## Verdict and consumer impact
 
-## What this case is about
+`bad.c` (v1) was compiled without `-fvisibility=hidden` and unintentionally
+exports two internal helpers (`internal_helper`, `another_impl`) as part of
+its public ABI surface, alongside the real `public_api`. `good.c` (v2) fixes
+this: it hides `internal_helper` and drops `another_impl` entirely. From a
+consumer's point of view this is indistinguishable from any other symbol
+removal — any binary that resolved `internal_helper` or `another_impl` at
+load time (even by accident, having reached past the intended public API)
+fails to load against v2.
 
-This case detects a **single-library quality issue**: a library that was compiled
-without `-fvisibility=hidden` unintentionally exports all internal symbols as part
-of its public ABI surface.
+## Old/new diff
 
-**This is NOT a comparison between two libraries.**
-The bad practice lives in `libv1.so` (the "bad" library) *alone*.
-`libv2.so` (the "good" library) is provided only as the correct reference —
-it shows how the library *should* look.
+| bad.c (v1) | good.c (v2) |
+|------------|-------------|
+| `__attribute__((visibility("default"))) int public_api(int x)` | `__attribute__((visibility("default"))) int public_api(int x)` |
+| `__attribute__((visibility("default"))) int internal_helper(int x)` | `__attribute__((visibility("hidden"))) int internal_helper(int x)` |
+| `__attribute__((visibility("default"))) int another_impl(int x)` | *(removed)* |
 
-## Why exposing internal symbols is bad practice
-
-- Every internal symbol (`internal_helper`, `another_impl`, etc.) accidentally
-  becomes part of the public ABI contract.
-- Any future refactor of internal helpers — rename, split, remove — risks being
-  detected as an ABI break or actually breaking consumers that mistakenly linked
-  against them.
-- Bloated `.dynsym` tables slow dynamic linker startup (symbol resolution scan).
-
-## What abicheck detects
-
-Running `abicheck dump -H bad.c libv1.so` + comparing to `abicheck dump -H good.c libv2.so`:
-
-- **`VISIBILITY_LEAK`** (BAD PRACTICE / COMPATIBLE): `libv1.so` exports
-  internal-looking symbols (`internal_helper`, `another_impl`) without
-  `-fvisibility=hidden`. Reported on the **old library**, not the transition.
-- **`FUNC_REMOVED`** (BREAKING): `another_impl()` is declared in `bad.c` but
-  absent from `good.c` entirely — the function was removed from both the header
-  and the library. Any consumer that called `another_impl` will fail to load.
-- **`FUNC_VISIBILITY_CHANGED`** (BREAKING): `internal_helper()` changes from
-  default to hidden visibility — it disappears from `.dynsym`.
-
-**Overall verdict: BREAKING** — removing or hiding previously-exported symbols
-is an ABI break for any consumer that depended on them, even if the symbols
-were only exported by accident.
-
-> **Note:** In ELF-only mode (without `-H`), both removals are classified as
-> `FUNC_REMOVED_ELF_ONLY` (BREAKING). Header-scoped mode with `-H` can still
-> distinguish intentional public API from accidentally-leaked internals, but
-> strict binary-only mode treats removed exports as ABI breaks.
-
-## Dual nature of this case
-
-This case is both a **bad practice** (v1 leaked internal symbols) and a **breaking
-change** (v2 removes those symbols from the dynamic table). The root cause is the
-visibility leak in v1; fixing it in v2 is the right thing to do, but it requires
-a SONAME bump or a transition plan.
-
-## How to reproduce
+## abicheck command
 
 ```bash
-# Build
-make -C examples/case06_visibility
-
-# Check libv1.so (bad — leaks internal symbols)
-nm --dynamic --defined-only examples/case06_visibility/libv1.so
-# → public_api, internal_helper, another_impl  ← leak!
-
-# Check libv2.so (good — only public API)
-nm --dynamic --defined-only examples/case06_visibility/libv2.so
-# → public_api only  ← correct
-
-# Run abicheck (with headers for accurate detection)
-python3 -m abicheck.cli dump examples/case06_visibility/libv1.so \
-    -H examples/case06_visibility/bad.c -o /tmp/v1.json
-python3 -m abicheck.cli dump examples/case06_visibility/libv2.so \
-    -H examples/case06_visibility/good.c -o /tmp/v2.json
-python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → BREAKING (FUNC_REMOVED: another_impl) + VISIBILITY_LEAK warning on libv1.so
+gcc -shared -fPIC -g bad.c -o libfoo_v1.so
+gcc -shared -fPIC -g -fvisibility=hidden good.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- func_removed: Public function removed: another_impl
+  > Old binaries call a symbol that no longer exists; dynamic linker
+    will refuse to load or crash at call site.
+- func_visibility_changed: Function visibility changed to hidden:
+  internal_helper (public -> hidden)
+  > Symbol hidden from dynamic linking; old binaries can't find it at
+    load time.
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — both findings come straight from the `.dynsym` exported-
+symbol set: `another_impl` is present in v1's table and absent from v2's,
+and `internal_helper` moves from an exported binding to no binding at all.
+No debug info or headers are required; abicheck's DWARF-aware path (used
+here since the binaries were built with `-g`) additionally confirms
+`internal_helper` still has external linkage in the source, distinguishing a
+genuine visibility change from a function that was deleted outright.
+
+## Why abicheck catches it
+
+The dynamic symbol table is authoritative L0 evidence for what's actually
+callable at runtime. abicheck diffs the exported-symbol sets directly, and
+(via `dwarf_snapshot.py`) can tell a symbol that disappeared from `.dynsym`
+while remaining externally-linked in DWARF apart from one that was deleted
+from the source — surfacing the former as `func_visibility_changed` instead
+of a plain removal.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** an app that (incorrectly) relies on the leaked
+`internal_helper` symbol, run against both libraries.
+
+```bash
+# Build both libraries and the consumer
+gcc -shared -fPIC -g bad.c -o libv1.so
+gcc -shared -fPIC -g -fvisibility=hidden good.c -o libv2.so
+gcc -g app.c -ldl -o app
+
+./app
+# → libv1.so (bad): internal_helper EXPORTED
+# → libv2.so (good): internal_helper hidden
+# → WRONG RESULT: libv2.so (good) hides internal_helper (symbol removed)
+echo "exit: $?"   # → 1
+```
+
+**Why CRITICAL:** the consumer relies on the accidentally-exported
+`internal_helper` symbol. v2 hides it, so any binary that resolved the
+symbol at load time will now fail to link/symbolize and abort before it can
+handle the crash.
+
+**Why this case stays `BASELINE_SIGNAL` in the runtime-smoke matrix
+(intentionally, not a bug):** this `app.c` doesn't fit
+`validation/scripts/run_example_runtime_smoke.py`'s baseline-then-swap
+model — it `dlopen`s `./libv1.so` *and* `./libv2.so` by name in a single
+run, independent of which library the harness's swap step substitutes. Its
+exit code 1 is overloaded: it fires both when `libv2.so` correctly hides
+`internal_helper` (the intended demonstration above) *and* when `libv1.so`
+unexpectedly fails to export it (a real build regression, unrelated to this
+case). A per-case `runtime_baseline_exit` override can't distinguish those
+two conditions, so whitelisting exit 1 as "expected" would silently mask
+the second one. Leave this case's baseline unwhitelisted; it is correctly
+non-blocking today (see `examples/README.md`'s "Known validation gaps").
+
+## Safe redesign
 
 Add `-fvisibility=hidden` to build flags and annotate every intended public
-function with `__attribute__((visibility("default")))`. Use a `FOO_EXPORT` macro:
+function with `__attribute__((visibility("default")))`. Use a `FOO_EXPORT`
+macro:
 
 ```c
 #define FOO_EXPORT __attribute__((visibility("default")))
@@ -88,48 +112,18 @@ FOO_EXPORT int public_api(void);  // exported
 static int internal_helper(void); // or just leave it static
 ```
 
-## Real-world example
+**Real-world example:** Qt, GCC libstdc++, LLVM, and most large C++ projects
+gate their public API with visibility macros (`Q_DECL_EXPORT`,
+`_GLIBCXX_VISIBILITY`) precisely to avoid this. `-fvisibility=hidden` is
+standard practice since GCC 4.
 
-Qt, GCC libstdc++, LLVM, and most large C++ projects gate their public API with
-visibility macros (`Q_DECL_EXPORT`, `_GLIBCXX_VISIBILITY`) precisely to avoid
-this. `-fvisibility=hidden` is standard practice since GCC 4.
+## Cross-tool comparison
+
+`abidiff` also flags this as an ABI change (the removed/hidden symbols),
+though it doesn't carry abicheck's `VISIBILITY_LEAK`-style framing of the
+*bad practice on v1 alone* — it only ever compares the two binaries.
 
 ## References
 
 - [GCC visibility](https://gcc.gnu.org/wiki/Visibility)
 - [libabigail `abidiff` manual](https://sourceware.org/libabigail/manual/abidiff.html)
-## Real Failure Demo
-
-**Severity: CRITICAL**
-
-**Scenario:** compile the app against the leaky v1 library and observe that it finds `internal_helper`. Rebuild the shared object with the hidden-symbol v2 source, rerun the same binary, and notice that the symbol becomes unavailable (exit code 1).
-
-```bash
-# Build the two libraries and keep them beside the app
-gcc -shared -fPIC -g bad.c -o libv1.so
-gcc -shared -fPIC -g good.c -o libv2.so
-gcc -g app.c -ldl -o app
-
-# Run the app while both libs are present
-./app
-# → v1.so (bad): internal_helper EXPORTED (leak!)
-# → v2.so (good): internal_helper hidden (correct)
-# → WRONG RESULT: visibility contract not demonstrated as expected
-
-echo "exit: $?"  # → 1
-```
-
-**Why CRITICAL:** The consumer relies on the accidentally-exported `internal_helper` symbol. v2 hides it, so any binary that resolved the symbol at load time will now fail to link/symbolize and abort before it can handle the crash. This app shows the missing symbol and exits with failure to make the issue obvious.
-
-**Why this case stays `BASELINE_SIGNAL` in the runtime-smoke matrix (intentionally, not a bug):**
-this `app.c` doesn't fit `validation/scripts/run_example_runtime_smoke.py`'s
-baseline-then-swap model — it `dlopen`s `./libv1.so` *and* `./libv2.so` by name
-in a single run, independent of which library the harness's swap step
-substitutes. Its exit code 1 is overloaded: it fires both when `libv2.so`
-correctly hides `internal_helper` (the intended demonstration above) *and*
-when `libv1.so` unexpectedly fails to export it (a real build regression,
-unrelated to this case). A per-case `runtime_baseline_exit` override can't
-distinguish those two conditions, so whitelisting exit 1 as "expected" would
-silently mask the second one. Leave this case's baseline unwhitelisted; it
-is correctly non-blocking today (see `examples/README.md`'s "Known
-validation gaps").

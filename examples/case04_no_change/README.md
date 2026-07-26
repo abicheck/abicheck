@@ -1,60 +1,86 @@
 # Case 04: No Change
 
-**Category:** Symbol API | **Verdict:** ✅ NO_CHANGE (exit 0)
+**Category:** Symbol API | **Verdict:** ✅ NO_CHANGE
 
-## What breaks
-Nothing. Recompiling with the same source produces a bit-for-bit equivalent ABI.
-This case confirms the baseline toolchain works correctly.
+## Verdict and consumer impact
 
-## Why abidiff catches it
-abidiff exits **0** — no differences in the ABI XML representation.
+Nothing breaks. v2 is built from the same source as v1, so the resulting
+`.so` has a bit-for-bit equivalent ABI surface. This case is the baseline
+sanity check: it confirms the toolchain and comparison pipeline agree that
+"no change" really means no change, with zero false positives.
 
-## Code (identical both versions)
-```c
-int stable_api(int x) { return x; }
-```
+## Old/new diff
 
-## Real Failure Demo
+| v1.c | v2.c |
+|------|------|
+| `int stable_api(int x) { return x; }` | `int stable_api(int x) { return x; }` *(identical)* |
 
-**Severity: INFORMATIONAL** (no ABI change — expected outcome)
-
-**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
+## abicheck command
 
 ```bash
-# Build old library + app
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v1.c -o libfoo_v2.so   # same source, rebuilt
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: NO_CHANGE (exit 0)
+
+_No ABI changes detected._
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the exported-symbol table alone is enough to confirm
+equivalence: `stable_api` is present with the same signature-relevant
+metadata in both `.dynsym` tables. No debug info or headers are required to
+reach this verdict.
+
+## Why abicheck catches it
+
+abicheck diffs the two snapshots' exported-symbol sets, and (when DWARF is
+present, as here) their type/layout facts. With identical source and build
+flags, every comparable field matches, so no detector fires and the overall
+verdict collapses to `NO_CHANGE`.
+
+## Runtime failure demonstration
+
+No observable effect on existing binaries — this is the compatible case.
+Swapping the rebuilt `.so` in for the original produces identical output,
+which is the expected outcome for a byte-identical rebuild:
+
+```bash
 gcc -shared -fPIC -g v1.c -o libfoo.so
 gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
 ./app
 # → stable_api(42) = 42
 
-# Swap in new library (no recompile)
-# v2.h is identical to v1.h — no .so yet
-gcc -shared -fPIC -g v1.c -o libfoo.so   # use same source, no change
+gcc -shared -fPIC -g v1.c -o libfoo.so   # rebuild from same source
 ./app
-# → stable_api(42) = 42   (identical output)
+# → stable_api(42) = 42   (unchanged)
 ```
 
-**Why INFORMATIONAL:** no ABI change means no breakage — this is the ideal state for patch releases.
-Use this as a sanity check to confirm your build and test pipeline works correctly.
+## Safe redesign
 
-## Reproduce manually
+N/A — this is the ideal state for a patch release. Use it as a CI sanity
+check: any non-zero exit from `abicheck compare` on an unmodified source
+tree signals a build reproducibility problem, not an ABI change.
+
+**Real-world example:** CI pipelines that run `abicheck compare` on every
+PR use a same-source rebuild like this one as a control case — if it ever
+reports a change, the build (not the ABI) is the thing to investigate.
+
+## Cross-tool comparison
+
 ```bash
-gcc -shared -fPIC -g v1.c -o libfoo_v1.so
-gcc -shared -fPIC -g v1.c -o libfoo_v2.so   # same source
 abidw --out-file v1.xml libfoo_v1.so
 abidw --out-file v2.xml libfoo_v2.so
 abidiff v1.xml v2.xml
 echo "exit: $?"   # → 0
 ```
 
-## How to fix
-N/A — this is the ideal state for patch releases.
-
-## Real-world example
-CI pipelines that run abidiff on every PR use this as the baseline to catch
-regressions: any non-zero exit from abidiff triggers a review gate.
-
 ## References
 
-- [libabigail abidiff manual](https://sourceware.org/libabigail/manual/abidiff.html)
 - [libabigail `abidiff` manual](https://sourceware.org/libabigail/manual/abidiff.html)

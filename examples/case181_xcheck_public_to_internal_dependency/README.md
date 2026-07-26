@@ -1,60 +1,125 @@
-# case181 — Public API reaches an internal declaration
+# Case 181: Public API Reaches an Internal Declaration
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-checks:**
-`public_to_internal_dependency` · **Mode:** single-release audit ·
-**Evidence tier:** L5
+**Category:** Quality (Audit) | **Verdict:** 🟢 COMPATIBLE (bad practice)
 
-## What it demonstrates
+## Verdict and consumer impact
 
-`json_parse` is declared in a public header — consumers can see and call it.
-Its implementation calls straight into `validate_utf8`, a helper declared
-only in `src/json_internal.cc` — a private implementation file with no
-public declaration anywhere. Nothing about `json_parse`'s own signature says
-this; the dependency is only visible by walking the **L5 source graph**'s
-`DECL_CALLS_DECL` edge from the public declaration to the internal one.
+Single-release audit: one build's evidence checked against itself, no
+baseline. abicheck's verdict is `COMPATIBLE` — the ABI hasn't broken — but
+the audit flags an advisory finding: the public, header-declared
+`json_parse()` calls straight into `validate_utf8()`, a helper declared
+only in `src/json_internal.cc`, a private implementation file with no
+public declaration anywhere. Nothing about `json_parse()`'s own signature
+says this — the dependency is only visible by walking the L5 source
+graph's `DECL_CALLS_DECL` edge from the public declaration to the internal
+one. If `validate_utf8()`'s behavior changes next release, `json_parse()`'s
+contract silently shifts with it, with no signal in a public-header diff
+at all. This is the intra-version counterpart to case150's
+`exported_not_public`/`public_not_exported` pair: that pair catches a
+mismatch between *what's exported* and *what's declared*; this one catches
+a mismatch **inside** a single public entry point — its behavior depends
+on an entity consumers cannot see, version, or reason about independently.
 
-This is the intra-version counterpart to the `exported_not_public` /
-`public_not_exported` pair in `case150`: those catch a mismatch between
-*what's exported* and *what's declared*; this one catches a mismatch
-**inside** a single public entry point — its behavior depends on an entity
-consumers cannot see, version, or reason about independently. If
-`validate_utf8` changes behavior next release, `json_parse`'s contract
-silently shifts with it, with no signal in the public header diff at all.
+## What this snapshot contains
 
-When the internal declaration's own file is among the revision's changed
-paths (`CrosscheckConfig.changed_paths`), the same finding is reported at
-`Confidence.HIGH` instead of `MEDIUM` — "this call reaches a file that
-changed this revision" is a stronger signal than "this call reaches
-*something* internal," and `abicheck scan --since` wires the changed-path
-set through automatically.
+`snapshot.abi.json` is a single, hand-built `AbiSnapshot` carrying the L5
+source graph for one build:
 
-## Reproduce
+| Source in the snapshot | What it records |
+|---|---|
+| Public-header AST (L2) | `json_parse` declared in the public header |
+| L5 source graph (`build_source.source_graph`, `DECL_CALLS_DECL` / `SOURCE_DECLARES` edges) | `json_parse`'s definition calls `validate_utf8`; `validate_utf8` is declared only in `src/json_internal.cc`, a file the source graph records as non-public |
+
+## abicheck command
 
 ```bash
-python3 -m abicheck.mcp_server  # or:
+abicheck scan snapshot.abi.json
+```
+
+## Expected abicheck finding
+
+```text
+Coverage
+  crosscheck:public_to_internal_dependency present   L5 reachability: 1 public declaration(s) depending on an internal entity
+
+ABI-hygiene catalog (intra-version, advisory)
+  [warning] public_to_internal_dependency: 1
+
+Verdict: COMPATIBLE (exit 0)
+```
+
+The underlying edge, read directly off the loaded snapshot via
+`run_crosschecks()` (the same call the CLI's cross-check pass and
+`tests/test_g20_catalog.py` both drive):
+
+```bash
 python3 - <<'EOF'
 import json
-from abicheck.serialization import snapshot_from_dict
+from abicheck.serialization import load_snapshot
 from abicheck.buildsource.crosscheck import run_crosschecks
 
-snap = snapshot_from_dict(json.load(open("snapshot.abi.json")))
+snap = load_snapshot("snapshot.abi.json")
 res = run_crosschecks(snap)
 for c in res.findings:
     print(c.kind.value, c.symbol, "->", c.new_value)
 EOF
-# → public_to_internal_dependency json_parse -> validate_utf8
 ```
 
-In a real project, produce the L5 graph with `abicheck dump --sources <tree>`
-(or `scan --depth source`) using clang for the call-graph pass — the
-dependency edges this check reads only exist after an S4/S5 semantic pass; a
-structural-only graph has no call edges to walk, and the check reports
-`skipped`, never a false clean.
+```text
+public_to_internal_dependency json_parse -> validate_utf8
+```
 
-## Fix
+## Minimum evidence
+
+`min_evidence: L5` — the binary (L0/L1) and the public-header AST (L2) each
+see `json_parse` as a normal public function with no signal that it
+depends on anything internal; only the L5 source graph's call edge from
+`json_parse`'s declaration to `validate_utf8`'s internal-only declaration
+exposes the dependency. A structural-only graph (no semantic/call-edge
+pass) has no call edges to walk either — this check needs the deeper S4/S5
+semantic source pass, not just a source tree being present.
+
+## Why abicheck catches it
+
+`public_to_internal_dependency` walks the L5 source graph's
+`DECL_CALLS_DECL` edges starting from every public declaration, and flags
+any edge that reaches a declaration whose own `SOURCE_DECLARES` provenance
+is a non-public file. Neither the binary nor the header AST carries a
+notion of "which internal function does this public function call" — only
+the source graph's call edges do, supplied by the `source_index` provider.
+When the internal declaration's own file is among the revision's changed
+paths (`CrosscheckConfig.changed_paths`), the same finding is reported at
+higher confidence — "this call reaches a file that changed this revision"
+is a stronger signal than "this call reaches *something* internal" — and
+`abicheck scan --since` wires the changed-path set through automatically.
+
+## Why this matters for a real release
+
+A consumer reading `json_parse()`'s public declaration has no way to know
+its behavior depends on `validate_utf8()` — that dependency is invisible
+in the header, the binary's symbol table, and any ordinary v1/v2 diff of
+the public surface, because `validate_utf8` was never public API to begin
+with. If a later release changes `validate_utf8`'s behavior (tightens
+validation, changes error handling, etc.), `json_parse()`'s observable
+contract shifts too, but nothing in the public API surface signals a
+change happened — the diff between v1 and v2's headers would show nothing.
+Catching the dependency now means the maintainer at least knows it exists
+before deciding whether to stabilize, wrap, or sever it.
+
+## Safe redesign
 
 - Make the dependency public: move `validate_utf8` (or a stable wrapper
-  around it) into a public header, so consumers can see and version it.
+  around it) into a public header, so consumers can see and version it
+  independently.
 - Or sever it: keep `json_parse`'s behavior independent of any internal
-  helper's own evolution, so a private-file change can never silently alter
-  a documented public contract.
+  helper's own evolution, so a private-file change can never silently
+  alter a documented public contract.
+
+## Cross-tool comparison
+
+`public_to_internal_dependency` is a cross-source check unique to
+abicheck's audit mode — it walks a source-level call graph from a public
+declaration into private implementation files within the *same* build,
+which isn't something `abidiff`/`abi-compliance-checker` do (they diff two
+compiled ABI dumps against each other; neither reads source-level call
+edges at all).

@@ -25,12 +25,12 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case22_method_const_changed](../case22_method_const_changed.md) | Method Const Qualifier Changed | 🔴 BREAKING | Breaking |
 | [case23_pure_virtual_added](../case23_pure_virtual_added.md) | Virtual Method Became Pure Virtual | 🔴 BREAKING | Breaking |
 | [case24_union_field_removed](../case24_union_field_removed.md) | Union Field Removed | 🔴 BREAKING | Breaking |
-| [case26_union_field_added](../case26_union_field_added.md) | Union Field Added | 🔴 BREAKING | Breaking |
+| [case26_union_field_added](../case26_union_field_added.md) | Union Field Added (Size Grows) | 🔴 BREAKING | Breaking |
 | [case28_typedef_opaque](../case28_typedef_opaque.md) | Typedef and Opaque Type Changes | 🔴 BREAKING | Breaking |
 | [case30_field_qualifiers](../case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🔴 BREAKING | Breaking |
-| [case33_pointer_level](../case33_pointer_level.md) | - Pointer Level Change | 🔴 BREAKING | Breaking |
-| [case36_anon_struct](../case36_anon_struct.md) | - Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
-| [case37_base_class](../case37_base_class.md) | - Base Class Changes | 🔴 BREAKING | Breaking |
+| [case33_pointer_level](../case33_pointer_level.md) | Pointer Level Change | 🔴 BREAKING | Breaking |
+| [case36_anon_struct](../case36_anon_struct.md) | Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
+| [case37_base_class](../case37_base_class.md) | Base Class Changes | 🔴 BREAKING | Breaking |
 | [case38_virtual_methods](../case38_virtual_methods.md) | Virtual Method Changes | 🔴 BREAKING | Breaking |
 | [case39_var_const](../case39_var_const.md) | Variable Const Change | 🔴 BREAKING | Breaking |
 | [case40_field_layout](../case40_field_layout.md) | Field Layout Changes | 🔴 BREAKING | Breaking |
@@ -60,39 +60,39 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case72_covariant_return_changed](../case72_covariant_return_changed.md) | Covariant Return Type Changed | 🔴 BREAKING | Breaking |
 | [case73_typedef_underlying_changed](../case73_typedef_underlying_changed.md) | Typedef Underlying Type Changed | 🔴 BREAKING | Breaking |
 | [case74_detail_base_class_changed](../case74_detail_base_class_changed.md) | Internal `detail::` base class layout change leaks via public API | 🔴 BREAKING | Breaking |
-| [case75_detail_embedded_by_value](../case75_detail_embedded_by_value.md) | Internal `detail::` impl struct embedded by value | 🔴 BREAKING | Breaking |
-| [case76_detail_pimpl_vtable_changed](../case76_detail_pimpl_vtable_changed.md) | Internal `detail::` polymorphic base vtable change | 🔴 BREAKING | Breaking |
-| [case77_detail_templated_base_changed](../case77_detail_templated_base_changed.md) | Internal `detail::` *templated* base class layout change | 🔴 BREAKING | Breaking |
-| [case78_task_arena_attach_tag](../case78_task_arena_attach_tag.md) | task_arena::attach Tag Type Replaces Enum | 🔴 BREAKING | Breaking |
-| [case79_missing_template_instantiation](../case79_missing_template_instantiation.md) | Missing template instantiation in shipped binary | 🔴 BREAKING | Breaking |
-| [case80_pimpl_shared_to_unique](../case80_pimpl_shared_to_unique.md) | Pimpl alias changed from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
-| [case81_serialization_tag_reassigned](../case81_serialization_tag_reassigned.md) | Serialization tag ID reassigned | 🔴 BREAKING | Breaking |
-| [case82_sycl_overload_set_removed](../case82_sycl_overload_set_removed.md) | SYCL overload set removed (DPC++ build withdrawn) | 🔴 BREAKING | Breaking |
-| [case85_internal_template_signature_changed](../case85_internal_template_signature_changed.md) | internal function-template signature leaks via public API (BREAKING) | 🔴 BREAKING | Breaking |
-| [case86_tag_struct_renamed](../case86_tag_struct_renamed.md) | Tag struct renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |
-| [case87_default_template_arg_changed](../case87_default_template_arg_changed.md) | Default template argument changed | 🔴 BREAKING | Breaking |
+| [case75_detail_embedded_by_value](../case75_detail_embedded_by_value.md) | Internal `detail::` Struct Embedded by Value | 🔴 BREAKING | Breaking |
+| [case76_detail_pimpl_vtable_changed](../case76_detail_pimpl_vtable_changed.md) | Internal `detail::` Polymorphic Base Vtable Change | 🔴 BREAKING | Breaking |
+| [case77_detail_templated_base_changed](../case77_detail_templated_base_changed.md) | Internal `detail::` Templated Base Class Layout Change | 🔴 BREAKING | Breaking |
+| [case78_task_arena_attach_tag](../case78_task_arena_attach_tag.md) | `task_arena::attach` Tag Type Replaces Enum | 🔴 BREAKING | Breaking |
+| [case79_missing_template_instantiation](../case79_missing_template_instantiation.md) | Missing Template Instantiation in Shipped Binary | 🔴 BREAKING | Breaking |
+| [case80_pimpl_shared_to_unique](../case80_pimpl_shared_to_unique.md) | Pimpl Alias Switched from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
+| [case81_serialization_tag_reassigned](../case81_serialization_tag_reassigned.md) | Serialization Tag ID Reassigned | 🔴 BREAKING | Breaking |
+| [case82_sycl_overload_set_removed](../case82_sycl_overload_set_removed.md) | SYCL Overload Set Removed (DPC++ Build Withdrawn) | 🔴 BREAKING | Breaking |
+| [case85_internal_template_signature_changed](../case85_internal_template_signature_changed.md) | Internal Template Signature Changed | 🔴 BREAKING | Breaking |
+| [case86_tag_struct_renamed](../case86_tag_struct_renamed.md) | Tag Struct Renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |
+| [case87_default_template_arg_changed](../case87_default_template_arg_changed.md) | Default Template Argument Changed | 🔴 BREAKING | Breaking |
 | [case88_cpo_kind_changed](../case88_cpo_kind_changed.md) | CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
-| [case89_inline_accessor_renamed_pimpl_member](../case89_inline_accessor_renamed_pimpl_member.md) | Inline accessor references renamed pimpl member | 🔴 BREAKING | Breaking |
+| [case89_inline_accessor_renamed_pimpl_member](../case89_inline_accessor_renamed_pimpl_member.md) | Inline Accessor References Renamed Pimpl Member | 🔴 BREAKING | Breaking |
 | [case94_empty_tag_gained_state](../case94_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |
 | [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
-| [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🔴 BREAKING | Breaking |
-| [case100_experimental_removed_without_replacement](../case100_experimental_removed_without_replacement.md) | experimental:: removed without replacement (API break) | 🔴 BREAKING | Breaking |
-| [case101_inline_namespace_version_bumped](../case101_inline_namespace_version_bumped.md) | inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
-| [case102_frozen_runtime_signature_changed](../case102_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | 🔴 BREAKING | Breaking |
-| [case104_glibcxx_dual_abi_flip](../case104_glibcxx_dual_abi_flip.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | 🔴 BREAKING | Breaking |
+| [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | API Depends on Consumer Environment | 🔴 BREAKING | Breaking |
+| [case100_experimental_removed_without_replacement](../case100_experimental_removed_without_replacement.md) | Experimental Declaration Removed Without Replacement | 🔴 BREAKING | Breaking |
+| [case101_inline_namespace_version_bumped](../case101_inline_namespace_version_bumped.md) | Inline Namespace Version Bumped | 🔴 BREAKING | Breaking |
+| [case102_frozen_runtime_signature_changed](../case102_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed | 🔴 BREAKING | Breaking |
+| [case104_glibcxx_dual_abi_flip](../case104_glibcxx_dual_abi_flip.md) | libstdc++ Dual-ABI Flip | 🔴 BREAKING | Breaking |
 | [case107_task_scheduler_init_removed](../case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (historical ABI break) | 🔴 BREAKING | Breaking |
 | [case108_task_class_removed](../case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
 | [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🔴 BREAKING | Breaking |
 | [case110_concurrent_unordered_map_api_drift](../case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
-| [case112_lp64_ilp64](../case112_lp64_ilp64.md) | LP64 → ILP64 integer-model switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
+| [case112_lp64_ilp64](../case112_lp64_ilp64.md) | LP64 → ILP64 Integer-Model Switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
 | [case113_abi_tag_changed](../case113_abi_tag_changed.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | 🔴 BREAKING | Breaking |
-| [case114_char8t_migration](../case114_char8t_migration.md) | char8_t migration (C++20 char-family → char8_t) | 🔴 BREAKING | Breaking |
-| [case115_bit_int_width_changed](../case115_bit_int_width_changed.md) | _BitInt(N) width change (C23 64 → 128) | 🔴 BREAKING | Breaking |
-| [case116_atomic_qualifier_changed](../case116_atomic_qualifier_changed.md) | _Atomic qualifier added (C11) | 🔴 BREAKING | Breaking |
-| [case117_no_unique_address](../case117_no_unique_address.md) | [[no_unique_address]] layout overlay (no new ChangeKind) | 🔴 BREAKING | Breaking |
-| [case121_kernel_btf_struct_field_added](../case121_kernel_btf_struct_field_added.md) | Kernel BTF struct grows a field (out-of-tree module break) | 🔴 BREAKING | Breaking |
-| [case126_sycl_device_impl_ptr](../case126_sycl_device_impl_ptr.md) | SYCL `device` impl pointer — `shared_ptr` → raw pointer | 🔴 BREAKING | Breaking |
-| [case127_data_object_size_changed](../case127_data_object_size_changed.md) | Exported Data Object Size Change | 🔴 BREAKING | Breaking |
+| [case114_char8t_migration](../case114_char8t_migration.md) | char8_t Migration (C++20 char-family → char8_t) | 🔴 BREAKING | Breaking |
+| [case115_bit_int_width_changed](../case115_bit_int_width_changed.md) | _BitInt(N) Width Change (C23 64 → 128) | 🔴 BREAKING | Breaking |
+| [case116_atomic_qualifier_changed](../case116_atomic_qualifier_changed.md) | _Atomic Qualifier Added (C11) | 🔴 BREAKING | Breaking |
+| [case117_no_unique_address](../case117_no_unique_address.md) | [[no_unique_address]] Layout Overlay (no dedicated ChangeKind) | 🔴 BREAKING | Breaking |
+| [case121_kernel_btf_struct_field_added](../case121_kernel_btf_struct_field_added.md) | Kernel BTF Struct Field Growth | 🔴 BREAKING | Breaking |
+| [case126_sycl_device_impl_ptr](../case126_sycl_device_impl_ptr.md) | SYCL `device` Impl Pointer — `shared_ptr` → Raw Pointer | 🔴 BREAKING | Breaking |
+| [case127_data_object_size_changed](../case127_data_object_size_changed.md) | Exported Data Object Size Changed | 🔴 BREAKING | Breaking |
 | [case129_struct_return_convention](../case129_struct_return_convention.md) | Struct-Return Convention Change | 🔴 BREAKING | Breaking |
 | [case139_symbol_version_node_removed](../case139_symbol_version_node_removed.md) | Symbol Version Node Removed | 🔴 BREAKING | Breaking |
 | [case140_empty_base_optimization_lost](../case140_empty_base_optimization_lost.md) | Empty Base Optimization Lost (base subobject moved) | 🔴 BREAKING | Breaking |
@@ -100,17 +100,17 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case142_vtable_slot_count_binary_only](../case142_vtable_slot_count_binary_only.md) | Vtable Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
 | [case166_ref_qualifier_added](../case166_ref_qualifier_added.md) | Method Ref-Qualifier Added (`str()` → `str() &`) | 🔴 BREAKING | Breaking |
 | [case167_base_became_virtual](../case167_base_became_virtual.md) | Base Class Became Virtual (`: public Device` → `: public virtual Device`) | 🔴 BREAKING | Breaking |
-| [case168_virtual_method_devirtualized](../case168_virtual_method_devirtualized.md) | Virtual Method Devirtualized (flush() leaves the vtable) | 🔴 BREAKING | Breaking |
+| [case168_virtual_method_devirtualized](../case168_virtual_method_devirtualized.md) | Virtual Method Devirtualized (`flush()` leaves the vtable) | 🔴 BREAKING | Breaking |
 | [case172_vtable_thunk_offset_changed](../case172_vtable_thunk_offset_changed.md) | Vtable Thunk Offset Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
 | [case173_vtt_slot_count_changed](../case173_vtt_slot_count_changed.md) | VTT Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
 | [case174_secondary_vtable_group_changed](../case174_secondary_vtable_group_changed.md) | Secondary Vtable Group Changed | 🔴 BREAKING | Breaking |
 | [case175_kabi_crc_changed](../case175_kabi_crc_changed.md) | kABI CRC Changed | 🔴 BREAKING | Breaking |
 | [case176_kabi_symbol_namespace_changed](../case176_kabi_symbol_namespace_changed.md) | kABI Export Namespace Changed | 🔴 BREAKING | Breaking |
 | [case177_long_double_abi_changed](../case177_long_double_abi_changed.md) | long double ABI Changed | 🔴 BREAKING | Breaking |
-| [case182_accidental_export_removed_still_breaking](../case182_accidental_export_removed_still_breaking.md) | Accidental export removed — still BREAKING under public-header scoping | 🔴 BREAKING | Breaking |
-| [case187_public_struct_private_field_type](../case187_public_struct_private_field_type.md) | _public_struct_private_field_type — Public struct field retyped to an internal type | 🔴 BREAKING | Breaking |
-| [case188_public_class_private_base_class](../case188_public_class_private_base_class.md) | _public_class_private_base_class — Public class gains a private base class | 🔴 BREAKING | Breaking |
-| [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type.md) | _public_function_private_parameter_type — Public function parameter retyped to an internal type | 🔴 BREAKING | Breaking |
-| [case191_header_only_graph_field_type](../case191_header_only_graph_field_type.md) | _header_only_graph_field_type — Same finding, proven with a genuine confirmed-zero (no coverage trick) | 🔴 BREAKING | Breaking |
-| [case192_call_graph_break_survives_suppression](../case192_call_graph_break_survives_suppression.md) | Call-graph-reachable break survives a broad internal-namespace suppression | 🔴 BREAKING | Breaking |
-| [case193_ordinary_exported_fn_call_not_reachable](../case193_ordinary_exported_fn_call_not_reachable.md) | An ordinary exported function's internal call is not public-reachable | 🔴 BREAKING | Breaking |
+| [case182_accidental_export_removed_still_breaking](../case182_accidental_export_removed_still_breaking.md) | Accidental Export Removed — Still Breaking Under Public-Header Scoping | 🔴 BREAKING | Breaking |
+| [case187_public_struct_private_field_type](../case187_public_struct_private_field_type.md) | Public Struct Field Retyped to an Internal Type | 🔴 BREAKING | Breaking |
+| [case188_public_class_private_base_class](../case188_public_class_private_base_class.md) | Public Class Gains a Private Base Class | 🔴 BREAKING | Breaking |
+| [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type.md) | Public Function Parameter Retyped to an Internal Type | 🔴 BREAKING | Breaking |
+| [case191_header_only_graph_field_type](../case191_header_only_graph_field_type.md) | Public Struct Gains a Field of a Private Type (Header-Only Graph) | 🔴 BREAKING | Breaking |
+| [case192_call_graph_break_survives_suppression](../case192_call_graph_break_survives_suppression.md) | Call-Graph-Reachable Break Survives Suppression | 🔴 BREAKING | Breaking |
+| [case193_ordinary_exported_fn_call_not_reachable](../case193_ordinary_exported_fn_call_not_reachable.md) | Ordinary Exported Function's Internal Call Is Not Public-Reachable | 🔴 BREAKING | Breaking |

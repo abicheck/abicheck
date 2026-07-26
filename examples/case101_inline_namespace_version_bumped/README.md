@@ -1,32 +1,127 @@
-# case101 — inline namespace version bumped (BREAKING)
+# Case 101: Inline Namespace Version Bumped
 
-## What this case demonstrates
+**Category:** Symbol API | **Verdict:** ❌ BREAKING
 
-A library uses a versioned inline namespace (`inline namespace _V1`) to
-manage ABI evolution. Between v1 and v2 the version segment is bumped
-to `_V2`. Source still compiles, but every freshly built TU emits a
-different mangled symbol — old and new TUs of the same program ODR-
-violate when linked together.
+## Verdict and consumer impact
 
-| v1 declares | v2 declares |
-|---|---|
-| `lib::_V1::sort`, `lib::_V1::unique` (inline) | `lib::_V2::sort`, `lib::_V2::unique` (inline) |
+The library publishes its API under a versioned `inline namespace _V1`.
+v2 bumps the segment to `_V2`. Consumers spell `lib::sort()`/`lib::unique()`
+in both versions — source keeps compiling unchanged — but every mangled
+symbol changes (`_ZN3lib3_V14sortEv` → `_ZN3lib3_V24sortEv`). Any program
+that mixes an old TU (or a pre-built `.so`) with a newly-compiled TU
+against v2's headers ODR-violates: the two "same-named" functions are, at
+the ABI level, entirely different symbols.
 
-## Why a dedicated detector
+## Old/new diff
 
-The existing `INLINE_NAMESPACE_MOVED` detector is symbol-table driven
-and requires ≥2 mangled-symbol moves. It works for built shared
-libraries but misses:
+| v1.h | v2.h |
+|------|------|
+| `namespace lib { inline namespace _V1 { void sort(); void unique(); } }` | `namespace lib { inline namespace _V2 { void sort(); void unique(); } }` |
 
-- header-only / template libraries that ship no `.so`
-- single-symbol bumps
-- pure declaration-level snapshots (castxml header dumps)
+## abicheck command
 
-`INLINE_NAMESPACE_VERSION_BUMPED` fires from declared qualified names
-alone, so it catches the bump even on header-only inputs and on a
-single declaration.
+```bash
+clang++ -std=c++17 -shared -fPIC -g v1.cpp -o liblib_v1.so
+clang++ -std=c++17 -shared -fPIC -g v2.cpp -o liblib_v2.so
+abicheck compare liblib_v1.so liblib_v2.so
+```
 
-## Expected verdict
+## Expected abicheck finding
 
-`BREAKING` — mangled names change, so any program that mixes old and
-new TUs at link or load time is broken.
+```text
+Verdict: BREAKING (exit 4)
+
+## Breaking Changes
+
+- func_removed: Public function removed: lib::_V1::sort
+- func_removed: Public function removed: lib::_V1::unique
+- inline_namespace_version_bumped: Inline namespace version bumped:
+  'lib::_V1::sort' -> 'lib::_V2::sort' (version segment changed from
+  [1] to [2]); mangled names change so old and new TUs of the same
+  program ODR-violate.
+- inline_namespace_version_bumped: Inline namespace version bumped:
+  'lib::_V1::unique' -> 'lib::_V2::unique' (same pattern)
+
+## Additions
+
+- func_added: New public function: lib::_V2::sort
+- func_added: New public function: lib::_V2::unique
+```
+
+## Minimum evidence
+
+`min_evidence: L0` — the mangled symbols disappearing from `_V1::` and
+reappearing under `_V2::` are enough on their own to reach the BREAKING
+verdict, even on a fully stripped binary with no debug info at all (as
+plain `func_removed_elf_only`/`func_added` pairs). The specific
+`inline_namespace_version_bumped` diagnosis needs the declared/qualified
+names, which abicheck recovers from DWARF (L1) or header text (L2) — no
+public headers are required as long as DWARF is present.
+`INLINE_NAMESPACE_VERSION_BUMPED` is a specialization of the existing
+symbol-table-driven `inline_namespace_moved` detector that instead fires
+from declared-name evidence, so it also works on header-only inputs and
+single-symbol bumps where the older detector (which requires ≥2 correlated
+mangled-symbol moves) would miss it — not exercised by this fixture, which
+ships a real `.so` either way.
+
+## Why abicheck catches it
+
+Each function's qualified declared name (recovered from DWARF, or from a
+header AST when present) includes its enclosing inline-namespace segment.
+The detector matches functions by leaf name across snapshots and checks
+whether the immediately-enclosing namespace segment looks like a version
+tag (`_V<N>`) that incremented — when it did, it reports
+`inline_namespace_version_bumped` alongside the underlying `func_removed`/
+`func_added` pair the mangled-name change produces.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
+
+```bash
+# Build old library + app
+ln -sf liblib_v1.so liblib.so
+clang++ -std=c++17 app.cpp -L. -llib -Wl,-rpath,. -o app
+./app
+# → exits 0 (lib::sort(); lib::unique(); both resolve to _V1 symbols)
+
+# Swap in new library (no recompile)
+ln -sf liblib_v2.so liblib.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol: _ZN3lib3_V14sortEv
+```
+
+**Why CRITICAL:** the old binary's call sites are hard-linked against the
+`_V1`-mangled symbols; v2's `.so` only exports `_V2`-mangled equivalents,
+so the dynamic linker cannot resolve them and the process fails to start.
+
+## Safe redesign
+
+Don't bump a versioned inline namespace's segment without a SONAME bump —
+treat it exactly like any other ABI-breaking symbol rename, because that's
+what it mechanically is. If both API generations must coexist in one
+build (e.g. during a migration window), keep both inline namespaces
+present simultaneously rather than replacing one with the other, or use
+a non-inline (explicitly qualified) versioned namespace so consumers
+opt in deliberately.
+
+**Real-world example:** libc++ and other standard-library implementations
+use versioned inline namespaces (`std::__1::`, `std::__2::`) for exactly
+this reason — bumping the version segment is treated as equivalent to an
+SONAME-level ABI break, never done silently within a compatible release.
+
+## Cross-tool comparison
+
+`abidiff` (binary-only) would see the same symbol churn and report a
+function removal/addition pair per symbol; it has no dedicated concept of
+"inline namespace version bump" — that framing, and the single detector
+tying the removal/addition pair together as one semantic event, is unique
+to abicheck. Not re-verified numerically in this environment (`abidiff` is
+not installed here).
+
+## References
+
+- [cppreference: inline namespaces](https://en.cppreference.com/w/cpp/language/namespace#Inline_namespaces)
+- [libabigail `abidiff` manual](https://sourceware.org/libabigail/manual/abidiff.html)

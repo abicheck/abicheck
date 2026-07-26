@@ -1,110 +1,117 @@
-# Case 84: Multi-library bundle SONAME skew
+# Case 84: Multi-Library Bundle SONAME Skew
 
-**Category:** Cross-artifact ABI | **Verdict:** BREAKING
+**Category:** Bundle / cross-artifact ABI | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-oneDAL ships as a co-versioned bundle:
+oneDAL-style toolkits ship several `.so`s that are meant to move in lockstep —
+one release, one SONAME bump across the whole set. case84 encodes a release
+where `libonedal_core` and `libonedal_dpc` bump `.so.1 → .so.2` but
+`libonedal_thread` is accidentally left at `.so.1`. Each of the three
+libraries passes an individual ABI check — nothing *inside* any one file is
+wrong. The cohort as a whole is broken: a distro package built from this
+release records `Depends: libonedal-core2, libonedal-thread1`, an internally
+inconsistent dependency set, and a process that links the new `core`/`dpc`
+against the still-`.so.1` `thread` mixes binaries built against different
+internal contracts.
 
-```
-libonedal_core.so.X
-libonedal_thread.so.X
-libonedal_sequential.so.X
-libonedal_parameters.so.X
-libonedal_dpc.so.X
-libonedal_sycl.so.X
-```
+## Old/new diff
 
-They are intended to move SONAME in lockstep. The break case84 encodes:
-release engineering bumps five of the six (`.so.1 → .so.2`) but
-`libonedal_thread.so.1` keeps the old SONAME by accident. Each library on
-its own passes per-library ABI checks. The bundle does not:
+No source changes — only the linked SONAME differs per library:
 
-- Distro packages declare `Depends: libonedal-core2, libonedal-thread1` —
-  internally inconsistent.
-- A binary linked against v1 finds `libonedal_thread.so.1` (still installed)
-  and `libonedal_core.so.2` (the only one available) — the two were built
-  against different internal contracts, leading to corruption at the first
-  cross-library call.
+| Library | v1 SONAME | v2 SONAME |
+|---|---|---|
+| `libonedal_core.so` | `.so.1` | `.so.2` |
+| `libonedal_dpc.so` | `.so.1` | `.so.2` |
+| `libonedal_thread.so` | `.so.1` | `.so.1` *(unbumped — the skew)* |
 
-## Layout
-
-Unlike the other cases, this one has no single `v1.cpp/v2.cpp` pair. Instead
-v1 and v2 are *directories* containing multiple `.so` files:
-
-```
-case84_bundle_soname_skew/
-├── v1/
-│   ├── libonedal_core.so.1
-│   ├── libonedal_thread.so.1
-│   └── libonedal_dpc.so.1
-└── v2/
-    ├── libonedal_core.so.2
-    ├── libonedal_thread.so.1   <-- soname-laggard
-    └── libonedal_dpc.so.2
-```
-
-The `compare-release` mode of abicheck ingests both directories and runs
-the cross-library aggregator.
-
-## Real Failure Demo
-
-**Severity: BREAKING / RELEASE BUNDLE SKEW**
-
-This fixture is a directory-level failure, not a single app swap. Build the
-`v1/` and `v2/` directories and run `compare-release`: two siblings bump to
-SONAME `.so.2`, while `libonedal_thread` stays on `.so.1`.
+## abicheck command
 
 ```bash
 bash examples/case84_bundle_soname_skew/gen_bundle.sh
-abicheck compare-release \
-    examples/case84_bundle_soname_skew/v1 \
-    examples/case84_bundle_soname_skew/v2 \
-    --bundle-cohort libonedal_ \
-    --format json
-# -> "bundle_verdict": "BREAKING", bundle_findings include "bundle_soname_skew"
-# -> exit code 4
+abicheck compare examples/case84_bundle_soname_skew/v1 examples/case84_bundle_soname_skew/v2 \
+    --bundle-cohort libonedal_ --format json
 ```
 
-The `--bundle-cohort` flag is required: SONAME-skew detection is **opt-in**.
-You declare which libraries are co-versioned (by name prefix); without it
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+Per-library (each passes in isolation):
+- libonedal_core.so.1   -> COMPATIBLE_WITH_RISK (soname_changed: .so.1 -> .so.2)
+- libonedal_dpc.so.1    -> COMPATIBLE_WITH_RISK (soname_changed: .so.1 -> .so.2)
+- libonedal_thread.so.1 -> NO_CHANGE
+
+Bundle (cross-library) findings:
+- bundle_soname_skew: Bundle SONAME skew: 2 of 3 cohort members bumped
+  major SONAME but 1 did not. Bumped: libonedal_core.so.1 -> libonedal_core.so.2,
+  libonedal_dpc.so.1 -> libonedal_dpc.so.2. Lagging: libonedal_thread.so.1.
+  > Distro packages built on this set carry inconsistent dependency
+    metadata; mixed loads can corrupt internal cross-library state.
+```
+
+`--bundle-cohort libonedal_` is required: SONAME-skew detection is opt-in.
+You declare which libraries are co-versioned by name prefix; without it
 abicheck never infers a lockstep invariant from filenames, so an ordinary
-release that bumps one independent library while another stays put is not
-flagged.
+release that bumps one independent library while another (unrelated) one
+stays put is not flagged.
 
-The underlying cohort detector can also be driven directly:
+## Minimum evidence
 
-```bash
-python3 - <<'PY'
-from abicheck.diff_cpp_patterns import bundle_members_from_directory, detect_bundle_soname_skew
-old = bundle_members_from_directory('examples/case84_bundle_soname_skew/v1')
-new = bundle_members_from_directory('examples/case84_bundle_soname_skew/v2')
-for finding in detect_bundle_soname_skew(old, new, cohort_prefix='libonedal_'):
-    print(finding.kind.value)
-PY
-# bundle_soname_skew
-```
+`min_evidence: L0` — each library's SONAME (`DT_SONAME` in the ELF dynamic
+section) is authoritative binary-only evidence. No debug info or headers are
+needed to read it; `gen_bundle.sh` doesn't even pass `-g`.
 
-## Why this is its own ChangeKind
+## Why abicheck catches it
 
-Existing `soname_changed` and `soname_bump_recommended` are per-library
-signals. The skew is a property of the **set** of libraries; no individual
-artifact is wrong. A new `BUNDLE_SONAME_SKEW` ChangeKind in
-`BREAKING_KINDS` reports the cohort-level invariant: "five siblings bumped,
-one did not."
+No individual artifact's `DT_SONAME` is "wrong" — `libonedal_thread.so.1`
+is a perfectly valid SONAME on its own, and a plain pairwise `compare` of
+`libonedal_thread.so.1` old vs. new reports `NO_CHANGE` because the file is
+untouched. The skew is a property of the *set*. `abicheck compare` on two
+directories builds a bundle snapshot of the whole release and, once a
+cohort prefix is declared, `abicheck/bundle.py`'s `_detect_soname_skew`
+extracts every declared member's major SONAME from both releases and emits
+`bundle_soname_skew` when the cohort has mixed deltas — some bumped, one
+not.
 
-## How abicheck detects it
+## Runtime failure demonstration
 
-`compare-release` builds a bundle snapshot of each release directory and
-runs the bundle layer (`abicheck/bundle.py`). When one or more cohorts are
-declared via `--bundle-cohort PREFIX`, `_detect_soname_skew` delegates to
-`abicheck.diff_cpp_patterns.detect_bundle_soname_skew` for each declared cohort:
-it extracts each member's SONAME major from both releases and emits one
-`BUNDLE_SONAME_SKEW` finding when the cohort has mixed soname deltas (some
-bumped, some not). The finding is classified `BREAKING`, so the bundle (and
-therefore the overall) verdict is BREAKING. With no `--bundle-cohort` the
-check is disabled — cohorts are never inferred from filenames.
+**Severity: BREAKING (release-engineering / packaging failure)**
 
-Source files for the example: see `gen_bundle.sh` for the script that
-produces the `.so` files. The end-to-end path is covered by
-`tests/test_bundle.py::TestCompareReleaseBundleE2E`.
+This is a directory-level failure, not a single-process crash, so there is
+no `app.c` to swap a library under. The real-world failure mode: a
+packaging script matches installed files by name, not by declared cohort.
+It ships `libonedal_core.so.2` and `libonedal_dpc.so.2` from the new
+release but leaves the previously-installed `libonedal_thread.so.1` in
+place (nothing told it to remove or replace a file whose name didn't
+change). A process now loads `core`/`dpc` built against the v2 internal
+contract alongside a `thread` still built against v1's. The dynamic linker
+resolves every symbol it's asked for — there is no `undefined symbol`
+error to catch the mistake at load time. The mismatch only surfaces as
+corrupted shared state deep inside a compute kernel, far from the
+packaging bug that caused it.
+
+## Safe redesign
+
+Treat a declared cohort's SONAME bump as one atomic release action: a
+packaging/CI gate should refuse to publish if any member of a declared
+cohort is missing the version bump the rest of the set received.
+`abicheck compare --bundle-cohort` is exactly that gate — wire it into the
+release pipeline so a skew like this fails CI instead of shipping.
+
+**Real-world example:** projects that ship several co-versioned `.so`s from
+one build (oneDAL's `libonedal_*` set, ffmpeg's `libavcodec`/`libavutil`/
+`libavformat`) rely on every member bumping together; a partial bump in a
+downstream repackage is a recurring distro-packaging bug class.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` compare one library pair at a time —
+neither tool has a cohort concept. Run against `libonedal_thread.so.1` old
+vs. new alone, either would correctly report "no ABI change" (the file is
+byte-for-byte identical here), which is *right* for that one artifact and
+is exactly why this class of bug — every artifact individually clean,
+cohort mismatched — is structurally invisible to per-library ABI diffing.
+Catching it requires directory/cohort-aware tooling, not a stronger
+per-file diff.

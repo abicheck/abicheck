@@ -1,64 +1,76 @@
-# Case 168: Virtual Method Devirtualized (flush() leaves the vtable)
+# Case 168: Virtual Method Devirtualized (`flush()` leaves the vtable)
 
-**Category:** Class Layout / Vtable | **Verdict:** BREAKING
+**Category:** Class Layout / Vtable | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
 v2 removes the `virtual` keyword from `Codec::flush()` — a tempting
 "optimization" ("nobody overrides it, and non-virtual calls are faster").
-The trap: the exported symbol `_ZN5Codec5flushEv` **survives with an identical
-signature**, so linking and loading succeed. But `flush()` left the vtable,
-and every slot after it shifts up one position:
+The trap: the exported symbol `_ZN5Codec5flushEv` **survives with an
+identical signature**, so linking and loading succeed. But `flush()` left
+the vtable, and every slot after it shifts up one position. An app compiled
+against v1 calls `c->flush()` **virtually** — through the slot index frozen
+at its compile time — and silently lands in `reset()` instead. No loader
+error, no crash: just the wrong method, silently, and any consumer override
+of `flush()` stops being reached at all. Recompilation is mandatory.
+
+## Old/new diff
+
+| v1.h | v2.h |
+|------|------|
+| `virtual int flush();` | `int flush(); /* was virtual */` |
+| vtable: `[D1][D0][encode][flush][reset]` | vtable: `[D1][D0][encode][reset]` |
+
+## abicheck command
+
+```bash
+g++ -shared -fPIC -g v1.cpp -o libv1.so
+g++ -shared -fPIC -g v2.cpp -o libv2.so
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --ast-frontend clang
+```
+
+## Expected abicheck finding
 
 ```text
-v1 vtable: [~Codec D1] [~Codec D0] [encode] [flush] [reset]
-v2 vtable: [~Codec D1] [~Codec D0] [encode] [reset]
-                                             ▲
-                     old flush slot now holds reset
+Verdict: BREAKING (exit 4)
+
+- type_vtable_changed: vtable changed: Codec
+  (~Codec, encode(int), flush(), reset() -> ~Codec, encode(int), reset())
+  > Vtable slot reordering; virtual dispatch calls wrong method.
+- vtable_slot_count_changed: Vtable for 'Codec' changed size: 56 -> 48 bytes
+  (~5 -> ~4 virtual slots)
+- func_virtual_removed: Function is no longer virtual: flush
+  > Vtable entry removed; old binaries that dispatch through the vtable
+    call the wrong slot.
 ```
 
-An app compiled against v1 calls `c->flush()` **virtually** — through the slot
-index frozen at its compile time — and lands in `reset()`. No loader error, no
-crash: just the wrong method, silently.
+The mangled name (`_ZN5Codec5flushEv`) is unchanged, so abicheck matches
+`flush` across snapshots by symbol and reports the virtuality flip directly
+as `func_virtual_removed`, rather than leaving it as an unexplained vtable
+size change.
 
-## Why this matters
+## Minimum evidence
 
-- **It defeats the "does it still link?" smoke test.** Unlike a removed
-  symbol (case 12) or a shrunk vtable detected via pure addition/removal, the
-  call target still exists; only the *dispatch route* is stale. This is the
-  mirror image of case 68 (virtual added) — and just as one-way: virtuality is
-  part of the ABI contract forever.
-- **Consumer overrides die silently.** Any consumer class that overrode
-  `flush()` still compiles against the v2 header — but the library's internal
-  `flush()` calls are now direct and never reach the override. Behavior
-  changes with no diagnostic anywhere.
-- **The last-virtual case is worse.** If the devirtualized method was the
-  class's only virtual, the vptr itself disappears and every field shifts
-  (case 68 in reverse).
+`min_evidence: L2` — DWARF alone shows the vtable shrank and slot layout
+changed (`type_vtable_changed`, `vtable_slot_count_changed`), but naming
+*which* method was devirtualized needs the public header AST's
+`virtual`/non-`virtual` declaration for `flush()` on both sides — DWARF's
+`DW_AT_virtuality` on the surviving `flush` symbol is not reliably present
+once it drops out of the vtable. castxml is the documented default backend
+for this evidence layer; clang (`--ast-frontend clang`, used above) is a
+supported alternative AST frontend for hosts without castxml installed.
 
-## Code diff
+## Why abicheck catches it
 
-```cpp
-// v1
-class Codec {
-public:
-    virtual ~Codec();
-    virtual int encode(int value);
-    virtual int flush();    // vtable slot after encode
-    virtual int reset();
-};
+abicheck matches `flush` across the two snapshots by its unchanged mangled
+symbol, then compares its virtuality flag from each side's header AST.
+Losing the `virtual` keyword — while the symbol itself survives — is
+reported directly as `func_virtual_removed`; the vtable's shrunken
+`_ZTV5Codec` size and slot-membership diff independently corroborate the
+same break even without headers, though at that tier they can only say the
+vtable changed, not name the devirtualized method.
 
-// v2
-class Codec {
-public:
-    virtual ~Codec();
-    virtual int encode(int value);
-    int flush();            // devirtualized — same symbol, no vtable slot
-    virtual int reset();    // slides into flush()'s old slot
-};
-```
-
-## Real Failure Demo
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
@@ -81,42 +93,33 @@ g++ -shared -fPIC -g v2.cpp -o liblib.so
 #   the pending count was silently discarded!
 ```
 
-The app's virtual call lands in `reset()` (returns −1, zeroes the pending
-counter) instead of `flush()`. Data is lost while every call "succeeds".
+**Why CRITICAL:** the app's virtual call lands in `reset()` (returns -1,
+zeroes the pending counter) instead of `flush()`. Data is lost while every
+call "succeeds" — no loader error, no crash, no diagnostic anywhere.
 
-## How to fix
+## Safe redesign
 
 1. **Don't devirtualize shipped methods.** If the cost of virtual dispatch
-   matters, add a non-virtual fast-path *alongside* (e.g. `flush_fast()`), or
-   devirtualize internally while keeping the vtable entry as a forwarding
-   definition.
-2. **Let the compiler do it invisibly**: `final` on the class/method enables
-   whole-program devirtualization at call sites *without* changing the vtable
-   layout — though adding `final` is itself a source-level API event
-   (case 125).
+   matters, add a non-virtual fast-path *alongside* (e.g. `flush_fast()`),
+   or devirtualize internally while keeping the vtable entry as a
+   forwarding definition.
+2. **Let the compiler do it invisibly**: `final` on the class/method
+   enables whole-program devirtualization at call sites *without* changing
+   the vtable layout — though adding `final` is itself a source-level API
+   event.
 3. **SONAME bump** if the slot must really go.
 
-## Real-world example
+**Real-world example:** the KDE binary-compatibility policy lists
+"unoverride a virtual function" and any change to the virtual-function
+order among its forbidden changes: vtable slot indexes are compiled into
+every caller, so this is exactly as one-way as adding a new virtual method.
 
-The KDE binary-compatibility policy lists "unoverride a virtual function" and
-any change to the virtual-function order among its forbidden changes: vtable
-slot indexes are compiled into every caller. This is the same slot-shift
-mechanics as oneTBB's historical `task` vtable churn (case 108), triggered
-here by a single removed keyword rather than a removed class.
-
-## abicheck detection
-
-The mangled name is unchanged in both versions, so abicheck matches the
-function across snapshots and sees its virtuality flip in the header AST:
-it reports `func_virtual_removed` (BREAKING, `min_evidence: L2`). Lower
-evidence tiers still catch the break through its layout fallout —
-`type_vtable_changed` (vtable membership) and `vtable_slot_count_changed`
-from `_ZTV5Codec`'s shrunken size, the latter even on a stripped binary —
-they just can't name the devirtualized method.
+## Cross-tool comparison
 
 ```bash
-abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
-# Verdict: BREAKING (func_virtual_removed: flush)
+abidw --out-file v1.xml libv1.so
+abidw --out-file v2.xml libv2.so
+abidiff v1.xml v2.xml
 ```
 
 ## References

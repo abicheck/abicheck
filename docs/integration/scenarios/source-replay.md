@@ -19,8 +19,26 @@ where the *build* emits source facts as it compiles instead.
   zero-config (CMake configure-only, a Bazel `aquery`, or a Make dry-run
   transcript) — see
   [Source-Scan Depth § Obtaining a compile database](../../use/scan-levels.md#obtaining-a-compile-database-without-a-full-build).
-- `clang` on the runner (installed automatically by the root Action's
-  `install-deps`).
+- `clang` on the runner. On the latest published release (`@v0.5.0`, used
+  below), the Action's only installer is the legacy `install-deps: true`
+  path — on an apt-based Linux runner (e.g. `ubuntu-latest`) this installs
+  clang alongside castxml, no extra input needed; on macOS, clang comes
+  from the runner's preinstalled Xcode toolchain rather than from
+  `install-deps` itself; on Windows, this path installs neither castxml nor
+  clang, so a Windows runner needs one installed manually before L4 replay
+  will run. On a newer pin (`dependency-source` and its
+  `conda-forge-clang20` value are not in `@v0.5.0` — see the note on the
+  `check-target` example below), the default `dependency-source: conda-forge`
+  does **not** install clang on Linux/macOS either; pin
+  `dependency-source: conda-forge-clang20` (or `system`, or install clang
+  yourself) instead. Without clang, L3 build-context evidence (this
+  scenario's compile database) is still collected, and the structural L5
+  target/compile-unit/source graph still builds from that L3 evidence alone
+  — only L4 replay and the clang-backed call/type/include-graph edges of L5
+  are skipped, not the whole source scan or the whole L5 graph; see
+  [Source-Scan Depth](../../use/scan-levels.md) for what each layer needs.
+  Check the `layers`/coverage output to confirm L4 actually ran. See
+  [GitHub Action: dependency-source](../../use/github-action.md).
 - For a PR run: `fetch-depth: 0` on checkout, so the base ref is available to
   seed the diff scope.
 
@@ -30,7 +48,7 @@ where the *build* emits source facts as it compiles instead.
 changed paths, runs the pinned evidence level, and compares in one step:
 
 ```yaml
-- uses: abicheck/abicheck@v1
+- uses: abicheck/abicheck@v0.5.0
   with:
     mode: scan
     new-library: build/libfoo.so
@@ -46,10 +64,12 @@ cross-source check.
 
 **Composed via `check-target`/`check-project.yml`** — when this check is one
 of several a `.abicheck.yml` `targets:`/`profiles:` block declares,
-`evidence-producer: replay` is the bridge:
+`evidence-producer: replay` is the bridge. `actions/check-target` shipped
+after the `v0.5.0` release, so pin a commit SHA (or `@main`) instead of a
+release tag until the next release includes it:
 
 ```yaml
-- uses: abicheck/abicheck/actions/check-target@v1
+- uses: abicheck/abicheck/actions/check-target@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
   with:
     name: libfoo
     requested-depth: source

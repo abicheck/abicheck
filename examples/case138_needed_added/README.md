@@ -1,53 +1,96 @@
 # Case 138: DT_NEEDED Added
 
-**Category:** ELF / Linker metadata | **Verdict:** COMPATIBLE
+**Category:** Quality | **Verdict:** 🟢 COMPATIBLE
 
-## What this case is about
+## Verdict and consumer impact
 
-Both libraries export identical symbols. v2 is linked with
-`-Wl,--no-as-needed -lm`, which records a **`DT_NEEDED`** entry for
-`libm.so.6` even though no math symbol is used. v1 has no such dependency. The
-exported ABI surface is unchanged, but the library now drags an additional
-shared object into every process that loads it.
+v2's exported symbols and their types are unchanged, so binaries already
+linked against `libfoo` keep working exactly as before. What changes is the
+library's own runtime dependency closure: v2 is linked with
+`-Wl,--no-as-needed -lm`, so it now carries a `DT_NEEDED` entry for
+`libm.so.6` even though it calls no math function. This is invisible to
+existing consumers, but it matters for packaging (an extra `Requires:`),
+container image size, and any deployment where `libm` might not be present.
 
-A new `DT_NEEDED` is compatible for consumers of *this* library's API, but it
-changes the runtime dependency closure — relevant for packaging, container
-image size, and deployments where the new dependency might be absent.
+## Old/new diff
 
-## What abicheck detects
+| old/lib.c | new/lib.c |
+|-----------|-----------|
+| `int compute(int x) { return x * x + 1; }` | `int compute(int x) { return x * x + 1; }` |
+| `int transform(int x, int y) { return x + y * 2; }` | `int transform(int x, int y) { return x + y * 2; }` |
+| *(linked normally)* | *(linked with `-Wl,--no-as-needed -lm`)* |
 
-- **`NEEDED_ADDED`**: a `DT_NEEDED` entry present in v2 but not v1. Classified as
-  a compatible quality/metadata change.
-
-(The compare may also note `symbol_version_required_added_compat` from the new
-dependency's version requirements.)
-
-**Overall verdict: COMPATIBLE.**
-
-## How to reproduce
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so -Wl,--no-as-needed -lm
-
-readelf -dW libv1.so | grep NEEDED
-readelf -dW libv2.so | grep NEEDED   # adds libm.so.6
-
-python3 -m abicheck.cli dump libv1.so -o v1.json
-python3 -m abicheck.cli dump libv2.so -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-# → COMPATIBLE + NEEDED_ADDED
+gcc -shared -fPIC -g old/lib.c -o libfoo_v1.so
+gcc -shared -fPIC -g new/lib.c -o libfoo_v2.so -Wl,--no-as-needed -lm
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## How to fix
+## Expected abicheck finding
 
-Link with `--as-needed` (the default on most toolchains) so only genuinely-used
-libraries become `DT_NEEDED`. This case documents the detection, not a required
-fix.
+```text
+Verdict: COMPATIBLE (exit 0)
 
-## Real Failure Demo
+Quality Issues:
+- needed_added: New dependency added: libc.so.6
+- needed_added: New dependency added: libm.so.6
+- symbol_version_required_added_compat: New symbol version requirement:
+  GLIBC_2.2.5 (from libc.so.6) — not newer than previous max, backward-compatible
+```
 
-**Severity: INFORMATIONAL**
+## Minimum evidence
 
-The library loads and runs the same where `libm.so.6` is present, but the v2
-artifact fails to load on a system that lacks the newly-added dependency.
+`min_evidence: L0` — the `.dynamic` section's `DT_NEEDED` entries are read
+straight from the ELF headers; no debug info or public headers needed.
+
+## Why abicheck catches it
+
+abicheck parses the `.dynamic` section of both binaries and diffs the sets
+of `DT_NEEDED` entries directly; a name present in v2 but absent from v1 is
+reported as `needed_added` regardless of whether any symbol from that
+dependency is actually called.
+
+## Runtime failure demonstration
+
+**Severity: INFORMATIONAL — no observable effect on existing binaries.**
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g old/lib.c -o libfoo.so
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → compute(7) = 50
+# → transform(3, 4) = 11
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g new/lib.c -o libfoo.so -Wl,--no-as-needed -lm
+./app
+# → compute(7) = 50
+# → transform(3, 4) = 11   (identical — libm is present on this host)
+```
+
+The added `DT_NEEDED` only causes a failure on a system where `libm.so.6`
+is unavailable at load time (`error while loading shared libraries`); on
+any host with a normal glibc/libm install, behavior is identical.
+
+## Safe redesign
+
+Link with `--as-needed` (the default on most modern toolchains) so only
+libraries whose symbols are actually referenced become `DT_NEEDED`. If a
+dependency is intentionally required for future use, add it deliberately
+and document it rather than picking it up as a side effect of link-flag
+ordering.
+
+**Real-world example:** distro packaging tools (e.g. `rpmbuild`'s
+auto-`Requires` generator) derive a package's runtime dependencies from
+`DT_NEEDED` entries — a stray added `DT_NEEDED` silently widens the
+package's dependency closure and its container/image footprint.
+
+## Cross-tool comparison
+
+```bash
+readelf -dW libfoo_v1.so | grep NEEDED
+readelf -dW libfoo_v2.so | grep NEEDED   # adds libm.so.6, libc.so.6
+```

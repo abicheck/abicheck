@@ -1,36 +1,90 @@
-# case149 — ODR type variant (cross-source, L4 layout ↔ layout)
+# Case 149: ODR Type Variant (Cross-Source, L4 Layout ↔ Layout)
 
-**Verdict:** 🟠 API_BREAK · **Cross-check:** `odr_type_variant` ·
-**Mode:** single-release audit · **Evidence tier:** L4
+**Category:** API Break (Audit) | **Verdict:** 🟠 API_BREAK
 
-## What it demonstrates
+## Verdict and consumer impact
 
-Two translation units materialize **one** public type — `geometry::Vec3` — with
-**different layouts** (e.g. one TU sees an extra member behind a macro the other
-does not). This is an ODR violation: the linker picks one definition and the
-other TU's call sites read the wrong bytes. No artifact layer can see it, because
-the shipped binary contains exactly one (arbitrary) layout.
+Single-release audit: one build's evidence checked against itself, no
+baseline comparison. abicheck's verdict is `API_BREAK` — two translation
+units materialize **one** public type, `geometry::Vec3`, with **different
+layouts** (one TU's definition carries an extra member behind a macro the
+other TU does not see). This is an ODR violation: the linker picks one
+definition arbitrarily, and call sites compiled against the *other* TU's
+layout read the wrong bytes at runtime. The shipped binary contains exactly
+one layout, so nothing about the binary itself looks wrong — the conflict
+only exists in the relationship between the two TUs' own source-replayed
+definitions.
 
-## Why no single source sees it
+## What this snapshot contains
+
+`snapshot.abi.json` is a single, hand-built `AbiSnapshot` carrying the L4
+per-TU source-ABI replay for two translation units that both define
+`geometry::Vec3`:
+
+| Source in the snapshot | What it records |
+|---|---|
+| Per-TU source-ABI surface (L4, `build_source.source_abi` per TU) | TU-A's replayed `geometry::Vec3` layout hash and TU-B's replayed `geometry::Vec3` layout hash, and they differ |
+
+## abicheck command
+
+```bash
+abicheck scan snapshot.abi.json
+```
+
+## Expected abicheck finding
+
+```text
+Coverage
+  crosscheck:odr_type_variant present   L4 per-TU type layouts: 1 type(s) with divergent cross-TU definitions (ODR conflict)
+
+ABI-hygiene catalog (intra-version, advisory)
+  [warning] odr_type_variant: 1
+
+Verdict: API_BREAK (exit 2)
+```
+
+## Minimum evidence
+
+`min_evidence: L4` — the shipped binary (L0/L1) and the header AST (L2)
+each see exactly one `geometry::Vec3` definition and look internally
+consistent; only replaying each translation unit's own source (L4) and
+comparing the *per-TU* layouts against each other exposes that two TUs
+disagree about the same type's layout.
+
+## Why abicheck catches it
 
 | Source | What it sees alone |
 |--------|--------------------|
 | Binary (L0/L1) | one `geometry::Vec3` layout — looks self-consistent |
 | Header AST (L2) | one declaration — looks self-consistent |
 | Per-TU source-ABI replay (L4) | TU-A's `Vec3` hash ≠ TU-B's `Vec3` hash |
-| **Combination** | the L4 surface records the per-TU conflict → `ODR_TYPE_VARIANT` (API_BREAK) |
+| **Combination** | the L4 surface records the per-TU conflict → `odr_type_variant` (API_BREAK) |
 
-The cross-check reads the L4 source-replay surface's recorded ODR conflicts; the
-`source_index` provider supplies them.
+`odr_type_variant` reads the L4 source-replay surface's recorded per-TU
+type hashes, supplied by the `source_index` provider — no single artifact
+layer can see it, because the binary contains only the one layout the
+linker happened to pick.
 
-## Reproduce
+## Why this matters for a real release
 
-```bash
-abicheck scan --binary libdemo.so --sources . --audit   # replays each TU, links the surface
-```
+Whichever TU's definition the linker keeps, every call site compiled
+against the *other* TU's assumed layout reads or writes the wrong offsets
+for `geometry::Vec3` — silent corruption or misreads with no crash to flag
+it. This is exactly the class of bug that is expensive to diagnose after
+the fact (it reproduces only with specific link orders or optimization
+levels) and cheap to catch here, before the build ships.
 
-## Fix
+## Safe redesign
 
-Make the type's definition identical in every TU: guard the divergent member with
-the *same* macro everywhere (and compile every TU with that macro consistently),
-or move the type to a single header all TUs include unconditionally.
+Make the type's definition identical in every TU: guard the divergent
+member with the *same* macro everywhere and compile every TU with that
+macro consistently, or move the type to a single header all TUs include
+unconditionally so there is only ever one definition to replay.
+
+## Cross-tool comparison
+
+`odr_type_variant` is a cross-source check unique to abicheck's audit mode
+— it compares two translation units' own replayed layouts for the *same*
+type against each other, which isn't something `abidiff`/`abi-compliance-checker`
+do (they diff two whole-binary ABI dumps against each other, not two TUs'
+source-replayed definitions within one build).

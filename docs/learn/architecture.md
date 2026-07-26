@@ -6,6 +6,7 @@ audience:
 level: intermediate
 summarizes:
   - platform-support-matrix
+  - evidence-model
 lifecycle: active
 generated: false
 ---
@@ -26,9 +27,11 @@ the model, and [Evidence & Detectability](evidence-and-detectability.md) for the
 conceptual companion.
 
 abicheck supports Linux (ELF), Windows (PE/COFF), and macOS (Mach-O), each with
-full binary-metadata, header-AST, and debug-info cross-check support — see the
-[platform support matrix](limitations.md#platform-support-matrix) for the
-per-platform tool/format breakdown.
+implemented binary-metadata, header-AST, and debug-info cross-check support —
+see the [platform support matrix](limitations.md#platform-support-matrix) for
+the per-platform tool/format breakdown and per-toolchain CI-validation
+maturity (implemented capability and CI-proven maturity are not the same
+thing, especially on Windows).
 
 ---
 
@@ -73,57 +76,14 @@ layers (L3/L4, plus the optional L5 reachability graph) are covered in
 
 abicheck's accuracy comes from treating compatibility analysis as a question of
 *evidence*: the more independent sources of information you give it about a
-library, the more it can prove — and the fewer false positives it raises. You
-**provide five** sources (`L0`–`L4`); abicheck **derives a sixth**, the `L5`
-graph — **six evidence layers in all**, layered from the least input to the most:
-
-| Layer | Source | Collected from | Authority | Reveals |
-|:-----:|--------|----------------|-----------|---------|
-| **L0** | Just the **binary** | ELF/PE/Mach-O parsers (`elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py`) | Authoritative | Exported symbols, SONAME/install-name, versions, visibility, binding, dependencies |
-| **L1** | **Debug symbols** | DWARF/PDB/BTF/CTF (`dwarf_*`, `pdb_*`, `btf_metadata.py`, `ctf_metadata.py`) | Authoritative when matched to the binary | Type **layout**: sizes, field offsets, enum values, vtable slots, calling convention, packing |
-| **L2** | **Public headers** | castxml or clang AST (`dumper_castxml.py` / `dumper_clang.py`, `--ast-frontend`) | Authoritative for header-visible API | Source **API**: signatures, overloads, access, `final`/`explicit`/`noexcept`, templates, public/internal scoping |
-| **L3** | **Build system data & options** | compile DB / CMake / Ninja / Bazel / Make (`build_context.py`, build/source pack ADR-029) | Context / confidence | ABI-relevant flags (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`), toolchain, target graph, export policy |
-| **L4** | **Sources** | per-TU source ABI replay (build/source pack ADR-030) | Source-/API-risk evidence, never sole shipped-ABI authority | Macro/`constexpr` values, default-argument values, inline/template bodies, uninstantiated templates |
-| **L5** | **Source/build graph** *(derived)* | folded from L3 (+ any L4 surface) into a graph summary (build/source pack ADR-031) | Explanation / localization / impact, never shipped-ABI authority | Include/type/call reachability: which public surface a change reaches; prioritizes cross-symbol impact |
-
-```mermaid
-flowchart LR
-    L0["L0 · binary<br/>(stripped .so)"] --> L1["L1 · + debug<br/>(DWARF/PDB)"]
-    L1 --> L2["L2 · + headers<br/>(castxml / clang AST)"]
-    L2 --> L3["L3 · + build data<br/>(compile DB)"]
-    L3 --> L4["L4 · + sources<br/>(build/source pack)"]
-    L3 -.derived.-> L5["L5 · source/build graph<br/>(reachability)"]
-    L4 -.derived.-> L5
-    L0 -.weaker evidence.-> L4
-```
-
-**The authority rule (ADR-028).** The layers are not a fallback chain — abicheck
-overlays everything it is given and computes one worst-wins verdict. But not all
-evidence carries the same weight:
-
-> Artifact-backed **L0/L1/L2** evidence is **authoritative** for the shipped-ABI
-> verdict. Build/source **L3/L4/L5** evidence may *explain, localize, scope, or
-> add confidence to* a finding, and may raise its own source-/API-level findings
-> (default `API_BREAK` or risk) — but it **never silently deletes** an
-> artifact-proven break.
-
-So L3 noticing a `-std` bump or L4 noticing a changed macro can *add* a finding
-or *explain* one, but only L0/L1/L2 can declare a binary `BREAKING`. Every
-compare that uses build/source evidence prints an **evidence-coverage** table
-(and a structured `layer_coverage` array in JSON) so consumers can tell which
-findings are artifact-proven vs. context-only — see [Build & Source Packs](build-source-data.md).
-
-**Graceful degradation.** `abicheck dump --dry-run` reports exactly
-which of L0/L1/L2 a binary affords (as of this writing it lists per-layer
-presence and basic stats — symbol/type/enum counts — not a detector-enabled
-fraction). With less input abicheck degrades down the staircase rather than
-failing; with more it both finds more and false-positives less. The empirical
-per-tier behaviour across the example catalog is benchmarked in [Tool
-Comparison §Benchmarking by evidence
-tier](../reference/tool-comparison.md#benchmarking-by-evidence-tier) — that
-page's detector-fraction table is a stale snapshot too (registered-detector
-count has grown since it was captured); re-run
-`scripts/benchmark_comparison.py --evidence-tiers` for current numbers.
+library (binary, debug symbols, headers, build data, sources — abicheck
+additionally derives a sixth, the `L5` reachability graph), the more it can
+prove and the fewer false positives it raises. Artifact-backed `L0`/`L1`/`L2`
+evidence is authoritative for the shipped-ABI verdict; build/source
+`L3`/`L4`/`L5` evidence may explain, localize, or add confidence to a finding,
+but never silently deletes an artifact-proven break (the authority rule,
+ADR-028). See [Evidence & Detectability](evidence-and-detectability.md) for
+the full model (all six layers, the `--depth` dial, and worked examples).
 
 ---
 
@@ -155,11 +115,16 @@ Reads native binary metadata using format-specific parsers:
 ### Layer L2: Header AST (castxml / Clang) — all platforms
 
 Parses C/C++ headers through a selectable frontend — `--ast-frontend
-auto|castxml|clang|hybrid` (or `ABICHECK_AST_FRONTEND`);
-`auto` prefers castxml and
-falls back to clang `-ast-dump=json` on clang-only hosts (ADR-003); `hybrid`
-(G28 Phase 3) runs both and merges them. The rest of
-this section describes the castxml backend. The clang backend exposes the same
+auto|castxml|clang|hybrid` (or `ABICHECK_AST_FRONTEND`). `auto` always
+resolves to castxml first and **never** silently switches producer — not
+even on a host with no castxml at all — unless `--allow-ast-frontend-fallback`
+(or `ABICHECK_ALLOW_AST_FALLBACK=1`) is also given; with that opt-in, a
+recognized castxml toolchain-version mismatch or direct-include-guard
+failure falls back to clang `-ast-dump=json` (ADR-003, G16). Without the
+opt-in, and on a clang-only host, run explicitly with `--ast-frontend clang`
+instead of relying on `auto`. `hybrid` (G28 Phase 3) runs both and merges
+them. The rest of this section describes the castxml backend. The clang
+backend exposes the same
 declaration surface (signatures, classes/bases, enums, typedefs, access,
 `noexcept`, templates) but is a **syntactic** AST: it does **not** compute record
 layout, so `size_bits`/`offset_bits`/vtable slots stay unset and the layout

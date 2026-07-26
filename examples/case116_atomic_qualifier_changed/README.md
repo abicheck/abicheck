@@ -1,26 +1,120 @@
-# Case 116: _Atomic qualifier added (C11)
+# Case 116: _Atomic Qualifier Added (C11)
 
-**Category:** Binary ABI break / C11 | **Verdict:** 🔴 BREAKING
+**Category:** Modern C/C++ Contract | **Verdict:** 🔴 BREAKING
 
-## What changed
+## Verdict and consumer impact
 
-`v1` exposes a `struct counter` whose `value` field is a plain (unqualified)
-`int`. `v2` adds the C11 `_Atomic` qualifier to that field. The accessor
-`get_count()` returns a plain `long` in both versions — only the field changed.
+`v1`'s `struct counter` has a plain (unqualified) `int value` field. `v2`
+adds the C11 `_Atomic` qualifier to that same field. Per WG14, the size and
+alignment of an `_Atomic`-qualified type is implementation-defined and may
+differ from the unqualified type — some targets pad lock-free atomics for
+alignment, and some implement wider types via a lock (extra bytes for a
+mutex). A consumer built against v1 allocates/copies `struct counter` with
+the plain-`int` layout; if the target's `_Atomic int` differs in size or
+alignment, the field is read at the wrong offset. Treated as a binary ABI
+break because the layout guarantee is compiler/architecture-dependent, not
+because it necessarily changes on every platform.
 
-Per WG14, the size and alignment of an `_Atomic`-qualified type may differ from
-the unqualified type and varies across implementations (some lock-free types
-carry extra padding/alignment). So the `struct counter` layout can diverge: a
-consumer built against v1 reads the field at the wrong offset/width against v2.
+## Old/new diff
 
-## How abicheck catches it
+| v1.h | v2.h |
+|------|------|
+| `struct counter { int value; };` | `struct counter { _Atomic int value; };` |
 
-`atomic_qualifier_changed` fires for each public slot (parameter, return, or
-field) where the `_Atomic` qualifier is added or removed. Layout-level findings
-(`type_size_changed` / `struct_field_*`) may also appear; the specialised kind
-names the `_Atomic` root cause.
+## abicheck command
 
-## Files
-- `v1.h` / `v2.h` — plain vs `_Atomic` declarations
-- `v1.c` / `v2.c` — the two library builds
-- `app.c` — consumer built against the plain interface
+```bash
+gcc -std=c11 -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -std=c11 -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_field_type_changed: Field type changed: counter::value (int -> _Atomic int)
+  > Field has different size or representation; old code misinterprets the data.
+  Affected symbols: get_count
+
+- atomic_qualifier_changed: _Atomic qualifier added on field 'value' of
+  'counter': int -> _Atomic int. _Atomic size/alignment may differ from
+  the unqualified type and varies across compilers.
+```
+
+(The real run also reports a `GLIBC_2.4`/`__stack_chk_fail` toolchain-drift
+finding from the two separate `gcc` invocations; that's build-environment
+noise, not part of this case's ABI change — see the "Environment & Toolchain
+Drift" section abicheck groups it under.)
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's `DW_TAG_atomic_type` wrapping the field's base
+type is enough to see the qualifier was added; no public headers needed.
+abicheck's DWARF reader (`dwarf_metadata.py`/`dwarf_snapshot.py`)
+special-cases `DW_TAG_atomic_type` and renders it as the literal `_Atomic`
+qualifier in the type spelling so the diff can name it directly.
+
+## Why abicheck catches it
+
+DWARF wraps an atomic-qualified type in `DW_TAG_atomic_type` around the
+unqualified base type; abicheck recognizes that wrapper for both DWARF and,
+separately, castxml's `Unimplemented`/`type_class="Atomic"` node (castxml
+cannot fully model `_Atomic` and exposes no reference to the wrapped type),
+and reports the qualifier change as `atomic_qualifier_changed` rather than
+losing it to a generic fallback spelling.
+
+## Runtime failure demonstration
+
+**Severity: risk-dependent** (a real hazard on toolchains where `_Atomic`
+changes layout; this reproducer's toolchain happens not to be one of them)
+
+**Scenario:** compile `app.c` against v1, swap in v2 `.so` without recompile.
+
+```bash
+gcc -std=c11 -shared -fPIC -g v1.c -o libfoo.so
+gcc -std=c11 -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
+./app; echo "exit: $?"
+# → exit: 0
+
+gcc -std=c11 -shared -fPIC -g v2.c -o libfoo.so
+./app; echo "exit: $?"
+# → exit: 0   (unchanged)
+```
+
+**Why nothing crashes here:** `abicheck dump` on both built `.so` files
+confirms `struct counter` stays 32 bits with `value` at offset 0 in both
+versions — this GCC/x86-64/glibc combination implements a lock-free
+`_Atomic int` with the exact same size and alignment as `int`, so this
+specific toolchain doesn't manifest the layout change WG14 permits.
+abicheck still flags it BREAKING because that guarantee isn't portable: a
+target that needs a lock for this type (or pads it for hardware
+compare-and-swap alignment) would grow `sizeof(struct counter)`, and a
+consumer built with the plain-`int` layout would misread the field — the
+same class of failure as case07's struct-size growth, just
+compiler/architecture-conditional instead of guaranteed.
+
+## Safe redesign
+
+Don't add `_Atomic` to a field of an already-public struct. If you need
+atomic access, either ship a new struct/function pair, or hide the field
+behind an opaque pointer (PIMPL, see case07) so its qualifier and layout
+are never part of the visible ABI.
+
+**Real-world example:** libraries adding lock-free counters/reference
+counts to existing public structs during a "make it thread-safe" pass are
+the classic trigger — the qualifier addition looks like a pure quality
+improvement but is a layout-portability hazard.
+
+## Cross-tool comparison
+
+`abidw`/`abidiff` are not installed in this environment, so no cross-tool
+output is reproduced here. For reference, the equivalent libabigail
+invocation would be:
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```

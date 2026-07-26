@@ -1,3 +1,15 @@
+---
+doc_type: how-to
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+canonical_for:
+  - suppressions
+lifecycle: active
+generated: false
+---
+
 # Suppressions
 
 `abicheck compare` and `abicheck compat` support YAML suppressions via `--suppress`.

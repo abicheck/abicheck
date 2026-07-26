@@ -8,9 +8,9 @@ _7 case(s)._ [← back to all examples](../index.md)
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
 | [case04_no_change](../case04_no_change.md) | No Change | ✅ NO_CHANGE | No Change |
-| [case118_internal_struct_field_added_scoped](../case118_internal_struct_field_added_scoped.md) | Internal struct gains a field (non-public, scoped) | ✅ NO_CHANGE | No Change |
-| [case119_internal_struct_field_removed_scoped](../case119_internal_struct_field_removed_scoped.md) | Internal struct loses a field (non-public, scoped) | ✅ NO_CHANGE | No Change |
-| [case120_internal_struct_reordered_scoped](../case120_internal_struct_reordered_scoped.md) | Internal struct fields reordered (non-public, scoped) | ✅ NO_CHANGE | No Change |
-| [case164_preproc_conditional_field](../case164_preproc_conditional_field.md) | Preprocessor-conditional field: a header false positive only build context clears | ✅ NO_CHANGE | No Change |
-| [case184_internal_enum_churn_scoped](../case184_internal_enum_churn_scoped.md) | Internal enum churn, scoped out by private-header origin | ✅ NO_CHANGE | No Change |
-| [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) | C API pointee const-qualification is ABI-neutral | ✅ NO_CHANGE | No Change |
+| [case118_internal_struct_field_added_scoped](../case118_internal_struct_field_added_scoped.md) | Internal Struct Gains a Field (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
+| [case119_internal_struct_field_removed_scoped](../case119_internal_struct_field_removed_scoped.md) | Internal Struct Loses a Field (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
+| [case120_internal_struct_reordered_scoped](../case120_internal_struct_reordered_scoped.md) | Internal Struct Fields Reordered (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
+| [case164_preproc_conditional_field](../case164_preproc_conditional_field.md) | Preprocessor-Conditional Field (Build-Context False Positive) | ✅ NO_CHANGE | No Change |
+| [case184_internal_enum_churn_scoped](../case184_internal_enum_churn_scoped.md) | Internal Enum Churn, Scoped Out by Private-Header Origin | ✅ NO_CHANGE | No Change |
+| [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) | C API Pointee const-Qualification Is ABI-Neutral | ✅ NO_CHANGE | No Change |

@@ -1,3 +1,15 @@
+---
+doc_type: reference
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+canonical_for:
+  - output-formats
+lifecycle: active
+generated: false
+---
+
 # Output Formats
 
 abicheck supports multiple output formats for different use cases:

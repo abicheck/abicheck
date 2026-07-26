@@ -28,7 +28,7 @@ targets:
 ```
 
 ```yaml
-- uses: abicheck/abicheck/actions/check-target@v1
+- uses: abicheck/abicheck/actions/check-target@c9e135a3233b6d45e9571533f71293fde458a469  # not yet in a tagged release; pin main or newer
   with:
     name: libfoo
     target-kind: library   # required -- app-consumer/plugin-contract have

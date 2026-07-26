@@ -1,53 +1,124 @@
-# Case 21 — Method Became Static
+# Case 21: Method Became Static
 
-**Verdict:** 🔴 BREAKING (calling convention contract)
+**Category:** Breaking | **Verdict:** 🔴 BREAKING
 
-## What changes
+## Verdict and consumer impact
 
-| Version | Declaration |
-|---------|-------------|
-| v1 | `class Widget { int value; int bar(); };` |
-| v2 | `class Widget { static int bar(); };` |
+Per the Itanium C++ ABI, static-ness is not encoded in symbol mangling for
+this case, so `Widget::bar()`'s symbol still resolves after the change
+(`_ZN6Widget3barEv` in both versions) — old binaries link fine against new.
+But the calling contract changes underneath them: old's `bar()` is an
+instance method that expects an implicit `this` pointer; new's `bar()` is
+`static` and expects none. A caller still passing `this` gets whatever
+garbage falls out of the mismatched calling convention — no crash required,
+just silently wrong results.
 
-## Why this is ABI-breaking
+## Old/new diff
 
-For Itanium C++ ABI, static-ness is not encoded in symbol mangling for this case,
-so the symbol still resolves (`_ZN6Widget3barEv`).
+| old/lib.h | new/lib.h |
+|-----------|-----------|
+| `class Widget { public: int value; int bar(); };` | `class Widget { public: static int bar(); };` |
 
-But call contract changes:
-- v1 call site passes implicit `this`
-- v2 static function expects no `this`
+## abicheck command
 
-So old binaries can still link, yet execute with a mismatched calling convention.
+```bash
+g++ -shared -fPIC -std=c++17 -g old/lib.cpp -Iold -o libfoo_v1.so
+g++ -shared -fPIC -std=c++17 -g new/lib.cpp -Inew -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
 
-## Real Failure Demo
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: Widget (32 -> 8 bits)
+  > Old code allocates or copies the type with the old size; heap/stack
+    corruption, out-of-bounds access.
+- type_field_removed: Field removed: Widget::value
+  > Old code accesses a field that no longer exists at the expected offset;
+    reads garbage or writes out of bounds.
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's struct-layout info already proves this is
+BREAKING: dropping `value` to make `bar()` static also shrinks `Widget`
+itself (32 → 8 bits, the minimum size of an empty class), which
+`DW_TAG_structure_type` size + member offsets capture directly. Note this
+isn't quite the same fact as "method became static" — DWARF's own
+`is_static` concept (`DW_AT_external`) describes file-scope linkage, not
+instance-vs-static class methods, so plain DWARF can't directly see the
+qualifier change. Adding headers (L2, `--ast-frontend clang` here since this
+sandbox has no castxml) additionally surfaces the more semantically precise
+`func_static_changed: Static qualifier changed: bar (False -> True)` for the
+same break — see below.
+
+## Why abicheck catches it
+
+At L1, abicheck compares each struct's `DW_TAG_structure_type` size and
+member list directly from debug info; `Widget` losing its `value` field and
+shrinking to an empty class's minimum size is unambiguous breaking evidence
+on its own — old code copying/allocating `sizeof(Widget)` now over-reads.
+At L2, the header AST additionally carries each method's `static`
+specifier, so abicheck can name the actual qualifier change:
+
+```bash
+abicheck compare libfoo_v1.so libfoo_v2.so \
+  --header old=old/lib.h --header new=new/lib.h --ast-frontend clang
+```
+
+```text
+- func_static_changed: Static qualifier changed: bar (False -> True)
+  > Static/non-static transition changes calling convention (implicit this
+    pointer); ABI mismatch.
+```
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-This demo shows a deterministic wrong result (not only “possible UB”):
-- v1 behavior: returns `value + 1`
-- app sets `value=41`, expects `42`
-- v2 static method returns fixed `7`
+**Scenario:** compile app against old (instance method, sets `value=41`,
+expects `bar()` to return `42`), swap in new `.so` without recompile.
 
 ```bash
-# Build v1 + app (compiled against old header)
-g++ -shared -fPIC -g old/lib.cpp -Iold -o libwidget.so
-g++ -g app.cpp -Iold -L. -lwidget -Wl,-rpath,. -o app
+# Build old library + app
+g++ -shared -fPIC -std=c++17 -g old/lib.cpp -Iold -o libwidget.so
+g++ -std=c++17 -g app.cpp -Iold -L. -lwidget -Wl,-rpath,. -o app
 ./app
-# expected:
-# bar() called (instance method), value=41
-# got=42 expected=42
+# → bar() called (instance method), value=41
+# → got=42 expected=42
+# → exit: 0
 
-# Swap in v2 (method became static, same symbol still links)
-g++ -shared -fPIC -g new/lib.cpp -Inew -o libwidget.so
+# Swap in new library (no recompile)
+g++ -shared -fPIC -std=c++17 -g new/lib.cpp -Inew -o libwidget.so
 ./app
-# expected:
-# bar() called (static method), returning fixed value
-# got=7 expected=42
-# WRONG RESULT: method call contract changed (instance -> static)
+# → bar() called (static method), returning fixed value
+# → got=7 expected=42
+# → WRONG RESULT: method call contract changed (instance -> static)
+# → exit: 1
 ```
 
-## Why this case matters
+**Why CRITICAL:** the symbol still links — no loader error, no crash — but
+`bar()`'s calling contract silently changed. The app's compiled-in call
+still passes `this` as if `bar()` were an instance method; the new `static`
+`bar()` doesn't expect it, so the app observes a deterministically wrong
+result rather than a diagnosable failure.
 
-This is a silent binary-compat trap: loader/linker are happy, but runtime semantics are broken.
-No crash is required to prove ABI break — wrong results are enough.
+## Safe redesign
+
+Never turn a public instance method into a `static` one (or vice versa) in
+place — it changes the calling convention while keeping the same mangled
+symbol, so linkers can't catch the mismatch. Add a new static function or
+free function alongside the old instance method instead, and deprecate the
+old one for at least one release cycle.
+
+**Real-world example:** this pattern shows up when a class is refactored to
+be "more functional" (e.g. removing per-instance state to make a method a
+pure computation) without renaming the method — exactly the `Widget::bar()`
+shape here.
+
+## References
+
+- [Itanium C++ ABI: mangling](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling)
+- [libabigail `abidiff` manual](https://sourceware.org/libabigail/manual/abidiff.html)
