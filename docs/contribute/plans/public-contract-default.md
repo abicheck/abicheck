@@ -791,10 +791,13 @@ and hard errors for unknown `ChangeKind` slugs.
 `abicheck/compatibility_evaluation_config.py`), the field-level precedence
 resolver (slice 2, `abicheck/compatibility_evaluation_resolver.py`
 `resolve_field`, implementing this phase's conflicts/aliases rules), pack
-conflict detection (`detect_pack_conflicts`, same module), and the
-unknown-`ChangeKind`-slug hard error (`policy_file.py`'s `_parse_overrides`
-now raises `PolicyError` instead of warning-and-skipping) are done. The
-first real front-end wiring also landed:
+conflict detection (`detect_pack_conflicts`, generalized to any pack field,
+not only `ChangeKind` overrides), and the unknown-`ChangeKind`-slug hard
+error are done — enforced at both the YAML edge (`policy_file.py`'s
+`_parse_overrides` raises `PolicyError`) and the typed-config edge
+(`CompatibilityPolicyConfig.overrides` rejects an unknown slug regardless
+of which front end constructs it directly). The first real front-end
+wiring also landed:
 `abicheck/compatibility_evaluation_wiring.py`'s
 `resolve_legacy_contract_mode` resolves `contract.mode` from the real
 `--scope-public-headers`/`--no-scope-public-headers` CLI flag via

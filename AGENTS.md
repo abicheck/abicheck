@@ -183,8 +183,10 @@ Core pipeline (in order of data flow):
      project_config > built_in_default` tier order over already-collected
      `FieldCandidate`s, the conflicting-values/legacy-alias-disagreement
      usage-error rules, and `detect_pack_conflicts` (D8: two selected packs
-     assigning different values to the same `ChangeKind` are a usage error
-     unless an explicit override resolves it). Pure resolution logic
+     assigning different values to the same field *or* `ChangeKind` are a
+     usage error unless an explicit override resolves it — one generic
+     field-keyed function covers both policy-pack `ChangeKind` overrides and
+     contract/gate-pack field assignments). Pure resolution logic
    - `compatibility_evaluation_wiring.py` — ADR-049 Phase 1's first real
      front-end wiring: `resolve_legacy_contract_mode` resolves
      `contract.mode` from the actual `--scope-public-headers`/
