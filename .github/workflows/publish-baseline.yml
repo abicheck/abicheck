@@ -206,7 +206,12 @@ jobs:
           # `|| true`): a report with per-target errors still writes
           # baseline-libraries.json (report['ok'] is False), and the Python
           # block below reads report['errors'] to print each one as its own
-          # ::error:: annotation either way.
+          # ::error:: annotation either way. The trailing `|| true` matches
+          # the former CLI call's own blanket tolerance -- any other
+          # unexpected failure here (not just a missing/malformed
+          # build-output.json) still falls through to that block's "was not
+          # produced" branch instead of aborting this step with a bare
+          # traceback.
           python3 -c "
           import json
           import os
@@ -222,7 +227,7 @@ jobs:
               raise SystemExit(0)
           report = derive_baseline_libraries(build_output, directory)
           Path('baseline-libraries.json').write_text(json.dumps(report.to_dict()))
-          "
+          " || true
           python3 -c "
           import json, sys
 

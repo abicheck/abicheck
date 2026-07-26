@@ -232,7 +232,9 @@ jobs:
         run: |
           set -euo pipefail
           # Not a CLI command (ADR-054) -- call the library function
-          # directly, same as publish-baseline.yml's identical step.
+          # directly, same as publish-baseline.yml's identical step
+          # (including the trailing `|| true`, matching the former CLI
+          # call's own blanket tolerance for any unexpected failure here).
           python3 -c "
           import json
           import os
@@ -248,7 +250,7 @@ jobs:
               raise SystemExit(0)
           report = derive_baseline_libraries(build_output, directory)
           Path('baseline-libraries.json').write_text(json.dumps(report.to_dict()))
-          "
+          " || true
           python3 -c "
           import json, sys
 

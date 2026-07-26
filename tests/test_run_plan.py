@@ -1007,6 +1007,45 @@ class TestRunPlanGenerateCli:
         result = CliRunner().invoke(main, ["project", "plan", str(config)])
         assert result.exit_code == 64
 
+    # ── --allow-empty (ADR-054: fail-closed by default on zero checks) ──────
+
+    def test_empty_run_plan_exits_one_by_default(self, tmp_path: Path) -> None:
+        config = _write_config(tmp_path, {"targets": {}})
+        result = CliRunner().invoke(main, ["project", "plan", str(config)])
+        assert result.exit_code == 1, result.output
+        assert "--allow-empty" in result.output
+        # The run-plan artifact is still emitted (an empty checks: list),
+        # even though the command signals failure via exit code.
+        assert '"checks": []' in result.stdout
+
+    def test_empty_run_plan_exits_zero_with_allow_empty(self, tmp_path: Path) -> None:
+        config = _write_config(tmp_path, {"targets": {}})
+        result = CliRunner().invoke(
+            main, ["project", "plan", str(config), "--allow-empty"]
+        )
+        assert result.exit_code == 0, result.output
+        assert '"checks": []' in result.stdout
+
+    def test_non_empty_run_plan_ignores_allow_empty(self, tmp_path: Path) -> None:
+        """--allow-empty only relaxes the zero-checks case -- a resolved,
+        non-empty run-plan is unaffected either way."""
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
+        result = CliRunner().invoke(
+            main,
+            [
+                "project",
+                "plan",
+                str(config),
+                "--build-output",
+                f"linux={build_dir}",
+                "--allow-empty",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert len(data["checks"]) == 1
+
 
 def _write_bindings_file(tmp_path: Path, bindings: dict) -> Path:
     import yaml
