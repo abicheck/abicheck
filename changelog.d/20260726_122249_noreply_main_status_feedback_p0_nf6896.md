@@ -94,6 +94,31 @@
   names the alias, not the real underlying class that owns the
   `RecordType` entry, and no current model field maps one back to the
   other — that needs a dedicated typedef-alias-resolution layer.
-  Not yet wired into any live detector — see `AGENTS.md`'s
-  "Known gaps" for why retrofitting the ~15 existing call sites needs its
-  own scoped, individually-verified follow-up.
+- **`type_reachability.py` is now wired into `diff_types.py`'s
+  RecordType-based detectors** (struct/union size, alignment, fields,
+  bases, vtable, kind, reserved fields, qualifiers, renames, deprecation):
+  `_is_abi_surface_type()`, the single gate function every one of those
+  detectors already shares, now accepts a `directly_referenced` set
+  (`_directly_referenced(old, new)`, computed once per detector) and
+  un-filters a std:: record that set names, instead of blanket-filtering
+  every std:: record regardless of direct use — e.g. a public function
+  taking `std::vector<int>` by value now correctly reports a layout change
+  to that vector as `TYPE_SIZE_CHANGED`/`BREAKING`, where it was previously
+  silently dropped as toolchain noise. Because one gate function covers
+  every caller, this closes the gap for all of them at once rather than 9
+  independently-drifting call sites. While wiring this in, the FP-rate
+  corpus's own new cases surfaced a second, pre-existing bug in the gate's
+  std:: check itself: it filtered using `t.name` alone (the same
+  bare-vs-qualified split just fixed in `type_reachability.py`), so a real
+  castxml/clang-produced std:: record was never actually recognized as
+  std:: at all, independent of `directly_referenced` — fixed by keying the
+  std:: prefix check on `qualified_name or name` too. `diff_platform.py`/
+  `diff_symbols.py`/`diff_vtable_layout.py`/`diff_stdlib_impl.py`/
+  `diff_layout.py`/`diff_filtering.py`/`diff_type_spellings.py`, plus
+  `diff_types.py`'s own enum/typedef paths, remain unwired and carry the
+  identical gap — each needs its own individually-verified follow-up
+  (FP-rate/mutation-score gates), documented in `AGENTS.md`'s "Known gaps".
+  New FP-rate gate corpus cases (`stdlib-direct-reference` category):
+  `public_stdlib_type_used_directly_layout_changed` (real-break/FN
+  sentinel) and `stdlib_type_unreferenced_stays_filtered` (internal-noise/
+  FP sentinel) — both pass at baseline 0/0.

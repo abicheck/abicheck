@@ -202,7 +202,9 @@ def _internal_field_type_changed() -> tuple[AbiSnapshot, AbiSnapshot]:
     new = _snap(
         "2",
         functions=[_fn("api")],
-        types=[_rec("InternalCache", size=128, fields=[("a", "long long"), ("b", "long")])],
+        types=[
+            _rec("InternalCache", size=128, fields=[("a", "long long"), ("b", "long")])
+        ],
     )
     return old, new
 
@@ -270,6 +272,39 @@ def _same_stdlib_internal_stl_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
+def _stdlib_type_unreferenced_stays_filtered() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A std:: RecordType is present in the snapshot (real dumps carry these from
+    # debug info even when nothing public uses them) but no public function or
+    # type references it directly -- status-review item 3's direct-reference
+    # exception must not degrade into "any std:: RecordType present is fair
+    # game": this must stay filtered as toolchain noise, same as before item 3.
+    old = _snap(
+        "1",
+        functions=[_fn("api")],
+        types=[
+            RecordType(
+                name="vector<int, std::allocator<int> >",
+                kind="class",
+                size_bits=192,
+                qualified_name="std::vector<int, std::allocator<int> >",
+            )
+        ],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api")],
+        types=[
+            RecordType(
+                name="vector<int, std::allocator<int> >",
+                kind="class",
+                size_bits=256,
+                qualified_name="std::vector<int, std::allocator<int> >",
+            )
+        ],
+    )
+    return old, new
+
+
 # --- enum-reachability + pointer/opaque precision (internal-noise) ------------
 # These lock in the by-value-vs-pointer (ADR-024 §D3) and enum/typedef
 # reachability behaviour the corpus previously left uncovered (see the NOTE
@@ -280,8 +315,12 @@ def _same_stdlib_internal_stl_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
 def _internal_enum_value_changed() -> tuple[AbiSnapshot, AbiSnapshot]:
     # An enum no public API references: re-valuing a member is invisible to the
     # exported surface, so it must not raise a public break.
-    old = _snap("1", functions=[_fn("api")], enums=[_enum("InternalMode", [("A", 0), ("B", 1)])])
-    new = _snap("2", functions=[_fn("api")], enums=[_enum("InternalMode", [("A", 0), ("B", 5)])])
+    old = _snap(
+        "1", functions=[_fn("api")], enums=[_enum("InternalMode", [("A", 0), ("B", 1)])]
+    )
+    new = _snap(
+        "2", functions=[_fn("api")], enums=[_enum("InternalMode", [("A", 0), ("B", 5)])]
+    )
     return old, new
 
 
@@ -295,7 +334,9 @@ def _internal_enum_member_removed() -> tuple[AbiSnapshot, AbiSnapshot]:
         functions=[_fn("api")],
         enums=[_enum("InternalMode", [("A", 0), ("B", 1), ("C", 2)])],
     )
-    new = _snap("2", functions=[_fn("api")], enums=[_enum("InternalMode", [("A", 0), ("B", 1)])])
+    new = _snap(
+        "2", functions=[_fn("api")], enums=[_enum("InternalMode", [("A", 0), ("B", 1)])]
+    )
     return old, new
 
 
@@ -322,8 +363,16 @@ def _opaque_handle_pointer_only_size() -> tuple[AbiSnapshot, AbiSnapshot]:
     # changes. Consumers only ever hold the pointer (they cannot see the layout),
     # so this is not a public break — the by-value-vs-pointer precision the
     # opaque filter supplies (ADR-024 §D3).
-    old = _snap("1", functions=[_fn("api", ret="OpaqueH *")], types=[_opaque("OpaqueH", size=64)])
-    new = _snap("2", functions=[_fn("api", ret="OpaqueH *")], types=[_opaque("OpaqueH", size=128)])
+    old = _snap(
+        "1",
+        functions=[_fn("api", ret="OpaqueH *")],
+        types=[_opaque("OpaqueH", size=64)],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", ret="OpaqueH *")],
+        types=[_opaque("OpaqueH", size=128)],
+    )
     return old, new
 
 
@@ -336,6 +385,46 @@ def _public_struct_size() -> tuple[AbiSnapshot, AbiSnapshot]:
     )
     new = _snap(
         "2", functions=[_fn("api", ret="Result *")], types=[_rec("Result", size=128)]
+    )
+    return old, new
+
+
+def _public_stdlib_type_used_directly_layout_changed() -> tuple[
+    AbiSnapshot, AbiSnapshot
+]:
+    # A public function takes a std:: type directly, by value -- the library's
+    # own ABI genuinely depends on this stdlib type's layout (e.g. a libstdc++
+    # dual-ABI flip affecting every public function taking std::vector<int> by
+    # value). Status-review item 3 (type_reachability.py wiring): before this,
+    # std:: types were always filtered as toolchain noise regardless of direct
+    # use, silently hiding this real, consumer-visible break -- a false
+    # negative this case guards against. Mirrors the real castxml/DWARF shape
+    # (empirically confirmed via `abicheck dump` on a compiled std::vector<int>
+    # parameter): RecordType.name/Function.return_type/Param.type spell the
+    # type bare, with the "std::"-prefixed spelling only in qualified_name.
+    old = _snap(
+        "1",
+        functions=[_fn("api", params=("vector<int, std::allocator<int> >",))],
+        types=[
+            RecordType(
+                name="vector<int, std::allocator<int> >",
+                kind="class",
+                size_bits=192,
+                qualified_name="std::vector<int, std::allocator<int> >",
+            )
+        ],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", params=("vector<int, std::allocator<int> >",))],
+        types=[
+            RecordType(
+                name="vector<int, std::allocator<int> >",
+                kind="class",
+                size_bits=256,
+                qualified_name="std::vector<int, std::allocator<int> >",
+            )
+        ],
     )
     return old, new
 
@@ -591,9 +680,7 @@ def _ext_snap(version, *, stub, extra_syms=()) -> AbiSnapshot:
 
     elf = ElfMetadata()
     elf.symbols = [
-        ElfSymbol(
-            name=s, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
-        )
+        ElfSymbol(name=s, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC)
         for s in ("PyInit_ext", *extra_syms)
     ]
     snap = AbiSnapshot(
@@ -636,10 +723,19 @@ CORPUS: list[Case] = [
     Case("hidden_function_signature_changed", True, _hidden_function_signature_changed),
     Case("private_header_type_change", True, _private_header_type_change),
     Case("same_stdlib_internal_stl_churn", True, _same_stdlib_internal_stl_churn),
+    Case(
+        "stdlib_type_unreferenced_stays_filtered",
+        True,
+        _stdlib_type_unreferenced_stays_filtered,
+    ),
     # enum reachability + pointer/opaque precision — internal-noise polarity.
     Case("internal_enum_value_changed", True, _internal_enum_value_changed),
     Case("internal_enum_member_removed", True, _internal_enum_member_removed),
-    Case("enum_reached_only_via_internal_struct", True, _enum_reached_only_via_internal_struct),
+    Case(
+        "enum_reached_only_via_internal_struct",
+        True,
+        _enum_reached_only_via_internal_struct,
+    ),
     Case("opaque_handle_pointer_only_size", True, _opaque_handle_pointer_only_size),
     # field-eval F2: versioned-symbol scheme (P08) + multi-.so bundle (P20).
     Case("versioned_scheme_internal_churn", True, _versioned_scheme_internal_churn),
@@ -655,6 +751,11 @@ CORPUS: list[Case] = [
         _cross_stdlib_embedded_layout_diverges,
     ),
     Case("public_struct_size", False, _public_struct_size),
+    Case(
+        "public_stdlib_type_used_directly_layout_changed",
+        False,
+        _public_stdlib_type_used_directly_layout_changed,
+    ),
     Case("public_function_removed", False, _public_function_removed),
     Case("public_param_type_changed", False, _public_param_type_changed),
     Case("public_return_type_changed", False, _public_return_type_changed),
@@ -663,9 +764,17 @@ CORPUS: list[Case] = [
     Case("versioned_scheme_public_churn", False, _versioned_scheme_public_churn),
     # enum reachability + pointer precision — real-break (FN sentinel) polarity.
     Case("public_enum_value_changed", False, _public_enum_value_changed),
-    Case("enum_reached_via_public_struct_field", False, _enum_reached_via_public_struct_field),
+    Case(
+        "enum_reached_via_public_struct_field",
+        False,
+        _enum_reached_via_public_struct_field,
+    ),
     Case("enum_reached_via_public_typedef", False, _enum_reached_via_public_typedef),
-    Case("namespaced_enum_reached_unqualified", False, _namespaced_enum_reached_unqualified),
+    Case(
+        "namespaced_enum_reached_unqualified",
+        False,
+        _namespaced_enum_reached_unqualified,
+    ),
     Case("defined_pointer_only_type_size", False, _defined_pointer_only_type_size),
 ]
 
@@ -1070,6 +1179,9 @@ CASE_CATEGORY: dict[str, str] = {
     # stdlib implementation attribution
     "same_stdlib_internal_stl_churn": "stdlib-impl",
     "cross_stdlib_embedded_layout_diverges": "stdlib-impl",
+    # direct vs. transitive stdlib type reachability (status-review item 3)
+    "stdlib_type_unreferenced_stays_filtered": "stdlib-direct-reference",
+    "public_stdlib_type_used_directly_layout_changed": "stdlib-direct-reference",
     # versioned-symbol scheme / multi-.so bundle
     "versioned_scheme_internal_churn": "versioned-scheme",
     "bundle_sibling_soname_churn": "versioned-scheme",

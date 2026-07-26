@@ -645,49 +645,67 @@ Once a root command genuinely clears the bar above, pick the right home:
   sites across `diff_*.py`/`buildsource/*.py`, each individually verified
   against the FP-rate/mutation-score gates — a multi-day project on its
   own, not attempted here.
-- **Type reachability (direct vs. transitive stdlib references) — a new,
-  additive, unwired building block only.** `abicheck/type_reachability.py`
+- **Type reachability (direct vs. transitive stdlib references) — computed
+  and wired into `diff_types.py`'s RecordType-based detectors; enum/typedef
+  paths remain unwired.** `abicheck/type_reachability.py`
   (`directly_referenced_stdlib_types()`) computes, from a snapshot alone,
   which `std::`/`__gnu_cxx::`/etc. record types are directly referenced by
   a non-stdlib function's signature or a non-stdlib type's own field — as
   opposed to only reachable via deep template-instantiation internals
   (`std::string::_Alloc_hider`, `std::_Rb_tree_node_base`) that
   `is_non_abi_surface_type`'s existing whole-name-prefix filter already
-  correctly excludes as toolchain-artifact churn either way. This closes
-  the *computational* gap (the distinction the status review asked for is
-  now computable) but is **not wired into any live detector** — retrofitting
-  the ~15 `is_non_abi_surface_type`/`is_abi_surface_type_name` call sites in
-  `diff_types.py`/`diff_platform.py`/`diff_symbols.py`/
-  `diff_vtable_layout.py`/`diff_stdlib_impl.py`/`diff_layout.py`/
-  `diff_filtering.py`/`diff_type_spellings.py` needs each site individually
-  verified against the FP-rate/mutation-score gates (exactly the guard those
-  gates exist for), a scoped follow-up rather than a drive-by extension
-  here. A Codex review round found and fixed a real correctness gap in the
-  *computational* claim above: candidate identification originally matched
-  only `RecordType.name`, but castxml/direct-clang populate the bare leaf
-  there and the namespace-qualified spelling separately in
-  `qualified_name` (`model.py`, `dumper_clang.py`) — so `name` alone never
-  carries a `std::` prefix for those two backends and the helper silently
-  found nothing on any real castxml/clang-produced snapshot. Fixed by
-  identifying candidates via `qualified_name or name`. That fix alone was
-  still insufficient, confirmed by dumping a real compiled
-  `std::vector<int>` parameter end to end: `Function.return_type`/
-  `Param.type` spell the outer type **bare** (`"vector<int,
-  std::allocator<int> >"`) even when the matching `RecordType`'s identity
-  is fully qualified (`"std::vector<int, std::allocator<int> >"`), across
-  *all three* backends (DWARF bakes the qualified form straight into
-  `name` with no separate field; castxml/clang keep `name` bare and
-  `qualified_name` separate) — so a pure full-identity substring match
-  still couldn't connect the two. Fixed by also generating a
-  namespace-prefix-stripped spelling per candidate and matching against
-  either form. **Still not fixed, and out of scope for that fix**: a
-  signature spelled with a typedef alias (`std::string`, `std::wstring`,
-  ...) names the alias, not the real underlying class
-  (`std::basic_string<char, ...>`) that owns the `RecordType` entry, and no
-  current model field maps one back to the other — resolving that needs a
-  dedicated typedef-alias-resolution layer (walking `snapshot.typedefs`),
-  a separate scoped project, not a further extension of this string-
-  spelling fallback.
+  correctly excludes as toolchain-artifact churn either way. A Codex review
+  round found and fixed a real correctness gap in the computational claim:
+  candidate identification originally matched only `RecordType.name`, but
+  castxml/direct-clang populate the bare leaf there and the
+  namespace-qualified spelling separately in `qualified_name` (`model.py`,
+  `dumper_clang.py`) — so `name` alone never carries a `std::` prefix for
+  those two backends and the helper silently found nothing on any real
+  castxml/clang-produced snapshot. Fixed by identifying candidates via
+  `qualified_name or name`. That fix alone was still insufficient, confirmed
+  by dumping a real compiled `std::vector<int>` parameter end to end:
+  `Function.return_type`/`Param.type` spell the outer type **bare**
+  (`"vector<int, std::allocator<int> >"`) even when the matching
+  `RecordType`'s identity is fully qualified
+  (`"std::vector<int, std::allocator<int> >"`), across *all three* backends
+  (DWARF bakes the qualified form straight into `name` with no separate
+  field; castxml/clang keep `name` bare and `qualified_name` separate) — so
+  a pure full-identity substring match still couldn't connect the two.
+  Fixed by also generating a namespace-prefix-stripped spelling per
+  candidate and matching against either form. **Still not fixed, and out of
+  scope for that fix**: a signature spelled with a typedef alias
+  (`std::string`, `std::wstring`, ...) names the alias, not the real
+  underlying class (`std::basic_string<char, ...>`) that owns the
+  `RecordType` entry, and no current model field maps one back to the
+  other — resolving that needs a dedicated typedef-alias-resolution layer
+  (walking `snapshot.typedefs`), a separate scoped project.
+
+  **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
+  `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
+  once per detector via `_directly_referenced(old, new)`) and un-filters a
+  std:: record that set names, instead of blanket-filtering every std::
+  record regardless of direct use. Because every RecordType-based
+  struct/union/field/kind/reserved detector in that file already shares this
+  one gate function, wiring it there once covers all of them uniformly —
+  not 9 independent, individually-drifting call sites. While wiring this in,
+  the FP-rate corpus's own new cases (`stdlib-direct-reference` category)
+  surfaced a second, *pre-existing* correctness gap in the gate's std::
+  check itself (independent of `directly_referenced`): it filtered using
+  `_is_non_abi_surface_type(t.name, ...)`, i.e. bare `t.name` only, the exact
+  same bare-vs-qualified split as the `type_reachability.py` fix above — so
+  a real castxml/clang-produced std:: record (bare `name`, qualified
+  `qualified_name`) was **never actually filtered as std:: at all**,
+  independent of whether anything referenced it. Fixed in the same gate by
+  keying the std:: prefix check on `qualified_name or name` (the anonymous-
+  type-marker half of the check still uses bare `name`, unaffected).
+  `diff_platform.py`/`diff_symbols.py`/`diff_vtable_layout.py`/
+  `diff_stdlib_impl.py`/`diff_layout.py`/`diff_filtering.py`/
+  `diff_type_spellings.py`, plus `diff_types.py`'s own enum/typedef paths
+  (which call `is_non_abi_surface_type`/`is_abi_surface_type_name` directly
+  on enum/typedef names, not through `_is_abi_surface_type`), remain
+  unwired and carry the identical bare-name gap — each needs its own
+  individually-verified follow-up (FP-rate/mutation-score gates), not a
+  drive-by extension of this pass's RecordType-scoped fix.
 
 ## What NOT to do
 
