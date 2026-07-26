@@ -167,6 +167,31 @@ def _function_key(tu_name: str, fn: Function) -> tuple[str, str]:
     (the same TU's own repeat, already tolerated by :func:`_merge_group`'s
     same-TU-extras handling), never with another TU's unrelated local
     entity.
+
+    **Known, accepted limitation** (Codex review, PR #635 round 9):
+    ``entity_key`` assumes ``fn.mangled`` is a return-type-independent
+    identity for "the same function," which holds for every mangling
+    scheme this module has been verified against (Itanium, and this
+    function's own plain-C fallback) but not for the Microsoft C++ ABI --
+    MSVC's decorated name for a free function encodes its return type, so
+    two genuinely conflicting cross-TU declarations differing only in
+    return type (``int compute(int);`` vs. ``double compute(int);`` --
+    itself only reachable as an ODR violation the two TUs' own compilers
+    never catch, since each sees only its own declaration) would decorate
+    to two different names, land in two different ``entity_key`` buckets,
+    and both survive the merge silently instead of raising
+    ``INCONSISTENT_DECLARATION``. This module already carries direct,
+    observed evidence of the same underlying MSVC-mangling difference --
+    ``tests/test_tu_merge.py``'s ``test_odr_conflict_fixture_raises_through_real_clang_backend``
+    documents exactly this symptom from real Windows CI (clang in MSVC
+    compatibility mode) and works around it by not forcing C++ mode there,
+    rather than fixing entity identity at the source. A real fix needs a
+    return-type-independent normalization of MSVC decorated names -- a
+    scheme-specific parser this module cannot write and verify without a
+    real MSVC/``clang-cl`` toolchain to check output against (unavailable
+    in the environment this round's changes were verified in), so this is
+    documented rather than guess-fixed, the same call already made for the
+    anonymous-namespace-type and typedef-qualification gaps above.
     """
     if fn.mangled == fn.name:
         is_local = fn.is_static
