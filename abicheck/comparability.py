@@ -310,7 +310,20 @@ def _slot_indices_match_position(slots: list[str]) -> bool:
     ``_slot_token_for_ancestor`` construction always emits
     ``f"{idx}:{token}"`` from ``enumerate(declared_includes)``, so a
     genuine ``include_sequence`` value's indices are always exactly
-    ``"0"``, ``"1"``, ``"2"``, ... in order).
+    ``"0"``, ``"1"``, ``"2"``, ... in order) -- EXCEPT for a single
+    trailing, unnumbered ``"sys:..."`` entry, which the real construction
+    appends for the system-header bucket whenever the depfile contains any
+    header outside every declared include root (Codex review, PR #641
+    follow-up, tenth P1): unlike the numbered ``label:``/``hdrs:``/``ext:``
+    slots, this bucket has no owning ``IncludeDir`` and thus no position of
+    its own to number -- it is always the list's last element, if present
+    at all. Excluding it from the position check is what the real ``sys:``
+    shape actually is, not a loosened restriction: this function's WHOLE
+    JOB is verifying a genuine ``include_sequence`` value's real shape, and
+    an entry with no index by construction cannot be held to an index
+    requirement without treating an ordinary, extremely common production
+    output (any header pulled from outside every declared root -- systemd
+    headers, the C standard library, ...) as malformed.
 
     :func:`_include_sequence_is_additive_owned_growth`'s per-slot loop only
     checked that a slot's index was *unchanged* between the old and new
@@ -323,7 +336,8 @@ def _slot_indices_match_position(slots: list[str]) -> bool:
     its position closes this without changing the carve-out's own additive
     semantics, since a genuine ``include_sequence`` always satisfies it.
     """
-    return all(slot.partition(":")[0] == str(i) for i, slot in enumerate(slots))
+    numbered_slots = slots[:-1] if slots and slots[-1].startswith("sys:") else slots
+    return all(slot.partition(":")[0] == str(i) for i, slot in enumerate(numbered_slots))
 
 
 def _include_sequence_is_additive_owned_growth(

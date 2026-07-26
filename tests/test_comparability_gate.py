@@ -568,6 +568,33 @@ def test_include_sequence_additive_owned_growth_false_for_non_positional_index()
     assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
 
 
+def test_include_sequence_additive_owned_growth_true_with_unchanged_trailing_sys_bucket():
+    # Codex review, PR #641 follow-up (tenth P1): the real production
+    # construction appends an unnumbered trailing "sys:..." entry for any
+    # depfile header outside every declared include root -- the seventh
+    # P2 fix's _slot_indices_match_position required EVERY slot's prefix
+    # to equal its position, which this "sys:" entry never can (it owns no
+    # IncludeDir and thus no position). An unchanged system bucket must
+    # not block an otherwise-legitimate owned-header addition.
+    sys_bucket = "sys:" + "a" * 16
+    old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")]), sys_bucket])
+    new = json.dumps(
+        [_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")]), sys_bucket]
+    )
+    assert _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+
+
+def test_include_sequence_additive_owned_growth_false_when_sys_bucket_not_trailing():
+    # A "sys:"-prefixed entry anywhere but the last position is not the
+    # real production shape (the bucket is always appended last, if
+    # present) -- must still be declined as an unverifiable position.
+    old = json.dumps(["sys:" + "a" * 16, _hdrs_slot(1, [("a.h", "a.h")])])
+    new = json.dumps(
+        ["sys:" + "a" * 16, _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])]
+    )
+    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+
+
 def test_include_sequence_additive_owned_growth_declines_when_scope_new_headers_is_none():
     # Codex review, PR #641 follow-up (ninth P1): a shape-valid owned-pair
     # growth must still decline when the caller has no verified set of
@@ -1192,6 +1219,52 @@ def test_gate_header_sequence_carve_out_declines_when_appended_header_is_not_the
     assert _scope_growth_corroborated(old.contract, new.contract)
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
+
+
+def test_gate_include_sequence_carve_out_allows_growth_alongside_unchanged_sys_bucket(
+    tmp_path,
+):
+    # Codex review, PR #641 follow-up (tenth P1): a real depfile commonly
+    # includes headers outside every declared include root (system
+    # headers, the C standard library, ...), which compute_extraction_contract
+    # buckets into an unnumbered trailing "sys:..." include_sequence
+    # entry. _slot_indices_match_position (seventh P2 fix) required EVERY
+    # slot's index to match its position, which this entry never can --
+    # so a pure header addition with an unchanged system bucket wrongly
+    # raised ProfileMismatchError. Confirmed by direct repro before any
+    # fix: reproduced [a.h, b.h] -> [a.h, b.h, c.h] with the same system
+    # header depfile-resolved on both sides.
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    c2 = _write(tmp_path / "v2" / "c.h", "int h(void);\n")
+    sys_h = _write(tmp_path / "sys" / "stdio.h", "void printf(void);\n")
+    old_headers = [a, b]
+    new_headers = [a2, b2, c2]
+    old_inc_extra, _ = resolve_inferred_header_roots(old_headers, [])
+    new_inc_extra, _ = resolve_inferred_header_roots(new_headers, [])
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            declared_headers=old_headers,
+            declared_includes=[IncludeDir(p) for p in old_inc_extra],
+            depfile_resolved_paths=[a, b, sys_h],
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            declared_headers=new_headers,
+            declared_includes=[IncludeDir(p) for p in new_inc_extra],
+            depfile_resolved_paths=[a2, b2, c2, sys_h],
+        )
+    )
+    old_slots = json.loads(old.contract.profile_fields["include_sequence"])
+    new_slots = json.loads(new.contract.profile_fields["include_sequence"])
+    assert old_slots[-1] == new_slots[-1]
+    assert old_slots[-1].startswith("sys:")
+    assert check_contracts_comparable(old, new) is None  # must not raise either error
 
 
 def test_gate_rejects_opaque_profile_mismatch_with_no_recognized_differing_field():
