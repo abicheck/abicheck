@@ -99,28 +99,98 @@ class _Provenanced(Protocol):
 _T = TypeVar("_T", bound=_Provenanced)
 
 
+def _has_local_linkage_mangling(mangled: str) -> bool:
+    """Whether *mangled* carries an Itanium ABI marker for genuine internal
+    (TU-local) linkage -- the ``_ZL`` local-entity prefix (a file-scope
+    ``static`` function/variable), or a ``_GLOBAL__N_`` component (an
+    anonymous-namespace entity). Empirically verified against real
+    clang/GCC output (``nm``'s lowercase-letter "local symbol" convention
+    agrees for both): ``static void helper(int);`` mangles to
+    ``_ZL6helperi``; an anonymous-namespace function mangles to
+    ``_ZN12_GLOBAL__N_1...``; a ``static`` **member** function/variable of
+    an ordinarily-visible class -- externally linked, not TU-local at all,
+    despite ``storageClass == "static"`` being set in the AST exactly the
+    same way -- mangles to an ordinary marker-free symbol like
+    ``_ZN6Widget4makeEi`` (Codex review, PR #635 round 6). Neither marker
+    ever appears in an externally-linked Itanium symbol, so this is a
+    precise linkage signal, not a heuristic guess.
+    """
+    return mangled.startswith("_ZL") or "_GLOBAL__N_" in mangled
+
+
 def _function_key(tu_name: str, fn: Function) -> tuple[str, str]:
     """``entity_key`` for a :class:`Function`, scoped by TU for
     internal-linkage declarations.
 
-    A ``static`` function's mangled spelling (Itanium's ``_ZL...`` local-
-    linkage marker) is **not** unique across translation units the way an
-    externally-linked symbol's is -- it never needs to be, since the symbol
-    never leaves its own TU's object file. Two unrelated TUs can each
-    declare their own private ``static void helper(int)`` and get the
-    identical mangled string, even though they are two distinct,
-    TU-local entities, not redeclarations of "the same" function (Codex
-    review, PR #635 round 5). Keying only on ``fn.mangled`` would either
-    silently fold them into one (discarding one TU's declaration) or raise
-    a false ``INCONSISTENT_DECLARATION`` the moment they happen to differ.
-    Folding ``tu_name`` into the key for a ``static`` function makes it
-    trivially TU-scoped -- it can only ever collide with *itself* (the
-    same TU's own repeat, already tolerated by :func:`_merge_group`'s
-    same-TU-extras handling), never with another TU's unrelated static
-    helper.
+    A TU-local function's mangled spelling is **not** unique across
+    translation units the way an externally-linked symbol's is -- it never
+    needs to be, since the symbol never leaves its own TU's object file.
+    Two unrelated TUs can each declare their own private
+    ``static void helper(int)`` (or their own same-named entity in an
+    anonymous namespace) and get the identical mangled string, even though
+    they are two distinct, TU-local entities, not redeclarations of "the
+    same" function (Codex review, PR #635 rounds 5-6). Keying only on
+    ``fn.mangled`` would either silently fold them into one (discarding one
+    TU's declaration) or raise a false ``INCONSISTENT_DECLARATION`` the
+    moment they happen to differ.
+
+    Detecting this from ``fn.is_static`` alone is wrong in *both*
+    directions: it misses an anonymous-namespace function entirely (clang
+    never sets ``storageClass`` for one -- confirmed empirically, it stays
+    unset even though the function is just as TU-local), and it wrongly
+    flags an ordinarily-visible class's ``static`` **member** function
+    (``storageClass == "static"`` is set there too, but a static member
+    function has the class's own, ordinary external linkage, nothing to do
+    with TU-locality). ``fn.mangled`` itself resolves both cases correctly
+    via :func:`_has_local_linkage_mangling` -- except when no C++ mangling
+    was applied at all (a plain-C parse, or `extern "C"`), where there is
+    no member-function concept to conflate with and ``is_static`` is an
+    unambiguous, purely C signal.
+
+    Folding ``tu_name`` into the key for a genuinely TU-local function
+    makes it trivially TU-scoped -- it can only ever collide with *itself*
+    (the same TU's own repeat, already tolerated by :func:`_merge_group`'s
+    same-TU-extras handling), never with another TU's unrelated local
+    entity.
     """
-    name = fn.mangled if not fn.is_static else f"{tu_name}::{fn.mangled}"
+    if fn.mangled == fn.name:
+        is_local = fn.is_static
+    else:
+        is_local = _has_local_linkage_mangling(fn.mangled)
+    name = f"{tu_name}::{fn.mangled}" if is_local else fn.mangled
     return entity_key("function", name)
+
+
+def _variable_key(tu_name: str, var: Variable) -> tuple[str, str]:
+    """``entity_key`` for a :class:`Variable`, the variable analogue of
+    :func:`_function_key` -- a file-scope ``static`` or anonymous-namespace
+    variable is exactly as TU-local as its function counterpart, and
+    verified to follow the identical Itanium marker convention (a
+    ``static int state;`` mangles to ``_ZL5state``; an anonymous-namespace
+    variable to ``_ZN12_GLOBAL__N_1...``; a ``static`` **member** variable
+    to an ordinary marker-free symbol, e.g. ``_ZN6Widget7counterE`` --
+    Codex review, PR #635 round 6).
+
+    **Known, accepted limitation**: unlike :class:`Function`,
+    :class:`Variable` carries no ``is_static`` field at all, so a plain-C
+    (or `extern "C"`) file-scope ``static`` variable -- whose mangled name
+    equals its bare name, carrying no Itanium marker to detect -- has no
+    signal this function can read to distinguish it from an ordinary
+    external variable. Closing that gap needs a new ``Variable.is_static``
+    model field (a schema change, `dumper_clang.py`/`dumper_castxml.py`
+    updates to populate it) -- out of proportionate scope for this fix,
+    matching this PR's typedef-qualification precedent (see G32 Phase C
+    PR discussion) of documenting a producer-side gap rather than papering
+    over it. The C++ case (the more common source of same-named
+    file-scope/anonymous-namespace variable collisions in practice) is
+    fully handled.
+    """
+    name = (
+        f"{tu_name}::{var.mangled}"
+        if _has_local_linkage_mangling(var.mangled)
+        else var.mangled
+    )
+    return entity_key("variable", name)
 
 
 def merge_fragments(
@@ -214,7 +284,7 @@ def merge_fragments(
     variables = _flatten(
         _merge_group(
             ((f.tu_name, var) for f in ordered for var in f.variables),
-            key_fn=lambda _tu, var: entity_key("variable", var.mangled),
+            key_fn=_variable_key,
             merge_fn=partial(
                 _merge_variables,
                 header_segs=header_segs,

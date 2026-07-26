@@ -226,6 +226,91 @@ def test_merge_fragments_still_merges_non_static_functions_across_tus():
     assert len(merged.functions) == 1
 
 
+def test_merge_fragments_keeps_distinct_anonymous_namespace_functions_from_different_tus():
+    # An anonymous-namespace function is exactly as TU-local as a `static`
+    # one, but clang never sets storageClass="static" for it (verified
+    # empirically) -- so is_static alone would miss this case entirely.
+    # Two unrelated TUs' own `namespace { void helper(int); }` mangle
+    # identically (`_ZN12_GLOBAL__N_1...`) without being the same entity.
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn(
+                "helper",
+                "_ZN12_GLOBAL__N_16helperEi",
+                is_static=False,
+                return_type="int",
+            ),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn(
+                "helper",
+                "_ZN12_GLOBAL__N_16helperEi",
+                is_static=False,
+                return_type="double",
+            ),
+        ),
+    )
+    merged = merge_fragments([a, b])
+    assert len(merged.functions) == 2
+    assert {fn.return_type for fn in merged.functions} == {"int", "double"}
+
+
+def test_merge_fragments_still_merges_static_member_functions_across_tus():
+    # A static *member* function (`struct Widget { static int make(int); };`)
+    # sets storageClass="static" too (verified empirically), but it has the
+    # class's own ordinary *external* linkage -- nothing to do with
+    # TU-locality. Its mangled name (e.g. "_ZN6Widget4makeEi") carries
+    # neither the _ZL prefix nor a _GLOBAL__N_ component, so it must keep
+    # merging normally across TUs, not get incorrectly TU-scoped just
+    # because is_static happens to be True.
+    a = TuFragment(
+        tu_name="a",
+        functions=(_fn("make", "_ZN6Widget4makeEi", is_static=True),),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(_fn("make", "_ZN6Widget4makeEi", is_static=True),),
+    )
+    merged = merge_fragments([a, b])
+    assert len(merged.functions) == 1
+
+
+def test_merge_fragments_keeps_distinct_static_variables_from_different_tus():
+    a = TuFragment(tu_name="a", variables=(_var("state", "_ZL5state", value="1"),))
+    b = TuFragment(tu_name="b", variables=(_var("state", "_ZL5state", value="2"),))
+    merged = merge_fragments([a, b])
+    assert len(merged.variables) == 2
+    assert {v.value for v in merged.variables} == {"1", "2"}
+
+
+def test_merge_fragments_keeps_distinct_anonymous_namespace_variables_from_different_tus():
+    a = TuFragment(
+        tu_name="a",
+        variables=(_var("anon_state", "_ZN12_GLOBAL__N_110anon_stateE", value="1"),),
+    )
+    b = TuFragment(
+        tu_name="b",
+        variables=(_var("anon_state", "_ZN12_GLOBAL__N_110anon_stateE", value="2"),),
+    )
+    merged = merge_fragments([a, b])
+    assert len(merged.variables) == 2
+    assert {v.value for v in merged.variables} == {"1", "2"}
+
+
+def test_merge_fragments_still_merges_static_member_variables_across_tus():
+    # `struct Widget { static int counter; };` -- ordinary external
+    # linkage, mangles marker-free (e.g. "_ZN6Widget7counterE"); must keep
+    # merging normally across TUs.
+    a = TuFragment(tu_name="a", variables=(_var("counter", "_ZN6Widget7counterE"),))
+    b = TuFragment(tu_name="b", variables=(_var("counter", "_ZN6Widget7counterE"),))
+    merged = merge_fragments([a, b])
+    assert len(merged.variables) == 1
+
+
 # ---------------------------------------------------------------------------
 # Empty / single-fragment base cases, directly against tu_merge (not just
 # the dumper_manifest.merge_tu_fragments alias already covered elsewhere)
