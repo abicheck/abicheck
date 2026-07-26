@@ -1153,6 +1153,138 @@ def test_gate_raises_scope_mismatch_error_on_scope_drift(tmp_path):
         check_contracts_comparable(old, new)
 
 
+def test_gate_additive_header_set_carve_out_allows_pure_addition(tmp_path):
+    # PR #641 follow-up (pvxs full-version-matrix scan, F8): master added
+    # exactly one new public header (include/pvxs/json.h) with nothing else
+    # added/removed/renamed -- ordinary evolution, not the "manifest/
+    # CLI-flag drift between two extraction runs" mistake this fingerprint
+    # exists to catch.
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    json_h = _write(tmp_path / "v2" / "json.h", "int h(void);\n")
+    old = _snap(compute_extraction_contract(declared_headers=[a, b]))
+    new = _snap(compute_extraction_contract(declared_headers=[a2, b2, json_h]))
+    assert old.contract.scope_fingerprint != new.contract.scope_fingerprint
+    check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_additive_header_set_carve_out_still_raises_when_a_header_is_also_removed(
+    tmp_path,
+):
+    # A header removed alongside one added is NOT a pure addition -- must
+    # still raise, exactly as it did before this carve-out existed.
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    c2 = _write(tmp_path / "v2" / "c.h", "int h(void);\n")
+    old = _snap(compute_extraction_contract(declared_headers=[a, b]))
+    new = _snap(compute_extraction_contract(declared_headers=[a2, c2]))
+    with pytest.raises(ScopeMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_additive_header_set_carve_out_still_raises_on_pure_removal(tmp_path):
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    c = _write(tmp_path / "v1" / "c.h", "int h(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    old = _snap(compute_extraction_contract(declared_headers=[a, b, c]))
+    new = _snap(compute_extraction_contract(declared_headers=[a2, b2]))
+    with pytest.raises(ScopeMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_additive_header_set_carve_out_declines_when_a_side_is_single_header_sentinel(
+    tmp_path,
+):
+    # A lone declared header collapses to a "<single-header>" sentinel with
+    # no real per-file identity (Codex review, PR #624 follow-up) -- there
+    # is nothing to verify a true superset against, so the carve-out must
+    # decline and the gate must still raise, exactly as it did before this
+    # carve-out existed.
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    old = _snap(compute_extraction_contract(declared_headers=[a]))
+    new = _snap(compute_extraction_contract(declared_headers=[a2, b2]))
+    with pytest.raises(ScopeMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_additive_header_set_carve_out_covers_public_header_dirs_growth(tmp_path):
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    dir1 = tmp_path / "v1" / "dir1"
+    dir2 = tmp_path / "v1" / "dir2"
+    for d in (dir1, dir2):
+        d.mkdir(parents=True)
+    dir1b = tmp_path / "v2" / "dir1"
+    dir2b = tmp_path / "v2" / "dir2"
+    dir3b = tmp_path / "v2" / "dir3"
+    for d in (dir1b, dir2b, dir3b):
+        d.mkdir(parents=True)
+    old = _snap(
+        compute_extraction_contract(declared_headers=[a, b], public_header_dirs=[dir1, dir2])
+    )
+    new = _snap(
+        compute_extraction_contract(
+            declared_headers=[a2, b2], public_header_dirs=[dir1b, dir2b, dir3b]
+        )
+    )
+    check_contracts_comparable(old, new)  # must not raise
+
+
+def test_gate_additive_header_set_carve_out_requires_every_differing_field_to_grow(
+    tmp_path,
+):
+    # headers grows (a,b -> a,b,c) but public_header_dirs SHRINKS
+    # (dir1,dir2,dir3 -> dir1,dir2) at the same time -- not a pure addition
+    # overall, so the gate must still raise even though the headers field
+    # alone would have qualified.
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    c2 = _write(tmp_path / "v2" / "c.h", "int h(void);\n")
+    dir1 = tmp_path / "v1" / "dir1"
+    dir2 = tmp_path / "v1" / "dir2"
+    dir3 = tmp_path / "v1" / "dir3"
+    for d in (dir1, dir2, dir3):
+        d.mkdir(parents=True)
+    dir1b = tmp_path / "v2" / "dir1"
+    dir2b = tmp_path / "v2" / "dir2"
+    for d in (dir1b, dir2b):
+        d.mkdir(parents=True)
+    old = _snap(
+        compute_extraction_contract(
+            declared_headers=[a, b], public_header_dirs=[dir1, dir2, dir3]
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            declared_headers=[a2, b2, c2], public_header_dirs=[dir1b, dir2b]
+        )
+    )
+    with pytest.raises(ScopeMismatchError):
+        check_contracts_comparable(old, new)
+
+
+def test_gate_additive_header_set_carve_out_applies_in_diagnostic_mode_too(tmp_path):
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    c2 = _write(tmp_path / "v2" / "c.h", "int h(void);\n")
+    old = _snap(compute_extraction_contract(declared_headers=[a, b]))
+    new = _snap(compute_extraction_contract(declared_headers=[a2, b2, c2]))
+    assert check_contracts_comparable(old, new, diagnostic=True) is None
+
+
 def test_gate_raises_profile_mismatch_error_on_profile_drift(tmp_path):
     dep_old = _write(tmp_path / "d1" / "dep.h", "struct Dep { int x; };\n")
     dep_new = _write(tmp_path / "d2" / "dep.h", "struct Dep { int x; int y; };\n")

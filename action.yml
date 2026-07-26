@@ -80,6 +80,10 @@ inputs:
     description: >
       Public header file(s) applied to both sides (space-separated).
       Required when input is an ELF binary; ignored for JSON snapshots.
+      If old and new actually declare different header sets (e.g. a new
+      release added a header), set `old-header`/`new-header` instead --
+      a bare `header` parses BOTH snapshots against the same files, which
+      silently hides the removed/added declarations you're trying to check.
     required: false
   old-header:
     description: 'Public header(s) for the old side only (overrides header for old). Space-separated.'

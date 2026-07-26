@@ -72,7 +72,7 @@ findings on these three pairs (`cnt_PutOperationCache`, `linkGlobal`,
 device-support globals, not mangling artifacts, so they correctly still
 fire; the new exemption below (F9) does not touch them.
 
-## F8 (documented, not fixed): a new public header trips the scope-comparability gate
+## F8 (fixed, follow-up pass): a new public header trips the scope-comparability gate
 
 **Symptom.** `compare 1.5.2-build/libpvxs.so master-build/libpvxs.so -H
 1.5.2-build/include -H master-build/include ...` exits `16` with no verdict:
@@ -123,23 +123,31 @@ each side built in its own separate tree), 2×`header_binary_context_mismatch`,
 and a `declaration_renamed` for an unrelated unnamed-enum reconciliation. No
 spurious breaking findings.
 
-**Not fixed here, because the fix is a genuine design call, not a drive-by
-patch.** The gate cannot locally distinguish "upstream added a real header"
-from "the caller's CLI/manifest drifted between two extraction runs" — both
-produce the identical symptom (a different declared header set). A principled
-fix (e.g. treating a strictly *additive* header-set change, new⊇old, as
-non-fatal and letting the ordinary diff engine report the new declarations as
-additions, while still hard-failing on removals/disjoint sets) is exactly the
-kind of `comparability.py`-internals change this repo's own conventions flag
-as needing an ADR or explicit maintainer sign-off before extending — the
-module's docstring already documents several deliberately-scoped carve-outs
-(platform-identity, build-context) added one at a time with their own Codex
-review passes, not a place for an unreviewed one-off. Filed here as a
-candidate follow-up ("additive-only header-set carve-out for
-`scope_fingerprint`"), with `--diagnostic-comparison` as the correct sanctioned
-workaround in the meantime — this *is* what "check that everything works"
-concluded: the tool doesn't silently produce a wrong verdict, it correctly
-refuses and tells the caller exactly how to proceed.
+**Fixed in a follow-up pass, with an ADR record, not a drive-by patch.** The
+gate cannot locally distinguish "upstream added a real header" from "the
+caller's CLI/manifest drifted between two extraction runs" — both produce the
+identical symptom (a different declared header set) — but it *can* tell
+**direction**: a genuine drift can shrink, grow, or replace the declared set
+in an unprincipled way, while ordinary library evolution overwhelmingly shows
+up as the new side's declared surface being a strict superset of the old
+side's. `abicheck/comparability.py` now checks each `SCOPE_FIELD_KEYS` field
+(`headers`, `public_header_dirs`) independently for a superset relationship
+(`_scope_field_is_additive_superset`) before hard-failing — a pure addition
+in every differing field skips the gate and lets the ordinary diff engine
+report the new declarations as additions, while a removal, rename, or
+disjoint set (even alongside a co-occurring addition) still hard-fails
+exactly as before. A side that collapses to the existing
+`<single-header>`/`<single-header-dir>` sentinel (no real per-entry identity
+to verify a superset against) still declines the carve-out and hard-fails,
+same as it always did. Documented as its own ADR-050 D2 subsection
+("Additive-only header-set carve-out"), with new regression tests in
+`tests/test_comparability.py` pinning: a pure addition (allowed), a removal
+alongside an addition (still raises), a pure removal (still raises), a
+single-header-sentinel side (still raises, carve-out declines), independent
+per-field growth on `public_header_dirs`, one field growing while the other
+shrinks (still raises overall), and `--diagnostic-comparison` interaction.
+`--diagnostic-comparison` remains available unchanged for the cases this
+carve-out still correctly declines.
 
 ## F9 (fixed): a second RTTI-shaped alignment false positive, found live
 
@@ -476,20 +484,74 @@ for a clang-only pvxs CI runner is to skip the `scan --depth source` job
 `--since`/`--changed-path` to just the PR's changed files rather than the
 whole library.
 
+## Scanner/process review — follow-up fixes
+
+A subsequent review of this report's own findings (asked: "what needs
+improving in the scanner and its process to work adequately?") turned up
+four concrete, tractable follow-ups beyond F8/F9 themselves, each fixed in
+this same branch:
+
+- **Grammar-level property test for the F9 classifier.** F9's nine-round
+  review cycle found nine different gaps in the same Itanium `<local-name>`
+  grammar one real mangled-name example at a time (missing restrict
+  qualifier, missing `Sa`-`Sd` substitutions, missing `__gnu_debug`, missing
+  recursive lambda nesting, missing user-specializable customization-point
+  exclusion, ...) — a pattern that generalizes: a hand-rolled mangling
+  classifier expressed as a regex, tested only against examples someone
+  happened to think of, will keep finding new gaps one real binary at a
+  time. `tests/test_name_classification_properties.py` (Hypothesis,
+  `slow`-marked) instead generates the grammar itself — nesting depth,
+  every CV/ref-qualifier combination, every recognized stdlib marker, both
+  stdlib- and library-owned roots — so a future gap in the same grammar is
+  caught structurally instead of waiting for the next real binary.
+- **F8 fixed, not left as a documented gap** (see F8 section above,
+  updated) — the additive-only header-set carve-out, with its own ADR-050
+  D2 subsection and regression tests.
+- **`--budget` mid-step preemption gap, partially fixed** (see the L3–L5
+  section above, updated) — the loop-driver gap that let the L4 replay's
+  serial fallback dispatch further translation units after the deadline had
+  already passed is closed; the deeper "is clang-frontend L4 replay
+  inherently this expensive, or is something pathological" question is
+  explicitly left open, needing a dedicated profiling pass this same-branch
+  follow-up is not the right scope for.
+- **CLI/Action ergonomics traps hit while writing this report's own
+  recommended workflow** — the directory/package `--format sarif` usage
+  error now states *why* (single-pair-only) instead of just listing
+  alternatives; `action.yml`'s `header` input now warns explicitly that it
+  applies to both sides (the exact confusion this report's F8 section hit
+  while drafting the recommended workflow); the Versioning/SARIF-recipe
+  docs now call out pinning every `uses:` step — not just
+  `abicheck/abicheck` — to a commit SHA whenever a job grants
+  `security-events: write` or another elevated permission, a gap this
+  report's own eighth/ninth review passes found and fixed only for its own
+  one-off recommendation, not in the docs a future integrator would
+  actually read.
+
 ## Status
 
 - **Fixed & tested in this branch:** F9 (a second, differently-mangled
   RTTI-adjacent alignment false positive — Itanium local-name-production
-  symbols, scoped to the stdlib-owned subset after PR review). Full fast
-  unit suite green (19558 passed / 30 skipped / 4 xfailed), mypy/ruff clean.
+  symbols, scoped to the stdlib-owned subset after PR review); F8
+  (scope-comparability gate's additive-only header-set carve-out, ADR-050
+  D2, with its own regression tests). Full fast unit suite green, mypy/ruff
+  clean.
 - **Verified working, no code change needed:** the full 1.4.0→1.5.0→1.5.1→
   1.5.2 tag-to-tag matrix (real, from-scratch EPICS Base R7.0.10 + pvxs
   builds — the acceptance spike's "still owed" step); the abicheck GitHub
   Action's real shell-script layer end-to-end against a real pvxs binary
-  pair; the `--diagnostic-comparison` escape hatch for F8.
-- **Documented, not fixed:** F8 (scope-comparability gate blocks a
-  new-header-added transition — needs an ADR-level carve-out design, not a
-  drive-by patch); the L3–L5 clang-frontend timing gap on `master` (needs a
-  dedicated profiling pass, likely mirroring F1/F5b's approach).
+  pair.
+- **Follow-up hardening in this same branch, prompted by a review of this
+  report** (see "Scanner/process review — follow-up fixes" below): a
+  Hypothesis grammar property test for the F9 classifier (so future mangled-
+  name grammar gaps are caught structurally instead of one real binary at a
+  time); clearer CLI/Action error messages and docs for the SARIF/directory
+  and header-staging traps this pass's own recommended workflow hit; two
+  `deadline.check()` insertions narrowing the L3-L5 budget-preemption gap.
+- **Documented, not fixed:** the deeper "is clang-frontend L4 replay
+  inherently more expensive per-TU than castxml on a template-heavy real
+  codebase, or is something pathological" question — needs a dedicated
+  profiling pass (mirroring F1/F5b's approach), out of scope for a
+  same-branch follow-up; `--diagnostic-comparison` remains available for
+  the scope-mismatch cases the F8 carve-out still correctly declines.
 - Binaries are not committed (per `validation/` convention); reproduce with
   the commands above.

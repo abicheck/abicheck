@@ -162,6 +162,14 @@ _PLATFORM_IDENTITY_FIELDS = frozenset({"target_triple", "pointer_width", "endian
 # surface as a RISK finding, not a reason to refuse a verdict outright.
 _BUILD_CONTEXT_FIELDS = frozenset({"language_standard", "macro_ops"})
 
+# The two scope_fields[...] values (see SCOPE_FIELD_KEYS) that a lone
+# declared header/directory's own name collapses to above -- carrying no
+# real per-entry identity, so the additive-only carve-out
+# (_scope_field_is_additive_superset below) can never verify a set
+# containing one of these is a true superset of the other side and must
+# decline instead of guessing.
+_SCOPE_SINGLE_ENTRY_SENTINELS = frozenset({"<single-header>", "<single-header-dir>"})
+
 
 @dataclass(frozen=True)
 class IncludeDir:
@@ -836,6 +844,40 @@ def _binary_platform_components(snap: AbiSnapshot) -> dict[str, str] | None:
     return None
 
 
+def _scope_field_is_additive_superset(
+    old_value: str | None, new_value: str | None
+) -> bool:
+    """Whether *new_value* (one ``scope_fields[...]`` json-encoded sorted
+    identity list -- ``"headers"`` or ``"public_header_dirs"``) declares
+    everything *old_value* did, plus possibly more (PR #641 follow-up, the
+    pvxs full-version-matrix scan's F8: a released library adding one new
+    public header between versions -- e.g. epics-base/pvxs's
+    ``include/pvxs/json.h`` landing on ``master`` with no other header
+    added/removed/renamed -- is ordinary, common evolution, not the
+    "manifest/CLI-flag drift between two extraction runs" mistake this
+    fingerprint exists to catch, yet both symptoms fingerprint identically:
+    a differing declared-file set).
+
+    Declines (returns False) whenever either side is ``None`` or collapsed
+    to a single-entry sentinel (:data:`_SCOPE_SINGLE_ENTRY_SENTINELS`) --
+    with no real per-file/per-dir identity to compare, "new looks like it
+    might be bigger" can't be told apart from "the one entry was
+    simultaneously renamed AND something else added", so there is nothing
+    here to safely verify a true superset against; the existing hard-fail
+    is the correct, conservative answer for that case, same as it always
+    was.
+    """
+    if old_value is None or new_value is None:
+        return False
+    old_list = json.loads(old_value)
+    new_list = json.loads(new_value)
+    if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
+        return False
+    if len(new_list) == 1 and new_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
+        return False
+    return set(new_list) >= set(old_list)
+
+
 def _build_context_corroborated(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     """Whether both *old* and *new* were actually parsed against real
     build-system evidence -- ``-p``/``--compile-db``/``--build-info``
@@ -898,6 +940,22 @@ def check_contracts_comparable(
     cross-compiler flag set for only one side), not a legitimate
     cross-architecture compare, and still raises.
 
+    **Additive-only header-set carve-out (PR #641 follow-up, pvxs scan F8):**
+    a ``scope_fingerprint`` mismatch does not raise when *every* differing
+    :data:`SCOPE_FIELD_KEYS` field on the new side is a superset of the old
+    side's (see :func:`_scope_field_is_additive_superset`) — an upstream
+    project adding a new public header (or a new declared public-header
+    directory) between two releases, with nothing removed or renamed, is
+    ordinary evolution the ordinary diff engine can correctly report as
+    additions, not the "manifest/CLI-flag drift between two extraction
+    runs" mistake this gate exists to catch. A single-entry side (collapsed
+    to a ``<single-header>``/``<single-header-dir>`` sentinel, since a lone
+    header/dir's own name is not itself load-bearing scope identity — see
+    :func:`compute_extraction_contract`) can never be verified this way and
+    still raises, same as any *non*-superset mismatch (a removal, a rename,
+    or a disjoint set) — this carve-out only ever *widens* what counts as
+    comparable, never narrows the cases the gate still correctly refuses.
+
     ``diagnostic=True`` (ADR-050's ``--diagnostic-comparison`` escape hatch)
     downgrades a hard-fail into a :class:`ComparabilityMismatch` descriptor
     returned to the caller instead of raised — the one sanctioned way to
@@ -914,6 +972,16 @@ def check_contracts_comparable(
         and new_contract.scope_fingerprint is not None
         and old_contract.scope_fingerprint != new_contract.scope_fingerprint
     ):
+        if all(
+            _scope_field_is_additive_superset(
+                old_contract.scope_fields.get(key),
+                new_contract.scope_fields.get(key),
+            )
+            for key in SCOPE_FIELD_KEYS
+        ):
+            # Additive-only header-set carve-out (PR #641 follow-up, pvxs
+            # scan F8) -- see check_contracts_comparable's own docstring.
+            return None
         reason = (
             "old and new snapshots do not cover the same declared surface "
             "(scope_fingerprint mismatch) — the comparison is not "

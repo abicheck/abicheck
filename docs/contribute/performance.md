@@ -475,3 +475,50 @@ re-emit declarations that came from a PCH, so loading one would silently drop th
 very header surface L4 exists to capture — a correctness bug, not a speedup. The
 right levers for repeated-parse cost are therefore the per-TU **cache** and the
 replay **scope** (`changed`/`target`), both already in place.
+
+### `--budget` mid-step preemption gap (found live, pvxs full-version-matrix scan)
+
+Real-world evidence (`validation/pvxs-main-scan-2026-07-26.md`): `scan --depth
+source` on a real 62-TU library, `--ast-frontend clang` (no castxml on that
+host), did not complete within a 3+ minute `--budget` on a 4-core host — RSS
+climbed past 4.9 GiB before an *external* kill, with no indication `--budget`
+itself was actually bounding the work.
+
+Investigation traced this to a gap in the *loop driver*, not the deadline
+mechanism itself: `deadline.check()` is already threaded per-TU inside each
+extractor (`source_extractors/clang.py`/`castxml.py` call it before/after the
+AST load, and `bounded_timeout()` shrinks the subprocess's own timeout to
+whatever's left of the scan-wide deadline before the clang/castxml process is
+even spawned) — so an *already-dispatched* TU always self-aborts quickly once
+the budget is gone. The gap was that `_extract_cache_misses`'s **serial**
+fallback loop (used when `jobs<=1`, a single miss unit, or when the
+opt-in `ProcessPoolExecutor` fails to start) and `_replay_cache_lookup`'s
+per-unit cache-key loop kept iterating to the *next* unit without checking
+the deadline first — each subsequent unit still self-aborted fast once
+dispatched, but only after paying the interpreter/extractor-startup overhead
+to get there. **Fixed:** both loops now call `deadline.check()` before each
+iteration (`abicheck/buildsource/source_replay.py`), so a hundred-unit miss
+list under an already-exhausted budget costs roughly one unit's overhead, not
+a hundred — regression-guarded by
+`tests/test_source_replay.py::test_extract_cache_misses_serial_path_stops_dispatching_once_budget_is_gone`
+(synthetic, fast — proven to fail without the fix by temporarily reverting
+it). The default **parallel** `pool.map()` path is unchanged: it still relies
+on each already-dispatched unit's own fast self-abort rather than a
+stop-enqueuing check, since `pool.map` submits its whole batch up front — a
+"don't submit further work once budget is gone" gate there would need a
+bespoke, non-`pool.map` dispatch loop, a larger change than this fix.
+
+**Not resolved by this fix, still an open question:** whether the *underlying*
+per-TU cost on this real 62-TU pvxs binary was itself pathological (something
+superlinear in this specific run) or is simply what clang-frontend L4 replay
+genuinely costs per TU on a template-heavy real C++ codebase without castxml
+— the first report's equivalent pass completed in 129s, but that ran *with*
+castxml, not available on the pvxs scan's host. Distinguishing those two
+needs a dedicated profiling pass on a real or `eval/scan_level_scaling.py`-
+synthesized multi-TU tree with a `--budget` sweep added to that harness
+(mirroring how the L2 pathological-header investigation above was profiled),
+not assumed from a single real-world data point. Until profiled, the safe
+recommendation for a clang-only (no castxml) CI runner on a library this
+size remains: skip `scan --depth source` in favor of `compare` for the L1/L2
+release gate, or scope it with `--since`/`--changed-path` to just the
+changed files rather than the whole library.

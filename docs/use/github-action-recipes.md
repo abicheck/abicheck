@@ -45,6 +45,15 @@ Upload results to the Security tab so ABI breaks appear as code scanning alerts.
     **new** alerts introduced by the PR — existing alerts stay on the default
     branch and don't clutter the review.
 
+!!! warning "Pin every action in this job to a commit SHA"
+    Any `uses:` step running inside a job that carries `security-events: write`
+    (or any other elevated permission) executes with that permission's token.
+    A mutable tag (`@v4`, `@v0.5.0`) can be repointed — accidentally or
+    maliciously — to different code after you've reviewed it once; a full
+    commit SHA cannot. Pin every action here, not just `abicheck/abicheck`,
+    and keep the release tag in a trailing comment so the pin stays
+    human-auditable. See [Versioning](github-action.md#versioning).
+
 ```yaml
 jobs:
   abi-check:
@@ -53,10 +62,10 @@ jobs:
       security-events: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - run: mkdir build && cd build && cmake .. && make
 
-      - uses: abicheck/abicheck@v0.5.0
+      - uses: abicheck/abicheck@<commit-sha>  # pin to the SHA your chosen release tag resolves to
         with:
           old-library: abi-baseline.json
           new-library: build/libfoo.so

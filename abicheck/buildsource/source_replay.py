@@ -1017,6 +1017,12 @@ def _replay_cache_lookup(
     results: list[SourceAbiTu | None] = [None] * len(units)
     misses: list[int] = []
     for i, cu in enumerate(units):
+        # Normally cheap (in-memory hashing / cache-file stat), but a large
+        # unit count with a cold cache can still burn real wall-clock before
+        # Phase 2 even starts -- check the shrinking scan-wide deadline here
+        # too, not only inside the per-TU extractor calls Phase 2 dispatches
+        # (PR #641 follow-up: --budget's mid-step preemption gap).
+        deadline.check()
         key = None
         if cache is not None:
             key_roots = _cache_public_header_roots(extractor, cu, roots)
@@ -1095,9 +1101,35 @@ def _extract_cache_misses(
                     "L4 process pool failed (%s); falling back to serial extraction",
                     exc,
                 )
-                return [worker(u) for u in miss_units]
+                return _extract_serially(worker, miss_units)
             raise
-    return [worker(u) for u in miss_units]
+    return _extract_serially(worker, miss_units)
+
+
+def _extract_serially(
+    worker: Callable[[CompileUnit], tuple[SourceAbiTu | None, str | None]],
+    miss_units: list[CompileUnit],
+) -> list[tuple[SourceAbiTu | None, str | None]]:
+    """Serial (``jobs<=1``, single-unit, or process-pool-failure fallback)
+    extraction loop.
+
+    Checks the shrinking scan-wide deadline *before* each unit rather than
+    relying solely on each unit's own extractor-level check (PR #641
+    follow-up: real-world evidence from a large multi-TU library showed
+    ``--budget`` still dispatching further TUs after the deadline had
+    already passed, wasting the interpreter/extractor-startup overhead for
+    each one before it self-aborted). The parallel ``pool.map`` path above
+    still relies on each dispatched unit's own fast self-abort (see
+    ``_deadline_bound_worker``/``bounded_timeout``) — a full stop-enqueuing
+    check there would need a bespoke, non-``pool.map`` dispatch loop, which
+    is a larger change than this fix; the serial path is the one that can
+    trivially check between iterations.
+    """
+    results = []
+    for unit in miss_units:
+        deadline.check()
+        results.append(worker(unit))
+    return results
 
 
 def _assemble_replay_results(

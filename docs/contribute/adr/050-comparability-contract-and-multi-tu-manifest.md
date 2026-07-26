@@ -1541,6 +1541,70 @@ checked so far. `reporter.py`/`sarif.py`/`junit_report.py` surface it the
 same way they already surface `assurance` — a plain report field, not a
 finding.
 
+**Additive-only header-set carve-out (found live, PR #641: the pvxs
+full-version-matrix scan's F8).** A real-world scan through
+epics-base/pvxs's current `master` hit exactly the failure mode D2's
+"Context" section predicted in the abstract: comparing `1.5.2` against
+`master` raised `ScopeMismatchError` because `master` had added exactly one
+new public header, `include/pvxs/json.h`, with nothing else added, removed,
+or renamed. This is not the "manifest/CLI-flag drift between two extraction
+runs" mistake `scope_fingerprint` exists to catch — it is ordinary,
+unremarkable library evolution (a new feature getting its own header
+between minor releases), and every *other* tag-to-tag pair in pvxs's
+history keeps an identical header set and never triggers the gate, which is
+exactly why neither of two earlier, narrower validation passes against
+this same project surfaced it: it only shows up once a scan genuinely
+reaches a project's live tip rather than stopping at the last tagged
+release.
+
+The gate cannot, from the fingerprint alone, distinguish "upstream added a
+real header" from "the caller's CLI/manifest drifted between two
+extraction runs" — both symptoms are identical (a different declared
+header-file set). What *can* be distinguished, without any new evidence
+beyond what `ExtractionContract` already carries, is **direction**: a
+manifest/CLI-flag drift can shrink, grow, or entirely replace the declared
+set in an unprincipled way, but a library's own ordinary evolution between
+releases overwhelmingly shows up as the new side's declared surface being a
+strict superset of the old side's — nothing the old side named is missing,
+and if anything is newly present, the ordinary diff engine already knows
+how to classify a newly-declared symbol as an addition. So rather than
+requiring the two declared-file *sets* to be identical, the gate is
+relaxed to require only that neither `SCOPE_FIELD_KEYS` field (`"headers"`,
+`"public_header_dirs"`) ever *shrinks* — checked independently per field
+(`_scope_field_is_additive_superset`), so a genuine removal or rename
+hiding behind a co-occurring, unrelated addition still correctly hard-fails
+(a library that drops one public header while adding another is not "pure
+addition," and this carve-out must not paper over it).
+
+This is deliberately narrower than it might first appear, for the same
+reason the single-header collapse already built into `scope_fields`
+(`"<single-header>"`/`"<single-header-dir>"` — see
+`compute_extraction_contract`'s docstring) exists: with only one entry
+declared on a side, there is no real per-entry identity to verify a
+superset claim against at all — the one name isn't load-bearing scope
+identity, by the same design decision that already lets a lone header be
+renamed between releases without tripping the gate. Guessing "it's
+probably still additive" in that case would be exactly the kind of silent
+assumption D2 exists to refuse to make, so the carve-out explicitly
+declines (falls through to the existing hard-fail) whenever either side's
+value for a differing field is one of these sentinels, rather than treating
+"can't tell" as "assume yes."
+
+Like the platform-identity and build-context carve-outs above, this one
+only ever **widens** what the gate accepts as comparable — it introduces no
+new way to suppress a genuine mismatch the gate would otherwise correctly
+catch, and the confirmed workaround for the cases it still declines
+(`--diagnostic-comparison`, already documented above) remains available
+unchanged. Unlike those two carve-outs, this is the first one gating the
+**scope** branch rather than the **profile** branch — the platform-identity
+and build-context carve-outs both operate on `profile_fields`/`PROFILE_FIELD_KEYS`;
+this one is the first to give `check_contracts_comparable`'s scope check
+its own field-level (rather than opaque-hash-level) reasoning, following
+the same pattern the profile branch already established: keep the raw,
+attributable field values on `ExtractionContract` (not just the fingerprint
+hash) specifically so a later carve-out can reason about *what* changed,
+not merely *that* something did.
+
 ### D3. Manifest and real multi-TU dump
 
 New `abicheck/dump_manifest.py`: a strict YAML parser (unknown fields are
