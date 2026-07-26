@@ -132,6 +132,12 @@ def test_is_stdlib_local_name_symbol_nested_but_user_owned_false() -> None:
         "_ZZNKSt4hashI6MyTypeEclERKS0_E4salt",
         "_ZZNKSt4lessI6MyTypeEclERKS0_S3_E1x",
         "_ZZNKSt7greaterI6MyTypeEclERKS0_S3_E1x",
+        # Codex review, PR #641 follow-up: std::swap is a *function*
+        # template the standard explicitly permits specializing for a
+        # program-defined type (e.g. `template<> inline void
+        # std::swap<MyType>(...)`) -- the same user-authored-code-in-std
+        # shape as the class-template cases above, just a function.
+        "_ZZSt4swapI6MyTypeEvRT_S1_E1x",
     ],
 )
 def test_is_stdlib_local_name_symbol_user_specialized_customization_point_false(

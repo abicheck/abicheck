@@ -971,17 +971,22 @@ def check_contracts_comparable(
         and old_contract.scope_fingerprint is not None
         and new_contract.scope_fingerprint is not None
         and old_contract.scope_fingerprint != new_contract.scope_fingerprint
-    ):
-        if all(
+        # Additive-only header-set carve-out (PR #641 follow-up, pvxs scan
+        # F8) -- see check_contracts_comparable's own docstring. Gated into
+        # the *condition* itself, not a `return None` inside the block
+        # (Codex review, PR #641 follow-up): waiving the scope mismatch
+        # must fall through to the profile check below, not skip it -- a
+        # release that both adds a header AND changes an unrelated
+        # extraction-profile field (compiler flags, macros, include order)
+        # must still be caught by that check, not silently waved through.
+        and not all(
             _scope_field_is_additive_superset(
                 old_contract.scope_fields.get(key),
                 new_contract.scope_fields.get(key),
             )
             for key in SCOPE_FIELD_KEYS
-        ):
-            # Additive-only header-set carve-out (PR #641 follow-up, pvxs
-            # scan F8) -- see check_contracts_comparable's own docstring.
-            return None
+        )
+    ):
         reason = (
             "old and new snapshots do not cover the same declared surface "
             "(scope_fingerprint mismatch) — the comparison is not "

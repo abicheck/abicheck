@@ -194,12 +194,19 @@ _STDLIB_LOCAL_NAME_RE = re.compile(
 # hiding a real one, the same guiding principle as the rest of this
 # exemption. This list can never be complete (the standard permits
 # specializing effectively any library template this way), so it only
-# covers the templates most commonly specialized in practice.
+# covers the templates most commonly specialized in practice. Includes
+# `4swap` alongside the class-template customization points (Codex review,
+# PR #641 follow-up): `std::swap` is a *function* template the standard
+# explicitly permits overloading/specializing for a program-defined type
+# (e.g. `template<> inline void std::swap<MyType>(...)`, mangling as
+# `_ZZSt4swapI6MyTypeE...`) -- the same "user-authored code nominally in
+# namespace std" shape as the class-template entries, just a function
+# rather than a class member.
 _USER_SPECIALIZABLE_STD_TEMPLATE_RE = re.compile(
     r"^_ZZZ*N?[rVK]{0,3}[RO]?(?:St|3std)"
     r"(?:4hash|4less|7greater|8equal_to|12not_equal_to|10less_equal|"
     r"13greater_equal|11char_traits|14numeric_limits|15iterator_traits|"
-    r"14default_delete|9formatter)I"
+    r"14default_delete|9formatter|4swap)I"
 )
 
 # Length-prefixed Itanium namespace components (``<len><name>``) for the

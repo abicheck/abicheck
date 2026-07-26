@@ -1285,6 +1285,34 @@ def test_gate_additive_header_set_carve_out_applies_in_diagnostic_mode_too(tmp_p
     assert check_contracts_comparable(old, new, diagnostic=True) is None
 
 
+def test_gate_additive_header_set_carve_out_still_checks_profile_afterward(tmp_path):
+    # Codex review (PR #641 follow-up): waiving an additive scope mismatch
+    # must fall through to the profile check, not skip it entirely -- a
+    # release that both adds a header AND changes an unrelated,
+    # uncorroborated extraction-profile field (here: compiler_family, not
+    # covered by any profile carve-out) must still raise
+    # ProfileMismatchError, not be silently treated as fully comparable.
+    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
+    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
+    c2 = _write(tmp_path / "v2" / "c.h", "int h(void);\n")
+    old = _snap(
+        compute_extraction_contract(
+            declared_headers=[a, b], l2_frontend_ran=True, compiler_family="gcc"
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            declared_headers=[a2, b2, c2], l2_frontend_ran=True, compiler_family="clang"
+        )
+    )
+    assert old.contract.scope_fingerprint != new.contract.scope_fingerprint
+    assert old.contract.profile_fingerprint != new.contract.profile_fingerprint
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)
+
+
 def test_gate_raises_profile_mismatch_error_on_profile_drift(tmp_path):
     dep_old = _write(tmp_path / "d1" / "dep.h", "struct Dep { int x; };\n")
     dep_new = _write(tmp_path / "d2" / "dep.h", "struct Dep { int x; int y; };\n")

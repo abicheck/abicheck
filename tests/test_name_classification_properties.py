@@ -82,6 +82,7 @@ _CUSTOMIZATION_POINT_CODES = (
     "15iterator_traits",
     "14default_delete",
     "9formatter",
+    "4swap",
 )
 _LIBRARY_OWNED_ROOTS = ("4pvxs6client6ConfigEvE", "N6mylib5inner3fooEvE", "3fooEvE")
 _ENTITY_SUFFIXES = ("5cache", "1x", "9__unused")
