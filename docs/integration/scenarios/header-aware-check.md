@@ -21,7 +21,7 @@ Set `requested-depth: headers` (or the equivalent `--depth headers` on the
 CLI/root Action) and point at your header root:
 
 ```yaml
-- uses: abicheck/abicheck/actions/check-target@v1
+- uses: abicheck/abicheck/actions/check-target@v0.5.0
   with:
     name: libfoo
     requested-depth: headers

@@ -4,8 +4,8 @@ Before the pre-1.0 CLI reset, abicheck shipped a wide set of standalone
 companion commands (`appcompat`, `plugin-check`, `baseline`, `collect`,
 `merge`, `debian-symbols`, `doctor`, `config`, `init`, `surface-report`,
 `graph compare`/`graph explain`, `pr-comment`, `suggest-suppressions`,
-`probe`). The CLI surface has since been narrowed to exactly five top-level
-commands:
+`probe`). The CLI surface has since been narrowed to five core
+per-library analysis commands:
 
 ```
 compare  Compare two ABI surfaces and report changes.
@@ -14,6 +14,13 @@ deps     Inspect a binary's shared-library dependency stack.
 dump     Dump ABI snapshot of a shared library to JSON.
 scan     Deterministic source-intelligence scan (classify → always-on tier → level).
 ```
+
+The CLI additionally exposes project-orchestration commands
+(`aggregate`, `build-output`, `plan`, `project-targets`, `run-plan`) that
+compose those five across a multi-target project — see the
+[CLI Reference](../reference/cli-reference.md) for the full command tree.
+These aren't part of the companion-command consolidation this page
+describes; they're new, not renamed/folded survivors of the old surface.
 
 Some of the old companion functionality survives as a **command** (`deps
 tree`, `deps compare`, `compat check`/`compat dump`); some folded into a
@@ -71,9 +78,8 @@ abicheck compare old.so new.so -H include/ --required-symbol foo_init
 ```
 
 See [Application Compatibility](appcompat.md) and [Plugin & Host
-Systems](plugin-systems.md) for the full guides — both are being updated in
-parallel to reflect this same reset; treat their command-line examples as
-the ones that matter, this page only summarizes the mapping.
+Systems](plugin-systems.md) for the full guides — treat their command-line
+examples as the ones that matter, this page only summarizes the mapping.
 
 ## Gone entirely — no CLI replacement
 
@@ -83,9 +89,9 @@ that's noted — none of these are documented as a public CLI path anymore.
 
 | Deleted command | Status |
 |---|---|
-| `baseline` (registry group: push/pull/list/delete) | No replacement command. Use `scan --against OLD` for point-in-time comparisons, or keep JSON snapshots yourself (plain files, your own storage/naming convention). See [Baseline Management](baseline-management.md) (being updated in parallel). |
+| `baseline` (registry group: push/pull/list/delete) | No replacement command. Use `scan --against OLD` for point-in-time comparisons, or keep JSON snapshots yourself (plain files, your own storage/naming convention). See [Baseline Management](baseline-management.md). |
 | `collect`, `merge`, `recommend-collect-mode` | Gone from the CLI. `dump --sources`/`--build-info` auto-collects build/source evidence inline; `compare` auto-ingests each side's embedded build-source pack, or an out-of-band pack via `--build-info old=PATH`/`--build-info new=PATH` (auto-detects `abicheck_inputs/` packs too). Library functions survive for internal/programmatic use only. |
-| `debian-symbols` | No CLI replacement. Library functions still exist in `abicheck/debian_symbols.py` (`generate_symbols_file`, `validate_symbols`, `diff_symbols_files`, `parse_symbols_file`, etc.) for programmatic/Python API use only. See [Debian Symbols](debian-symbols.md) (being updated in parallel). |
+| `debian-symbols` | No CLI replacement. Library functions still exist in `abicheck/debian_symbols.py` (`generate_symbols_file`, `validate_symbols`, `diff_symbols_files`, `parse_symbols_file`, etc.) for programmatic/Python API use only. See [Debian Symbols](debian-symbols.md). |
 | `doctor` | No replacement command. |
 | `config` (scaffolding subcommand: `config validate`, `config show-effective`) | No replacement command. Config loading is strict now (unknown keys, wrong types, bad enum values are hard errors, exit `64`), so `validate` is less necessary; there is no `show-effective` equivalent. |
 | `init` | No replacement command — no more `.abicheck.yml` scaffolding generator. Write the file by hand; see [Config File Reference](../reference/config-file.md) for the schema/keys. |

@@ -38,6 +38,16 @@ However, the depth of analysis depends on the **host platform** and whether head
 
 <!-- END GENERATED: platform-matrix -->
 
+> **"Full" means implemented capability, not CI-proven maturity.** The table
+> above tracks two booleans (symbol diff, type/param diff) per host/format —
+> it does not encode how much automated validation backs a "Full" cell, or
+> which toolchain you used to get there. On Windows in particular, "Full"
+> covers both MinGW (validated in CI, still marked Experimental) and MSVC
+> (untested in CI) with the same cell — see
+> [Validation status](#validation-status-what-is-actually-exercised-in-ci)
+> and the [Windows Toolchain Support Matrix](#windows-toolchain-support-matrix)
+> below before relying on a specific toolchain in production.
+
 ---
 
 ## Validation status (what is actually exercised in CI)

@@ -1,6 +1,6 @@
 # Case 14: C++ Class Size Change
 
-**Category:** C++ ABI | **Verdict:** 🟡 ABI CHANGE (exit 4)
+**Category:** C++ ABI | **Verdict:** 🔴 BREAKING
 
 > **Note on abidiff 2.4.0:** Returns exit **4**. Semantically breaking for any
 > code that heap-allocates `Buffer` via operator new or embeds it by value.

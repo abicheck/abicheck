@@ -58,7 +58,7 @@ jobs:
 
   check:
     needs: build
-    uses: abicheck/abicheck/.github/workflows/check-project.yml@v1
+    uses: abicheck/abicheck/.github/workflows/check-project.yml@v0.5.0
 ```
 
 This is the same primitive S13 (package-only inputs), S17 (multiple build

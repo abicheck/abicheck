@@ -19,8 +19,13 @@ where the *build* emits source facts as it compiles instead.
   zero-config (CMake configure-only, a Bazel `aquery`, or a Make dry-run
   transcript) — see
   [Source-Scan Depth § Obtaining a compile database](../../use/scan-levels.md#obtaining-a-compile-database-without-a-full-build).
-- `clang` on the runner (installed automatically by the root Action's
-  `install-deps`).
+- `clang` on the runner. The root Action's default
+  `dependency-source: conda-forge` does **not** install clang — pin
+  `dependency-source: conda-forge-clang20` (or `system`, or install clang
+  yourself) to enable L4 replay. Without clang, the run silently degrades
+  to L0–L2 evidence instead of failing; check the `layers`/coverage output
+  to confirm L4 actually ran. See
+  [GitHub Action: dependency-source](../../use/github-action.md).
 - For a PR run: `fetch-depth: 0` on checkout, so the base ref is available to
   seed the diff scope.
 
@@ -30,7 +35,7 @@ where the *build* emits source facts as it compiles instead.
 changed paths, runs the pinned evidence level, and compares in one step:
 
 ```yaml
-- uses: abicheck/abicheck@v1
+- uses: abicheck/abicheck@v0.5.0
   with:
     mode: scan
     new-library: build/libfoo.so
@@ -49,7 +54,7 @@ of several a `.abicheck.yml` `targets:`/`profiles:` block declares,
 `evidence-producer: replay` is the bridge:
 
 ```yaml
-- uses: abicheck/abicheck/actions/check-target@v1
+- uses: abicheck/abicheck/actions/check-target@v0.5.0
   with:
     name: libfoo
     requested-depth: source

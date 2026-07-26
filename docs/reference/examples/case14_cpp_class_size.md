@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case14_cpp_class_size/` |
 
-**Category:** C++ ABI | **Verdict:** 🟡 ABI CHANGE (exit 4)
+**Category:** C++ ABI | **Verdict:** 🔴 BREAKING
 
 > **Note on abidiff 2.4.0:** Returns exit **4**. Semantically breaking for any
 > code that heap-allocates `Buffer` via operator new or embeds it by value.

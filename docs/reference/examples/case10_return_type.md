@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `func_return_changed` |
 | **Source files** | `examples/case10_return_type/` |
 
-**Category:** Symbol API | **Verdict:** 🟡 ABI CHANGE (exit 4)
+**Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
 > **Note on abidiff 2.4.0:** Returns exit **4**. Semantically breaking — on
 > x86-64, `int` is returned in the lower 32 bits of `rax`; `long` uses all 64 bits.

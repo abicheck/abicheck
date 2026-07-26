@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `type_vtable_changed` |
 | **Source files** | `examples/case09_cpp_vtable/` |
 
-**Category:** C++ ABI | **Verdict:** 🟡 ABI CHANGE (exit 4)
+**Category:** C++ ABI | **Verdict:** 🔴 BREAKING
 
 > **Note on abidiff 2.4.0:** Returns exit **4** even though this is a hard vtable
 > incompatibility. abidiff's text output explicitly notes:

@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `enum_member_value_changed` |
 | **Source files** | `examples/case08_enum_value_change/` |
 
-**Category:** Type Layout | **Verdict:** 🟡 ABI CHANGE (exit 4)
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
 > **Note on abidiff 2.4.0:** Returns exit **4**. Semantically breaking because
 > code compiled against v1 uses hardcoded integer values (e.g., `if (c == 1)` for

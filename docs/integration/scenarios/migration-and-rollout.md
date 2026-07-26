@@ -21,7 +21,7 @@ compatibility finding — only a genuine operational error still fails
 verdict, never an infrastructure problem):
 
 ```yaml
-- uses: abicheck/abicheck/actions/check-target@v1
+- uses: abicheck/abicheck/actions/check-target@v0.5.0
   with:
     name: libfoo
     gate-mode: advisory

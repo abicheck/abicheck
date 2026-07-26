@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `var_type_changed` |
 | **Source files** | `examples/case11_global_var_type/` |
 
-**Category:** Type Layout | **Verdict:** 🟡 ABI CHANGE (exit 4)
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
 > **Note on abidiff 2.4.0:** Returns exit **4**. Semantically breaking — the symbol
 > size changes from 4 to 8 bytes; consumers that read it as `int` get only half the

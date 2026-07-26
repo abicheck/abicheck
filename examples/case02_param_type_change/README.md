@@ -1,6 +1,6 @@
 # Case 02: Parameter Type Change
 
-**Category:** Symbol API | **Verdict:** 🟡 ABI CHANGE (exit 4)
+**Category:** Symbol API | **Verdict:** 🔴 BREAKING
 
 > **Note on abidiff 2.4.0:** libabigail classifies parameter type changes as
 > "indirect sub-type changes" with exit code **4** (ABI change detected, not

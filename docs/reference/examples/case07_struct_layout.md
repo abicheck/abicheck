@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `examples/case07_struct_layout/` |
 
-**Category:** Type Layout | **Verdict:** 🟡 ABI CHANGE (exit 4)
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
 > **Note on abidiff 2.4.0:** Struct layout changes return exit **4** (not 12),
 > but the change is **semantically breaking** — all callers allocate the old size

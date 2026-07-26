@@ -57,7 +57,7 @@ exactly what the three optional `*-artifact-name` inputs below do, mirroring
 ```yaml
 jobs:
   check-libfoo:
-    uses: abicheck/abicheck/.github/workflows/check-single.yml@v1
+    uses: abicheck/abicheck/.github/workflows/check-single.yml@v0.5.0
     with:
       name: libfoo
       profile: linux-x86_64-gcc13
@@ -200,7 +200,7 @@ jobs:
 
   check:
     needs: [build-linux, fetch-accepted-main-baseline]
-    uses: abicheck/abicheck/.github/workflows/check-project.yml@v1
+    uses: abicheck/abicheck/.github/workflows/check-project.yml@v0.5.0
     with:
       config-path: .abicheck.yml
 ```

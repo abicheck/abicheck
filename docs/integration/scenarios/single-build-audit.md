@@ -28,7 +28,7 @@ targets:
 ```
 
 ```yaml
-- uses: abicheck/abicheck/actions/check-target@v1
+- uses: abicheck/abicheck/actions/check-target@v0.5.0
   with:
     name: libfoo
     target-kind: library   # required -- app-consumer/plugin-contract have
