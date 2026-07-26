@@ -2,19 +2,16 @@
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-Functions return `int**` and accept `int*const*` in v1. In v2, the ultimate pointee
-type changes from `int` to `long`. Callers that dereference the returned pointer chain
-and write `int`-sized values will corrupt memory — `long` is 8 bytes on 64-bit,
-`int` is 4 bytes, so every write is half the expected size.
+`get_matrix()`/`set_cell()`/`sum_row()` return and accept `int**`/`int*const*`
+in v1. In v2 the ultimate pointee type changes from `int` to `long` at every
+level of the chain. A caller compiled against v1 still writes 4-byte `int`
+values into memory the v2 library now treats as 8-byte `long` elements —
+every write after the first lands on the wrong element, silently corrupting
+adjacent cells. Recompilation against v2 is mandatory.
 
-## Why abidiff catches it
-
-abidiff reports `Function_Return_Type_Change` (indirect pointee type) and exits **4**.
-abicheck detects: `FUNC_RETURN_CHANGED`, `PARAM_TYPE_CHANGED`.
-
-## Code diff
+## Old/new diff
 
 | v1.h | v2.h |
 |------|------|
@@ -22,34 +19,85 @@ abicheck detects: `FUNC_RETURN_CHANGED`, `PARAM_TYPE_CHANGED`.
 | `void set_cell(int *const *matrix, int row, int col, int val);` | `void set_cell(long *const *matrix, int row, int col, long val);` |
 | `int sum_row(int *const *matrix, int row, int cols);` | `long sum_row(long *const *matrix, int row, int cols);` |
 
-## Real Failure Demo
-
-**Severity: 🔴 CRITICAL — silent memory corruption**
-
-**Scenario:** v1 caller writes `int` values into memory allocated for `long` — adjacent cells are overwritten.
+## abicheck command
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so
-
-abidw --out-file v1.abi libv1.so
-abidw --out-file v2.abi libv2.so
-abidiff v1.abi v2.abi
-echo "exit: $?"   # → 4 (FUNC_RETURN_CHANGED)
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Reproduce manually
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- func_return_changed: Return type changed: sum_row (int -> long int)
+  > Callers expect the old return type layout in registers/stack; misinterpretation
+    causes data corruption.
+- func_params_changed: Parameters changed: sum_row (const int **, int, int -> const long int **, int, int)
+- func_params_changed: Parameters changed: set_cell (const int **, int, int, int -> const long int **, int, int, long int)
+- func_return_changed: Return type changed: get_matrix (int ** -> long int **)
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's `DW_TAG_pointer_type` chain records the pointee
+type at every indirection level, so debug info alone (no public headers) is
+enough to see `int` become `long` at the end of the chain.
+
+## Why abicheck catches it
+
+abicheck walks each function's parameter and return `DW_TAG_pointer_type`
+entries down to their ultimate non-pointer type and compares that leaf type
+across versions — the same mechanism used for a direct parameter change,
+applied through the indirection levels.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL — silent memory corruption**
+
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so
-abidw --headers-dir . --out-file v1.abi libv1.so
-abidw --headers-dir . --out-file v2.abi libv2.so
-abidiff v1.abi v2.abi
+# Build old library + app
+gcc -shared -fPIC -g v1.c -o libfoo.so
+gcc -g app.c -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → sum_row = 12
+# → expected = 12
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g v2.c -o libfoo.so
+./app
+# → sum_row = 5
+# → expected = 12
+# → CORRUPTION: pointer-chain pointee type changed (int** vs long**)
 ```
 
-## How to fix
+**Why CRITICAL:** the app writes `int` values at 4-byte stride into storage
+that v2's `sum_row()` now reads as `long` at 8-byte stride — the second write
+(`m[0][1] = 7`) lands inside the first `long` element instead of a separate
+one, so the summed value comes out wrong with no crash or diagnostic.
 
-1. **Opaque element type**: `typedef int mat_cell_t;` at the API boundary — change only the typedef.
-2. **Never change primitive types deep in pointer chains** — consumers are forced to cast through every level.
-3. **SONAME bump** if the type change is unavoidable.
+## Safe redesign
+
+Put an opaque typedef (`typedef int mat_cell_t;`) at the API boundary so a
+future width change touches one declaration instead of the struct/pointer
+chain, and never change a primitive type deep inside a multi-level pointer
+chain without a SONAME bump — consumers have no way to detect the change
+short of a full ABI diff.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+echo "exit: $?"   # → 4
+```
+
+> **Note on abidiff:** libabigail reports this as an indirect
+> `Function_Return_Type_Change`/parameter change through the pointer chain,
+> exit code **4** — the same conclusion abicheck reaches from the same DWARF
+> pointer-chain evidence.
