@@ -100,6 +100,25 @@ class ScopeMismatchError(AbicheckError):
     """
 
 
+class ManifestValidationError(AbicheckError, ValueError):
+    """Raised by :func:`abicheck.dump_manifest.load_manifest` for any
+    parse-time schema violation of a ``--dump-manifest`` YAML document
+    (ADR-050 D3): an unknown field, a duplicate mapping key, a duplicate TU
+    ``name``, the ``contributes_to_abi=True ⇒ required=True`` invariant, a
+    manifest-declared ``frontend_context`` other than ``"host"`` (Phase D,
+    not this phase, adds a real selector for ``"device"``), or a malformed
+    field value.
+
+    Inherits ValueError for the same backward-compatibility reason
+    :class:`SuppressionError`/:class:`PolicyError` do — a generic ``except
+    ValueError`` around manifest loading still catches it. Deliberately not
+    a subclass of :class:`SnapshotError`: this fires before any extraction
+    is even attempted, over the manifest document alone, the same
+    parse-time-vs-extraction-time distinction :class:`ProfileMismatchError`/
+    :class:`ScopeMismatchError` draw against :class:`SnapshotError`.
+    """
+
+
 class UnsupportedCastxmlVersionError(SnapshotError):
     """Raised when a CastXML build outside the supported version range would
     be used for an authoritative L2 scan, before any header is parsed.

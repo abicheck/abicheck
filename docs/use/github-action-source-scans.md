@@ -9,6 +9,15 @@ what the evidence layers *are*, see
 [Evidence & Detectability](../learn/evidence-and-detectability.md); for the
 underlying CLI flags, see [Source-Scan Depth](scan-levels.md).
 
+> **See also.** If this check is one of several a project-wide
+> `.abicheck.yml` `targets:`/`profiles:` block declares (not a standalone
+> root-Action step), see
+> [S7: Source Scan via Compile-DB Replay](../integration/scenarios/source-replay.md)
+> and
+> [S8/S9: Source Facts From the Build Itself](../integration/scenarios/build-integrated-facts.md)
+> for the `check-target`/`evidence-producer` composition this page's
+> `mode: scan` inputs map onto.
+
 ## Source scans (build & source evidence)
 
 `mode: scan` is the **one-step entry point** for source intelligence. It

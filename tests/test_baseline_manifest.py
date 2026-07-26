@@ -24,6 +24,7 @@ libraries).
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -135,7 +136,9 @@ class TestBuildManifestBasics:
         manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
         assert manifest["artifacts"][0]["dump_provenance"] == provenance
 
-    def test_dump_provenance_absent_when_no_depth_requested(self, tmp_path: Path) -> None:
+    def test_dump_provenance_absent_when_no_depth_requested(
+        self, tmp_path: Path
+    ) -> None:
         _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
         entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
         manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
@@ -974,3 +977,63 @@ class TestMainCli:
         )
         digest2 = self._run_main_and_get_content_digest(tmp_path, libraries, capsys)
         assert digest1 != digest2
+
+
+class TestStageBinary:
+    """G30 P1.6 (ADR-047 §6/§8 S14 correction): a ``stage_binary: true``
+    entry's real ELF binary was already copied by ``run.sh`` into
+    ``output_dir/binaries/<name>`` before this script runs -- these tests
+    cover the manifest side (recording ``binary``/``binary_sha256``), not
+    the copy itself (``tests/test_action_baseline.py``'s job)."""
+
+    def test_staged_binary_recorded_with_path_and_digest(self, tmp_path: Path) -> None:
+        _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
+        binaries_dir = tmp_path / "binaries"
+        binaries_dir.mkdir()
+        (binaries_dir / "libfoo").write_bytes(b"fake-elf-bytes")
+        entries = [
+            {"name": "libfoo", "artifact": "a.so", "stage_binary": True},
+        ]
+        manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+        artifact = manifest["artifacts"][0]
+        assert artifact["binary"] == "binaries/libfoo"
+        assert (
+            artifact["binary_sha256"] == hashlib.sha256(b"fake-elf-bytes").hexdigest()
+        )
+
+    def test_non_staged_entry_has_no_binary_fields(self, tmp_path: Path) -> None:
+        _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+        artifact = manifest["artifacts"][0]
+        assert "binary" not in artifact
+        assert "binary_sha256" not in artifact
+
+    def test_stage_binary_true_but_file_missing_raises(self, tmp_path: Path) -> None:
+        _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "a.so", "stage_binary": True}]
+        with pytest.raises(SystemExit, match="libfoo"):
+            build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+
+    def test_stage_binary_false_does_not_require_staged_file(
+        self, tmp_path: Path
+    ) -> None:
+        _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "a.so", "stage_binary": False}]
+        manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+        assert "binary" not in manifest["artifacts"][0]
+
+    def test_mixed_bundle_and_standalone_entries(self, tmp_path: Path) -> None:
+        _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
+        _write_snapshot(tmp_path / "libbar.abicheck.json", library="libbar")
+        binaries_dir = tmp_path / "binaries"
+        binaries_dir.mkdir()
+        (binaries_dir / "libfoo").write_bytes(b"foo-bytes")
+        entries = [
+            {"name": "libfoo", "artifact": "a.so", "stage_binary": True},
+            {"name": "libbar", "artifact": "b.so"},
+        ]
+        manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+        by_name = {a["library"]: a for a in manifest["artifacts"]}
+        assert by_name["libfoo"]["binary"] == "binaries/libfoo"
+        assert "binary" not in by_name["libbar"]

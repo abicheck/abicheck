@@ -49,6 +49,11 @@ _RELEASE_VERDICT_ORDER: dict[str, int] = {
     "API_BREAK": 3,
     "BREAKING": 4,
     "ERROR": 5,
+    # ADR-050 D2 — ranked above even ERROR: a not_comparable library means
+    # the comparison couldn't establish what changed at all, so it dominates
+    # the release-level "worst verdict wins" rollup over every other outcome
+    # in the same release, including a genuine crash.
+    "not_comparable": 6,
 }
 
 
@@ -503,7 +508,18 @@ def _exit_compare_release(
     still floors the exit at 4 — such failures produce no ``DiffResult.changes``
     so the severity aggregation cannot see them, and must never be downgraded.
     When None, the legacy verdict-based mapping is unchanged.
+
+    ``worst_verdict == "not_comparable"`` (ADR-050 D2) is checked first, in
+    both schemes, ahead of even ``--fail-on-removed-library``'s exit 8: a
+    not_comparable result means the comparison couldn't establish what
+    changed at all, so an apparent "library removed" reading from an
+    incomparable pair is an unproven inference, not a real removal finding
+    entitled to its own exit code. Exits 16 — identical to native
+    ``compare``'s own not_comparable code, since it fires before severity
+    classification or the removed-library check ever run.
     """
+    if worst_verdict == "not_comparable":
+        sys.exit(16)
     if severity_exit_code is not None:
         # Severity-aware scheme: removed-library 8 takes precedence over the
         # severity code, otherwise emit the aggregated severity exit code.
@@ -601,6 +617,15 @@ def _format_release_junit(
     contributes to the release's severity-aware exit code — otherwise a CI
     dashboard reading this JUnit file could show zero failures for a release
     that just exited non-zero on that exact finding.
+
+    A ``"not_comparable"`` library (ADR-050 D2 — its own dedicated verdict
+    string, not folded into ``"ERROR"``, see ``_RELEASE_VERDICT_ORDER``) gets
+    the same treatment as a genuine ``"ERROR"``: without this, it would
+    contribute zero testsuites here, so a CI dashboard reading only this
+    JUnit file would show no failures for a release that just exited 16 on
+    exactly this library. ``entry["reason"]`` (not the ``"error"`` key
+    ``_build_error_testsuite`` defaults to) carries the message for this
+    verdict.
     """
     from .junit_report import to_junit_xml_multi
 
@@ -609,7 +634,13 @@ def _format_release_junit(
     # testsuite so CI dashboards reading the JUnit report see the failure.
     if matrix_result is not None:
         pairs.append((matrix_result, None))
-    error_libs = [entry for entry in library_results if entry.get("verdict") == "ERROR"]
+    error_libs = [
+        {**entry, "error": entry.get("reason", "not comparable")}
+        if entry.get("verdict") == "not_comparable"
+        else entry
+        for entry in library_results
+        if entry.get("verdict") in ("ERROR", "not_comparable")
+    ]
     return to_junit_xml_multi(
         pairs,
         severity_config=severity_config,
@@ -740,6 +771,7 @@ def _format_release_markdown(
         "API_BREAK": "⚠️",
         "BREAKING": "❌",
         "ERROR": "💥",
+        "not_comparable": "❓",
     }
     lines: list[str] = [
         "# ABI Release Comparison",

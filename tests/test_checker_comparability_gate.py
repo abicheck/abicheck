@@ -1,9 +1,10 @@
-"""ADR-050 D2 (G32 Phase A, slice 2) — check_contracts_comparable wired into
-checker.compare(). Every snapshot produced by a real dump() still has
-contract=None today (dumper.py wiring is separate, not-yet-started work —
-see abicheck/comparability.py's module docstring), so these tests build
-AbiSnapshot.contract by hand via compute_extraction_contract() to exercise
-the wiring itself."""
+"""ADR-050 D2 — check_contracts_comparable wired into checker.compare().
+dumper.py now attaches a real contract to every snapshot it produces with
+fingerprintable extraction inputs (see abicheck/comparability.py's module
+docstring), but these are unit tests of the gate itself, not an integration
+test of a real dump — they build AbiSnapshot.contract by hand via
+compute_extraction_contract() so each case can hold every other field fixed
+and vary only the one fingerprint under test."""
 
 from __future__ import annotations
 
@@ -76,8 +77,8 @@ def test_compare_raises_profile_mismatch_by_default(tmp_path):
 
 
 def test_compare_with_no_contract_on_either_side_is_unaffected():
-    # The ordinary case today: no dumper.py wiring yet, so contract=None on
-    # both sides -- compare() must behave exactly as it always has.
+    # A pre-ADR-050 snapshot (or one built by hand, as here) has contract=None
+    # on both sides -- compare() must behave exactly as it always has.
     old = _snap("1.0")
     new = _snap("2.0")
     result = compare(old, new)

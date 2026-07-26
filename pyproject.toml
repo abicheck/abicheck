@@ -151,6 +151,7 @@ module = [
     "abicheck.cli_baseline",
     "abicheck.cli_buildsource",
     "abicheck.cli_dump_helpers",
+    "abicheck.cli_dump_manifest",
     "abicheck.cli_graph",
     "abicheck.cli_inputs",
     "abicheck.cli_plugin",
@@ -214,6 +215,14 @@ module = [
     "abicheck.buildsource.toolchain_bindings",
 ]
 disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+# Same stubless-PyYAML situation as the block above, plus a local
+# ``class _StrictLoader(yaml.SafeLoader)`` (ADR-050 D3 duplicate-key
+# rejection) — without stubs ``yaml.SafeLoader`` types as ``Any``, so
+# subclassing it also trips ``misc`` ("cannot subclass Any").
+module = ["abicheck.dump_manifest"]
+disable_error_code = ["import-untyped", "misc"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,284 @@
+name: 'abicheck update-main-baseline'
+
+# G30 P1.6 (ADR-047 section 6/section 10): refreshes the `accepted-main`
+# baseline-set channel in GitHub Actions cache, one entry per contract
+# profile, on every default-branch push. Reusable workflow (workflow_call)
+# -- the calling repository's own workflow decides WHEN this runs (a `push:
+# branches: [<default branch>]` trigger is the intended one; ADR-047 section
+# 12 requires baseline-publishing workflows to be push/workflow_dispatch-
+# triggered only, never `pull_request`/`pull_request_target`, so a fork PR
+# can never refresh what `accepted-main` answers "did this PR introduce a
+# break vs." for). This workflow never builds anything itself ("build once,
+# scan many", the same boundary check-project.yml draws): it expects the
+# caller's own build job(s) to have already uploaded one
+# `<build-output-artifact-prefix><profile-id>` artifact per contract profile
+# earlier in the same workflow run.
+#
+# **Actions-cache key contract (ADR-047 section 10) -- read this before
+# wiring a consumer.** A cache entry is immutable once written, so this
+# workflow writes a NEW key on every run: `<key-prefix>-<profile-id>-
+# <head-sha>` (`abicheck.buildsource.baseline_publish.accepted_main_cache_key`
+# is this exact format's pure-Python mirror). A consumer restoring the
+# latest entry (this workflow's own freshness-comparison step, or a future
+# caller wiring `accepted-main` into check-project.yml/check-single.yml --
+# neither restores from cache today; see docs/reference/publish-baseline.md's
+# "Known gap" note) must use `restore-keys: <key-prefix>-<profile-id>-`
+# (`accepted_main_cache_restore_prefix`'s mirror) to find it -- a consumer
+# that instead used one fixed key across refreshes would silently keep
+# resolving the FIRST entry ever written, forever.
+#
+# Every third-party Action reference below is pinned to a full commit SHA,
+# not a floating tag -- this workflow writes to Actions cache, which needs
+# the same SHA-pinning bar AGENTS.md already applies to security.yml/
+# publish.yml. See publish-baseline.yml's identical header note for why
+# these pins reuse this repository's own existing commits rather than each
+# tag's current HEAD.
+
+on:
+  workflow_call:
+    inputs:
+      build-output-artifact-prefix:
+        description: 'Each contract profile''s build-output.json is downloaded from an artifact named <this><profile-id>.'
+        type: string
+        default: 'abicheck-build-'
+      key-prefix:
+        description: 'Actions-cache key prefix (ADR-047 section 10) -- the written key is <this>-<profile-id>-<head-sha>.'
+        type: string
+        default: 'abicheck-baseline-main'
+      head-sha:
+        description: 'Commit SHA recorded as this baseline-set''s project-ref and folded into the cache key. Defaults to github.sha.'
+        type: string
+        default: ''
+      build-info:
+        description: >-
+          Path to a shared build/source facts pack, relative to each
+          profile's downloaded build-output artifact directory -- passed as
+          --build-info to every library's dump call. Omit for a
+          binary/header-only (L0-L2) baseline-set.
+        type: string
+        default: ''
+      depth:
+        description: 'Evidence depth passed to every dump call (binary, headers, build, or source). Omit for the CLI default.'
+        type: string
+        default: ''
+      validation:
+        description: 'Forwarded to actions/baseline''s validation input (strict or none).'
+        type: string
+        default: 'strict'
+      python-version:
+        description: 'Python version for setup-python, every job.'
+        type: string
+        default: '3.13'
+      install-deps:
+        description: 'Install system dependencies (castxml, gcc) before dumping. Set to false if pre-installed.'
+        type: boolean
+        default: true
+
+jobs:
+  # ── Job 1: discover which contract profiles have a build-output artifact ──
+  discover:
+    name: 'Discover contract profiles'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+      has-profiles: ${{ steps.discover.outputs.has-profiles }}
+    steps:
+      - name: Download build-output artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          path: build-outputs
+          pattern: '${{ inputs.build-output-artifact-prefix }}*'
+          merge-multiple: false
+
+      # See publish-baseline.yml's identical step for why profile.id is read
+      # from each build-output.json's own field rather than the download
+      # directory name.
+      - name: Discover profile ids
+        id: discover
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import glob, json, sys
+
+          profiles = []
+          for bo_file in sorted(glob.glob('build-outputs/**/build-output.json', recursive=True)):
+              profile_id = json.load(open(bo_file)).get('profile', {}).get('id', '')
+              if not profile_id:
+                  print(f'::error::{bo_file} has no profile.id set -- cannot determine which contract profile it belongs to', file=sys.stderr)
+                  sys.exit(1)
+              profiles.append(profile_id)
+          print('matrix=' + json.dumps({'include': [{'profile_id': p} for p in profiles]}))
+          print('has-profiles=' + ('true' if profiles else 'false'))
+          " >> "$GITHUB_OUTPUT"
+
+  no-profiles:
+    name: 'Fail: no contract-profile build-output artifacts found'
+    needs: discover
+    if: needs.discover.outputs.has-profiles != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail
+        env:
+          BUILD_OUTPUT_ARTIFACT_PREFIX: ${{ inputs.build-output-artifact-prefix }}
+        run: |
+          echo "::error::no '${BUILD_OUTPUT_ARTIFACT_PREFIX}*' build-output artifacts were found -- this run would otherwise report success having refreshed nothing. Make sure the calling workflow's build job(s) upload one such artifact per contract profile before calling this reusable workflow." >&2
+          exit 1
+
+  # ── Job 2: dump + refresh one accepted-main cache entry per profile ──────
+  refresh:
+    name: 'Refresh ${{ matrix.profile_id }}'
+    needs: discover
+    if: needs.discover.outputs.has-profiles == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      # See publish-baseline.yml's identical steps for the "install abicheck,
+      # not the caller's own repo" rationale.
+      - name: Capture this reusable workflow's identity
+        id: identity
+        shell: bash
+        env:
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          FALLBACK_REPOSITORY: ${{ github.repository }}
+          FALLBACK_REF: ${{ github.sha }}
+        run: |
+          repository="${WORKFLOW_REF%%/.github/workflows/*}"
+          echo "repository=${repository:-$FALLBACK_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "ref=${WORKFLOW_SHA:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout abicheck (for installing the CLI and nested Action composition)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          repository: ${{ steps.identity.outputs.repository }}
+          ref: ${{ steps.identity.outputs.ref }}
+          path: .update-main-baseline-src
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install abicheck
+        shell: bash
+        run: pip install ./.update-main-baseline-src
+
+      - name: Download build-output artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: '${{ inputs.build-output-artifact-prefix }}${{ matrix.profile_id }}'
+          path: 'build-output/${{ matrix.profile_id }}'
+
+      # Cache keys computed once, up front, so every later step (restore,
+      # save) reads the identical values -- must exactly match
+      # abicheck.buildsource.baseline_publish.accepted_main_cache_key /
+      # accepted_main_cache_restore_prefix's format (tests/test_reusable_
+      # workflows.py pins this file's literal template string against that
+      # pure-Python mirror).
+      - name: Compute cache key
+        id: cache-key
+        shell: bash
+        env:
+          KEY_PREFIX: ${{ inputs.key-prefix }}
+          PROFILE_ID: ${{ matrix.profile_id }}
+          HEAD_SHA: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
+        run: |
+          echo "cache-key=${KEY_PREFIX}-${PROFILE_ID}-${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "restore-prefix=${KEY_PREFIX}-${PROFILE_ID}-" >> "$GITHUB_OUTPUT"
+
+      # `key` is this run's own cache key, keyed by head-sha (unique per
+      # commit, not per run -- a rerun/retrigger of the same commit, or an
+      # explicit caller-supplied head-sha, reuses the same key and can hit
+      # an entry this same commit already wrote). Either way this step
+      # falls through to `restore-keys`, which resolves to the newest entry
+      # actually written under the profile's prefix (GitHub's cache-restore
+      # semantics: the most recently created matching entry wins). That is
+      # exactly what a freshness comparison needs: the latest previously
+      # accepted-main baseline-set, regardless of which head_sha wrote it.
+      - name: Restore previous accepted-main baseline-set
+        id: restore
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        with:
+          path: .abicheck-baseline-previous
+          key: ${{ steps.cache-key.outputs.cache-key }}
+          restore-keys: |
+            ${{ steps.cache-key.outputs.restore-prefix }}
+
+      - name: Locate previous manifest
+        id: previous
+        shell: bash
+        run: |
+          if [[ -f .abicheck-baseline-previous/manifest.json ]]; then
+            echo "manifest-path=.abicheck-baseline-previous/manifest.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "manifest-path=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # See publish-baseline.yml's identical step for the full rationale
+      # (derives actions/baseline's `libraries` input from build-output.json,
+      # no separate .abicheck.yml read).
+      - name: Derive baseline libraries from build-output.json
+        id: libraries
+        shell: bash
+        env:
+          PROFILE_ID: ${{ matrix.profile_id }}
+        run: |
+          set -euo pipefail
+          abicheck build-output baseline-libraries "build-output/${PROFILE_ID}" -o baseline-libraries.json || true
+          python3 -c "
+          import json, sys
+
+          try:
+              report = json.load(open('baseline-libraries.json'))
+          except OSError as exc:
+              print(f'::error::baseline-libraries.json was not produced: {exc}', file=sys.stderr)
+              sys.exit(1)
+          if not report['ok']:
+              for e in report['errors']:
+                  print(f'::error::{e}', file=sys.stderr)
+              sys.exit(1)
+          with open('libraries.json', 'w', encoding='utf-8') as fh:
+              json.dump(report['entries'], fh)
+          "
+          {
+            echo "libraries<<ABICHECK_LIBRARIES_EOF"
+            cat libraries.json
+            echo
+            echo "ABICHECK_LIBRARIES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Dump baseline-set
+        id: baseline
+        uses: ./.update-main-baseline-src/actions/baseline
+        with:
+          libraries: ${{ steps.libraries.outputs.libraries }}
+          output-dir: '.abicheck-baseline'
+          project-ref: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
+          profile: ${{ matrix.profile_id }}
+          build-info: ${{ inputs.build-info != '' && format('build-output/{0}/{1}', matrix.profile_id, inputs.build-info) || '' }}
+          depth: ${{ inputs.depth }}
+          previous-manifest: ${{ steps.previous.outputs.manifest-path }}
+          validation: ${{ inputs.validation }}
+          python-version: ${{ inputs.python-version }}
+          install-deps: ${{ inputs.install-deps }}
+
+      # Writes the per-commit key computed above -- never the stable
+      # restore-prefix alone (ADR-047 section 10's explicit warning: a
+      # workflow that reused one stable key across refreshes would silently
+      # stop updating after the first write, since the cache action reports
+      # that as a hit, not an error). No `if:` guard needed: a failed "Dump
+      # baseline-set" step above already fails this job before this step is
+      # reached (no continue-on-error was set on it), so this step only ever
+      # runs after a real, complete baseline-set was written.
+      - name: Save accepted-main baseline-set to cache
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        with:
+          path: .abicheck-baseline
+          key: ${{ steps.cache-key.outputs.cache-key }}

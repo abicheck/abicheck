@@ -425,6 +425,17 @@ def _collect_metadata(path: Path) -> LibraryMetadata | None:
 # collides with ``compare``'s documented "2 = source break"; this remaps it.
 _EXIT_USAGE_ERROR = 64
 
+# Exit code for a single-library ``compare`` whose OLD/NEW snapshots failed
+# ADR-050 D2's comparability gate (a ProfileMismatchError/ScopeMismatchError
+# — the two snapshots were not extracted under a comparable contract, so no
+# verdict was ever produced). Identical across the legacy (0/2/4) and
+# severity-aware (0/1/2/4) single-library schemes, since the gate runs before
+# either classification, and deliberately not ``8`` — that already means
+# ``--fail-on-removed-library`` in the release/multi-library table. ``16``
+# continues that table's own doubling pattern one step further and sits
+# outside every existing compare exit code in all three tables.
+_EXIT_NOT_COMPARABLE = 16
+
 
 class _AbicheckGroup(_RootGroupBase):
     """Root group that maps Click *usage* errors to a dedicated exit code.
@@ -549,12 +560,20 @@ def main() -> None:
 # ── Debug artifact resolution (ADR-021a) ──────────────────────────────────────
 @click.option("--debug-root", "debug_roots", multiple=True, type=click.Path(path_type=Path),
               help="Directory containing separate debug files (build-id trees, "
-                   "path-mirror debug files, or dSYM bundles). Can be repeated.")
+                   "path-mirror debug files, or dSYM bundles). This option can be repeated.")
 @click.option("--debuginfod", is_flag=True, default=False,
               help="Enable debuginfod network resolution for debug info (opt-in). "
                    "Uses DEBUGINFOD_URLS environment variable or --debuginfod-url.")
 @click.option("--debuginfod-url", "debuginfod_url", default=None,
               help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).")
+# ── Multi-TU manifest (ADR-050 D3) ────────────────────────────────────────────
+@click.option("--dump-manifest", "dump_manifest_path",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
+              help="A strict YAML document describing multiple translation units to compile "
+                   "and merge into one snapshot, instead of a single -H/--header list. "
+                   "Mutually exclusive with -H/--header and --public-header/"
+                   "--public-header-dir (declare those in the manifest's own base profile "
+                   "instead). ELF only so far.")
 @verbose_option
 # ── Provenance metadata ──────────────────────────────────────────────────────
 @click.option("--git-tag", "git_tag", default=None,
@@ -580,6 +599,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              compile_db_filter: str | None,
              debug_roots: tuple[Path, ...],
              debuginfod: bool, debuginfod_url: str | None,
+             dump_manifest_path: Path | None,
              verbose: bool,
              git_tag: str | None, build_id: str | None, no_git: bool,
              build_info: Path | None = None, sources: Path | None = None,
@@ -588,8 +608,10 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              depth: str | None = None,
              header_graph_deprecated: bool = False,
              header_graph_includes_deprecated: bool = False,
+             frontend_context: str = "host",
              _resolved_compile_context: CompileContext | None = None,
-             _resolved_collect_mode: str | None = None) -> None:
+             _resolved_collect_mode: str | None = None,
+             _resolved_include_labels: dict[Path, str] | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -606,6 +628,30 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
 
     reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
+
+    # ADR-050 D3: parsed before the collect/compile-context resolution below so
+    # a bad manifest fails fast, and validated against the *raw* CLI values
+    # (headers/public_headers/public_header_dirs haven't been reassigned yet).
+    parsed_dump_manifest = None
+    if dump_manifest_path is not None:
+        if headers:
+            raise click.UsageError(
+                "--dump-manifest and -H/--header are mutually exclusive -- the "
+                "manifest's own 'roots' field declares the public surface instead."
+            )
+        if public_headers or public_header_dirs:
+            raise click.UsageError(
+                "--dump-manifest and --public-header/--public-header-dir are "
+                "mutually exclusive -- declare them in the manifest's own base "
+                "profile instead."
+            )
+        from .dump_manifest import load_manifest
+        from .errors import ManifestValidationError
+
+        try:
+            parsed_dump_manifest = load_manifest(dump_manifest_path)
+        except ManifestValidationError as exc:
+            raise click.UsageError(str(exc)) from exc
 
     # Resolve the evidence-depth preset into the collect mode, apply --depth binary
     # suppression, and warn on an explicitly-requested deep depth without sources.
@@ -631,6 +677,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
         header_backend=header_backend, includes=includes,
         build_config=build_config, sources=sources,
+        frontend_context=frontend_context,
     )
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
     gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
@@ -820,6 +867,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         )
 
     if binary_fmt in ("pe", "macho"):
+        if parsed_dump_manifest is not None:
+            raise click.UsageError(
+                f"--dump-manifest is not yet supported for {binary_fmt.upper()} "
+                "binaries (ADR-050 D3); use a single-header dump for this format."
+            )
         native_cc = (
             dataclasses.replace(_cc, gcc_options=effective_gcc_options)
             if effective_gcc_options != _cc.gcc_options
@@ -892,6 +944,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         compile_context=_cc,
         depth=depth,
         compile_db_context_matched=compile_db_matched,
+        dump_manifest=parsed_dump_manifest,
+        include_labels=_resolved_include_labels,
     )
 
 
@@ -1321,6 +1375,7 @@ def _embed_inline_source_side(
     debug_roots: tuple[Path, ...] = (),
     debuginfod: bool = False,
     debuginfod_url: str | None = None,
+    include_labels: dict[Path, str] | None = None,
 ) -> tuple[Path, Path | None, Path | None]:
     """Resolve one side's ``--sources`` into the input ``compare`` should read.
 
@@ -1345,6 +1400,15 @@ def _embed_inline_source_side(
     ``--old/new-sources`` tree bypassed ``--debug-root`` entirely (the inline
     dump used its own unset defaults), so a stripped binary on this side still
     lost its DWARF even though the sibling non-inline path was fixed.
+
+    ``include_labels`` (ADR-050 D1, CodeRabbit review): this side's already-
+    resolved ``path -> label`` map from a labeled ``--include
+    old:LABEL=PATH``/``new:LABEL=PATH`` compare entry, forwarded to the
+    inline ``dump`` invocation's private ``_resolved_include_labels`` hook —
+    without this, a raw ``--old/new-sources`` tree's inline-dumped temporary
+    snapshot silently lost its label, leaving that side's extraction contract
+    fingerprinted as if the support root were unlabeled/external even though
+    the non-inline path already threads the same label correctly.
 
     ``depth`` is ``compare``'s own (unmodified) ``--depth`` string, used only
     to reproduce ``dump_cmd``'s ``--depth source`` + ``--ast-frontend hybrid``
@@ -1489,6 +1553,7 @@ def _embed_inline_source_side(
         debug_roots=debug_roots,
         debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
+        _resolved_include_labels=include_labels,
     )
     # The raw sources/build-info are now embedded in the snapshot; pack-shaped
     # inputs (kept_*) ride through to the later prepare_embedded_build_source so
@@ -1718,6 +1783,15 @@ def _embed_inline_source_side(
                    "depth/scope, show tool/config resolution -- and print a report "
                    "without running the diff. Writes nothing; incompatible with "
                    "-o/--output.")
+@click.option("--diagnostic-comparison", "diagnostic_comparison", is_flag=True, default=False,
+              help="ADR-050 D2's sanctioned escape hatch: when OLD and NEW were "
+                   "extracted under a genuinely incomparable profile/scope "
+                   "(ExtractionContract mismatch), downgrade the default hard "
+                   "failure (exit 16, no verdict) into a tentative diff instead, "
+                   "stamped assurance: \"none\" everywhere in the report so a "
+                   "reader knows not to trust it the way an ordinary comparable "
+                   "diff is trusted. Not needed, and does nothing, on a "
+                   "comparable pair.")
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
@@ -1867,6 +1941,7 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_aggregate,  # noqa: F401  — registers aggregate
     cli_build_output,  # noqa: F401  — registers build-output (validate)
     cli_buildsource,  # noqa: F401  — buildsource internals (no command of its own)
+    cli_dump_manifest,  # noqa: F401  — registers plan (--dump-manifest diagnostic)
     cli_project_targets,  # noqa: F401  — registers project-targets (validate)
     cli_run_plan,  # noqa: F401  — registers run-plan (generate, to-aggregate-manifest)
     cli_scan,  # noqa: F401  — registers scan

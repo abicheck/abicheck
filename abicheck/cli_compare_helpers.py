@@ -28,6 +28,7 @@ in ``check_ai_readiness``). Verdict routing stays through the Tier-2 service
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -37,6 +38,7 @@ import click
 
 from . import cli
 from .cli import (
+    _EXIT_NOT_COMPARABLE,
     _announce_exit_scheme,
     _embed_inline_source_side,
     _exit_with_severity_or_verdict,
@@ -70,10 +72,11 @@ from .cli_resolve import (
     _resolve_compare_snapshots,
     classify_compare_operand,
 )
-from .errors import AbicheckError
+from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
+    from .dump_manifest import DumpManifest
     from .model import AbiSnapshot
     from .policy_file import PolicyFile
 
@@ -192,6 +195,8 @@ def _reject_set_input_flags(
     secondary_fmt: str | None = None,
     used_by_apps: tuple[Path, ...] = (),
     required_symbols: tuple[str, ...] = (),
+    diagnostic_comparison: bool = False,
+    include_labels: dict[Path, str] | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
 
@@ -236,6 +241,23 @@ def _reject_set_input_flags(
             "directory/package (release) comparisons: the per-library "
             "fan-out has no plugin-host-contract scoping. Compare the "
             "specific library individually with --required-symbol."
+        )
+    if diagnostic_comparison:
+        raise click.UsageError(
+            "--diagnostic-comparison is not supported for directory/package "
+            "(release) comparisons yet: the per-library fan-out does not "
+            "wire the ADR-050 D2 comparability gate's diagnostic escape "
+            "hatch (a mismatch there still raises unhandled). Compare the "
+            "specific library individually to use it."
+        )
+    if include_labels:
+        raise click.UsageError(
+            "A labeled --include (old:LABEL=PATH/new:LABEL=PATH/"
+            "both:LABEL=PATH) is not supported for directory/package "
+            "(release) comparisons yet: the per-library fan-out does not "
+            "thread ADR-050 D1's project_include_labels into its per-library "
+            "dumps, so the label would be silently dropped. Compare the "
+            "specific library individually to use it."
         )
 
 
@@ -990,6 +1012,68 @@ def _render_compare_dry_run(
     return result
 
 
+def _report_not_comparable(
+    exc: ProfileMismatchError | ScopeMismatchError,
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    fmt: str,
+    output: Path | None,
+) -> None:
+    """Surface an ADR-050 D2 comparability-gate hard failure to the user.
+
+    ``checker.compare``'s gate raises before any ``diff_*`` module runs, so
+    there is no ``DiffResult`` for any renderer to work with — unlike an
+    ordinary verdict, this cannot be formatted the way a completed comparison
+    would be. ``--format json`` gets the schema-conformant ``{"verdict":
+    null, "reason": {...}}`` document (schema 2.17,
+    ``compare_report.schema.json``); ``sarif``/``junit`` get a real,
+    spec-conformant document of their own (a failed-invocation SARIF run /
+    an errored JUnit testcase — both formats have a genuine, standard way to
+    represent "the run didn't complete", distinct from "zero findings") via
+    :func:`sarif.to_sarif_not_comparable`/
+    :func:`junit_report.to_junit_xml_not_comparable`, so CI tooling
+    consuming those artifacts sees the failure instead of a missing file.
+    ``markdown``/``html``/``review`` get the same clear stderr message a
+    ``click.UsageError`` would produce and no output file — those are
+    human-facing formats already reading this stderr output, and neither has
+    an equivalent "run failed" document convention worth fabricating one for.
+    """
+    kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
+    message = str(exc)
+    click.echo(
+        f"Error: '{old.library}' old={old.version!r} new={new.version!r} are not "
+        f"comparable: {message}\n"
+        "The two snapshots were not extracted under a comparable profile/scope "
+        "contract (ADR-050 D1/D2), so no verdict was produced. Pass "
+        '--diagnostic-comparison to force a tentative diff (stamped '
+        'assurance: "none") if you understand the risk.',
+        err=True,
+    )
+    if fmt == "json":
+        from .schemas import REPORT_SCHEMA_VERSION
+
+        doc = {
+            "report_schema_version": REPORT_SCHEMA_VERSION,
+            "library": old.library,
+            "old_version": old.version,
+            "new_version": new.version,
+            "verdict": None,
+            "reason": {"kind": kind, "message": message},
+        }
+        _write_or_echo(output, json.dumps(doc, indent=2))
+    elif fmt == "sarif":
+        from .sarif import to_sarif_not_comparable
+
+        doc = to_sarif_not_comparable(old.library, old.version, new.version, kind, message)
+        _write_or_echo(output, json.dumps(doc, indent=2))
+    elif fmt == "junit":
+        from .junit_report import to_junit_xml_not_comparable
+
+        xml = to_junit_xml_not_comparable(old.library, old.version, new.version, kind, message)
+        _write_or_echo(output, xml)
+
+
 def run_compare(
     ctx: click.Context,
     *,
@@ -1055,6 +1139,11 @@ def run_compare(
     required_symbols_opt: tuple[str, ...] = (),
     required_symbols_file: Path | None = None,
     verify_runtime: bool = False,
+    diagnostic_comparison: bool = False,
+    include_labels: dict[Path, str] | None = None,
+    old_dump_manifest: Path | None = None,
+    new_dump_manifest: Path | None = None,
+    frontend_context: str = "host",
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -1163,9 +1252,31 @@ def run_compare(
         _reject_set_input_flags(
             exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
+            diagnostic_comparison=diagnostic_comparison,
+            include_labels=include_labels,
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _reject_evidence_flags_for_set_inputs(ctx)
+
+    # Parsed after the directory/package rejection above (not before, like an
+    # earlier revision of this function did): a malformed --dump-manifest on
+    # a directory/package compare must fail with that block's clear "not
+    # supported for directory/package" message, not a confusing "invalid
+    # YAML" one for a flag combination that was never going to work anyway
+    # (Codex review).
+    old_manifest_obj: DumpManifest | None = None
+    new_manifest_obj: DumpManifest | None = None
+    if old_dump_manifest is not None or new_dump_manifest is not None:
+        from .dump_manifest import load_manifest
+        from .errors import ManifestValidationError
+
+        try:
+            if old_dump_manifest is not None:
+                old_manifest_obj = load_manifest(old_dump_manifest)
+            if new_dump_manifest is not None:
+                new_manifest_obj = load_manifest(new_dump_manifest)
+        except ManifestValidationError as exc:
+            raise click.UsageError(str(exc)) from exc
 
     if dry_run:
         from .dry_run import emit_dry_run
@@ -1261,6 +1372,7 @@ def run_compare(
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
         header_backend=header_backend, includes=includes, build_config=cfg_path,
+        frontend_context=frontend_context,
     )
     # The dirs the config appended past the CLI -I roots. These are documented as
     # applying to *both* sides, so they must survive a per-side --old/new-include
@@ -1280,6 +1392,18 @@ def run_compare(
         headers, includes, old_headers_only, new_headers_only,
         old_includes_only, new_includes_only,
     )
+    if old_manifest_obj is not None and old_h:
+        raise click.UsageError(
+            "--dump-manifest old=... and a header for the old side "
+            "(-H/--header) are mutually exclusive -- declare the old side's "
+            "public surface in the manifest's own base profile instead."
+        )
+    if new_manifest_obj is not None and new_h:
+        raise click.UsageError(
+            "--dump-manifest new=... and a header for the new side "
+            "(-H/--header) are mutually exclusive -- declare the new side's "
+            "public surface in the manifest's own base profile instead."
+        )
     if config_includes:
         old_inc = list(old_inc) + list(config_includes)
         new_inc = list(new_inc) + list(config_includes)
@@ -1359,7 +1483,7 @@ def run_compare(
             debug_roots=tuple(resolved_old_debug),
             debuginfod=debuginfod, debuginfod_url=debuginfod_url,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
-            depth=depth,
+            depth=depth, include_labels=include_labels,
         )
         new_input, new_sources, new_build_info = _embed_inline_source_side(
             ctx, input_path=new_input, sources=new_sources,
@@ -1376,7 +1500,7 @@ def run_compare(
             dwarf_only=dwarf_only, debug_format=effective_debug_format,
             pdb_path=new_pdb_path or pdb_path,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
-            depth=depth,
+            depth=depth, include_labels=include_labels,
         )
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text
@@ -1392,6 +1516,16 @@ def run_compare(
     # new_input (which, in that case, no longer point at the original library).
     used_by_old_input, _ = cli._normalize_binary_input(used_by_old_input)
     used_by_new_input, _ = cli._normalize_binary_input(used_by_new_input)
+    if old_manifest_obj is not None and old_fmt != "elf":
+        raise click.UsageError(
+            "--dump-manifest old=... requires the old input to be an ELF "
+            f"binary (ADR-050 D3); got {old_fmt or 'a non-binary input'}."
+        )
+    if new_manifest_obj is not None and new_fmt != "elf":
+        raise click.UsageError(
+            "--dump-manifest new=... requires the new input to be an ELF "
+            f"binary (ADR-050 D3); got {new_fmt or 'a non-binary input'}."
+        )
     _reject_debug_format_for_non_elf(effective_debug_format, old_fmt, new_fmt)
     _warn_ignored_flags(
         old_fmt is not None, new_fmt is not None,
@@ -1421,6 +1555,9 @@ def run_compare(
         new_debug_roots=resolved_new_debug or None,
         enable_debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
+        include_labels=include_labels,
+        old_dump_manifest=old_manifest_obj,
+        new_dump_manifest=new_manifest_obj,
     )
 
     suppression, pf = _load_suppression_and_policy(
@@ -1470,18 +1607,23 @@ def run_compare(
         env_matrix = load_env_matrix(env_matrix_path)
     except AbicheckError as exc:
         raise click.UsageError(str(exc)) from exc
-    result = compare_snapshots(
-        old, new, suppression=suppression, policy=policy, policy_file=pf,
-        env_matrix=env_matrix,
-        scope_to_public_surface=scope_public_headers,
-        force_public_symbols=force_public,
-        extra_changes=extra_changes,
-        pattern_verdicts=apply_patterns,
-        surface_metrics=surface_metrics,
-        collapse_versioned_symbols=collapse_versioned_symbols,
-        public_surface_allowlist=post_manifest_allowlist,
-        reconcile_build_context=reconcile_build_context,
-    )
+    try:
+        result = compare_snapshots(
+            old, new, suppression=suppression, policy=policy, policy_file=pf,
+            env_matrix=env_matrix,
+            scope_to_public_surface=scope_public_headers,
+            force_public_symbols=force_public,
+            extra_changes=extra_changes,
+            pattern_verdicts=apply_patterns,
+            surface_metrics=surface_metrics,
+            collapse_versioned_symbols=collapse_versioned_symbols,
+            public_surface_allowlist=post_manifest_allowlist,
+            reconcile_build_context=reconcile_build_context,
+            diagnostic_comparison=diagnostic_comparison,
+        )
+    except (ProfileMismatchError, ScopeMismatchError) as exc:
+        _report_not_comparable(exc, old, new, fmt=fmt, output=output)
+        sys.exit(_EXIT_NOT_COMPARABLE)
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     # Pass all injected findings (probe-matrix + evidence) so artifact-backed

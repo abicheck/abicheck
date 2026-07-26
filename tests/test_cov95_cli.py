@@ -944,6 +944,39 @@ class TestExitCompareRelease:
             _exit_compare_release("NO_CHANGE", False, [], severity_exit_code=0) is None
         )
 
+    def test_not_comparable_exits_16_legacy(self) -> None:
+        # ADR-050 D2: not_comparable dominates the legacy scheme too.
+        with pytest.raises(SystemExit) as exc:
+            _exit_compare_release("not_comparable", False, [])
+        assert exc.value.code == 16
+
+    def test_not_comparable_beats_removed_library(self) -> None:
+        # Takes precedence over --fail-on-removed-library's exit 8 -- a
+        # not_comparable result means the comparison couldn't establish
+        # what changed, so an apparent removal is an unproven inference.
+        with pytest.raises(SystemExit) as exc:
+            _exit_compare_release("not_comparable", True, ["libgone.so"])
+        assert exc.value.code == 16
+
+    def test_not_comparable_beats_severity_scheme(self) -> None:
+        with pytest.raises(SystemExit) as exc:
+            _exit_compare_release(
+                "not_comparable", True, ["libgone.so"], severity_exit_code=2
+            )
+        assert exc.value.code == 16
+
+
+class TestReleaseVerdictOrder:
+    def test_not_comparable_ranks_above_error(self) -> None:
+        # ADR-050 D2: not_comparable dominates the release-level "worst
+        # verdict wins" rollup over every other outcome, including ERROR.
+        from abicheck.cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
+
+        assert (
+            _RELEASE_VERDICT_ORDER["not_comparable"]
+            > _RELEASE_VERDICT_ORDER["ERROR"]
+        )
+
 
 class TestFoldReleaseGlobalSeverity:
     def test_no_config_returns_base(self) -> None:

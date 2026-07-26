@@ -41,6 +41,24 @@ Aggregate per-target ABI reports in REPORTS_DIR into one CI gate verdict.
 
 Validate a project-produced ``abicheck-build/`` directory.
 
+### `build-output baseline-libraries`
+
+Derive actions/baseline's ``libraries`` JSON input from DIRECTORY's build-output.json (G30 P1.6, ADR-047 §6/§8 S14 correction).
+
+**Arguments**
+
+| Name | Required | Description |
+|---|:--:|---|
+| `directory` | yes |  |
+
+**Options**
+
+| Option | Required | Default | Description |
+|---|:--:|---|---|
+| `--format` | no | `json` | Output format (json only today). Choices: `json`. |
+| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
+
 ### `build-output validate`
 
 Validate DIRECTORY's build-output.json (ADR-047 §11.1).
@@ -89,8 +107,9 @@ Compare two ABI surfaces and report changes.
 | `--bundle-cohort` | no | — | Declare a co-versioned library cohort by name prefix (e.g. 'libfoo\_'). Repeatable. Enables the BUNDLE\_SONAME\_SKEW check. (directory/package inputs only) |
 | `--no-bundle-analysis` | no | `False` | Skip bundle-level cross-library analysis (debug/parity escape hatch). Bundle findings catch intra-bundle symbol removals, signature drift across DSO boundaries, type drift across siblings, provider migration, and manifest mismatches. (directory/package inputs only) |
 | `--header`, `-H` | no | — | Public header file or directory. Applies to both sides; scope to one side with an 'old='/'new=' prefix, repeating the flag per side (e.g. --header old=v1/foo.h --header new=v2/foo.h). Repeatable (ADR-040). Recommended for full ABI analysis; without headers, native binaries fall back to symbols-only mode. Scopes the ABI surface to declarations in these headers for ELF; on PE/Mach-O scoping is best-effort and falls back to the export table when castxml is unavailable or names don't match (e.g. MSVC C++ mangling). Validated for native binaries; ignored for snapshots. |
-| `--include`, `-I` | no | — | Extra include directory for castxml. Applies to both sides; scope to one side with an 'old='/'new=' prefix, repeating the flag per side (e.g. --include old=inc1 --include new=inc2). Repeatable (ADR-040). |
+| `--include`, `-I` | no | — | Extra include directory for castxml. Applies to both sides; scope to one side with an 'old='/'new=' prefix, repeating the flag per side (e.g. --include old=inc1 --include new=inc2). Repeatable (ADR-040). A labeled 'old:LABEL=PATH'/'new:LABEL=PATH' form (e.g. --include old:support=old/src --include new:support=new/src) names a side-specific support root under one shared logical identity, so a genuine two-checkout compare doesn't spuriously PROFILE\_MISMATCH on it (ADR-050 D1). |
 | `--version` | no | — | Version label used when an input is a bare .so file. Scope to one side with an 'old='/'new=' prefix, repeating the flag per side (e.g. --version old=1.0 --version new=2.0); a bare value applies to both. Defaults: old side 'old', new side 'new' (ADR-040). |
+| `--dump-manifest` | no | — | A strict YAML document describing multiple translation units to compile and merge into one side's snapshot, instead of a single -H/--header list (ADR-050 D3). Side-scoped: repeat the flag with an 'old='/'new=' prefix per side (e.g. --dump-manifest old=v1/abi.yml --dump-manifest new=v2/abi.yml); a bare value applies to both. Mutually exclusive with -H/--header for that side (declare the public surface in the manifest's own base profile instead). ELF only so far. |
 | `--ast-frontend` | no | `auto` | C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) or clang (-ast-dump=json; for hosts where castxml is absent or its bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges them (dumper\_hybrid.merge\_snapshots) — needs both tools installed and costs roughly 2x a single-backend dump; never selected by auto. auto resolves to castxml (or the ABICHECK\_AST\_FRONTEND pin) and never changes producer unless --allow-ast-frontend-fallback (or ABICHECK\_ALLOW\_AST\_FALLBACK=1) is explicitly set. Env: ABICHECK\_AST\_FRONTEND. Choices: `auto`, `castxml`, `clang`, `hybrid`. |
 | `--allow-ast-frontend-fallback` | no | `False` | Allow auto-selected CastXML to fall back to Clang for a recognized toolchain mismatch or direct-include guard. Disabled by default because the frontends can produce materially different findings. |
 | `--allow-unsupported-castxml` | no | `False` | Proceed with a CastXML build outside the supported version range (castxml\_policy.MIN\_CASTXML/MAX\_CASTXML/MIN\_CASTXML\_CLANG\_MAJOR) instead of aborting the scan before headers are parsed. Exploratory-mode-only: the resulting snapshot's ast\_toolchain\_supported is recorded as false with ast\_toolchain\_unsupported\_reasons, so it is never mistaken for a normal supported scan and cannot become a new strict baseline without a further explicit acknowledgment. |
@@ -100,6 +119,7 @@ Compare two ABI surfaces and report changes.
 | `--gcc-option` | no | — | A single extra compiler flag passed to the header frontend verbatim (repeatable; not whitespace-split). Use two for a flag + spaced value, e.g. --gcc-option=-include --gcc-option='some header.h'. |
 | `--sysroot` | no | — | Alternative system root directory for header resolution. |
 | `--nostdinc`, `--no-nostdinc` | no | `False` | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
+| `--frontend-context` | no | `host` | Which AST context the L2 header frontend should target (ADR-050 D3/D5). Only 'host' is honored so far -- 'device' (e.g. a SYCL/DPC++ offload target) is rejected until the real device selector lands; declared now so a manifest's own frontend\_context field has a matching CLI counterpart for the legacy, non-manifest path. Choices: `host`, `device`. |
 | `--lang` | no | `c++` | Language mode for the header backend. Choices: `c++`, `c`. |
 | `--old-ast-frontend` | no | — | C/C++ AST frontend for the old side only (overrides --ast-frontend for old). Use when the old release parses on castxml but the new one needs clang (or vice versa). Choices: `auto`, `castxml`, `clang`, `hybrid`. |
 | `--new-ast-frontend` | no | — | C/C++ AST frontend for the new side only (overrides --ast-frontend for new). Choices: `auto`, `castxml`, `clang`, `hybrid`. |
@@ -144,6 +164,7 @@ Compare two ABI surfaces and report changes.
 | `--profile` | no | — | Run-profile preset bundling workflow defaults (ADR-040): 'ci-gate' (headers depth, review digest, severity exit codes), 'release-cut' (source depth, recommendation, Markdown -- the 'should I bump semver?' flow; distinct from directory/package 'release' comparisons, which this profile does not apply to), 'quick' (symbols-only, one-line summary). Explicit flags override the profile; single-pair compares only (configure release defaults in .abicheck.yml). Choices: `ci-gate`, `release-cut`, `quick`. |
 | `--reconcile-build-context` | no | `False` | Clear context-free header-parse false positives using the build's active preprocessor defines (ADR-039): a conditional field's phantom add/remove/size change the build proves never happened is moved to an audit bucket instead of the verdict. No-op unless snapshots carry build\_context\_defines + per-field guards. |
 | `--dry-run` | no | `False` | Resolve and validate the invocation -- classify inputs, resolve depth/scope, show tool/config resolution -- and print a report without running the diff. Writes nothing; incompatible with -o/--output. |
+| `--diagnostic-comparison` | no | `False` | ADR-050 D2's sanctioned escape hatch: when OLD and NEW were extracted under a genuinely incomparable profile/scope (ExtractionContract mismatch), downgrade the default hard failure (exit 16, no verdict) into a tentative diff instead, stamped assurance: "none" everywhere in the report so a reader knows not to trust it the way an ordinary comparable diff is trusted. Not needed, and does nothing, on a comparable pair. |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
 ## `compat`
@@ -314,9 +335,10 @@ Dump ABI snapshot of a shared library to JSON.
 | `--debug-format` | no | — | Force the ELF debug format (auto=pick best available). Supersedes the individual --btf/--ctf/--dwarf flags. Choices: `auto`, `dwarf`, `btf`, `ctf`. |
 | `--build-dir`, `-p` | no | — | Build directory containing compile\_commands.json, or path to the file itself. Enables deterministic header parsing with exact build flags. Requires -H/--header. |
 | `--compile-db-filter` | no | — | Glob pattern to filter compile\_commands.json entries by source file (e.g. 'src/libfoo/**'). Useful for large databases. |
-| `--debug-root` | no | — | Directory containing separate debug files (build-id trees, path-mirror debug files, or dSYM bundles). Can be repeated. |
+| `--debug-root` | no | — | Directory containing separate debug files (build-id trees, path-mirror debug files, or dSYM bundles). This option can be repeated. |
 | `--debuginfod` | no | `False` | Enable debuginfod network resolution for debug info (opt-in). Uses DEBUGINFOD\_URLS environment variable or --debuginfod-url. |
 | `--debuginfod-url` | no | — | debuginfod server URL (overrides DEBUGINFOD\_URLS env var). |
+| `--dump-manifest` | no | — | A strict YAML document describing multiple translation units to compile and merge into one snapshot, instead of a single -H/--header list. Mutually exclusive with -H/--header and --public-header/--public-header-dir (declare those in the manifest's own base profile instead). ELF only so far. |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 | `--git-tag` | no | — | Git tag to embed in the snapshot (e.g. v2.0.0). |
 | `--build-id` | no | — | Opaque build identifier (CI run ID, build number, etc.). |
@@ -336,6 +358,20 @@ Dump ABI snapshot of a shared library to JSON.
 | `--gcc-option` | no | — | A single extra compiler flag passed to the header frontend verbatim (repeatable; not whitespace-split). Use two for a flag + spaced value, e.g. --gcc-option=-include --gcc-option='some header.h'. |
 | `--sysroot` | no | — | Alternative system root directory for header resolution. |
 | `--nostdinc`, `--no-nostdinc` | no | `False` | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
+| `--frontend-context` | no | `host` | Which AST context the L2 header frontend should target (ADR-050 D3/D5). Only 'host' is honored so far -- 'device' (e.g. a SYCL/DPC++ offload target) is rejected until the real device selector lands; declared now so a manifest's own frontend\_context field has a matching CLI counterpart for the legacy, non-manifest path. Choices: `host`, `device`. |
+
+## `plan`
+
+Parse and normalize a --dump-manifest document without extracting.
+
+**Options**
+
+| Option | Required | Default | Description |
+|---|:--:|---|---|
+| `--dump-manifest` | yes | — | The --dump-manifest YAML document to parse and normalize. |
+| `--format` | no | `text` | Output format. Choices: `text`, `json`. |
+| `--output`, `-o` | no | — | Write output to this path (default: stdout). |
+| `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
 ## `project-targets`
 
@@ -447,3 +483,4 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 | `--gcc-option` | no | — | A single extra compiler flag passed to the header frontend verbatim (repeatable; not whitespace-split). Use two for a flag + spaced value, e.g. --gcc-option=-include --gcc-option='some header.h'. |
 | `--sysroot` | no | — | Alternative system root directory for header resolution. |
 | `--nostdinc`, `--no-nostdinc` | no | `False` | Do not search the standard system include paths (suppresses the castxml/clang system-include auto-detection too). Paired form so an explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: true` for a one-off run (CLI > config). |
+| `--frontend-context` | no | `host` | Which AST context the L2 header frontend should target (ADR-050 D3/D5). Only 'host' is honored so far -- 'device' (e.g. a SYCL/DPC++ offload target) is rejected until the real device selector lands; declared now so a manifest's own frontend\_context field has a matching CLI counterpart for the legacy, non-manifest path. Choices: `host`, `device`. |

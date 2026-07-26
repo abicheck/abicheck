@@ -32,6 +32,7 @@ from .binder import BindingStatus, SymbolBinding, compute_bindings
 from .checker import DiffResult, compare
 from .checker_policy import BREAKING_KINDS
 from .checker_types import Change
+from .errors import ProfileMismatchError, ScopeMismatchError
 from .resolver import DependencyGraph, resolve_dependencies
 from .stack_binding_diff import diff_runtime_bindings
 
@@ -51,6 +52,13 @@ class StackChange:
     change_type: str           # "added", "removed", "content_changed"
     abi_diff: DiffResult | None = None  # Per-library ABI diff
     impacted_imports: list[SymbolBinding] = field(default_factory=list)
+    # ADR-050 D2: set instead of leaving abi_diff an unexplained None when
+    # the baseline/candidate DSOs for this library were not extracted under
+    # a comparable profile/scope contract (ProfileMismatchError/
+    # ScopeMismatchError from _run_abi_diff) -- distinct from the pre-ADR-050
+    # "unreadable file or diff error" case, which also leaves abi_diff None
+    # but has no reason to attach here.
+    not_comparable_reason: str | None = None
 
 
 @dataclass
@@ -371,8 +379,16 @@ def _diff_stacks(
                 impacted_imports=impacted,
             ))
         elif base_hash != cand_hash:
-            # Run per-library ABI diff using the existing checker.
-            abi_diff = _run_abi_diff(base_node.path, cand_node.path, soname)
+            # Run per-library ABI diff using the existing checker. A genuine
+            # comparability-gate mismatch (ADR-050 D2) is not just another
+            # "diff failed" case -- record *why*, not just an unexplained
+            # abi_diff=None.
+            not_comparable_reason = None
+            try:
+                abi_diff = _run_abi_diff(base_node.path, cand_node.path, soname)
+            except (ProfileMismatchError, ScopeMismatchError) as exc:
+                abi_diff = None
+                not_comparable_reason = str(exc)
             # Populate impacted_imports: bindings that reference the changed DSO.
             impacted = bindings_by_provider.get(cand_key, [])
             changes.append(StackChange(
@@ -380,6 +396,7 @@ def _diff_stacks(
                 change_type="content_changed",
                 abi_diff=abi_diff,
                 impacted_imports=impacted,
+                not_comparable_reason=not_comparable_reason,
             ))
 
     return changes
@@ -394,7 +411,17 @@ def _file_hash(path: Path) -> str | None:
 
 
 def _run_abi_diff(old_path: Path, new_path: Path, library_name: str) -> DiffResult | None:
-    """Run the existing abicheck compare on two library files."""
+    """Run the existing abicheck compare on two library files.
+
+    Raises:
+        ProfileMismatchError: baseline/candidate were not extracted under a
+            comparable profile contract (ADR-050 D2). Deliberately *not*
+            swallowed into the generic ``None``-on-failure fallback below —
+            only the caller can attach a ``StackChange.not_comparable_reason``
+            to explain it, instead of leaving ``abi_diff`` an unexplained
+            ``None`` indistinguishable from every other failure mode.
+        ScopeMismatchError: same, for the scope contract.
+    """
     from .dumper import dump
 
     try:
@@ -406,7 +433,14 @@ def _run_abi_diff(old_path: Path, new_path: Path, library_name: str) -> DiffResu
             so_path=new_path, headers=[], extra_includes=[],
             version="candidate", compiler="c++",
         )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("_run_abi_diff: failed for %s: %s", library_name, exc)
+        return None
+
+    try:
         return compare(old_snap, new_snap)
+    except (ProfileMismatchError, ScopeMismatchError):
+        raise
     except Exception as exc:  # noqa: BLE001
         log.warning("_run_abi_diff: failed for %s: %s", library_name, exc)
         return None

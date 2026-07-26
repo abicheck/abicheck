@@ -90,10 +90,18 @@ def dwarf_layout_types_or_empty(
     ):
         return []
     from .dwarf_snapshot import build_snapshot_from_dwarf
-    return list(build_snapshot_from_dwarf(
-        so_path, elf_meta, dwarf_meta, dwarf_adv,
-        version=version, language_profile=language_profile, session=session,
-    ).types)
+
+    return list(
+        build_snapshot_from_dwarf(
+            so_path,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
+            version=version,
+            language_profile=language_profile,
+            session=session,
+        ).types
+    )
 
 
 def _topmost_scope_suffix(name: str) -> str:
@@ -386,7 +394,9 @@ def backfill_dwarf_layout(
 
     def _fields_corroborate(header: RecordType, dwarf: RecordType) -> bool:
         if header.fields and dwarf.fields:
-            return bool({f.name for f in header.fields} & {f.name for f in dwarf.fields})
+            return bool(
+                {f.name for f in header.fields} & {f.name for f in dwarf.fields}
+            )
         if not header.fields and dwarf.fields:
             # An empty header type (tag type) can't corroborate against a
             # DWARF candidate that DOES have fields — that's exactly the
@@ -409,8 +419,12 @@ def backfill_dwarf_layout(
         # only ever reads DW_AT_name (always bare, e.g. "Base", never
         # scope-qualified) — comparing the raw strings would reject a
         # namespaced base's own correct match (Codex review).
-        header_bases = {_topmost_scope_suffix(b) for b in header.bases + header.virtual_bases}
-        dwarf_bases = {_topmost_scope_suffix(b) for b in dwarf.bases + dwarf.virtual_bases}
+        header_bases = {
+            _topmost_scope_suffix(b) for b in header.bases + header.virtual_bases
+        }
+        dwarf_bases = {
+            _topmost_scope_suffix(b) for b in dwarf.bases + dwarf.virtual_bases
+        }
         if header_bases or dwarf_bases:
             return bool(header_bases & dwarf_bases)
         if header.name == dwarf.name:
@@ -533,30 +547,42 @@ def backfill_dwarf_layout(
             if f.offset_bits is not None or df is None:
                 new_fields.append(f)
                 continue
-            new_fields.append(replace(
-                f,
-                offset_bits=df.offset_bits,
-                is_bitfield=df.is_bitfield,
-                bitfield_bits=df.bitfield_bits,
-            ))
-        out.append(replace(
-            t,
-            size_bits=dwarf_t.size_bits,
-            alignment_bits=dwarf_t.alignment_bits,
-            fields=new_fields,
-            vtable=t.vtable or dwarf_t.vtable,
-            vptr_offset_bits=(
-                t.vptr_offset_bits if t.vptr_offset_bits is not None else dwarf_t.vptr_offset_bits
-            ),
-            base_offsets=t.base_offsets or dwarf_t.base_offsets,
-            data_size_bits=t.data_size_bits if t.data_size_bits is not None else dwarf_t.data_size_bits,
-            is_standard_layout=(
-                t.is_standard_layout if t.is_standard_layout is not None else dwarf_t.is_standard_layout
-            ),
-            is_trivially_copyable=(
-                t.is_trivially_copyable if t.is_trivially_copyable is not None else dwarf_t.is_trivially_copyable
-            ),
-        ))
+            new_fields.append(
+                replace(
+                    f,
+                    offset_bits=df.offset_bits,
+                    is_bitfield=df.is_bitfield,
+                    bitfield_bits=df.bitfield_bits,
+                )
+            )
+        out.append(
+            replace(
+                t,
+                size_bits=dwarf_t.size_bits,
+                alignment_bits=dwarf_t.alignment_bits,
+                fields=new_fields,
+                vtable=t.vtable or dwarf_t.vtable,
+                vptr_offset_bits=(
+                    t.vptr_offset_bits
+                    if t.vptr_offset_bits is not None
+                    else dwarf_t.vptr_offset_bits
+                ),
+                base_offsets=t.base_offsets or dwarf_t.base_offsets,
+                data_size_bits=t.data_size_bits
+                if t.data_size_bits is not None
+                else dwarf_t.data_size_bits,
+                is_standard_layout=(
+                    t.is_standard_layout
+                    if t.is_standard_layout is not None
+                    else dwarf_t.is_standard_layout
+                ),
+                is_trivially_copyable=(
+                    t.is_trivially_copyable
+                    if t.is_trivially_copyable is not None
+                    else dwarf_t.is_trivially_copyable
+                ),
+            )
+        )
     coherence = DwarfLayoutCoherence(
         status=_coherence_status(
             mismatched=mismatched,
@@ -569,3 +595,25 @@ def backfill_dwarf_layout(
         ambiguous=tuple(ambiguous),
     )
     return out, coherence
+
+
+def resolve_snapshot_layout_coherence(
+    *, is_clang_backend: bool, coherence: DwarfLayoutCoherence | None
+) -> tuple[str | None, tuple[str, ...]]:
+    """Turn a :func:`backfill_dwarf_layout` call's result into the two
+    ``AbiSnapshot`` fields ``dwarf_layout_coherence``/
+    ``dwarf_layout_coherence_mismatches`` (P0 evidence-coherence audit).
+
+    *coherence* is ``None`` exactly when this dump's ``dwarf_types`` was
+    empty, which happens for two semantically different reasons only the
+    caller (``dumper.py``) can tell apart -- ``dwarf_layout_types_or_empty()``
+    itself folds "castxml backend (layout already computed directly, not a
+    coherence question)" and "clang backend but no usable DWARF at all (a
+    real 'unavailable' state)" into the same empty-list result. Split out of
+    ``dumper.py`` to keep that module under the AI-readiness file-size cap.
+    """
+    if not is_clang_backend:
+        return None, ()
+    if coherence is None:
+        return "unavailable", ()
+    return coherence.status, coherence.mismatched

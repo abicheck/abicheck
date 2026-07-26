@@ -49,6 +49,13 @@ for i, e in enumerate(entries):
     name = e["name"]
     if not isinstance(name, str) or not name:
         sys.exit(f"entry {i} has an invalid \"name\" {name!r} -- must be a non-empty string")
+    # stage_binary (G30 P1.6, ADR-047 section 6/section 8 S14 correction):
+    # optional, defaults to false when omitted -- a real boolean is required
+    # so a truthy-but-wrong JSON value (e.g. the string "true") does not
+    # silently skip binary staging for a bundle member.
+    if "stage_binary" in e and not isinstance(e["stage_binary"], bool):
+        bad_stage_binary = e["stage_binary"]
+        sys.exit(f"entry {i} has an invalid \"stage_binary\" {bad_stage_binary!r} -- must be a boolean")
     # Both run.sh ("$OUTPUT_DIR/$name.abicheck.json", bash string concat)
     # and build_manifest.py (output_dir / f"{name}.abicheck.json", pathlib)
     # build the per-library snapshot path directly from this string, so a
@@ -82,6 +89,11 @@ if [[ -d "$OUTPUT_DIR" ]]; then
   # output-dir that happens to already exist for an unrelated reason isn't
   # blown away.
   find "$OUTPUT_DIR" -maxdepth 1 -name '*.abicheck.json' -delete
+  # Same reasoning, for staged bundle-member binaries (G30 P1.6): a member
+  # dropped from stage_binary since an earlier run at this same output-dir
+  # would otherwise leave its old binary sitting under binaries/, invisible
+  # to this run's manifest but still present for a whole-directory upload.
+  rm -rf "$OUTPUT_DIR/binaries"
   # Don't delete manifest.json if it IS the caller's previous-manifest -- a
   # workflow that restores the previous baseline set into output-dir before
   # regenerating (an in-place refresh) points previous-manifest at that same
@@ -98,16 +110,16 @@ fi
 mkdir -p "$OUTPUT_DIR"
 
 echo "::group::Dump baseline-set into $OUTPUT_DIR"
-# Emit one row per library (name, artifact, header, include -- header/
-# include default to empty, never absent, so the bash read below always
-# gets four fields), delimited by ASCII Unit Separator (\x1f) rather than a
-# tab: bash's word-splitting always treats a literal tab in IFS as "IFS
-# whitespace" and collapses adjacent/empty fields regardless of what IFS is
-# set to, so a library with `include` set but `header` omitted (an adjacent
-# empty field) would silently shift include's value into header. \x1f is not
-# whitespace to bash, so empty fields between delimiters are preserved.
-# Python does the JSON parsing; bash just loops.
-while IFS=$'\x1f' read -r name artifact header include; do
+# Emit one row per library (name, artifact, header, include, stage_binary --
+# header/include default to empty and stage_binary to "", never absent, so
+# the bash read below always gets five fields), delimited by ASCII Unit
+# Separator (\x1f) rather than a tab: bash's word-splitting always treats a
+# literal tab in IFS as "IFS whitespace" and collapses adjacent/empty fields
+# regardless of what IFS is set to, so a library with `include` set but
+# `header` omitted (an adjacent empty field) would silently shift include's
+# value into header. \x1f is not whitespace to bash, so empty fields between
+# delimiters are preserved. Python does the JSON parsing; bash just loops.
+while IFS=$'\x1f' read -r name artifact header include stage_binary; do
   [[ -z "$name" ]] && continue
   echo "-- $name ($artifact)"
   CMD=(abicheck dump "$artifact")
@@ -124,6 +136,22 @@ while IFS=$'\x1f' read -r name artifact header include; do
   if ! "${CMD[@]}"; then
     _fail "dump failed for library '$name' ($artifact) -- see the command output above."
   fi
+  # stage_binary (G30 P1.6, ADR-047 section 6/section 8 S14 correction): a
+  # bundle-scoped baseline must preserve each member's real ELF binary
+  # alongside its snapshot -- abicheck/bundle.py's build_bundle_snapshot()
+  # builds its cross-library graph from real ELF binaries and skips non-ELF
+  # (including JSON snapshot) inputs, so a bundle baseline containing only
+  # snapshots would silently produce no old-side bundle data. Staged under
+  # $OUTPUT_DIR/binaries/$name (no extension -- resolve_bundle() parses the
+  # file's own ELF header, never its name), reusing the same path-safety
+  # guarantee $name already has (run.sh's own input validation above rejects
+  # a name containing a path separator or a ".."/"." traversal segment).
+  if [[ "$stage_binary" == "1" ]]; then
+    mkdir -p "$OUTPUT_DIR/binaries"
+    if ! cp "$artifact" "$OUTPUT_DIR/binaries/$name"; then
+      _fail "failed to stage binary for library '$name' ($artifact) into $OUTPUT_DIR/binaries/ -- see the error above."
+    fi
+  fi
 done < <(python3 -c '
 import json, sys
 for e in json.loads(sys.argv[1]):
@@ -132,6 +160,7 @@ for e in json.loads(sys.argv[1]):
         e["artifact"],
         e.get("header", ""),
         e.get("include", ""),
+        "1" if e.get("stage_binary") else "",
     ]))
 ' "$LIBRARIES_JSON" | tr -d '\r')
 # ^ Windows CPython opens stdout in text mode, so `print()` translates \n to

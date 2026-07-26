@@ -69,7 +69,7 @@ from .checker_policy import (
     policy_for,
     policy_kind_sets,
 )
-from .errors import AbicheckError
+from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 from .model import AbiSnapshot
 from .reporter import _finding_id, to_json, to_markdown
 from .serialization import snapshot_to_json
@@ -724,6 +724,7 @@ def abi_compare(
     severity_addition: str | None = None,
     used_by: list[str] | None = None,
     required_symbols: list[str] | None = None,
+    diagnostic_comparison: bool = False,
 ) -> str:
     """Compare two ABI surfaces and report breaking changes.
 
@@ -790,6 +791,15 @@ def abi_compare(
             Mutually exclusive with used_by. Adds a ``required_symbol_contract``
             object to the response and computes ``exit_code`` from its verdict
             under the same legacy/severity-aware scheme as ``used_by`` above.
+        diagnostic_comparison: ADR-050 D2's sanctioned escape hatch. By default,
+            a genuine ``ExtractionContract`` mismatch between old_input and
+            new_input (old/new were not extracted under a comparable
+            profile/scope) makes this tool return
+            ``{"status": "not_comparable", "reason": ...}`` instead of a
+            verdict. Setting this True downgrades that into a tentative diff
+            whose report is stamped ``assurance: "none"``, so the caller can
+            still see *a* result but knows not to trust it fully. Not needed,
+            and does nothing, on a comparable pair.
     """
     t0 = _time.monotonic()
     try:
@@ -917,6 +927,7 @@ def abi_compare(
                     suppression=suppression,
                     policy=policy,
                     policy_file=pf,
+                    diagnostic_comparison=diagnostic_comparison,
                 ),
                 pf,
                 suppression,
@@ -940,6 +951,19 @@ def abi_compare(
                         "error": f"abi_compare timed out after {MCP_TIMEOUT}s",
                     }
                 )
+            except (ProfileMismatchError, ScopeMismatchError) as exc:
+                # ADR-050 D2: a genuine comparability-gate mismatch is a
+                # distinct, expected outcome -- not an "error" the caller
+                # should treat as an abicheck bug -- so it gets its own
+                # status, ordered before the generic except Exception below.
+                elapsed = _time.monotonic() - t0
+                _audit_log(
+                    "abi_compare",
+                    {"old": old_path.name, "new": new_path.name},
+                    elapsed,
+                    "not_comparable",
+                )
+                return json.dumps({"status": "not_comparable", "reason": str(exc)})
 
         # Use the active policy from the result (may differ from input when
         # policy_file overrides the base policy).

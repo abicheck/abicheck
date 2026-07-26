@@ -57,6 +57,7 @@ L2 header-AST compile context — shared by ``dump`` and ``scan``.
 | `sysroot` | `Path \| None` | `None` |
 | `nostdinc` | `bool` | `False` |
 | `frontend` | `str` | `'auto'` |
+| `frontend_context` | `str` | `'host'` |
 
 ## `CostEstimate`
 
@@ -128,7 +129,7 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 | `seeded` | `bool` | `False` |
 | `budget` | `Budget` | `Budget(total_timeout=None, max_tus=None, partial_ok=True)` |
 | `lang` | `str` | `'c++'` |
-| `compile` | `CompileContext` | `CompileContext(gcc_path=None, gcc_prefix=None, gcc_options=None, gcc_option_tokens=(), sysroot=None, nostdinc=False, frontend='auto')` |
+| `compile` | `CompileContext` | `CompileContext(gcc_path=None, gcc_prefix=None, gcc_options=None, gcc_option_tokens=(), sysroot=None, nostdinc=False, frontend='auto', frontend_context='host')` |
 
 ## `ScanResult`
 
@@ -274,6 +275,8 @@ Auto-detect input type and return an ABI snapshot.
 | `header_backend` | `str` | `'auto'` |
 | `compile` | `CompileContext \| None` | `None` |
 | `notify` | `Callable[[str], None] \| None` | `None` |
+| `include_labels` | `dict[Path, str] \| None` | `None` |
+| `dump_manifest` | `DumpManifest \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
 
@@ -356,6 +359,8 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `header_backend` | `str` | `'auto'` |
 | `compile` | `CompileContext \| None` | `None` |
 | `notify` | `Callable[[str], None] \| None` | `None` |
+| `include_labels` | `dict[Path, str] \| None` | `None` |
+| `dump_manifest` | `DumpManifest \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
 

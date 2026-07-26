@@ -92,11 +92,24 @@ def _read_snapshot_meta(path: Path) -> dict[str, Any]:
     }
 
 
+def _file_sha256(path: Path) -> str:
+    """Plain whole-file SHA-256 -- unlike a snapshot's stable *content* hash
+    (:func:`compute_snapshot_content_hash`), a staged binary has no
+    dumper.py-stamped volatile fields to strip, so hashing the raw bytes is
+    both correct and what :func:`~abicheck.buildsource.baseline_set
+    ._binary_digest_issue` (the resolver-side check) expects."""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def build_manifest(
     output_dir: Path,
     project_ref: str,
     profile: str,
-    entries: list[dict[str, str]],
+    entries: list[dict[str, Any]],
     previous_manifest_path: Path | None,
 ) -> dict[str, Any]:
     artifacts = []
@@ -165,19 +178,40 @@ def build_manifest(
                 f"identity {fact_set!r} -- expected a dict with at least "
                 f"'name' and 'version' keys."
             )
-        artifacts.append(
-            {
-                "library": name,
-                "artifact": entry.get("artifact", ""),
-                "snapshot": snap_path.name,
-                "sha256": meta["sha256"],
-                "git_commit": meta["git_commit"],
-                "git_tag": meta["git_tag"],
-                "created_at": meta["created_at"],
-                "build_id": meta["build_id"],
-                "dump_provenance": meta["dump_provenance"],
-            }
-        )
+        artifact_row: dict[str, Any] = {
+            "library": name,
+            "artifact": entry.get("artifact", ""),
+            "snapshot": snap_path.name,
+            "sha256": meta["sha256"],
+            "git_commit": meta["git_commit"],
+            "git_tag": meta["git_tag"],
+            "created_at": meta["created_at"],
+            "build_id": meta["build_id"],
+            "dump_provenance": meta["dump_provenance"],
+        }
+        # G30 P1.6 (ADR-047 section 6/section 8 S14 correction): a
+        # stage_binary: true entry's run.sh already copied the real ELF
+        # binary into output_dir/binaries/<name> -- record its path (relative
+        # to output_dir, matching how "snapshot" above is recorded) and a
+        # plain whole-file digest, so resolve_bundle() (abicheck/buildsource/
+        # baseline_set.py) has both a path to stage and a digest to verify.
+        # Read directly from disk rather than trusting entry["stage_binary"]
+        # alone: run.sh writing the file and this script recording it are two
+        # separate steps, and a run.sh bug that silently skipped the copy
+        # must surface as this script's own missing-file error, not a
+        # manifest that claims a binary exists when it doesn't.
+        if entry.get("stage_binary"):
+            binary_path = output_dir / "binaries" / name
+            if not binary_path.is_file():
+                raise SystemExit(
+                    f"library {name!r} declared stage_binary: true, but no "
+                    f"staged binary was found at {binary_path} -- the "
+                    "binary-staging step for this library must have failed "
+                    "silently."
+                )
+            artifact_row["binary"] = f"binaries/{binary_path.name}"
+            artifact_row["binary_sha256"] = _file_sha256(binary_path)
+        artifacts.append(artifact_row)
 
     # Every check below is a self-consistency invariant of one baseline-set
     # run (all libraries dumped in the same job, by the same installed

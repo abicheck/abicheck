@@ -220,6 +220,22 @@ class TestLibrariesJsonValidation:
         assert result.returncode == 1
         assert "invalid" in result.stdout
 
+    @pytest.mark.parametrize("bad_value", ["true", 1, "yes", []])
+    def test_stage_binary_non_bool_rejected(self, tmp_path: Path, bad_value) -> None:
+        # G30 P1.6: stage_binary must be a real JSON boolean -- a
+        # truthy-but-wrong value (e.g. the string "true") must not silently
+        # skip binary staging for a bundle member.
+        result, _ = _run_action(
+            {
+                "INPUT_LIBRARIES": json.dumps(
+                    [{"name": "libfoo", "artifact": "a.so", "stage_binary": bad_value}]
+                )
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "stage_binary" in result.stdout
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
 class TestStaleOutputCleared:
@@ -247,6 +263,27 @@ class TestStaleOutputCleared:
         )
         assert not (output_dir / "stale-lib.abicheck.json").exists()
         assert not (output_dir / "manifest.json").exists()
+
+    def test_stale_binaries_dir_removed_before_dump(self, tmp_path: Path) -> None:
+        # Same reasoning as above, extended to the binaries/ directory (G30
+        # P1.6): a bundle member dropped from stage_binary since an earlier
+        # run at this same output-dir must not leave its old staged binary
+        # sitting there, invisible to the new run's manifest but still
+        # present for a whole-directory upload.
+        output_dir = tmp_path / "out"
+        (output_dir / "binaries").mkdir(parents=True)
+        (output_dir / "binaries" / "stale-lib").write_bytes(b"stale")
+
+        _run_action(
+            {
+                "INPUT_LIBRARIES": json.dumps(
+                    [{"name": "libfoo", "artifact": str(tmp_path / "no-such.so")}]
+                ),
+                "INPUT_OUTPUT_DIR": str(output_dir),
+            },
+            tmp_path,
+        )
+        assert not (output_dir / "binaries" / "stale-lib").exists()
 
     def test_previous_manifest_pointing_at_output_dir_survives_cleanup(
         self, tmp_path: Path
@@ -420,6 +457,53 @@ class TestEndToEndBaselineSet:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "Self-compare validation" not in result.stdout
+
+    def test_stage_binary_true_stages_binary_and_records_digest(
+        self, tmp_path: Path
+    ) -> None:
+        # G30 P1.6 (ADR-047 §6/§8 S14 correction): a bundle member's real
+        # ELF binary is staged alongside its snapshot, and the manifest
+        # records its path + a plain whole-file digest for
+        # resolve_bundle()'s own verification (abicheck/buildsource/
+        # baseline_set.py).
+        libfoo = tmp_path / "libfoo.so"
+        _compile_shared_lib(
+            "int abicheck_foo_add(int a, int b) { return a + b; }\n", libfoo
+        )
+        libbar = tmp_path / "libbar.so"
+        _compile_shared_lib(
+            "int abicheck_bar_sub(int a, int b) { return a - b; }\n", libbar
+        )
+        output_dir = tmp_path / "baseline-out"
+
+        result, _ = _run_action(
+            {
+                "INPUT_LIBRARIES": json.dumps(
+                    [
+                        {
+                            "name": "libfoo",
+                            "artifact": str(libfoo),
+                            "stage_binary": True,
+                        },
+                        {"name": "libbar", "artifact": str(libbar)},
+                    ]
+                ),
+                "INPUT_OUTPUT_DIR": str(output_dir),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+        staged = output_dir / "binaries" / "libfoo"
+        assert staged.is_file()
+        assert staged.read_bytes() == libfoo.read_bytes()
+        assert not (output_dir / "binaries" / "libbar").exists()
+
+        manifest = json.loads((output_dir / "manifest.json").read_text())
+        by_library = {a["library"]: a for a in manifest["artifacts"]}
+        assert by_library["libfoo"]["binary"] == "binaries/libfoo"
+        assert by_library["libfoo"]["binary_sha256"]
+        assert "binary" not in by_library["libbar"]
 
 
 _DUMP_LOOP_START = 'echo "::group::Dump baseline-set into $OUTPUT_DIR"'

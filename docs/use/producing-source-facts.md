@@ -27,6 +27,12 @@ wiring, the Bazel/ccache traps, `.abicheck.yml` project-contract blocks,
 out-of-band packs, and external CLI extractors), see
 [Build Evidence Setup](build-evidence-setup.md).
 
+> **See also.** If this is one of several checks a project-wide
+> `.abicheck.yml` `targets:`/`profiles:` block declares, see
+> [S8/S9: Source Facts From the Build Itself](../integration/scenarios/build-integrated-facts.md)
+> for the `check-target`/`evidence-producer: wrapper|clang-plugin`
+> composition built on the wrapper/plugin setup this page covers.
+
 Whichever producer you pick, the **output contract is identical** — an
 `abicheck_inputs/` pack (or an inline `--sources` collection) that
 `abicheck dump --build-info ./abicheck_inputs/` folds onto the binary-side

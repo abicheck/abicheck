@@ -13,7 +13,11 @@ from defusedxml.ElementTree import fromstring as xml_fromstring
 
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
-from abicheck.junit_report import to_junit_xml, to_junit_xml_multi
+from abicheck.junit_report import (
+    to_junit_xml,
+    to_junit_xml_multi,
+    to_junit_xml_not_comparable,
+)
 from abicheck.model import AbiSnapshot, EnumType, Function, RecordType, Variable
 from abicheck.serialization import snapshot_to_json
 
@@ -1511,3 +1515,33 @@ class TestScopedProperties:
         tc = ts.find("testcase")
         assert tc.get("name") == "ordinal:5"
         assert tc.find("failure") is not None
+
+
+class TestNotComparable:
+    """ADR-050 D2 -- the comparability-gate hard-fail path has no DiffResult
+    at all, so it gets its own dedicated renderer instead of to_junit_xml."""
+
+    def test_structure(self) -> None:
+        xml_str = to_junit_xml_not_comparable(
+            "libfoo.so.1", "1.0", "2.0", "scope_mismatch", "scope drift"
+        )
+        root = _parse(xml_str)
+        assert root.tag == "testsuites"
+        assert root.get("errors") == "1"
+        assert root.get("failures") == "0"
+        ts = root.find("testsuite")
+        assert ts.get("name") == "libfoo.so.1"
+        assert ts.get("errors") == "1"
+        err = ts.find("testcase/error")
+        assert err is not None
+        assert err.get("type") == "scope_mismatch"
+        assert err.text == "scope drift"
+
+    def test_message_mentions_versions(self) -> None:
+        xml_str = to_junit_xml_not_comparable(
+            "libfoo.so.1", "1.0", "2.0", "profile_mismatch", "dep.h changed"
+        )
+        err = _parse(xml_str).find("testsuite/testcase/error")
+        assert "1.0" in err.get("message")
+        assert "2.0" in err.get("message")
+        assert "ADR-050" in err.get("message")

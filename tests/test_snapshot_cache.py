@@ -68,6 +68,34 @@ class TestCacheKey:
         key = _cache_key(tmp_path / "nonexistent.so", [], [], "1.0", "c++")
         assert key == ""
 
+    def test_header_order_changes_key(self, tmp_path):
+        # ADR-050 D1/D2: header order is a real, load-bearing input (the same
+        # "order is a real compile difference" rule profile_fingerprint
+        # already enforces) -- a warm cache must not collapse two
+        # differently-ordered requests to the same key.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+        hdr_a = tmp_path / "a.h"
+        hdr_a.write_text("#pragma once\n")
+        hdr_b = tmp_path / "b.h"
+        hdr_b.write_text("#pragma once\n")
+
+        key1 = _cache_key(binary, [hdr_a, hdr_b], [], "1.0", "c++")
+        key2 = _cache_key(binary, [hdr_b, hdr_a], [], "1.0", "c++")
+        assert key1 != key2
+
+    def test_include_order_changes_key(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+        inc_a = tmp_path / "inc_a"
+        inc_a.mkdir()
+        inc_b = tmp_path / "inc_b"
+        inc_b.mkdir()
+
+        key1 = _cache_key(binary, [], [inc_a, inc_b], "1.0", "c++")
+        key2 = _cache_key(binary, [], [inc_b, inc_a], "1.0", "c++")
+        assert key1 != key2
+
     def test_stale_pre_header_graph_cache_version_invalidated(
         self, tmp_path, monkeypatch
     ):

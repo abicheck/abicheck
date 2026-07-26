@@ -16,10 +16,10 @@
 
 A *baseline-set* is what ``actions/baseline`` produces: ``manifest.json``
 plus one ``.abicheck.json`` snapshot per library — and, for a bundle-scoped
-baseline (ADR-047 §8's S14 correction, staged by a future G30 P1.6 change to
-``actions/baseline``), a ``binaries/`` directory of each member's real ELF
-binary, since ``abicheck/bundle.py``'s ``build_bundle_snapshot()`` skips
-non-ELF inputs and cannot read a bundle's old side from JSON snapshots alone.
+baseline (ADR-047 §8's S14 correction, staged by ``actions/baseline`` since
+G30 P1.6), a ``binaries/`` directory of each member's real ELF binary, since
+``abicheck/bundle.py``'s ``build_bundle_snapshot()`` skips non-ELF inputs and
+cannot read a bundle's old side from JSON snapshots alone.
 
 This module is the shared reader/resolver ``actions/resolve-baseline`` uses
 (and any future bundle-mode ``check-target`` call would reuse, per the G30
@@ -63,11 +63,9 @@ SUPPORTED_MANIFEST_VERSIONS = frozenset({1})
 BASELINE_MANIFEST_FILENAME = "manifest.json"
 
 #: Subdirectory (relative to a baseline-set directory) a bundle-scoped
-#: baseline stages member ELF binaries into (ADR-047 §6/§8 S14 correction).
-#: Not populated by ``actions/baseline`` yet (G30 P1.6) — a hand-authored
-#: fixture directory is how this module's bundle resolution is exercised
-#: until then, the same "defines the contract, no producer yet" scoping
-#: G30 P1.1 used for ``build-output.json``.
+#: baseline stages member ELF binaries into (ADR-047 §6/§8 S14 correction),
+#: populated by ``actions/baseline`` for any ``libraries[]`` entry marked
+#: ``stage_binary: true`` (G30 P1.6).
 BASELINE_BINARIES_DIRNAME = "binaries"
 
 # Keys that vary between two dumps/replays of otherwise ABI-identical
@@ -684,11 +682,9 @@ def _binary_digest_issue(
     recorded digests -- reusing one field for both would compare a JSON
     snapshot's content hash against an ELF binary's raw-byte hash and
     (mis)report every bundle member as corrupt, since the two will never
-    coincidentally match (Codex review). No producer populates
-    ``binary_sha256`` for a staged binary yet (G30 P1.6, not built here), so
-    this is the contract this resolver defines, not one it validates
-    against real output. Unlike a snapshot's content hash, a binary's
-    digest is a plain whole-file SHA-256 -- no volatile-field stripping
+    coincidentally match (Codex review). ``actions/baseline/build_manifest.py``
+    populates ``binary_sha256`` for every ``stage_binary: true`` entry (G30
+    P1.6) with a plain whole-file digest -- no volatile-field stripping
     needed, since dumper.py's timestamp-stamping doesn't apply to an
     unmodified ELF file. Without this, a truncated/tampered staged binary
     would still resolve purely because a file with the right name exists

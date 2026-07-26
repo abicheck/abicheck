@@ -5,6 +5,8 @@ import hashlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from abicheck.binder import BindingStatus, SymbolBinding
 from abicheck.checker import DiffResult
 from abicheck.checker_policy import ChangeKind, Verdict
@@ -340,6 +342,85 @@ class TestDiffStacks:
         assert changes[0].change_type == "content_changed"
         assert changes[0].abi_diff is not None
         mock_abi_diff.assert_called_once()
+
+    @patch("abicheck.stack_checker._run_abi_diff")
+    def test_different_hash_not_comparable(self, mock_abi_diff, tmp_path):
+        """ADR-050 D2: a ProfileMismatchError/ScopeMismatchError from
+        _run_abi_diff is not swallowed into a bare abi_diff=None -- the
+        resulting StackChange records why via not_comparable_reason."""
+        from abicheck.errors import ScopeMismatchError
+
+        mock_abi_diff.side_effect = ScopeMismatchError("scope drift")
+
+        base_lib = tmp_path / "base" / "libfoo.so"
+        cand_lib = tmp_path / "cand" / "libfoo.so"
+        base_lib.parent.mkdir(parents=True)
+        cand_lib.parent.mkdir(parents=True)
+        base_lib.write_bytes(b"old content")
+        cand_lib.write_bytes(b"new content")
+
+        base_dso = _make_resolved_dso(str(base_lib), soname="libfoo.so")
+        cand_dso = _make_resolved_dso(str(cand_lib), soname="libfoo.so")
+        baseline = _make_graph(nodes={str(base_lib): base_dso})
+        candidate = _make_graph(nodes={str(cand_lib): cand_dso})
+
+        changes = _diff_stacks(baseline, candidate)
+        assert len(changes) == 1
+        assert changes[0].change_type == "content_changed"
+        assert changes[0].abi_diff is None
+        assert changes[0].not_comparable_reason == "scope drift"
+
+
+# ---------------------------------------------------------------------------
+# _run_abi_diff
+# ---------------------------------------------------------------------------
+
+
+class TestRunAbiDiff:
+    def test_reraises_profile_mismatch_instead_of_swallowing(self, monkeypatch, tmp_path):
+        """ADR-050 D2: a genuine comparability-gate mismatch from compare()
+        must propagate, not be swallowed into the generic except-Exception
+        None fallback every other compare() failure still uses."""
+        from abicheck.errors import ProfileMismatchError
+        from abicheck.stack_checker import _run_abi_diff
+
+        old_lib = tmp_path / "old.so"
+        new_lib = tmp_path / "new.so"
+        old_lib.write_bytes(b"old")
+        new_lib.write_bytes(b"new")
+
+        monkeypatch.setattr(
+            "abicheck.dumper.dump", lambda **_kw: MagicMock(name="snapshot")
+        )
+
+        def _raise(*_a, **_kw):
+            raise ProfileMismatchError("profile drift")
+
+        monkeypatch.setattr("abicheck.stack_checker.compare", _raise)
+
+        with pytest.raises(ProfileMismatchError):
+            _run_abi_diff(old_lib, new_lib, "libfoo.so")
+
+    def test_other_compare_failures_still_return_none(self, monkeypatch, tmp_path):
+        """Non-comparability failures from compare() keep the pre-existing
+        swallow-and-log-warning behavior."""
+        from abicheck.stack_checker import _run_abi_diff
+
+        old_lib = tmp_path / "old.so"
+        new_lib = tmp_path / "new.so"
+        old_lib.write_bytes(b"old")
+        new_lib.write_bytes(b"new")
+
+        monkeypatch.setattr(
+            "abicheck.dumper.dump", lambda **_kw: MagicMock(name="snapshot")
+        )
+
+        def _raise(*_a, **_kw):
+            raise RuntimeError("unrelated failure")
+
+        monkeypatch.setattr("abicheck.stack_checker.compare", _raise)
+
+        assert _run_abi_diff(old_lib, new_lib, "libfoo.so") is None
 
 
 # ---------------------------------------------------------------------------

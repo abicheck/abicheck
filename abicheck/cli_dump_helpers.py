@@ -1178,6 +1178,7 @@ def resolve_dump_compile_context(
     includes: tuple[Path, ...],
     build_config: Path | None,
     sources: Path | None,
+    frontend_context: str = "host",
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Resolve the L2 compile context for a dump, folding the config compile: block.
 
@@ -1201,6 +1202,7 @@ def resolve_dump_compile_context(
         gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
         header_backend=header_backend, includes=includes,
         build_config=build_config, sources=sources,
+        frontend_context=frontend_context,
     )
 
 
@@ -1247,8 +1249,25 @@ def perform_elf_dump(
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     compile_db_context_matched: bool = False,
+    dump_manifest: Any = None,
+    include_labels: dict[Path, str] | None = None,
 ) -> None:
     """Run the ELF dump pipeline and write output.
+
+    ``dump_manifest`` (ADR-050 D3, G32 Phase B): a parsed
+    ``abicheck.dump_manifest.DumpManifest``, typed ``Any`` here (matching
+    ``compile_context`` above) so this module needs no new import just for
+    a type hint -- forwarded to :func:`abicheck.dumper.dump` unchanged.
+
+    ``include_labels`` (ADR-050 D1): a resolved ``path -> label`` map from a
+    labeled ``--include old:LABEL=PATH``/``new:LABEL=PATH`` compare-side
+    entry, forwarded unchanged to :func:`abicheck.dumper.dump`'s
+    ``extra_include_labels`` -- not exposed as its own ``dump`` CLI flag
+    (``dump_cmd``'s own ``--include`` has no labeled-entry grammar), only
+    threaded through here so the inline source-tree embed path
+    (``cli._embed_inline_source_side``, invoked from a *compare* whose
+    ``--include`` already carries a label) can pass its already-resolved
+    label map through the nested ``dump`` invocation instead of losing it.
 
     ``debug_info_path`` (P1.1, ADR-021a): a resolved detached debug artifact
     (``--debug-root``/``--debuginfod``) to read DWARF sections from instead of
@@ -1352,6 +1371,8 @@ def perform_elf_dump(
             header_backend=header_backend,
             extra_hash_dirs=deferred_dirs,
             debug_info_path=debug_info_path,
+            dump_manifest=dump_manifest,
+            extra_include_labels=include_labels,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         # The header parse itself failed -- nothing downstream (including a

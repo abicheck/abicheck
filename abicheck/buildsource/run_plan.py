@@ -138,10 +138,13 @@ def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
 
     Every atom was already whitespace-validated by
     ``ProfileCompileSpec.from_dict`` (``_safe_profile_atom`` -- no argv
-    smuggling), so plain space-joining is safe here. ``abi_macros`` are
-    emitted sorted by name for deterministic output; ``args`` are appended
-    verbatim, in declared order, last -- the operator's own explicit escape
-    hatch wins over the structured axes this function derives flags from.
+    smuggling), so plain space-joining is safe here. A consequence of that
+    validation: no atom -- including an ``abi_macros`` value -- may itself
+    contain a space, since this function has no further escaping step to
+    fall back on. ``abi_macros`` are emitted sorted by name for
+    deterministic output; ``args`` are appended verbatim, in declared
+    order, last -- the operator's own explicit escape hatch wins over the
+    structured axes this function derives flags from.
     """
     parts: list[str] = []
     if compile_spec.standard:

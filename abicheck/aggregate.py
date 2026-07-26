@@ -290,6 +290,15 @@ class TargetReport:
     unreadable — in which case ``gate`` is also ``None`` and ``reason``
     explains why. ``unexpected`` marks a report whose target was not in the
     expected set (a new/not-yet-declared matrix target).
+
+    ``reason`` is also populated (with ``compatibility_verdict`` forced to
+    ``BREAKING`` and ``gate`` a synthetic blocking one,
+    ``blocking_categories=("not_comparable",)``) for an *analyzed* target
+    whose report was an ADR-050 D2 ``verdict: null`` not-comparable result —
+    see :func:`_load_report_file`. A consumer distinguishing that from a
+    genuine break checks ``gate.blocking_categories`` for
+    ``"not_comparable"``, the same way an operational-error report
+    (``blocking_categories=("operational_error",)``) is already told apart.
     """
 
     target_id: str
@@ -298,7 +307,7 @@ class TargetReport:
     gate: GateInfo | None = None
     report_path: str | None = None
     library: str | None = None
-    reason: str | None = None  # populated only when unavailable
+    reason: str | None = None  # unavailable, or not_comparable/operational_error detail
     unexpected: bool = False
 
     @property
@@ -525,6 +534,11 @@ class AggregateResult:
         if t.gate is not None and t.gate.blocking:
             cats = ", ".join(t.gate.blocking_categories)
             gate = f" [gate: blocking{f' ({cats})' if cats else ''}]"
+            # An analyzed-but-synthetic verdict (not_comparable/operational_error)
+            # carries its own explanatory reason, unlike a genuine break — surface
+            # it here so "BREAKING" is never the whole story for one of these.
+            if t.reason:
+                gate += f" — {t.reason}"
         else:
             gate = ""
         return f"{t.target_id}{tag}: {verdict}{gate}"
@@ -670,6 +684,41 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             reason=None,
             path=path,
         )
+    # ADR-050 D2: a native compare/compare-release not_comparable report
+    # carries a real ``verdict: null`` (JSON null, not a missing key) plus a
+    # structured ``reason: {kind, message}`` (schema 2.17) -- distinct from
+    # an ordinary verdictless/malformed report (which falls through to the
+    # generic "carried no ABI verdict" reason below), and must never be
+    # silently folded into the same "unavailable" bucket a report that
+    # simply never arrived gets: unavailable is a *coverage* gap, gated only
+    # for required targets and skipped entirely under
+    # --on-missing-required warn / discovered-only mode, while a genuine
+    # not_comparable result is exactly the "we don't actually know if this
+    # is safe" case this whole ADR exists to never treat as silently OK.
+    # Mapped to the same forced-blocking shape the operational-error branch
+    # above already uses -- a synthetic BREAKING verdict with a gate that
+    # bypasses the legacy/report gate lookup entirely -- so it is folded
+    # into exit_code() unconditionally, coverage settings notwithstanding.
+    if "verdict" in data and data.get("verdict") is None:
+        reason_obj = data.get("reason")
+        if isinstance(reason_obj, dict) and isinstance(reason_obj.get("kind"), str):
+            kind = reason_obj["kind"]
+            message = reason_obj.get("message")
+            detail = f": {message}" if isinstance(message, str) and message else ""
+            return _LoadedReport(
+                target_id=target_id,
+                verdict=Verdict.BREAKING,
+                gate=GateInfo(
+                    exit_code=4,
+                    blocking=True,
+                    blocking_categories=("not_comparable",),
+                    from_report=True,
+                ),
+                library=data.get("library"),
+                head_sha=head_sha,
+                reason=f"not comparable ({kind}){detail}",
+                path=path,
+            )
     verdict = parse_report_verdict(data)
     gate: GateInfo | None = None
     if verdict is not None:

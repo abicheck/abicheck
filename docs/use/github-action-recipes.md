@@ -8,6 +8,15 @@ comments, and package-comparison modes.
 > Split out of [GitHub Action](github-action.md), which covers quick
 > start, inputs/outputs, and the three core usage examples.
 
+> **See also.** If your project has more than one library, profile, or
+> baseline channel, [Which Scenario Am I?](../integration/index.md) picks
+> the right primitive for your project's whole lifecycle (multiple
+> targets, `.abicheck.yml`'s `targets:`/`profiles:` block, the
+> `check-project.yml` matrix) rather than a single recipe — several of
+> this page's recipes below (cross-compilation, multi-platform matrices,
+> dependency/appcompat checks) now also have a dedicated scenario
+> walkthrough there.
+
 ## Use GitHub Actions cache for baseline
 
 ```yaml

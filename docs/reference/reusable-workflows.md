@@ -204,9 +204,13 @@ that trusted, separately-managed mapping file into an exact executable
 path, and composes `compile.standard`/`stdlib`/`target`/`abi_macros`/`args`
 into one extra-flags string — both land on the generated cell as
 `compile_gcc_path`/`compile_gcc_options`
-([`run-plan-schema.md`](run-plan-schema.md#runplancheck-fields)) and are
-forwarded ahead of this workflow's own global `gcc-path`/`gcc-options`
-inputs for that cell only. A profile with no `compile:` overlay (or a run
+([`run-plan-schema.md`](run-plan-schema.md#runplancheck-fields)) and
+**replace** this workflow's own global `gcc-path`/`gcc-options` inputs for
+that cell only — not merge with them. If the project relies on a flag set
+via the workflow's global `gcc-options` input (e.g. a universal `-fPIC`)
+*and* wants a per-profile `compile:` overlay too, that global flag will not
+carry over to overlaid cells; repeat it inside the overlay's `args` if it
+still needs to apply there. A profile with no `compile:` overlay (or a run
 with `toolchain-bindings-path` left empty, the default) falls back to the
 global inputs unchanged — no behavior change for a project that doesn't use
 this. `compiler_family`/`compiler_version` are validated shape-wise but not

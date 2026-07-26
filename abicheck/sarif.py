@@ -906,6 +906,70 @@ def to_sarif(
     }
 
 
+def to_sarif_not_comparable(
+    library: str, old_version: str, new_version: str, kind: str, message: str
+) -> dict[str, Any]:
+    """Render an ADR-050 D2 comparability-gate hard failure as SARIF 2.1.0.
+
+    ``checker.compare``'s gate raises before any ``DiffResult`` exists, so
+    :func:`to_sarif` (which reads ``result.changes``/``result.policy``/etc.)
+    has nothing to render. Unlike an ordinary verdict, this is not a "no
+    findings" run — the *comparison itself* did not complete — so per the
+    SARIF spec ``invocations[0].executionSuccessful`` is ``False`` (not
+    ``True`` with zero results, which would read as "compared cleanly") and
+    the reason rides in a ``toolExecutionNotification`` (the spec's own
+    mechanism for a tool-level problem, distinct from an analysis
+    ``result``), rather than fabricating a synthetic finding-shaped result
+    for something that isn't a finding.
+    """
+    tool_version = _tool_version()
+    return {
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "abicheck",
+                        "version": tool_version,
+                        "informationUri": "https://github.com/abicheck/abicheck",
+                        "rules": [],
+                    }
+                },
+                "invocations": [
+                    {
+                        "executionSuccessful": False,
+                        "exitCode": 16,
+                        "exitCodeDescription": f"not_comparable ({kind})",
+                        "toolExecutionNotifications": [
+                            {
+                                "descriptor": {"id": kind},
+                                "level": "error",
+                                "message": {
+                                    "text": (
+                                        f"'{library}' old={old_version!r} "
+                                        f"new={new_version!r} are not comparable: "
+                                        f"{message}"
+                                    )
+                                },
+                            }
+                        ],
+                    }
+                ],
+                "results": [],
+                "properties": {
+                    "abiVerdict": None,
+                    "notComparable": True,
+                    "reason": {"kind": kind, "message": message},
+                    "oldVersion": old_version,
+                    "newVersion": new_version,
+                    "library": library,
+                },
+            }
+        ],
+    }
+
+
 def to_sarif_str(
     result: DiffResult,
     indent: int = 2,
