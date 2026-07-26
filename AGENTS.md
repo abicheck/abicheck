@@ -170,6 +170,10 @@ Core pipeline (in order of data flow):
      relevance vocabulary, reason-code registry, and snapshot/decision schema
      versions. Leaf module; not yet wired into detection, policy, or reports
      (see `docs/contribute/plans/public-contract-default.md`)
+   - `compatibility_evaluation_config.py` — ADR-049 Phase 1 slice 1: the
+     `CompatibilityEvaluationConfig` typed object (contract/evidence/surface/
+     assurance/policy/gate/suppressions + field-level `ValueProvenance`).
+     Shape only — no resolver wires a CLI/config/recipe front end to it yet
 6. **Reporting** — output results
    - `reporter.py` — JSON/Markdown/text output
    - `html_report.py` — HTML reports
