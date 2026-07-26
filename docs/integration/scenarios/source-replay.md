@@ -31,9 +31,11 @@ where the *build* emits source facts as it compiles instead.
   `check-target` example below), the default `dependency-source: conda-forge`
   does **not** install clang on Linux/macOS either; pin
   `dependency-source: conda-forge-clang20` (or `system`, or install clang
-  yourself) instead. Without clang, the run silently degrades to L0–L2
-  evidence instead of failing; check the `layers`/coverage output to
-  confirm L4 actually ran. See
+  yourself) instead. Without clang, L3 build-context evidence (this
+  scenario's compile database) is still collected — only the clang-dependent
+  L4 replay and L5 graph stages are skipped, not the whole source scan; see
+  [Source-Scan Depth](../../use/scan-levels.md) for what each layer needs.
+  Check the `layers`/coverage output to confirm L4 actually ran. See
   [GitHub Action: dependency-source](../../use/github-action.md).
 - For a PR run: `fetch-depth: 0` on checkout, so the base ref is available to
   seed the diff scope.
