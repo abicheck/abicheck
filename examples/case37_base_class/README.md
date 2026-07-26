@@ -1,106 +1,143 @@
-# Case 37 -- Base Class Changes
+# Case 37: Base Class Changes
 
+**Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
-**Verdict:** 🔴 BREAKING
-**abicheck verdict: BREAKING**
+## Verdict and consumer impact
 
-## What changes
+Three independent base-class changes land in one release: `ReorderDemo`
+swaps its base order, `VirtualDemo`'s base becomes virtually inherited, and
+`AddBaseDemo` gains a second base class. Each one changes the derived
+object's layout — which sub-object sits at offset 0, where `this`-pointer
+adjustments land, and the object's total size. Any binary built against v1
+that casts through a base pointer, calls a virtual method, or allocates one
+of these types is working with stale offsets once the new library loads;
+recompilation is mandatory.
 
-| Version | Definition |
-|---------|-----------|
-| v1 | `ReorderDemo : Logger, Serializer` / `VirtualDemo : Logger` / `AddBaseDemo : Logger` |
-| v2 | `ReorderDemo : Serializer, Logger` (swapped) / `VirtualDemo : virtual Logger` / `AddBaseDemo : Logger, Serializer` (added base) |
+## Old/new diff
 
-Three separate scenarios are demonstrated:
+| v1.hpp | v2.hpp |
+|--------|--------|
+| `class ReorderDemo : public Logger, public Serializer` | `class ReorderDemo : public Serializer, public Logger` (order swapped) |
+| `class VirtualDemo : public Logger` | `class VirtualDemo : public virtual Logger` (became virtual) |
+| `class AddBaseDemo : public Logger` | `class AddBaseDemo : public Logger, public Serializer` (base added) |
 
-1. **Base class position changed** -- `ReorderDemo` swaps base order
-2. **Base class became virtual** -- `VirtualDemo` gains `virtual` inheritance
-3. **Base class added** -- `AddBaseDemo` acquires `Serializer` as a second base
+## abicheck command
 
-## Why this is a binary ABI break
-
-All three changes alter the object layout:
-
-1. **Reorder:** In multiple inheritance, each base class occupies a sub-object at a
-   specific offset. Swapping the order changes which vtable pointer is at offset 0
-   and how `this` is adjusted when casting to a base pointer. Code compiled against v1
-   that casts `ReorderDemo*` to `Logger*` will get the wrong sub-object with v2.
-
-2. **Virtual inheritance:** Changing from non-virtual to virtual inheritance completely
-   restructures the object layout, introducing a vbase offset and moving the base
-   sub-object to the end of the most-derived object.
-
-3. **Added base:** Adding `Serializer` as a base increases the object size and shifts
-   field offsets. Code compiled with v1's layout will read/write wrong memory locations.
-
-## Code diff
-
-```diff
--class ReorderDemo : public Logger, public Serializer {
-+class ReorderDemo : public Serializer, public Logger {
-     // base order swapped -> this-pointer adjustments change
-
--class VirtualDemo : public Logger {
-+class VirtualDemo : public virtual Logger {
-     // non-virtual -> virtual inheritance -> layout restructured
-
--class AddBaseDemo : public Logger {
-+class AddBaseDemo : public Logger, public Serializer {
-     // new base added -> object size grows, offsets shift
+```bash
+g++ -shared -fPIC -g -femit-class-debug-always v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g -femit-class-debug-always v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-## Real Failure Demo
+`-femit-class-debug-always` matters here: none of `ReorderDemo`,
+`VirtualDemo`, or `AddBaseDemo` declares its own virtual function (their
+virtuals are all inherited), so GCC has no "key function" to anchor a
+complete class DIE to and — by default — emits only a forward-declaration
+stub for them in this translation unit, dropping the `DW_TAG_inheritance`
+entries abicheck needs. The flag forces GCC to always emit the complete
+class layout in DWARF.
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_size_changed: Size changed: VirtualDemo (128 -> 192 bits)
+  > Old code allocates or copies the type with the old size;
+    heap/stack corruption, out-of-bounds access.
+- type_base_changed: Base classes changed: VirtualDemo (['Logger'] -> [])
+  > Base class layout change shifts derived member offsets and vtable
+    pointers; this-pointer arithmetic breaks.
+- type_size_changed: Size changed: AddBaseDemo (128 -> 256 bits)
+- type_base_changed: Base classes changed: AddBaseDemo
+  (['Logger'] -> ['Logger', 'Serializer'])
+- base_class_offset_changed: Base class 'Serializer' moved within
+  'ReorderDemo' (128 -> 0 bits)
+  > A base-class subobject moved to a different offset within the derived
+    object. The this-pointer adjustment for that base and every field
+    after it shifts; old binaries read the wrong addresses.
+- base_class_offset_changed: Base class 'Logger' moved within 'ReorderDemo'
+  (0 -> 128 bits)
+- base_class_position_changed: Base class order reordered: ReorderDemo —
+  this-pointer adjustments changed (['Logger', 'Serializer'] ->
+  ['Serializer', 'Logger'])
+- base_class_virtual_changed: Base class virtual inheritance changed:
+  VirtualDemo — became virtual: ['Logger'] ([] -> ['Logger'])
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's `DW_TAG_inheritance` entries (base type,
+offset, and virtual-ness) plus each class's `DW_AT_byte_size` are enough to
+detect all three changes; no public headers required. The caveat above
+(`-femit-class-debug-always`) is about *getting* complete DWARF out of GCC
+for classes with no class-local key function, not about needing a higher
+evidence tier — headers are still not required.
+
+## Why abicheck catches it
+
+DWARF encodes each base class as a `DW_TAG_inheritance` child of the
+derived `DW_TAG_class_type`, carrying the base's type, its
+`DW_AT_data_member_location` offset, and a `DW_AT_virtuality` flag for
+virtual bases; abicheck compares each derived type's base list, per-base
+offsets, and virtual-ness directly from debug info in both versions.
+
+## Runtime failure demonstration
 
 **Severity: CRITICAL**
 
-```bash
-# Build v1 lib + app
-g++ -shared -fPIC -g v1.cpp -o libv1.so
-g++ -g app.cpp -I. -L. -lv1 -Wl,-rpath,. -o app
-./app
-# -> ReorderDemo: log_level=1, format=2
-# -> ReorderDemo::log() called via Logger* OK
-# -> ReorderDemo::serialize() called via Serializer* OK
-# -> VirtualDemo: log_level=5
-# -> AddBaseDemo: log_level=3
-
-# Swap to v2
-g++ -shared -fPIC -g v2.cpp -o libv1.so
-./app
-# -> CRASH or wrong output: Logger* now points to Serializer sub-object
-#    due to swapped base order. Virtual method calls through base pointers
-#    invoke the wrong function or pass a corrupted this pointer.
-```
-
-**Why CRITICAL:** Base class layout changes silently corrupt the object's memory layout.
-The `this`-pointer adjustments compiled into the application no longer match the
-library's actual object layout, causing virtual dispatch to call the wrong function,
-or field accesses to read/write the wrong memory -- both leading to crashes or
-silent data corruption.
-
-## Why runtime result may differ from verdict
-Base class position changed: derived class layout corrupted
-
-## Runtime note
-Methods now mutate fields and app asserts expected postconditions; layout/base-order mismatch is observable.
-
-## abicheck Detection
-
-abicheck detects base class changes when run with header files (`-H`):
+**Scenario:** app builds `ReorderDemo`/`VirtualDemo`/`AddBaseDemo` against
+v1's layout, calls their methods through base pointers and direct calls,
+then the library is swapped for v2 without recompiling the app.
 
 ```bash
-make  # builds libv1.so and libv2.so with -g debug info
+# Build old library + app
+g++ -shared -fPIC -g -femit-class-debug-always v1.cpp -o libfoo.so
+g++ -g app.cpp -I. -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → ReorderDemo: log_level=11 format=21
+# → VirtualDemo: log_level=77
+# → AddBaseDemo: log_level=33
+# → exit 0
 
-python3 -m abicheck.cli dump libv1.so -H v1.hpp -o v1.json
-python3 -m abicheck.cli dump libv2.so -H v2.hpp -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-# → BREAKING: type_base_changed, type_size_changed, type_vtable_changed
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g -femit-class-debug-always v2.cpp -o libfoo.so
+./app
+# → Segmentation fault
+# → exit 139
 ```
 
-**Note:** Without `-H` header files, abicheck reports NO_CHANGE because the ELF
-symbol table does not encode C++ class hierarchy information. Header analysis is
-required for C++ structural changes (base class composition, vtable layout, field
-offsets).
+**Why CRITICAL:** the app's `this`-pointer adjustments, vtable slot
+assumptions, and object-size allocations are all baked in for v1's layout.
+Against v2's reordered/virtual/widened bases those assumptions are wrong
+from the first virtual call, crashing the process outright rather than
+producing recoverable bad output.
+
+## Safe redesign
+
+Never reorder, virtualize, or add a base class to a public class after
+release — each is a layout change with no source-compatible mitigation
+short of a SONAME bump. If a type genuinely needs a new capability, add it
+as a non-base member or a separate interface obtained through a factory
+function, and keep object layout behind an opaque pointer (PIMPL) for
+anything callers allocate directly.
+
+**Real-world example:** Qt's public classes went through this exact
+problem historically, which is why Qt adopted the `d-pointer` (PIMPL)
+idiom project-wide — base-class and member layout of `QObject`-derived
+classes can never change without breaking every compiled plugin.
+
+## Cross-tool comparison
+
+`abidiff`/`abi-compliance-checker` also detect base-class layout changes
+(reordering, virtual-inheritance conversion, added base) via their own
+DWARF-based inheritance-graph comparison:
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
 
 ## References
 

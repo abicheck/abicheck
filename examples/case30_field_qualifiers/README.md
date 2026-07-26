@@ -1,129 +1,133 @@
-# Case 30 — Field Qualifier Changes (const, volatile)
+# Case 30: Field Qualifier Changes (const, volatile)
 
 **Category:** Type Qualifiers | **Verdict:** 🔴 BREAKING (policy-escalated API break)
 
-The underlying compatibility **fact** is `API_BREAK`, exactly like case95 and
-case109: `abi_break: false`, `api_break: true` in `ground_truth.json` — the
-binary layout of `struct SensorConfig` is unchanged, so an already-built
-consumer binary keeps linking and running against v2 unmodified. `expected`
-is escalated to `BREAKING` as a **policy** decision (see `policy_note` in
-`ground_truth.json`): the project's default policy conservatively routes
-field-qualifier changes through the same contract detector as other
-field-type changes, treating the semantic-divergence risk (a `const` write
-becoming a silent bug, a missing `volatile` risking stale-cache reads) as
-release-blocking rather than recompile-only. This is a deliberate policy
-choice, not a claim that the binary itself is incompatible.
+## Verdict and consumer impact
 
-## Compatibility classification
+The binary layout of `struct SensorConfig` is unchanged — `const` and
+`volatile` don't affect size, alignment, or offsets, so an already-built
+consumer binary keeps linking and running against v2 unmodified. The
+underlying compatibility *fact* is API_BREAK, not ABI_BREAK
+(`ground_truth.json`: `abi_break: false`, `api_break: true`). abicheck's
+default policy escalates the verdict to BREAKING anyway: `sample_rate`
+becomes `const` (writing through the old, non-`const` assumption is
+undefined behavior and will be rejected on recompilation) and `raw_value`
+becomes `volatile` (a binary compiled without the volatile contract may
+observe or rely on compiler-cached reads that are no longer valid). The
+project treats this semantic-divergence risk as release-blocking by
+default rather than recompile-only.
 
-- **Binary ABI impact:** None — layout-compatible (no size/offset change); an existing binary keeps linking and running against v2.
-- **Source compatibility impact:** API_BREAK (`const` write errors, `volatile` contract changes) — the underlying compatibility fact.
-- **Runtime behavior impact:** Semantic divergence (stale reads / UB writes) without linker errors, if an old binary's assumptions about a now-`const`/`volatile` field are wrong.
-- **Policy severity:** **BREAKING** in `ground_truth.json` — a policy escalation of the API_BREAK fact, not a second independent verdict.
+## Old/new diff
 
-## What changes
+| v1.h | v2.h |
+|------|------|
+| `int   sample_rate;` | `const int    sample_rate;` |
+| `int   raw_value;` | `volatile int raw_value;` |
+| `int   cache_hits;` *(unchanged)* | `int          cache_hits;` |
 
-| Field | v1 | v2 | Effect |
-|---|---|---|---|
-| `sample_rate` | `int sample_rate` | `const int sample_rate` | Writing becomes UB |
-| `raw_value` | `int raw_value` | `volatile int raw_value` | Compiler must not cache reads |
-| `cache_hits` | `int cache_hits` | `int cache_hits` | Unchanged |
-
-## Why this is an API break despite binary compatibility
-
-The binary layout of `struct SensorConfig` is **unchanged** — `const` and `volatile`
-do not affect size, alignment, or field offsets. An existing binary will link and
-run against the v2 library without error. This is not an ABI break.
-
-However, the **API contract** has changed:
-
-1. **`const int sample_rate`:** Code compiled against v1 freely writes to `sample_rate`.
-   The v2 header declares this field `const`, meaning the library now considers it
-   immutable after initialization. Writing to a `const`-qualified field through a
-   non-`const` pointer is undefined behavior in C. Compilers recompiling against v2
-   will reject the write at compile time.
-
-2. **`volatile int raw_value`:** Code compiled against v1 may have the compiler optimize
-   away redundant reads of `raw_value`. The v2 header marks it `volatile`, indicating
-   it may change asynchronously (e.g., hardware-mapped). Binaries compiled without
-   `volatile` may return stale cached values.
-
-## Code diff
-
-```diff
- struct SensorConfig {
--    int   sample_rate;
--    int   raw_value;
-+    const int    sample_rate;
-+    volatile int raw_value;
-     int   cache_hits;
- };
-```
-
-## Real Failure Demo
-
-**Severity: MODERATE (semantic break, not crash)**
-
-**Scenario:** Compile app against v1 headers, swap in v2 `.so`.
-
-```bash
-# Build v1 library + app
-gcc -shared -fPIC -g v1.c -o libfoo.so
-gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
-./app
-# → Field qualifier change demo (compiled against v1.h):
-# →
-# → Initial state:
-# →   sample_rate = 1000
-# →   raw_value   = 42
-# →   cache_hits  = 0
-# →
-# → sensor_read(&cfg) = 42
-# →
-# → After setting sample_rate = 2000:
-# →   sample_rate = 2000
-# →
-# → raw_value read twice: r1=99 r2=99 (should be equal)
-# → ...
-# → sensor_read(&cfg) after modifications = 99
-
-# Swap in v2 (no recompile)
-gcc -shared -fPIC -g v2.c -o libfoo.so
-./app
-# → Output is identical — binary layout unchanged.
-# → But the semantic contract is now violated: the app writes
-# → to sample_rate which v2 declares const.
-```
-
-**Source break verification** (recompilation against v2 will warn/error):
-
-```bash
-# Create a temporary source that includes v2.h instead of v1.h
-sed 's/#include "v1.h"/#include "v2.h"/' app.c > /tmp/app_v2_test.c
-gcc -g /tmp/app_v2_test.c -I. -L. -lfoo -Wl,-rpath,. -o app_v2 2>&1
-# → error: assignment of read-only member 'sample_rate'
-#   (because sample_rate is const in v2.h)
-rm -f /tmp/app_v2_test.c
-```
-
-## Reproduce with abicheck
+## abicheck command
 
 ```bash
 gcc -shared -fPIC -g v1.c -o libfoo_v1.so
 gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_field_type_changed: Field type changed: SensorConfig::sample_rate (int -> const int)
+  > Field has different size or representation; old code misinterprets the data.
+  Affected symbols: sensor_read
+- type_field_type_changed: Field type changed: SensorConfig::raw_value (int -> volatile int)
+  > Field has different size or representation; old code misinterprets the data.
+  Affected symbols: sensor_read
+
+Quality issues:
+- field_became_const: Field became const: SensorConfig::sample_rate
+- field_became_volatile: Field became volatile: SensorConfig::raw_value
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF wraps a qualified field's type DIE in
+`DW_TAG_const_type`/`DW_TAG_volatile_type`, so the qualifier change is
+visible directly in debug info; `-g` alone (no public headers) is enough,
+matching the by-value cv-qualifier policy note in `ground_truth.json`.
+
+## Why abicheck catches it
+
+abicheck resolves each struct member's type DIE for both binaries and
+compares the resolved type name/qualification. A member that gained a
+`DW_TAG_const_type` or `DW_TAG_volatile_type` wrapper reports as a field
+type change even though the underlying byte size and member offset are
+identical — the layout-neutral, contract-only nature of the change is what
+routes it to the quality-issue `field_became_const`/`field_became_volatile`
+findings alongside the escalated breaking finding.
+
+## Runtime failure demonstration
+
+**Severity: MODERATE (semantic break, not crash)**
+
+**Scenario:** compile app against v1 headers, swap in the v2 `.so` without
+recompiling.
+
+```bash
+# Build old library + app
+gcc -shared -fPIC -g v1.c -o libfoo.so
+gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → sensor_read = 42
+# → OK (semantic break only: field qualifiers changed, binary runs identically)
+
+# Swap in new library (no recompile)
+gcc -shared -fPIC -g v2.c -o libfoo.so
+./app
+# → sensor_read = 42
+# → OK (semantic break only: field qualifiers changed, binary runs identically)
+```
+
+**Why MODERATE, not CRITICAL:** the struct's binary layout is unchanged, so
+the already-compiled app keeps running with identical output — there's no
+crash or corruption to observe here. The break only surfaces on
+recompilation: code that writes to `sample_rate` becomes a compile error
+against v2.h, and code relying on non-`volatile` caching of `raw_value` can
+silently diverge from hardware-mapped reality once actually rebuilt against
+the new header.
+
+**Source break verification** (recompiling against v2 fails):
+
+```bash
+sed 's/#include "v1.h"/#include "v2.h"/' app.c > /tmp/app_v2_test.c
+gcc -g /tmp/app_v2_test.c -I. -L. -lfoo -Wl,-rpath,. -o app_v2
+# → error: assignment of read-only member 'sample_rate'
+rm -f /tmp/app_v2_test.c
+```
+
+(This app doesn't write to `sample_rate`, so this step only demonstrates
+the compile-time contract; a version that assigns `cfg.sample_rate = ...`
+would fail to build against v2.h.)
+
+## Safe redesign
+
+Don't add `const` to a field of a public struct unless it was always
+documented as read-only, and don't add `volatile` to an existing field —
+both are contract changes that recompiled callers must account for. If a
+field must become immutable, provide setter/getter functions and hide the
+struct behind an opaque pointer instead of relying on the field-qualifier
+system; introduce a new struct (or bump the major version) if `volatile`
+semantics are genuinely required.
+
+## Cross-tool comparison
+
+```bash
 abidw --out-file v1.xml libfoo_v1.so
 abidw --out-file v2.xml libfoo_v2.so
 abidiff v1.xml v2.xml
 echo "exit: $?"
 ```
-
-## How to fix
-
-- Do not add `const` to fields of public structs unless the field was always
-  documented as read-only.
-- If a field must become immutable, provide setter/getter functions instead of
-  direct field access, and hide the struct behind an opaque pointer.
-- Adding `volatile` should be done only in a new struct or with a major version bump.
 
 ## References
 

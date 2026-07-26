@@ -1,81 +1,125 @@
-# Case 35 -- Field Rename
+# Case 35: Field Rename
 
+**Category:** Struct API | **Verdict:** 🟡 API_BREAK (binary compatible)
 
-**Verdict:** 🟡 API_BREAK
-**abicheck verdict: API_BREAK**
+## Verdict and consumer impact
 
+`struct Point`'s fields are renamed (`x`→`col`, `y`→`row`) with identical
+offsets and types. Field names are a compile-time concept only — they're
+resolved to byte offsets during compilation and never appear in the
+compiled binary. An already-built consumer binary keeps linking and
+running against v2 unmodified, since `make_point()` returns the exact same
+struct layout. Source code referencing `p.x` or `p.y` fails to compile
+against the v2 header, though, so recompilation forces every downstream
+consumer to update field references before they can rebuild.
 
-## Compatibility classification
+## Old/new diff
 
-- **Binary ABI impact:** Compatible (layout and offsets unchanged).
-- **Source compatibility impact:** API_BREAK (field identifiers removed/renamed).
-- **Runtime behavior impact:** Existing binaries keep working; recompilation fails.
-- **Policy severity:** **API_BREAK** in `ground_truth.json`. The dedicated field-rename
-  detector reports `field_renamed` (API_BREAK); the generic field-removed/-added
-  detectors recognize the exact same-offset/same-type rename and no longer also
-  report a redundant `BREAKING` field-removal for it (fixed — previously this case
-  produced both findings and the higher severity won the overall verdict).
+| v1.h | v2.h |
+|------|------|
+| `struct Point { int x; int y; };` | `struct Point { int col; int row; };` |
 
-## What changes
-
-| Version | Definition |
-|---------|-----------|
-| v1 | `struct Point { int x; int y; };` |
-| v2 | `struct Point { int col; int row; };` |
-
-## Why this is NOT a binary ABI break
-
-Renaming struct fields does not change the binary layout. The fields `x`/`col`
-are at offset 0 and `y`/`row` are at offset 4 in both versions. Field names
-are not encoded in the compiled binary -- they are resolved to offsets at
-compile time. A binary compiled against v1 will continue to work correctly
-with v2's shared library because `make_point()` returns the same struct layout.
-
-However, source code referencing `p.x` or `p.y` will fail to compile against
-v2's header, making this a source-level break.
-
-## Code diff
-
-```diff
- struct Point {
--    int x;      /* offset 0 */
--    int y;      /* offset 4 */
-+    int col;    /* offset 0 -- was x */
-+    int row;    /* offset 4 -- was y */
- };
-```
-
-## Real Failure Demo
-
-**Severity: API_BREAK (binary compatible)**
+## abicheck command
 
 ```bash
-# Build v1 lib + app
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: API_BREAK (exit 2)
+
+- field_renamed: Field renamed: Point::x -> col
+  > Field name changed but offset is the same; source code using old
+    name won't compile.
+- field_renamed: Field renamed: Point::y -> row
+  > Field name changed but offset is the same; source code using old
+    name won't compile.
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF's `DW_TAG_member` entries carry both a name and
+an offset for every struct field, so abicheck can match old and new
+members by identical offset+type and detect the name-only change directly
+from debug info; `-g` alone (no public headers) is enough. The dedicated
+field-rename detector suppresses the redundant `field_removed`/`field_added`
+pair that a naive same-offset match would otherwise also report, so this
+case surfaces cleanly as `field_renamed` rather than a spurious BREAKING
+removal alongside it.
+
+## Why abicheck catches it
+
+abicheck pairs struct members between the two `Point` snapshots by offset
+and type (both have an `int` at offset 0 and an `int` at offset 4) and
+compares the member names read from `DW_TAG_member` DIEs. A member that
+keeps its offset and type but changes name is reported as a rename, which
+is what routes this to the API_BREAK (source-level) bucket instead of a
+binary-layout BREAKING finding.
+
+## Runtime failure demonstration
+
+**Severity: NONE (binary compatible) / compile-time failure on rebuild**
+
+**Scenario:** compile app against v1 headers, swap in the v2 `.so` without
+recompiling.
+
+```bash
+# Build old library + app
 gcc -shared -fPIC -g v1.c -o libv1.so
 gcc -g app.c -I. -L. -lv1 -Wl,-rpath,. -o app
 ./app
-# -> p.x = 10
-# -> p.y = 20
+# → p.x = 10
+# → p.y = 20
+# → OK (API_BREAK only: field renamed, binary layout unchanged)
 
-# Swap to v2 .so (do NOT recompile app)
+# Swap in new library (no recompile)
 gcc -shared -fPIC -g v2.c -o libv1.so
 ./app
-# -> p.x = 10       <-- still correct! binary layout unchanged
-# -> p.y = 20       <-- still correct!
-
-# But recompiling against v2 header FAILS:
-sed 's/#include "v1.h"/#include "v2.h"/' app.c > /tmp/app_v2_test.c
-gcc -g /tmp/app_v2_test.c -I. -L. -lv1 -Wl,-rpath,. -o app
-# -> error: 'struct Point' has no member named 'x'
-rm -f /tmp/app_v2_test.c
+# → p.x = 10
+# → p.y = 20
+# → OK (API_BREAK only: field renamed, binary layout unchanged)
 ```
 
-**Why API_BREAK:** The struct layout is bit-for-bit identical between v1 and v2.
-Only the field names changed, which are a compile-time concept. Existing binaries
-are fully compatible.
+**Why no runtime failure:** `x`/`col` and `y`/`row` sit at the exact same
+offsets with the exact same type in both versions — the app's field
+accesses compile down to fixed-offset loads that are identical either way,
+so there's nothing for the swapped library to disturb at runtime.
 
-## Why runtime result differs from source compatibility
-Field rename: binary compat (field exists at the same offset/type), source break (name changed) — exactly what the API_BREAK verdict means.
+**Source break verification** (recompiling against v2 fails):
+
+```bash
+sed 's/#include "v1.h"/#include "v2.h"/' app.c > /tmp/app_v2_test.c
+gcc -g /tmp/app_v2_test.c -I. -L. -lv1 -Wl,-rpath,. -o /tmp/app_v2_out
+# → error: 'struct Point' has no member named 'x'
+# → error: 'struct Point' has no member named 'y'
+rm -f /tmp/app_v2_test.c /tmp/app_v2_out
+```
+
+## Safe redesign
+
+Avoid renaming public struct fields; if a clearer name is genuinely
+needed, add the field under both names via a `#define` alias, or provide
+accessor macros/functions and deprecate direct field access, giving
+consumers a migration window before the old name disappears.
+
+**Real-world example:** coordinate/geometry libraries that rename fields
+for clarity (`x`/`y` → domain-specific names like `col`/`row` or
+`lat`/`lon`) hit this exact break — every downstream consumer that
+directly accesses the old field names fails to rebuild, even though the
+struct's actual memory layout never changed.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+echo "exit: $?"
+```
 
 ## References
 

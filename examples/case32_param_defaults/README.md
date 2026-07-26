@@ -1,95 +1,107 @@
-# Case 32 — Parameter Default Value Changes (C++)
+# Case 32: Parameter Default Value Changes (C++)
 
-**Category:** C++ Defaults | **Verdict:** 🟠 API_BREAK (with headers) / NO_CHANGE (object/ELF-only)
+**Category:** C++ Defaults | **Verdict:** 🟠 API_BREAK (binary compatible)
 
-> A parameter default is removed (`configure(verbose, ...)`), which is a
-> source-level break — callers relying on the default no longer compile. The
-> mangled symbol is unchanged, so the binary ABI is intact. Default-argument
-> values live only in the header, so this is detected only in header
-> (castxml) mode (`param_default_value_removed` / `param_default_value_changed`);
-> object/DWARF comparison reports NO_CHANGE.
+## Verdict and consumer impact
 
-## What changes
+C++ resolves default argument values at the *call site*, during
+compilation of the caller — the library's `.so` never sees them, it only
+receives whatever arguments the compiled caller actually passes. That
+means an already-built binary calling `conn.connect()` keeps passing `30`
+forever, regardless of what v2's header now says the default is; the
+mangled symbols (`_ZN10Connection7connectEi`, etc.) don't encode defaults
+at all, so binary compatibility is total. The break is source-only, and
+only for `configure()`: `verbose` loses its default, so any caller that
+recompiles against v2 while still calling `configure()` with zero
+arguments fails to compile. `connect`'s changed default and
+`disconnect`'s added default don't break anything, recompiled or not.
 
-| Method | v1 signature | v2 signature | Effect |
-|---|---|---|---|
-| `connect` | `void connect(int timeout = 30)` | `void connect(int timeout = 60)` | Default changed |
-| `configure` | `void configure(bool verbose = true, int retries = 3)` | `void configure(bool verbose, int retries = 5)` | `verbose` lost default; `retries` changed |
-| `disconnect` | `void disconnect(int code)` | `void disconnect(int code = 0)` | Default added |
+## Old/new diff
 
-## Why this is NOT a binary ABI break
+| Method | v1.hpp | v2.hpp | Effect |
+|--------|--------|--------|--------|
+| `connect` | `void connect(int timeout = 30)` | `void connect(int timeout = 60)` | default changed |
+| `configure` | `void configure(bool verbose = true, int retries = 3)` | `void configure(bool verbose, int retries = 5)` | `verbose` default removed; `retries` default changed |
+| `disconnect` | `void disconnect(int code)` | `void disconnect(int code = 0)` | default added (compatible) |
 
-In C++, default parameter values are resolved **at the call site** during compilation.
-When the compiler sees `conn.connect()`, it rewrites it to `conn.connect(30)` using
-the default from the header at compile time. The library's `.so` never knows about
-default values — it only receives the actual arguments.
+## abicheck command
 
-This means:
-
-1. **Default changed (timeout 30 -> 60):** Binaries compiled against v1 will always
-   pass `30`. Only code recompiled against v2 will pass `60`. No binary break.
-
-2. **Default removed (verbose):** Binaries compiled against v1 already have `true`
-   baked in. Only recompilation against v2 would fail (source break) because
-   `configure()` with zero args is no longer valid.
-
-3. **Default added (disconnect):** Existing binaries already pass explicit values.
-   New code compiled against v2 can call `disconnect()` without arguments. Fully
-   backward compatible.
-
-The mangled symbol names are identical (`_ZN10Connection7connectEi`, etc.) because
-default values do not participate in name mangling.
-
-## Code diff
-
-```diff
- class Connection {
- public:
--    void connect(int timeout = 30);
--    void configure(bool verbose = true, int retries = 3);
--    void disconnect(int code);
-+    void connect(int timeout = 60);
-+    void configure(bool verbose, int retries = 5);
-+    void disconnect(int code = 0);
- };
+```bash
+g++ -shared -fPIC -g -std=c++17 v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g -std=c++17 v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so \
+  --header old=v1.hpp --header new=v2.hpp \
+  --ast-frontend clang --gcc-options "-std=c++17"
 ```
 
-## Real Failure Demo
+## Expected abicheck finding
+
+```text
+Verdict: API_BREAK (exit 2)
+
+- param_default_value_removed: Parameter default removed: configure param verbose (True)
+
+Quality issues:
+- param_default_value_changed: Parameter default changed: connect param timeout
+- param_default_value_changed: Parameter default changed: configure param retries
+```
+
+## Minimum evidence
+
+`min_evidence: L2` — default argument values live only in the header's AST
+(they're never emitted into DWARF or the symbol table), so this class of
+change is invisible below the header/AST evidence layer. abicheck's
+default AST backend is castxml; clang is a supported alternative frontend
+(`--ast-frontend clang`), used here because castxml isn't installed in
+this environment. `min_evidence` is scoped to `linux` in
+`ground_truth.json` because the castxml build used elsewhere doesn't
+always emit the `default=` attribute on Homebrew/macOS; header-AST default
+extraction is otherwise cross-platform.
+
+## Why abicheck catches it
+
+The header AST records each parameter's `default=` value alongside its
+type. abicheck diffs the two versions' default-value lists per parameter:
+a default present in v1 and absent in v2 is a removal (source break —
+existing zero-arg call sites stop compiling); a default whose value simply
+changes is a quality-level finding, since it doesn't break compilation,
+only silently changes behavior for callers that get recompiled.
+
+## Runtime failure demonstration
 
 **Severity: NONE (binary compatible)**
 
-**Scenario:** Compile app against v1 headers, swap in v2 `.so`.
+**Scenario:** compile app against v1 headers, swap in the v2 `.so` without
+recompiling.
 
 ```bash
-# Build v1 library + app
-g++ -shared -fPIC -g v1.cpp -o libfoo.so
-g++ -g app.cpp -I. -L. -lfoo -Wl,-rpath,. -o app
+# Build old library + app
+g++ -shared -fPIC -g -std=c++17 v1.cpp -o libfoo.so
+g++ -g -std=c++17 app.cpp -I. -L. -lfoo -Wl,-rpath,. -o app
 ./app
-# → Parameter defaults demo (compiled against v1.hpp):
-# →
 # → Calling connect() with default timeout:
 # →   Compiled as connect(30) from v1 header
 # →   OK — v2 default is 60, but caller already passed 30
-# →
-# → Calling connect(45) with explicit timeout:
-# →   OK — explicit args are unaffected
-# →
-# → Calling configure() with defaults:
-# →   Compiled as configure(true, 3) from v1 header
-# →   OK — v2 removed verbose default, but caller already passed true
 # → ...
+# → Binary is 100% compatible: same mangled symbols, same calling convention
+# → NO_CHANGE at binary ABI level
 
-# Swap in v2 (no recompile)
-g++ -shared -fPIC -g v2.cpp -o libfoo.so
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g -std=c++17 v2.cpp -o libfoo.so
 ./app
-# → Output is IDENTICAL — defaults were baked into the caller at compile time.
-# → The v2 library receives the same arguments as v1.
+# → identical output — the caller's defaults were baked in at compile
+#   time and never touch the library
 ```
 
-**Source break verification** (partial — `configure()` with no args fails):
+**Why no runtime failure:** defaults are a pure caller-side compile-time
+concept in C++; there is nothing for the v2 library to get wrong at
+runtime, since it only ever sees the explicit integer/bool arguments the
+already-compiled caller passes.
+
+**Source break verification** (recompiling a zero-arg `configure()` call
+against v2 fails):
 
 ```bash
-# Create a minimal source that includes only v2.hpp and calls configure()
 cat > /tmp/source_break.cpp << 'SRC'
 #include "v2.hpp"
 int main() {
@@ -98,33 +110,31 @@ int main() {
     return 0;
 }
 SRC
-g++ -g /tmp/source_break.cpp -I. -L. -lfoo -Wl,-rpath,. -o /tmp/app_v2 2>&1
+g++ -g -std=c++17 -I. /tmp/source_break.cpp -L. -lfoo -Wl,-rpath,. -o /tmp/app_v2
 # → error: no matching function for call to 'Connection::configure()'
-# → note: candidate expects 2 arguments, 0 provided
-#    (because 'verbose' lost its default in v2)
+# → note: candidate: 'void Connection::configure(bool, int)'
+# → note:   candidate expects 2 arguments, 0 provided
 rm -f /tmp/source_break.cpp /tmp/app_v2
 ```
 
-## Reproduce with abicheck
+## Safe redesign
+
+No fix is needed for binary compatibility — it's already preserved. For
+source compatibility: don't remove a default from a public header in a
+minor/patch release; if a default value must change, document it clearly,
+since existing compiled binaries keep silently using the old default until
+they're recompiled. Consider overloaded functions instead of defaults for
+parameters where the old-vs-new behavioral difference actually matters.
+
+## Cross-tool comparison
 
 ```bash
-g++ -shared -fPIC -g v1.cpp -o libfoo_v1.so
-g++ -shared -fPIC -g v2.cpp -o libfoo_v2.so
 abidw --out-file v1.xml libfoo_v1.so
 abidw --out-file v2.xml libfoo_v2.so
 abidiff v1.xml v2.xml
-echo "exit: $?"   # → 0 (no binary ABI change)
+echo "exit: $?"   # → 0 (no binary ABI change; abidiff doesn't read header
+                   #     default-argument AST at all)
 ```
-
-## How to fix
-
-No fix needed for binary compatibility. For source compatibility:
-
-- Do not remove defaults from public headers in minor releases.
-- If a default value must change, document it clearly — existing compiled binaries
-  will silently continue using the old default until recompiled.
-- Consider using overloaded functions instead of defaults for critical parameters
-  where behavioral differences matter.
 
 ## References
 
