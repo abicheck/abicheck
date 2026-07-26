@@ -272,22 +272,46 @@ def resolve_variable_identity(var: Variable) -> FindingIdentity:
     )
 
 
-#: ChangeKind slugs that are unambiguously "about one function/variable
-#: symbol" (see ``checker_policy.py``'s ``func_*``/``var_*``/``ifunc_*``
-#: naming convention -- verified exhaustively against the current enum).
+#: ChangeKind slug *prefixes* that are unambiguously "about one
+#: function/variable symbol" (see ``checker_policy.py``'s
+#: ``func_*``/``var_*``/``ifunc_*``/``symbol_*`` naming convention). The
+#: ``symbol_*`` family (``symbol_binding_changed``, ``symbol_type_changed``,
+#: ``symbol_size_changed``, ...) is the ELF-level symbol-table diff --
+#: equally unambiguous, added after Codex review flagged it missing.
+_SYMBOL_LEVEL_KIND_PREFIXES = ("func_", "var_", "ifunc_", "symbol_")
+
+#: Individually-named kinds that don't share one of the prefixes above but
+#: are still unambiguously about one function/variable symbol (Codex
+#: review: ``VIRTUAL_METHOD_ADDED``/``CALLING_CONVENTION_CHANGED`` were
+#: flagged as missing). Not claimed to be an exhaustive audit of all ~395
+#: `ChangeKind` values -- extend as gaps are found.
+_SYMBOL_LEVEL_KIND_SLUGS = frozenset(
+    {
+        "virtual_method_added",
+        "calling_convention_changed",
+        "value_abi_trait_changed",
+        "hidden_friend_added",
+        "hidden_friend_removed",
+    }
+)
+
+
 #: ``resolve_change_identity`` only attempts to interpret ``change.symbol``
-#: as a mangled name for these -- a type-level kind's ``symbol`` is a type
-#: name (e.g. a type named ``_Zebra`` structurally resembles an Itanium
-#: mangling but is not one), and ``change.qualified_name`` -- the signal
-#: that would normally catch this via ``normalize_mangled_name``'s
-#: mangled-vs-plain-name check -- is documented as unset for exactly this
-#: case (``Change.qualified_name``'s docstring: "None when no matching
-#: Function record was found (e.g. type-level changes)"), so it cannot be
-#: relied on alone (Codex review). Missing a real symbol-level kind here
-#: only means an unnecessary degrade to the NORMALIZED tier, never a wrong
-#: CANONICAL promotion -- the same ambiguity-safe-fallback bias as
-#: everywhere else in this module.
-_SYMBOL_LEVEL_KIND_PREFIXES = ("func_", "var_", "ifunc_")
+#: as a mangled name when its kind matches one of the two sets above -- a
+#: type-level kind's ``symbol`` is a type name (e.g. a type named
+#: ``_Zebra`` structurally resembles an Itanium mangling but is not one),
+#: and ``change.qualified_name`` -- the signal that would normally catch
+#: this via ``normalize_mangled_name``'s mangled-vs-plain-name check -- is
+#: documented as unset for exactly this case (``Change.qualified_name``'s
+#: docstring: "None when no matching Function record was found (e.g.
+#: type-level changes)"), so it cannot be relied on alone (Codex review).
+#: Missing a real symbol-level kind here only means an unnecessary degrade
+#: to the NORMALIZED tier, never a wrong CANONICAL promotion -- the same
+#: ambiguity-safe-fallback bias as everywhere else in this module.
+def _is_symbol_level_kind(kind_value: str) -> bool:
+    return kind_value.startswith(_SYMBOL_LEVEL_KIND_PREFIXES) or (
+        kind_value in _SYMBOL_LEVEL_KIND_SLUGS
+    )
 
 
 #: Change kinds ``diff_filtering._deduplicate_cross_detector`` already
@@ -340,8 +364,8 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
 
     ``change.symbol`` doubles as "mangled name or type name" (see
     ``Change``'s docstring); mangled-name interpretation is therefore only
-    attempted for :data:`_SYMBOL_LEVEL_KIND_PREFIXES` kinds, never for a
-    type-level change whose ``symbol`` merely happens to look like a
+    attempted when :func:`_is_symbol_level_kind` recognizes the kind, never
+    for a type-level change whose ``symbol`` merely happens to look like a
     mangling (Codex review).
 
     Unlike :func:`resolve_function_identity`/:func:`resolve_variable_identity`
@@ -362,7 +386,7 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     rel = source_relative_identity(change.source_location or "", change.symbol or "")
 
     real_mangled = None
-    if kind_value.startswith(_SYMBOL_LEVEL_KIND_PREFIXES):
+    if _is_symbol_level_kind(kind_value):
         real_mangled = normalize_mangled_name(change.symbol, change.qualified_name)
 
     aliases: list[str] = []

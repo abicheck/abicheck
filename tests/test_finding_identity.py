@@ -264,6 +264,30 @@ class TestResolveVariableIdentity:
 
 
 class TestResolveChangeIdentity:
+    def test_symbol_slug_kind_with_mangled_symbol_is_canonical(self) -> None:
+        # Codex review: SYMBOL_TYPE_CHANGED etc. (the ELF symbol_* family)
+        # carry a real mangled symbol too, not just func_*/var_*/ifunc_*.
+        change = Change(
+            kind=ChangeKind.SYMBOL_TYPE_CHANGED,
+            symbol=_ITANIUM_MANGLED,
+            description="FUNC -> OBJECT",
+            qualified_name="foo",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_CANONICAL
+
+    def test_individually_named_symbol_level_kind_is_canonical(self) -> None:
+        # Codex review: VIRTUAL_METHOD_ADDED/CALLING_CONVENTION_CHANGED don't
+        # share a func_*/var_*/symbol_* prefix but are still symbol-level.
+        change = Change(
+            kind=ChangeKind.CALLING_CONVENTION_CHANGED,
+            symbol=_ITANIUM_MANGLED,
+            description="cdecl -> fastcall",
+            qualified_name="foo",
+        )
+        identity = resolve_change_identity(change)
+        assert identity.tier == IDENTITY_TIER_CANONICAL
+
     def test_real_mangled_symbol_is_canonical(self) -> None:
         change = Change(
             kind=ChangeKind.FUNC_REMOVED,

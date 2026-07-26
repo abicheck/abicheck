@@ -308,8 +308,10 @@ explicit per-kind override > selected packs > base policy
 
 Conflicting packs are a usage error until an explicit final override resolves
 the field. File order never resolves conflicts. Unknown `ChangeKind` slugs in
-custom policy are hard errors; replace the current warning-and-skip behavior in
-the implementation phase so a renamed kind cannot silently disable policy.
+custom policy are hard errors, so a renamed kind cannot silently disable
+policy — implemented (2026-07-26, ADR-049 D8) in `policy_file.py`'s
+`_parse_overrides` and `CompatibilityPolicyConfig.overrides`, replacing the
+prior warning-and-skip behavior.
 
 ## 4. Evidence model and completeness
 

@@ -16,11 +16,14 @@
 >   `HIGH_SEVERITY_KINDS`/`MEDIUM_SEVERITY_KINDS` for ABICC-compat output) and
 >   origin (rtti/internal/public, in `report_summary.py`). See ADR-036 for why
 >   these are kept separate rather than collapsed into policy.
-> - **Unknown-ChangeKind-slug handling was wrong.** §3 below claims "Unknown
->   ChangeKind slugs or severity values are rejected at load time." In
->   `policy_file.py`'s `_parse_overrides()`, unknown **severity** values do
->   raise `PolicyError` (as stated) — but unknown **ChangeKind slugs** are only
->   logged as a warning and silently skipped, not rejected.
+> - **Unknown-ChangeKind-slug handling was wrong, now fixed (2026-07-26,
+>   ADR-049 D8).** §3 below claims "Unknown ChangeKind slugs or severity
+>   values are rejected at load time." That was inaccurate for ChangeKind
+>   slugs when this amendment was first written — `policy_file.py`'s
+>   `_parse_overrides()` only logged a warning and silently skipped an
+>   unknown slug. It now raises `PolicyError`, matching §3's original text,
+>   for both the YAML-loading path and `CompatibilityPolicyConfig.overrides`
+>   (the typed-config edge any front end can construct directly).
 > - **"Unknown policy names silently fall back to `strict_abi`" is stale for
 >   the CLI.** `policy_kind_sets(policy)` itself still has that fallback
 >   internally, but it's unreachable from the documented CLI surface today:
