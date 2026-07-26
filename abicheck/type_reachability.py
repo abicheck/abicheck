@@ -524,20 +524,30 @@ def _finditer_allow_nested(
     candidates from the *same* index (both stdlib, or both non-stdlib
     records) can still mask each other this way.
 
-    Recurses into ``text[m.start() + 1 : m.end()]`` for every match found —
-    a strictly narrower window than the match itself, so recursion always
-    terminates — to catch a shorter candidate embedded anywhere inside it,
-    at any nesting depth (not just one level).
+    Uses an explicit stack rather than recursing into ``text[m.start() + 1 :
+    m.end()]`` for every match found (Codex review, fresh evidence): a
+    genuinely deep chain of registered spellings each nested one inside the
+    next — plausible for template-metaprogramming-heavy C++ under a
+    compiler's configured ``-ftemplate-depth`` (GCC/Clang both default well
+    into the hundreds, and it's routinely raised higher) — previously
+    recursed one Python call per nesting level. Confirmed empirically: 1,000
+    successively nested registered candidate spellings raised
+    ``RecursionError`` under Python's default 1,000-frame recursion limit,
+    aborting the whole comparison rather than degrading gracefully. An
+    explicit stack has no such limit — each entry is still a strictly
+    narrower window than the match that produced it, so the search still
+    always terminates, just without consuming Python's call stack to do it.
     """
     if end is None:
         end = len(text)
     matches: list[re.Match[str]] = []
-    for m in pattern.finditer(text, start, end):
-        matches.append(m)
-        if m.end() - m.start() > 1:
-            matches.extend(
-                _finditer_allow_nested(pattern, text, m.start() + 1, m.end())
-            )
+    stack: list[tuple[int, int]] = [(start, end)]
+    while stack:
+        window_start, window_end = stack.pop()
+        for m in pattern.finditer(text, window_start, window_end):
+            matches.append(m)
+            if m.end() - m.start() > 1:
+                stack.append((m.start() + 1, m.end()))
     return matches
 
 

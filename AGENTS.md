@@ -1138,6 +1138,52 @@ Once a root command genuinely clears the bar above, pick the right home:
   already-fixed unqualified case is detected, falling through to
   mangled-name recovery for both shapes uniformly.
 
+  **A thirteenth finding pointed at a robustness gap in the eleventh
+  finding's own fix, not a new correctness bug.** `_finditer_allow_nested()`
+  (the nested-match helper from the eleventh finding) recursed one Python
+  call per nesting level to search each match's own span for a further
+  embedded candidate (Codex review, fresh evidence). For a genuinely deep
+  chain of registered spellings each nested one inside the next —
+  plausible for template-metaprogramming-heavy C++ under a compiler's
+  configured template-instantiation depth (GCC/Clang both default well
+  into the hundreds, and it is routinely raised higher for real
+  metaprogramming-heavy code) — that per-level recursion follows the C++
+  template depth 1:1. Confirmed empirically: 1,000 successively nested
+  registered candidate spellings raised `RecursionError` under Python's
+  default 1,000-frame recursion limit, aborting the whole comparison
+  rather than degrading gracefully. Fixed by converting the recursive
+  search into an explicit stack — each entry is still a strictly narrower
+  window than the match that produced it, so the search still always
+  terminates, just without consuming Python's call stack to do it, so no
+  amount of nesting depth can overflow it.
+
+  **A fourteenth finding was a genuine regression the tenth finding's own
+  fix introduced, caught before merge.** Recognizing the Itanium `cv` code
+  as an opaque leaf component (tenth finding) used a single fixed
+  placeholder label (`"{op:cv}"`) regardless of the conversion's actual
+  target type. `diff_types._overload_group_key()` chains
+  `itanium_qualified_name()` — which now runs this label onto the scope
+  prefix — to decide whether two declarations are genuine overloads of one
+  another for `_diff_overload_additions()`'s KDE-policy check (Codex
+  review, fresh evidence). A fixed placeholder made *every* conversion
+  operator on a class produce the same qualified name regardless of
+  target — e.g. both `operator int()` and `operator double()` on the same
+  class reduced to `"Foo::{op:cv}"` — collapsing two conversion operators
+  that are never overloads of each other (each is a distinct, unambiguous
+  conversion function; there is no shared `&Foo::operator T` that becomes
+  ambiguous) into one group. Confirmed empirically:
+  `_diff_overload_additions()` fired a false `OVERLOAD_ADDED` for adding
+  `operator double()` alongside an existing `operator int()` before this
+  fix. Fixed by embedding the raw, un-decoded remainder of the mangled
+  string after `cv` into the label itself, instead of a fixed placeholder
+  — Itanium mangling is deterministic, so the same target always
+  reproduces the identical remainder (keeping genuine re-declarations in
+  the same group) while distinct targets always mangle differently
+  (keeping them in distinct groups), without this parser needing to
+  actually decode the arbitrary Itanium `<type>` grammar the remainder
+  encodes. Owner recovery (`owner_class_of()`, which only ever consumes
+  `comps[:-1]`, dropping the leaf entirely) is unaffected either way.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a

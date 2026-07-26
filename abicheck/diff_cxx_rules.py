@@ -189,8 +189,9 @@ def _parse_operator_component(s: str, i: int) -> tuple[str | None, int]:
     """Parse an Itanium operator-function code at ``s[i]``.
 
     Returns ``("{op:XX}", i+2)`` for a known 2-char operator code,
-    ``("{op:cv}", i+2)`` for a conversion operator (see below), or
-    ``(None, i)`` if ``s[i:i+2]`` is not a recognized operator code.
+    ``("{op:cv:<raw remainder>}", len(s))`` for a conversion operator (see
+    below), or ``(None, i)`` if ``s[i:i+2]`` is not a recognized operator
+    code.
 
     A conversion operator's own Itanium code, ``cv``, is deliberately kept
     out of ``_ITANIUM_OPERATORS`` for *signature-identity* purposes (a
@@ -217,10 +218,34 @@ def _parse_operator_component(s: str, i: int) -> tuple[str | None, int]:
     recognizing it — see the ``done`` override in
     :func:`_step_next_component` — rather than attempt (and risk
     mis-parsing) the type that follows.
+
+    The leaf *label* embeds the raw, unparsed remainder of the mangled
+    string after ``cv`` rather than a fixed placeholder (Codex review,
+    fresh evidence): ``diff_types._overload_group_key()`` uses
+    ``itanium_qualified_name()`` — which chains this label onto the scope
+    prefix — to decide whether two declarations are genuine overloads of
+    one another. A fixed placeholder made every conversion operator on a
+    class produce the *same* qualified name regardless of target (e.g.
+    both ``operator int()`` and ``operator double()`` on the same class
+    reduced to ``"Foo::{op:cv}"``), which collapsed two conversion
+    operators that are never overloads of each other (each is a distinct,
+    unambiguous conversion function — there is no shared ``&Foo::operator
+    T`` to become ambiguous) into one group, producing a false
+    ``OVERLOAD_ADDED`` — confirmed empirically:
+    ``_diff_overload_additions()`` fired for exactly this case before this
+    fix. The target type's mangled encoding is itself deterministic (the
+    same target always mangles identically, distinct targets always
+    mangle differently), so embedding the raw, un-decoded remainder
+    verbatim is sufficient to keep distinct targets in distinct groups and
+    identical targets in the same group, without needing to parse the
+    arbitrary ``<type>`` grammar it contains. Advances ``i`` to
+    ``len(s)`` (nothing meaningful follows for this parser's purposes
+    anyway, since :func:`_step_next_component` always stops immediately
+    after a ``cv`` component regardless of nesting).
     """
     code = s[i : i + 2]
     if code == "cv":
-        return "{op:cv}", i + 2
+        return f"{{op:cv:{s[i + 2 :]}}}", len(s)
     if code in _ITANIUM_OPERATORS:
         # Keep the code so operator overloads group (e.g. operator[](int)/(long))
         # while distinct operators stay distinct. Conversion operators (`cv`) are
@@ -271,7 +296,7 @@ def _step_next_component(
     label, new_i = _parse_non_source_name_component(s, i)
     if label is None:
         return None  # conversion operator / substitution / vendor — not modelled
-    if label == "{op:cv}":
+    if label.startswith("{op:cv:"):
         # A conversion operator's own leaf component is always last; its
         # target type follows immediately and is deliberately not parsed
         # (see _parse_operator_component) so stop right here regardless of

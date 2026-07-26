@@ -614,3 +614,25 @@
   single-character-match edge case, and the qualified-target conversion
   operator directly. Full suite green, 100% module coverage, FP-rate gate
   stays 0 FP/0 FN.
+- **`_finditer_allow_nested()`'s own fix could crash on a genuinely deep
+  input, and the earlier `cv`-as-opaque-leaf fix had introduced a real
+  overload-grouping regression** (both Codex review, fresh evidence):
+  (1) the nested-match helper recursed one Python call per nesting level,
+  so 1,000 successively-nested registered spellings (plausible under a
+  compiler's template-instantiation-depth setting for metaprogramming-
+  heavy C++) raised `RecursionError` under Python's default recursion
+  limit, aborting the whole comparison — fixed by converting the
+  recursion into an explicit stack, which has no depth limit. (2) treating
+  the Itanium `cv` (conversion-operator) code as a single fixed-placeholder
+  leaf label made every conversion operator on a class share the same
+  scope-qualified name regardless of target type, so `diff_types`'
+  overload-uniqueness grouping collapsed genuinely distinct conversion
+  operators (`operator int()` vs `operator double()`) into one group and
+  fired a false `OVERLOAD_ADDED` — fixed by embedding the raw, un-decoded
+  mangled remainder after `cv` into the label instead of a placeholder
+  (deterministic mangling keeps identical targets in the same group and
+  distinct targets in distinct groups, without needing to actually decode
+  the target type). New regression tests cover the deep-nesting case, an
+  explicit start/end window unit test, and the conversion-operator
+  overload-grouping false positive end-to-end. Full suite green, 100%
+  module coverage, FP-rate gate stays 0 FP/0 FN.

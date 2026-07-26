@@ -421,6 +421,29 @@ class TestOverloadAdded:
         assert ChangeKind.OVERLOAD_ADDED not in _kinds(result)
         assert ChangeKind.FUNC_ADDED in _kinds(result)
 
+    def test_added_conversion_operator_is_not_treated_as_overload(self):
+        # Codex review, fresh evidence: itanium_scope_components() previously
+        # reduced every conversion operator's leaf to the same fixed
+        # "{op:cv}" placeholder regardless of target type, so adding
+        # operator double() alongside an existing operator int() collapsed
+        # to the same _overload_group_key() and fired a false
+        # OVERLOAD_ADDED -- two conversion operators to different types are
+        # never overloads of each other (no shared `&Foo::operator T` can
+        # become ambiguous).
+        old = _snap(
+            functions=[
+                _method("operator int", "_ZNK3FoocviEv"),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _method("operator int", "_ZNK3FoocviEv"),
+                _method("operator double", "_ZNK3FoocvdEv"),
+            ]
+        )
+        result = compare(old, new)
+        assert ChangeKind.OVERLOAD_ADDED not in _kinds(result)
+
     def test_signature_change_is_not_overload_added(self):
         """A pure signature change (remove+add of the same name) must not look
         like an overload addition: the original declaration is gone."""
@@ -563,10 +586,11 @@ class TestItaniumScopeParser:
         ("__ZSt5touchv", ["std", "touch"]),                  # Mach-O std::touch()
         # Conversion operator (Codex review, fresh evidence): the "cv" code
         # is followed by the target type's own encoding, which is not
-        # parsed -- only the scope prefix before "cv" is needed, so the
-        # leaf label is the opaque "{op:cv}" marker rather than a spelled
-        # target type.
-        ("_ZNK3FoocvN2ns3BarEEv", ["Foo", "{op:cv}"]),       # Foo::operator ns::Bar() const
+        # parsed -- only the scope prefix before "cv" is needed for owner
+        # recovery -- but the leaf label embeds the raw remainder verbatim
+        # (not a fixed placeholder) so distinct conversion targets still
+        # produce distinct overload-grouping keys elsewhere.
+        ("_ZNK3FoocvN2ns3BarEEv", ["Foo", "{op:cv:N2ns3BarEEv}"]),  # Foo::operator ns::Bar() const
     ])
     def test_components(self, mangled, expected):
         assert itanium_scope_components(mangled) == expected

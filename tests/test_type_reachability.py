@@ -36,6 +36,7 @@ from abicheck.model import (
 from abicheck.type_reachability import (
     _bare_type_name,
     _compile_spelling_pattern,
+    _finditer_allow_nested,
     _non_stdlib_signature_spellings,
     _stripped_signature_spelling,
     _typedef_spelling_targets,
@@ -1424,6 +1425,39 @@ class TestNestedMatchesWithinTheSameSpellingIndex:
             ],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_deeply_nested_candidates_do_not_raise_recursion_error(self) -> None:
+        """Codex review, fresh evidence: a genuinely deep chain of
+        registered spellings, each nested one inside the next -- plausible
+        under a compiler's configured template-instantiation depth for
+        template-metaprogramming-heavy C++ -- previously recursed one
+        Python call per nesting level in _finditer_allow_nested, raising
+        RecursionError under Python's default 1,000-frame limit and
+        aborting the whole comparison. An explicit stack has no such
+        limit."""
+        depth = 1000
+        inner = "X"
+        candidates = ["X"]
+        for i in range(depth, 0, -1):
+            inner = f"Wrapper{i}<{inner}>"
+            candidates.append(inner)
+        pattern = _compile_spelling_pattern(set(candidates))
+        matches = _finditer_allow_nested(pattern, inner)
+        assert len(matches) == len(candidates)
+
+    def test_explicit_end_bound_restricts_the_search_window(self) -> None:
+        """Direct unit coverage for the explicit start/end window this
+        helper's stack-based search is built on -- restricting end excludes
+        a match that starts beyond it."""
+        pattern = _compile_spelling_pattern({"Foo", "Bar"})
+        text = "Foo Bar"
+        assert {m.group(0) for m in _finditer_allow_nested(pattern, text)} == {
+            "Foo",
+            "Bar",
+        }
+        assert {m.group(0) for m in _finditer_allow_nested(pattern, text, end=3)} == {
+            "Foo"
+        }
 
 
 class TestNonStdlibBareAliasCollisionWithStdlibStrippedSpelling:
