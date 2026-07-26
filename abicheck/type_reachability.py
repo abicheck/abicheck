@@ -199,15 +199,63 @@ def _stripped_signature_spelling(identity: str) -> str | None:
     return None
 
 
+def _bare_type_name(identity: str) -> str:
+    """*identity* with its outer namespace-qualification stripped — the
+    part after the last ``::`` that occurs at template-argument bracket
+    depth zero, keeping the entire spelling (including any inner qualified
+    template arguments) otherwise intact.
+
+    A plain ``identity.rsplit("::", 1)`` would incorrectly split *inside* a
+    template argument's own qualified name (Codex review, fresh evidence):
+    for ``"api::Wrapper<dep::Tag>"``, the lexically last ``"::"`` belongs
+    to the template argument ``dep::Tag``, not the outer namespace path, so
+    a naive rsplit produces the bare form ``"Tag>"`` instead of the correct
+    ``"Wrapper<dep::Tag>"``. Tracking ``<``/``>`` nesting depth and only
+    considering a ``"::"`` at depth zero as a namespace separator fixes
+    this. Returns *identity* unchanged when it carries no depth-zero
+    ``"::"`` at all (already bare, or only qualified inside template args).
+    """
+    depth = 0
+    split_at = -1
+    i = 0
+    n = len(identity)
+    while i < n:
+        ch = identity[i]
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth -= 1
+        elif ch == ":" and depth == 0 and i + 1 < n and identity[i + 1] == ":":
+            split_at = i
+            i += 1
+        i += 1
+    if split_at == -1:
+        return identity
+    return identity[split_at + 2 :]
+
+
 def _spelling_index(
     stdlib_identities: list[str], non_stdlib_identities: frozenset[str]
-) -> dict[str, frozenset[str]]:
-    """spelling -> {identity, ...} that spelling proves reachable.
+) -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]]:
+    """Returns ``(stdlib_index, record_index)`` — separate spelling ->
+    {identity, ...} maps for stdlib candidates (the ultimate targets) and
+    non-stdlib records (intermediate reachability-closure nodes — see
+    :func:`directly_referenced_stdlib_types`'s worklist).
 
-    Covers both stdlib candidates (the ultimate targets) and non-stdlib
-    records (intermediate reachability-closure nodes — see
-    :func:`directly_referenced_stdlib_types`'s worklist) in one combined
-    index so a single compiled pattern can scan every declaration once.
+    Kept as two independent indices, scanned via two independently
+    compiled patterns rather than one combined pattern (Codex review,
+    fresh evidence): a non-stdlib record's own identity can itself embed a
+    stdlib type's spelling verbatim, e.g. a registered non-stdlib record
+    identity ``"Wrapper<std::string>"`` naming a public function's
+    parameter type exactly. A single non-overlapping ``finditer()`` pass
+    over one combined pattern tries the longest alternative first, matches
+    the *whole* ``"Wrapper<std::string>"`` span as one non-stdlib hit, and
+    then — because regex matches don't overlap — never independently
+    notices the nested ``"std::string"`` substring inside that same span,
+    even though it is directly present in the public signature text.
+    Scanning with two separate compiled patterns means the stdlib pass
+    finds ``"std::string"`` regardless of what the non-stdlib pass matched
+    in the same text.
 
     A stdlib candidate's stripped spelling that collides with a real,
     unrelated non-stdlib record's own identity is dropped (Codex review,
@@ -222,35 +270,39 @@ def _spelling_index(
     reducing to the same bare form) — every one of them is recorded, not
     just the first.
 
-    A non-stdlib record's own bare-trailing-segment alias is dropped
-    instead of recorded when it is ambiguous — shared by two or more
-    *different* non-stdlib records (Codex review, fresh evidence: e.g.
-    ``api::Inner`` and ``detail::Inner`` both reducing to bare ``Inner``):
-    unlike the stdlib case above, queuing every colliding record here would
-    let a signature naming one of them wrongly walk an unrelated internal
-    record's fields too, misattributing its own implementation-only churn
-    as publicly reachable. Each record's own full identity is never
-    ambiguous this way and is always kept.
+    A non-stdlib record's own bare (namespace-unqualified, see
+    :func:`_bare_type_name`) alias is dropped instead of recorded when it
+    is ambiguous — shared by two or more *different* non-stdlib records
+    (Codex review, fresh evidence: e.g. ``api::Inner`` and ``detail::Inner``
+    both reducing to bare ``Inner``): unlike the stdlib case above, queuing
+    every colliding record here would let a signature naming one of them
+    wrongly walk an unrelated internal record's fields too, misattributing
+    its own implementation-only churn as publicly reachable. Each record's
+    own full identity is never ambiguous this way and is always kept.
     """
-    index: dict[str, set[str]] = {}
+    stdlib_index: dict[str, set[str]] = {}
     for identity in stdlib_identities:
-        index.setdefault(identity, set()).add(identity)
+        stdlib_index.setdefault(identity, set()).add(identity)
         stripped = _stripped_signature_spelling(identity)
         if stripped is not None and stripped not in non_stdlib_identities:
-            index.setdefault(stripped, set()).add(identity)
+            stdlib_index.setdefault(stripped, set()).add(identity)
 
+    record_index: dict[str, set[str]] = {}
     generic_bare: dict[str, set[str]] = {}
     for identity in non_stdlib_identities:
-        index.setdefault(identity, set()).add(identity)
-        if "::" in identity:
-            bare = identity.rsplit("::", 1)[1]
+        record_index.setdefault(identity, set()).add(identity)
+        bare = _bare_type_name(identity)
+        if bare != identity:
             generic_bare.setdefault(bare, set()).add(identity)
     for bare, ids in generic_bare.items():
         if len(ids) == 1:
-            index.setdefault(bare, set()).update(ids)
+            record_index.setdefault(bare, set()).update(ids)
         # else: ambiguous bare alias shared by distinct records -- drop.
 
-    return {spelling: frozenset(ids) for spelling, ids in index.items()}
+    return (
+        {spelling: frozenset(ids) for spelling, ids in stdlib_index.items()},
+        {spelling: frozenset(ids) for spelling, ids in record_index.items()},
+    )
 
 
 def _typedef_spelling_targets(
@@ -422,14 +474,15 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     if not stdlib_identities:
         return frozenset()
 
-    spelling_index = _spelling_index(
+    stdlib_index, record_index = _spelling_index(
         stdlib_identities, frozenset(non_stdlib_identities)
     )
-    pattern = _compile_spelling_pattern(spelling_index)
-    # spelling_index always has at least one entry here (every stdlib
+    stdlib_pattern = _compile_spelling_pattern(stdlib_index)
+    record_pattern = _compile_spelling_pattern(record_index)
+    # stdlib_index always has at least one entry here (every stdlib
     # identity maps at least itself), so _compile_spelling_pattern's
     # empty-input case never applies to this caller.
-    assert pattern is not None
+    assert stdlib_pattern is not None
 
     referenced: set[str] = set()
     remaining = set(stdlib_identities)
@@ -454,17 +507,17 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
         names."""
         if not type_string:
             return
-        for match in pattern.finditer(type_string):
-            for identity in spelling_index.get(match.group(0), ()):
+        for match in stdlib_pattern.finditer(type_string):
+            for identity in stdlib_index.get(match.group(0), ()):
                 if identity in remaining:
                     referenced.add(identity)
                     remaining.discard(identity)
-                elif (
-                    identity in non_stdlib_identities
-                    and identity not in reached_records
-                ):
-                    reached_records.add(identity)
-                    worklist.append(identity)
+        if record_pattern is not None:
+            for match in record_pattern.finditer(type_string):
+                for identity in record_index.get(match.group(0), ()):
+                    if identity not in reached_records:
+                        reached_records.add(identity)
+                        worklist.append(identity)
         if typedef_pattern is not None:
             for match in typedef_pattern.finditer(type_string):
                 alias = match.group(0)

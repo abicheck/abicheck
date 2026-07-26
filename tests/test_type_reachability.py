@@ -28,6 +28,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.type_reachability import (
+    _bare_type_name,
     _compile_spelling_pattern,
     _stripped_signature_spelling,
     _typedef_spelling_targets,
@@ -1171,3 +1172,105 @@ class TestStdlibTypedefAliasResolution:
             frozenset(),
         )
         assert index["Alias"] == "Real"
+
+
+class TestBareTypeNameTemplateArguments:
+    def test_strips_only_outer_namespace_not_template_argument_qualifier(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: a naive rsplit("::", 1) splits
+        inside a template argument's own qualified name, since
+        "dep::Tag"'s "::" is lexically the last one in the whole string
+        even though it belongs to the template argument, not the outer
+        namespace path -- producing the corrupted bare form "Tag>" instead
+        of "Wrapper<dep::Tag>"."""
+        assert _bare_type_name("api::Wrapper<dep::Tag>") == "Wrapper<dep::Tag>"
+
+    def test_no_outer_namespace_qualifier_returns_identity_unchanged(self) -> None:
+        """A template argument's own "::" at bracket depth > 0 is not an
+        outer-namespace separator -- with nothing at depth zero to split
+        on, the identity is already bare."""
+        assert _bare_type_name("Wrapper<dep::Tag>") == "Wrapper<dep::Tag>"
+
+    def test_plain_qualified_name_without_templates_still_works(self) -> None:
+        """Guard against over-correcting the simple (pre-existing) case."""
+        assert _bare_type_name("api::Inner") == "Inner"
+
+    def test_nested_namespace_qualifier_strips_up_to_last_depth_zero_separator(
+        self,
+    ) -> None:
+        assert _bare_type_name("ns::Outer::Inner<T>") == "Inner<T>"
+
+    def test_end_to_end_bare_alias_resolves_through_qualified_template_argument(
+        self,
+    ) -> None:
+        """A record whose qualified identity is a template instantiation
+        with its own qualified template argument (api::Wrapper<dep::Tag>)
+        must still be reachable via the bare spelling a real dumper
+        backend actually uses in a signature (Wrapper<dep::Tag>) -- the
+        template-nesting-aware bare alias, not a naive rsplit, is what
+        makes this resolve."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="Wrapper<dep::Tag>")],
+            types=[
+                RecordType(
+                    name="Wrapper<dep::Tag>",
+                    kind="class",
+                    qualified_name="api::Wrapper<dep::Tag>",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
+class TestNestedStdlibSpellingWithinNonStdlibWrapperIdentity:
+    def test_stdlib_type_embedded_directly_in_public_signature_via_wrapper_identity(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: when a non-stdlib record's own
+        full identity spelling embeds a stdlib type's spelling verbatim
+        (a template instantiation like "Wrapper<std::string>"), and a
+        public function's signature names that wrapper identity exactly,
+        the nested "std::string" substring must be independently detected
+        as directly referenced -- a single non-overlapping regex pass over
+        one combined pattern would match the longer non-stdlib alternative
+        first and never separately notice the nested stdlib substring in
+        the same span. Wrapper itself has no fields, so this can only pass
+        via the direct-spelling match, not the field-walk fallback."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("foo", return_type="Wrapper<std::string>")],
+            types=[
+                RecordType(name="Wrapper<std::string>", kind="class"),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_stdlib_type_already_found_is_not_reprocessed_on_a_second_mention(
+        self,
+    ) -> None:
+        """A stdlib identity already moved from ``remaining`` into
+        ``referenced`` by an earlier declaration must not error or
+        duplicate work when a later declaration mentions it again."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    return_type="std::string",
+                    params=[
+                        Param(name="a", type="std::string"),
+                        Param(name="b", type="std::string"),
+                    ],
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})

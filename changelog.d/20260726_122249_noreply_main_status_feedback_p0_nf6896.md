@@ -253,3 +253,32 @@
   target the same way `surface.py`'s own reachability closure does. New
   FP-rate corpus case `public_std_string_typedef_alias_layout_changed`
   (real-break/FN sentinel) passes at baseline 0/0.
+- **`type_reachability.py`'s bare-alias derivation and single-pattern
+  scan each had one more real gap** (Codex review, fresh evidence): (1)
+  the non-stdlib bare-alias fallback derived a record's unqualified
+  spelling via `identity.rsplit("::", 1)`, which splits inside a *template
+  argument's own* qualified name rather than at the outer namespace
+  boundary — for `"api::Wrapper<dep::Tag>"`, the lexically last `"::"`
+  belongs to the template argument `dep::Tag`, not the outer namespace
+  path, so the old code derived the corrupted bare form `"Tag>"` instead
+  of `"Wrapper<dep::Tag>"`, and a real dumper backend's bare signature
+  spelling for that wrapper then never matched anything. Fixed with a new
+  `_bare_type_name()` that tracks `<`/`>` nesting depth and only treats a
+  `"::"` at depth zero as a namespace separator. (2) stdlib and non-stdlib
+  spellings were matched via one *combined* compiled pattern in a single
+  non-overlapping `finditer()` pass — when a non-stdlib record's own
+  identity embeds a stdlib type's spelling verbatim (e.g. a template
+  instantiation `"Wrapper<std::string>"` registered as its own record
+  identity), and a public signature names that wrapper's full identity
+  exactly, the combined pattern's longest-first alternation matches the
+  whole wrapper span first, consuming it — since regex matches never
+  overlap, the nested `"std::string"` substring inside that same span was
+  never independently found, even though it is directly present in the
+  public signature text. Fixed by splitting `_spelling_index()` into two
+  independent indices (stdlib vs. non-stdlib/record) with two
+  independently compiled patterns scanned separately over each
+  declaration, so one pattern's match can never mask the other's. New
+  regression tests cover both: an end-to-end case resolving a record via
+  its qualified-template-argument bare alias, and a wrapper-with-no-fields
+  case that can only pass via the independent nested-spelling match (not
+  the field-walk fallback).
