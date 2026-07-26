@@ -1,62 +1,81 @@
 # Case 39: Variable Const Change
 
-**Category:** Global Variable Qualifiers | **Verdict:** 🔴 BREAKING (runtime) / NO_CHANGE in headers-only abicheck
+**Category:** Global Variable Qualifiers | **Verdict:** 🔴 BREAKING
 
-## What changes
+## Verdict and consumer impact
 
-| Version | Definition |
-|---------|-----------|
-| v1 | `extern int g_buffer_size` (mutable); `extern const int g_max_retries` (const); `extern int g_legacy_flag` (exists) |
-| v2 | `extern const int g_buffer_size` (became const); `extern int g_max_retries` (lost const); `g_legacy_flag` removed |
+Three independent global-variable changes land in one release:
+`g_buffer_size` becomes `const` (moves to `.rodata`), `g_max_retries` loses
+`const` (moves out of `.rodata`), and `g_legacy_flag` is removed entirely.
+Old binaries that write to `g_buffer_size` (legal against v1) get a SIGSEGV
+once the page is read-only; binaries that inlined `g_max_retries`'s old
+constant value now silently disagree with the library; and anything
+referencing `g_legacy_flag` fails to load at all. Recompilation is
+mandatory.
 
-## Why runtime is BREAKING but headers-only abicheck may say NO_CHANGE
+## Old/new diff
 
-When abicheck performs headers-only analysis (without compiled `.so` files), const
-qualifiers on global variables and variable removal are not visible in the header parse
-output in a way that triggers ABI break detection. The actual binary impact is real:
+| v1.h | v2.h |
+|------|------|
+| `extern int g_buffer_size;` | `extern const int g_buffer_size;` (became const) |
+| `extern const int g_max_retries;` | `extern int g_max_retries;` (lost const) |
+| `extern int g_legacy_flag;` | *(removed)* |
 
-1. **`g_buffer_size` became const** — moved from `.data` to `.rodata`. Old binaries that
-   write to it (legal in v1) will get a SIGSEGV because the memory page is now read-only.
-2. **`g_max_retries` lost const** — old binaries may have inlined the constant value `3`
-   at compile time. The library now holds `5`, but the app still uses `3` (ODR violation).
-3. **`g_legacy_flag` removed** — old binaries referencing it get an undefined symbol error
-   at load time.
+## abicheck command
 
-With full `.so`-level analysis (abidiff), these would all be detected. But the
-headers-only checker reports NO_CHANGE.
-
-## Code diff
-
-```diff
--extern int g_buffer_size;
-+extern const int g_buffer_size;
-
--extern const int g_max_retries;
-+extern int g_max_retries;
-
--extern int g_legacy_flag;
-+/* g_legacy_flag REMOVED */
+```bash
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 
-```diff
--int g_buffer_size = 4096;
-+const int g_buffer_size = 8192;
+## Expected abicheck finding
 
--const int g_max_retries = 3;
-+int g_max_retries = 5;
+```text
+Verdict: BREAKING (exit 4)
 
--int g_legacy_flag = 1;
-+/* g_legacy_flag removed */
+- var_became_const: Variable became const-qualified: g_buffer_size
+  (writes now -> SIGSEGV) (non-const -> const)
+  > Variable moved to read-only section; old code writing to it gets SIGSEGV.
+- var_lost_const: Variable lost const qualifier: g_max_retries
+  (ODR / inlining break) (const -> non-const)
+  > Variable no longer const; ODR violations possible if old code
+    inlined the value.
+- var_removed: Public variable removed: g_legacy_flag
+  > Old binaries reference a global variable that no longer exists;
+    link or load failure.
+
+Deployment Risk:
+- exported_object_alignment_reduced: Exported object alignment reduced:
+  g_max_retries (4096 -> 8 bytes)
 ```
 
-## Real Failure Demo
+## Minimum evidence
 
-**Severity: HIGH (but undetected by headers-only check)**
+`min_evidence: L1` — DWARF's variable type entries carry the `const`
+qualifier for each global, and the exported-symbol table carries
+existence/removal; both are enough to detect all three changes directly
+from debug info. No public headers required — the diff canonicalizes each
+side's type string with the `const` token stripped before comparing, so a
+pure const-qualifier flip is caught instead of being read as an unrelated
+base-type change.
+
+## Why abicheck catches it
+
+DWARF's `DW_TAG_variable` entries carry each global's type, including a
+`DW_TAG_const_type` wrapper when present; abicheck compares the
+const-qualification of each global directly from debug info in both
+versions, and cross-checks variable existence against the exported-symbol
+table for removal.
+
+## Runtime failure demonstration
+
+**Severity: HIGH**
 
 **Scenario:** compile app against v1, swap in v2 `.so` without recompile.
 
 ```bash
-# Build v1 lib + app
+# Build old library + app
 gcc -shared -fPIC -g v1.c -o libfoo.so
 gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
 ./app
@@ -65,46 +84,42 @@ gcc -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
 # → g_legacy_flag  = 1
 # → get_config()   = 4096
 # → g_buffer_size after write = 2048
+# → exit 0
 
-# Swap to v2 (no recompile of app)
+# Swap in new library (no recompile)
 gcc -shared -fPIC -g v2.c -o libfoo.so
 ./app
 # → ./app: symbol lookup error: ./app: undefined symbol: g_legacy_flag
-#
-# If g_legacy_flag reference were removed, the write to g_buffer_size
-# would cause SIGSEGV (it now lives in .rodata).
+# → exit 127
 ```
 
-**Why HIGH:** Variable removal causes immediate load failure. Const promotion causes
-segfaults on write. Const removal causes silent value staleness. All are real ABI breaks
-that headers-only analysis misses.
+**Why HIGH:** the removed `g_legacy_flag` symbol fails resolution before
+the app can even reach the `g_buffer_size` write, so this run demonstrates
+immediate load failure. Had `g_legacy_flag` stayed in place, the app would
+have loaded and then SIGSEGV'd on `g_buffer_size = 2048;` once that global
+moved to the now-read-only `.rodata` section — both are real ABI breaks
+from this one release.
 
-## Reproduce manually
+## Safe redesign
+
+Never change const-qualification on an exported global variable, and never
+remove one without a SONAME bump. If a variable needs to become read-only,
+add an accessor function (`int get_buffer_size(void)`) instead and
+deprecate the raw global.
+
+**Real-world example:** libraries that "harden" their public globals by
+adding `const` after the fact (a seemingly safe tightening) break any
+consumer that legitimately wrote to the old mutable variable — the fix
+always needs a major version bump, not a patch release.
+
+## Cross-tool comparison
+
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -shared -fPIC -g v2.c -o libv2.so
 abidw --out-file v1.xml libv1.so
 abidw --out-file v2.xml libv2.so
 abidiff v1.xml v2.xml
 echo "exit: $?"   # → 12 (detected at binary level)
 ```
-
-## How to fix
-Never change const qualification on exported global variables. If a variable needs to
-become read-only, provide an accessor function instead (`int get_buffer_size(void)`).
-Never remove exported variables without a SONAME bump.
-
-## abicheck usage note
-
-For global variable qualifier/type changes, run dump with headers:
-
-```bash
-python3 -m abicheck.cli dump libv1.so -H v1.h -o v1.json
-python3 -m abicheck.cli dump libv2.so -H v2.h -o v2.json
-python3 -m abicheck.cli compare v1.json v2.json
-```
-
-Without `-H`, ELF-only mode may miss source-level type qualifiers on globals.
 
 ## References
 
