@@ -2899,18 +2899,19 @@ project (the Bazel pilot additionally re-validated ADR-053's TU→DSO
 attribution against a real, live `bazel aquery` capture, not just
 CMake/Make); the Intel `icpx`/oneAPI vendor-toolchain pilot installed
 cleanly and validated real icpx-compiled binaries plus real SYCL
-device-code compilation, additionally finding (not fixed) a real
-`sycl_metadata.py` detection gap against Intel's current Unified Runtime
-adapter ABI; MSVC/PDB remains genuinely blocked (no redistributable Linux
-path to `cl.exe`) — see that report for the full detail on both; one real,
-reproducible product bug (`dump`/`compare` disagreeing
-on `--header`-derived `public_header_dirs` scope, causing a spurious
+device-code compilation; MSVC/PDB remains genuinely blocked (no
+redistributable Linux path to `cl.exe`). Two real, reproducible product
+bugs were found and fixed in this same PR, both after initial triage as
+out-of-scope follow-ups: (1) `dump`/`compare` disagreeing on
+`--header`-derived `public_header_dirs` scope, causing a spurious
 `ScopeMismatchError` in the exact baseline-then-live-candidate pattern this
-pipeline relies on) was found and, after initial triage as an ADR-050 (not
-ADR-053/G30 P2) follow-up, fixed in this same PR
-(`dumper.dump(scope_header_dirs=...)`, decoupled from ADR-015's
-declaration-provenance tagging) — see that report's "Finding" section for
-the full root-cause and fix detail. The per-pilot plan below is kept as the
+pipeline relies on (`dumper.dump(scope_header_dirs=...)`, decoupled from
+ADR-015's declaration-provenance tagging); (2) `sycl_metadata.py` silently
+rejecting real, current Intel oneAPI 2026.1 UR adapters as invalid (they
+export only `urGet<Category>ProcAddrTable` getters, not the older
+`urAdapterGet`-based per-verb symbols the detector required) — see that
+report's "Finding" sections for the full root-cause and fix detail on
+both. The per-pilot plan below is kept as the
 original acceptance-criteria
 reference the executed report was checked against.
 

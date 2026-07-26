@@ -28,15 +28,14 @@ what that did and didn't cover, and "Still blocked" for MSVC/PDB.
 | Bazel (minimal generic) | Synthetic (`libdemo` fixture) | Done | Yes |
 | Package-only, `.deb` (minimal generic) | Synthetic (`libdemo` fixture) | Done | Yes |
 | Cross-compiled target (aarch64) | Synthetic (`libdemo` fixture) | Done | Yes |
-| Second vendor-toolchain project: Intel `icpx`/oneAPI | Synthetic (`libdemo` fixture) + real DPC++ runtime plugins | Partially done — see below | Yes (C++); real SYCL-plugin detection gap found, not fixed |
+| Second vendor-toolchain project: Intel `icpx`/oneAPI | Synthetic (`libdemo` fixture) + real DPC++ runtime plugins | Done | Yes (C++); real SYCL-plugin detection gap found and fixed |
 | Second vendor-toolchain project: MSVC/PDB | — | Still blocked — see below | n/a |
 
-One real, reproducible product bug was found and fixed in this same PR
-after initial triage as an out-of-scope follow-up (see "Finding" below); a
-second, real, currently-unfixed gap (`sycl_metadata.py`'s UR-adapter
-detection is stale relative to a real, current Intel oneAPI 2026.1 runtime)
-was found by the vendor-toolchain pilot below and left for its own
-follow-up.
+Two real, reproducible product bugs were found and fixed in this same PR:
+a `dump`-vs-`compare` scope-fingerprint mismatch, and a `sycl_metadata.py`
+UR-adapter detection gap against Intel's current oneAPI 2026.1 runtime —
+both after initial triage as out-of-scope follow-ups (see "Finding"
+sections below).
 
 ## PVXS pilot (the confirmed/recommended pilot)
 
@@ -168,7 +167,7 @@ captured `BuildEvidence` correctly attributed both `src/demo.cpp` and
 channel (Bazel's own compile-unit → link-unit → terminal-DSO graph), exactly
 as ADR-053 D2 documents.
 
-## Second vendor-toolchain pilot: Intel oneAPI (`icpx`) — partially unblocked; MSVC/PDB remains blocked
+## Second vendor-toolchain pilot: Intel oneAPI (`icpx`) — unblocked; MSVC/PDB remains blocked
 
 **Initially marked fully blocked, then partially unblocked**: contrary to
 the initial assessment, Intel's oneAPI compiler is a real, freely
@@ -193,28 +192,45 @@ DPC++/C++ Compiler 2026.1.0).
   (`sycl/sycl.hpp` from the installed DPC++ runtime, no GPU/OpenCL runtime
   needed just to *compile*), producing a real ELF `.so` `abicheck dump`
   parses without error (binary/symbols-level; 4 functions extracted).
-- **Real SYCL runtime plugin metadata (`sycl_metadata.py`) — a genuine
-  finding, not fixed here.** The installed DPC++ runtime ships real Intel
-  Unified Runtime (UR) adapter plugins
+- **Real SYCL runtime plugin metadata (`sycl_metadata.py`) — found and
+  fixed.** The installed DPC++ runtime ships real Intel Unified Runtime (UR)
+  adapter plugins
   (`/opt/intel/oneapi/compiler/2026.1/lib/libur_adapter_{opencl,level_zero}.so.*`).
   Running `abicheck.sycl_metadata.parse_sycl_plugin()` directly against
-  these real, current (oneAPI 2026.1) adapters returns `None` for both —
-  "missing urAdapterGet — not a valid UR adapter". Root cause: `nm -D`
-  confirms neither real adapter exports a symbol named `urAdapterGet` at
-  all; both instead export the newer `urGetAdapterProcAddrTable`/
-  `urGet<Category>ProcAddrTable` entry-point family (`urGetPlatformProcAddrTable`,
-  `urGetDeviceProcAddrTable`, …). `sycl_metadata.py`'s UR-plugin validity
-  check (`parse_sycl_plugin`, `_UR_SYMBOL_RE`) still hard-requires the
-  older `urAdapterGet` symbol, so it silently rejects a real, valid,
-  current-generation UR adapter as "not a valid UR adapter" — a genuine
-  staleness gap relative to the real Unified Runtime ABI's evolution,
-  surfaced only by running against a real, currently-shipping vendor
-  runtime (a synthetic/mocked plugin fixture would not have caught this,
-  since it would be built to match whatever symbol set the detector
-  already expects). **Not fixed in this pass** — understanding UR's actual
-  current versioned entry-point contract well enough to fix the detector
-  correctly (not just pattern-match today's one observed symbol set) is
-  its own scoped task, not a drive-by alongside this PR's other work.
+  these real, current (oneAPI 2026.1) adapters originally returned `None`
+  for both — "missing urAdapterGet — not a valid UR adapter". Root cause:
+  `nm -D` confirmed neither real adapter exports a symbol named
+  `urAdapterGet` at all (25 exported `ur*` symbols total, every one of them
+  an `urGet<Category>ProcAddrTable` function-pointer-table getter —
+  `urGetAdapterProcAddrTable`, `urGetPlatformProcAddrTable`,
+  `urGetDeviceProcAddrTable`, …, no individual per-verb symbol exported
+  directly at all). `sycl_metadata.py`'s UR-plugin validity check
+  (`parse_sycl_plugin`) hard-required the older `urAdapterGet` symbol, so
+  it silently rejected a real, valid, current-generation UR adapter as "not
+  a valid UR adapter" — a genuine staleness gap relative to the real
+  Unified Runtime ABI's evolution, surfaced only by running against a real,
+  currently-shipping vendor runtime (a synthetic/mocked plugin fixture
+  would not have caught this, since it would be built to match whatever
+  symbol set the detector already expects).
+
+  **Fix**: `parse_sycl_plugin()` now accepts either UR generation — the
+  legacy `urAdapterGet` marker or the current `urGetAdapterProcAddrTable`
+  marker. `_detect_ur_version_from_symbols()`'s landmark heuristic
+  (`urBindlessImages*`/`urVirtualMem*`/`urCommandBuffer*`/`urAdapterGet`)
+  only ever matched the legacy per-verb shape to begin with — none of those
+  `startswith()` checks match `urGet<Category>ProcAddrTable` names, so it
+  already, correctly, returned `""` for the modern shape once the validity
+  gate itself was fixed (deliberately left unchanged rather than guessing
+  a version from landmarks that are always fully present on every current
+  adapter regardless of actual UR release — a real per-release signal
+  doesn't exist in the export set for this generation). Verified against
+  both real installed adapters directly (`parse_sycl_plugin` now returns a
+  populated `SyclPluginInfo` with all 25 real entry points for each) and
+  end-to-end via `discover_sycl_plugins`/`parse_sycl_metadata` over the
+  real oneAPI lib directory (`implementation: "dpcpp"`, all 3 real backends
+  — `level_zero`, `level_zero_v2`, `opencl` — discovered). New regression
+  tests in `tests/test_sycl_metadata.py` pin both the validity fix and the
+  version-detection non-regression.
 - **MSVC/`cl.exe` — still genuinely blocked.** No amount of `apt`/network
   access changes this: MSVC requires a licensed Windows installation and
   is not redistributable for a Linux container the way Intel's compiler

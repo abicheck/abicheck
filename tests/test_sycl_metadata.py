@@ -170,6 +170,29 @@ class TestVersionDetection:
     def test_ur_unknown(self) -> None:
         assert _detect_ur_version_from_symbols(["urRandom"]) == ""
 
+    def test_ur_table_generation_returns_unknown_not_a_false_landmark_match(
+        self,
+    ) -> None:
+        """The current UR export shape (real Intel oneAPI 2026.1 adapters,
+        G30 pilot validation) exports only urGet<Category>ProcAddrTable
+        getters -- never the legacy per-verb symbols this heuristic keys
+        off. None of its own "Get...ProcAddrTable" names should accidentally
+        satisfy a startswith() landmark check (e.g. urGetBindlessImagesExp
+        ProcAddrTable must not match the "urBindlessImages" landmark) --
+        version detection must honestly return "" rather than guess."""
+        assert (
+            _detect_ur_version_from_symbols(
+                [
+                    "urGetAdapterProcAddrTable",
+                    "urGetBindlessImagesExpProcAddrTable",
+                    "urGetVirtualMemProcAddrTable",
+                    "urGetCommandBufferExpProcAddrTable",
+                    "urGetPlatformProcAddrTable",
+                ]
+            )
+            == ""
+        )
+
     def test_backend_known(self) -> None:
         assert _detect_backend_type("cuda") == "cuda"
 
@@ -219,6 +242,40 @@ class TestParseSyclPlugin:
         so = _write_elf(tmp_path, "libur_adapter_opencl.so")
         with patch(
             "abicheck.sycl_metadata._extract_plugin_symbols", return_value=["urFoo"]
+        ):
+            assert parse_sycl_plugin(so) is None
+
+    def test_ur_plugin_table_generation_recognized(self, tmp_path: Path) -> None:
+        """The current UR export shape (verified against a real Intel
+        oneAPI 2026.1 install, G30 pilot validation) exports only
+        urGet<Category>ProcAddrTable getters -- no legacy urAdapterGet at
+        all. Must be recognized as a valid plugin, not silently rejected."""
+        so = _write_elf(tmp_path, "libur_adapter_level_zero.so")
+        table_symbols = [
+            "urGetAdapterProcAddrTable",
+            "urGetPlatformProcAddrTable",
+            "urGetDeviceProcAddrTable",
+            "urGetContextProcAddrTable",
+            "urGetQueueProcAddrTable",
+        ]
+        with patch(
+            "abicheck.sycl_metadata._extract_plugin_symbols",
+            return_value=table_symbols,
+        ):
+            plugin = parse_sycl_plugin(so)
+        assert plugin is not None
+        assert plugin.name == "level_zero"
+        assert plugin.interface_type == "ur"
+        assert plugin.entry_points == table_symbols
+        # Honest "unknown" -- see _detect_ur_version_from_symbols's docstring.
+        assert plugin.pi_version == ""
+
+    def test_ur_plugin_missing_both_generations_markers(self, tmp_path: Path) -> None:
+        so = _write_elf(tmp_path, "libur_adapter_opencl.so")
+        with patch(
+            "abicheck.sycl_metadata._extract_plugin_symbols",
+            # A near-miss: real category getters, but not the adapter one.
+            return_value=["urGetPlatformProcAddrTable", "urGetDeviceProcAddrTable"],
         ):
             assert parse_sycl_plugin(so) is None
 
