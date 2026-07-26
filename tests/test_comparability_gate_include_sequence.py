@@ -18,10 +18,10 @@ from __future__ import annotations
 import json
 
 from abicheck.comparability import (
-    _OWNED_HEADER_SINGLE_SENTINEL,
     _include_sequence_is_additive_owned_growth,
     _sha256_of,
 )
+from abicheck.comparability_json import _OWNED_HEADER_SINGLE_SENTINEL
 from tests._comparability_gate_helpers import _ANY_NEW_HEADERS, _hdrs_slot
 
 
@@ -241,4 +241,20 @@ def test_include_sequence_additive_owned_growth_false_for_duplicated_old_pair():
     new = json.dumps(
         [f"0:hdrs:{json.dumps([['a.h', 'a.h'], ['a.h', 'a.h'], ['c.h', 'c.h']])}"]
     )
+    assert not _include_sequence_is_additive_owned_growth(old, new, frozenset({"c.h"}))
+
+
+def test_include_sequence_additive_owned_growth_false_for_unchanged_slot_with_duplicate_pairs():
+    # Codex review, PR #641 follow-up (fifteenth P2): the duplicate-pair
+    # check above lives inside this function's per-slot diff loop, which
+    # only reaches a slot whose payload actually DIFFERS between old and
+    # new (`if old_slot == new_slot: continue`). An unchanged, malformed
+    # slot 0 with a duplicated pair (["x.h", "x.h"] listed twice) rode
+    # alongside a genuinely-growing separate slot 1 completely unexamined.
+    # Confirmed by direct repro before any fix: this was accepted as safe
+    # growth. Fixed in _slot_indices_match_position, which validates every
+    # slot (including unchanged ones), not just the per-slot loop.
+    malformed_slot0 = "0:hdrs:" + json.dumps([["x.h", "x.h"], ["x.h", "x.h"]])
+    old = json.dumps([malformed_slot0, _hdrs_slot(1, [("a.h", "a.h")])])
+    new = json.dumps([malformed_slot0, _hdrs_slot(1, [("a.h", "a.h"), ("c.h", "c.h")])])
     assert not _include_sequence_is_additive_owned_growth(old, new, frozenset({"c.h"}))

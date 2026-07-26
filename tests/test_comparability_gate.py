@@ -666,6 +666,48 @@ def test_gate_still_raises_when_appended_header_pulls_in_new_external_dependency
         check_contracts_comparable(old, new)
 
 
+def test_gate_header_sequence_growth_still_comparable_with_out_of_root_provenance_header(
+    tmp_path,
+):
+    # Codex review, PR #641 follow-up (sixteenth P2): `public_header_paths`
+    # (provenance-only, never fed to the L2 frontend) sitting outside every
+    # DECLARED header's own common root used to give the scope "headers"
+    # field and profile_fields["header_sequence"]/"include_sequence" two
+    # different identity strings for the exact same newly-added file (e.g.
+    # scope "foo/c.h" vs. sequence "c.h") -- the specific-correspondence
+    # check (_scope_newly_added_headers) compares these by exact string
+    # equality, so this genuinely safe, purely additive header change
+    # (bar/d.h stays untouched throughout; foo/c.h is a real new header
+    # alongside the existing foo/a.h, foo/b.h) used to spuriously raise
+    # ProfileMismatchError. Unlike the "new header lands outside the old
+    # common root" and "new external dependency" cases nearby (both
+    # documented, accepted limitations), this one doesn't require existing
+    # declared headers to shift identity shape at all -- widening
+    # _header_identities' own root computation to match the scope side's
+    # closes it outright.
+    a = _write(tmp_path / "foo" / "a.h", "int f(void);\n")
+    b = _write(tmp_path / "foo" / "b.h", "int g(void);\n")
+    d = _write(tmp_path / "bar" / "d.h", "int d(void);\n")
+    a2 = _write(tmp_path / "foo" / "a.h", "int f(void);\n")
+    b2 = _write(tmp_path / "foo" / "b.h", "int g(void);\n")
+    c2 = _write(tmp_path / "foo" / "c.h", "int h(void);\n")
+    old = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            declared_headers=[a, b],
+            public_header_paths=[d],
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            l2_frontend_ran=True,
+            declared_headers=[a2, b2, c2],
+            public_header_paths=[d],
+        )
+    )
+    assert check_contracts_comparable(old, new) is None
+
+
 def test_gate_raises_profile_mismatch_error_on_profile_drift(tmp_path):
     dep_old = _write(tmp_path / "d1" / "dep.h", "struct Dep { int x; };\n")
     dep_new = _write(tmp_path / "d2" / "dep.h", "struct Dep { int x; int y; };\n")
@@ -1339,6 +1381,25 @@ def test_scope_field_additive_superset_declines_on_malformed_json():
 
 def test_scope_field_additive_superset_declines_on_non_list_json():
     assert not _scope_field_is_additive_superset('{"a": 1}', json.dumps(["a.h"]))
+
+
+def test_scope_field_additive_superset_false_for_duplicated_new_identity():
+    # Codex review, PR #641 follow-up (fourteenth P2): compute_extraction_
+    # contract always emits a sorted, deduplicated identity list for this
+    # field, so a duplicated identity (e.g. "c.h" listed twice) is never
+    # genuine evidence -- but `set(new_list) >= set(old_list)` silently
+    # collapses it away, so it would otherwise still authorize the
+    # carve-out. Confirmed by direct repro before any fix: this was
+    # accepted as safe growth.
+    old = json.dumps(["a.h", "b.h"])
+    new = json.dumps(["a.h", "b.h", "c.h", "c.h"])
+    assert not _scope_field_is_additive_superset(old, new)
+
+
+def test_scope_field_additive_superset_false_for_duplicated_old_identity():
+    old = json.dumps(["a.h", "a.h", "b.h"])
+    new = json.dumps(["a.h", "a.h", "b.h", "c.h"])
+    assert not _scope_field_is_additive_superset(old, new)
 
 
 def test_header_sequence_additive_reorder_free_declines_on_malformed_json():

@@ -117,12 +117,18 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
+from .comparability_json import _SCOPE_SINGLE_ENTRY_SENTINELS, _json_load_str_list
+from .comparability_sequences import (
+    _HEADER_SEQUENCE_FIELDS,
+    _INCLUDE_SEQUENCE_FIELDS,
+    _header_sequence_is_additive_reorder_free,
+    _include_sequence_is_additive_owned_growth,
+    _scope_newly_added_headers,
+)
 from .errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
 from .model import AbiSnapshot, ExtractionContract
 
@@ -176,381 +182,6 @@ _PLATFORM_IDENTITY_FIELDS = frozenset({"target_triple", "pointer_width", "endian
 # CXX_STANDARD_FLOOR_RAISED/ABI_RELEVANT_BUILD_FLAG_CHANGED exist to
 # surface as a RISK finding, not a reason to refuse a verdict outright.
 _BUILD_CONTEXT_FIELDS = frozenset({"language_standard", "macro_ops"})
-
-# The two scope_fields[...] values (see SCOPE_FIELD_KEYS) that a lone
-# declared header/directory's own name collapses to above -- carrying no
-# real per-entry identity, so the additive-only carve-out
-# (_scope_field_is_additive_superset below) can never verify a set
-# containing one of these is a true superset of the other side and must
-# decline instead of guessing.
-_SCOPE_SINGLE_ENTRY_SENTINELS = frozenset({"<single-header>", "<single-header-dir>"})
-
-# The only profile_fields key the header-sequence-growth carve-out (PR #641
-# follow-up, third round -- Codex review: the F8 scope carve-out's own "pure
-# header addition" case unavoidably changes profile_fields["header_sequence"]
-# too, since profile_fingerprint tracks declared-header ORDER as a genuine
-# extraction-context fact distinct from scope_fingerprint's order-independent
-# declared SET -- see compute_extraction_contract's docstring) is allowed to
-# treat as non-fatal, and only when the new sequence extends the old one with
-# new entries strictly TRAILING the old sequence, unchanged -- proving every
-# EXISTING header's preprocessing context (the headers parsed before it) is
-# byte-for-byte identical to before, not merely that existing headers keep
-# their relative order to each other.
-_HEADER_SEQUENCE_FIELDS = frozenset({"header_sequence"})
-
-
-def _scope_newly_added_headers(
-    old_value: str | None, new_value: str | None
-) -> set[str] | None:
-    """The set of header identities present in *new_value*
-    (``scope_fields["headers"]``) but not *old_value* -- ``None`` if either
-    side can't be safely decoded to a real per-header identity list (absent,
-    malformed, or collapsed to the ``<single-header>`` sentinel).
-
-    Both sequence carve-outs below must verify not just THAT the scope grew,
-    but that the SPECIFIC entries they're waiving correspond to entries
-    genuinely new to the declared surface (Codex review, PR #641 follow-up,
-    ninth P1): ``_scope_growth_corroborated`` alone only proves the scope
-    grew by *some* header, not that it grew by the *same* header the
-    sequence carve-out is waiving. For example, old scope ``{a, b, d}``
-    (``d`` declared via ``--public-header`` only, never parsed) with
-    sequence ``[a, b]``, growing to new scope ``{a, b, c, d}`` (``c`` newly
-    declared) with sequence ``[a, b, d]`` (``d`` now fed to the L2 frontend)
-    satisfies scope-growth corroboration (``c`` is new) and the trailing-
-    append shape (``d`` appended) independently, but the two have nothing
-    to do with each other: ``d``'s content was never parsed on the old
-    side, and ``c`` was never parsed on EITHER side, so real removals in
-    both would still be invisible. Requiring the sequence carve-outs'
-    specific appended entries to be a subset of this newly-added set closes
-    that gap.
-    """
-    if old_value is None or new_value is None:
-        return None
-    old_list = _json_load_str_list(old_value)
-    new_list = _json_load_str_list(new_value)
-    if old_list is None or new_list is None:
-        return None
-    if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
-        return None
-    if len(new_list) == 1 and new_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
-        return None
-    return set(new_list) - set(old_list)
-
-
-def _header_sequence_is_additive_reorder_free(
-    old_value: str | None, new_value: str | None, scope_new_headers: set[str] | None
-) -> bool:
-    """Whether *new_value* (``profile_fields["header_sequence"]``, a
-    json-encoded order-preserving-deduplicated header identity list) is
-    *old_value* with new entries appended STRICTLY AFTER it, unchanged --
-    never with a new header inserted before or between existing ones, and
-    never with an EXISTING header reordered relative to another (Codex
-    review, PR #641 follow-up, seventh P1) -- AND every appended entry is
-    itself in *scope_new_headers* (:func:`_scope_newly_added_headers`;
-    Codex review, PR #641 follow-up, ninth P1): the appended sequence
-    entries must correspond to headers genuinely new to the declared
-    surface, not merely additive-shaped growth that happens to coincide
-    with an unrelated scope addition (see that function's own docstring for
-    the concrete scenario this rules out).
-
-    Trailing-append is the only shape that's actually safe: the aggregate
-    driver TU the dumper generates parses declared headers sequentially, so
-    a new header's macros/pragmas can change how every header parsed AFTER
-    it resolves. Merely preserving the *relative* order of the existing
-    headers to each other (this function's original, insufficient check)
-    is not enough -- ``[a.h, c.h]`` -> ``[a.h, b.h, c.h]`` keeps ``a.h``
-    before ``c.h`` on both sides, but ``c.h`` is now parsed with ``b.h``'s
-    macros/pragmas already in effect, a genuinely different extraction
-    context that can produce a real, non-additive ABI difference despite
-    looking like a pure addition. Only requiring every new entry to land
-    strictly after the entire unchanged old sequence rules this out: the
-    old sequence's own internal parsing context never changes. Declines
-    (like :func:`_scope_field_is_additive_superset`) whenever either side
-    is the ``<single-header>`` sentinel, since there is no real order to
-    verify there.
-
-    Also declines whenever *old_list* or *new_list* contains a duplicate
-    entry (Codex review, PR #641 follow-up, thirteenth P2): a genuine
-    ``header_sequence`` value is always order-preserving-deduplicated by
-    construction (see this parameter's own docstring above), so a
-    duplicate is never real evidence -- e.g. appending ``"c.h"`` twice
-    (``["a.h", "b.h"]`` -> ``["a.h", "b.h", "c.h", "c.h"]``) is malformed.
-    Without this check, the final ``set(...) <= scope_new_headers``
-    comparison collapses the duplicate away silently, so it would
-    otherwise still authorize the waiver instead of failing closed on
-    unverifiable evidence.
-    """
-    if old_value is None or new_value is None:
-        return False
-    old_list = _json_load_str_list(old_value)
-    new_list = _json_load_str_list(new_value)
-    if old_list is None or new_list is None:
-        return False
-    if len(old_list) != len(set(old_list)) or len(new_list) != len(set(new_list)):
-        return False
-    if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
-        return False
-    if len(new_list) == 1 and new_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
-        return False
-    if len(new_list) < len(old_list):
-        return False
-    if new_list[: len(old_list)] != old_list:
-        return False
-    if scope_new_headers is None:
-        return False
-    return set(new_list[len(old_list) :]) <= scope_new_headers
-
-
-# The only profile_fields key the include-sequence-owned-growth carve-out
-# (PR #641 follow-up, fourth round -- Codex review) is allowed to treat as
-# non-fatal: `resolve_inferred_header_roots` (cli_dump_helpers.py) auto-adds
-# a header-owning include directory, whose slot token in `include_sequence`
-# encodes the declared-header set IT owns (`_slot_token_for_ancestor`) --
-# so a pure header addition changes this token too, independently of
-# `header_sequence`. The real F8 CLI shape (`-H old=<dir> -H new=<dir>`)
-# hits exactly this: both `header_sequence` and `include_sequence` differ
-# together, and the header-sequence-growth carve-out alone (which only ever
-# considered `differing <= _HEADER_SEQUENCE_FIELDS`) declined to apply
-# because `include_sequence` was also in `differing`.
-_INCLUDE_SEQUENCE_FIELDS = frozenset({"include_sequence"})
-
-_OWNED_HEADER_TOKEN_PREFIX = "hdrs:"
-_OWNED_HEADER_SINGLE_SENTINEL = "hdrs:<single-header>"
-
-_SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-
-
-def _is_valid_digest_payload(value: str) -> bool:
-    """Whether *value* is exactly the ``"sha256:<64 lowercase hex chars>"``
-    form :func:`_sha256_of` always produces (Codex review, PR #641
-    follow-up, twelfth P2).
-
-    An ``"ext:"``/``"sys:"`` token's payload is always a real
-    :func:`_sha256_of` digest in genuine ``compute_extraction_contract``
-    output -- never arbitrary text -- so a malformed payload like
-    ``"ext:bogus"`` or ``"sys:not-a-sha256"`` unchanged on both sides is
-    exactly as unverifiable as the delimiter-less/non-positional slots the
-    previous two rounds closed: if it rides alongside a genuinely-growing
-    ``"hdrs:"`` slot, the per-slot loop's equality short-circuit never
-    re-examines it, and the carve-out would otherwise still return
-    additive-safe despite one slot being unverifiable garbage. Not applied
-    to ``"label:"`` (an arbitrary user-supplied label, never a hash) or
-    ``"hdrs:"`` (its own JSON-list-of-pairs shape is validated separately,
-    by :func:`_json_load_list`/:func:`_is_owned_header_pair`).
-    """
-    return bool(_SHA256_DIGEST_RE.match(value))
-
-
-def _slot_indices_match_position(slots: list[str]) -> bool:
-    """Whether every ``"<slot-index>:<token>"`` entry in *slots* carries the
-    literal decimal index matching its own position in the list (the real
-    ``_slot_token_for_ancestor`` construction always emits
-    ``f"{idx}:{token}"`` from ``enumerate(declared_includes)``, so a
-    genuine ``include_sequence`` value's indices are always exactly
-    ``"0"``, ``"1"``, ``"2"``, ... in order) -- EXCEPT for a single
-    trailing, unnumbered ``"sys:..."`` entry, which the real construction
-    appends for the system-header bucket whenever the depfile contains any
-    header outside every declared include root (Codex review, PR #641
-    follow-up, tenth P1): unlike the numbered ``label:``/``hdrs:``/``ext:``
-    slots, this bucket has no owning ``IncludeDir`` and thus no position of
-    its own to number -- it is always the list's last element, if present
-    at all. Excluding it from the position check is what the real ``sys:``
-    shape actually is, not a loosened restriction: this function's WHOLE
-    JOB is verifying a genuine ``include_sequence`` value's real shape, and
-    an entry with no index by construction cannot be held to an index
-    requirement without treating an ordinary, extremely common production
-    output (any header pulled from outside every declared root -- systemd
-    headers, the C standard library, ...) as malformed.
-
-    :func:`_include_sequence_is_additive_owned_growth`'s per-slot loop only
-    checked that a slot's index was *unchanged* between the old and new
-    side (``old_idx != new_idx``), never that the index was itself a real,
-    well-formed position rather than an arbitrary string (Codex review, PR
-    #641 follow-up, seventh P2): an externally-constructed contract with a
-    slot literally named ``"bogus:hdrs:[...]"`` on both sides passed that
-    check trivially (``"bogus" == "bogus"``) and could still reach the
-    owned-header superset comparison below. Requiring every index to match
-    its position closes this without changing the carve-out's own additive
-    semantics, since a genuine ``include_sequence`` always satisfies it.
-
-    Also requires each numbered slot to actually carry a ``":"`` delimiter
-    AND a recognized token shape (``hdrs:``/``ext:``/``label:``) after it
-    (Codex review, PR #641 follow-up, eleventh P2): a malformed slot with
-    NO colon at all, e.g. the bare string ``"0"``, still passes a check
-    that only compares ``slot.partition(":")[0]`` against the position --
-    ``"0".partition(":")[0]`` is ``"0"`` itself, matching position 0 -- and
-    if that slot happens to be byte-identical on both sides, the caller's
-    per-slot loop's own equality short-circuit (``if old_slot == new_slot:
-    continue``) never even looks at it again, so an unchanged malformed
-    slot could ride alongside a genuinely growing one and still return
-    additive-safe. Real ``include_sequence`` slots produced by
-    ``compute_extraction_contract`` always have exactly one of these three
-    token prefixes after the delimiter, so requiring one here is the real
-    shape, not a new restriction.
-
-    Also requires an ``"ext:"`` slot's (or the trailing ``"sys:"`` entry's)
-    payload to be a well-formed :func:`_sha256_of` digest (Codex review, PR
-    #641 follow-up, twelfth P2): the previous round only checked the
-    ``"ext:"``/``"sys:"`` PREFIX, not that what follows it is a genuine
-    digest -- an unchanged malformed payload like ``"ext:bogus"`` or
-    ``"sys:not-a-sha256"`` passed that check trivially and, exactly like
-    the delimiter-less case above, could ride unexamined alongside a
-    genuinely-growing ``"hdrs:"`` slot. ``"label:"`` (arbitrary
-    user-supplied text) and ``"hdrs:"`` (its own JSON-shape, validated
-    separately) are deliberately excluded from this digest check -- see
-    :func:`_is_valid_digest_payload`.
-
-    Also requires an ``"hdrs:"`` slot's own payload to actually decode to
-    the real owned-header shape -- either the ``<single-header>`` sentinel
-    or a JSON list of valid ``(identity, relative_path)`` pairs (Codex
-    review, PR #641 follow-up, thirteenth P2): the JSON-list-of-pairs shape
-    was previously only decoded and validated by
-    :func:`_include_sequence_is_additive_owned_growth`'s per-slot loop, and
-    that loop's equality short-circuit (``if old_slot == new_slot:
-    continue``) never reaches an *unchanged* slot -- so a malformed,
-    byte-identical payload like ``"0:hdrs:not-json"`` rode alongside a
-    genuinely-growing separate ``"hdrs:"`` slot completely unexamined,
-    exactly the same unverifiable-evidence gap the ``ext:``/``sys:`` digest
-    check above closed for its own token shape.
-    """
-    if slots and slots[-1].startswith("sys:"):
-        numbered_slots = slots[:-1]
-        if not _is_valid_digest_payload(slots[-1][len("sys:") :]):
-            return False
-    else:
-        numbered_slots = slots
-    for i, slot in enumerate(numbered_slots):
-        idx, sep, rest = slot.partition(":")
-        if sep != ":" or not rest.startswith(("hdrs:", "ext:", "label:")):
-            return False
-        if idx != str(i):
-            return False
-        if rest.startswith("ext:") and not _is_valid_digest_payload(
-            rest[len("ext:") :]
-        ):
-            return False
-        if (
-            rest.startswith(_OWNED_HEADER_TOKEN_PREFIX)
-            and rest != _OWNED_HEADER_SINGLE_SENTINEL
-        ):
-            pairs = _json_load_list(rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
-            if pairs is None or not all(_is_owned_header_pair(p) for p in pairs):
-                return False
-    return True
-
-
-def _include_sequence_is_additive_owned_growth(
-    old_value: str | None, new_value: str | None, scope_new_headers: set[str] | None
-) -> bool:
-    """Whether *new_value* (``profile_fields["include_sequence"]``, a
-    json-encoded list of ``"<slot-index>:<token>"`` strings) differs from
-    *old_value* only in an OWNED-root ``"hdrs:..."`` token growing to
-    include newly-added headers, in the same additive-only sense
-    :func:`_scope_field_is_additive_superset` already applies to the scope
-    ``"headers"`` field -- AND every newly-added owned pair's global
-    identity (a pair's first element; see ``_slot_token_for_ancestor``) is
-    itself in *scope_new_headers* (:func:`_scope_newly_added_headers`;
-    Codex review, PR #641 follow-up, ninth P1), the same specific-
-    correspondence requirement :func:`_header_sequence_is_additive_reorder_free`
-    now applies to ``header_sequence`` -- an owned-pair addition that
-    merely looks additive can still coincide with an unrelated scope
-    addition rather than reflecting the same genuinely-new header (see
-    that function's docstring for the concrete scenario).
-
-    Declines (returns False) for any slot whose token isn't the owned
-    ``"hdrs:"`` form (an ``"ext:"``/``"label:"`` slot differing is real,
-    unrelated profile drift this carve-out has no business waiving), whose
-    header list collapsed to the ``<single-header>`` sentinel (no real
-    per-header identity to verify a superset against, mirroring the
-    scope-side carve-out's own sentinel handling), or whose slot *count*
-    changed (a different ``-I``/``--header`` topology, not merely a header
-    addition within an existing one).
-    """
-    if old_value is None or new_value is None:
-        return False
-    if old_value == new_value:
-        return True
-    old_slots = _json_load_str_list(old_value)
-    new_slots = _json_load_str_list(new_value)
-    if old_slots is None or new_slots is None:
-        return False
-    if len(old_slots) != len(new_slots):
-        return False
-    if not (
-        _slot_indices_match_position(old_slots)
-        and _slot_indices_match_position(new_slots)
-    ):
-        return False
-    for old_slot, new_slot in zip(old_slots, new_slots):
-        if old_slot == new_slot:
-            continue
-        old_idx, _, old_rest = old_slot.partition(":")
-        new_idx, _, new_rest = new_slot.partition(":")
-        if old_idx != new_idx:
-            return False
-        if (
-            old_rest == _OWNED_HEADER_SINGLE_SENTINEL
-            or new_rest == _OWNED_HEADER_SINGLE_SENTINEL
-        ):
-            return False
-        if not (
-            old_rest.startswith(_OWNED_HEADER_TOKEN_PREFIX)
-            and new_rest.startswith(_OWNED_HEADER_TOKEN_PREFIX)
-        ):
-            return False
-        old_pairs = _json_load_list(old_rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
-        new_pairs = _json_load_list(new_rest[len(_OWNED_HEADER_TOKEN_PREFIX) :])
-        if old_pairs is None or new_pairs is None:
-            return False
-        # Every owned pair must be an exact two-string list (Codex review,
-        # PR #641 follow-up, third P2) -- `tuple(p)` alone doesn't reject a
-        # malformed member the way it looks like it should: a bare string
-        # like "xx" is itself iterable, so `tuple("xx")` silently succeeds
-        # as `("x", "x")` instead of raising, letting malformed evidence
-        # masquerade as a legitimate owned-header pair and potentially make
-        # a bogus set comparison look like real superset growth.
-        if not (
-            all(_is_owned_header_pair(p) for p in old_pairs)
-            and all(_is_owned_header_pair(p) for p in new_pairs)
-        ):
-            return False
-        # Reject a duplicated pair before the set conversion below collapses
-        # it away (Codex review, PR #641 follow-up, fourteenth P2):
-        # `_slot_token_for_ancestor`'s real `owned` construction always
-        # emits a deduplicated pair list, so a duplicate -- e.g. a newly
-        # appended ("c.h", "c.h") listed twice -- is never genuine evidence.
-        # `{tuple(p) for p in pairs}` silently discards that duplication,
-        # so without this check a malformed, duplicated newly-owned pair
-        # would still authorize the waiver instead of failing closed.
-        old_tuples = [tuple(p) for p in old_pairs]
-        new_tuples = [tuple(p) for p in new_pairs]
-        if len(old_tuples) != len(set(old_tuples)) or len(new_tuples) != len(
-            set(new_tuples)
-        ):
-            return False
-        old_owned = set(old_tuples)
-        new_owned = set(new_tuples)
-        if not new_owned >= old_owned:
-            return False
-        newly_owned = new_owned - old_owned
-        if newly_owned:
-            if scope_new_headers is None:
-                return False
-            if not all(pair[0] in scope_new_headers for pair in newly_owned):
-                return False
-    return True
-
-
-def _is_owned_header_pair(pair: object) -> bool:
-    """Whether *pair* is a valid owned-header ``(identity, relative_path)``
-    entry: an exact two-element list/tuple of ``str`` (see
-    :func:`_slot_token_for_ancestor`'s real ``owned`` construction).
-    """
-    return (
-        isinstance(pair, (list, tuple))
-        and len(pair) == 2
-        and all(isinstance(x, str) for x in pair)
-    )
 
 
 @dataclass(frozen=True)
@@ -677,7 +308,9 @@ def _classify_include_dirs(
     return owned
 
 
-def _header_identities(declared_headers: Sequence[Path]) -> dict[Path, str]:
+def _header_identities(
+    declared_headers: Sequence[Path], extra_root_paths: Sequence[Path] = ()
+) -> dict[Path, str]:
     """A stable, side-local identity string per declared header — its path
     relative to the common ancestor of every declared header's *parent*
     directory (the same normalization ``scope_fingerprint`` uses for its own
@@ -688,10 +321,28 @@ def _header_identities(declared_headers: Sequence[Path]) -> dict[Path, str]:
     ``generated/foo.h``) — both would otherwise collapse to token
     ``hdrs:foo.h``, silently losing the order-sensitivity a swapped
     ``-I include -I generated`` vs. ``-I generated -I include`` is supposed
-    to preserve."""
+    to preserve.
+
+    *extra_root_paths* (``public_header_paths`` — provenance-only headers
+    never fed to the L2 frontend, so never in *declared_headers* or the
+    returned dict) widens the root candidates the same way the scope
+    ``"headers"`` field's own root computation already does (Codex review,
+    PR #641 follow-up, sixteenth P2): without this, a ``public_header_paths``
+    entry outside every declared header's common root makes this function's
+    root narrower than the scope side's, so the SAME physical file gets two
+    different identity strings across the two fields (e.g. scope
+    ``"foo/c.h"`` vs. sequence ``"c.h"``) — and the header/include-sequence
+    carve-outs' specific-correspondence check (``_scope_newly_added_headers``)
+    compares these by exact string equality, so a genuinely safe, purely
+    additive header change spuriously hard-fails with ``ProfileMismatchError``
+    the moment any ``public_header_paths`` entry reaches outside that
+    narrower root. Widening the root here to match closes the mismatch
+    without changing what a declared header's identity actually disambiguates
+    (its path relative to a root is still unique per file — the root is
+    just wider than before when *extra_root_paths* is non-empty)."""
     if not declared_headers:
         return {}
-    parents = [str(_resolved(h).parent) for h in declared_headers]
+    parents = [str(_resolved(h).parent) for h in (*declared_headers, *extra_root_paths)]
     root = _common_root(parents)
     return {h: _side_local_identity(h, root) for h in declared_headers}
 
@@ -920,7 +571,7 @@ def compute_extraction_contract(
     profile_fields: dict[str, str] = {}
     if l2_frontend_ran:
         ownership = _classify_include_dirs(declared_headers, declared_includes)
-        header_identities = _header_identities(declared_headers)
+        header_identities = _header_identities(declared_headers, public_header_paths)
         # Whether the owned-slot token below is safe to collapse to a
         # constant placeholder instead of encoding the (rename-prone)
         # declared header's own name: true only when the WHOLE declared
@@ -1258,57 +909,6 @@ def _binary_platform_components(snap: AbiSnapshot) -> dict[str, str] | None:
     return None
 
 
-def _json_load_list(value: str) -> list[Any] | None:
-    """Decode *value* as a JSON list, or ``None`` if it isn't valid JSON or
-    doesn't decode to a list (Codex review, PR #641 follow-up, P2).
-
-    Every carve-out helper below treats its ``profile_fields``/
-    ``scope_fields`` string inputs as trusted output of
-    :func:`compute_extraction_contract` -- but a serialized or externally
-    constructed :class:`~abicheck.model.ExtractionContract` can carry an
-    arbitrary string there (``_extraction_contract_from_dict`` preserves
-    field values without validating their JSON encoding), so an unguarded
-    ``json.loads`` call risks an unhandled ``JSONDecodeError`` escaping
-    :func:`check_contracts_comparable` as a raw traceback instead of the
-    clean ``ScopeMismatchError``/``ProfileMismatchError`` the gate is
-    supposed to fail closed with. A malformed value is exactly as
-    unverifiable as a missing one, so callers treat ``None`` here the same
-    way they already treat an absent field: decline the carve-out.
-    """
-    try:
-        decoded = json.loads(value)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    return decoded if isinstance(decoded, list) else None
-
-
-def _json_load_str_list(value: str) -> list[str] | None:
-    """Like :func:`_json_load_list`, but additionally requires every
-    element to be a ``str`` (Codex review, PR #641 follow-up, second P2).
-
-    Valid JSON can decode to a list whose *members* aren't the plain string
-    identities this module's ``"headers"``/``"header_sequence"``/
-    ``include_sequence``-slot fields always are in a real
-    :func:`compute_extraction_contract` output -- e.g. a syntactically
-    valid ``scope_fields["headers"] = "[{}]"`` decodes fine as
-    :func:`_json_load_list` returns ``[{}]``, but every caller of that
-    field then immediately does something that requires its elements to be
-    hashable strings (``in _SCOPE_SINGLE_ENTRY_SENTINELS``, ``set(...)``
-    membership/superset checks) -- a ``dict`` element there raises
-    ``TypeError: unhashable type: 'dict'`` instead of the clean decline
-    :func:`_json_load_list` alone was meant to guarantee. Validating shape
-    all the way down to the element type, not just the outer list, closes
-    that gap the same way :func:`_json_load_list` closed the JSON-syntax
-    one. Not used for ``include_sequence``'s inner owned-pairs list, whose
-    elements are themselves pairs, not plain strings -- that decode already
-    guards its own ``tuple(p)`` conversion with a ``try``/``except``.
-    """
-    decoded = _json_load_list(value)
-    if decoded is None:
-        return None
-    return decoded if all(isinstance(item, str) for item in decoded) else None
-
-
 def _scope_field_is_additive_superset(
     old_value: str | None, new_value: str | None
 ) -> bool:
@@ -1344,6 +944,16 @@ def _scope_field_is_additive_superset(
     renamed AND something else added", so there is nothing here to safely
     verify a true superset against; the existing hard-fail is the correct,
     conservative answer for that case, same as it always was.
+
+    Also declines whenever *old_list* or *new_list* contains a duplicate
+    identity (Codex review, PR #641 follow-up, fourteenth P2):
+    ``compute_extraction_contract`` always emits a sorted, deduplicated
+    identity list for these fields, so a duplicate is never genuine
+    evidence -- e.g. growing ``["a.h", "b.h"]`` to ``["a.h", "b.h", "c.h",
+    "c.h"]`` is malformed. The final ``set(new_list) >= set(old_list)``
+    comparison would otherwise collapse that duplicate away silently and
+    still authorize the carve-out, the same gap already closed for
+    ``header_sequence`` and the owned-header pair lists.
     """
     if old_value is None or new_value is None:
         return False
@@ -1352,6 +962,8 @@ def _scope_field_is_additive_superset(
     old_list = _json_load_str_list(old_value)
     new_list = _json_load_str_list(new_value)
     if old_list is None or new_list is None:
+        return False
+    if len(old_list) != len(set(old_list)) or len(new_list) != len(set(new_list)):
         return False
     if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
         return False
