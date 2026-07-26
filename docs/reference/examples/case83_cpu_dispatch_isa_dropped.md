@@ -115,10 +115,15 @@ ISA-specialized symbols suffixed `_avx512_`, `_avx2_`, `_sse42_`, `_sse2_`,
 
 ## Cross-tool comparison
 
-`abidiff`/`abi-compliance-checker` have no equivalent grouped-finding
-concept — a mass ISA-tier drop is reported (if at all) as N independent
-symbol removals, with no signal that the dispatcher-using majority of
-callers is unaffected. Neither tool ships an ISA-token clustering heuristic.
+```bash
+abidw --out-file v1.xml libfoo_v1.so
+abidw --out-file v2.xml libfoo_v2.so
+abidiff v1.xml v2.xml
+```
+
+Not independently re-verified in this environment (`abidiff` unavailable
+here) — see case01's symbol-removal case for a documented `abidiff`
+exit-code comparison on the same kind of raw symbol removal.
 
 ---
 

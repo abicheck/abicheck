@@ -12,72 +12,103 @@
 
 **Category:** Polymorphic Class Removal | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
 An entire publicly-derivable polymorphic base class is removed. Every user
 subclass that overrode the virtual `execute()` becomes a vtable error at
-link/load time: the typeinfo symbol for the v1 base is gone, RTTI fails,
-and `delete` on a polymorphic pointer to the removed base invokes UB.
+link/load time: the typeinfo symbol for the v1 base is gone, RTTI fails, and
+`delete` on a polymorphic pointer to the removed base invokes UB. This is
+more severe than a plain class removal (case107) because the base class was
+a *derivation point* — user code embedded the v1 vtable layout into every
+derived class's own vtable, and the RTTI strings crossed DSO boundaries.
 
-This is more severe than case107 because:
-- The base class was a *derivation point* — user code embedded the v1 vtable
-  layout into every derived class's vtable.
-- RTTI strings (`typeinfo for mylib::task`) crossed DSO boundaries; removing
-  the base silently breaks `dynamic_cast` and exception handling for any
-  user exception derived from it.
+## Old/new diff
 
-## Real Failure Demo
+| v1.h | v2.h |
+|------|------|
+| `class task { public: task(); virtual ~task(); virtual task* execute() = 0; ... };` | *(removed)* |
+| `task* mylib_spawn_dummy();` | *(removed)* |
+| — | `class task_group { public: void run(task_fn); void wait(); };` |
+
+## abicheck command
+
+```bash
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- type_removed: Type removed: mylib::task
+  > Old code references a type that no longer exists; compilation or link
+    failure.
+- type_removed: Type removed: mylib::dummy_task
+- func_removed_elf_only: Elf_only function removed: mylib::mylib_spawn_dummy()
+  > (and 6 more: task ctor/dtor/set_ref_count/decrement_ref_count)
+- var_removed: Public variable removed: vtable for mylib::task
+- var_removed: Public variable removed: typeinfo for mylib::task
+- var_removed: Public variable removed: typeinfo name for mylib::task
+
+Additions:
+- type_added: New type: mylib::task_group
+- func_added: New public function: mylib::task_group::run/wait/task_group()
+
+10 genuine public-surface breaking findings (3 of 13 raw findings are
+internal RTTI/dependency churn, annotated separately by the reporter).
+```
+
+## Minimum evidence
+
+`min_evidence: L1` — `task`'s ctor/dtor/methods, its vtable, and its
+typeinfo symbols are all emitted from `v1.cpp` (which instantiates a
+`dummy_task` subclass), so DWARF + the dynamic symbol table are enough; no
+public headers are required.
+
+## Why abicheck catches it
+
+DWARF exposes the class hierarchy and virtual member layout directly, and
+the ELF symbol table carries the mangled vtable (`_ZTV7mylib4task`) and
+typeinfo (`_ZTI7mylib4task`) symbols alongside the ordinary member
+functions. When the whole class disappears in v2, abicheck's DWARF/ELF diff
+reports the type, its members, and its vtable/typeinfo variables as removed
+together — the full surface of what "removing a polymorphic base" actually
+costs a consumer.
+
+## Runtime failure demonstration
 
 **Severity: BREAKING**
 
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile.
+
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build \
-  --target case108_task_class_removed_app case108_task_class_removed_v2
+# Build old library + app
+g++ -shared -fPIC -g v1.cpp -o libfoo.so
+g++ -g app.cpp -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → ref_count after dec = 2 (expect 2)
 
-/tmp/abicheck-examples-build/case108_task_class_removed/app_v1
-# ref_count after dec = 2 (expect 2)
+# Swap in new library (no recompile)
+g++ -shared -fPIC -g v2.cpp -o libfoo.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol:
+#   _ZN5mylib17mylib_spawn_dummyEv
 
-# Runtime replacement: the v1 binary asks for the removed v1 factory/type
-# surface and fails as soon as the missing symbol is resolved.
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case108_task_class_removed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case108_task_class_removed/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# ./app_v1: symbol lookup error: ./app_v1: undefined symbol: _ZN5mylib17mylib_spawn_dummyEv
-
-# Source rebuild against the v2 header also fails because the base class and
-# factory are gone.
-tmp=$(mktemp -d)
-cp examples/case108_task_class_removed/app.cpp "$tmp/app.cpp"
-cp examples/case108_task_class_removed/v2.h "$tmp/v1.h"
-g++ -std=c++17 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
-# error: 'task' is not a member of 'mylib'
-# error: 'mylib_spawn_dummy' is not a member of 'mylib'
+# Source rebuild against the v2 header also fails: the base class and
+# factory are both gone.
+# → error: 'task' is not a member of 'mylib'
+# → error: 'mylib_spawn_dummy' is not a member of 'mylib'
 ```
 
-## Why this matters
+**Why BREAKING:** `app` calls the factory `mylib_spawn_dummy()` to obtain a
+polymorphic `task*`; that symbol — along with the vtable and typeinfo it
+depends on — no longer exists in v2, so the dynamic linker refuses to
+resolve it before `main()` even runs.
 
-This fixture mirrors a real historical ABI break. Classic TBB's `tbb::task` low-level API was the recommended way to write
-parallel algorithms before `parallel_invoke` / `task_group`. The class was
-fully removed in oneTBB 2021.1 along with `task_scheduler_init` (case107).
-
-## Code diff
-
-| v1 | v2 |
-|----|------|
-| `class task { virtual task* execute() = 0; ... };` | *(removed)* |
-| `task* mylib_spawn_dummy();` | *(removed)* |
-| — | `class task_group { using task_fn = void (*)(); void run(task_fn); ... };` |
-
-## How abicheck catches it
-
-The existing `FUNC_REMOVED` / `TYPE_REMOVED` detectors fire on the base
-class symbols, vtable symbol (`_ZTV7mylib4task`), and typeinfo
-(`_ZTI7mylib4task`). This case exists to pin the full surface as a named
-regression fixture.
-
-## How to fix
+## Safe redesign
 
 A polymorphic base class is the most expensive thing to remove. The safe
 migration is:
@@ -86,6 +117,11 @@ migration is:
 3. Bump SONAME on removal.
 4. Document the equivalence map (which `task` workflow maps to which
    `task_group` call).
+
+**Real-world example:** classic TBB's `tbb::task` low-level API was the
+recommended way to write parallel algorithms before `parallel_invoke` /
+`task_group`. It was fully removed in oneTBB 2021.1 alongside
+`task_scheduler_init` (case107).
 
 ## References
 

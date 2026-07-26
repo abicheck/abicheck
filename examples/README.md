@@ -345,10 +345,10 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [83](case83_cpu_dispatch_isa_dropped/README.md) | CPU-dispatch ISA family dropped | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [84](case84_bundle_soname_skew/README.md) | Multi-library bundle SONAME skew | Bundle | 🔵 BUNDLE (bad practice) |
 | [85](case85_internal_template_signature_changed/README.md) | Internal Template Signature Changed | Breaking | 🔴 BREAKING |
-| [86](case86_tag_struct_renamed/README.md) | Tag struct renamed (empty class re-mangling) | Breaking | 🔴 BREAKING |
-| [87](case87_default_template_arg_changed/README.md) | Default template argument changed | Breaking | 🔴 BREAKING |
+| [86](case86_tag_struct_renamed/README.md) | Tag Struct Renamed (empty class re-mangling) | Breaking | 🔴 BREAKING |
+| [87](case87_default_template_arg_changed/README.md) | Default Template Argument Changed | Breaking | 🔴 BREAKING |
 | [88](case88_cpo_kind_changed/README.md) | CPO kind changed (BREAKING) | Breaking | 🔴 BREAKING |
-| [89](case89_inline_accessor_renamed_pimpl_member/README.md) | Inline accessor references renamed pimpl member | Breaking | 🔴 BREAKING |
+| [89](case89_inline_accessor_renamed_pimpl_member/README.md) | Inline Accessor References Renamed Pimpl Member | Breaking | 🔴 BREAKING |
 | [90](case90_bundle_intra_dep_removed/README.md) | Bundle — intra-bundle removed symbol | Bundle | 🔵 BUNDLE |
 | [91](case91_bundle_intra_signature_drift/README.md) | Bundle — intra-bundle extern-C signature drift | Bundle | 🔵 BUNDLE |
 | [92](case92_bundle_provider_changed/README.md) | Bundle — symbol provider migration | Bundle | 🔵 BUNDLE |
@@ -359,11 +359,11 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [97](case97_api_depends_on_consumer_env/README.md) | API Depends on Consumer Environment | Breaking | 🔴 BREAKING |
 | [98](case98_cxx_standard_floor_raised/README.md) | C++ Standard Floor Raised | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [99](case99_experimental_graduated/README.md) | experimental → stable graduation (compatible) | Addition | 🟢 COMPATIBLE |
-| [100](case100_experimental_removed_without_replacement/README.md) | experimental:: removed without replacement (API break) | Breaking | 🔴 BREAKING |
-| [101](case101_inline_namespace_version_bumped/README.md) | inline namespace version bumped (BREAKING) | Breaking | 🔴 BREAKING |
-| [102](case102_frozen_runtime_signature_changed/README.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | Breaking | 🔴 BREAKING |
-| [103](case103_toolchain_flag_drift/README.md) | Toolchain flag drift (`toolchain_flag_drift`) | Quality | 🟢 COMPATIBLE (bad practice) |
-| [104](case104_glibcxx_dual_abi_flip/README.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | Breaking | 🔴 BREAKING (bad practice) |
+| [100](case100_experimental_removed_without_replacement/README.md) | Experimental Declaration Removed Without Replacement | Breaking | 🔴 BREAKING |
+| [101](case101_inline_namespace_version_bumped/README.md) | Inline Namespace Version Bumped | Breaking | 🔴 BREAKING |
+| [102](case102_frozen_runtime_signature_changed/README.md) | Frozen Runtime Signature Changed | Breaking | 🔴 BREAKING |
+| [103](case103_toolchain_flag_drift/README.md) | Toolchain Flag Drift | Quality | 🟢 COMPATIBLE (bad practice) |
+| [104](case104_glibcxx_dual_abi_flip/README.md) | libstdc++ Dual-ABI Flip | Breaking | 🔴 BREAKING (bad practice) |
 | [105](case105_concept_tightening/README.md) | Concept Tightening (C++20) | API Break | 🟠 API_BREAK |
 | [106](case106_ctor_became_explicit/README.md) | Conversion Operator Became `explicit` | API Break | 🟠 API_BREAK |
 | [107](case107_task_scheduler_init_removed/README.md) | `task_scheduler_init` Removed (historical ABI break) | Breaking | 🔴 BREAKING |
@@ -374,25 +374,25 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [112](case112_lp64_ilp64/README.md) | LP64 → ILP64 integer-model switch (oneMKL MKL_INT 32→64) | Breaking | 🔴 BREAKING |
 | [113](case113_abi_tag_changed/README.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | Breaking | 🔴 BREAKING |
 | [114](case114_char8t_migration/README.md) | char8_t migration (C++20 char-family → char8_t) | Breaking | 🔴 BREAKING |
-| [115](case115_bit_int_width_changed/README.md) | _BitInt(N) width change (C23 64 → 128) | Breaking | 🔴 BREAKING |
-| [116](case116_atomic_qualifier_changed/README.md) | _Atomic qualifier added (C11) | Breaking | 🔴 BREAKING |
-| [117](case117_no_unique_address/README.md) | [[no_unique_address]] layout overlay (no new ChangeKind) | Breaking | 🔴 BREAKING |
-| [118](case118_internal_struct_field_added_scoped/README.md) | Internal struct gains a field (non-public, scoped) | No Change | ✅ NO_CHANGE |
-| [119](case119_internal_struct_field_removed_scoped/README.md) | Internal struct loses a field (non-public, scoped) | No Change | ✅ NO_CHANGE |
-| [120](case120_internal_struct_reordered_scoped/README.md) | Internal struct fields reordered (non-public, scoped) | No Change | ✅ NO_CHANGE |
+| [115](case115_bit_int_width_changed/README.md) | _BitInt(N) Width Change (C23 64 → 128) | Breaking | 🔴 BREAKING |
+| [116](case116_atomic_qualifier_changed/README.md) | _Atomic Qualifier Added (C11) | Breaking | 🔴 BREAKING |
+| [117](case117_no_unique_address/README.md) | [[no_unique_address]] Layout Overlay (no dedicated ChangeKind) | Breaking | 🔴 BREAKING |
+| [118](case118_internal_struct_field_added_scoped/README.md) | Internal Struct Gains a Field (Non-Public, Scoped) | No Change | ✅ NO_CHANGE |
+| [119](case119_internal_struct_field_removed_scoped/README.md) | Internal Struct Loses a Field (Non-Public, Scoped) | No Change | ✅ NO_CHANGE |
+| [120](case120_internal_struct_reordered_scoped/README.md) | Internal Struct Fields Reordered (Non-Public, Scoped) | No Change | ✅ NO_CHANGE |
 | [121](case121_kernel_btf_struct_field_added/README.md) | Kernel BTF struct grows a field (out-of-tree module break) | Breaking | 🔴 BREAKING |
 | [122](case122_template_signature_uninstantiated/README.md) | Uninstantiated Template Signature Change | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [123](case123_default_argument_removed/README.md) | Default Argument Removed | API Break | 🟠 API_BREAK |
 | [124](case124_header_constant_value_changed/README.md) | Header Constant Value Changed | API Break | 🟠 API_BREAK |
 | [125](case125_class_became_final/README.md) | Class Became `final` | API Break | 🟠 API_BREAK |
-| [126](case126_sycl_device_impl_ptr/README.md) | SYCL `device` impl pointer — `shared_ptr` → raw pointer | Breaking | 🔴 BREAKING |
+| [126](case126_sycl_device_impl_ptr/README.md) | SYCL `device` Impl Pointer — `shared_ptr` → Raw Pointer | Breaking | 🔴 BREAKING |
 | [127](case127_data_object_size_changed/README.md) | Exported Data Object Size Change | Breaking | 🔴 BREAKING (bad practice) |
 | [128](case128_symbol_binding_strengthened/README.md) | Symbol Binding Strengthened (Weak → Global) | Quality | 🟢 COMPATIBLE |
 | [129](case129_struct_return_convention/README.md) | Struct-Return Convention Change | Breaking | 🔴 BREAKING |
 | [130](case130_exceptions_mode_flip/README.md) | Exceptions Mode Flip (`-fno-exceptions`) | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [131](case131_rtti_mode_flip/README.md) | RTTI Mode Flip (`-fno-rtti`) | Risk | 🟡 COMPATIBLE_WITH_RISK |
-| [132](case132_threadsafe_statics_flip/README.md) | Thread-Safe Statics Mode Flip (`-fno-threadsafe-statics`) | Risk | 🟡 COMPATIBLE_WITH_RISK |
-| [133](case133_tls_model_flip/README.md) | TLS Model Flip (`-ftls-model`) | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [132](case132_threadsafe_statics_flip/README.md) | Thread-Safe Statics Mode Flip | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [133](case133_tls_model_flip/README.md) | TLS Model Flip | Risk | 🟡 COMPATIBLE_WITH_RISK |
 | [134](case134_relro_weakened/README.md) | RELRO Weakened | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [135](case135_stack_canary_removed/README.md) | Stack Canary Removed | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [136](case136_executable_stack_removed/README.md) | Executable Stack Removed (the fix direction) | Quality | 🟢 COMPATIBLE |

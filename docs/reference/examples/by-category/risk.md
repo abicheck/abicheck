@@ -14,8 +14,8 @@ _29 case(s)._ [← back to all examples](../index.md)
 | [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case130_exceptions_mode_flip](../case130_exceptions_mode_flip.md) | Exceptions Mode Flip (`-fno-exceptions`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case131_rtti_mode_flip](../case131_rtti_mode_flip.md) | RTTI Mode Flip (`-fno-rtti`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case132_threadsafe_statics_flip](../case132_threadsafe_statics_flip.md) | Thread-Safe Statics Mode Flip (`-fno-threadsafe-statics`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case133_tls_model_flip](../case133_tls_model_flip.md) | TLS Model Flip (`-ftls-model`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case132_threadsafe_statics_flip](../case132_threadsafe_statics_flip.md) | Thread-Safe Statics Mode Flip | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case133_tls_model_flip](../case133_tls_model_flip.md) | TLS Model Flip | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case134_relro_weakened](../case134_relro_weakened.md) | RELRO Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case135_stack_canary_removed](../case135_stack_canary_removed.md) | Stack Canary Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case152_enum_size_flag_flip](../case152_enum_size_flag_flip.md) | _enum_size_flag_flip — Enum-size flag flip (`-fshort-enums`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
