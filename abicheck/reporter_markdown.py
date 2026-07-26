@@ -66,7 +66,9 @@ _VERDICT_LABEL = {
 # ---------------------------------------------------------------------------
 
 
-def to_stat(result: DiffResult, *, severity_config: SeverityConfig | None = None) -> str:
+def to_stat(
+    result: DiffResult, *, severity_config: SeverityConfig | None = None
+) -> str:
     """One-line summary for CI gates.
 
     *severity_config*, when given, appends a ``gate: PASS|FAIL`` suffix
@@ -106,8 +108,7 @@ def to_stat(result: DiffResult, *, severity_config: SeverityConfig | None = None
             f" [gate: FAIL (exit {exit_code})]" if exit_code else " [gate: PASS]"
         )
     return (
-        f"{label}: {detail} ({summary.total_changes} total)"
-        f"{redundant_note}{gate_note}"
+        f"{label}: {detail} ({summary.total_changes} total){redundant_note}{gate_note}"
     )
 
 
@@ -302,7 +303,10 @@ class ShowOnlyFilter:
         from .severity import effective_verdict_for_change
 
         eff = effective_verdict_for_change(
-            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+            change,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
         )
         # NB: this maps to the CLI --show-only token vocabulary (hyphenated
         # "api-break"), which intentionally differs from the JSON-field
@@ -744,6 +748,66 @@ def _group_changes_by_root_cause(
     return [(key, roots[key], groups[key]) for key in order]
 
 
+def root_cause_for_change(
+    c: Change, *, referenced_causes: frozenset[str] = frozenset()
+) -> tuple[str, str] | None:
+    """This change's ``(root_cause_id, root_display)``, or ``None`` when it
+    has no real correlation signal (G29 Phase 3 follow-up, ADR-052).
+
+    Uses the exact same grouping key ``--report-mode root-cause`` computes
+    (:func:`_root_cause_key_and_display`), hashed the same way
+    :func:`~abicheck.reporter._to_json_root_cause`/``sarif._root_cause_for``
+    already do — so a finding's ``root_cause_id`` here is always identical to
+    its ``root_causes[].root_cause_id`` in JSON root-cause mode, or its
+    ``properties.rootCauseId`` in SARIF root-cause mode, for the same report.
+
+    Deliberately returns ``None`` for the trivial self-referencing singleton
+    case (no ``caused_by_type``, and *c*'s own ``symbol`` isn't referenced by
+    any other finding's ``caused_by_type``) — unlike ``--report-mode
+    root-cause``'s own grouping (which buckets *every* finding, including
+    singletons, since that mode's whole point is showing the full grouping
+    structure), a per-finding ``ImpactAssessment.root_cause_id`` naming
+    nothing but the finding's own identity is not real information; see
+    :func:`root_cause_lookup_for_changes`.
+    """
+    fid = _finding_id(c)
+    key, root_display = _root_cause_key_and_display(
+        c.caused_by_type,
+        c.symbol,
+        c.kind.value,
+        fid,
+        referenced_causes=referenced_causes,
+    )
+    if key == f"finding:{fid}":
+        return None
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16], root_display
+
+
+def root_cause_lookup_for_changes(
+    changes: list[Change], *, extra_causes: frozenset[str] = frozenset()
+) -> dict[str, tuple[str, str]]:
+    """``finding_id -> (root_cause_id, root_display)`` for every change in
+    *changes* that has one (G29 Phase 3 follow-up, ADR-052).
+
+    Built once per report (or per self-contained scope, e.g. a suppressed-
+    changes list or a scoped-only fold-in) so per-change lookup during
+    serialization is O(1) rather than re-deriving ``referenced_causes`` per
+    finding. Feeds ``impact.engine.assess_change``'s ``root_cause`` parameter
+    — see :func:`root_cause_for_change` for why a finding with no real
+    correlation signal is simply absent from the returned dict rather than
+    mapped to a self-referencing singleton id.
+    """
+    referenced_causes = (
+        frozenset(c.caused_by_type for c in changes if c.caused_by_type) | extra_causes
+    )
+    lookup: dict[str, tuple[str, str]] = {}
+    for c in changes:
+        rc = root_cause_for_change(c, referenced_causes=referenced_causes)
+        if rc is not None:
+            lookup[_finding_id(c)] = rc
+    return lookup
+
+
 def _resolve_scoped_gate_findings(
     result: DiffResult,
     severity_config: SeverityConfig | None,
@@ -907,7 +971,10 @@ def _to_markdown_root_cause(
             severity_tag = "breaking" if blocks else "compatible"
             for label in missing_labels:
                 key, root_display = _root_cause_key_and_display(
-                    None, label, missing_kind, label,
+                    None,
+                    label,
+                    missing_kind,
+                    label,
                     referenced_causes=referenced_causes,
                 )
                 line = (
@@ -1108,7 +1175,9 @@ def _build_severity_summary_md(
         level_val = level.value if hasattr(level, "value") else str(level)
         emoji = _SEVERITY_EMOJI.get(level_val, "")
         count = (
-            scoped_counts.get(attr, 0) if scoped_counts is not None else len(cat_changes)
+            scoped_counts.get(attr, 0)
+            if scoped_counts is not None
+            else len(cat_changes)
         )
         impact = (
             "causes non-zero exit"
@@ -1298,7 +1367,9 @@ def _severity_merge_effect(result: DiffResult, severity_config: SeverityConfig) 
 
 
 def to_review_digest(
-    result: DiffResult, *, severity_config: SeverityConfig | None = None,
+    result: DiffResult,
+    *,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
     """Compact GitHub-facing review digest (Markdown).
 

@@ -34,6 +34,7 @@ from .checker_policy import (
     policy_kind_sets as _policy_kind_sets,
 )
 from .detectors import DetectorResult
+from .impact.model import ImpactAssessment
 from .model import AbiSnapshot
 from .policy_file import PolicyFile
 
@@ -209,6 +210,27 @@ class Change:
     affected_public_roots: list[str] | None = None
     impact_proof_path: list[dict[str, object]] | None = None
     impact_is_direct: bool | None = None
+    # ADR-046 D6 (G29 Phase 2 follow-up): the "alternative_paths"/
+    # "discarded_path_count" half of the finding shape the ADR calls for
+    # alongside the "primary_path" ``impact_proof_path`` above. Set by the
+    # same ``attach_impact_metadata`` call, in the same node/edge-dict shape,
+    # when more than one candidate path was available and a preference order
+    # (``buildsource.graph_impact.select_preferred_graph_path``) picked one
+    # as primary — the runner-up(s), capped, not every discarded candidate.
+    # ``impact_discarded_path_count`` is how many candidates beyond the kept
+    # cap were dropped (0 when every candidate fit).
+    impact_alternative_paths: list[list[dict[str, object]]] | None = None
+    impact_discarded_path_count: int = 0
+    # ADR-052's "stable occurrence_id" follow-up (G29 Phase 3), now buildable
+    # on top of ADR-046 D1's occurrence_id half: a hash over the primary
+    # proof path's edges' own GraphEdge.occurrences (buildsource.graph_facts.
+    # edge_occurrence_id), independent of description text — distinct from
+    # finding_id (which deliberately still includes description, see that
+    # function's docstring) and from root_cause_id (which needs full-result
+    # context this per-Change field can't see, so stays out of scope here).
+    # None whenever every edge on the path lacks occurrence-level attrs —
+    # still the common case today, since no producer populates them yet.
+    impact_occurrence_id: str | None = None
     # G29 Phase 3 slice 2 (ADR-052 follow-up) — set on a change moved into
     # ``DiffResult.suppressed_changes`` (``checker._filter_suppressed_changes``/
     # ``_filter_pattern_synthetic``, ``post_processing.ApplySuppression``) to
@@ -221,6 +243,24 @@ class Change:
     # runtime overlays a suppression rule discards outright (those never
     # reach ``suppressed_changes`` at all).
     suppression_rule: str | None = None
+    # ADR-052 D2 follow-up (G29 Phase 3, scoped implementation) — a
+    # producer's own directly-constructed ``ImpactAssessment``, when the
+    # producer builds one itself instead of leaving ``impact.engine.
+    # assess_change`` to derive it later from the flat fields above. Only
+    # ``internal_leak._build_leak_change``/``_build_call_graph_leak_change``
+    # set this today (see those functions' docstrings for why they are safe
+    # to cache: nothing later in ``post_processing.DEFAULT_PIPELINE``
+    # mutates a leak finding's own reachability/evidence fields after
+    # construction). ``impact.engine.assess_change`` reuses this object's
+    # *evidence* fields (reachability/proof-path/confidence/
+    # evidence_category/correlated_change_kind) when present, but always
+    # recomputes ``decision``/``root_cause_id`` fresh from this ``Change``'s
+    # current flat-field state — those can still change after construction
+    # (suppression, pattern modulation), so a cached ``decision`` would risk
+    # going stale. ``None`` (the default) for every producer that has not
+    # yet been migrated — the flat fields above remain the sole source of
+    # truth for those, exactly as before this field existed.
+    impact_assessment: ImpactAssessment | None = None
 
 
 @dataclass

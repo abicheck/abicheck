@@ -94,6 +94,28 @@ class GraphProofPath:
     duplicating its logic here would be a second, driftable implementation.
     ``steps`` is empty when only the prose rendering is available (no
     structured ``impact_proof_path`` was attached for this finding).
+
+    ``alternative_paths``/``discarded_path_count`` (ADR-046 D6, G29 Phase 2
+    follow-up) are this path's runner-ups: when a producer had more than one
+    candidate path and picked this one as primary via a preference order
+    (e.g. ``buildsource.graph_impact.select_preferred_graph_path``), the
+    next-best candidates (capped by the producer) are kept here as their own
+    ``GraphProofPath``s (typically with their own, different ``target`` —
+    see that function's docstring), and ``discarded_path_count`` is how many
+    more existed beyond the cap. Both are empty/zero when only one candidate
+    path was ever available, which is still the common case today.
+
+    ``occurrence_id`` (ADR-052's stable-identifier follow-up, built on top of
+    ADR-046 D1) is a hash over this path's edges' own graph occurrence trail
+    — independent of ``description`` text, unlike ``reporter._finding_id``.
+    ``None`` whenever no edge on the path carries occurrence-level attrs
+    (``buildsource.graph_impact._path_occurrence_id``) — still the common
+    case today, since no producer populates them yet. ``root_cause_id``/
+    ``impact_group_id`` stay out of this dataclass: unlike a path's own
+    occurrences, correctly computing either needs whole-``DiffResult``
+    context (which findings elsewhere reference this one) that a single
+    ``Change``'s read view can't see — see ADR-052's "Deliberately not
+    implemented" section and Phase 6's ``RootCauseCorrelator``.
     """
 
     target: str
@@ -101,6 +123,9 @@ class GraphProofPath:
     is_direct: bool | None = None
     steps: tuple[ProofStep, ...] = ()
     prose: str | None = None
+    alternative_paths: tuple[GraphProofPath, ...] = ()
+    discarded_path_count: int = 0
+    occurrence_id: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         d: dict[str, object] = {"target": self.target}
@@ -112,6 +137,12 @@ class GraphProofPath:
             d["steps"] = [s.to_dict() for s in self.steps]
         if self.prose is not None:
             d["prose"] = self.prose
+        if self.alternative_paths:
+            d["alternative_paths"] = [p.to_dict() for p in self.alternative_paths]
+        if self.discarded_path_count:
+            d["discarded_path_count"] = self.discarded_path_count
+        if self.occurrence_id is not None:
+            d["occurrence_id"] = self.occurrence_id
         return d
 
 
@@ -160,6 +191,26 @@ class ImpactAssessment:
     is already independently populated by one of the producer modules named
     in this module's docstring — this dataclass adds no new signal, only a
     shared shape to query it through (ADR-052 D1).
+
+    ``root_cause_id``/``root_cause_display``/``impact_group_id`` (G29 Phase 3
+    follow-up) are the report-level root-cause grouping key
+    (``reporter_markdown.root_cause_for_change``, the same
+    ``_root_cause_key_and_display`` computation ``--report-mode root-cause``
+    uses) surfaced as a per-finding identifier, independent of report mode —
+    unlike ``--report-mode root-cause``'s own grouping (which buckets *every*
+    finding, including singletons), these three fields are deliberately
+    ``None`` for a finding with no real correlation signal (no
+    ``caused_by_type``, and not itself referenced by another finding's
+    ``caused_by_type``) — the trivial self-referencing
+    ``f"finding:{finding_id}"`` case — so a plain, uncorrelated finding's
+    ``impact_assessment`` doesn't balloon with a rootCauseId that names
+    nothing but itself. ``impact_group_id`` is currently always identical to
+    ``root_cause_id`` — a placeholder alias, not yet a distinct concept
+    (Phase 6's ``RootCauseCorrelator`` is what would ever make them diverge,
+    e.g. bucketing several distinct root causes that share one broader
+    consumer-visible event under one group while keeping their own
+    individual root-cause identities); see ADR-052's "Deliberately not
+    implemented" section.
     """
 
     reachability_state: ReachabilityState = ReachabilityState.UNKNOWN
@@ -170,6 +221,9 @@ class ImpactAssessment:
     decision: FindingDecision = field(default_factory=FindingDecision)
     evidence_category: str | None = None
     correlated_change_kind: str | None = None
+    root_cause_id: str | None = None
+    root_cause_display: str | None = None
+    impact_group_id: str | None = None
 
     def has_signal(self) -> bool:
         """True when this assessment carries information beyond the
@@ -186,6 +240,7 @@ class ImpactAssessment:
             or self.decision.verdict_override is not None
             or self.correlated_change_kind is not None
             or self.evidence_category is not None
+            or self.root_cause_id is not None
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -203,4 +258,8 @@ class ImpactAssessment:
             d["evidence_category"] = self.evidence_category
         if self.correlated_change_kind is not None:
             d["correlated_change_kind"] = self.correlated_change_kind
+        if self.root_cause_id is not None:
+            d["root_cause_id"] = self.root_cause_id
+            d["root_cause_display"] = self.root_cause_display
+            d["impact_group_id"] = self.impact_group_id
         return d

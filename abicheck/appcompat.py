@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 from .checker import Change, DiffResult
 from .checker_policy import ChangeKind, ReachabilityState, Verdict, compute_verdict
 from .diff_helpers import make_change
+from .impact.engine import assess_change
 from .model import AbiSnapshot, Visibility
 
 if TYPE_CHECKING:
@@ -957,6 +958,14 @@ def scope_diff_to_app(
             reachability_kind="consumer_proven",
             reachability_state=ReachabilityState.PROVEN_REACHABLE,
         )
+        # ADR-052 D2 follow-up (G29 Phase 3, scoped implementation): cache
+        # this overlay's ImpactAssessment right away. Safe here because
+        # suppression.evaluate() below is a pure read of change's fields
+        # (Suppression.matches/would_withhold/would_withhold_unknown_reachability
+        # never assign to *change*) -- nothing between this point and the
+        # cache read in impact.engine.assess_change touches the evidence
+        # fields just set above.
+        overlay_change.impact_assessment = assess_change(overlay_change)
         if suppression is None:
             breaking_for_app.append(overlay_change)
             continue

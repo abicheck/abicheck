@@ -264,6 +264,39 @@ class TestAssessChange:
         assert assessment.proof_path.steps[2].node_id == "decl://helper"
         assert assessment.proof_path.target == "helper"
 
+    def test_alternative_path_is_direct_counts_edge_hops_not_raw_steps(
+        self,
+    ) -> None:
+        """CodeRabbit review: structured_proof_path's shape is
+        node, edge, node, ... -- a single-hop (direct) path already has 3
+        raw entries (one edge, two nodes), so is_direct must count edge
+        steps, not len(raw_steps), or every direct alternative would be
+        mislabeled transitive."""
+        direct_alt = [
+            {"type": "node", "id": "decl://pub", "label": "pub"},
+            {"type": "edge", "kind": "DECL_CALLS_DECL"},
+            {"type": "node", "id": "decl://direct", "label": "direct"},
+        ]
+        transitive_alt = [
+            {"type": "node", "id": "decl://pub", "label": "pub"},
+            {"type": "edge", "kind": "DECL_CALLS_DECL"},
+            {"type": "node", "id": "decl://mid", "label": "mid"},
+            {"type": "edge", "kind": "DECL_CALLS_DECL"},
+            {"type": "node", "id": "decl://leaf", "label": "leaf"},
+        ]
+        change = _change(
+            affected_public_roots=["pub"],
+            impact_proof_path=direct_alt,
+            impact_is_direct=True,
+            impact_alternative_paths=[direct_alt, transitive_alt],
+        )
+        assessment = assess_change(change)
+        assert assessment.proof_path is not None
+        alternatives = assessment.proof_path.alternative_paths
+        assert len(alternatives) == 2
+        assert alternatives[0].is_direct is True
+        assert alternatives[1].is_direct is False
+
     def test_target_derives_from_last_node_not_symbol_when_symbol_is_the_root(
         self,
     ) -> None:
@@ -352,6 +385,97 @@ class TestAssessChange:
         assessment = assess_change(Bare())
         assert assessment.reachability_state == ReachabilityState.UNKNOWN
         assert assessment.has_signal() is False
+
+
+class TestAssessChangeWithCachedImpactAssessment:
+    """ADR-052 D2 follow-up (G29 Phase 3, scoped implementation):
+    Change.impact_assessment, when a producer set it directly, supplies
+    assess_change's *evidence* fields instead of re-deriving them -- but
+    decision/root_cause_id are always recomputed fresh regardless."""
+
+    def test_cached_evidence_is_reused_verbatim(self) -> None:
+        cached = ImpactAssessment(
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
+            public_reachable=True,
+            reachability_kind="value_embedding",
+            confidence=Confidence.HIGH,
+            proof_path=GraphProofPath(target="ns::internal::Helper", prose="fn:pub"),
+            evidence_category="source_only",
+            correlated_change_kind="inline_body_changed",
+        )
+        change = _change(impact_assessment=cached)
+        assessment = assess_change(change)
+        assert assessment.reachability_state == cached.reachability_state
+        assert assessment.public_reachable == cached.public_reachable
+        assert assessment.reachability_kind == cached.reachability_kind
+        assert assessment.confidence == cached.confidence
+        assert assessment.proof_path == cached.proof_path
+        assert assessment.evidence_category == cached.evidence_category
+        assert assessment.correlated_change_kind == cached.correlated_change_kind
+
+    def test_decision_is_always_recomputed_not_read_from_cache(self) -> None:
+        """The cached object's own decision (built when the producer
+        constructed it, before suppression/modulation ran) must never leak
+        through -- assess_change recomputes decision fresh from the
+        Change's *current* flat fields every time, since those can change
+        after construction."""
+        cached = ImpactAssessment(
+            public_reachable=True,
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
+            decision=FindingDecision(state="kept"),
+        )
+        # Flat fields mutated *after* the cached assessment was built --
+        # e.g. a later suppression/modulation pass.
+        change = _change(
+            impact_assessment=cached,
+            modulation_reason="idiom_pattern_matched",
+            effective_verdict=Verdict.COMPATIBLE,
+            suppression_rule="workaround-123",
+        )
+        assessment = assess_change(change, suppressed=True)
+        assert assessment.decision.state == "suppressed"
+        assert assessment.decision.reason_code == "idiom_pattern_matched"
+        assert assessment.decision.verdict_override == "COMPATIBLE"
+        assert assessment.decision.suppression_rule == "workaround-123"
+        # The cached evidence is still reused untouched.
+        assert assessment.public_reachable is True
+        assert assessment.reachability_state == ReachabilityState.PROVEN_REACHABLE
+
+    def test_root_cause_is_always_recomputed_not_read_from_cache(self) -> None:
+        cached = ImpactAssessment(
+            root_cause_id="stale-id", root_cause_display="stale-display",
+            impact_group_id="stale-id",
+        )
+        change = _change(impact_assessment=cached)
+        assessment = assess_change(change, root_cause=("fresh-id", "fresh-display"))
+        assert assessment.root_cause_id == "fresh-id"
+        assert assessment.root_cause_display == "fresh-display"
+        assert assessment.impact_group_id == "fresh-id"
+
+    def test_matches_uncached_derivation_for_equivalent_flat_fields(self) -> None:
+        """A cached assessment built from the same flat-field values an
+        on-demand derivation would use must produce an identical result --
+        the two code paths must never disagree for equivalent input."""
+        flat_fields: dict[str, object] = {
+            "public_reachable": True,
+            "reachability_kind": "value_embedding",
+            "reachability_proof_path": "fn:pub → base:detail::Base",
+            "reachability_state": ReachabilityState.PROVEN_REACHABLE,
+        }
+        uncached = assess_change(_change(**flat_fields))
+        cached = assess_change(
+            _change(impact_assessment=uncached, **flat_fields)
+        )
+        assert cached == uncached
+
+    def test_none_cached_falls_back_to_derivation(self) -> None:
+        change = _change(
+            impact_assessment=None,
+            public_reachable=True,
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
+        )
+        assessment = assess_change(change)
+        assert assessment.public_reachable is True
 
 
 class TestReporterIntegration:

@@ -1266,17 +1266,29 @@ def _internal_dependency_findings(
         )
         # G31 Phase B B3 (ADR-048): attach the structured (node/edge-list)
         # counterpart of the prose "Proof path(s)" text above, using the
-        # shortest of the per-target paths already computed — enrichment on
-        # the finding this function was already emitting, not a duplicate.
+        # strongest of the per-target paths already computed (ADR-046 D6's
+        # tiered preference, not plain shortest-length) — enrichment on the
+        # finding this function was already emitting, not a duplicate. The
+        # runner-up target paths become impact_alternative_paths: this one
+        # Change already aggregates every newly-reached target under `entry`,
+        # so its "alternatives" are legitimately the other reached targets,
+        # not redundant routes to the same one.
         if target_paths:
-            _, shortest_path = min(target_paths, key=lambda tp: len(tp[1]))
-            from .graph_impact import attach_impact_metadata
+            from .graph_impact import (
+                attach_impact_metadata,
+                select_preferred_graph_path,
+            )
+
+            candidate_paths = [path for _, path in target_paths]
+            primary_path = select_preferred_graph_path(new, candidate_paths)
+            alternative_paths = [p for p in candidate_paths if p is not primary_path]
 
             attach_impact_metadata(
                 change,
                 affected_public_roots=[label],
-                path=shortest_path,
+                path=primary_path,
                 graph=new,
+                alternative_paths=alternative_paths,
             )
         findings.append(change)
     return findings

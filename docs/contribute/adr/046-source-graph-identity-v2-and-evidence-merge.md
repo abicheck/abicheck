@@ -1,24 +1,35 @@
 # ADR-046: Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge
 
 **Date:** 2026-07-19
-**Status:** Accepted — D1, D2, D3, a partial D5, and a partial D6 slice
-implemented: role-aware edge identity (`GraphEdge.relation_key()`/
-`edge_relation_key`, the `relation_key` half of D1's split — `occurrence_id`
-remains open), the evidence-preserving node/edge merge (`GraphFact`/
-`FactConflict`/`merge_graph_facts`, replacing `SourceGraphSummary.add_node`/
-`add_edge`'s v1 first-writer-wins drop), the per-(kind,role) coverage matrix
-for `inline_graph_fold.fold_type_graph`, a named `TraversalPolicy` reifying
-the call-graph leak walk's own edge-kind/stop/confidence rules
-(`internal_leak.TraversalPolicy`/`CALL_GRAPH_TRAVERSAL_POLICY` — see "D5
-implementation" for what's covered and what's deferred), and a two-tier
-proof-path preference (`internal_leak.select_preferred_path`, wired into
-`post_processing.py`'s layout-walk selection only — see "D6 implementation"
-for what's covered and what's deferred). D4 (`EntityResolver`/
-`SOURCE_GRAPH_VERSION = 2`) remains open, and is a deliberate stop, not an
-oversight — see "D4: deliberately deferred" below for why. See "D1
-implementation"/"D2 implementation"/"D3 implementation"/"D5 implementation"/
-"D6 implementation"
-below.
+**Status:** Accepted — D1, D2, D3, D4, D5, and D6 all implemented (each to
+the extent described below): role-aware edge identity plus the opt-in
+per-call-site occurrence trail (`GraphEdge.relation_key()`/`edge_relation_key`
+for D1's `relation_key` half, `GraphEdge.occurrences`/`edge_occurrence_id`
+for its `occurrence_id` half — free of cost until a producer populates the
+four occurrence-level attrs, per the Costs section below), the
+evidence-preserving node/edge merge (`GraphFact`/`FactConflict`/
+`merge_graph_facts`, replacing `SourceGraphSummary.add_node`/`add_edge`'s v1
+first-writer-wins drop), the per-(kind,role) coverage matrix for
+`inline_graph_fold.fold_type_graph`, a USR-preferring `EntityResolver`
+aliasing v1 node ids to a canonical identity without changing `GraphNode.id`
+generation itself (`SOURCE_GRAPH_VERSION = 2`, opt-in via
+`SourceGraphSummary.resolve_entities()` — see "D4 implementation" below for
+why this is a deliberately *scoped* subset of the originally sketched full
+rewrite, not the whole thing), a named `TraversalPolicy` reifying the
+call-graph leak walk's own edge-kind/stop/confidence/precision rules
+(`internal_leak.TraversalPolicy`/`CALL_GRAPH_TRAVERSAL_POLICY`, now including
+a real `effect_transitions` — see "D5 implementation" for what's covered and
+what's still deferred to the layout walk), and a proof-path preference order
+across two selectors split by how much per-hop structure their walk's path
+representation carries (`internal_leak.select_preferred_path` — 2 of 6
+tiers, the layout walk's plain `list[str]` paths;
+`buildsource.graph_impact.select_preferred_graph_path` — 4 of 6 tiers, a
+structured `list[GraphEdge]` path — plus the `primary_path`/
+`alternative_paths`/`discarded_path_count` finding shape on
+`impact.model.GraphProofPath`; see "D6 implementation" for the exact tier
+mapping and what's still deferred). See "D1 implementation"/"D2
+implementation"/"D3 implementation"/"D4 implementation"/"D5
+implementation"/"D6 implementation" below.
 **Decision maker:** (pending — recorded per repository convention, the same
 caveat ADR-048's header carries; a single-maintainer repo where merging the
 implementing PR is the acceptance mechanism.)
@@ -175,6 +186,17 @@ weakest-covered role's honesty.
 
 ### D4. `EntityResolver` — USR-based canonical identity, `SOURCE_GRAPH_VERSION = 2`
 
+> **Historical sketch — superseded by the shipped API.** The
+> `EntityResolver`/`aliases: list[str]` shape below is the *original decision
+> proposal*, written before this ADR was implemented. What actually shipped
+> (see "D4 implementation" below, the authoritative API description) is a
+> **graph-level** resolver — `EntityResolver.aliases: dict[str, str]` (v1
+> node id → canonical id, not a per-entity `list[str]`), no `kind` field, and
+> `resolve(node: GraphNode) -> str` instead of `resolve(any_alias)`. Kept
+> here unmodified as the historical record of what D4 originally proposed,
+> not as a second description of the real API — don't implement against
+> this sketch.
+
 New `abicheck/buildsource/entity_resolver.py`:
 
 ```python
@@ -265,7 +287,7 @@ The finding keeps `primary_path` (the highest-preference path found) plus
 "how much evidence was there, and how strong was the best of it," not just
 one arbitrary shortest path.
 
-## D1 implementation (G29 Phase 2, slice 3 — the `relation_key` half)
+## D1 implementation (G29 Phase 2, slices 3 and 6 — both halves)
 
 - `abicheck/buildsource/graph_facts.py`: `edge_relation_key(src, dst, kind,
   resolved)` and `GraphEdge.relation_key()` — the `(src, dst, kind, role)`
@@ -279,18 +301,33 @@ one arbitrary shortest path.
   to `relation_key()`, since deduping on the coarse key alone silently
   folded two real, role-distinct edges into one before `relation_key()`
   could ever observe both roles on a real, `add_edge`-built graph.
-- **Not implemented**: `occurrence_id` (the full, non-deduplicated
-  per-call-site/per-configuration evidence trail one `relation_key` can back
-  many of). The ADR's own Costs section flags this specifically as needing "a
-  measured check against the existing scan-level cost model... before this
-  lands on a default, always-on path rather than an opt-in one" — that
-  measurement hasn't been done, so this slice stops at the identity split and
-  does not add per-occurrence storage.
-- `tests/test_source_graph_v2.py` (`TestRelationKey`): role discriminates two
-  edges that collapse on `key()`; defaults to `""` when no role attr;
-  defaults absent; reads the D2-merged `resolved` view (not whichever fact
-  registered first) rather than a raw/stale attr; the free function and
-  method agree.
+- **`occurrence_id` (slice 6, G29 Phase 2 follow-up):** `edge_occurrence_id(
+  relation_key, attrs)` and `GraphEdge.occurrences` — a stable
+  `sha256:<hex>` hash over `(relation_key, source_location,
+  configuration_id, instantiation_id, callsite_id)`, computed per fact and
+  accumulated (deduplicated) into `occurrences` by
+  `ensure_facts_and_resolve` alongside `resolved`/`conflicts`. Answers the
+  Costs section's own gate differently than a default-on path would:
+  `edge_occurrence_id` returns `None` — contributing nothing to
+  `occurrences` — whenever a fact carries none of the four occurrence keys,
+  which is every fact from every current producer. So this lands as
+  genuinely opt-in surface (zero cost, zero behavior change, until a
+  producer populates those attrs) rather than needing the scan-level
+  cost-model measurement a default-on path would have required. No current
+  producer opts in yet; this is forward-compatible schema, not a change to
+  what any pack contains today.
+- `tests/test_source_graph_v2.py` (`TestRelationKey`, `TestOccurrenceId`):
+  role discriminates two edges that collapse on `key()`; defaults to `""`
+  when no role attr; defaults absent; reads the D2-merged `resolved` view
+  (not whichever fact registered first) rather than a raw/stale attr; the
+  free function and method agree. `TestOccurrenceId` covers: no occurrence
+  attrs → `None`/empty `occurrences`; a stable, deterministic hash for
+  identical inputs; distinct call sites and distinct relation keys both
+  produce distinct ids; two facts with different `callsite_id`s on one
+  `relation_key`-deduped edge both survive in `occurrences`; re-registering
+  the same call site doesn't duplicate; round-trips through
+  `to_dict()`/`from_dict()`; self-heals from a v1 pack with no `occurrences`
+  key.
 
 ### Mechanical follow-up: `GraphNode`/`GraphEdge` moved into `graph_facts.py`
 
@@ -580,19 +617,140 @@ preference order all remain open follow-up work under this same ADR — see
   family-level `extractor_passes` side); `role_pass_covered()`'s direct-hit
   and family-fallback behavior.
 
-## D5 implementation (G29 Phase 2, slice 5 — partial)
+## D4 implementation (G29 Phase 2 follow-up) — deliberately scoped
+
+D4 stayed open through Slices 1-8 as a genuine deferral (see "Why this stays
+scoped, not the full rewrite" below for the reasoning that was originally
+recorded here) — this section is that deferral's own follow-up,
+implementing the part of D4 that delivers real value without the
+node-id-generation rewrite the original deferral flagged as too large a
+single change.
+
+- **`abicheck/buildsource/entity_resolver.py` (new): `EntityResolver`.**
+  `resolve(node) -> str` computes a USR-preferring canonical identity for a
+  `GraphNode` — reusing `entity_identity.resolve_identity_for_node`
+  (ADR-048) rather than a second, independent identity computation, exactly
+  the "natural first alias `EntityResolver.aliases` would fold in"
+  relationship ADR-048's own "Relationship to ADR-046" section predicted —
+  and records it as `aliases[v1_id] = canonical_id`. **`GraphNode.id`
+  generation itself is unchanged** — `_decl_node_id`/`_type_node_id` et al.
+  in `source_graph.py` still produce exactly the v1 ids they always have;
+  `EntityResolver` computes a *second*, richer identity alongside them, never
+  in place of them. Two or more v1 ids that resolve to the same canonical
+  identity (the identity-fragmentation pattern this ADR exists to name) are
+  recorded as an `EntityConflict` — "conflicts gives cross-producer
+  disagreement a visible home instead of silent first-writer-wins," the same
+  design goal D2's `FactConflict` serves for attrs/confidence, applied to
+  identity here.
+- **`SOURCE_GRAPH_VERSION` bumped 1 → 2.** A *signal* bump, not a breaking
+  schema change: nothing anywhere reads or branches on `schema_version`
+  today (confirmed before this change — it was genuinely dead data), so this
+  only marks "this graph was built with `EntityResolver`-capable tooling."
+  `SourceGraphSummary.entity_resolver: EntityResolver` is an additive
+  optional field; `from_dict` defaults it to an empty, unresolved
+  `EntityResolver` when absent. **v1 IDs kept as aliases — no forced
+  re-collection**: a v1 pack (`schema_version: 1`, no `entity_resolver` key
+  at all) still loads and compares correctly through its existing
+  `GraphNode.id` values with zero behavior change, exactly as the G29.3
+  summary's original framing promised.
+- **`resolve_entities()` is opt-in**, not wired into `add_node`/
+  `__post_init__`/`finalize()` — computing a USR-preferring identity for
+  every node is extra work no current graph consumer needs by default, the
+  same "no cost until asked for" discipline D1's `occurrence_id` and D5's
+  `effect_transitions` both follow. `to_dict()` omits the `entity_resolver`
+  key entirely (never an empty `{"aliases": {}, "conflicts": []}`) unless
+  `resolve_entities()` was actually called — the same sparse-output
+  convention `impact_assessment` (ADR-052) uses.
+- **Why this stays scoped, not the full rewrite.** The originally-recorded
+  reasons for deferring all of D4 still explain why this implementation
+  stops short of touching `GraphNode.id` generation itself:
+  1. [ADR-048](048-canonical-entity-identity-and-graph-reconciliation.md)
+     (G31 Phase B, accepted and implemented after this ADR was written)
+     already ships `entity_identity.CanonicalIdentity` — the identity
+     resolution `EntityResolver.resolve` reuses — solving safe old/new
+     reconciliation and impact/proof-path linking *without* touching
+     `GraphNode.id` or the schema version. This implementation wires that
+     existing module into a graph-wide alias index rather than duplicating
+     its resolution logic.
+  2. **Changing `GraphNode.id` generation itself** (`_decl_node_id`/
+     `_type_node_id`/`_symbol_node_id` et al.) would still need every
+     `GraphNode`-constructing producer (`source_graph.py`, `call_graph.py`,
+     `type_graph.py`, `header_graph.py`, `include_graph.py`,
+     `graph_backends.py`) updated in lockstep, plus a genuine
+     v1-id/v2-id-scheme compatibility matrix at the *identity* level (not
+     just the pack-loading level `EntityResolver` already handles) — the
+     kind of "own scoped design pass" bar this file's own header sets for
+     an identity/version-bump change, still not attempted here. This
+     implementation sidesteps that lockstep-update requirement entirely: by
+     hooking `resolve_entities()` into `SourceGraphSummary.nodes` (populated
+     the same way regardless of which producer added a node), *every*
+     `GraphNode`-constructing producer gets alias resolution automatically,
+     without any of those six modules being touched — the risky part of the
+     original D4 sketch never had to happen for this scoped version to
+     deliver real value.
+  3. **Open research question (not yet answered): is the full
+     `GraphNode.id`-generation migration still needed at all?** Every known
+     current consumer of stable cross-version identity (impact/proof-path
+     linking via ADR-048's `CanonicalIdentity`) is already served by the
+     alias layer above without touching `GraphNode.id`. Before scheduling
+     the six-module lockstep rewrite in item 2, the concrete gap it would
+     close needs to be named explicitly — e.g. a producer that needs a
+     *single* id without alias indirection, or a performance case where
+     resolving through `aliases` on every lookup is measurably too slow.
+     Absent a named consumer with that requirement, the honest status of
+     this item may be "not planned" rather than "deferred", the same
+     distinction ADR-052 draws between its own still-open items and the
+     ones it explicitly closed as out of scope.
+- `tests/test_entity_resolver.py`: `EntityResolver.resolve` resolves a USR to
+  its canonical id, falls back to a real mangled name then a normalized
+  qualified-name signature when no USR is available (`entity_identity`'s own
+  preference order), is idempotent per node id, gives two v1 ids sharing a
+  USR the same canonical alias, and records an `EntityConflict` for the
+  second (non-representative) v1 id — with the first-seen id staying
+  `v1_id_for`'s answer. `to_dict()`/`from_dict()` round-trip (including the
+  conflict list and the representative-id reconstruction).
+  `TestSourceGraphSummaryEntityResolution` covers `SOURCE_GRAPH_VERSION ==
+  2`; `resolve_entities()` not running automatically (`add_node`/
+  `finalize()` alone leave `entity_resolver.aliases` empty); a call
+  populating aliases for every node; being safe to call again after more
+  nodes are added; `to_dict()` omitting the key when unresolved and
+  including it once resolved; a full `to_dict()`/`from_dict()` round trip;
+  and the explicit v1-pack-compat case — a `schema_version: 1` dict with no
+  `entity_resolver` key loads with an empty, unresolved `EntityResolver`,
+  and `resolve_entities()` still works on it on demand afterward.
+
+**Follow-up fixes (CodeRabbit review), same PR:**
+
+- `SourceGraphSummary.from_dict` crashed on a hand-edited pack with an
+  explicit `"entity_resolver": null` (as opposed to the key being absent
+  entirely) — `dict(None)` raised before `EntityResolver.from_dict`'s own
+  defensive `.get()` parsing ever ran. Fixed by narrowing to a dict (or
+  `{}`) before the call, matching every other optional-object field on this
+  same `from_dict`.
+- `resolve_entities()` reused the existing `entity_resolver` across calls,
+  so a node that gained *stronger* identity evidence via a later `add_node`
+  merge (e.g. a USR contributed by a second registration after an earlier
+  one lacked it) kept serving the canonical id resolved from its earlier,
+  weaker attrs — `EntityResolver.resolve`'s per-node-id idempotence, correct
+  within one resolver instance, silently became staleness across repeated
+  `resolve_entities()` calls. Fixed by starting from a fresh `EntityResolver`
+  on every call, trading re-resolving every node (not just new ones) for
+  guaranteed freshness.
+
+## D5 implementation (G29 Phase 2, slices 5 and 7)
 
 - `abicheck/internal_leak.py`: `TraversalPolicy` (`allowed_edges`,
-  `stop_conditions`, `minimum_confidence`) and `CALL_GRAPH_TRAVERSAL_POLICY`
-  — the call-graph leak walk's own rules (`{DECL_CALLS_DECL,
-  DECL_REFERENCES_DECL}`, the existing `is_consumer_compiled_node` stop
-  check) reified as one named, reusable object instead of the inline
-  `edge_kinds` frozenset + hard-coded `_is_consumer_compiled_node` call
-  `_consumer_compiled_reachability`/`compute_call_graph_leak_paths` had
-  before. `stop_conditions` matches the Decision text's own polarity (True =
-  "do not expand past this node," the node itself still counts as
-  reachable) — the inverse sense of `is_consumer_compiled_node`, which the
-  policy's `stop_conditions` lambda negates.
+  `stop_conditions`, `minimum_confidence`, `effect_transitions`) and
+  `CALL_GRAPH_TRAVERSAL_POLICY` — the call-graph leak walk's own rules
+  (`{DECL_CALLS_DECL, DECL_REFERENCES_DECL}`, the existing
+  `is_consumer_compiled_node` stop check) reified as one named, reusable
+  object instead of the inline `edge_kinds` frozenset + hard-coded
+  `_is_consumer_compiled_node` call `_consumer_compiled_reachability`/
+  `compute_call_graph_leak_paths` had before. `stop_conditions` matches the
+  Decision text's own polarity (True = "do not expand past this node," the
+  node itself still counts as reachable) — the inverse sense of
+  `is_consumer_compiled_node`, which the policy's `stop_conditions` lambda
+  negates.
 - `minimum_confidence` is real, wired filtering — `_consumer_compiled_reachability`
   now skips any edge whose confidence rank is below the policy's floor
   before building its adjacency map — not just a passthrough field. The
@@ -601,14 +759,26 @@ preference order all remain open follow-up work under this same ADR — see
   existing caller; a policy built with a stricter floor (e.g. `CONF_HIGH`)
   is new capability future code can opt into without this walk's own logic
   changing again.
-- **Not implemented this slice**: `effect_transitions` (how a walk's
-  precision label changes crossing a particular edge kind) — no current
-  walk needs it, so it would be speculative surface with no caller.
+- **`effect_transitions` (slice 7, G29 Phase 2 follow-up):**
+  `CALL_GRAPH_TRAVERSAL_POLICY.effect_transitions = {"virtual": "overapprox",
+  "function_pointer": "overapprox"}` — a virtual/function-pointer call is
+  never statically exact (the same `CallEdge.resolution="overapprox"` label
+  ADR-031 D4/D9 already puts on that edge), so crossing one downgrades the
+  walk's precision from that point on. `_edge_effect_transition(policy,
+  edge)` looks up an edge's resolved `call_kind` against the policy's map;
+  `_consumer_compiled_reachability` now returns a third element per entry —
+  `degraded: frozenset[str]` — the subset of reached nodes first reached via
+  a transitioning edge, sticky for every node reached transitively past it
+  (a private-function signature change, callers of `_consumer_compiled_reachability`
+  updated to the 3-tuple accordingly). `compute_call_graph_leak_paths`
+  prefixes a degraded path's formatted string with `"overapprox: "`, so a
+  proof that only exists through a possible-dispatch-target edge is
+  distinguishable from one proven through an unbroken chain of direct calls.
   `compute_leak_paths`'s layout/type-graph walk (the other of the two walks
-  D5's Decision text names) does **not** adopt `TraversalPolicy` — it
+  D5's Decision text names) still does **not** adopt `TraversalPolicy` — it
   traverses `RecordType`/typedef structures, not the L5 `GraphNode`/
   `GraphEdge` graph this policy shape describes, so it would need its own
-  data-model change first, which is out of scope here (matches the
+  data-model change first, which stays out of scope (matches the
   same-shaped scoping decision D3 made for `inline_graph_fold` vs.
   `header_graph.py`/the clang-plugin producer).
 - `tests/test_internal_leak.py` (`TestTraversalPolicy`): the shared policy's
@@ -618,40 +788,66 @@ preference order all remain open follow-up work under this same ADR — see
   while still recording that node itself as reachable; the public
   `compute_call_graph_leak_paths` entry point still routes through
   `CALL_GRAPH_TRAVERSAL_POLICY` end to end.
+  `tests/test_internal_leak_effect_transitions.py` (`TestEffectTransitions`,
+  split out to stay under the line-count cap): no transition for a direct
+  call; a real transition for a virtual call; the target of a virtual call
+  is marked degraded; the downgrade is sticky past the transitioning edge; a
+  policy with no `effect_transitions` behaves exactly as before this field
+  existed; `compute_call_graph_leak_paths` flags the overapprox-only path.
 
-## D6 implementation (G29 Phase 2, slice 4 — partial)
+## D6 implementation (G29 Phase 2, slices 4 and 8)
 
 - `abicheck/internal_leak.py`: `select_preferred_path(paths: list[list[str]])
   -> list[str]` implements the two tiers this walk's own per-path signals
-  already support out of the Decision text's six-tier order — "exact" (a
-  value-propagating path, tier 2 in the six-tier list) and "virtual/indirect
-  over-approximation" (tier 6). A pointer/reference-only path never wins over
-  an available value-propagating one just because it's shorter (what plain
-  `min(paths, key=len)` did); within a tier, shortest still wins. The other
-  four tiers (consumer-proven, public-header structural, multi-producer-
-  confirmed, reduced-confidence name resolution) need structured per-hop
-  evidence (confidence, producer, `ScopeOrigin`) this walk's plain
-  `list[str]` path representation doesn't carry — not implemented.
-- Wired into two call sites over the same layout-walk path representation:
+  support out of the Decision text's six-tier order — "exact" (a
+  value-propagating path, tier 2) and "virtual/indirect over-approximation"
+  (tier 6). A pointer/reference-only path never wins over an available
+  value-propagating one just because it's shorter (what plain
+  `min(paths, key=len)` did); within a tier, shortest still wins. Wired into
   `post_processing.py`'s `MarkReachability` proof-path selection (the
-  `reachable_types`-keyed branch), and `internal_leak._build_leak_change`
+  `reachable_types`-keyed branch) and `internal_leak._build_leak_change`
   (the `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` synthetic finding's own
-  displayed proof path — CodeRabbit review caught that the first wiring
-  missed this second consumer of the same `paths` shape). The
-  call-graph-walk's own `min(call_paths, key=len)` selection is **deliberately
-  left unchanged** — `call_paths` there are already-formatted strings with no
-  structured value/indirection signal to tier on, so `select_preferred_path`
-  cannot apply without first changing that walk's path representation, which
-  is out of scope for this slice.
-- `post_processing.py` was already at the AI-readiness 2000-line hard cap
-  before this change; wiring in `select_preferred_path` was paired with
-  collapsing the layout walk's separate `reachability_kind`
-  value-propagating-check and `reachability_proof_path` `min(...)` call into
-  one shared `preferred_path = select_preferred_path(paths)` — net negative
-  line count even after the new import, and the two derived fields are now
-  provably consistent (`reachability_kind` reads `"value_embedding"` exactly
-  when the selected proof path itself is value-propagating, not "any path
-  is" independently of which one gets shown).
+  displayed proof path). The call-graph walk's own `min(call_paths,
+  key=len)` selection is **deliberately left unchanged for this string-path
+  representation** — a formatted string still carries no per-hop
+  value/indirection signal to tier `select_preferred_path` on.
+- **`select_preferred_graph_path` (slice 8, G29 Phase 2 follow-up,
+  `abicheck/buildsource/graph_impact.py`):** a *second* selector, over
+  structured `list[GraphEdge]` paths rather than plain `list[str]` — a real
+  `GraphEdge` carries per-edge confidence, fact-producer count (D2), and
+  (via each endpoint node's `visibility` attr) public/private surface
+  information, so this selector implements four of the six tiers instead of
+  two: "exact/high-confidence" (every edge `CONF_HIGH`), "public-header
+  structural" (every node `PUBLIC_VISIBILITIES`), "multi-producer-confirmed"
+  (some edge has >1 distinct fact producer), and a residual
+  "reduced-confidence" catch-all; over-approximation (crossing an
+  `effect_transitions`-tagged edge, D5) is checked first and forces the
+  weakest tier regardless of the other signals, since an over-approximated
+  proof is never "exact" no matter how confident its other edges look. Tier
+  1 (consumer-proven) stays out of scope for both selectors — it needs the
+  Phase 4 consumer graph. Wired into
+  `source_graph_findings.py`'s `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`
+  producer, replacing its own `min(target_paths, key=lambda tp: len(tp[1]))`
+  — the same plain-shortest anti-pattern this ADR's Decision text
+  originally called out, now closed for the one detector whose path
+  representation is already structured enough to support it.
+- **`primary_path`/`alternative_paths[0..N]`/`discarded_path_count` (slice
+  8):** `buildsource.graph_impact.attach_impact_metadata` gained an
+  `alternative_paths` parameter — the runner-up candidates *not* selected as
+  primary, capped at 3 (matching `_build_leak_change`'s own "+N more paths"
+  cap), with any remainder recorded as `Change.impact_discarded_path_count`.
+  `impact.model.GraphProofPath` gained matching `alternative_paths`
+  (nested `GraphProofPath`s) and `discarded_path_count` fields;
+  `impact.engine._build_proof_path` reads the new `Change` fields into them.
+  Both are empty/zero for the still-common single-candidate case. See
+  [Unified Impact Assessment](../../learn/impact-analysis.md) and
+  [Source Graph Schema Reference](../../reference/source-graph-schema.md#primary_path-alternative_paths-discarded_path_count).
+- **Still not implemented**: the two evidence-requiring tiers neither
+  selector covers (consumer-proven, and a genuinely finer
+  "reduced-confidence name resolution" axis beyond the residual case
+  `select_preferred_graph_path` folds it into) — both need evidence
+  (a consumer graph; a producer-name-resolution confidence signal) that
+  doesn't exist yet.
 - `tests/test_internal_leak.py` (`TestSelectPreferredPath`): value-propagating
   preferred over a shorter indirect path; shortest wins within the same tier;
   a pointer/signature-only path beats a pure-indirect one; a single path
@@ -659,50 +855,36 @@ preference order all remain open follow-up work under this same ADR — see
   `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` finding's own `reachability_proof_path`
   also prefers the value-propagating path (verified to fail without the fix);
   the description's "+N more paths" count still reflects the full,
-  unreordered candidate collection.
-- **Not implemented**: the `primary_path`/`alternative_paths[0..N]`/
-  `discarded_path_count` finding shape the Decision text describes, and the
-  four evidence-requiring tiers listed above — this slice only replaces the
-  layout walk's path-selection comparator, not the finding schema around it.
+  unreordered candidate collection. `tests/test_graph_impact.py`
+  (`TestSelectPreferredGraphPath`, `TestAttachImpactMetadataAlternatives`,
+  `TestPathOccurrenceId`): each of the four computable tiers beats a weaker
+  candidate; ties within a tier prefer the shorter path;
+  `attach_impact_metadata` records/caps alternatives correctly and excludes
+  the primary path from its own alternatives list.
 
-## D4: deliberately deferred
+## D4: history (why it stayed deferred through Slices 1-8)
 
 D4 (`EntityResolver`, USR-based canonical identity, `SOURCE_GRAPH_VERSION =
-2`) is the one Phase 2 decision this pass does **not** implement even
-partially — a deliberate scope stop, not an oversight, for two reasons:
+2`) was, through Slices 1-8, the one Phase 2 decision this ADR did not
+implement even partially — a deliberate scope stop, not an oversight. Two
+reasons drove that: [ADR-048](048-canonical-entity-identity-and-graph-reconciliation.md)
+already shipped a narrower, working identity-resolution module
+(`entity_identity.CanonicalIdentity`) that solved D4's two motivating
+problems without touching `GraphNode.id`/`SOURCE_GRAPH_VERSION`; and a
+*full* D4 would still mean changing `GraphNode.id` generation itself across
+every producer in lockstep plus a genuine identity-level compatibility
+matrix — categorically larger than any other slice in this ADR.
 
-1. **[ADR-048](048-canonical-entity-identity-and-graph-reconciliation.md)
-   (G31 Phase B, accepted and implemented after this ADR was written)
-   already ships a narrower, working identity-resolution module —
-   `entity_identity.CanonicalIdentity` — that solves the two problems D4 was
-   actually motivated by: safe old/new reconciliation (ADR-048 D2's
-   `graph_reconcile.py`) and impact/proof-path linking (ADR-048 D4's
-   `graph_impact.py`). It does this **without** touching `GraphNode.id` or
-   bumping `SOURCE_GRAPH_VERSION` — both explicit non-goals ADR-048 itself
-   records. ADR-048's own "Relationship to ADR-046" section confirms the
-   two are compatible, not competing: `CanonicalIdentity` is "the natural
-   first alias `EntityResolver.aliases` would fold in," should D4 ever be
-   built.
-2. **A full D4 would still require changing `GraphNode.id` generation
-   itself** (`_decl_node_id`/`_type_node_id`/`_symbol_node_id` et al. in
-   `source_graph.py`) and bumping `SOURCE_GRAPH_VERSION` — a materially
-   larger, more invasive change than any other slice landed in this pass:
-   every producer that constructs a `GraphNode` (`source_graph.py`,
-   `call_graph.py`, `type_graph.py`, `header_graph.py`, `include_graph.py`,
-   the L4 `source_link.py` fold) would need updating in lockstep, plus a
-   genuine v1-pack/v2-graph compatibility test matrix — categorically
-   different in risk from D1/D3/D5/D6's single-call-site or single-module
-   slices, none of which touched node-id generation at all.
-
-Given ADR-048 already delivers D4's practical value with a smaller, safer
-footprint, and a full `GraphNode.id`/`SOURCE_GRAPH_VERSION=2` rewrite is a
-large undertaking that deserves its own scoped design pass rather than a
-drive-by addition at the tail of this one, D4 stays open. Should a future
-need arise that `entity_identity.CanonicalIdentity` genuinely cannot serve
-(e.g. an on-disk v2 pack format, or cross-TU USR-based node identity that
-`GraphNode.id` itself must carry), it should get the same "own ADR" bar
-noted at the top of this file's Context section — a bar this deferral
-respects rather than sidesteps.
+Both reasons are why the follow-up implementation ("D4 implementation"
+above) stops short of that full rewrite: it wires `entity_identity`'s
+existing resolution into a graph-wide alias index (`EntityResolver`) instead
+of duplicating it, and never touches `GraphNode.id` generation, so none of
+the lockstep-producer-update risk this section originally flagged had to be
+taken on. Should a future need arise that this implementation genuinely
+cannot serve (e.g. an on-disk v2 pack format, or cross-TU USR-based identity
+that `GraphNode.id` itself must carry), *that* still needs the same "own
+ADR" bar this file's Context section sets — a bar this history respects
+rather than sidesteps.
 
 ## Non-goals
 
@@ -724,10 +906,14 @@ respects rather than sidesteps.
 
 **Positive:**
 
-- Removes the class of bug PR #607's review repeatedly found by hand:
+- Gives the class of bug PR #607's review repeatedly found by hand —
   "which identity signal does this lookup use, and did the producer that
-  built the graph use the same one" — `EntityResolver` centralizes that
-  resolution once instead of at every call site.
+  built the graph use the same one" — a real, tested place to centralize
+  resolution instead of at every call site. `EntityResolver` itself is not
+  yet consumed by any existing lookup (`post_processing.py`'s hand-rolled
+  fallback chain is unchanged — see "D4 implementation" above); this slice
+  ships the alias index a future migration would build on, not that
+  migration itself.
 - `conflicts` gives cross-producer disagreement a visible home instead of
   silent first-writer-wins — directly useful for `crosscheck.py`'s existing
   provider-agreement matrix (ADR-035 D4/D8), which currently has no graph-
@@ -754,11 +940,16 @@ respects rather than sidesteps.
   its strongest form; a castxml-only pipeline sees no identity-fragmentation
   improvement from D4 (still falls back to v1 hashing), only the D2/D3/D5/D6
   benefits.
-- `occurrence_id`'s extra granularity (D1) grows pack size for a
-  template-heavy codebase (more distinct occurrences per relation) — needs a
-  measured check against the existing scan-level cost model
-  (`docs/contribute/performance.md`) before this lands on a default,
-  always-on path rather than an opt-in one.
+- `occurrence_id`'s extra granularity (D1) would grow pack size for a
+  template-heavy codebase (more distinct occurrences per relation) if it
+  landed on a default, always-on path — the implemented slice sidesteps the
+  scan-level cost-model measurement (`docs/contribute/performance.md`) this
+  would otherwise need by making it strictly opt-in instead:
+  `edge_occurrence_id` costs one dict-membership check and returns `None`
+  (contributing nothing to `occurrences`) unless a fact already carries
+  `source_location`/`configuration_id`/`instantiation_id`/`callsite_id` —
+  which no current producer sets. The cost-model measurement is still owed
+  *if and when* a producer opts in and this stops being a no-op in practice.
 - This is explicitly **schema-only** groundwork: none of D1-D6 alone changes
   a single `ChangeKind`'s output. The payoff is realized only once G29
   Phases 3-6 (reporting, consumer join, new edge families, new detectors)
@@ -806,11 +997,17 @@ respects rather than sidesteps.
   `CALL_GRAPH_TRAVERSAL_POLICY` (D5, partial, implemented),
   `select_preferred_path` (D6, partial, implemented).
 - `abicheck/post_processing.py` — `MarkReachability` (PR #607), the
-  root/qualified_name fallback pattern D4 centralizes (not implemented), now
-  calls `select_preferred_path` for its layout-walk proof-path selection (D6,
-  partial); the call-graph walk's own shortest-path selection is unchanged.
+  hand-rolled root/qualified_name fallback pattern `EntityResolver` (D4)
+  could in principle replace — not yet wired to actually consume it (D4's
+  scoped implementation ships the alias index itself, not a rewrite of every
+  existing lookup site that could use it); now calls `select_preferred_path`
+  for its layout-walk proof-path selection (D6, partial); the call-graph
+  walk's own shortest-path selection is unchanged.
+- `abicheck/buildsource/entity_resolver.py` — D4's `EntityResolver`/
+  `EntityConflict` (implemented, scoped — see "D4 implementation" above).
 - `tests/test_source_graph_v2.py` — D1/D2 unit tests, including the
   `add_edge` role-distinct-edge regression test.
+- `tests/test_entity_resolver.py` — D4 unit tests.
 - `tests/test_inline_changed_paths.py` — D3 unit tests.
 - `tests/test_internal_leak.py` — `TestTraversalPolicy` (D5 unit tests),
   `TestSelectPreferredPath` (D6 unit tests).

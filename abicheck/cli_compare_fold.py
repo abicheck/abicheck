@@ -45,8 +45,12 @@ _SEVERITY_TO_SUMMARY_BUCKET = {
 
 
 def _fold_scoped_compat_into_text(
-    text: str, fmt: str, result: Any, severity_config: Any = None,
-    show_only: str | None = None, report_mode: str = "full",
+    text: str,
+    fmt: str,
+    result: Any,
+    severity_config: Any = None,
+    show_only: str | None = None,
+    report_mode: str = "full",
 ) -> str:
     """Fold ``--used-by``/``--required-symbol(s)`` summaries into the rendered text.
 
@@ -166,6 +170,7 @@ def _fold_scoped_compat_into_text(
                 _finding_id,
                 _resolve_scoped_gate_findings,
                 _root_cause_key_and_display,
+                root_cause_for_change,
             )
 
             eff_sets = result._effective_kind_sets()
@@ -202,6 +207,16 @@ def _fold_scoped_compat_into_text(
                     # BREAKING/RISK category, same as appcompat_to_json's own
                     # CONSUMER_PROVEN override for this exact finding shape.
                     evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
+                    # G29 Phase 3 follow-up (ADR-052): feeds
+                    # impact_assessment.root_cause_id -- None (the singleton
+                    # case) for a scoped-only change with no real correlation
+                    # signal, same rule root_cause_lookup_for_changes applies
+                    # elsewhere; the *entries* below never skip a singleton,
+                    # since --report-mode root-cause's own grouping is
+                    # deliberately complete, unlike this per-finding field.
+                    root_cause=root_cause_for_change(
+                        c, referenced_causes=referenced_causes
+                    ),
                 )
                 changes_list.append(entry)
                 key, root_display = _root_cause_key_and_display(
@@ -276,10 +291,14 @@ def _fold_scoped_compat_into_text(
                     "compatible_additions": 0,
                 }
                 for entry in changes_list:
-                    severity = entry.get("severity") if isinstance(entry, dict) else None
-                    bucket = _SEVERITY_TO_SUMMARY_BUCKET.get(severity, "") if isinstance(
-                        severity, str
-                    ) else None
+                    severity = (
+                        entry.get("severity") if isinstance(entry, dict) else None
+                    )
+                    bucket = (
+                        _SEVERITY_TO_SUMMARY_BUCKET.get(severity, "")
+                        if isinstance(severity, str)
+                        else None
+                    )
                     if bucket:
                         bucket_counts[bucket] += 1
                 payload["summary"] = {
@@ -325,13 +344,17 @@ def _fold_scoped_compat_into_text(
                         evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
                     )
                     severity = entry.get("severity")
-                    bucket = _SEVERITY_TO_SUMMARY_BUCKET.get(severity) if isinstance(
-                        severity, str
-                    ) else None
+                    bucket = (
+                        _SEVERITY_TO_SUMMARY_BUCKET.get(severity)
+                        if isinstance(severity, str)
+                        else None
+                    )
                     if bucket:
                         added_counts[bucket] += 1
                 for _label in missing_labels:
-                    bucket = _SEVERITY_TO_SUMMARY_BUCKET["breaking" if blocks else "compatible"]
+                    bucket = _SEVERITY_TO_SUMMARY_BUCKET[
+                        "breaking" if blocks else "compatible"
+                    ]
                     added_counts[bucket] += 1
                 payload["summary"] = {
                     **full_summary,

@@ -1,7 +1,31 @@
-# ADR-052: Unified Impact Assessment Model (G29 Phase 3, slices 1-5)
+# ADR-052: Unified Impact Assessment Model (G29 Phase 3, slices 1-9)
 
 **Date:** 2026-07-22
-**Status:** Accepted — slices 1-5 implemented.
+**Status:** Accepted — slices 1-9 implemented. Slice 6 (G29 Phase 3
+follow-up) closed two items this ADR originally left open: `--format junit`
+now renders `--report-mode root-cause` (additive `rootCauseId`/`rootCause`
+attributes on each `<failure>`, not a restructured `<testcase>` tree — see
+"JUnit root-cause rendering" below), and a stable, `description`-independent
+`occurrence_id` now exists on `GraphProofPath` (built on
+[ADR-046](046-source-graph-identity-v2-and-evidence-merge.md) D1's
+`occurrence_id` half, itself implemented after this ADR was first accepted).
+Slice 7 (G29 Phase 3 follow-up) closed the remaining item: `root_cause_id`/
+`root_cause_display`/`impact_group_id` now exist on `ImpactAssessment`,
+computed report-wide and passed into `assess_change` as a plain parameter —
+see "Slice 7" below. Slices 8-9 (G29 Phase 3 follow-up) deliver the D2
+direction flip as a deliberately *scoped* subset — two producers
+(`internal_leak.py`'s two leak-finding builders, Slice 8; `appcompat.py`'s
+one consumer-overlay builder, Slice 9) construct `ImpactAssessment` directly
+and `assess_change` reuses their evidence fields, each verified safe by its
+own pipeline-ordering/purity audit; the remaining two producer sites named
+in D2's original decision (`post_processing.MarkReachability` especially,
+the suppression-safety-critical one; and `source_graph_findings.py`'s nine
+construction sites) are **not** migrated, and `suppression.py` — D2's
+original decision text also named it, but it turns out to construct no
+`Change` of its own — has an unresolved role that needs a documentation
+clarification pass rather than a migration (see "Deliberately not
+implemented this slice") — see "Slice 8"/"Slice 9" below for the full
+scoping rationale.
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 3's own
 "needs its own ADR" gate — [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s
@@ -531,11 +555,10 @@ threaded through `service_render.render_output` and
 `mcp_server._render_output`'s `sarif` branches, both of which previously
 accepted (but silently dropped) the parameter for that format.
 
-`--report-mode root-cause` still renders as `full` for `--format junit` —
-JUnit's `<testcase>` model already groups by *symbol* (`_partition_changes`),
-not by finding, so a caused_by_type-keyed grouping would need to decide what
-happens when a multi-change testcase's changes disagree on root cause; left
-for a dedicated slice rather than bolted on here.
+`--report-mode root-cause` rendered as `full` for `--format junit` through
+Slice 5; Slice 6 (below) closes that gap the same way SARIF did — additive
+attributes, no restructuring — rather than the symbol-keyed `<testcase>`
+regrouping this section originally worried about.
 
 **Follow-up fix (Codex review), same PR:** `to_sarif`'s `referenced_causes`
 was originally computed from an *unfiltered* preview of
@@ -548,6 +571,255 @@ disagreeing with JSON/markdown root-cause mode (which computes
 filtered `scoped_only_changes` once, up front, and reusing that single list
 for both `referenced_causes` and the results loop.
 
+## Slice 6 — JUnit root-cause rendering + `occurrence_id` (G29 Phase 3 follow-up)
+
+Closes two of the four items Slices 1-5 left open ("Deliberately not
+implemented this slice," below) — landed after
+[ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s D1
+`occurrence_id` half and D6 structured-path selector shipped, both of which
+this slice builds directly on.
+
+**JUnit root-cause rendering** (`abicheck/junit_report.py`): rather than
+SARIF's per-*result* additive properties, JUnit gets per-*failure* additive
+attributes — `_root_cause_lookup(changes, missing_labels, gate_scope)`
+precomputes `finding_id -> (root_cause_id, root_display)` once per
+testsuite (the same `_root_cause_key_and_display`/hash JSON/markdown/SARIF
+already share, so no format can disagree about a finding's root cause), and
+`_add_failure` sets `rootCauseId`/`rootCause` on each `<failure>` element
+when a lookup entry exists. This sidesteps the "what if a testcase's
+changes disagree on root cause" question this ADR originally raised for a
+symbol-keyed regrouping: there is no regrouping — `<testcase>` still groups
+by symbol exactly as before, and a symbol with multiple changes gets
+multiple `<failure>` children, each carrying only its *own* change's root
+cause. `to_junit_xml`/`to_junit_xml_multi`/`_build_testsuite` gained a
+`report_mode` parameter (mirroring `to_sarif`/`to_sarif_str`); any value
+other than `"root-cause"` renders identically to before this slice.
+Missing-contract labels (`_emit_missing_contract_testcases`) get the same
+treatment, mirroring `sarif._missing_contract_result`'s
+`_root_cause_for(None, label, rule_id, label)` handling.
+
+**The actual end-to-end gap, found while wiring this up:**
+`service_render.render_output`'s `"junit"` branch called `to_junit_xml`
+without forwarding its own `report_mode` parameter at all — so
+`--format junit --report-mode root-cause` silently rendered as plain `full`
+with no error, for every caller (CLI, MCP, Python API) that went through
+`render_output`, not just a JUnit-internal limitation. Fixed by forwarding
+`report_mode=report_mode` in that branch.
+
+**`occurrence_id`** (`abicheck/buildsource/graph_impact.py`,
+`impact/model.py`, `impact/engine.py`): `_path_occurrence_id(path)` folds a
+structured path's edges' own `GraphEdge.occurrences`
+([ADR-046 D1](046-source-graph-identity-v2-and-evidence-merge.md#d1-implementation-g29-phase-2-slices-3-and-6-both-halves))
+into one hash, set as `Change.impact_occurrence_id` by
+`attach_impact_metadata` and surfaced as `GraphProofPath.occurrence_id` by
+`assess_change`. `None` whenever no edge on the path carries occurrence-level
+attrs — still every finding today, since no producer populates them (D1's
+own opt-in note). `root_cause_id`/`impact_group_id` are **not** included in
+this slice — see "Deliberately not implemented" below, unchanged from why
+Slices 1-5 left them out.
+
+`tests/test_junit_report_root_cause.py` (split from `test_junit_report.py`,
+already at the line-count cap): full mode never sets the new attributes;
+root-cause mode sets them; shared `caused_by_type` findings get the same
+`rootCauseId`; unrelated findings get different ones; two failures on one
+testcase get independent root causes; a missing-contract label gets one
+too; other report modes (e.g. `"leaf"`) behave like `"full"`;
+`to_junit_xml_multi` forwards `report_mode`; and a direct regression test
+for the `render_output` forwarding gap. `tests/test_graph_impact.py`
+(`TestPathOccurrenceId`) covers `_path_occurrence_id` directly and its
+propagation through `attach_impact_metadata`/`assess_change`.
+
+## Slice 7 — `root_cause_id`/`root_cause_display`/`impact_group_id` on `ImpactAssessment` (G29 Phase 3 follow-up)
+
+Closes the third item Slices 1-6 left open ("Deliberately not implemented
+this slice," below originally argued these "cannot see" whole-`DiffResult`
+context and so "do not belong on `ImpactAssessment`/`GraphProofPath` at
+all" — that reasoning was about what a *single `Change`'s own read view*
+can compute, not about whether the field could exist on the dataclass at
+all. This slice adds the fields without contradicting it: `ImpactAssessment`
+itself stays a pure, single-`Change` read view (`assess_change` still
+doesn't traverse `result.changes`) — the report-level caller resolves the
+value and passes it in as a plain parameter, the same pattern `occurrence_id`
+(Slice 6) established for a different reason (needing D1's edge-occurrence
+data, not whole-report context).
+
+`assess_change(change, *, root_cause: tuple[str, str] | None = None)` gained
+the parameter; when given, it fans out to `root_cause_id`/
+`root_cause_display`/`impact_group_id` (`impact_group_id` is always set
+equal to `root_cause_id` — see "Deliberately not implemented" below for why
+they aren't yet distinct concepts). `reporter_markdown.py` gained two
+sibling helpers next to `_group_changes_by_root_cause`: `root_cause_for_change`
+(one change's `(root_cause_id, root_display)`, or `None` for the trivial
+self-referencing singleton case — a finding with no `caused_by_type` that
+also isn't named by any other finding's `caused_by_type`) and
+`root_cause_lookup_for_changes` (builds a `finding_id -> (id, display)` dict
+once per report/scope, the same amortization pattern Slice 6's
+`_root_cause_lookup` used for JUnit). Every JSON/SARIF call site that builds
+an `ImpactAssessment` now resolves its own lookup, scoped to whichever list
+of changes is actually in play for that call site, and threads the result
+through:
+
+- `reporter.py`: `_to_json_leaf`'s leaf/non-type entries, the root-cause JSON
+  builder's `entry_by_id`, `_add_suppression` (scoped to
+  `result.suppressed_changes` itself — a suppressed finding's root cause is
+  resolved relative to other suppressed findings, not folded into the kept
+  `changes[]` list's own grouping), and `_add_changes_block`/appcompat's
+  `relevant_changes` block.
+- `cli_compare_fold.py`: the scoped-only-changes JSON fold-in, reusing the
+  same `referenced_causes` that fold-in already computes for its own
+  complete root-cause-mode grouping (`root_cause_entries`, which
+  deliberately still includes singletons — that list feeds `--report-mode
+  root-cause`'s exhaustive grouping, a different contract than this
+  per-finding field's singleton-omission rule).
+- `sarif.py`: `_result_for` gained a second, independent `impact_root_cause`
+  parameter (distinct from its existing `root_cause` parameter, which stays
+  exclusive to `--report-mode root-cause`'s own `properties.rootCauseId`/
+  `rootCause`) — computed unconditionally in `to_sarif` via
+  `root_cause_lookup_for_changes(changes + scoped_only_changes)`, regardless
+  of `report_mode`, so `properties.impactAssessment.root_cause_id` is always
+  populated when a real correlation exists, the same as JSON. Kept as a
+  separate parameter specifically so the existing, tested `root_cause_mode`
+  gating on the top-level properties couldn't shift.
+
+Every one of these lookups reuses the exact same
+`_root_cause_key_and_display` grouping decision `--report-mode root-cause`
+computes, so a finding's `impact_assessment.root_cause_id` is always
+identical to its `root_causes[].root_cause_id` in JSON root-cause mode or
+its `properties.rootCauseId` in SARIF root-cause mode, for the same report —
+no format can disagree.
+
+**Correction (G29 Phase 3, review finding, same PR as Slices 8-9 above)**:
+that "no format can disagree" claim didn't hold for one case at ship time —
+`_add_changes_block` (default/full JSON) and `_to_json_leaf` (`--report-mode
+leaf`) built their `root_cause_lookup_for_changes` scoped only to
+`result.changes`, unlike `_to_json_root_cause`, `sarif.to_sarif`, and
+`junit_report._build_testsuite`, which all fold `result.scoped_only_changes`'
+`caused_by_type` values in too (the scoped-gate fold-in appends these
+findings *after* the main report is otherwise built). A finding in
+`result.changes` correlating only via a scoped-only overlay's
+`caused_by_type` silently lost its `impact_assessment.root_cause_id` in full
+and leaf mode while still getting one in root-cause mode, SARIF, and JUnit —
+dormant in practice (no shipped scoped-only producer sets `caused_by_type`
+yet) but a real latent inconsistency. Fixed by factoring the fold-in into a
+shared `reporter._scoped_only_extra_causes` helper and wiring it into all
+three JSON call sites; `tests/test_reporter.py::TestImpactAssessmentRootCause::
+test_correlates_via_a_scoped_only_changes_caused_by_type`/
+`test_leaf_mode_also_correlates_via_scoped_only_changes` cover it.
+
+`tests/test_impact_model.py`/`abicheck/impact/engine.py`'s own tests cover
+`assess_change`'s new parameter directly;
+`tests/test_reporter.py::TestImpactAssessmentRootCause` and
+`tests/test_sarif.py::TestImpactAssessmentRootCause` cover the end-to-end
+JSON/SARIF behavior — an uncorrelated singleton finding has no
+`impact_assessment.root_cause_id` (or, when it has no other signal either,
+no `impact_assessment` key at all), correlated findings share one id and
+`impact_group_id == root_cause_id`, two independent findings sharing only a
+symbol stay separate, and the unconditional id matches
+`--report-mode root-cause`'s own id for the same finding.
+
+## Slice 8 — D2 direction flip, scoped to one producer (G29 Phase 3 follow-up)
+
+D2's original decision text called for five producer modules
+(`post_processing.MarkReachability`, `source_graph_findings.py`,
+`internal_leak.py`, `suppression.py`, `appcompat.py`) to construct
+`ImpactAssessment` directly, with the flat `Change` fields becoming derived
+views over it. This slice does **not** attempt that in full — the
+"Deliberately not implemented" section below (unchanged reasoning, carried
+forward from Slices 1-7) explains why forcing the whole flip through in one
+pass would be exactly the rushed, high-blast-radius change this ADR's own
+"needs its own ADR/scoped design pass" bar exists to prevent, particularly
+for `MarkReachability`'s suppression-safety-critical walk (ADR-044).
+
+Instead, this slice delivers a **verifiably safe, narrower** version:
+
+- **`Change.impact_assessment: ImpactAssessment | None = None`** (new field,
+  `checker_types.py`) — purely additive, defaults to `None`, so every
+  existing `Change(...)` call site (hundreds, across every detector and
+  test) is unaffected.
+- **One producer wired**: `internal_leak.py`'s `_build_leak_change`/
+  `_build_call_graph_leak_change` (the two `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`/
+  `INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API` synthetic-finding builders) now
+  call `impact.engine.assess_change(change)` on the just-constructed
+  `Change` and attach the result to `change.impact_assessment` — reusing
+  the existing, tested derivation logic itself (not a second,
+  independently-maintained computation), so the cached object is
+  byte-identical to what an on-demand call would have produced.
+- **Verified safe to cache, not assumed**: a pipeline-ordering audit of
+  `post_processing.DEFAULT_PIPELINE` confirmed `MarkReachability` — the
+  *only* step anywhere in the codebase that mutates
+  `public_reachable`/`reachability_state`/`reachability_kind`/
+  `reachability_proof_path` on an existing `Change` — runs **before**
+  `DetectInternalLeaks`, which *appends new* `Change` objects to
+  `ctx.changes` after `MarkReachability` has already finished. A leak
+  finding's own reachability/evidence fields are therefore self-contained
+  and provably never mutated after construction by anything later in the
+  pipeline (`DemoteUnreachableInternalChurn`, `DetectCppPatterns`,
+  `DetectNamespacePatterns`, `DetectTemplatePatterns`,
+  `DetectVersionedSymbolScheme`, `EscalateFrozenNamespaceViolations` — none
+  of them touch these fields at all, confirmed by a repo-wide grep, not
+  read from this ADR's own claim alone).
+- **`decision`/`root_cause_id` are never cached** — `impact.engine.
+  assess_change` reuses a cached `impact_assessment`'s *evidence* fields
+  only (`reachability_state`/`public_reachable`/`reachability_kind`/
+  `confidence`/`proof_path`/`evidence_category`/`correlated_change_kind`);
+  `decision` (which depends on `suppression_rule`/`modulation_reason`/
+  `effective_verdict` — fields suppression/pattern-modulation passes *do*
+  set after construction) and `root_cause_id`/`root_cause_display`/
+  `impact_group_id` (whole-`DiffResult` context) are always recomputed
+  fresh from the `Change`'s *current* state on every call, exactly as
+  before this slice — so a finding suppressed after construction still
+  reports `decision.state == "suppressed"` correctly, even though its
+  evidence came from a cache built before suppression ran.
+- **The other four producer modules are untouched** — `source_graph_findings.py`,
+  `post_processing.py`, `suppression.py`, `appcompat.py` still
+  independently set the overlapping flat `Change` fields exactly as
+  before, and `impact.engine.assess_change` still derives their
+  `ImpactAssessment` on demand from those flat fields (the Slice 1 path,
+  unchanged). `Change.impact_assessment` stays `None` for every finding
+  those modules produce.
+- `tests/test_impact_model.py::TestAssessChangeWithCachedImpactAssessment`:
+  cached evidence is reused verbatim; `decision`/`root_cause_id` are always
+  recomputed, never read from the cache (including when flat fields were
+  mutated *after* the cached object was built); a cached assessment built
+  from the same flat fields an on-demand derivation would use produces an
+  identical result; `impact_assessment=None` falls back to the unchanged
+  derivation path. `tests/test_internal_leak.py::TestBuildChangeAttachesImpactAssessment`:
+  both builders attach a correct `impact_assessment`;
+  `assess_change(change) == change.impact_assessment` for both (proving
+  the two code paths never disagree); the cached evidence survives a
+  simulated later suppression pass untouched while `decision` correctly
+  reflects it.
+
+## Slice 9 — D2 direction flip, second producer (G29 Phase 3 follow-up)
+
+Migrates `appcompat.py`'s single `CONSUMER_REQUIRED_SYMBOL_REMOVED` overlay
+construction (`scope_diff_to_app`) the same way Slice 8 migrated
+`internal_leak.py`'s two builders — chosen next because, like Slice 8's
+targets, it is a single, well-isolated construction site rather than the
+nine-site sweep `source_graph_findings.py` would need (see "Deliberately not
+implemented this slice" below for why that one stays open).
+
+- `overlay_change.impact_assessment = assess_change(overlay_change)` is set
+  immediately after `make_change(ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+  ...)` constructs it, before `suppression.evaluate(overlay_change)` runs.
+- **Verified safe, not assumed**: `Suppression.evaluate`/`matches`/
+  `would_withhold`/`would_withhold_unknown_reachability` (`suppression.py`)
+  are confirmed pure reads of the `Change` passed in — none assigns to it —
+  so nothing between the cache write and any later `assess_change()` read
+  touches `overlay_change`'s evidence fields. `_build_suppression_overreach_change`
+  (`post_processing.py`), which `scope_diff_to_app` calls on a withheld
+  match, builds a *different* `Change` (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`)
+  that sets no reachability fields of its own — left uncached, matching
+  Slice 8's own precedent of only caching a finding that actually carries
+  evidence.
+- `tests/test_appcompat.py::test_consumer_required_symbol_removed_carries_impact_assessment`:
+  mirrors `test_internal_leak.py`'s cache-assertion pattern —
+  `assess_change(overlay) == overlay.impact_assessment`.
+- **Two producer sites now remain unmigrated**: `source_graph_findings.py`
+  and `post_processing.MarkReachability` — down from three after Slice 8.
+  `suppression.py`'s still-unclear D2 role (see below) is a separate,
+  unresolved documentation question, not a third producer to migrate.
+
 ## Deliberately not implemented this slice
 
 Per the "ship each phase independently" mitigation this initiative committed
@@ -555,55 +827,121 @@ to from the start, and matching exactly how ADR-046 documented its own
 partial slices (D1's `occurrence_id` half, D4, D5's `effect_transitions`, D6's
 remaining four tiers):
 
-- **`changed_entities`/`affected_consumers`/`affected_use_cases`/`coverage`/
-  `root_cause_id`** — the plan's full `ImpactAssessment` field list. None of
-  these have a data source yet: `affected_consumers`/`affected_use_cases`
-  need Phase 4's consumer/use-case graph (unbuilt), `coverage` needs the
-  per-(kind,role) matrix wired all the way through the impact layer, and
-  `root_cause_id` needs Phase 6's `RootCauseCorrelator`. Adding empty
-  placeholder fields for data no producer can populate yet would be exactly
-  the speculative-surface pattern ADR-046 D5 explicitly declined
-  (`effect_transitions`, "no current walk needs it") — so they are left out
-  of `ImpactAssessment` entirely rather than added as permanently-`None`
-  fields.
-- **The D2 direction flip** (`Change` fields becoming derived from
-  `ImpactAssessment` rather than the reverse) — deliberately not attempted.
-  This touches the core control flow of five producer modules at once
-  (`post_processing.MarkReachability`, `source_graph_findings.py`,
-  `internal_leak.py`, `suppression.py`, `appcompat.py`), several of them
-  performance-sensitive graph walks under active suppression-safety
-  guarantees (ADR-044) — the same risk class this ADR's own D2 section
-  already flagged. Forcing it through in the same pass as slices 1-2 would
-  be exactly the kind of rushed, high-blast-radius change the "needs its
-  own ADR/scoped design pass" bar (this ADR's own header, ADR-046 D4, and
-  CLAUDE.md "M1-3") exists to prevent — a real regression here would be to
-  suppression correctness, not just to this reporting layer. Left for a
-  dedicated slice.
+- **`changed_entities`/`affected_consumers`/`affected_use_cases`/`coverage`**
+  — the remainder of the plan's full `ImpactAssessment` field list
+  (`root_cause_id`/`root_cause_display`/`impact_group_id` shipped in Slice 7
+  above). None of these four have a data source yet:
+  `affected_consumers`/`affected_use_cases` need Phase 4's consumer/use-case
+  graph (unbuilt), and `coverage` needs the per-(kind,role) matrix wired all
+  the way through the impact layer. Adding empty placeholder fields for data
+  no producer can populate yet would be exactly the speculative-surface
+  pattern ADR-046 D5 explicitly declined (`effect_transitions`, "no current
+  walk needs it") — so they are left out of `ImpactAssessment` entirely
+  rather than added as permanently-`None` fields.
+- **The full D2 direction flip** (every flat `Change` field becoming a
+  derived view over `ImpactAssessment`, across all five producer modules
+  D2's decision text names) — still not attempted in full; Slices 8-9
+  (above) deliver a verifiably safe, two-producer subset instead of forcing
+  the whole flip through in one pass. Attempting all five in one pass would
+  still be exactly the kind of rushed, high-blast-radius change the "needs
+  its own ADR/scoped design pass" bar (this ADR's own header, ADR-046 D4,
+  and CLAUDE.md "M1-3") exists to prevent — a real regression to either of
+  the two remaining producer sites would risk suppression correctness, not
+  just this reporting layer. Each remaining producer site is its own
+  follow-up slice, migrated only once the same kind of pipeline-ordering
+  safety audit Slice 8 did for `internal_leak.py` has been done for it
+  specifically — a real audit, not an assumption carried over from a
+  different module's safety proof. Status below, refined by direct code
+  inspection rather than carried forward from the original decision text
+  unchanged: two are genuine remaining producer sites
+  (`source_graph_findings.py`, `post_processing.MarkReachability`); the
+  third entry the original decision text named, `suppression.py`, turns out
+  not to be a producer at all (no `Change(...)` construction site exists in
+  it) — its own D2 role is a separate, unresolved documentation question,
+  not a third migration:
+  - **`source_graph_findings.py`** — not one construction site like
+    `internal_leak.py`/`appcompat.py`, but **nine**:
+    `_mapping_drift_findings`, `_public_reachability_findings` (two),
+    `_generated_public_closure_findings`, `_call_reachability_findings`,
+    `_include_graph_drift_findings`, `_build_option_reach_findings`,
+    `_internal_dependency_findings`, `_target_dependency_findings`,
+    `_symbol_owner_findings`. Each needs its own check for whether anything
+    downstream of `diff_source_graph_findings()` (in particular, whether its
+    output changes flow through `post_processing.DEFAULT_PIPELINE` before
+    reaching a report) still mutates evidence fields after construction,
+    before caching is safe — a bigger audit than Slice 8/9's single-site
+    ones, plausibly worth a shared `_finalize_finding(change)` helper
+    invoked at the end of all nine instead of nine independent edits.
+  - **`post_processing.MarkReachability`** — mutates existing `Change`
+    objects in place (not a constructor site), via four separate graph
+    walks (`compute_leak_paths`/`compute_call_graph_leak_paths` on old and
+    new) plus `ScopeOrigin.PUBLIC_HEADER` logic, and only runs at all when
+    `ctx.suppression.needs_reachability_evidence()`. **Open question,
+    unresolved**: `impact.engine.assess_change` is already a pure read view
+    that performs no graph traversal of its own (module docstring) — the
+    expensive walks this step performs are not duplicated by
+    `assess_change`, cached or not. What caching here would actually save
+    is re-building the `ImpactAssessment`/`GraphProofPath` object (proof-path
+    formatting in particular) on every `assess_change()` call for the same
+    `Change` — worth doing only if a single `compare` run actually calls
+    `assess_change` more than once per `Change` (e.g. rendering JSON and
+    SARIF from the same `DiffResult` in one process; `reporter.py` alone has
+    three separate call sites — `_leaf_entry`, a suppressed-changes entry
+    builder, and the main JSON entry builder — though normally each
+    `Change` only ever passes through one of the three, since they render
+    disjoint change-list memberships). This needs to be measured before
+    deciding whether `MarkReachability` caching is worth its
+    suppression-safety risk at all, not assumed the way Slice 8's
+    performance rationale was for `internal_leak.py`.
+  - **`suppression.py`** — direct inspection found **no** `Change(...)`
+    construction inside this module at all; it only *reads*
+    `public_reachable`/`reachability_state` for rule matching. The one
+    diagnostic `Change` construction near this area
+    (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`, `_build_suppression_overreach_change`)
+    actually lives in `post_processing.py`, not `suppression.py`, and sets
+    no reachability fields to cache in the first place (see Slice 9 above).
+    **This ADR's own D2 decision text naming `suppression.py` as a producer
+    needs a follow-up clarification pass** — either it meant this
+    `post_processing.py` diagnostic function, or it meant the Slice 2 audit-
+    trail (`FindingDecision`/`SuppressionAudit`) surface instead of
+    `impact_assessment` caching at all, or the original text was simply
+    imprecise about which module owns the construction site. Resolve this
+    with a documentation-only pass through the original decision text before
+    scheduling any code change here.
 - **The full `RootCauseCorrelator` correlation across consumer-overlay
-  findings that don't share a `caused_by_type` today** — Slices 3-5 above
-  ship the `caused_by_type`-based first cut (JSON, markdown/text, and SARIF
-  properties); Phase 6's `RootCauseCorrelator` is the fuller job that adds
-  correlation for findings with no `caused_by_type` link at all. `--format
-  junit` still renders `root-cause` mode as `full` (Slice 5's ADR section
-  above explains why JUnit's symbol-grouped `<testcase>` model doesn't take
-  the same properties-only approach SARIF did).
-- **Stable `finding_id`/`occurrence_id`/`root_cause_id`/`impact_group_id`
-  identifiers independent of `description` text** — `reporter._finding_id`
-  already exists (schema 2.3) and is stable across repeated runs, but (unlike
-  the plan's stated goal) it *does* include `description` text as a
-  discriminator by design — disambiguating same-kind/same-symbol findings
-  that would otherwise collide (e.g. two parameters of one function both
-  changing pointer depth). Changing that derivation to drop `description`
-  would itself be a breaking change to an already-published, schema-2.3
-  field's values — out of scope for an additive slice, and not attempted
-  here. `occurrence_id`/`root_cause_id`/`impact_group_id` have no producer to
-  populate them from yet (the first two need ADR-046 D1's undone
-  `occurrence_id` half and Phase 6's correlator respectively).
+  findings that don't share a `caused_by_type` today** — Slices 3-5 shipped
+  the `caused_by_type`-based first cut (JSON, markdown/text, and SARIF
+  properties), and Slice 6 extended the same first cut to JUnit (additive
+  `<failure>` attributes, not a restructuring). Phase 6's
+  `RootCauseCorrelator` is still the fuller job that adds correlation for
+  findings with no `caused_by_type` link at all — none of Slices 1-6 attempt
+  it.
+- **Stable `finding_id` independent of `description` text** —
+  `reporter._finding_id` already exists (schema 2.3) and is stable across
+  repeated runs, but (unlike the plan's stated goal) it *does* include
+  `description` text as a discriminator by design — disambiguating
+  same-kind/same-symbol findings that would otherwise collide (e.g. two
+  parameters of one function both changing pointer depth). Changing that
+  derivation to drop `description` would itself be a breaking change to an
+  already-published, schema-2.3 field's values — out of scope for an
+  additive slice, and not attempted here. `occurrence_id` **is** now
+  populated (Slice 6, above) — it needed only ADR-046 D1's `occurrence_id`
+  half, which has since landed, and it is computable from a single
+  `Change`'s own path. `root_cause_id`/`root_cause_display`/
+  `impact_group_id` **are** now populated too (Slice 7, above) — but note
+  they stay report-level concepts computed relative to whole-`DiffResult`
+  context (`referenced_causes` — see `_root_cause_key_and_display`) and
+  passed into `assess_change` as a plain parameter; `ImpactAssessment`
+  itself never gained the ability to compute them from a single `Change` in
+  isolation, matching the [Detector Impact Contract](../detector-impact-contract.md)'s
+  reasoning for future detectors. `impact_group_id` diverging from
+  `root_cause_id` still needs Phase 6's `RootCauseCorrelator`.
 - **`docs/reference/source-graph-schema.md`,
-  `docs/contribute/detector-impact-contract.md`** — reference docs for the
-  full edge/detector surface Phases 2/5/6 will add; premature while those
-  surfaces don't exist yet. This ADR adds `docs/learn/impact-analysis.md`
-  instead, scoped to what this slice actually ships.
+  `docs/contribute/detector-impact-contract.md`** — both now exist (G29
+  Phase 2/3 follow-up), once D1/D5/D6/Slice 6 gave them enough real surface
+  to document. `docs/learn/impact-analysis.md` remains the narrative
+  canonical page; the two reference pages summarize it rather than
+  duplicating its explanation.
 
 ## Non-goals
 
@@ -612,17 +950,18 @@ remaining four tiers):
   membership, or to which findings suppression withholds — this ADR is a
   read view and a reporting addition underneath the existing tri-state
   reachability model (ADR-044, ADR-046, ADR-048), not a policy change.
-- **Not** removing, renaming, or reshaping any existing JSON/SARIF field.
-  `public_reachable`/`reachability_kind`/`reachability_proof_path`/
+- **Not** removing, renaming, or reshaping any existing JSON/SARIF/JUnit
+  field. `public_reachable`/`reachability_kind`/`reachability_proof_path`/
   `affected_public_roots`/`impact_proof_path`/`impact_is_direct`/
-  `correlated_change_kind` all stay exactly as they are; `impact_assessment`
-  is additive.
-- **Not** JUnit surfacing for `--report-mode root-cause`, for the same reason
-  ADR-048 D4 already gave (`--format junit` still renders `root-cause` mode as
-  `full`). `--report-mode root-cause` itself is *not* deferred — Slices 3-5
-  above ship it for JSON, markdown/text, and SARIF; what remains deferred to
-  Phase 6 is the fuller `RootCauseCorrelator` (see "Deliberately not
-  implemented this slice" above).
+  `correlated_change_kind` all stay exactly as they are; `impact_assessment`,
+  `impact_alternative_paths`/`impact_discarded_path_count`/
+  `impact_occurrence_id`, JUnit's `rootCauseId`/`rootCause`, and
+  `impact_assessment.root_cause_id`/`root_cause_display`/`impact_group_id`
+  (Slice 7) are all additive.
+- **Not** the fuller `RootCauseCorrelator` (Phase 6) — Slices 3-6 ship the
+  `caused_by_type`-based first cut for every format including JUnit (Slice
+  6); correlating findings with no `caused_by_type` link at all is still
+  deferred (see "Deliberately not implemented this slice" above).
 
 ## Consequences
 
@@ -636,13 +975,13 @@ proof" instead of five separately-named, independently-nullable keys.
 
 **Costs:** `impact_assessment` duplicates data already present at the
 top level for findings where both are emitted — an accepted, documented
-redundancy (D3 above), not an oversight. This slice does not reduce the
+redundancy (D3 above), not an oversight. This ADR does not reduce the
 scattered-field problem Phase 3 exists to solve at the *producer* level
 (D2) — only at the *reporting* level. The remaining phases (the D2 flip,
 Phase 4's consumer/use-case join, Phase 5's new graph families, Phase 6's
-detectors and the fuller `RootCauseCorrelator` beyond Slices 3-5's shipped
-`--report-mode root-cause`) are unaffected by and do not depend on anything
-in this slice being done differently.
+detectors and the fuller `RootCauseCorrelator` beyond Slices 3-6's shipped
+`--report-mode root-cause`, including JUnit) are unaffected by and do not
+depend on anything in this ADR being done differently.
 
 ## References
 

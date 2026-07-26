@@ -50,6 +50,31 @@ def _proof_path_target(change: Any, steps: tuple[ProofStep, ...]) -> str:
     return str(getattr(change, "symbol", "") or "")
 
 
+def _build_alternative_path(
+    raw_steps: list[dict[str, object]], *, root: str | None
+) -> GraphProofPath:
+    """One runner-up candidate as its own (prose-less) ``GraphProofPath`` —
+    ADR-046 D6's ``alternative_paths``. Shares ``root`` with the primary
+    path (same walk origin); ``target``/``is_direct`` are derived from its
+    own steps, since an alternative can legitimately point at a different
+    subject than the primary (see :func:`_build_proof_path`).
+    """
+    steps = tuple(ProofStep.from_dict(raw) for raw in raw_steps)
+    last_node = next((s for s in reversed(steps) if s.step_type == "node"), None)
+    # CodeRabbit review: structured_proof_path's shape is
+    # node, edge, node, edge, ... -- a single-hop (direct) path already has
+    # 3 raw_steps entries (one edge, two nodes), so counting *all* entries
+    # would mark every direct path as transitive. Count edge-type steps
+    # only (the actual hop count).
+    edge_hops = sum(1 for s in steps if s.step_type == "edge")
+    return GraphProofPath(
+        target=last_node.label if last_node is not None else (root or ""),
+        root=root,
+        is_direct=edge_hops <= 1 if raw_steps else None,
+        steps=steps,
+    )
+
+
 def _build_proof_path(change: Any) -> GraphProofPath | None:
     impact_proof_path = getattr(change, "impact_proof_path", None)
     affected_roots = getattr(change, "affected_public_roots", None)
@@ -59,16 +84,28 @@ def _build_proof_path(change: Any) -> GraphProofPath | None:
         return None
     steps = tuple(ProofStep.from_dict(raw) for raw in (impact_proof_path or []))
     root = affected_roots[0] if affected_roots else None
+    alt_raw = getattr(change, "impact_alternative_paths", None) or []
+    alternatives = tuple(_build_alternative_path(p, root=root) for p in alt_raw)
+    discarded = int(getattr(change, "impact_discarded_path_count", 0) or 0)
+    occurrence_id = getattr(change, "impact_occurrence_id", None)
     return GraphProofPath(
         target=_proof_path_target(change, steps),
         root=root,
         is_direct=is_direct,
         steps=steps,
         prose=prose,
+        alternative_paths=alternatives,
+        discarded_path_count=discarded,
+        occurrence_id=occurrence_id,
     )
 
 
-def assess_change(change: Any, *, suppressed: bool = False) -> ImpactAssessment:
+def assess_change(
+    change: Any,
+    *,
+    suppressed: bool = False,
+    root_cause: tuple[str, str] | None = None,
+) -> ImpactAssessment:
     """Derive an ``ImpactAssessment`` from *change*'s existing fields.
 
     *suppressed* is caller-supplied: whether *this* call site is rendering
@@ -80,6 +117,34 @@ def assess_change(change: Any, *, suppressed: bool = False) -> ImpactAssessment:
     ``post_processing.ApplySuppression``), so it is read unconditionally
     here rather than gated on *suppressed* — reading it for a *kept* change
     is harmless (it is never set on one).
+
+    *root_cause*, when given, is *change*'s ``(root_cause_id, root_display)``
+    pair (G29 Phase 3 follow-up) — computed by the caller, not derived here,
+    because correctly computing it needs whole-``DiffResult`` context (which
+    findings elsewhere reference this one via ``caused_by_type`` —
+    ``reporter_markdown.root_cause_lookup_for_changes``) that a single
+    *change* alone can't see; this function stays a pure, single-``Change``
+    read view. ``None`` (the default) leaves
+    ``root_cause_id``/``root_cause_display``/``impact_group_id`` unset, same
+    as any caller that doesn't have whole-result context to offer (e.g. a
+    unit test constructing one bare ``Change``).
+
+    ``Change.impact_assessment`` (ADR-052 D2 follow-up, scoped
+    implementation), when a producer set it directly, supplies this
+    assessment's *evidence* fields (``reachability_state``/
+    ``public_reachable``/``reachability_kind``/``confidence``/``proof_path``/
+    ``evidence_category``/``correlated_change_kind``) instead of re-deriving
+    them from the flat fields below — both are equivalent by construction
+    for a producer that built both from the same data, but reusing the
+    cached object avoids recomputing ``proof_path`` from scratch.
+    ``decision``/``root_cause_id``/``root_cause_display``/``impact_group_id``
+    are **always** recomputed fresh here regardless, never read from a
+    cached ``impact_assessment`` — those depend on *this call's*
+    ``suppressed``/``root_cause`` arguments and on flat fields
+    (``suppression_rule``/``modulation_reason``/``effective_verdict``) that
+    can change after a producer constructs its `Change` (suppression,
+    pattern modulation), so trusting a cached ``decision`` would risk
+    serving a stale one.
     """
     effective_verdict = getattr(change, "effective_verdict", None)
     decision = FindingDecision(
@@ -90,6 +155,24 @@ def assess_change(change: Any, *, suppressed: bool = False) -> ImpactAssessment:
             effective_verdict.value if effective_verdict is not None else None
         ),
     )
+    root_cause_id, root_cause_display = (
+        root_cause if root_cause is not None else (None, None)
+    )
+    cached = getattr(change, "impact_assessment", None)
+    if cached is not None:
+        return ImpactAssessment(
+            reachability_state=cached.reachability_state,
+            public_reachable=cached.public_reachable,
+            reachability_kind=cached.reachability_kind,
+            confidence=cached.confidence,
+            proof_path=cached.proof_path,
+            decision=decision,
+            evidence_category=cached.evidence_category,
+            correlated_change_kind=cached.correlated_change_kind,
+            root_cause_id=root_cause_id,
+            root_cause_display=root_cause_display,
+            impact_group_id=root_cause_id,
+        )
     return ImpactAssessment(
         reachability_state=getattr(
             change, "reachability_state", ReachabilityState.UNKNOWN
@@ -101,4 +184,7 @@ def assess_change(change: Any, *, suppressed: bool = False) -> ImpactAssessment:
         decision=decision,
         evidence_category=getattr(change, "evidence_category", None),
         correlated_change_kind=getattr(change, "correlated_change_kind", None),
+        root_cause_id=root_cause_id,
+        root_cause_display=root_cause_display,
+        impact_group_id=root_cause_id,
     )

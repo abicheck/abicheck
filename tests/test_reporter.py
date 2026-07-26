@@ -663,6 +663,130 @@ class TestRootCauseReporter:
         assert d["scope"]["manual_review_required"] is True
 
 
+class TestImpactAssessmentRootCause:
+    """``impact_assessment.root_cause_id``/``root_cause_display``/
+    ``impact_group_id`` (G29 Phase 3 follow-up): the same grouping decision
+    ``--report-mode root-cause`` uses, surfaced per-finding on
+    ``impact_assessment`` -- unlike root-cause mode's own grouping (which
+    buckets every finding, including singletons), these are absent for a
+    finding with no real correlation signal. Computed regardless of
+    report_mode, unlike root-cause mode's dedicated grouping."""
+
+    def test_uncorrelated_finding_has_no_impact_assessment_root_cause(self):
+        # A singleton finding (no caused_by_type, not referenced by any
+        # other finding's caused_by_type) has no impact-assessment signal at
+        # all -- has_signal() gates emitting the whole impact_assessment key,
+        # the same sparse-output rule any other all-defaults assessment gets.
+        c = Change(ChangeKind.FUNC_REMOVED, "s", "removed")
+        r = _result(Verdict.BREAKING, changes=[c])
+        d = json.loads(to_json(r))
+        assert "impact_assessment" not in d["changes"][0]
+
+    def test_correlated_findings_share_root_cause_id_in_full_mode(self):
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        overlay = Change(
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
+            "required", caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root, overlay])
+        d = json.loads(to_json(r))  # report_mode defaults to "full"
+        assessments = [c["impact_assessment"] for c in d["changes"]]
+        ids = {a["root_cause_id"] for a in assessments}
+        assert len(ids) == 1
+        for a in assessments:
+            assert a["root_cause_display"] == "ns::internal::helper"
+            # impact_group_id is currently always an alias of root_cause_id.
+            assert a["impact_group_id"] == a["root_cause_id"]
+
+    def test_independent_findings_sharing_a_symbol_stay_separate(self):
+        # Neither finding has a real correlation signal (only a shared
+        # symbol, no caused_by_type) -- both stay singletons, so neither
+        # carries a root_cause_id (or any impact_assessment at all).
+        a = Change(ChangeKind.FUNC_RETURN_CHANGED, "foo", "return type changed")
+        b = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "parameter changed")
+        r = _result(Verdict.BREAKING, changes=[a, b])
+        d = json.loads(to_json(r))
+        assert all("impact_assessment" not in c for c in d["changes"])
+
+    def test_correlates_via_a_scoped_only_changes_caused_by_type(self):
+        """Review finding: a change in result.changes whose only correlation
+        signal is a scoped-only overlay's own caused_by_type (not another
+        entry in result.changes itself) must still get impact_assessment.
+        root_cause_id in full mode -- matching --report-mode root-cause,
+        SARIF, and JUnit, which already fold scoped_only_changes into their
+        own root-cause grouping (see reporter._scoped_only_extra_causes)."""
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        scoped_only_overlay = Change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, "pub_entry",
+            "required by consumer", caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root])
+        r.scoped_only_changes = (scoped_only_overlay,)  # type: ignore[attr-defined]
+        d = json.loads(to_json(r))  # report_mode defaults to "full"
+        assert d["changes"][0]["impact_assessment"]["root_cause_display"] == (
+            "ns::internal::helper"
+        )
+
+    def test_leaf_mode_also_correlates_via_scoped_only_changes(self):
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        scoped_only_overlay = Change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED, "pub_entry",
+            "required by consumer", caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root])
+        r.scoped_only_changes = (scoped_only_overlay,)  # type: ignore[attr-defined]
+        d = json.loads(to_json(r, report_mode="leaf"))
+        assert d["changes"][0]["impact_assessment"]["root_cause_display"] == (
+            "ns::internal::helper"
+        )
+
+    def test_matches_root_cause_mode_id(self):
+        # Cross-check: the unconditional impact_assessment id must equal
+        # --report-mode root-cause's own root_cause_id for the same root.
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        overlay = Change(
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
+            "required", caused_by_type="ns::internal::helper",
+        )
+        r = _result(Verdict.BREAKING, changes=[root, overlay])
+        full = json.loads(to_json(r))
+        rc = json.loads(to_json(r, report_mode="root-cause"))
+        full_ids = {c["impact_assessment"]["root_cause_id"] for c in full["changes"]}
+        assert full_ids == {rc["root_causes"][0]["root_cause_id"]}
+
+    def test_suppressed_changes_share_root_cause_id(self):
+        # A suppressed finding's root cause is resolved against other
+        # *suppressed* findings (reporter._suppressed_change_entry's own
+        # scoping docstring) -- both correlated findings need to be
+        # suppressed together for the grouping to be visible here.
+        root = Change(
+            ChangeKind.FUNC_REMOVED, "ns::internal::helper", "helper removed",
+        )
+        overlay = Change(
+            ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API, "pub_entry",
+            "required", caused_by_type="ns::internal::helper",
+        )
+        r = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest.so.1",
+            changes=[], suppressed_changes=[root, overlay],
+            verdict=Verdict.COMPATIBLE,
+        )
+        d = json.loads(to_json(r))
+        assessments = [
+            c["impact_assessment"] for c in d["suppression"]["suppressed_changes"]
+        ]
+        ids = {a["root_cause_id"] for a in assessments}
+        assert len(ids) == 1
+
+
 class TestRootCauseMarkdown:
     """G29 Phase 3 slice 4 (ADR-052): --report-mode root-cause markdown/text
     rendering, sharing reporter._group_changes_by_root_cause with the JSON

@@ -44,7 +44,7 @@ from abicheck.appcompat import (
     uncovered_missing_symbols,
 )
 from abicheck.checker import Change, DiffResult
-from abicheck.checker_policy import ChangeKind, Verdict
+from abicheck.checker_policy import ChangeKind, ReachabilityState, Verdict
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.macho_metadata import MachoExport, MachoMetadata
 from abicheck.model import AbiSnapshot
@@ -1892,6 +1892,52 @@ class TestScopeDiffToAppWithSnapshots:
         assert len(overlay) == 1
         assert overlay[0].symbol == "foo_process"
         assert "myapp" in overlay[0].description
+
+    def test_consumer_required_symbol_removed_carries_impact_assessment(
+        self, tmp_path,
+    ):
+        """ADR-052 D2 follow-up (G29 Phase 3, scoped implementation):
+        scope_diff_to_app caches this overlay's own ImpactAssessment at
+        construction time, same as internal_leak.py's two builders --
+        impact.engine.assess_change() must reuse it unchanged, not
+        re-derive a different result."""
+        from abicheck.impact.engine import assess_change
+
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_process"})
+        app_path = tmp_path / "myapp"
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(diff, app_path, old_snap, new_snap)
+        (overlay,) = [
+            c for c in result.breaking_for_app
+            if c.kind == ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED
+        ]
+        assert overlay.impact_assessment is not None
+        assert overlay.impact_assessment.public_reachable is True
+        assert (
+            overlay.impact_assessment.reachability_state
+            == ReachabilityState.PROVEN_REACHABLE
+        )
+        assert overlay.impact_assessment.reachability_kind == "consumer_proven"
+        # Mutate the flat fields *after* caching (as a later pipeline stage
+        # could) and confirm assess_change() still serves the cached
+        # evidence rather than silently re-deriving from the mutated flat
+        # fields -- with the flat fields unchanged, an implementation that
+        # ignored the cache entirely would produce an identical result, so
+        # this is the assertion that actually proves the cache is used.
+        overlay.public_reachable = False
+        overlay.reachability_state = ReachabilityState.UNKNOWN
+        reassessed = assess_change(overlay)
+        assert reassessed.public_reachable is True
+        assert reassessed.reachability_state == ReachabilityState.PROVEN_REACHABLE
+        assert reassessed.reachability_kind == "consumer_proven"
 
     def test_missing_symbol_covered_by_diff_change_gets_no_overlay(self, tmp_path):
         """The dedup case: a missing symbol already represented by a real

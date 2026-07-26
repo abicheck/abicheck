@@ -109,6 +109,7 @@ def render_output(
             old,
             show_only=show_only,
             severity_config=severity_config,
+            report_mode=report_mode,
         )
 
     if fmt == "review":

@@ -4,7 +4,7 @@
   "edges": [],
   "external_graph_refs": [],
   "extractor_passes": {},
-  "graph_id": "sha256:205d3e7344a506dda28e34c87084af03750e05fd0f7282571d4216ecc263e3cd",
+  "graph_id": "sha256:c74a55d5fc9754433679b1a34e821a97381ad0c272a0dd47593e61e8c03d6088",
   "indexes": {
     "by_binary_symbol": {},
     "by_file": {},
@@ -49,5 +49,5 @@
       "resolved": {}
     }
   ],
-  "schema_version": 1
+  "schema_version": 2
 }

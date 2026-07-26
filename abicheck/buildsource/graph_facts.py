@@ -25,13 +25,15 @@ behavior: a node or edge accumulates one :class:`GraphFact` per producer that
 ever registered it, folded into one order-independent ``resolved`` dict via
 :func:`merge_graph_facts`, with genuine cross-producer disagreements recorded
 as :class:`FactConflict` instead of silently dropped (D2). :func:`edge_relation_key`
-adds a role-aware edge identity alongside the coarse ``(src, dst, kind)`` one
-(D1). See ADR-046 and ``docs/contribute/plans/g29-impact-analysis-layer.md``
-Phase 2.
+adds a role-aware edge identity alongside the coarse ``(src, dst, kind)`` one,
+and :func:`edge_occurrence_id` layers an opt-in per-call-site occurrence
+identity on top of it (D1). See ADR-046 and
+``docs/contribute/plans/g29-impact-analysis-layer.md`` Phase 2.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -226,7 +228,10 @@ class GraphEdge:
     ``attrs`` carries edge-kind-specific labels — most importantly the
     ``call_kind``/``resolution`` pair for ``DECL_CALLS_DECL`` edges (ADR-031
     D4). ``facts``/``resolved``/``conflicts`` are the ADR-046 D2
-    evidence-preserving merge — see :class:`GraphNode`.
+    evidence-preserving merge — see :class:`GraphNode`. ``occurrences`` is
+    D1's second half: the deduplicated set of per-call-site
+    :func:`edge_occurrence_id` values contributed by this edge's facts (empty
+    when no fact carries occurrence-level attrs — the common case today).
     """
 
     src: str
@@ -238,6 +243,7 @@ class GraphEdge:
     facts: list[GraphFact] = field(default_factory=list)
     resolved: dict[str, Any] = field(default_factory=dict)
     conflicts: list[FactConflict] = field(default_factory=list)
+    occurrences: list[str] = field(default_factory=list)
 
     def key(self) -> tuple[str, str, str]:
         """Identity for diffing/de-dup: (src, dst, kind) — ADR-046 D1's
@@ -270,6 +276,7 @@ class GraphEdge:
             "facts": [f.to_dict() for f in self.facts],
             "resolved": dict(self.resolved),
             "conflicts": [c.to_dict() for c in self.conflicts],
+            "occurrences": list(self.occurrences),
         }
 
     @classmethod
@@ -317,6 +324,8 @@ def ensure_facts_and_resolve(entity: GraphNode | GraphEdge) -> None:
     top = min(entity.facts, key=_precedence_key)
     entity.confidence = top.confidence
     entity.provenance = top.producer
+    if isinstance(entity, GraphEdge):
+        entity.occurrences = _compute_occurrences(entity)
 
 
 def register_fact(
@@ -385,10 +394,73 @@ def edge_relation_key(
     coarser ``key()`` — role-level diff granularity is out of scope for this
     ADR's D1 slice.
 
-    D1's second half — ``occurrence_id`` (the full, non-deduplicated
-    per-call-site/per-configuration evidence trail a ``relation_key`` can
-    back many of) — is not implemented here: it needs the pack-size
-    cost-model check ADR-046's own Costs section calls for before landing on
-    a default, always-on path rather than an opt-in one.
+    D1's second half — the full, non-deduplicated per-call-site/
+    per-configuration evidence trail a ``relation_key`` can back many of —
+    is :func:`edge_occurrence_id`/:class:`GraphEdge`'s ``occurrences`` field,
+    kept deliberately opt-in (a no-op unless a producer supplies
+    occurrence-level attrs) so it never lands on a default, always-on path
+    without the pack-size cost-model check ADR-046's Costs section calls for.
     """
     return (src, dst, kind, str(resolved.get("role", "")))
+
+
+#: The four ADR-046 D1 occurrence-level attrs an edge fact may carry, beyond
+#: its ``relation_key``, to pin down exactly *which* call site/configuration/
+#: template instantiation it came from. No current producer populates any of
+#: these — :func:`edge_occurrence_id` returns ``None`` when none is present,
+#: so occurrence tracking costs nothing until a producer opts in.
+OCCURRENCE_ATTR_KEYS = (
+    "source_location",
+    "configuration_id",
+    "instantiation_id",
+    "callsite_id",
+)
+
+
+def edge_occurrence_id(
+    relation_key: tuple[str, str, str, str], attrs: dict[str, Any]
+) -> str | None:
+    """ADR-046 D1's per-call-site occurrence identity: a stable
+    ``sha256:<hex>`` over ``(relation_key, source_location, configuration_id,
+    instantiation_id, callsite_id)``, read from *attrs*.
+
+    Two facts that share a ``relation_key`` (and so collapse onto one
+    :class:`GraphEdge`) but come from different call sites, ``#ifdef``
+    configurations, or template instantiations get distinct occurrence ids —
+    preserving the full evidence trail a ``relation_key``-deduped edge would
+    otherwise discard.
+
+    Returns ``None`` when *attrs* carries none of :data:`OCCURRENCE_ATTR_KEYS`
+    — the common case today, since no producer populates them yet — so a
+    fact with no occurrence-level data contributes nothing to
+    :class:`GraphEdge`'s ``occurrences`` list rather than a spurious
+    all-``None`` id.
+    """
+    if not any(k in attrs for k in OCCURRENCE_ATTR_KEYS):
+        return None
+    blob = json.dumps(
+        {
+            "relation_key": list(relation_key),
+            **{k: attrs.get(k) for k in OCCURRENCE_ATTR_KEYS},
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(blob).hexdigest()
+
+
+def _compute_occurrences(edge: GraphEdge) -> list[str]:
+    """Recompute :attr:`GraphEdge.occurrences` from *edge*'s current facts.
+
+    Called by :func:`ensure_facts_and_resolve` alongside ``resolved``/
+    ``conflicts`` — always derived fresh from ``facts``, never trusted from a
+    loaded pack, matching that function's self-healing convention.
+    """
+    rk = edge.relation_key()
+    seen: list[str] = []
+    for fact in edge.facts:
+        oid = edge_occurrence_id(rk, fact.attrs)
+        if oid is not None and oid not in seen:
+            seen.append(oid)
+    return sorted(seen)
