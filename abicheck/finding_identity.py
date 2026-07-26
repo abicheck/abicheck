@@ -583,16 +583,24 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     if _is_symbol_level_kind(kind_value):
         real_mangled = normalize_mangled_name(change.symbol, change.qualified_name)
 
+    # Every alias below is qualified with `discriminator`, matching `primary`/
+    # `sig`: a bare `mangled:<x>`/`symbol:<x>`/`qualified:<x>` alias would
+    # identify the *entity*, not this *finding* -- two distinct findings on
+    # the same entity (e.g. a return-type change and a param-type change on
+    # the same function) would then share every entity-scoped alias despite
+    # being unrelated changes, and a future alias-match reconciliation tier
+    # (this field's documented purpose) would wrongly pair them whenever
+    # each side has only one candidate (Codex review).
     aliases: list[str] = []
     if real_mangled:
-        aliases.append(f"mangled:{real_mangled}")
+        aliases.append(f"mangled:{real_mangled}\x1f{discriminator}")
     if change.symbol:
-        aliases.append(f"symbol:{change.symbol}")
+        aliases.append(f"symbol:{change.symbol}\x1f{discriminator}")
     if change.qualified_name:
-        aliases.append(f"qualified:{change.qualified_name}")
+        aliases.append(f"qualified:{change.qualified_name}\x1f{discriminator}")
     aliases.append(sig)
     if change.source_location:
-        aliases.append(f"relsrc:{rel}")
+        aliases.append(f"relsrc:{rel}\x1f{discriminator}")
 
     if real_mangled:
         primary = f"mangled:{real_mangled}\x1f{discriminator}"

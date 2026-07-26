@@ -469,6 +469,32 @@ class TestResolveChangeIdentity:
         assert params_changed.tier == IDENTITY_TIER_CANONICAL
         assert return_changed.primary_id != params_changed.primary_id
 
+    def test_aliases_do_not_intersect_for_two_findings_on_the_same_symbol(
+        self,
+    ) -> None:
+        # Codex review: bare `mangled:`/`symbol:`/`qualified:` aliases with
+        # no discriminator would let a future alias-match reconciliation
+        # tier wrongly pair a return-type change with an unrelated
+        # param-type change on the same function, since both would carry
+        # identical entity-scoped aliases despite being different findings.
+        return_changed = resolve_change_identity(
+            Change(
+                kind=ChangeKind.FUNC_RETURN_CHANGED,
+                symbol=_ITANIUM_MANGLED,
+                description="return type changed",
+                qualified_name="foo",
+            )
+        )
+        params_changed = resolve_change_identity(
+            Change(
+                kind=ChangeKind.FUNC_PARAMS_CHANGED,
+                symbol=_ITANIUM_MANGLED,
+                description="param 0 type changed",
+                qualified_name="foo",
+            )
+        )
+        assert set(return_changed.aliases).isdisjoint(params_changed.aliases)
+
     def test_equivalent_removal_kinds_collide_on_the_same_mangled_symbol(self) -> None:
         # Codex review: diff_filtering._deduplicate_cross_detector already
         # treats FUNC_REMOVED (rich detector) and FUNC_REMOVED_ELF_ONLY (L0)

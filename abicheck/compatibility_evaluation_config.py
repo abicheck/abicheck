@@ -374,6 +374,20 @@ class CompatibilityPolicyConfig:
                 f"ChangeKind slugs: {unknown} (ADR-049 D8: a hard load "
                 "error, matching policy_file.py's PolicyFile.load)"
             )
+        non_verdict = sorted(
+            slug for slug, v in self.overrides.items() if not isinstance(v, Verdict)
+        )
+        if non_verdict:
+            raise TypeError(
+                "CompatibilityPolicyConfig.overrides values must be Verdict "
+                f"members, not raw strings: {non_verdict}. The `Mapping[str, "
+                "Verdict]` annotation isn't runtime-enforced, so an untyped "
+                'adapter passing a raw string (e.g. "BREAKING" or the '
+                'YAML-facing "break") would otherwise freeze silently -- '
+                "policy_file.py's _SEVERITY_MAP already normalizes the "
+                "YAML spellings to real Verdict members before reaching "
+                "this constructor; any other front end must do the same."
+            )
         object.__setattr__(
             self, "packs", _canonical_tuple(self.packs, key=_pack_sort_key)
         )

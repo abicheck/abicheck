@@ -94,6 +94,29 @@ class TestConstruction:
                 overrides={"totally_made_up_kind": Verdict.BREAKING},
             )
 
+    def test_raw_string_override_value_is_rejected(self):
+        # The Mapping[str, Verdict] annotation isn't runtime-enforced -- an
+        # untyped adapter passing the enum's own string value must still be
+        # rejected, since only real Verdict members are accepted downstream.
+        with pytest.raises(TypeError, match="func_removed"):
+            CompatibilityPolicyConfig(
+                base=_identity("strict_abi"),
+                overrides={"func_removed": "BREAKING"},
+            )
+
+    def test_yaml_facing_severity_spelling_override_value_is_rejected(self):
+        # "break"/"warn"/"risk"/"ignore" are policy_file.py's YAML-facing
+        # severity spellings, not Verdict values -- policy_file.py already
+        # normalizes them via _SEVERITY_MAP before constructing this config,
+        # so a caller passing the raw YAML spelling through directly must
+        # still be rejected here rather than silently freezing an unusable
+        # override.
+        with pytest.raises(TypeError, match="func_removed"):
+            CompatibilityPolicyConfig(
+                base=_identity("strict_abi"),
+                overrides={"func_removed": "break"},
+            )
+
 
 class TestContractConfigUnresolvedBehavior:
     # ADR-049 D9: unresolved_behavior is a closed two-value vocabulary
