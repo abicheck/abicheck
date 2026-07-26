@@ -163,6 +163,14 @@ class TestNormalizeMangledName:
         # and "_ZN" (nothing after N) are not real Itanium encodings despite
         # structurally passing the coarser _Z + character-class check.
         assert normalize_mangled_name("_ZNonsense", "_ZNonsense") is None
+
+    def test_nested_name_source_name_embedded_e_is_not_a_terminator(self) -> None:
+        # Codex review, fresh evidence: "_ZN1E" is incomplete -- "1E" is a
+        # length-1 <source-name> whose one-byte identifier IS "E", leaving
+        # no separate terminator -- but the naive `rest.find("E", 1)` scan
+        # matched that embedded byte and wrongly promoted this incomplete
+        # token to the canonical tier.
+        assert normalize_mangled_name("_ZN1E", "_ZN1E") is None
         assert normalize_mangled_name("_ZN", "_ZN") is None
 
     def test_local_name_with_no_terminator_is_rejected(self) -> None:

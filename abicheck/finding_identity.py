@@ -162,6 +162,31 @@ _SOURCE_NAME_LENGTH_RE = re.compile(r"\A[0-9]+")
 _MAX_SOURCE_NAME_LENGTH_DIGITS = 9
 
 
+def _source_name_end(text: str) -> int | None:
+    """If *text* starts with a valid ``<source-name>`` production
+    (``<number>`` followed by exactly that many bytes, e.g. ``3foo``),
+    return the index just past it; otherwise ``None``.
+
+    Unlike :func:`_valid_source_name` (a plain bool), callers that need to
+    know *where* the component ends -- e.g. to search for whatever
+    terminator follows it, rather than just accepting/rejecting the whole
+    string -- use this instead. Applies the same digit-run bound and
+    zero-length rejection :func:`_valid_source_name` documents.
+    """
+    if not text or not text[0].isdigit():
+        return None
+    m = _SOURCE_NAME_LENGTH_RE.match(text)
+    assert m is not None  # guarded by the isdigit() check above
+    digits = m.group()
+    if len(digits) > _MAX_SOURCE_NAME_LENGTH_DIGITS:
+        return None
+    declared_len = int(digits)
+    if declared_len == 0:
+        return None
+    end = m.end() + declared_len
+    return end if len(text) >= end else None
+
+
 def _valid_source_name(rest: str) -> bool:
     """Whether a leading ``<source-name>`` production (``<number>``
     followed by exactly that many bytes, e.g. ``3foo``) has a declared
@@ -181,16 +206,7 @@ def _valid_source_name(rest: str) -> bool:
     "succeeds" against any following content without actually being a
     valid ``<source-name>`` (Codex review, round 3).
     """
-    m = _SOURCE_NAME_LENGTH_RE.match(rest)
-    assert m is not None  # only called when rest[0].isdigit()
-    digits = m.group()
-    if len(digits) > _MAX_SOURCE_NAME_LENGTH_DIGITS:
-        return False
-    declared_len = int(digits)
-    if declared_len == 0:
-        return False
-    identifier = rest[m.end() :]
-    return len(identifier) >= declared_len
+    return _source_name_end(rest) is not None
 
 
 def _looks_like_itanium_encoding(rest: str) -> bool:
@@ -230,6 +246,24 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
         # itself well-formed -- that is the unbounded full-grammar case
         # this heuristic deliberately doesn't attempt (see this function's
         # docstring on its accepted boundary).
+        #
+        # A naive `rest.find("E", 1)` can mistake an 'E' byte that is part
+        # of the first component's OWN spelling for the production's
+        # terminator -- e.g. "_ZN1E" is incomplete (the "1E" is a
+        # length-1 <source-name> whose one-byte identifier IS "E", leaving
+        # no separate terminator), but the naive scan found that embedded
+        # byte and wrongly accepted it (Codex review, fresh evidence).
+        # When the component right after N/Z is itself a <source-name>
+        # (the common shape: a namespace/class/function name), skip past
+        # it before searching for the real terminator; any other
+        # component shape (constructor/destructor names, template-args,
+        # ...) falls back to the original naive scan -- still this
+        # heuristic's documented accepted boundary, just narrowed to the
+        # one concrete counterexample found so far.
+        source_name_end = _source_name_end(rest[1:])
+        if source_name_end is not None:
+            search_start = 1 + source_name_end
+            return rest.find("E", search_start) >= search_start
         return rest.find("E", 1) > 1
     if rest[0] == "L" and len(rest) > 1 and rest[1].isdigit():
         # GCC internal-linkage prefix (_ZL7g_count) + <source-name>

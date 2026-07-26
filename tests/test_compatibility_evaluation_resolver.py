@@ -135,6 +135,23 @@ class TestConflictingFieldValues:
         assert exc_info.value.field_name == "contract.mode"
         assert len(exc_info.value.candidates) == 2
 
+    def test_equal_but_differently_typed_candidates_at_the_same_tier_raise(self):
+        # Codex review, fresh evidence: ContractMode subclasses str, so
+        # ContractMode.PUBLIC == "public" and they hash equal -- a bare
+        # `{c.value for c in candidates}` set previously had length 1 even
+        # though one candidate left the value as a raw, unnormalized
+        # string and the other used the real enum member, so no conflict
+        # was raised and resolve_field could return the raw string
+        # (which would later fail constructing the typed effective
+        # config) depending on candidate order.
+        candidates = [
+            _candidate(SelectorLayer.EXPLICIT_CLI, ContractMode.PUBLIC),
+            _candidate(SelectorLayer.EXPLICIT_CLI, "public"),
+        ]
+        with pytest.raises(ConflictingFieldValuesError) as exc_info:
+            resolve_field("contract.mode", candidates, default=_default())
+        assert exc_info.value.field_name == "contract.mode"
+
     def test_conflict_in_a_shadowed_lower_tier_still_raises(self):
         # ADR-049 D7's same-layer-conflict rule isn't scoped to only the
         # winning tier: a run_recipe value resolves the field, but the
@@ -405,6 +422,28 @@ class TestDetectPackConflicts:
             )
         assert exc_info.value.field_name == "func_removed"
         assert len(exc_info.value.contributors) == 2
+
+    def test_equal_but_differently_typed_pack_values_raise(self):
+        # Codex review, fresh evidence: ContractMode subclasses str, so
+        # ContractMode.PUBLIC == "public" and they hash equal -- a bare
+        # `{value for _, value in contributors}` set previously had length
+        # 1 even though one pack assigned the raw, unnormalized string and
+        # the other the real enum member, silently picking whichever pack
+        # happened to be sorted first instead of flagging the genuine
+        # pack-vs-pack disagreement (the same "resulting value can fail
+        # later constructing the typed effective config" risk the
+        # resolve_field tier-conflict fix closes).
+        with pytest.raises(PackConflictError) as exc_info:
+            detect_pack_conflicts(
+                [
+                    (
+                        _pack("security_hardening"),
+                        {"contract.mode": ContractMode.PUBLIC},
+                    ),
+                    (_pack("release_governance"), {"contract.mode": "public"}),
+                ]
+            )
+        assert exc_info.value.field_name == "contract.mode"
 
     def test_conflict_report_is_order_independent(self):
         # "Pack order never decides semantics" -- forward and reversed input

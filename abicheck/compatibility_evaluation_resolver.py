@@ -106,6 +106,24 @@ _EXPLICIT_LAYERS = frozenset({SelectorLayer.EXPLICIT_CLI, SelectorLayer.API_REQU
 _KNOWN_LAYERS: frozenset[SelectorLayer] = frozenset().union(*_PRECEDENCE_TIERS)
 
 
+def _value_identity_key(value: Hashable) -> tuple[type, Hashable]:
+    """A dedup key that also distinguishes *runtime type*, not just ``==``.
+
+    Plain ``==``/``hash()`` equality hides a real same-tier conflict when
+    one candidate is left as a raw spelling and another is normalized:
+    ``ContractMode.PUBLIC == "public"`` and hash equal (``ContractMode``
+    subclasses ``str``), so a bare ``{c.value for c in candidates}`` set
+    would have length 1 even though the two candidates disagree on
+    *which* value -- a raw string could then win depending on candidate
+    order and later fail constructing the typed effective config. The
+    same collision happens for ``True`` vs. ``1`` (Codex review, fresh
+    evidence). Including ``type(value)`` in the key makes candidates that
+    are merely ``==``-equal but differ in runtime type collide as a
+    genuine conflict instead of silently picking one arbitrarily.
+    """
+    return (type(value), value)
+
+
 @dataclass(frozen=True)
 class FieldCandidate:
     """One selector layer's contribution to a field's effective value.
@@ -312,7 +330,7 @@ def resolve_field(
         # usage errors" is not scoped to only the winning tier: a shadowed
         # layer's internal conflict must still be caught now, not silently
         # exposed later if the higher-precedence override is ever removed.
-        if len({c.value for c in tier_candidates}) > 1:
+        if len({_value_identity_key(c.value) for c in tier_candidates}) > 1:
             raise ConflictingFieldValuesError(field_name, tier_candidates)
         if winner is None:
             winner = tier_candidates[0]
@@ -493,5 +511,12 @@ def detect_pack_conflicts(
         if field_name in explicit_overrides:
             continue
         contributors = by_field[field_name]
-        if len({value for _, value in contributors}) > 1:
+        # Same runtime-type-blind collision _value_identity_key documents
+        # for resolve_field's tier/legacy-alias comparisons: a plain
+        # `{value for _, value in contributors}` would treat
+        # ContractMode.PUBLIC and the raw string "public" as one value
+        # (ContractMode subclasses str, so they hash/compare equal),
+        # silently picking whichever pack happened to be sorted first
+        # instead of flagging the genuine pack-vs-pack disagreement.
+        if len({_value_identity_key(value) for _, value in contributors}) > 1:
             raise PackConflictError(field_name, contributors)
