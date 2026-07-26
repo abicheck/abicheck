@@ -69,6 +69,9 @@ from dataclasses import replace
 from functools import partial
 from typing import Protocol, TypeVar
 
+from .dumper_castxml import (
+    _mangled_name_is_local_linkage as _mangled_name_is_local_linkage,
+)
 from .errors import TuMergeError
 from .model import EnumType, Function, Param, RecordType, ScopeOrigin, Variable
 from .provenance import build_public_set, classify_origin, header_from_location
@@ -94,6 +97,7 @@ class _Provenanced(Protocol):
     source_location: str | None
     source_header: str | None
     origin: ScopeOrigin
+    deprecated: str | None
 
 
 _T = TypeVar("_T", bound=_Provenanced)
@@ -101,21 +105,32 @@ _T = TypeVar("_T", bound=_Provenanced)
 
 def _has_local_linkage_mangling(mangled: str) -> bool:
     """Whether *mangled* carries an Itanium ABI marker for genuine internal
-    (TU-local) linkage -- the ``_ZL`` local-entity prefix (a file-scope
-    ``static`` function/variable), or a ``_GLOBAL__N_`` component (an
-    anonymous-namespace entity). Empirically verified against real
-    clang/GCC output (``nm``'s lowercase-letter "local symbol" convention
-    agrees for both): ``static void helper(int);`` mangles to
-    ``_ZL6helperi``; an anonymous-namespace function mangles to
-    ``_ZN12_GLOBAL__N_1...``; a ``static`` **member** function/variable of
-    an ordinarily-visible class -- externally linked, not TU-local at all,
-    despite ``storageClass == "static"`` being set in the AST exactly the
-    same way -- mangles to an ordinary marker-free symbol like
-    ``_ZN6Widget4makeEi`` (Codex review, PR #635 round 6). Neither marker
-    ever appears in an externally-linked Itanium symbol, so this is a
-    precise linkage signal, not a heuristic guess.
+    (TU-local) linkage -- the ``<local-name>`` production's bare ``L``
+    immediately before a source-name (a file-scope ``static``
+    function/variable, whether at global scope -- ``_ZL6helperi`` -- or
+    nested in a named namespace -- ``static int state;`` inside
+    ``namespace ns`` mangles to ``_ZN2nsL5stateE``, *not* a leading ``_ZL``
+    prefix, since the ``L`` marks the innermost component, not the string's
+    start (Codex review, PR #635 round 7; empirically confirmed against real
+    clang) -- or a ``_GLOBAL__N_`` component (an anonymous-namespace
+    entity, e.g. ``_ZN12_GLOBAL__N_1...``). A ``static`` **member**
+    function/variable of an ordinarily-visible class -- externally linked,
+    not TU-local at all, despite ``storageClass == "static"`` being set in
+    the AST exactly the same way -- mangles to an ordinary marker-free
+    symbol like ``_ZN6Widget4makeEi`` (round 6). Neither marker ever
+    appears in an externally-linked Itanium symbol, so this is a precise
+    linkage signal, not a heuristic guess.
+
+    The ``L``-marker half of this check delegates to
+    :func:`abicheck.dumper_castxml._mangled_name_is_local_linkage`, which
+    already parses the full length-prefixed identifier chain component by
+    component rather than substring-matching -- reusing it here (instead of
+    a second, narrower ``_ZL``-prefix-only reimplementation) is what catches
+    the nested-namespace case; a plain ``startswith("_ZL")`` check only ever
+    matches when the local entity is the *first* component, i.e. at global
+    scope.
     """
-    return mangled.startswith("_ZL") or "_GLOBAL__N_" in mangled
+    return _mangled_name_is_local_linkage(mangled) or "_GLOBAL__N_" in mangled
 
 
 def _function_key(tu_name: str, fn: Function) -> tuple[str, str]:
@@ -304,6 +319,27 @@ def merge_fragments(
             # unset (global-scope types, or a producer that never captured
             # it), matching every other merge key's "None means unknown,
             # don't invent structure" convention.
+            #
+            # Known, accepted limitation (Codex review, PR #635 round 7):
+            # a type declared inside an *anonymous* namespace is exactly as
+            # TU-local as an anonymous-namespace function/variable (see
+            # _function_key/_variable_key above), but has no analogous
+            # signal to detect it from here -- unlike a Function/Variable,
+            # a RecordType/EnumType carries no mangled linker symbol to
+            # read a `_GLOBAL__N_` marker off of, and dumper_clang.py's AST
+            # walker drops an anonymous namespace's (nameless) segment from
+            # `scope` entirely rather than encoding it distinctly (see
+            # `_SCOPE_NODE_KINDS` handling in `_walk`), so `qualified_name`
+            # for such a type is indistinguishable from one declared
+            # directly at the enclosing named scope. Two unrelated
+            # same-named anonymous-namespace types in different TUs can
+            # therefore still be incorrectly merged/conflicted here.
+            # Closing this needs a producer-side signal (a new model field
+            # marking anonymous-namespace membership, populated by both
+            # dumper_clang.py and dumper_castxml.py) -- a schema change out
+            # of proportionate scope for this fix, the same call already
+            # made for the typedef/constant namespace-qualification gap
+            # documented on `_merge_scalar_group`'s call sites below.
             key_fn=lambda _tu, rt: entity_key("type", rt.qualified_name or rt.name),
             merge_fn=partial(
                 _merge_types,
@@ -328,6 +364,16 @@ def merge_fragments(
             ),
         )
     )
+    # Known, accepted limitation: TuFragment.typedefs/.constants are bare
+    # `name -> value` dicts with no namespace-qualified-name channel (unlike
+    # RecordType/EnumType's `qualified_name`), so `namespace one { using X =
+    # int; }` and `namespace two { using X = double; }` still collide on the
+    # bare key `X` here -- a real gap, but closing it needs a producer-side
+    # schema change (dumper_clang.py/dumper_castxml.py would need to start
+    # emitting qualified typedef/constant names), out of proportionate scope
+    # for this fix (Codex review, PR #635; see also the anonymous-namespace
+    # RecordType/EnumType gap documented on the `types`/`enums` key_fn above,
+    # the same category of producer-side limitation).
     typedefs = _merge_scalar_group(
         (
             (f.tu_name, name, value)
@@ -540,11 +586,12 @@ def _with_more_public_provenance(
     header_segs: list[tuple[str, ...]],
     dir_segs: list[tuple[str, ...]],
     have_public_set: bool,
-) -> _T:
+) -> _T | None:
     """Return *winner* -- the structurally-complete side of a forward-
     declaration/definition merge (:func:`_merge_types`/:func:`_merge_enums`)
     -- with its provenance possibly overridden from *other* (the forward
-    declaration) when *other* classifies as more public.
+    declaration) when *other* classifies as more public, and its
+    ``deprecated`` unioned in from *other* when *winner* doesn't carry one.
 
     :func:`_more_public_of` alone isn't enough here: unlike the
     already-identical-modulo-provenance case it's built for, *winner* and
@@ -558,7 +605,29 @@ def _with_more_public_provenance(
     is still correct, but the merged entity's *provenance* must reflect the
     public forward declaration, or ``apply_provenance`` reads a genuinely
     public type as private (Codex review, PR #635 follow-up).
+
+    ``deprecated`` gets the same "don't silently drop the other side's
+    fact" treatment (Codex review, PR #635 round 7): a public
+    ``class [[deprecated("old")]] X;`` forward declaration merged with an
+    undecorated private definition must not lose the deprecation -- picking
+    *winner*'s fields wholesale, as before this fix, always did, since
+    *winner* is the definition and definitions commonly carry no
+    ``[[deprecated]]`` of their own. Two differing non-``None``
+    ``deprecated`` values is a genuine conflict (returns ``None``, the same
+    treatment :func:`_merge_functions`'s conflicting-default-argument check
+    and :func:`_merge_variables`'s conflicting-value check already give
+    their own optional facts) rather than arbitrarily preferring one
+    message over the other.
     """
+    if (
+        winner.deprecated is not None
+        and other.deprecated is not None
+        and winner.deprecated != other.deprecated
+    ):
+        return None
+    deprecated = (
+        winner.deprecated if winner.deprecated is not None else other.deprecated
+    )
     provenance_source = _more_public_of(
         winner,
         other,
@@ -566,14 +635,19 @@ def _with_more_public_provenance(
         dir_segs=dir_segs,
         have_public_set=have_public_set,
     )
-    if provenance_source is winner:
-        return winner
-    return replace(  # type: ignore[type-var]
-        winner,
-        source_location=other.source_location,
-        source_header=other.source_header,
-        origin=other.origin,
+    merged = (
+        winner
+        if provenance_source is winner
+        else replace(  # type: ignore[type-var]
+            winner,
+            source_location=other.source_location,
+            source_header=other.source_header,
+            origin=other.origin,
+        )
     )
+    if merged.deprecated != deprecated:
+        merged = replace(merged, deprecated=deprecated)  # type: ignore[type-var]
+    return merged
 
 
 def _merge_functions(
@@ -723,7 +797,27 @@ def _merge_types(
     merged entity must still read as public. Two complete (non-opaque)
     definitions must be identical (modulo provenance) to merge; if they
     disagree, that is a genuine ODR conflict.
+
+    Two forward declarations that are *both* opaque merge the same way,
+    checked only for class-key compatibility -- neither side has fields to
+    prefer over the other's, so there is no "definition wins" side, but
+    ``class X;`` in one TU and ``struct X;`` in another is exactly as valid
+    a pair of redeclarations as ``class X;`` paired with a `struct X {
+    ... };` definition, and was previously rejected as
+    ``INCONSISTENT_DECLARATION`` purely because the class-key-compatibility
+    check below was only reached when exactly one side was opaque (Codex
+    review, PR #635 round 7).
     """
+    if a.is_opaque and b.is_opaque:
+        if not _record_kinds_compatible(a.kind, b.kind):
+            return None
+        return _with_more_public_provenance(
+            a,
+            b,
+            header_segs=header_segs,
+            dir_segs=dir_segs,
+            have_public_set=have_public_set,
+        )
     if a.is_opaque and not b.is_opaque:
         if not _record_kinds_compatible(a.kind, b.kind):
             return None

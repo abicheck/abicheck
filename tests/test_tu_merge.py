@@ -774,6 +774,120 @@ def test_merge_fragments_raises_on_conflicting_constant_value():
 
 
 # ---------------------------------------------------------------------------
+# Round 7 (Codex review, PR #635): nested-namespace static linkage, the
+# deprecated attribute lost across a forward-decl/definition merge, and
+# both-opaque struct/class forward-redeclaration compatibility.
+# ---------------------------------------------------------------------------
+
+
+def test_merge_fragments_keeps_distinct_namespaced_static_functions_from_different_tus():
+    # `namespace ns { static void helper(int); }` mangles to
+    # `_ZN2nsL6helperEi` -- the internal-linkage `L` marker sits *after* the
+    # namespace component, not as a `_ZL` prefix, so two unrelated TUs' own
+    # namespaced statics must still be kept distinct (empirically verified
+    # against real clang: `nm` shows the lowercase/local symbol type for
+    # exactly this mangled spelling).
+    a = TuFragment(
+        tu_name="a",
+        functions=(
+            _fn("helper", "_ZN2nsL6helperEi", is_static=True, return_type="int"),
+        ),
+    )
+    b = TuFragment(
+        tu_name="b",
+        functions=(
+            _fn("helper", "_ZN2nsL6helperEi", is_static=True, return_type="double"),
+        ),
+    )
+    merged = merge_fragments([a, b])
+    assert len(merged.functions) == 2
+    assert {fn.return_type for fn in merged.functions} == {"int", "double"}
+
+
+def test_merge_fragments_keeps_distinct_namespaced_static_variables_from_different_tus():
+    # `namespace ns { static int state; }` mangles to `_ZN2nsL5stateE` --
+    # the variable analogue of the namespaced-static-function case above.
+    a = TuFragment(tu_name="a", variables=(_var("state", "_ZN2nsL5stateE", value="1"),))
+    b = TuFragment(tu_name="b", variables=(_var("state", "_ZN2nsL5stateE", value="2"),))
+    merged = merge_fragments([a, b])
+    assert len(merged.variables) == 2
+    assert {v.value for v in merged.variables} == {"1", "2"}
+
+
+def test_merge_fragments_type_unions_deprecated_from_opaque_forward_declaration():
+    # A public `class [[deprecated("old")]] X;` forward declaration merged
+    # with an undecorated private definition must not silently lose the
+    # deprecation -- picking the definition's fields wholesale, as before
+    # this fix, always did, since the opaque side's own facts (besides
+    # provenance) were never consulted.
+    forward = RecordType(name="X", kind="class", is_opaque=True, deprecated="old")
+    definition = RecordType(
+        name="X", kind="class", fields=[TypeField(name="v", type="int")]
+    )
+    a = TuFragment(tu_name="a", types=(forward,))
+    b = TuFragment(tu_name="b", types=(definition,))
+    merged = merge_fragments([a, b])
+    assert len(merged.types) == 1
+    assert merged.types[0].deprecated == "old"
+    assert merged.types[0].fields == [TypeField(name="v", type="int")]
+
+
+def test_merge_fragments_type_raises_on_conflicting_deprecated_message():
+    forward = RecordType(
+        name="X", kind="class", is_opaque=True, deprecated="old reason"
+    )
+    definition = RecordType(
+        name="X",
+        kind="class",
+        fields=[TypeField(name="v", type="int")],
+        deprecated="different reason",
+    )
+    a = TuFragment(tu_name="a", types=(forward,))
+    b = TuFragment(tu_name="b", types=(definition,))
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    assert excinfo.value.entity_key == ("type", "X")
+
+
+def test_merge_fragments_enum_unions_deprecated_from_forward_declaration():
+    forward = EnumType(name="Color", members=[], deprecated="old")
+    definition = EnumType(name="Color", members=[EnumMember(name="RED", value=0)])
+    a = TuFragment(tu_name="a", enums=(forward,))
+    b = TuFragment(tu_name="b", enums=(definition,))
+    merged = merge_fragments([a, b])
+    assert len(merged.enums) == 1
+    assert merged.enums[0].deprecated == "old"
+
+
+def test_merge_fragments_type_reconciles_both_opaque_class_and_struct():
+    # `class X;` in one TU, `struct X;` (also opaque, no definition anywhere
+    # in this manifest) in another -- both are mere forward declarations of
+    # the same class-key-compatible entity, so this must not raise even
+    # though neither side has fields to prefer over the other's.
+    forward_class = RecordType(name="X", kind="class", is_opaque=True)
+    forward_struct = RecordType(name="X", kind="struct", is_opaque=True)
+    a = TuFragment(tu_name="a", types=(forward_class,))
+    b = TuFragment(tu_name="b", types=(forward_struct,))
+    merged = merge_fragments([a, b])
+    assert len(merged.types) == 1
+    assert merged.types[0].is_opaque
+
+
+def test_merge_fragments_type_raises_on_both_opaque_conflicting_kind():
+    # `union X;` and `struct X;`, both opaque -- union is never compatible
+    # with struct/class, even when neither side is a full definition.
+    forward_union = RecordType(name="X", kind="union", is_opaque=True)
+    forward_struct = RecordType(name="X", kind="struct", is_opaque=True)
+    a = TuFragment(tu_name="a", types=(forward_union,))
+    b = TuFragment(tu_name="b", types=(forward_struct,))
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == INCONSISTENT_DECLARATION
+    assert excinfo.value.entity_key == ("type", "X")
+
+
+# ---------------------------------------------------------------------------
 # Real end-to-end: G32 Phase 0's own committed odr_safe/odr_conflict fixtures
 # ---------------------------------------------------------------------------
 
