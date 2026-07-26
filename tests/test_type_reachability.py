@@ -398,3 +398,67 @@ class TestDirectlyReferencedStdlibTypes:
             types=[RecordType(name="std::string", kind="class")],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_castxml_style_bare_name_with_separate_qualified_name_is_detected(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: castxml/direct-clang store the bare
+        leaf in RecordType.name and the "std::"-prefixed spelling separately
+        in qualified_name (model.py:384-392, dumper_clang.py:865-878) --
+        matching only against `t.name` (as the pre-fix code did) never finds
+        a real castxml/clang-produced stdlib record at all, since `name`
+        alone never carries the "std::" prefix for those two backends.
+        Reproduces the real shape empirically confirmed via `abicheck dump`
+        on a compiled std::vector<int> parameter: Function.return_type/
+        Param.type spell it bare ("vector<int, std::allocator<int> >"),
+        matching RecordType.name, not RecordType.qualified_name."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    params=[Param(name="v", type="vector<int, std::allocator<int> >")],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="vector<int, std::allocator<int> >",
+                    kind="class",
+                    qualified_name="std::vector<int, std::allocator<int> >",
+                )
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {"std::vector<int, std::allocator<int> >"}
+        )
+
+    def test_dwarf_style_prequalified_name_matches_bare_signature_spelling(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: DWARF has no separate
+        qualified_name field and instead bakes the namespace straight into
+        `name` (dwarf_snapshot.py:606,725), so `name` is already
+        "std::vector<...>" with qualified_name=None -- but
+        Function.return_type/Param.type are still spelled bare (empirically
+        confirmed via a real `abicheck dump` DWARF-only snapshot). The
+        prefix-stripped fallback must connect the two."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "bar",
+                    return_type="vector<int, std::allocator<int> >",
+                )
+            ],
+            types=[
+                RecordType(
+                    name="std::vector<int, std::allocator<int> >",
+                    kind="class",
+                )
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {"std::vector<int, std::allocator<int> >"}
+        )

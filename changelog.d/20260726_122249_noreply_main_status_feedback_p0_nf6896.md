@@ -76,7 +76,24 @@
   had bypassed `_NON_PUBLIC_ORIGINS` entirely even though `RecordType`
   carries the same provenance axis as `Function` — a non-stdlib record kept
   only from a private/system/generated header must not make its own field
-  types count as reachability roots either.
+  types count as reachability roots either. Candidate identification is
+  also fixed to use `qualified_name or name` instead of `name` alone
+  (Codex review, fresh evidence): castxml/direct-clang populate the bare
+  leaf in `name` and the "std::"-prefixed spelling separately in
+  `qualified_name`, so `name` alone never carries the prefix for those two
+  backends and the helper silently found nothing on any real
+  castxml/clang-produced snapshot. That alone was still insufficient,
+  confirmed by dumping a real compiled `std::vector<int>` parameter
+  end-to-end: `Function.return_type`/`Param.type` spell the outer type
+  bare (`"vector<int, std::allocator<int> >"`) even when the matching
+  `RecordType`'s identity is fully qualified, across all three backends —
+  fixed by also generating a namespace-prefix-stripped spelling per
+  candidate and matching against either form. Still not fixed (out of
+  scope for this pass, documented in `AGENTS.md`'s "Known gaps"): a
+  signature spelled with a typedef alias (`std::string`, `std::wstring`)
+  names the alias, not the real underlying class that owns the
+  `RecordType` entry, and no current model field maps one back to the
+  other — that needs a dedicated typedef-alias-resolution layer.
   Not yet wired into any live detector — see `AGENTS.md`'s
   "Known gaps" for why retrofitting the ~15 existing call sites needs its
   own scoped, individually-verified follow-up.

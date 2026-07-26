@@ -662,7 +662,32 @@ Once a root command genuinely clears the bar above, pick the right home:
   `diff_filtering.py`/`diff_type_spellings.py` needs each site individually
   verified against the FP-rate/mutation-score gates (exactly the guard those
   gates exist for), a scoped follow-up rather than a drive-by extension
-  here.
+  here. A Codex review round found and fixed a real correctness gap in the
+  *computational* claim above: candidate identification originally matched
+  only `RecordType.name`, but castxml/direct-clang populate the bare leaf
+  there and the namespace-qualified spelling separately in
+  `qualified_name` (`model.py`, `dumper_clang.py`) — so `name` alone never
+  carries a `std::` prefix for those two backends and the helper silently
+  found nothing on any real castxml/clang-produced snapshot. Fixed by
+  identifying candidates via `qualified_name or name`. That fix alone was
+  still insufficient, confirmed by dumping a real compiled
+  `std::vector<int>` parameter end to end: `Function.return_type`/
+  `Param.type` spell the outer type **bare** (`"vector<int,
+  std::allocator<int> >"`) even when the matching `RecordType`'s identity
+  is fully qualified (`"std::vector<int, std::allocator<int> >"`), across
+  *all three* backends (DWARF bakes the qualified form straight into
+  `name` with no separate field; castxml/clang keep `name` bare and
+  `qualified_name` separate) — so a pure full-identity substring match
+  still couldn't connect the two. Fixed by also generating a
+  namespace-prefix-stripped spelling per candidate and matching against
+  either form. **Still not fixed, and out of scope for that fix**: a
+  signature spelled with a typedef alias (`std::string`, `std::wstring`,
+  ...) names the alias, not the real underlying class
+  (`std::basic_string<char, ...>`) that owns the `RecordType` entry, and no
+  current model field maps one back to the other — resolving that needs a
+  dedicated typedef-alias-resolution layer (walking `snapshot.typedefs`),
+  a separate scoped project, not a further extension of this string-
+  spelling fallback.
 
 ## What NOT to do
 

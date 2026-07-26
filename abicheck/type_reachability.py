@@ -119,6 +119,51 @@ def type_string_references_name(type_string: str, name: str) -> bool:
         start = idx + 1
 
 
+def _record_identity(name: str, qualified_name: str | None) -> str:
+    """The best available fully-qualified spelling for a record: the
+    dedicated ``qualified_name`` field when the producer populated it
+    (castxml, direct-clang), else ``name`` itself (DWARF, which has no
+    separate field and instead bakes the namespace straight into ``name``;
+    see ``RecordType.qualified_name``'s own docstring)."""
+    return qualified_name or name
+
+
+def _signature_spellings(identity: str) -> frozenset[str]:
+    """Every spelling of *identity* that a real dumper backend's own
+    ``Function.return_type``/``Param.type``/``TypeField.type`` strings might
+    actually use (Codex review, fresh evidence).
+
+    ``RecordType.name``/``qualified_name`` and the *signature* type-string
+    fields are populated by independent code paths per backend and do not
+    share one spelling convention: castxml's ``_type_name`` and the direct-
+    clang backend's field/param types are built from the bare (unqualified)
+    declaration name, while DWARF bakes the full namespace into ``name``
+    directly. Empirically (verified against a real compiled+DWARF-dumped
+    ``std::vector<int>`` parameter), the identity string
+    ``"std::vector<int, std::allocator<int> >"`` never itself appears in a
+    signature — only its namespace-prefix-stripped form
+    ``"vector<int, std::allocator<int> >"`` does, because
+    ``Function.return_type``/``Param.type`` spell the outermost type bare
+    even when ``RecordType.name`` is fully qualified. Returning both the
+    full identity and its prefix-stripped form lets the scan match whichever
+    convention the snapshot's producer actually used, without guessing which
+    backend produced it.
+
+    This does **not** close the deeper, separate gap of typedef-aliased
+    stdlib types (``std::string``, ``std::wstring``, ...): a signature
+    spelled ``std::string`` names the alias, not the real underlying class
+    (``std::basic_string<char, ...>``) that owns the ``RecordType`` entry,
+    and no current model field maps one back to the other. See
+    ``AGENTS.md``'s "Known gaps" for why resolving that needs a dedicated
+    typedef-alias-resolution layer, not a string-spelling fallback.
+    """
+    spellings = {identity}
+    for prefix in STDLIB_TYPE_NAMESPACE_PREFIXES:
+        if identity.startswith(prefix):
+            spellings.add(identity[len(prefix) :])
+    return frozenset(spellings)
+
+
 def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     """Stdlib/runtime-namespaced :class:`RecordType` names in *snapshot* that
     are directly referenced by a **public**, non-stdlib function's
@@ -132,6 +177,14 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     :func:`type_string_references_name`), so a stdlib type mentioned only
     inside another stdlib type's own template arguments (never surfacing in
     a non-stdlib declaration) is correctly excluded.
+
+    Candidate identification uses ``qualified_name or name`` (Codex review,
+    fresh evidence), not ``name`` alone: castxml/direct-clang record the bare
+    leaf in ``name`` and the namespace-qualified spelling separately in
+    ``qualified_name``, so ``name`` alone never carries a ``std::`` prefix
+    for those two backends and this helper would silently find nothing. See
+    :func:`_signature_spellings` for how the resulting identity is matched
+    back against the (differently-spelled) signature type strings.
 
     A ``Function`` whose ``visibility`` is not :attr:`Visibility.PUBLIC`
     (``HIDDEN``/``ELF_ONLY``) is never itself the referencing side (Codex
@@ -152,24 +205,27 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     header must not make its own field types count as reachability roots
     either.
     """
-    stdlib_names = [
-        t.name
-        for t in snapshot.types
-        if t.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)
-    ]
-    if not stdlib_names:
+    candidates: dict[str, frozenset[str]] = {}
+    for t in snapshot.types:
+        identity = _record_identity(t.name, t.qualified_name)
+        if identity.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
+            candidates[identity] = _signature_spellings(identity)
+    if not candidates:
         return frozenset()
 
     referenced: set[str] = set()
-    remaining = set(stdlib_names)
+    remaining = set(candidates)
 
     def _scan(type_string: str) -> None:
         if not remaining:
             return
-        for name in tuple(remaining):
-            if type_string_references_name(type_string, name):
-                referenced.add(name)
-                remaining.discard(name)
+        for identity in tuple(remaining):
+            if any(
+                type_string_references_name(type_string, spelling)
+                for spelling in candidates[identity]
+            ):
+                referenced.add(identity)
+                remaining.discard(identity)
 
     for fn in snapshot.functions:
         if fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
@@ -186,7 +242,9 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
 
     if remaining:
         for rec in snapshot.types:
-            if rec.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
+            if _record_identity(rec.name, rec.qualified_name).startswith(
+                STDLIB_TYPE_NAMESPACE_PREFIXES
+            ):
                 continue
             if rec.origin in _NON_PUBLIC_ORIGINS:
                 continue
