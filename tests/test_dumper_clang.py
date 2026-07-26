@@ -34,6 +34,7 @@ from abicheck.dumper import (
     _build_clang_header_command,
     _clang_header_dump,
     _header_ast_parser,
+    _needs_sycl_host_only,
     _parse_gnu_include_search_dirs,
     _resolve_clang_system_includes,
     _resolve_header_backend,
@@ -778,6 +779,88 @@ def test_build_clang_header_command_cpp_and_c(tmp_path: Path) -> None:
     c_cmd = _build_clang_header_command("clang", "gnu", [], agg, force_cpp=False)
     assert "-std=gnu11" in c_cmd
     assert "-x" in c_cmd
+
+
+@pytest.mark.parametrize(
+    "tokens,expected",
+    [
+        (["-fsycl"], True),
+        (["-fsycl", "-DFOO=1"], True),
+        # No -fsycl at all: nothing to pin.
+        (["-DFOO=1"], False),
+        ([], False),
+        # Caller already pinned a single pass explicitly: don't second-guess it.
+        (["-fsycl", "-fsycl-host-only"], False),
+        (["-fsycl", "-fsycl-device-only"], False),
+        # A flag that merely starts with "-fsycl" is not the bare enabling
+        # flag itself (exact-token match, not a prefix/substring check).
+        (["-fsycl-device-only"], False),
+    ],
+)
+def test_needs_sycl_host_only(tokens: list[str], expected: bool) -> None:
+    assert _needs_sycl_host_only(tokens) is expected
+
+
+def test_build_clang_header_command_appends_sycl_host_only(tmp_path: Path) -> None:
+    # A bare -fsycl makes a SYCL-capable driver (icpx/dpcpp) run a device pass
+    # *and* a host pass, each emitting a full -ast-dump=json document to the
+    # same stdout stream -- the second document breaks json.load() with
+    # "Extra data". -fsycl-host-only pins the compile to the single pass that
+    # actually matches what links into the scanned binary.
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "icpx", "gnu", [], agg, force_cpp=True, gcc_options="-fsycl -DFOO=1"
+    )
+    assert "-fsycl-host-only" in cmd
+    assert cmd.count("-fsycl-host-only") == 1
+
+
+def test_build_clang_header_command_respects_explicit_sycl_device_only(
+    tmp_path: Path,
+) -> None:
+    # An explicit --gcc-options choice must never be second-guessed.
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "icpx",
+        "gnu",
+        [],
+        agg,
+        force_cpp=True,
+        gcc_options="-fsycl -fsycl-device-only",
+    )
+    assert "-fsycl-host-only" not in cmd
+
+
+def test_build_clang_header_command_without_sycl_unaffected(tmp_path: Path) -> None:
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command("clang++", "gnu", [], agg, force_cpp=True)
+    assert "-fsycl-host-only" not in cmd
+
+
+def test_build_clang_header_command_sycl_via_gcc_option_tokens(tmp_path: Path) -> None:
+    # The repeatable --gcc-option path (gcc_option_tokens) must be checked the
+    # same way as the shlex-split --gcc-options string.
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "icpx", "gnu", [], agg, force_cpp=True, gcc_option_tokens=("-fsycl",)
+    )
+    assert "-fsycl-host-only" in cmd
+
+
+def test_parse_clang_ast_result_rejects_concatenated_json_documents(
+    tmp_path: Path,
+) -> None:
+    # A SYCL device pass + host pass (or any other flag that makes clang run
+    # more than one -cc1 pass for one compile) each write a complete
+    # -ast-dump=json document to the same stdout stream, back-to-back with no
+    # separator -- json.load() parses only the first and raises on the rest.
+    # The error must name the likely cause instead of a bare byte offset.
+    ast_path = tmp_path / "ast.json"
+    doc = '{"kind": "TranslationUnitDecl", "inner": []}'
+    ast_path.write_text(doc + doc, encoding="utf-8")
+    result = _fake_proc(stdout="", stderr="", returncode=0)
+    with pytest.raises(SnapshotError, match="more than one JSON document"):
+        _parse_clang_ast_result(result, tmp_path / "cache.json", ast_path)
 
 
 def test_clang_header_dump_missing_clang_raises(

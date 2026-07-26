@@ -118,7 +118,11 @@ def _is_gnu_compiler_resource_dir(path: str) -> bool:
     see the ``lib``/``gcc`` segments from the walked-back-out-of prefix and
     misclassify it. ``normpath`` only collapses ``.``/``..`` lexically (no
     filesystem access, no symlink resolution), keeping this pure/string-only
-    and unit-testable without a real toolchain.
+    and unit-testable without a real toolchain — a path traversing a symlink
+    needs OS-level (``realpath``) resolution for ``..`` to denote the same
+    directory the kernel would open, which is the caller's job when it wants
+    that guarantee (:func:`_probe_gnu_system_includes` does, since it already
+    knows *path* exists there).
     """
     parts = Path(os.path.normpath(path)).parts
     for prev, cur in zip(parts, parts[1:]):
@@ -137,6 +141,19 @@ def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
     :func:`_is_gnu_compiler_resource_dir`): feeding it to clang as
     ``-isystem`` makes clang use GCC's intrinsics headers, which reference
     GCC-only builtins clang does not implement and the parse fails.
+
+    The classifier itself only collapses ``.``/``..`` lexically
+    (``os.path.normpath``), which is correct as long as no traversed
+    component is a symlink — a symlink followed by ``..`` resolves relative
+    to the symlink's *target* directory at the OS level (``realpath``
+    semantics), not the symlink's own location, so lexical collapsing alone
+    can misjudge which directory an unresolved ``../``-bearing path actually
+    denotes. Classifying ``os.path.realpath(d)`` instead of the raw ``d``
+    here — safe and cheap since ``Path(d).is_dir()`` (short-circuiting
+    ``and``, evaluated first) has already confirmed ``d`` exists — makes the
+    decision symlink-correct for the one path that matters at runtime, while
+    :func:`_is_gnu_compiler_resource_dir` itself stays pure/string-only and
+    testable against synthetic paths that don't exist on disk (Codex review).
 
     Bounded by the tighter of its own 15s cap and the active deadline, and
     process-group-safe on timeout, same as the main clang/castxml subprocess
@@ -167,7 +184,7 @@ def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
     return [
         d
         for d in _parse_gnu_include_search_dirs(proc.stderr or "")
-        if Path(d).is_dir() and not _is_gnu_compiler_resource_dir(d)
+        if Path(d).is_dir() and not _is_gnu_compiler_resource_dir(os.path.realpath(d))
     ]
 
 

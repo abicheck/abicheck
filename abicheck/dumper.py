@@ -181,6 +181,32 @@ def _resolve_header_backend(backend: str | None) -> str:
     return "castxml"
 
 
+def _needs_sycl_host_only(tokens: list[str]) -> bool:
+    """True if *tokens* enable SYCL without pinning a single compilation pass.
+
+    A bare ``-fsycl`` makes a SYCL-capable driver (Intel's icpx/dpcpp, or
+    upstream clang's own SYCL support) run *two* separate ``-cc1`` passes for
+    one compile — a device-side pass (``-fsycl-is-device``, ``-triple
+    spir64-unknown-unknown``) and a host-side pass (``-fsycl-is-host``) —
+    each with its own ``-Xclang -ast-dump=json``, both writing a complete JSON
+    document to the same stdout stream abicheck captures, back-to-back with
+    no separator. ``json.load()`` in
+    :func:`abicheck.dumper_clang_errors._parse_clang_ast_result` parses only
+    the first document and raises on the leftover bytes ("Extra data").
+
+    The device-side AST is also the wrong evidence even if it parsed: it
+    describes SPIR-V kernel code that never becomes part of a host ``.so``'s
+    exported symbols or public header surface. ``-fsycl-host-only`` collapses
+    the compile back to a single ``-cc1`` pass over the host-side AST, which
+    is what actually links into the scanned binary. Skipped when the caller
+    already pinned a single pass explicitly (``-fsycl-host-only`` or
+    ``-fsycl-device-only``) so an explicit choice is never second-guessed.
+    """
+    return "-fsycl" in tokens and not (
+        "-fsycl-host-only" in tokens or "-fsycl-device-only" in tokens
+    )
+
+
 def _build_clang_header_command(
     cc_bin: str,
     cc_id: str,
@@ -211,6 +237,12 @@ def _build_clang_header_command(
     user's ``-I`` *and* the pass-through ``--gcc-options``/``--gcc-option``) so
     auto-detection stays a genuine fallback: a user-supplied ``-isystem`` for a
     cross/hermetic SDK is searched first and wins. Skipped under ``-nostdinc``.
+
+    A bare ``-fsycl`` in ``gcc_options``/``gcc_option_tokens`` gets
+    ``-fsycl-host-only`` appended (see :func:`_needs_sycl_host_only`) so the
+    compile stays a single ``-cc1``/AST-dump pass instead of splitting into a
+    SYCL device pass and a host pass that both write JSON to the same
+    stdout stream.
     """
     cmd = [cc_bin]
     for inc in extra_includes:
@@ -223,6 +255,8 @@ def _build_clang_header_command(
         cmd += shlex.split(gcc_options, posix=os.name != "nt")
     # Repeatable --gcc-option: one literal argument each (no shlex split).
     cmd += list(gcc_option_tokens)
+    if _needs_sycl_host_only(cmd):
+        cmd.append("-fsycl-host-only")
     # Auto-probed host system dirs go *after* the user's pass-through flags, so a
     # user-supplied -isystem (cross/hermetic SDK) keeps higher search priority
     # (Codex review). Auto-detection is a fallback, never an override.

@@ -530,6 +530,48 @@ def test_probe_gnu_system_includes_keeps_unresolved_walk_back_libstdcxx(
     assert out == [unresolved_libstdcxx]
 
 
+def test_probe_gnu_system_includes_resolves_symlink_before_classifying(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Codex review (PR #643): lexically collapsing '..' is wrong once a
+    # symlink sits in the path -- the OS resolves '..' relative to the
+    # symlink's *target* directory, not the symlink's own location. Build a
+    # case where that distinction changes the classification: the reported
+    # path's literal segments walk (lexically) all the way out of lib/gcc to
+    # what looks like a plain 'include' dir, but 'triple/13' is actually a
+    # symlink two levels *deeper* than a real version dir would be, so the
+    # same four '../' hops only physically escape back to 'lib/gcc/include'
+    # -- still inside GCC's own resource tree, not real system libstdc++.
+    from abicheck import dumper_sysinc
+
+    base = tmp_path / "base"
+    real_target = base / "lib" / "gcc" / "x86_64-linux-gnu" / "13.2.0" / "sub1" / "sub2"
+    real_target.mkdir(parents=True)
+    symlinked_ver = base / "lib" / "gcc" / "x86_64-linux-gnu" / "13"
+    symlinked_ver.symlink_to(real_target, target_is_directory=True)
+    # Where the four '../' hops *physically* land, starting from real_target:
+    # sub2 -> sub1 -> 13.2.0 -> x86_64-linux-gnu -> gcc, then include/c++/13.
+    physically_resolved = base / "lib" / "gcc" / "include" / "c++" / "13"
+    physically_resolved.mkdir(parents=True)
+
+    reported = str(symlinked_ver / ".." / ".." / ".." / ".." / "include" / "c++" / "13")
+    # Sanity check the fixture actually exercises the symlink hazard: lexical
+    # normpath must disagree with realpath, or this test proves nothing.
+    assert os.path.normpath(reported) != os.path.realpath(reported)
+    assert os.path.realpath(reported) == str(physically_resolved)
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc, "_parse_gnu_include_search_dirs", lambda s: [reported]
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    # Physically this is still inside lib/gcc -- must be dropped, not kept.
+    assert out == []
+
+
 def test_buildconfig_compile_frontend_case_insensitive() -> None:
     from abicheck.buildsource.inline import BuildConfig
 
