@@ -977,7 +977,14 @@ def test_merge_fragments_type_reconciles_matching_alignment_between_opaque_and_d
 def test_merge_fragments_type_reconciles_unset_alignment_on_definition_side():
     # alignment_bits=None means "not captured", not "no alignment" -- a
     # None side contributes no information and must not be treated as a
-    # conflict with the other side's captured value.
+    # conflict with the other side's captured value. The captured value
+    # (128, from the forward declaration's explicit
+    # __attribute__((aligned(16)))) must also actually survive onto the
+    # merged result, not just avoid raising -- the merge's chosen
+    # provenance representative here is the definition, whose own
+    # alignment_bits is None, so this only passes if the union step
+    # explicitly restores the other side's captured fact (Codex review,
+    # PR #635 round 16).
     forward = RecordType(name="X", kind="struct", is_opaque=True, alignment_bits=128)
     definition = RecordType(
         name="X", kind="struct", fields=[TypeField(name="v", type="int")]
@@ -986,6 +993,7 @@ def test_merge_fragments_type_reconciles_unset_alignment_on_definition_side():
     b = TuFragment(tu_name="b", types=(definition,))
     merged = merge_fragments([a, b])
     assert len(merged.types) == 1
+    assert merged.types[0].alignment_bits == 128
 
 
 # ---------------------------------------------------------------------------

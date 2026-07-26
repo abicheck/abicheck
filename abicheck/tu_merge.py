@@ -1011,14 +1011,17 @@ def _record_kinds_compatible(a_kind: str, b_kind: str) -> bool:
     return a_kind == b_kind or {a_kind, b_kind} <= {"struct", "class"}
 
 
-def _record_alignments_compatible(
+def _merge_record_alignment(
     a_alignment: int | None, b_alignment: int | None
-) -> bool:
-    """Whether two :class:`RecordType` declarations' ``alignment_bits`` are
-    compatible -- at most one side committing to a non-``None`` value, or
-    both agreeing, is an ordinary redeclaration; two different non-``None``
-    values are a genuine ABI conflict, not something to silently discard
-    one side of (Codex review, PR #635 round 15).
+) -> tuple[bool, int | None]:
+    """Union two :class:`RecordType` declarations' ``alignment_bits`` --
+    the alignment analogue of :func:`_pick_deprecated`/every other
+    optional-fact union in this module (``Param.default``,
+    ``Variable.value``, ``contract_attributes``): at most one side
+    committing to a non-``None`` value, or both agreeing, merges to
+    whichever side actually captured the fact; two different non-``None``
+    values are a genuine ABI conflict, returned as ``(False, None)``
+    (Codex review, PR #635 round 15).
 
     Unlike ``fields``/``bases``/``is_abstract`` -- which castxml only
     populates for a complete definition -- ``alignment_bits`` is captured
@@ -1029,12 +1032,20 @@ def _record_alignments_compatible(
     an ABI-relevant fact independent of the member layout: ``struct
     __attribute__((aligned(16))) X;`` in one TU and a naturally
     4-byte-aligned ``struct X { ... };`` definition in another are not
-    interchangeable redeclarations of the same type, even though
-    :func:`_merge_types`'s opaque-vs-definition branches would otherwise
-    accept the pair and silently keep only the definition's (weaker)
-    alignment.
+    interchangeable redeclarations of the same type. Merely checking
+    compatibility and keeping the merge's chosen representative unchanged
+    (round 15's first cut) isn't enough on its own: when the
+    representative's own ``alignment_bits`` is ``None`` and the other
+    side's is a real, captured value, that captured fact must still
+    survive onto the merged result, not be silently dropped just because
+    it happened to belong to the "losing" side of the provenance choice
+    (Codex review, PR #635 round 16).
     """
-    return a_alignment is None or b_alignment is None or a_alignment == b_alignment
+    if a_alignment is None:
+        return True, b_alignment
+    if b_alignment is None:
+        return True, a_alignment
+    return a_alignment == b_alignment, a_alignment
 
 
 def _merge_types(
@@ -1087,39 +1098,63 @@ def _merge_types(
     if a.is_opaque and b.is_opaque:
         if not _record_kinds_compatible(a.kind, b.kind):
             return None
-        if not _record_alignments_compatible(a.alignment_bits, b.alignment_bits):
+        alignment_ok, alignment_bits = _merge_record_alignment(
+            a.alignment_bits, b.alignment_bits
+        )
+        if not alignment_ok:
             return None
         winner, loser = (a, b) if a.kind <= b.kind else (b, a)
-        return _with_more_public_provenance(
+        merged = _with_more_public_provenance(
             winner,
             loser,
             header_segs=header_segs,
             dir_segs=dir_segs,
             have_public_set=have_public_set,
         )
+        return (
+            merged
+            if merged.alignment_bits == alignment_bits
+            else replace(merged, alignment_bits=alignment_bits)
+        )
     if a.is_opaque and not b.is_opaque:
         if not _record_kinds_compatible(a.kind, b.kind):
             return None
-        if not _record_alignments_compatible(a.alignment_bits, b.alignment_bits):
+        alignment_ok, alignment_bits = _merge_record_alignment(
+            a.alignment_bits, b.alignment_bits
+        )
+        if not alignment_ok:
             return None
-        return _with_more_public_provenance(
+        merged = _with_more_public_provenance(
             b,
             a,
             header_segs=header_segs,
             dir_segs=dir_segs,
             have_public_set=have_public_set,
         )
+        return (
+            merged
+            if merged.alignment_bits == alignment_bits
+            else replace(merged, alignment_bits=alignment_bits)
+        )
     if b.is_opaque and not a.is_opaque:
         if not _record_kinds_compatible(a.kind, b.kind):
             return None
-        if not _record_alignments_compatible(a.alignment_bits, b.alignment_bits):
+        alignment_ok, alignment_bits = _merge_record_alignment(
+            a.alignment_bits, b.alignment_bits
+        )
+        if not alignment_ok:
             return None
-        return _with_more_public_provenance(
+        merged = _with_more_public_provenance(
             a,
             b,
             header_segs=header_segs,
             dir_segs=dir_segs,
             have_public_set=have_public_set,
+        )
+        return (
+            merged
+            if merged.alignment_bits == alignment_bits
+            else replace(merged, alignment_bits=alignment_bits)
         )
     return _merge_identical_modulo_provenance(
         a,
