@@ -25,6 +25,7 @@ from abicheck.finding_identity import (
     IDENTITY_TIER_REDUCED,
     FindingIdentity,
     _looks_like_itanium_encoding,
+    _source_name_end,
     _stringify_change_value,
     is_real_mangled_name,
     normalize_mangled_name,
@@ -212,6 +213,19 @@ class TestNormalizeMangledName:
         assert normalize_mangled_name("_ZN1E", "_ZN1E") is None
         assert normalize_mangled_name("_ZN", "_ZN") is None
 
+    def test_nested_name_with_malformed_digit_component_is_rejected(self) -> None:
+        # Codex review, fresh evidence, round 3: _source_name_end(rest[1:])
+        # correctly rejects "_ZN0E"/"_ZN9abcE"'s zero-length/truncated
+        # first component (returning None), but the previous code then
+        # fell back to the naive terminator scan, which treated the
+        # trailing E as a valid terminator anyway -- no other
+        # <nested-name>/<local-name> first component starts with a bare
+        # digit, so a digit-prefixed component that fails to parse as a
+        # <source-name> makes the whole production invalid, not just that
+        # one component.
+        assert normalize_mangled_name("_ZN0E", "_ZN0E") is None
+        assert normalize_mangled_name("_ZN9abcE", "_ZN9abcE") is None
+
     def test_local_name_with_nothing_after_terminator_is_rejected(self) -> None:
         # Codex review, fresh evidence: unlike <nested-name> (complete once
         # its own terminator E is found), a <local-name> is
@@ -291,6 +305,20 @@ class TestNormalizedSignature:
 
     def test_empty_inputs_still_produce_a_string(self) -> None:
         assert normalized_signature("", "", ()) == "sig:\x1f\x1f0"
+
+
+class TestSourceNameEnd:
+    # Codex review, fresh evidence, round 3: every current call site
+    # pre-checks that its input is non-empty and digit-prefixed before
+    # calling _source_name_end, so its own defensive guard (kept for
+    # robustness against future callers, matching _valid_source_name's
+    # documented "only called when rest[0].isdigit()" contract) is
+    # exercised directly here instead.
+    def test_empty_string_returns_none(self) -> None:
+        assert _source_name_end("") is None
+
+    def test_non_digit_prefix_returns_none(self) -> None:
+        assert _source_name_end("abc") is None
 
 
 class TestStringifyChangeValue:

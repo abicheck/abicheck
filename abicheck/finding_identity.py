@@ -285,8 +285,20 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
         # ...) falls back to the original naive scan -- still this
         # heuristic's documented accepted boundary, just narrowed to the
         # one concrete counterexample found so far.
-        source_name_end = _source_name_end(rest[1:])
-        if source_name_end is not None:
+        body = rest[1:]
+        if body and body[0].isdigit():
+            # No other <nested-name>/<local-name> first-component
+            # production starts with a bare digit -- it can only be a
+            # <source-name> (same reasoning as _operand_looks_valid). If
+            # that fails to parse (declared length 0, or claims more
+            # bytes than exist), the whole production is invalid --
+            # falling back to the naive terminator scan would otherwise
+            # treat the trailing E of a truncated digit-prefixed
+            # component as a valid terminator, wrongly accepting
+            # "_ZN0E"/"_ZN9abcE" (Codex review, fresh evidence, round 3).
+            source_name_end = _source_name_end(body)
+            if source_name_end is None:
+                return False
             search_start = 1 + source_name_end
             e_index = rest.find("E", search_start)
             terminator_ok = e_index >= search_start
