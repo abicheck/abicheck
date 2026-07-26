@@ -1716,6 +1716,62 @@ flag as needing its own ADR treatment, not a fifth drive-by carve-out
 appended to an already four-deep list. `--diagnostic-comparison` remains
 the correct workaround.
 
+**A fifth review pass** (Codex, two P1s) found the sequence carve-outs and
+the composing-loop restructuring above each had one more gap:
+
+- **The header/include-sequence carve-outs accepted an additive *shape* on
+  their own, without corroborating it against an actual scope-level
+  change.** `scope_fields["headers"]` deliberately treats a file reaching it
+  via `declared_headers` (fed to the L2 frontend via `-H`) and via
+  `public_header_paths` (bare `--public-header` provenance, never actually
+  parsed) as the *same* declared-surface membership (see
+  `compute_extraction_contract`'s own docstring) — so a header already
+  declared identically on both sides via `--public-header`, but fed to the
+  L2 frontend only on the new side, leaves `scope_fingerprint` completely
+  unchanged while `profile_fields["header_sequence"]` (and, via
+  `resolve_inferred_header_roots`, `include_sequence` too) still grows
+  additively, purely because of which mechanism happened to feed the
+  parser. The old snapshot then has *no* parsed AST content for that header
+  at all, so a real removal made inside it between old and new would be
+  silently invisible rather than reported — a false negative, not merely
+  extra noise, and P1-severity for exactly that reason. Fixed with a new
+  helper, `_scope_growth_corroborated`, requiring `scope_fingerprint` to
+  genuinely differ *and* verify as additive (the same check the scope
+  carve-out itself uses) before either sequence carve-out is allowed to
+  fire. Confirmed by direct repro before any fix (both new regression tests
+  failed with "DID NOT RAISE ProfileMismatchError" without the corroboration
+  requirement), and re-verified the real F8/directory-based end-to-end
+  tests still pass afterward — the genuine pvxs scenario's scope-level
+  "headers" field really does grow when a wholly new header is added, so
+  requiring corroboration doesn't regress it.
+- **An opaque `profile_fingerprint` mismatch was silently accepted as
+  comparable.** The composing loop starts `unexplained = set(differing)`,
+  where `differing` is the subset of `PROFILE_FIELD_KEYS` that actually
+  differ between the two sides' `profile_fields`. If `profile_fields` was
+  entirely absent or malformed on deserialization (the serialization
+  layer's `_extraction_contract_from_dict` substitutes `{}` for a missing/
+  invalid field, rather than failing), every field trivially compares
+  `"" == ""`, so `differing` — and therefore `unexplained` — comes out
+  empty even though `profile_fingerprint` genuinely differs. `if not
+  unexplained: return None` then treated "nothing left to explain" as
+  "already explained," bypassing the fail-closed gate exactly when the
+  granular data needed to verify safety was missing. The same gap applies
+  if the two sides differ only on a field a newer schema might add outside
+  today's `PROFILE_FIELD_KEYS`. Fixed by distinguishing the two cases: an
+  empty `differing` now raises unconditionally (nothing was positively
+  verified, so this is not a hard-fail this gate should ever waive), while
+  a non-empty `differing` still requires the carve-outs to explain
+  everything before returning comparable, exactly as before.
+
+Both fixes add regression tests proven to fail without them (`git stash`
+the fix, confirm the new test fails, restore). Full fast unit suite green,
+mypy/ruff clean. `tests/test_comparability.py` crossed the file-size hard
+cap once these tests landed; the `check_contracts_comparable`-focused
+tests (already about two-thirds of the file) were split into a sibling
+`tests/test_comparability_gate.py`, leaving the parent file scoped to
+`compute_extraction_contract`'s own fingerprint-computation tests, per this
+repo's usual large-file-split convention.
+
 ### D3. Manifest and real multi-TU dump
 
 New `abicheck/dump_manifest.py`: a strict YAML parser (unknown fields are

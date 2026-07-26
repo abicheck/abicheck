@@ -1002,6 +1002,48 @@ def _scope_field_is_additive_superset(
     return set(new_list) >= set(old_list)
 
 
+def _scope_growth_corroborated(
+    old_contract: ExtractionContract, new_contract: ExtractionContract
+) -> bool:
+    """Whether the scope-level declared-surface check independently confirms
+    a genuine additive header-set change between *old_contract* and
+    *new_contract* — i.e. ``scope_fingerprint`` actually differs AND every
+    :data:`SCOPE_FIELD_KEYS` field is a verified superset growth (see
+    :func:`_scope_field_is_additive_superset`).
+
+    The header/include-sequence carve-outs below must not accept a
+    profile-level "sequence grew" shape on its own (Codex review, PR #641
+    follow-up): ``scope_fields["headers"]`` treats a file reaching it via
+    ``declared_headers`` (fed to the L2 frontend via ``-H``) and via
+    ``public_header_paths`` (bare ``--public-header`` provenance, never
+    actually parsed) as the *same* declared-surface membership — see
+    :func:`compute_extraction_contract`'s docstring — so a header already
+    declared identically on both sides via ``--public-header``, but fed to
+    the L2 frontend only on the new side, leaves ``scope_fingerprint``
+    completely UNCHANGED while ``profile_fields["header_sequence"]`` still
+    grows additively, purely from which mechanism happened to feed the
+    parser. That old snapshot then has NO parsed AST content for that header
+    at all, so a real removal made inside it between old and new is
+    invisible rather than reported — a silent false negative, not merely
+    extra noise. Requiring an independently-verified, genuinely differing
+    scope-level growth corroborates that the sequence growth corresponds to
+    content that is actually new to the declared surface, not merely
+    re-routed between the two provenance mechanisms "headers" treats as
+    equivalent.
+    """
+    if old_contract.scope_fingerprint is None or new_contract.scope_fingerprint is None:
+        return False
+    if old_contract.scope_fingerprint == new_contract.scope_fingerprint:
+        return False
+    return all(
+        _scope_field_is_additive_superset(
+            old_contract.scope_fields.get(key),
+            new_contract.scope_fields.get(key),
+        )
+        for key in SCOPE_FIELD_KEYS
+    )
+
+
 def _build_context_corroborated(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     """Whether both *old* and *new* were actually parsed against real
     build-system evidence -- ``-p``/``--compile-db``/``--build-info``
@@ -1096,7 +1138,17 @@ def check_contracts_comparable(
     appended/inserted. A reorder of existing headers entangled with growth
     (a genuine profile-relevant risk — header order can change how a later
     header's macros/pragmas resolve) still raises, same as any other
-    profile drift this carve-out doesn't cover.
+    profile drift this carve-out doesn't cover. **Also requires
+    :func:`_scope_growth_corroborated` (Codex review, PR #641 follow-up,
+    P1):** an additive-shaped ``header_sequence`` on its own is not
+    sufficient — a header already declared identically on both sides via
+    ``--public-header``, but fed to the L2 frontend via ``-H`` only on the
+    new side, produces the identical shape with ``scope_fingerprint``
+    completely unchanged, even though the old snapshot never actually
+    parsed that header's content (a real removal inside it would then be
+    silently invisible, not reported). This carve-out therefore only fires
+    when the scope-level check *also* independently confirms a genuinely
+    differing, verified-additive growth.
 
     **Include-sequence-owned-growth carve-out (PR #641 follow-up, fourth
     round):** the real ``-H old=<dir> -H new=<dir>`` F8 invocation changes
@@ -1111,7 +1163,24 @@ def check_contracts_comparable(
     :func:`_include_sequence_is_additive_owned_growth`) — an ``"ext:"``/
     ``"label:"`` slot differing, a slot count change, or either side
     collapsing to the ``<single-header>`` sentinel all still raise, the
-    same conservative defaults as the other carve-outs.
+    same conservative defaults as the other carve-outs. Also requires
+    :func:`_scope_growth_corroborated`, for the identical reason as the
+    header-sequence carve-out above.
+
+    **Opaque profile-fingerprint mismatches are rejected, not silently
+    waived (Codex review, PR #641 follow-up, P1):** the four carve-outs
+    above narrow an ``unexplained`` working set that starts as ``differing``
+    — the set of :data:`PROFILE_FIELD_KEYS` that actually differ between
+    ``old_fields``/``new_fields``. If ``profile_fingerprint`` differs but
+    ``differing`` itself is *empty* — either because one or both sides'
+    ``profile_fields`` were entirely absent/malformed on deserialization
+    (``_extraction_contract_from_dict`` substitutes ``{}``, so every field
+    trivially compares equal) or because the two sides only differ on a
+    field outside ``PROFILE_FIELD_KEYS`` a newer schema might add — there is
+    nothing here to positively verify as safe, so this raises rather than
+    treating the absence of an explanation as one. Only a ``differing`` set
+    that is non-empty and gets fully narrowed to nothing by the carve-outs
+    above counts as comparable.
 
     **Carve-outs compose (PR #641 follow-up, fourth round):** a release
     combining two independently-sanctioned deltas — e.g. adding a header
@@ -1264,32 +1333,78 @@ def check_contracts_comparable(
             # detector classify it correctly.
             unexplained -= build_candidate
 
+        # Both sequence carve-outs below additionally require
+        # _scope_growth_corroborated (Codex review, PR #641 follow-up, P1):
+        # an additive-shaped header_sequence/include_sequence on its own is
+        # not sufficient evidence -- a header already declared identically
+        # on both sides via --public-header, but fed to the L2 frontend via
+        # -H only on the new side, produces the identical additive-growth
+        # SHAPE with scope_fingerprint completely UNCHANGED, even though the
+        # old snapshot never actually parsed that header's content at all
+        # (see _scope_growth_corroborated's own docstring for why that's
+        # unsafe to wave through). Requiring a genuinely differing,
+        # independently-verified scope-level growth corroborates that the
+        # sequence growth reflects real new declared content, not just a
+        # same-declared-surface extraction-mechanism difference.
+        scope_growth_corroborated = _scope_growth_corroborated(
+            old_contract, new_contract
+        )
+
         header_seq_candidate = unexplained & _HEADER_SEQUENCE_FIELDS
-        if header_seq_candidate and _header_sequence_is_additive_reorder_free(
-            old_fields.get("header_sequence"), new_fields.get("header_sequence")
+        if (
+            header_seq_candidate
+            and scope_growth_corroborated
+            and _header_sequence_is_additive_reorder_free(
+                old_fields.get("header_sequence"), new_fields.get("header_sequence")
+            )
         ):
             # Header-sequence-growth carve-out (PR #641 follow-up, third
             # round) -- see check_contracts_comparable's own docstring.
             unexplained -= header_seq_candidate
 
         include_seq_candidate = unexplained & _INCLUDE_SEQUENCE_FIELDS
-        if include_seq_candidate and _include_sequence_is_additive_owned_growth(
-            old_fields.get("include_sequence"), new_fields.get("include_sequence")
+        if (
+            include_seq_candidate
+            and scope_growth_corroborated
+            and _include_sequence_is_additive_owned_growth(
+                old_fields.get("include_sequence"), new_fields.get("include_sequence")
+            )
         ):
             # Include-sequence-owned-growth carve-out (PR #641 follow-up,
             # fourth round) -- see check_contracts_comparable's own
             # docstring.
             unexplained -= include_seq_candidate
 
-        if not unexplained:
+        if not differing:
+            # Codex review, PR #641 follow-up (P1): profile_fingerprint
+            # differs but NONE of the known PROFILE_FIELD_KEYS explain it --
+            # either profile_fields was entirely absent/malformed on
+            # deserialization (_extraction_contract_from_dict substitutes
+            # {}, so every old_fields.get(k, "")/new_fields.get(k, "")
+            # compares "" == "" for every k) or the two sides only differ on
+            # a field outside PROFILE_FIELD_KEYS (a newer schema key this
+            # build doesn't know about yet). An empty `differing` must NOT
+            # be treated as "nothing to explain, therefore comparable" --
+            # that would silently bypass this fail-closed gate exactly when
+            # the granular field data needed to verify safety is missing or
+            # incomplete, which is the opposite of the gate's purpose.
+            reason = (
+                "old and new snapshots were extracted under different "
+                "compile contexts (profile_fingerprint mismatch), but no "
+                "recognized profile field explains the difference — "
+                "profile_fields may be absent/incomplete, or the mismatch "
+                "comes from a field this version does not track — so the "
+                "comparison cannot be verified safe."
+            )
+        elif not unexplained:
             return None
-
-        reason = (
-            "old and new snapshots were extracted under different compile "
-            f"contexts (profile_fingerprint mismatch; differing fields: "
-            f"{', '.join(sorted(unexplained))}) — the comparison "
-            "is not comparable."
-        )
+        else:
+            reason = (
+                "old and new snapshots were extracted under different compile "
+                f"contexts (profile_fingerprint mismatch; differing fields: "
+                f"{', '.join(sorted(unexplained))}) — the comparison "
+                "is not comparable."
+            )
         if diagnostic:
             return ComparabilityMismatch(kind="profile", reason=reason)
         raise ProfileMismatchError(reason)
