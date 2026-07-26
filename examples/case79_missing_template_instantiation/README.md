@@ -1,75 +1,118 @@
-# Case 79: Missing template instantiation in shipped binary
+# Case 79: Missing Template Instantiation in Shipped Binary
 
-**Category:** Header-vs-binary parity | **Verdict:** BREAKING
+**Category:** Header-vs-Binary Parity | **Verdict:** 🔴 BREAKING
 
-## What breaks
+## Verdict and consumer impact
 
-The v1 library declares two explicit template instantiations:
+v1 ships two explicit template instantiations, `descriptor<float>` and
+`descriptor<double>`, and the header advertises both via
+`extern template`. v2's header is **unchanged** — it still declares
+`extern template class descriptor<double>` — but the `.cpp` silently drops
+the `template class descriptor<double>;` explicit-instantiation line.
+Consumer source compiles cleanly against v2's header (no diagnostic at
+all), but linking/loading against `libv2.so` fails with an undefined
+symbol. This is the failure mode behind oneDAL's "ship one Float
+combination only" build trims when a header isn't updated to match.
 
-```cpp
-template class descriptor<float>;
-template class descriptor<double>;
-```
+## Old/new diff
 
-…and the header forward-declares both via `extern template`. Consumers using
-`descriptor<double>` link against the symbol shipped in the `.so`.
+| v1.cpp | v2.cpp |
+|--------|--------|
+| `template class descriptor<float>;` | `template class descriptor<float>;` |
+| `template class descriptor<double>;` | *(removed — but v1.h/v2.h both still declare `extern template class descriptor<double>`)* |
 
-In v2, the `template class descriptor<double>;` line is dropped from the
-`.cpp` file (e.g. "build-time savings — nobody uses it"). The header is
-**unchanged** — it still says `extern template class descriptor<double>`.
-
-- Consumer compiles successfully against v2 header (no diagnostic).
-- Linker against `libv2.so` fails with `undefined reference to descriptor<double>::descriptor()`.
-- Or worse: dynamic load succeeds (because consumer's own translation unit
-  emits no instantiation either), then crashes the first time a method is
-  called from a different consumer that *did* link the v1 symbol.
-
-This is the failure mode for oneDAL's "ship `float` instantiation only" build
-trim: the public combinatorics promised by `cpp/oneapi/dal/algo/*/common.hpp`
-must match the explicit instantiations in `*_instantiation.cpp`.
-
-## Real Failure Demo
-
-**Severity: BREAKING / LOAD-TIME FAILURE**
+## abicheck command
 
 ```bash
-cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case79_missing_template_instantiation_app case79_missing_template_instantiation_v2
-
-tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case79_missing_template_instantiation/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case79_missing_template_instantiation/libv2.so "$tmp/libv1.so"
-(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
-# ./app_v1: symbol lookup error: undefined symbol: _ZN5mylib10descriptorIdE13set_thresholdEd
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo_v1.so
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --ast-frontend clang
 ```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- instantiation_missing_from_binary: Template instantiation 'descriptor'
+  was exported by the old library but is missing from the new binary.
+  Other instantiations of 'mylib::descriptor::descriptor()' still exist,
+  so the public header very likely still advertises this one. Consumers
+  built against the old header link cleanly but fail at load time with an
+  undefined-symbol error. (mylib::descriptor<double>::descriptor())
+- instantiation_missing_from_binary: ... mylib::descriptor<double>::threshold() const
+- func_removed_elf_only: Elf_only function removed:
+  mylib::descriptor<double>::set_threshold(double)
+- func_removed_elf_only: Elf_only function removed:
+  mylib::descriptor<double>::descriptor()
+- func_removed_elf_only: Elf_only function removed:
+  mylib::descriptor<double>::threshold() const
+```
+
+## Minimum evidence
+
+`min_evidence: L2` — the public header AST is what tells abicheck the
+header still declares `extern template class descriptor<double>` even
+though the binary no longer exports its mangled symbols;
+`instantiation_missing_from_binary` demangles each `Function.mangled` name
+to recover the template argument (`<double>`) that the header/castxml
+dumper's bare `Function.name` never carries, and scopes the check to
+`Visibility.PUBLIC` functions so a stale `extern template` cross-reference
+entry isn't mistaken for a surviving instantiation. castxml is the
+documented default backend for this evidence layer; clang
+(`--ast-frontend clang`) is a supported alternative AST frontend used
+above.
 
 ## Why abicheck catches it
 
-A new `INSTANTIATION_MISSING_FROM_BINARY` ChangeKind is emitted when a
-symbol exported in the **old** library disappears from the **new** library
-while the **header** of the new release still references its mangled signature.
+Without header evidence, a plain symbol diff would just report
+`func_removed_elf_only` for each of `descriptor<double>`'s three mangled
+symbols — already enough to conclude BREAKING. With the header AST,
+abicheck additionally recognizes that the *declaring header is unchanged*
+and still promises `descriptor<double>`, which is the specific signal that
+distinguishes "the API author removed this on purpose" (an ordinary
+`func_removed`, source-visible via a compile error) from "the API author
+thinks this still ships but it doesn't" (`instantiation_missing_from_binary`
+— no source-level diagnostic fires at all, only a load-time failure).
 
-Mechanically this is similar to `func_removed`, but the report distinguishes
-"the API author removed this on purpose" from "the API author thinks this
-still ships but it doesn't" — the latter is a strictly worse signal because
-no source-level deprecation warning fires.
+## Runtime failure demonstration
 
-## Code diff
+**Severity: CRITICAL**
 
-```cpp
-// v1.cpp — both instantiations shipped
-template class descriptor<float>;
-template class descriptor<double>;
+**Scenario:** compile app against v1, swap in v2 `.so` without recompile —
+the app only uses the header's `extern template` declaration, so nothing
+about its own compilation changes.
 
-// v2.cpp — double instantiation accidentally dropped
-template class descriptor<float>;
-// template class descriptor<double>;   // BUG: header still references this
+```bash
+# Build old library + app
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo.so
+g++ -std=c++17 -g app.cpp -L. -lfoo -Wl,-rpath,. -o app
+./app
+# → threshold = 0.500000
+
+# Swap in new library (no recompile)
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo.so
+./app
+# → app: symbol lookup error: app: undefined symbol:
+#   _ZN5mylib10descriptorIdE13set_thresholdEd
 ```
 
-## Real-world reference
+**Why CRITICAL:** the app's own source never changed and gave no warning
+at compile time — `descriptor<double>` is still declared `extern template`
+in the header the app compiled against. The failure surfaces only at
+dynamic-link time, in production, with no corresponding source-level
+signal a developer could have caught earlier.
 
-oneDAL's algorithm modules each have an `*_instantiation.cpp` file (one per
-combination of `Float × Method × Task`). If a build is trimmed without
-updating headers, the binary stops shipping symbols the header still
-advertises. case79 reproduces this failure with a minimal two-instantiation
-example.
+## Safe redesign
+
+Keep the shipped `*_instantiation.cpp` file's explicit-instantiation list
+in lockstep with the header's `extern template` declarations — ideally
+generated from the same combinatorics list, so a build trim that drops an
+instantiation is forced to also touch the header (turning a silent
+load-time failure into a compile-time one).
+
+**Real-world example:** oneDAL's algorithm modules each have an
+`*_instantiation.cpp` file (one per `Float × Method × Task` combination).
+If a build is trimmed without updating headers, the binary stops shipping
+symbols the header still advertises — exactly the scenario this case
+reproduces with a minimal two-instantiation example.
