@@ -68,3 +68,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   a required failure is observed (and pending futures cancelled) as soon as
   it completes, while the final fragment list is still assembled in the
   manifest's declared TU order.
+- `dumper_manifest._run_tu_fragments`'s pooled branch never re-established
+  an active scan deadline (`deadline.deadline_scope`, e.g. a future
+  `--budget`-aware caller) inside its `ThreadPoolExecutor` workers —
+  `contextvars` don't cross that boundary, so a worker would silently see
+  no deadline at all and each TU's clang/castxml invocation would fall back
+  to its fixed default timeout regardless of the caller's budget. The same
+  class of gap PR #591 already closed for `source_replay.py`'s L4 pool via
+  `_deadline_bound_worker`; fixed the same way here by capturing
+  `deadline.current_deadline_ts()` on the submitting thread and
+  re-establishing it inside each worker with `deadline.with_deadline_ts`.

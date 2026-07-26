@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import process_resources
+from . import deadline, process_resources
 from .dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from .dumper_clang import _ClangAstParser
 from .dumper_toolchain import (
@@ -343,9 +343,25 @@ def _run_tu_fragments(
     # already known to be doomed (Codex review, PR #636). The final
     # `results`-to-`fragments` pass below is what restores declared order
     # for the merge step, which still needs it.
+    # contextvars don't cross a ThreadPoolExecutor boundary, so a worker
+    # submitted here would otherwise see no active deadline and each TU's
+    # clang/castxml invocation would silently fall back to its fixed default
+    # timeout regardless of an active deadline.deadline_scope (e.g. `scan
+    # --budget`) around the caller -- the same class of gap PR #591 already
+    # closed for source_replay.py's L4 pool via _deadline_bound_worker
+    # (Codex review, PR #636). Captured once on the submitting thread and
+    # re-established inside each worker.
+    deadline_ts = deadline.current_deadline_ts()
+
+    def _run_one_with_deadline(tu: TranslationUnit) -> TuFragment:
+        with deadline.with_deadline_ts(deadline_ts):
+            return _run_one(tu)
+
     results: list[TuFragment | None] = [None] * len(tus)
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        future_to_index = {pool.submit(_run_one, tu): i for i, tu in enumerate(tus)}
+        future_to_index = {
+            pool.submit(_run_one_with_deadline, tu): i for i, tu in enumerate(tus)
+        }
         for fut in as_completed(future_to_index):
             idx = future_to_index[fut]
             tu = tus[idx]

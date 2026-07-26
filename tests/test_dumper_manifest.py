@@ -584,6 +584,59 @@ def test_run_tu_fragments_cancels_pending_futures_promptly_on_required_failure(
     assert cancelled_promptly
 
 
+def test_run_tu_fragments_propagates_active_deadline_into_pool_workers(monkeypatch):
+    """Codex review, PR #636: ``contextvars`` don't cross a
+    ``ThreadPoolExecutor`` boundary, so a worker submitted from inside an
+    active ``deadline.deadline_scope`` (e.g. a future ``scan --budget`` caller)
+    would otherwise see no deadline at all and silently fall back to each
+    TU's unbudgeted default timeout -- the same class of gap PR #591 already
+    closed for ``source_replay.py``'s L4 pool. Each stub "TU" records what
+    ``deadline.remaining()`` sees on its own (pool worker) thread; if the
+    deadline didn't propagate, that's ``None`` even though the submitting
+    thread had an active scope.
+    """
+    from abicheck import deadline
+    from abicheck.dumper_manifest import _run_tu_fragments
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+
+    seen_remaining: dict[str, float | None] = {}
+
+    def _stub(headers, extra_includes, **kwargs):
+        name = Path(headers[0]).stem
+        seen_remaining[name] = deadline.remaining()
+        return _StubParser(functions=(_fn(name),))
+
+    tus = (_tu("a", "a.h"), _tu("b", "b.h"))
+    with deadline.deadline_scope(60.0):
+        fragments = _run_tu_fragments(
+            tus,
+            header_ast_parser=_stub,
+            backend="auto",
+            compiler="c++",
+            gcc_path=None,
+            gcc_prefix=None,
+            gcc_options=None,
+            gcc_option_tokens=(),
+            sysroot=None,
+            nostdinc=False,
+            lang=None,
+            exported_dynamic=set(),
+            exported_static=set(),
+            public_header_paths=[],
+            public_dir_paths=[],
+            extra_hash_dirs=(),
+        )
+
+    assert [f.tu_name for f in fragments] == ["a", "b"]
+    assert seen_remaining["a"] is not None
+    assert seen_remaining["b"] is not None
+    # Each worker's remaining budget must be close to the 60s scope, not the
+    # unbounded "no deadline" None a dropped ContextVar would produce.
+    assert 0 < seen_remaining["a"] <= 60.0
+    assert 0 < seen_remaining["b"] <= 60.0
+
+
 def test_tu_jobs_env_override_forces_serial(monkeypatch):
     from abicheck.dumper_manifest import _tu_jobs
 
