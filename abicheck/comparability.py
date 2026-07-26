@@ -198,15 +198,59 @@ _SCOPE_SINGLE_ENTRY_SENTINELS = frozenset({"<single-header>", "<single-header-di
 _HEADER_SEQUENCE_FIELDS = frozenset({"header_sequence"})
 
 
-def _header_sequence_is_additive_reorder_free(
+def _scope_newly_added_headers(
     old_value: str | None, new_value: str | None
+) -> set[str] | None:
+    """The set of header identities present in *new_value*
+    (``scope_fields["headers"]``) but not *old_value* -- ``None`` if either
+    side can't be safely decoded to a real per-header identity list (absent,
+    malformed, or collapsed to the ``<single-header>`` sentinel).
+
+    Both sequence carve-outs below must verify not just THAT the scope grew,
+    but that the SPECIFIC entries they're waiving correspond to entries
+    genuinely new to the declared surface (Codex review, PR #641 follow-up,
+    ninth P1): ``_scope_growth_corroborated`` alone only proves the scope
+    grew by *some* header, not that it grew by the *same* header the
+    sequence carve-out is waiving. For example, old scope ``{a, b, d}``
+    (``d`` declared via ``--public-header`` only, never parsed) with
+    sequence ``[a, b]``, growing to new scope ``{a, b, c, d}`` (``c`` newly
+    declared) with sequence ``[a, b, d]`` (``d`` now fed to the L2 frontend)
+    satisfies scope-growth corroboration (``c`` is new) and the trailing-
+    append shape (``d`` appended) independently, but the two have nothing
+    to do with each other: ``d``'s content was never parsed on the old
+    side, and ``c`` was never parsed on EITHER side, so real removals in
+    both would still be invisible. Requiring the sequence carve-outs'
+    specific appended entries to be a subset of this newly-added set closes
+    that gap.
+    """
+    if old_value is None or new_value is None:
+        return None
+    old_list = _json_load_str_list(old_value)
+    new_list = _json_load_str_list(new_value)
+    if old_list is None or new_list is None:
+        return None
+    if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
+        return None
+    if len(new_list) == 1 and new_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
+        return None
+    return set(new_list) - set(old_list)
+
+
+def _header_sequence_is_additive_reorder_free(
+    old_value: str | None, new_value: str | None, scope_new_headers: set[str] | None
 ) -> bool:
     """Whether *new_value* (``profile_fields["header_sequence"]``, a
     json-encoded order-preserving-deduplicated header identity list) is
     *old_value* with new entries appended STRICTLY AFTER it, unchanged --
     never with a new header inserted before or between existing ones, and
     never with an EXISTING header reordered relative to another (Codex
-    review, PR #641 follow-up, seventh P1).
+    review, PR #641 follow-up, seventh P1) -- AND every appended entry is
+    itself in *scope_new_headers* (:func:`_scope_newly_added_headers`;
+    Codex review, PR #641 follow-up, ninth P1): the appended sequence
+    entries must correspond to headers genuinely new to the declared
+    surface, not merely additive-shaped growth that happens to coincide
+    with an unrelated scope addition (see that function's own docstring for
+    the concrete scenario this rules out).
 
     Trailing-append is the only shape that's actually safe: the aggregate
     driver TU the dumper generates parses declared headers sequentially, so
@@ -236,7 +280,11 @@ def _header_sequence_is_additive_reorder_free(
         return False
     if len(new_list) < len(old_list):
         return False
-    return new_list[: len(old_list)] == old_list
+    if new_list[: len(old_list)] != old_list:
+        return False
+    if scope_new_headers is None:
+        return False
+    return set(new_list[len(old_list) :]) <= scope_new_headers
 
 
 # The only profile_fields key the include-sequence-owned-growth carve-out
@@ -279,14 +327,22 @@ def _slot_indices_match_position(slots: list[str]) -> bool:
 
 
 def _include_sequence_is_additive_owned_growth(
-    old_value: str | None, new_value: str | None
+    old_value: str | None, new_value: str | None, scope_new_headers: set[str] | None
 ) -> bool:
     """Whether *new_value* (``profile_fields["include_sequence"]``, a
     json-encoded list of ``"<slot-index>:<token>"`` strings) differs from
     *old_value* only in an OWNED-root ``"hdrs:..."`` token growing to
     include newly-added headers, in the same additive-only sense
     :func:`_scope_field_is_additive_superset` already applies to the scope
-    ``"headers"`` field.
+    ``"headers"`` field -- AND every newly-added owned pair's global
+    identity (a pair's first element; see ``_slot_token_for_ancestor``) is
+    itself in *scope_new_headers* (:func:`_scope_newly_added_headers`;
+    Codex review, PR #641 follow-up, ninth P1), the same specific-
+    correspondence requirement :func:`_header_sequence_is_additive_reorder_free`
+    now applies to ``header_sequence`` -- an owned-pair addition that
+    merely looks additive can still coincide with an unrelated scope
+    addition rather than reflecting the same genuinely-new header (see
+    that function's docstring for the concrete scenario).
 
     Declines (returns False) for any slot whose token isn't the owned
     ``"hdrs:"`` form (an ``"ext:"``/``"label:"`` slot differing is real,
@@ -346,6 +402,12 @@ def _include_sequence_is_additive_owned_growth(
         new_owned = {tuple(p) for p in new_pairs}
         if not new_owned >= old_owned:
             return False
+        newly_owned = new_owned - old_owned
+        if newly_owned:
+            if scope_new_headers is None:
+                return False
+            if not all(pair[0] in scope_new_headers for pair in newly_owned):
+                return False
     return True
 
 
@@ -1706,13 +1768,26 @@ def check_contracts_comparable(
         scope_growth_corroborated = _scope_growth_corroborated(
             old_contract, new_contract
         )
+        # The specific set of header identities the sequence carve-outs
+        # below are allowed to treat an appended/newly-owned entry as
+        # corresponding to (Codex review, PR #641 follow-up, ninth P1) --
+        # see _scope_newly_added_headers's own docstring for why
+        # scope_growth_corroborated alone (proving the scope grew by SOME
+        # header) isn't enough; the carve-outs must additionally verify
+        # they're waiving growth in the SAME header(s).
+        scope_new_headers = _scope_newly_added_headers(
+            old_contract.scope_fields.get("headers"),
+            new_contract.scope_fields.get("headers"),
+        )
 
         header_seq_candidate = unexplained & _HEADER_SEQUENCE_FIELDS
         if (
             header_seq_candidate
             and scope_growth_corroborated
             and _header_sequence_is_additive_reorder_free(
-                old_fields.get("header_sequence"), new_fields.get("header_sequence")
+                old_fields.get("header_sequence"),
+                new_fields.get("header_sequence"),
+                scope_new_headers,
             )
         ):
             # Header-sequence-growth carve-out (PR #641 follow-up, third
@@ -1724,7 +1799,9 @@ def check_contracts_comparable(
             include_seq_candidate
             and scope_growth_corroborated
             and _include_sequence_is_additive_owned_growth(
-                old_fields.get("include_sequence"), new_fields.get("include_sequence")
+                old_fields.get("include_sequence"),
+                new_fields.get("include_sequence"),
+                scope_new_headers,
             )
         ):
             # Include-sequence-owned-growth carve-out (PR #641 follow-up,
