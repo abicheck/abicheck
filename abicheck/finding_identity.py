@@ -173,6 +173,11 @@ def _valid_source_name(rest: str) -> bool:
     whatever trails them is valid too -- a real ``<source-name>`` may be
     followed by more encoding (template args, parameter types, ...) this
     function does not parse.
+
+    Also rejects a declared length of zero (``_Z0``): a real identifier
+    can never be zero bytes long, so ``declared_len == 0`` always
+    "succeeds" against any following content without actually being a
+    valid ``<source-name>`` (Codex review, round 3).
     """
     m = _SOURCE_NAME_LENGTH_RE.match(rest)
     assert m is not None  # only called when rest[0].isdigit()
@@ -180,6 +185,8 @@ def _valid_source_name(rest: str) -> bool:
     if len(digits) > _MAX_SOURCE_NAME_LENGTH_DIGITS:
         return False
     declared_len = int(digits)
+    if declared_len == 0:
+        return False
     identifier = rest[m.end() :]
     return len(identifier) >= declared_len
 
@@ -745,6 +752,13 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     # for the sibling `_diff_allocator_replacement` batch kinds, but the
     # same channel exists for every batch-shaped kind).
     qualified_name = None if is_batch else change.qualified_name
+    # `_enrich_source_locations` also populates `source_location` from the
+    # sampled export for a batch-shaped change (Codex review, round 3 on
+    # this same leak channel) -- feeding `change.source_location` into
+    # `rel`/the `relsrc:` alias/the REDUCED-tier synthetic basis below
+    # would still make the supposedly library-level identity change
+    # whenever the sampled export's file changes.
+    source_location = None if is_batch else change.source_location
     is_symbol_level = _is_symbol_level_kind(kind_value) and not is_batch
     # For a symbol-level change, `entity_symbol` (the raw exported name) is
     # the more tier-stable NORMALIZED-tier basis than `qualified_name` --
@@ -772,7 +786,7 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
         change, kind_value, include_description=not is_batch
     )
     sig = f"sig:{qn}\x1f{discriminator}"
-    rel = source_relative_identity(change.source_location or "", entity_symbol or "")
+    rel = source_relative_identity(source_location or "", entity_symbol or "")
 
     real_mangled = None
     if is_symbol_level:
@@ -794,7 +808,7 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     if qualified_name:
         aliases.append(f"qualified:{qualified_name}\x1f{discriminator}")
     aliases.append(sig)
-    if change.source_location:
+    if source_location:
         aliases.append(f"relsrc:{rel}\x1f{discriminator}")
 
     if real_mangled:
@@ -805,7 +819,7 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
         return FindingIdentity(sig, IDENTITY_TIER_NORMALIZED, tuple(aliases))
 
     basis = "\x1f".join(
-        str(x) for x in (entity_symbol, discriminator, change.source_location) if x
+        str(x) for x in (entity_symbol, discriminator, source_location) if x
     )
     digest = hashlib.sha256(f"synthetic\x00{basis}".encode()).hexdigest()[:32]
     synthetic = f"synthetic:sha256:{digest}"

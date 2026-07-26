@@ -116,6 +116,14 @@ class TestNormalizeMangledName:
         huge = "_Z" + "9" * 5000 + "abc"
         assert normalize_mangled_name(huge, None) is None
 
+    def test_zero_length_source_name_is_rejected(self) -> None:
+        # Codex review, round 3: declared_len == 0 previously "succeeded"
+        # against any following content (len(identifier) >= 0 is always
+        # true), so a legal C/extern-C identifier like "_Z0" was wrongly
+        # promoted to the canonical tier despite not being a valid Itanium
+        # encoding -- a real identifier can never be zero bytes long.
+        assert normalize_mangled_name("_Z0", "_Z0") is None
+
     def test_guard_variable_special_name_is_accepted(self) -> None:
         assert normalize_mangled_name("_ZGVfoo", None) == "_ZGVfoo"
 
@@ -648,6 +656,38 @@ class TestResolveChangeIdentity:
         second_identity = resolve_change_identity(second)
         assert first_identity.primary_id == second_identity.primary_id
         assert not any(a.startswith("qualified:") for a in first_identity.aliases)
+
+    def test_batch_change_ignores_enrichment_derived_source_location_too(
+        self,
+    ) -> None:
+        # Codex review, round 3: _enrich_source_locations (diff_filtering.py)
+        # also populates source_location from the sampled export, same as
+        # qualified_name -- unlike qualified_name/entity_symbol, it wasn't
+        # cleared for a batch-shaped change, so it still leaked into the
+        # relsrc: alias and the REDUCED-tier synthetic basis. Two batch
+        # changes differing only in their (enrichment-derived)
+        # source_location must still resolve to the same identity, with no
+        # relsrc: alias at all.
+        first = Change(
+            kind=ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
+            symbol=_ITANIUM_MANGLED,
+            description="1 GNU_UNIQUE export(s)",
+            old_value="(no GNU_UNIQUE exports)",
+            new_value="1 GNU_UNIQUE export(s)",
+            source_location="a.c:1",
+        )
+        second = Change(
+            kind=ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE,
+            symbol="_ZN3FooC1Ev",
+            description="1 GNU_UNIQUE export(s)",
+            old_value="(no GNU_UNIQUE exports)",
+            new_value="1 GNU_UNIQUE export(s)",
+            source_location="b.c:99",
+        )
+        first_identity = resolve_change_identity(first)
+        second_identity = resolve_change_identity(second)
+        assert first_identity.primary_id == second_identity.primary_id
+        assert not any(a.startswith("relsrc:") for a in first_identity.aliases)
 
     def test_allocator_replacement_kinds_are_batch_shaped(self) -> None:
         # Codex review: diff_platform_elf_symbols.py's
