@@ -386,7 +386,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [124](case124_header_constant_value_changed/README.md) | Header Constant Value Changed | API Break | 🟠 API_BREAK |
 | [125](case125_class_became_final/README.md) | Class Became `final` | API Break | 🟠 API_BREAK |
 | [126](case126_sycl_device_impl_ptr/README.md) | SYCL `device` Impl Pointer — `shared_ptr` → Raw Pointer | Breaking | 🔴 BREAKING |
-| [127](case127_data_object_size_changed/README.md) | Exported Data Object Size Change | Breaking | 🔴 BREAKING (bad practice) |
+| [127](case127_data_object_size_changed/README.md) | Exported Data Object Size Changed | Breaking | 🔴 BREAKING (bad practice) |
 | [128](case128_symbol_binding_strengthened/README.md) | Symbol Binding Strengthened (Weak → Global) | Quality | 🟢 COMPATIBLE |
 | [129](case129_struct_return_convention/README.md) | Struct-Return Convention Change | Breaking | 🔴 BREAKING |
 | [130](case130_exceptions_mode_flip/README.md) | Exceptions Mode Flip (`-fno-exceptions`) | Risk | 🟡 COMPATIBLE_WITH_RISK |

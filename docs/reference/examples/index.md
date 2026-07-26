@@ -174,7 +174,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case124_header_constant_value_changed](case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
 | [case125_class_became_final](case125_class_became_final.md) | Class Became `final` | 🟠 API_BREAK | API Break |
 | [case126_sycl_device_impl_ptr](case126_sycl_device_impl_ptr.md) | SYCL `device` Impl Pointer — `shared_ptr` → Raw Pointer | 🔴 BREAKING | Breaking |
-| [case127_data_object_size_changed](case127_data_object_size_changed.md) | Exported Data Object Size Change | 🔴 BREAKING | Breaking |
+| [case127_data_object_size_changed](case127_data_object_size_changed.md) | Exported Data Object Size Changed | 🔴 BREAKING | Breaking |
 | [case128_symbol_binding_strengthened](case128_symbol_binding_strengthened.md) | Symbol Binding Strengthened (Weak → Global) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case129_struct_return_convention](case129_struct_return_convention.md) | Struct-Return Convention Change | 🔴 BREAKING | Breaking |
 | [case130_exceptions_mode_flip](case130_exceptions_mode_flip.md) | Exceptions Mode Flip (`-fno-exceptions`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
