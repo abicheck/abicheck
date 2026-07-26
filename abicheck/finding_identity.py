@@ -323,9 +323,12 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
     # `rest[:2] in _ITANIUM_OPERATOR_CODES` outright with no operand check
     # at all, the same "requires an operand after the prefix" gap already
     # fixed for <special-name>/guard-variable above (Codex review, fresh
-    # evidence).
+    # evidence). `_operand_looks_valid` catches the same digit-prefixed
+    # invalid-<source-name> case for this operand too -- "_Zcv0"/"_Zli0"
+    # pass the length check but "0" is not a valid operand for either
+    # production (Codex review, fresh evidence, round 2).
     if rest[:2] in ("cv", "li"):
-        return len(rest) > 2
+        return len(rest) > 2 and _operand_looks_valid(rest[2:])
     return rest[:2] in _ITANIUM_OPERATOR_CODES
 
 
@@ -688,11 +691,24 @@ _BATCH_SHAPED_OLD_VALUES = {
 #: happen to serialize in a different order would otherwise get different
 #: discriminators (via ``description``) and fragment into separate
 #: ``primary_id``s for the same logical finding.
+#:
+#: ``header_binary_context_mismatch`` joins this set for the same reason
+#: (Codex review, fresh evidence): ``diff_layout_coherence.py``'s
+#: ``_mismatch_change`` is the sole producer, fires once per side with
+#: ``symbol=snapshot.library`` (the library name, not a per-entity symbol),
+#: and embeds up to five uncorroborated record names sampled from
+#: ``dwarf_layout_coherence_mismatches`` into ``description`` -- if that
+#: tuple's own order ever varies for otherwise-identical evidence (its
+#: upstream ``backfill_dwarf_layout`` call site doesn't document a sort
+#: guarantee), the sampled prose would fragment one logical finding into
+#: separate ``primary_id``s, the same risk already fixed for
+#: ``visibility_leak``.
 _ALWAYS_BATCH_SHAPED_KIND_SLUGS = frozenset(
     {
         "allocator_replacement_added",
         "allocator_replacement_removed",
         "visibility_leak",
+        "header_binary_context_mismatch",
     }
 )
 

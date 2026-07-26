@@ -109,6 +109,17 @@ class TestNormalizeMangledName:
         # operator int() const -- "cv" followed by its target <type> "i".
         assert normalize_mangled_name("_Zcvi", None) == "_Zcvi"
 
+    def test_conversion_and_literal_operators_with_invalid_digit_operand_are_rejected(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence, round 2: "_Zcv0"/"_Zli0" pass the
+        # bare length check added for the earlier fix, but "0" is not a
+        # valid operand for either production (not a real <type> code, and
+        # not a positive-length <source-name>) -- the same digit-prefixed
+        # gap _operand_looks_valid already closes for TV/GV.
+        assert normalize_mangled_name("_Zcv0", "_Zcv0") is None
+        assert normalize_mangled_name("_Zli0", "_Zli0") is None
+
     def test_vtable_special_name_is_accepted(self) -> None:
         assert normalize_mangled_name("_ZTV6Widget", None) == "_ZTV6Widget"
 
@@ -858,6 +869,31 @@ class TestResolveChangeIdentity:
         assert first_identity.primary_id == second_identity.primary_id
         assert "_internal_helper_a" not in first_identity.primary_id
         assert all("_internal_helper_a" not in a for a in first_identity.aliases)
+
+    def test_header_binary_context_mismatch_is_batch_shaped(self) -> None:
+        # Codex review, fresh evidence: diff_layout_coherence.py's
+        # _mismatch_change fires once per side with symbol=snapshot.library
+        # (the library name, not a per-entity symbol) and embeds up to five
+        # uncorroborated record names sampled from
+        # dwarf_layout_coherence_mismatches into description -- two
+        # semantically identical snapshots whose mismatch tuple happens to
+        # be ordered differently would otherwise get different
+        # discriminators and fragment into separate primary_ids.
+        first = Change(
+            kind=ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+            symbol="libfoo.so",
+            description="The old snapshot's ... found 2 record(s): Foo, Bar.",
+        )
+        second = Change(
+            kind=ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+            symbol="libfoo.so",
+            description="The old snapshot's ... found 2 record(s): Bar, Foo.",
+        )
+        first_identity = resolve_change_identity(first)
+        second_identity = resolve_change_identity(second)
+        assert first_identity.primary_id == second_identity.primary_id
+        assert "Foo" not in first_identity.primary_id
+        assert all("Foo" not in a for a in first_identity.aliases)
 
     def test_per_symbol_gnu_unique_transition_is_still_canonical(self) -> None:
         # Regression guard: _check_binding_change's genuine per-symbol
