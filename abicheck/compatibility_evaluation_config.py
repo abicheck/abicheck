@@ -70,18 +70,6 @@ def _require_nonempty_digest(sha256: str, *, owner: str) -> None:
         )
 
 
-def _require_digest_when_nonempty(
-    items: Sequence[object], sha256: str | None, *, owner: str
-) -> None:
-    if items and not sha256:
-        raise ValueError(
-            f"{owner}.sha256 is required when its item/rule list is "
-            "non-empty (ADR-049 D6): the digest identifies the external "
-            "source that produced the list, not the list's contents, so a "
-            "source change is detectable even when the names stay the same."
-        )
-
-
 # --------------------------------------------------------------------------
 # D7: field-level provenance.
 # --------------------------------------------------------------------------
@@ -211,11 +199,29 @@ class ContractConfig:
 
 @dataclass(frozen=True)
 class EvidenceProviderRequirement:
-    """One evidence capability's requiredness and pinned implementation."""
+    """One evidence capability's requiredness and pinned implementation.
+
+    ``implementation`` is required whenever ``required`` is ``True``:
+    ADR-049 D6's worked example always pairs a required capability with a
+    pinned implementation (e.g. ``{capability: active_ast, required: true,
+    implementation: {id: clang_ast, version: 1, sha256: "..."}}``) -- a
+    required capability with no pinned implementation cannot be replayed
+    exactly, since there is nothing recorded to say which parser/version
+    satisfied it. An optional (enrichment) capability may have none.
+    """
 
     capability: str
     required: bool
     implementation: ImmutableIdentity | None = None
+
+    def __post_init__(self) -> None:
+        if self.required and self.implementation is None:
+            raise ValueError(
+                "EvidenceProviderRequirement.implementation is required "
+                "when required=True (ADR-049 D6): a required capability "
+                "must be backed by a pinned, versioned implementation for "
+                "exact replay; only an optional capability may have none."
+            )
 
 
 @dataclass(frozen=True)
@@ -307,22 +313,25 @@ class GateConfig:
 
 @dataclass(frozen=True)
 class SuppressionConfig:
-    """Immutable rules and digest (ADR-049 D7).
+    """Immutable rules and digest (ADR-049 D7: ``{rules: [], sha256: "..."}``,
+    kept as its own field pair rather than :class:`DigestedItems` since the
+    ADR's own key is ``rules``, not ``items``).
 
-    ``sha256`` is required whenever ``rules`` is non-empty (ADR-049 D6:
-    ``suppressions: {rules: [], sha256: "..."}`` -- same content-digest
-    requirement as :class:`DigestedItems`, kept as its own field pair here
-    since the ADR's own key is ``rules``, not ``items``).
+    ``sha256`` is unconditionally required, for the same reason as
+    :class:`DigestedItems`: a suppression source explicitly selected and
+    resolved to zero rules is a different fact from no suppression source
+    being selected at all, and only the digest can prove the source was
+    genuinely consulted and empty (not merely unconsidered) at decision
+    time. "No suppression source selected" is represented by
+    :attr:`CompatibilityEvaluationConfig.suppressions` being ``None``.
     """
 
+    sha256: str
     rules: tuple[str, ...] = ()
-    sha256: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "rules", _frozen_tuple(self.rules))
-        _require_digest_when_nonempty(
-            self.rules, self.sha256, owner="SuppressionConfig"
-        )
+        _require_nonempty_digest(self.sha256, owner="SuppressionConfig")
 
 
 # --------------------------------------------------------------------------
@@ -347,7 +356,9 @@ class CompatibilityEvaluationConfig:
     assurance: AssuranceConfig
     policy: CompatibilityPolicyConfig
     gate: GateConfig
-    suppressions: SuppressionConfig
+    #: ``None`` means no suppression source was selected at all; a
+    #: ``SuppressionConfig`` (empty ``rules`` or not) means one was.
+    suppressions: SuppressionConfig | None = None
     provenance: Mapping[str, ValueProvenance] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

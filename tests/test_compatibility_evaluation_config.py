@@ -56,7 +56,6 @@ def _minimal_config(**overrides) -> CompatibilityEvaluationConfig:
         assurance=AssuranceConfig(),
         policy=CompatibilityPolicyConfig(base=_identity("strict_abi")),
         gate=GateConfig(),
-        suppressions=SuppressionConfig(),
     )
     fields.update(overrides)
     return CompatibilityEvaluationConfig(**fields)
@@ -203,10 +202,26 @@ class TestEvidenceProviderRequirement:
         assert req.required is True
         assert req.implementation.id == "guarded_index"
 
+    def test_required_without_implementation_is_a_value_error(self):
+        # ADR-049 D6: a required capability with no pinned implementation
+        # cannot be replayed exactly.
+        with pytest.raises(ValueError, match="implementation is required"):
+            EvidenceProviderRequirement(capability="active_ast", required=True)
+
+    def test_optional_capability_may_omit_implementation(self):
+        req = EvidenceProviderRequirement(capability="active_ast", required=False)
+        assert req.implementation is None
+
     def test_providers_tuple_is_frozen(self):
         evidence = EvidenceConfig(
             providers=[
-                EvidenceProviderRequirement(capability="active_ast", required=True),
+                EvidenceProviderRequirement(
+                    capability="active_ast",
+                    required=True,
+                    implementation=ImmutableIdentity(
+                        id="clang_ast", version=1, sha256="abc123"
+                    ),
+                ),
             ]
         )
         assert isinstance(evidence.providers, tuple)
@@ -335,16 +350,41 @@ class TestDigestedItems:
 
 
 class TestSuppressionConfigDigest:
-    def test_empty_rules_need_no_digest(self):
-        suppressions = SuppressionConfig()
-        assert suppressions.rules == ()
-        assert suppressions.sha256 is None
+    # ADR-049 D6/D7 review follow-up: suppressions now distinguish "no
+    # source selected" (CompatibilityEvaluationConfig.suppressions is None)
+    # from "a source was selected" (a SuppressionConfig, empty rules or
+    # not), the same way DigestedItems does for variants/explicit_scope --
+    # sha256 is unconditionally required whenever a SuppressionConfig
+    # exists at all.
+    def test_missing_sha256_is_a_type_error(self):
+        with pytest.raises(TypeError):
+            SuppressionConfig(rules=["ignore-internal-symbol"])  # type: ignore[call-arg]
 
-    def test_nonempty_rules_without_digest_is_a_value_error(self):
-        with pytest.raises(ValueError, match="sha256 is required"):
-            SuppressionConfig(rules=["ignore-internal-symbol"])
+    def test_empty_string_sha256_is_rejected(self):
+        with pytest.raises(ValueError, match="non-empty digest"):
+            SuppressionConfig(sha256="", rules=["ignore-internal-symbol"])
+
+    def test_selected_but_empty_rules_still_requires_a_digest(self):
+        selected_but_empty = SuppressionConfig(
+            sha256="digest-of-empty-suppression-file"
+        )
+        assert selected_but_empty.rules == ()
+        assert selected_but_empty.sha256 == "digest-of-empty-suppression-file"
 
     def test_nonempty_rules_with_digest_constructs(self):
         suppressions = SuppressionConfig(rules=["ignore-internal-symbol"], sha256="xyz")
         assert suppressions.rules == ("ignore-internal-symbol",)
         assert suppressions.sha256 == "xyz"
+
+    def test_config_defaults_to_no_suppression_source_selected(self):
+        cfg = _minimal_config()
+        assert cfg.suppressions is None
+
+    def test_config_distinguishes_no_source_from_selected_empty(self):
+        no_source = _minimal_config()
+        selected_empty = _minimal_config(
+            suppressions=SuppressionConfig(sha256="empty-digest")
+        )
+        assert no_source.suppressions is None
+        assert selected_empty.suppressions is not None
+        assert no_source != selected_empty
