@@ -552,6 +552,13 @@ class TestItaniumScopeParser:
         ("_ZN1CD1Ev", ["C", "{dtor}"]),                      # C::~C() destructor
         ("_ZN5ArrayILi4EE4sizeEv", ["ArrayILi4EE", "size"]),  # Array<4>::size (non-type arg)
         ("_ZN1C3getB5cxx11Ev", ["C", "getBcxx11"]),          # C::get[abi:cxx11]()
+        ("_ZSt5touchv", ["std", "touch"]),                   # std::touch(), no N...E wrapper
+        ("_ZNSt6detail3fooEv", ["std", "detail", "foo"]),    # std::detail::foo()
+        # Mach-O direct-clang mangled names carry an extra platform leading
+        # underscore (Codex review, fresh evidence: dumper_clang.py's own
+        # _visibility() docstring documents "__ZN3lib3addEii" on macOS).
+        ("__ZN1C3barEv", ["C", "bar"]),                      # Mach-O member
+        ("__ZSt5touchv", ["std", "touch"]),                  # Mach-O std::touch()
     ])
     def test_components(self, mangled, expected):
         assert itanium_scope_components(mangled) == expected

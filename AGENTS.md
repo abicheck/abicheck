@@ -971,6 +971,24 @@ Once a root command genuinely clears the bar above, pick the right home:
   false-negative gap. Left as a silent false negative — the same
   conservative default this module already uses throughout.
 
+  **A seventh finding pointed at a platform-specific mangled-name quirk,
+  silently disabling the mangled-scope-recovery guard on every Mach-O
+  snapshot.** Confirmed via `dumper_clang.py`'s own `_visibility()`
+  docstring: clang's `mangledName` carries an extra platform leading
+  underscore on macOS (`"__ZN3lib3addEii"`, not the plain Itanium
+  `"_ZN3lib3addEii"`), and empirically: `itanium_scope_components(
+  "__ZSt5touchv")` returned `None` before this fix, since
+  `_itanium_strip_prefix()` only recognized the bare `"_Z"` prefix
+  (Codex review, fresh evidence). Since every declaration's stdlib-scope
+  check in this module (and `owner_class_of()`'s mangled fallback) relies
+  on this recovery, a bare-named stdlib declaration on macOS bypassed the
+  guard *entirely* — not just in the one edge case a synthetic unit test
+  would reach, but for every symbol on that platform. Fixed in the shared
+  `diff_cxx_rules.py` parser (benefiting all four of its callers, not
+  just this module) by stripping the extra leading underscore before the
+  Itanium-prefix check, mirroring `dumper_clang.py`'s own
+  `_symbol_candidates()` de-prefixing approach for the identical quirk.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   once per detector via `_directly_referenced(old, new)`) and un-filters a

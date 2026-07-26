@@ -503,3 +503,22 @@
   needing either a producer-side fix in `dumper_clang.py` (its own
   separate, broader-blast-radius change) or a speculative reverse-
   namespace-guessing mechanism (real false-positive risk, not attempted).
+- **The mangled-scope-recovery guard was silently disabled on every
+  Mach-O direct-clang snapshot** (Codex review, fresh evidence): clang's
+  `mangledName` carries an extra platform leading underscore on macOS
+  (`dumper_clang.py`'s own `_visibility()` docstring documents
+  `"__ZN3lib3addEii"`), but `itanium_qualified_name()`'s underlying
+  `_itanium_strip_prefix()` only recognized the plain Itanium `"_Z"`
+  prefix — confirmed empirically: `itanium_scope_components("__ZSt5touchv")`
+  returned `None`. Since every function/variable's stdlib-scope check in
+  `type_reachability.py` (and `owner_class_of()`'s mangled fallback) relies
+  on this recovery, a bare-named stdlib declaration on macOS bypassed the
+  guard entirely, unfiltering purely internal toolchain churn as a public
+  break. Fixed in the shared `diff_cxx_rules.py` parser (benefiting all of
+  its callers) by normalizing away the extra leading underscore before the
+  Itanium-prefix check, mirroring `dumper_clang.py`'s own
+  `_symbol_candidates()` de-prefixing approach for the identical quirk.
+  New regression tests cover both the standalone and nested `St`
+  substitution forms under Mach-O mangling, plus an end-to-end guard that
+  genuine non-stdlib owner seeding still works. Full suite green, 100%
+  module coverage, FP-rate gate stays 0 FP/0 FN.

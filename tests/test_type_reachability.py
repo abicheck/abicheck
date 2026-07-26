@@ -1865,3 +1865,54 @@ class TestBareIdentityCollisionWithDerivedSuffix:
             ],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset()
+
+
+class TestMachODoubleUnderscorePrefixRecognized:
+    def test_bare_named_stdlib_function_stays_filtered_with_macho_mangling(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: on macOS, clang's mangledName
+        carries an extra platform leading underscore ("__ZSt5touchv",
+        confirmed via dumper_clang.py's own _visibility() docstring),
+        which itanium_qualified_name's bare "_Z" check previously
+        rejected outright -- silently disabling the mangled-scope-
+        recovery guard for every symbol on that platform."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="touch",
+                    mangled="__ZSt5touchv",
+                    return_type="std::string",
+                    params=[],
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset()
+
+    def test_macho_owner_seeding_still_works_for_a_genuine_class(self) -> None:
+        """Guard against over-correcting: a Mach-O-mangled method on a
+        genuine non-stdlib owner must still seed that owner normally."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="Foo::touch",
+                    mangled="__ZN3Foo5touchEv",
+                    return_type="void",
+                    params=[],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})

@@ -112,7 +112,19 @@ def _itanium_strip_prefix(mangled: str) -> tuple[str, bool] | None:
     first component and *is_nested* indicates whether a ``N`` nested-name
     wrapper was opened (and must be closed by ``E``). Returns ``None`` when
     the symbol does not carry the ``_Z`` Itanium prefix.
+
+    A Mach-O direct-clang mangled name carries an extra platform leading
+    underscore (Codex review, fresh evidence: confirmed via
+    ``dumper_clang.py``'s own ``_visibility()`` docstring — clang's
+    ``mangledName`` is ``"__ZN3lib3addEii"`` on macOS, not the plain
+    Itanium ``"_ZN3lib3addEii"``), so a bare ``mangled.startswith("_Z")``
+    check rejects every symbol on that platform. Normalized away here by
+    stripping one leading underscore before the check, mirroring
+    ``dumper_clang.py``'s own ``_symbol_candidates()`` de-prefixing
+    approach for the identical Mach-O quirk.
     """
+    if mangled.startswith("__Z"):
+        mangled = mangled[1:]
     if not mangled.startswith("_Z"):
         return None
     s = mangled[2:]
