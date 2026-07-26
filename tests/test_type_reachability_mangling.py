@@ -575,3 +575,38 @@ class TestMsvcOwnerSeedingRecognized:
             ],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset()
+
+
+class TestConversionOperatorOwnerSeedingRecognized:
+    """Codex review, fresh evidence: direct-clang stores a conversion
+    operator's own AST name bare (e.g. "operator Bar", no owning-class
+    prefix at all -- confirmed via a real clang -ast-dump), so
+    owner_class_of()'s display-name path never applies (there's no "::" to
+    find). Its mangled name's Itanium "cv" code was previously entirely
+    unmodelled by itanium_scope_components(), so the mangled-name fallback
+    failed too, leaving the owner unresolved and an embedded stdlib
+    record's fields unwalked."""
+
+    def test_bare_named_conversion_operator_seeds_its_owner(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="operator Bar",
+                    mangled="_ZNK3FoocvN2ns3BarEEv",
+                    return_type="ns::Bar",
+                    params=[],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+                RecordType(name="ns::Bar", kind="class"),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})

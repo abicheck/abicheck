@@ -1055,6 +1055,43 @@ Once a root command genuinely clears the bar above, pick the right home:
   typedef contributes nothing for it, rather than competing through the
   ambiguity-resolution machinery.
 
+  **A tenth finding closed the conversion-operator half of the owner-
+  seeding gap the earlier `"::operator "`-marker fix only partly covered.**
+  That earlier fix handled a *display-name* conversion operator whose own
+  qualification embeds `"::"` (e.g. DWARF's `"Foo::operator ns::Bar"`), but
+  a direct-clang snapshot stores a conversion operator's AST name bare —
+  `"operator Bar"`, no owning-class prefix at all, confirmed via a real
+  `clang -ast-dump` — so `owner_class_of()`'s display-name branch never
+  applies (there is no `"::"` to find), and it falls through to the
+  mangled-name fallback (Codex review, fresh evidence). That fallback had
+  no coverage for conversion operators either:
+  `itanium_scope_components()`'s underlying component parser deliberately
+  excludes the Itanium `cv` (conversion-to-*T*) code from
+  `_ITANIUM_OPERATORS` — correctly, for that set's own purpose of grouping
+  operator *overloads* by a fixed 2-char code, since every conversion
+  operator carries a different target type and is never an overload of
+  another one — but treating `cv` as entirely unparseable meant hitting it
+  aborted the *whole* scope-recovery attempt, discarding the class name
+  already parsed before it. Confirmed empirically: `_ZNK3FoocvN2ns3BarEEv`
+  (`Foo::operator ns::Bar() const`) made `itanium_scope_components()`
+  return `None` outright, and `owner_class_of()` therefore returned `None`
+  instead of `"Foo"`. Fixed by recognizing `cv` as a distinct, opaque leaf
+  component (`"{op:cv}"`) in `_parse_operator_component()` — separately
+  from `_ITANIUM_OPERATORS`, since the overload-grouping semantics
+  correctly stay excluded — and forcing `_step_next_component()`'s `done`
+  flag to `True` immediately upon seeing it, regardless of nesting: the
+  conversion operator's own leaf is always the last component, and the
+  target-type encoding immediately following `cv` (e.g. `N2ns3BarE` for
+  `ns::Bar`) is a full, arbitrary Itanium `<type>` production — a much
+  larger grammar than this structural parser attempts elsewhere — but
+  recovering the *scope prefix* never needs that type parsed at all, only
+  a signal to stop before attempting it. Regression tests added: direct
+  parser-level cases in `TestItaniumScopeParser`/`TestMsvcScopeParser`'s
+  sibling `diff_cxx_rules` test file, plus an end-to-end
+  `directly_referenced_stdlib_types` test confirming a `Foo`-owning
+  conversion operator's embedded `std::string` field is no longer
+  filtered.
+
   **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
   `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built

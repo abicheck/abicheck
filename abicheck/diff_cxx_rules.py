@@ -188,10 +188,39 @@ def _parse_ctor_dtor_component(s: str, i: int) -> tuple[str | None, int]:
 def _parse_operator_component(s: str, i: int) -> tuple[str | None, int]:
     """Parse an Itanium operator-function code at ``s[i]``.
 
-    Returns ``("{op:XX}", i+2)`` for a known 2-char operator code, or
-    ``(None, i)`` if ``s[i:i+2]`` is not in ``_ITANIUM_OPERATORS``.
+    Returns ``("{op:XX}", i+2)`` for a known 2-char operator code,
+    ``("{op:cv}", i+2)`` for a conversion operator (see below), or
+    ``(None, i)`` if ``s[i:i+2]`` is not a recognized operator code.
+
+    A conversion operator's own Itanium code, ``cv``, is deliberately kept
+    out of ``_ITANIUM_OPERATORS`` for *signature-identity* purposes (a
+    fixed 2-char code there is used so operator overloads group together,
+    but every conversion operator carries a different target type and is
+    never an overload of another one) — handled separately here instead of
+    folded into that set, since it needs different treatment for *scope
+    recovery*: a direct-clang snapshot stores a conversion operator's own
+    ``Function.name`` bare (e.g. ``"operator Bar"``, confirmed via a real
+    ``clang -ast-dump``, no owning-class prefix at all — the same
+    unqualified-leaf convention CastXML uses for ordinary methods), so
+    ``owner_class_of()``'s mangled-name fallback is the only way to
+    recover the owner, and it previously failed outright here (Codex
+    review, fresh evidence): ``cv`` is immediately followed by the full
+    Itanium encoding of the conversion's target type (e.g.
+    ``cvN2ns3BarE`` for ``operator ns::Bar()``), which is not a simple
+    length-prefixed name — parsing an arbitrary Itanium ``<type>``
+    production (builtin codes, pointers, nested names, substitutions, ...)
+    is a much larger grammar than this structural parser attempts
+    elsewhere. Recovering the *scope* doesn't need the target type parsed
+    at all: ``cv`` is always this member's own leaf component (a
+    conversion operator can't itself enclose further nested-name
+    components), so it is safe to stop parsing immediately after
+    recognizing it — see the ``done`` override in
+    :func:`_step_next_component` — rather than attempt (and risk
+    mis-parsing) the type that follows.
     """
     code = s[i : i + 2]
+    if code == "cv":
+        return "{op:cv}", i + 2
     if code in _ITANIUM_OPERATORS:
         # Keep the code so operator overloads group (e.g. operator[](int)/(long))
         # while distinct operators stay distinct. Conversion operators (`cv`) are
@@ -227,8 +256,8 @@ def _step_next_component(
       for a nested name, or a free-function's single component was consumed).
 
     Returns ``None`` (not a 3-tuple) when the component cannot be parsed at all
-    (conversion operator, substitution, vendor encoding, truncated source name)
-    so the caller propagates failure by returning ``None`` from its own scope.
+    (an unrecognized/vendor operator, substitution, truncated source name) so
+    the caller propagates failure by returning ``None`` from its own scope.
     """
     c = s[i]
     if nested and c == "E":
@@ -242,6 +271,12 @@ def _step_next_component(
     label, new_i = _parse_non_source_name_component(s, i)
     if label is None:
         return None  # conversion operator / substitution / vendor — not modelled
+    if label == "{op:cv}":
+        # A conversion operator's own leaf component is always last; its
+        # target type follows immediately and is deliberately not parsed
+        # (see _parse_operator_component) so stop right here regardless of
+        # nesting, rather than attempt to step into that unparsed type.
+        return label, new_i, True
     return label, new_i, not nested
 
 

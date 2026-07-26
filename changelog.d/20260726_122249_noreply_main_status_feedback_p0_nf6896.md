@@ -567,3 +567,20 @@
   Itanium/Mach-O/MSVC mangled-name recovery, and their ambiguity guards) —
   a pure file split, no test behavior changed. Full suite green, 100%
   module coverage, FP-rate gate stays 0 FP/0 FN.
+- **A conversion operator's owner still couldn't be recovered, even after
+  the earlier `"::operator "`-marker fix** (Codex review, fresh evidence):
+  direct-clang stores a conversion operator's AST name bare (`"operator
+  Bar"`, no owning-class prefix — confirmed via a real `clang -ast-dump`),
+  so `owner_class_of()`'s display-name branch never applies, and its
+  mangled-name fallback had no coverage either — `itanium_scope_components()`
+  aborted entirely on the Itanium `cv` (conversion-operator) code, which
+  `_ITANIUM_OPERATORS` correctly excludes from its own overload-grouping
+  set, but treating it as wholly unparseable discarded the class name
+  already recovered before it. Confirmed empirically:
+  `itanium_scope_components("_ZNK3FoocvN2ns3BarEEv")` returned `None`
+  outright. Fixed by recognizing `cv` as a distinct opaque leaf component
+  and stopping there (never attempting to parse the arbitrary target-type
+  encoding that follows, which recovering the scope prefix never needed).
+  New regression tests cover the parser directly and an end-to-end
+  `directly_referenced_stdlib_types` case. Full suite green, 100% module
+  coverage, FP-rate gate stays 0 FP/0 FN.

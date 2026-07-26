@@ -561,6 +561,12 @@ class TestItaniumScopeParser:
         # _visibility() docstring documents "__ZN3lib3addEii" on macOS).
         ("__ZN1C3barEv", ["C", "bar"]),                      # Mach-O member
         ("__ZSt5touchv", ["std", "touch"]),                  # Mach-O std::touch()
+        # Conversion operator (Codex review, fresh evidence): the "cv" code
+        # is followed by the target type's own encoding, which is not
+        # parsed -- only the scope prefix before "cv" is needed, so the
+        # leaf label is the opaque "{op:cv}" marker rather than a spelled
+        # target type.
+        ("_ZNK3FoocvN2ns3BarEEv", ["Foo", "{op:cv}"]),       # Foo::operator ns::Bar() const
     ])
     def test_components(self, mangled, expected):
         assert itanium_scope_components(mangled) == expected
@@ -589,6 +595,21 @@ class TestItaniumScopeParser:
         f = Function(name="~C", mangled="_ZN1CD1Ev",
                      return_type="void", visibility=Visibility.PUBLIC)
         assert owner_class_of(f) == "C"
+
+    def test_conversion_operator_owner_resolves_from_mangled(self):
+        # direct-clang records a conversion operator's bare AST name
+        # ("operator Bar", no owning-class prefix, confirmed via a real
+        # clang -ast-dump) -- owner_class_of must fall back to the mangled
+        # name, whose "cv" code was previously unmodelled entirely (Codex
+        # review, fresh evidence).
+        f = Function(name="operator Bar", mangled="_ZNK3FoocvN2ns3BarEEv",
+                     return_type="ns::Bar", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) == "Foo"
+
+    def test_conversion_operator_owner_resolves_with_namespaced_class(self):
+        f = Function(name="operator Bar", mangled="_ZNK2ns3FoocvN2ns3BarEEv",
+                     return_type="ns::Bar", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) == "ns::Foo"
 
     @pytest.mark.parametrize("mangled", [
         "foo",            # not Itanium-mangled (C symbol)
