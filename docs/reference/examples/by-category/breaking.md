@@ -84,9 +84,9 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case108_task_class_removed](../case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
 | [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🔴 BREAKING | Breaking |
 | [case110_concurrent_unordered_map_api_drift](../case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
-| [case112_lp64_ilp64](../case112_lp64_ilp64.md) | LP64 → ILP64 integer-model switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
+| [case112_lp64_ilp64](../case112_lp64_ilp64.md) | LP64 → ILP64 Integer-Model Switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
 | [case113_abi_tag_changed](../case113_abi_tag_changed.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | 🔴 BREAKING | Breaking |
-| [case114_char8t_migration](../case114_char8t_migration.md) | char8_t migration (C++20 char-family → char8_t) | 🔴 BREAKING | Breaking |
+| [case114_char8t_migration](../case114_char8t_migration.md) | char8_t Migration (C++20 char-family → char8_t) | 🔴 BREAKING | Breaking |
 | [case115_bit_int_width_changed](../case115_bit_int_width_changed.md) | _BitInt(N) Width Change (C23 64 → 128) | 🔴 BREAKING | Breaking |
 | [case116_atomic_qualifier_changed](../case116_atomic_qualifier_changed.md) | _Atomic Qualifier Added (C11) | 🔴 BREAKING | Breaking |
 | [case117_no_unique_address](../case117_no_unique_address.md) | [[no_unique_address]] Layout Overlay (no dedicated ChangeKind) | 🔴 BREAKING | Breaking |
@@ -107,7 +107,7 @@ _107 case(s)._ [← back to all examples](../index.md)
 | [case175_kabi_crc_changed](../case175_kabi_crc_changed.md) | kABI CRC Changed | 🔴 BREAKING | Breaking |
 | [case176_kabi_symbol_namespace_changed](../case176_kabi_symbol_namespace_changed.md) | kABI Export Namespace Changed | 🔴 BREAKING | Breaking |
 | [case177_long_double_abi_changed](../case177_long_double_abi_changed.md) | long double ABI Changed | 🔴 BREAKING | Breaking |
-| [case182_accidental_export_removed_still_breaking](../case182_accidental_export_removed_still_breaking.md) | Accidental export removed — still BREAKING under public-header scoping | 🔴 BREAKING | Breaking |
+| [case182_accidental_export_removed_still_breaking](../case182_accidental_export_removed_still_breaking.md) | Accidental Export Removed — Still Breaking Under Public-Header Scoping | 🔴 BREAKING | Breaking |
 | [case187_public_struct_private_field_type](../case187_public_struct_private_field_type.md) | Public Struct Field Retyped to an Internal Type | 🔴 BREAKING | Breaking |
 | [case188_public_class_private_base_class](../case188_public_class_private_base_class.md) | Public Class Gains a Private Base Class | 🔴 BREAKING | Breaking |
 | [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type.md) | Public Function Parameter Retyped to an Internal Type | 🔴 BREAKING | Breaking |

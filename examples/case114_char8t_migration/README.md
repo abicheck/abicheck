@@ -1,28 +1,118 @@
-# Case 114: char8_t migration (C++20 char-family → char8_t)
+# Case 114: char8_t Migration (C++20 char-family → char8_t)
 
 **Category:** Binary ABI break / C++20 | **Verdict:** 🔴 BREAKING
 
-## What changed
+## Verdict and consumer impact
 
-`v1` exposes a UTF-8 API over `const char*`. `v2` migrates to C++20 `char8_t`
-on both the function parameters and the `Utf8View::data` field. `char8_t` is a
-distinct type (Itanium mangling code `Du`), not an alias for `char` /
-`unsigned char`, so it participates in overload resolution and name mangling.
+`v1` exposes a UTF-8 API over plain `const char*`. `v2` migrates to C++20
+`char8_t` on both function parameters and the `Utf8View::data` field.
+`char8_t` is a distinct type (Itanium mangling code `Du`), not an alias for
+`char`/`unsigned char`, so it participates in name mangling: `utf8_length`
+mangles to `_Z11utf8_lengthPKc` in v1 but `_Z11utf8_lengthPKDu` in v2 — a
+different exported symbol. A consumer built against v1 fails to resolve
+`utf8_length`/`utf8_make` against v2 without recompilation.
 
-`utf8_length(const char*)` mangles to `_Z11utf8_lengthPKc`; the v2
-`utf8_length(const char8_t*)` mangles to `_Z11utf8_lengthPKDu` — a different
-symbol. A consumer built against v1 fails to resolve it against v2.
+## Old/new diff
 
-## How abicheck catches it
+| v1.cpp | v2.cpp |
+|--------|--------|
+| `std::size_t utf8_length(const char* text)` | `std::size_t utf8_length(const char8_t* text)` |
+| `Utf8View { const char *data; ... }` | `Utf8View { const char8_t *data; ... }` |
 
-`char8t_migration` fires for each public slot (parameter, return, or field)
-whose spelling moves between a char-family type and `char8_t` in either
-direction. The per-symbol `func_params_changed` / field findings are still
-present; the specialised kind names the C++20 root cause.
+## abicheck command
 
-## Files
-- `v1.cpp` / `v2.cpp` — the two library builds, with the `const char*` vs
-  `const char8_t*` declarations inlined (no header: the snapshot is taken from
-  the compiled library's DWARF). This case is Linux-only — the migration is
-  only visible via the ELF/DWARF path.
-- `app.cpp` — minimal consumer stub
+```bash
+g++ -std=c++20 -shared -fPIC -g v1.cpp -o libv1.so
+g++ -std=c++20 -shared -fPIC -g v2.cpp -o libv2.so
+abicheck compare libv1.so libv2.so
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: BREAKING (exit 4)
+
+- char8t_migration: char8_t migration (char-family -> char8_t) on parameter 'text'
+  of 'utf8_make': const char * -> const char8_t *
+  > char8_t is a distinct C++20 type that changes overload identity and
+    name mangling; old binaries fail to resolve it.
+- char8t_migration: char8_t migration on parameter 'text' of 'utf8_length':
+  const char * -> const char8_t *
+- char8t_migration: char8_t migration on field 'data' of 'Utf8View':
+  const char * -> const char8_t *
+- type_field_type_changed: Field type changed: Utf8View::data (const char * -> const char8_t *)
+- func_removed: Public function removed: utf8_make
+- func_removed: Public function removed: utf8_length
+```
+
+(The real run also surfaces build-environment noise — a `GLIBC_2.4` runtime
+floor and `libstdc++` symbols leaking in via `std::char_traits<char8_t>` —
+unrelated to the `char8_t` migration itself; grouped separately as
+Environment & Toolchain Drift by abicheck.)
+
+## Minimum evidence
+
+`min_evidence: L1` — DWARF alone carries each parameter/field's distinct
+`char8_t` type (`DW_AT_type` pointing at a base type named `char8_t`, mangled
+differently from `char`), so `-g` is enough; no public headers are needed
+(this case is intentionally self-contained, taking its snapshot from the
+compiled library's DWARF, not headers).
+
+## Why abicheck catches it
+
+`char8t_migration` fires whenever a public parameter, return, or field
+spelling moves between a char-family type and C++20 `char8_t` in either
+direction — DWARF exposes `char8_t` as its own distinct base type (not a
+`typedef`/alias for `char`), so abicheck's type-diff sees a genuine type
+change and the specialised detector names the C++20 root cause directly,
+alongside the underlying `func_removed`/`type_field_type_changed` findings
+that a mangled-name change and a retyped field always produce.
+
+## Runtime failure demonstration
+
+**Severity: CRITICAL**
+
+**Scenario:** the shipped `app.cpp` is a minimal stub (this case is
+header-free by design, so there's no shared declaration for both library
+versions to build a full app against) — the demo below uses a small
+standalone consumer that declares and calls the v1 signature directly,
+compiled against v1, then run against v2 without recompiling.
+
+```bash
+# Build old library + a v1-signature consumer
+g++ -std=c++20 -shared -fPIC -g v1.cpp -o libv1.so
+g++ -std=c++20 -g runtime_app.cpp -L. -lv1 -Wl,-rpath,. -o app
+./app
+# → len=5 view.size=5
+
+# Swap in new library (no recompile)
+g++ -std=c++20 -shared -fPIC -g v2.cpp -o libv1.so
+./app
+# → ./app: symbol lookup error: ./app: undefined symbol: _Z11utf8_lengthPKc
+```
+
+**Why CRITICAL:** the old mangled symbol `_Z11utf8_lengthPKc` is gone from
+v2's dynamic symbol table (replaced by `_Z11utf8_lengthPKDu`); the runtime
+linker cannot resolve `utf8_length` and the process fails to start.
+
+## Safe redesign
+
+Introduce the `char8_t`-based API alongside the existing `char`-based one
+under a new name (e.g. `utf8_length_u8`), and deprecate the old one for at
+least one release cycle before removing it — the same pattern as any other
+breaking signature change (see
+[case02_param_type_change](../case02_param_type_change/README.md)).
+
+**Real-world example:** libraries migrating their UTF-8 surface to C++20
+`char8_t` (a well-known source of downstream breakage after GCC/Clang
+enabled `-fchar8_t` by default under `-std=c++20`) hit exactly this
+mangled-name churn; nlohmann/json and fmtlib both document explicit
+`char8_t` opt-in/opt-out handling for this reason.
+
+## Cross-tool comparison
+
+```bash
+abidw --out-file v1.xml libv1.so
+abidw --out-file v2.xml libv2.so
+abidiff v1.xml v2.xml
+```

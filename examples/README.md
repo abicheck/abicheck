@@ -371,9 +371,9 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [109](case109_flow_graph_policy_renames/README.md) | flow::graph Policy Tag Renames | Breaking | 🔴 BREAKING |
 | [110](case110_concurrent_unordered_map_api_drift/README.md) | concurrent_unordered_map API Drift | Breaking | 🔴 BREAKING |
 | [111](case111_enumerable_thread_specific_lambda_ambiguity/README.md) | enumerable_thread_specific Lambda-Init Ambiguity | API Break | 🟠 API_BREAK (bad practice) |
-| [112](case112_lp64_ilp64/README.md) | LP64 → ILP64 integer-model switch (oneMKL MKL_INT 32→64) | Breaking | 🔴 BREAKING |
+| [112](case112_lp64_ilp64/README.md) | LP64 → ILP64 Integer-Model Switch (oneMKL MKL_INT 32→64) | Breaking | 🔴 BREAKING |
 | [113](case113_abi_tag_changed/README.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | Breaking | 🔴 BREAKING |
-| [114](case114_char8t_migration/README.md) | char8_t migration (C++20 char-family → char8_t) | Breaking | 🔴 BREAKING |
+| [114](case114_char8t_migration/README.md) | char8_t Migration (C++20 char-family → char8_t) | Breaking | 🔴 BREAKING |
 | [115](case115_bit_int_width_changed/README.md) | _BitInt(N) Width Change (C23 64 → 128) | Breaking | 🔴 BREAKING |
 | [116](case116_atomic_qualifier_changed/README.md) | _Atomic Qualifier Added (C11) | Breaking | 🔴 BREAKING |
 | [117](case117_no_unique_address/README.md) | [[no_unique_address]] Layout Overlay (no dedicated ChangeKind) | Breaking | 🔴 BREAKING |
@@ -440,9 +440,9 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [179](case179_cet_protection_weakened/README.md) | CET Protection Weakened | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [180](case180_symbol_binding_lost_unique/README.md) | Symbol Binding Lost GNU_UNIQUE | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [181](case181_xcheck_public_to_internal_dependency/README.md) | Public API reaches an internal declaration | Quality | 🟢 COMPATIBLE (bad practice) |
-| [182](case182_accidental_export_removed_still_breaking/README.md) | Accidental export removed — still BREAKING under public-header scoping | Breaking | 🔴 BREAKING (bad practice) |
+| [182](case182_accidental_export_removed_still_breaking/README.md) | Accidental Export Removed — Still Breaking Under Public-Header Scoping | Breaking | 🔴 BREAKING (bad practice) |
 | [183](case183_internal_version_node_churn/README.md) | Internal ELF symbol-version node churn | Risk | 🟡 COMPATIBLE_WITH_RISK |
-| [184](case184_internal_enum_churn_scoped/README.md) | Internal enum churn, scoped out by private-header origin | No Change | ✅ NO_CHANGE |
+| [184](case184_internal_enum_churn_scoped/README.md) | Internal Enum Churn, Scoped Out by Private-Header Origin | No Change | ✅ NO_CHANGE |
 | [185](case185_inherited_override_reuses_slot/README.md) | Inherited override reuses the base's vtable slot | Addition | 🟢 COMPATIBLE |
 | [186](case186_c_api_pointee_const_abi_neutral/README.md) | C API Pointee const-Qualification Is ABI-Neutral | No Change | ✅ NO_CHANGE |
 | [187](case187_public_struct_private_field_type/README.md) | Public Struct Field Retyped to an Internal Type | Breaking | 🔴 BREAKING (bad practice) |
