@@ -493,7 +493,20 @@ Pick the right home:
   string is Clang, not GCC, and Clang re-execs itself via `-cc1` rather
   than spawning a separate, `-B`-discoverable one; confirmed neither
   castxml's internal bundled Clang nor the direct `--ast-frontend clang`
-  backend ran a planted `cc1` with `-B` set). This denylist is
+  backend ran a planted `cc1` with `-B` set). A fifth review round found a
+  flag family that IS actually exploitable through this pipeline, unlike
+  the two immediately above: clang-cl's (Clang's MSVC-compatible driver
+  mode — reachable via a `compile.binding` whose path stem contains
+  "clang", e.g. `clang-cl`/`clang-cl.exe`, which
+  `dumper_clang._is_clang_family_binary` recognizes as clang-family)
+  `/clang:<arg>` escape hatch forwards an argument straight to the
+  underlying clang driver, bypassing clang-cl's MSVC-shaped option parsing
+  entirely — empirically confirmed exploitable: `clang
+  --driver-mode=cl "/clang:-fplugin=./evil.so" -c t.h` really does load and
+  run the planted plugin. `/link <options>` (clang-cl's documented
+  "forward options to the linker") is blocked alongside it on the same
+  LTO-linker-plugin grounds as the already-blocked `-Wl,`, without a
+  from-scratch empirical repro of that specific sub-case. This denylist is
   necessarily reactive to the delivery *mechanism*, not exhaustive over
   every dangerous flag a mechanism could carry — a real fix for the
   whack-a-mole shape of this (an allowlist of known-safe ABI flags instead

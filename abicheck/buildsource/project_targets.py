@@ -525,6 +525,21 @@ class BundleSpec:
 #: execution-contract change (AGENTS.md's "Known gaps" entry) ever forwards
 #: these flags to a real GCC invocation directly, which would restore the
 #: attack.
+#:
+#: ``/clang:<arg>`` is clang-cl's (Clang's MSVC-compatible driver mode,
+#: reachable via a Windows toolchain binding whose path stem contains
+#: "clang" -- e.g. ``clang-cl``/``clang-cl.exe``, which
+#: ``dumper_clang._is_clang_family_binary`` recognizes) own escape hatch
+#: for passing an argument straight to the underlying clang driver,
+#: bypassing clang-cl's normally-MSVC-shaped option parsing entirely --
+#: confirmed **actually exploitable** (unlike ``--castxml-cc-``/``-B``
+#: above): ``clang --driver-mode=cl "/clang:-fplugin=./evil.so" -c t.h``
+#: really does load and run the planted plugin. ``/link <options>`` is the
+#: same driver's documented "forward options to the linker" escape hatch
+#: -- the cl-mode spelling of the already-blocked ``-Wl,`` mechanism above
+#: -- blocked for the same reason, on the same LTO-linker-plugin grounds,
+#: even without a from-scratch clang-cl empirical repro of that specific
+#: sub-case.
 _DANGEROUS_ARG_PREFIXES = (
     "-Xclang",
     "-Xpreprocessor",
@@ -545,6 +560,8 @@ _DANGEROUS_ARG_PREFIXES = (
     "-Wl,",
     "--castxml-cc-",
     "-B",
+    "/clang:",
+    "/link",
     "@",
 )
 

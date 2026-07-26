@@ -74,6 +74,17 @@
   `clang -E`). Blocked anyway: cheap, and closes the door in case a
   future toolchain-execution-contract change ever forwards these flags to
   a real GCC invocation directly.
+- **`profiles.<id>.compile.args` also rejects clang-cl's `/clang:` and
+  `/link` now.** `/clang:<arg>` forwards straight to the underlying clang
+  driver, bypassing clang-cl's MSVC-shaped option parsing entirely —
+  empirically confirmed exploitable (`clang --driver-mode=cl
+  "/clang:-fplugin=./evil.so" -c t.h` loads and runs the planted plugin),
+  and reachable through this pipeline via a `compile.binding` whose path
+  stem contains "clang" (e.g. `clang-cl`/`clang-cl.exe`, recognized as
+  clang-family by `dumper_clang._is_clang_family_binary`). `/link
+  <options>` is clang-cl's own "forward to the linker" escape hatch — the
+  cl-mode spelling of the already-blocked `-Wl,` mechanism — blocked for
+  the same LTO-linker-plugin reason.
 
 ### Documentation
 
