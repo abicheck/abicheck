@@ -335,9 +335,30 @@ def _slot_indices_match_position(slots: list[str]) -> bool:
     owned-header superset comparison below. Requiring every index to match
     its position closes this without changing the carve-out's own additive
     semantics, since a genuine ``include_sequence`` always satisfies it.
+
+    Also requires each numbered slot to actually carry a ``":"`` delimiter
+    AND a recognized token shape (``hdrs:``/``ext:``/``label:``) after it
+    (Codex review, PR #641 follow-up, eleventh P2): a malformed slot with
+    NO colon at all, e.g. the bare string ``"0"``, still passes a check
+    that only compares ``slot.partition(":")[0]`` against the position --
+    ``"0".partition(":")[0]`` is ``"0"`` itself, matching position 0 -- and
+    if that slot happens to be byte-identical on both sides, the caller's
+    per-slot loop's own equality short-circuit (``if old_slot == new_slot:
+    continue``) never even looks at it again, so an unchanged malformed
+    slot could ride alongside a genuinely growing one and still return
+    additive-safe. Real ``include_sequence`` slots produced by
+    ``compute_extraction_contract`` always have exactly one of these three
+    token prefixes after the delimiter, so requiring one here is the real
+    shape, not a new restriction.
     """
     numbered_slots = slots[:-1] if slots and slots[-1].startswith("sys:") else slots
-    return all(slot.partition(":")[0] == str(i) for i, slot in enumerate(numbered_slots))
+    for i, slot in enumerate(numbered_slots):
+        idx, sep, rest = slot.partition(":")
+        if sep != ":" or not rest.startswith(("hdrs:", "ext:", "label:")):
+            return False
+        if idx != str(i):
+            return False
+    return True
 
 
 def _include_sequence_is_additive_owned_growth(

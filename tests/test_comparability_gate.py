@@ -595,6 +595,20 @@ def test_include_sequence_additive_owned_growth_false_when_sys_bucket_not_traili
     assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
 
 
+def test_include_sequence_additive_owned_growth_false_for_unchanged_delimiterless_slot():
+    # Codex review, PR #641 follow-up (eleventh P2): a malformed slot with
+    # NO ":" delimiter at all, e.g. the bare string "0", still passes
+    # slot.partition(":")[0] == str(i) trivially ("0".partition(":")[0] is
+    # "0" itself). If that slot happens to be byte-identical on both
+    # sides, the per-slot loop's own equality short-circuit never
+    # re-examines it, so it could ride alongside a genuinely-growing slot
+    # 1 and still return additive-safe. Confirmed by direct repro before
+    # any fix: this was accepted as safe growth.
+    old = json.dumps(["0", _hdrs_slot(1, [("a.h", "a.h")])])
+    new = json.dumps(["0", _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])])
+    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+
+
 def test_include_sequence_additive_owned_growth_declines_when_scope_new_headers_is_none():
     # Codex review, PR #641 follow-up (ninth P1): a shape-valid owned-pair
     # growth must still decline when the caller has no verified set of
