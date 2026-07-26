@@ -478,3 +478,20 @@ class TestDetectPackConflicts:
             explicit_overrides={"exit_code_scheme": "severity"},
         )
         assert result is None
+
+    def test_non_string_assignment_key_is_rejected(self):
+        # Codex review: an untyped pack adapter supplying a mixed-type
+        # assignments mapping (e.g. {"exit_code_scheme": "severity", 2:
+        # "legacy"}) previously reached sorted(by_field) unvalidated,
+        # crashing with "TypeError: '<' not supported between instances of
+        # 'int' and 'str'" instead of the deliberate PackConflictError this
+        # function exists to raise.
+        with pytest.raises(TypeError, match="detect_pack_conflicts"):
+            detect_pack_conflicts(
+                [
+                    (
+                        _pack("rust_c_ffi"),
+                        {"exit_code_scheme": "severity", 2: "legacy"},  # type: ignore[dict-item]
+                    ),
+                ]
+            )

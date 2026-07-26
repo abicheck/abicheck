@@ -374,6 +374,17 @@ def detect_pack_conflicts(
     by_field: dict[str, list[tuple[ImmutableIdentity, Hashable]]] = {}
     for identity, assignments in pack_assignments:
         for field_name, value in assignments.items():
+            # A non-str field/ChangeKind-slug key (e.g. an untyped pack
+            # adapter supplying {2: "legacy"}) previously reached
+            # sorted(by_field) unvalidated below, crashing with "TypeError:
+            # '<' not supported between instances of 'int' and 'str'"
+            # instead of the deliberate PackConflictError this function
+            # exists to raise (Codex review).
+            if not isinstance(field_name, str):
+                raise TypeError(
+                    "detect_pack_conflicts: every assignment key must be a "
+                    f"str, not {field_name!r} (from pack {identity!r})."
+                )
             by_field.setdefault(field_name, []).append((identity, value))
 
     for field_name in sorted(by_field):
