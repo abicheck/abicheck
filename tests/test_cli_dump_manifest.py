@@ -202,6 +202,38 @@ def test_dry_run_manifest_only_no_so_path_succeeds(tmp_path, runner):
     assert "no artifact (SO_PATH)" in result.output
 
 
+def test_dry_run_manifest_reports_public_headers_and_tu_includes(tmp_path, runner):
+    """The removed standalone `plan --dump-manifest` command printed every
+    public_header_paths/public_header_dirs entry and each TU's
+    forced_includes/includes (with project_owned) -- the dry-run replacement
+    must not silently drop those, since they're exactly what a user checks
+    path resolution against before a real extraction (Codex review)."""
+    (tmp_path / "a.h").write_text("int f(void);\n")
+    (tmp_path / "pub.h").write_text("int g(void);\n")
+    manifest = _write_manifest(
+        tmp_path,
+        "roots: [a.h]\n"
+        "public_header_paths: [pub.h]\n"
+        "public_header_dirs: [.]\n"
+        "translation_units:\n"
+        "  - name: main\n"
+        "    forced_includes: [a.h]\n"
+        "    includes:\n"
+        "      - path: a.h\n"
+        "        project_owned: true\n",
+    )
+    result = runner.invoke(
+        main, ["dump", "--dump-manifest", str(manifest), "--dry-run"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "public_header_paths:" in result.output
+    assert str(tmp_path / "pub.h") in result.output
+    assert "public_header_dirs:" in result.output
+    assert "forced_includes:" in result.output
+    assert "includes:" in result.output
+    assert "[project_owned]" in result.output
+
+
 def test_dry_run_manifest_malformed_yaml_rejected(tmp_path, runner):
     manifest = _write_manifest(tmp_path, "roots: [unterminated\n")
     result = runner.invoke(

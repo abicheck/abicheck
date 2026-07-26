@@ -690,21 +690,44 @@ def render_dump_dry_run(
             l2_frontend_ran=False,
         )
         scope_fingerprint = contract.scope_fingerprint if contract is not None else None
-        result.add(
-            "Multi-TU manifest (--dump-manifest)",
+        manifest_lines = [
             f"compiler: {dump_manifest.compiler}",
             f"target: {dump_manifest.target or '(none)'}",
             f"frontend_context: {dump_manifest.frontend_context}",
             f"roots: {', '.join(str(p) for p in dump_manifest.roots)}",
-            *(
+        ]
+        if dump_manifest.public_header_paths:
+            manifest_lines.append(
+                "public_header_paths: "
+                + ", ".join(str(p) for p in dump_manifest.public_header_paths)
+            )
+        if dump_manifest.public_header_dirs:
+            manifest_lines.append(
+                "public_header_dirs: "
+                + ", ".join(str(p) for p in dump_manifest.public_header_dirs)
+            )
+        for tu in dump_manifest.translation_units:
+            manifest_lines.append(
                 f"  tu: {tu.name} (required={tu.required}, "
                 f"contributes_to_abi={tu.contributes_to_abi})"
-                for tu in dump_manifest.translation_units
-            ),
-            f"scope_fingerprint: {scope_fingerprint or '(none)'}",
+            )
+            if tu.forced_includes:
+                manifest_lines.append(
+                    "      forced_includes: "
+                    + ", ".join(str(p) for p in tu.forced_includes)
+                )
+            if tu.includes:
+                inc_repr = ", ".join(
+                    f"{inc.path}{' [project_owned]' if inc.project_owned else ''}"
+                    for inc in tu.includes
+                )
+                manifest_lines.append(f"      includes: {inc_repr}")
+        manifest_lines.append(f"scope_fingerprint: {scope_fingerprint or '(none)'}")
+        manifest_lines.append(
             "profile_fingerprint: (not computed -- requires a real L2 "
-            "extraction; run without --dry-run)",
+            "extraction; run without --dry-run)"
         )
+        result.add("Multi-TU manifest (--dump-manifest)", *manifest_lines)
     result.add(
         "Resolved depth and source scope",
         f"requested depth: {depth or '(auto)'}",
