@@ -914,7 +914,20 @@ def _attach_header_graph(
         public_dir_paths=[str(p) for p in (public_header_dirs or [])],
         header_paths=[str(p) for p in resolved_headers],
     )
-    if header_graph_includes and resolved_headers:
+    if header_graph_includes and resolved_headers and cc.frontend_context == "host":
+        # `ClangHeaderIncludeExtractor` drives a plain `clang -M` per header
+        # with no `-fsycl`/host-vs-device concept at all (unlike the AST pass
+        # just above, which threads `frontend_context` through and is
+        # validated against a real DPC++ capture, see sycl_context.py) --
+        # for a non-host request it would silently resolve `#ifdef
+        # __SYCL_DEVICE_ONLY__`-style guards as host and attach host-only
+        # include edges to a device snapshot's graph (Codex review). Skipping
+        # it entirely leaves the include-graph pass honestly "not collected"
+        # for this snapshot (`_include_graph_covered` false, since neither
+        # `extractor_passes` nor `degraded_passes` gets stamped) rather than
+        # confidently wrong -- the same host/device tradeoff already made for
+        # DWARF layout backfill (dumper._dump_elf) and the clang layout tool.
+        #
         # Resolve the same clang driver `_clang_header_dump` above used
         # (honoring `--gcc-path`/`--gcc-prefix`) rather than defaulting to
         # the bare "clang++" — otherwise a hermetic/cross toolchain selected

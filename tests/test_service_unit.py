@@ -2758,6 +2758,92 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         assert calls == [(False, False)]
 
 
+class TestAttachHeaderGraphDeviceContext:
+    """Codex review: ClangHeaderIncludeExtractor drives a plain `clang -M`
+    per header with no frontend_context/-fsycl concept at all (unlike the
+    AST pass in the same function, which threads frontend_context through
+    and is validated against a real DPC++ capture) -- for a device-context
+    request it would silently resolve `__SYCL_DEVICE_ONLY__`-style guards as
+    host and attach host-only include edges to a device snapshot's graph.
+    Must be skipped entirely, not just given the wrong flags, so the
+    include-graph pass stays honestly "not collected" rather than
+    confidently wrong."""
+
+    def test_device_context_skips_include_extractor(self, tmp_path):
+        from abicheck.service import _attach_header_graph
+        from abicheck.service_scan import CompileContext
+
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+        with patch(
+            "abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor"
+        ) as mock_extractor:
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=True,
+                headers=[header],
+                includes=[],
+                lang="c",
+                compile=CompileContext(frontend_context="device"),
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        mock_extractor.assert_not_called()
+
+    def test_host_context_still_uses_include_extractor(self, tmp_path):
+        from abicheck.service import _attach_header_graph
+        from abicheck.service_scan import CompileContext
+
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+        with patch(
+            "abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor"
+        ) as mock_extractor:
+            mock_extractor.return_value.extract.return_value = ({}, [])
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=True,
+                headers=[header],
+                includes=[],
+                lang="c",
+                compile=CompileContext(frontend_context="host"),
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        mock_extractor.return_value.extract.assert_called_once()
+
+    def test_no_compile_context_defaults_to_host_and_still_uses_extractor(
+        self, tmp_path
+    ):
+        """compile=None -- the default CompileContext() -- must behave the
+        same as an explicit host request, not be silently skipped."""
+        from abicheck.service import _attach_header_graph
+
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+        with patch(
+            "abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor"
+        ) as mock_extractor:
+            mock_extractor.return_value.extract.return_value = ({}, [])
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=True,
+                headers=[header],
+                includes=[],
+                lang="c",
+                compile=None,
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        mock_extractor.return_value.extract.assert_called_once()
+
+
 class TestCliNativeBinaryHeaderWiring:
     """CLI _dump_native_binary must forward headers to service._dump_pe/_dump_macho."""
 

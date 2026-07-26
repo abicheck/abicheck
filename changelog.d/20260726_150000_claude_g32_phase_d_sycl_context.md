@@ -234,3 +234,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   invocation at all, so its kind can't be ruled out in advance) — a
   definitely-non-matching document is never parsed, not even transiently
   (Codex review).
+- `service._attach_header_graph`'s per-header `clang -M` include-closure
+  pass (`buildsource.header_graph.ClangHeaderIncludeExtractor`) had no
+  `frontend_context`/SYCL concept at all — unlike the semantic AST pass in
+  the same function, which already threads `frontend_context` through. A
+  device-context dump's include pass would therefore resolve
+  `__SYCL_DEVICE_ONLY__`-style guards as host and attach host-only include
+  edges to a device snapshot's graph. Rather than guess at unvalidated
+  `-fsycl`/`-fsycl-is-device` flags for a one-shot `-M` invocation (no real
+  captured evidence exists for how that behaves, unlike the AST decoder's
+  real DPC++ capture), the include pass is now skipped entirely for a
+  non-host `frontend_context` — the same host/device tradeoff already made
+  for DWARF layout backfill (`dumper._dump_elf`) and the clang layout tool:
+  honestly "not collected" rather than confidently wrong (Codex review).
