@@ -129,10 +129,28 @@ def test_to_dict_keys() -> None:
     d = rec.to_dict()
     assert d == {
         "version_bump": "major",
+        "possible_impact": "major",
         "soname_action": "bump_required",
         "rationale": "because",
         "state": "actionable",
     }
+
+
+def test_possible_impact_survives_when_version_bump_is_nulled() -> None:
+    """``possible_impact`` (schema 2.22) is the machine-readable escape hatch
+    for "what would abicheck recommend if this were confirmed" — distinct
+    from ``version_bump``, which is deliberately withheld (``null``) when
+    ``state`` is ``UNAVAILABLE`` so automation can't blindly act on it."""
+    rec = ReleaseRecommendation(
+        SemverBump.MAJOR,
+        SonameAction.NOT_DETERMINED,
+        "because",
+        state=ReleaseRecommendationState.UNAVAILABLE,
+    )
+    d = rec.to_dict()
+    assert d["version_bump"] is None
+    assert d["possible_impact"] == "major"
+    assert d["state"] == "unavailable"
 
 
 def test_headline_mentions_soname_only_when_relevant() -> None:
@@ -178,10 +196,12 @@ def test_json_output_always_includes_recommendation() -> None:
     payload = json.loads(to_json(result))
     assert "release_recommendation" in payload
     rec = payload["release_recommendation"]
-    assert rec["version_bump"] == "major"  # b was removed → breaking
     # This pair is hand-built with no ELF/DWARF/PE/Mach-O metadata at all, so
-    # the SONAME action is correctly "not_determined" (see
-    # TestBinaryEvidenceGating below) — this test only asserts presence/shape.
+    # state is "unavailable" and version_bump is null (schema 2.20) even
+    # though `b` was removed and rationale still calls out a likely major —
+    # see TestBinaryEvidenceGating below — this test only asserts presence/shape.
+    assert rec["version_bump"] is None
+    assert rec["state"] == "unavailable"
     assert rec["soname_action"] in {
         "bump_required",
         "bump_missing",
@@ -213,7 +233,12 @@ def test_leaf_json_also_includes_recommendation() -> None:
     new = AbiSnapshot(library="libfoo.so", version="2.0", functions=[_fn("a")])
     result = compare(old, new)
     payload = json.loads(to_json(result, report_mode="leaf"))
-    assert payload["release_recommendation"]["version_bump"] == "major"
+    rec = payload["release_recommendation"]
+    # Hand-built pair, no binary evidence → state "unavailable", version_bump
+    # null (schema 2.20); this test only asserts the key survives report_mode.
+    assert "version_bump" in rec
+    assert rec["version_bump"] is None
+    assert rec["state"] == "unavailable"
 
 
 def test_leaf_markdown_honors_recommendation_flag() -> None:

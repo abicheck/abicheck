@@ -478,6 +478,123 @@ Once a root command genuinely clears the bar above, pick the right home:
   can be slotted into CRITICAL/HIGH without restructuring, but there is
   only one maintainer today — don't read the tiering as "these are reviewed
   by different people," it isn't, yet.
+- **Toolchain-profile compiler-family rendering — audited, `args` trust
+  boundary hardened; the `-stdlib=`/`--target=` "fix" itself was wrong and
+  has been reverted.** An external audit found `run_plan.py`'s
+  `_compose_gcc_options()` composing `-stdlib=`/`--target=` unconditionally
+  for any `profiles.<id>.compile` overlay, even when
+  `compile.compiler_family: gcc` — both are Clang-driver-only spellings a
+  real GCC binary rejects (confirmed against GCC 14.2), so an early pass
+  dropped both whenever `compiler_family` resolved to a GCC family name. A
+  later review round found that fix backwards: the composed string this
+  function returns is **never actually fed to a literal GCC binary
+  anywhere in this pipeline** — `--ast-frontend` only has
+  `auto`/`castxml`/`clang`/`hybrid` (no `gcc`); castxml's own frontend is
+  always its internal bundled Clang (`--castxml-cc-<id>` selects an
+  *emulation* mode, not a literal execution path); and the direct-clang
+  backend's `_resolve_clang_bin` (`dumper_clang.py`) explicitly rejects a
+  `gcc-path` that isn't clang-family and falls back to host
+  `clang`/`clang++`. Since the real consumer is always Clang, dropping
+  `--target=` actively broke cross-compilation-target correctness for the
+  direct-clang backend — it was the *only* signal available there to steer
+  parsing away from the host architecture (no "probe the real compiler"
+  auto-discovery step exists on that path the way castxml has one), so a
+  GCC-family profile with an explicit `target:` would silently have its
+  headers parsed for the runner's architecture instead. Reverted:
+  `_compose_gcc_options()` emits `-stdlib=`/`--target=` unconditionally
+  again, same as before the original audit, with both the change and the
+  reasoning for reverting it recorded in the function's own docstring so a
+  future reader doesn't rediscover and re-"fix" the same false positive.
+  The same original audit flagged a real trust-boundary gap in
+  `profiles.<id>.compile.args`, which is unaffected by this revert and
+  stays fixed: the existing whitespace-
+  smuggling check (`_safe_profile_atom`) rejected one YAML scalar expanding
+  into multiple argv tokens, but not a single, whitespace-free dangerous
+  atom. `_DANGEROUS_ARG_PREFIXES` (`project_targets.py`) now blocks four
+  families of these: direct code-loading flags (`-Xclang`, `-load`,
+  `-fplugin=`, `-fpass-plugin=`), file/argv re-expansion (`@response-file`,
+  Clang's `--config`/`--config=`), driver command-line substitution
+  (`-specs=`/`--specs=`, `-wrapper`), and — added across two follow-up
+  review rounds on the same PR, since each is the same underlying
+  "opaque subprocess-forwarding" mechanism as the others — GCC's
+  `-Wa,`/`-Wp,`/`-Wl,` (comma-joined payload passed straight to the
+  assembler/preprocessor/linker; `-Wp,-fplugin=./evil.so` reaches cc1 the
+  same as a bare `-fplugin=`, `-Wl,-plugin=./evil.dso` loads an LTO linker
+  plugin) and Clang's `-Xpreprocessor`/`-Xassembler`/`-Xlinker`
+  (separate-argument equivalent of `-Xclang`). A third review round found a
+  deeper issue than another missing flag spelling: every `compile.*` atom
+  (not just `args`) now also rejects quote (`'`/`"`) and backslash (`\`)
+  characters, since `_compose_gcc_options` space-joins every field into one
+  string that `dumper.py`'s `--gcc-options` handling later re-splits with
+  `shlex.split()` — an atom like `"'-fplugin=./evil.so'"` starts with a
+  quote, not `-fplugin=`, so the prefix denylist alone accepted it, but
+  POSIX shlex quote-removal reconstitutes the exact blocked flag on
+  re-split (confirmed with an actual `shlex.split()` round-trip). Two more
+  review rounds each found a flag real for the mechanism it names but
+  empirically NOT exploitable through abicheck's actual pipeline —
+  verified rather than taken on faith, and blocked anyway since doing so
+  is free: `--castxml-cc-` (a second occurrence naively looks like it
+  could replace the trusted `--castxml-cc-<id> <path>` pair
+  `dumper_ast_config.py` composes ahead of `args`, but real castxml
+  0.6.3 hard-rejects any repeated `--castxml-cc-*` occurrence at
+  argv-parse time instead of silently substituting the compiler); and
+  `-B<dir>`/`-B <dir>` (GCC's compiler-component search path override
+  really does let a planted `cc1`/`cc1plus` run instead of the real one,
+  confirmed against real GCC — but every consumer of this composed
+  string is Clang, not GCC, and Clang re-execs itself via `-cc1` rather
+  than spawning a separate, `-B`-discoverable one; confirmed neither
+  castxml's internal bundled Clang nor the direct `--ast-frontend clang`
+  backend ran a planted `cc1` with `-B` set). A fifth review round found a
+  flag family that IS actually exploitable through this pipeline, unlike
+  the two immediately above: clang-cl's (Clang's MSVC-compatible driver
+  mode — reachable via a `compile.binding` whose path stem contains
+  "clang", e.g. `clang-cl`/`clang-cl.exe`, which
+  `dumper_clang._is_clang_family_binary` recognizes as clang-family)
+  `/clang:<arg>` escape hatch forwards an argument straight to the
+  underlying clang driver, bypassing clang-cl's MSVC-shaped option parsing
+  entirely — empirically confirmed exploitable: `clang
+  --driver-mode=cl "/clang:-fplugin=./evil.so" -c t.h` really does load and
+  run the planted plugin. `/link <options>` (clang-cl's documented
+  "forward options to the linker") is blocked alongside it on the same
+  LTO-linker-plugin grounds as the already-blocked `-Wl,`, without a
+  from-scratch empirical repro of that specific sub-case. A sixth review
+  round found a different shape of finding again: `-cc1`/`-cc1as`, Clang's
+  internal frontend mode, only activates when `-cc1`/`-cc1as` is literally
+  the *first* argument after the program name (confirmed empirically:
+  `-cc1` anywhere else is rejected as "unknown argument", including right
+  after a leading `-I`) — but `dumper.py`'s `_build_clang_header_command`
+  builds argv as `[cc_bin, *-I dirs, --sysroot, -nostdinc, *gcc_options
+  tokens, ...]`, so a scan with no `extra_includes`/`sysroot`/`nostdinc`
+  lets a leading `-cc1` in `compile.args` genuinely land in that
+  first-argument slot. Once in cc1 mode, `-load`/`-fpass-plugin=` were
+  already blocked, but cc1 mode exposes an entirely different, much larger
+  argument namespace this denylist was never designed to enumerate — Codex
+  found `-fcas-plugin-path` (a cc1-only flag not present in every Clang
+  build) doing the identical thing. Rejected the mode switch itself rather
+  than chasing individual cc1-only flags, the same reasoning as `--config`.
+  This denylist is necessarily reactive to the delivery *mechanism*, not exhaustive over
+  every dangerous flag a mechanism could carry — a real fix for the
+  whack-a-mole shape of this (an allowlist of known-safe ABI flags instead
+  of a denylist of known-dangerous ones) was suggested during review but
+  deliberately not done here: `args` is documented as a general escape
+  hatch for ABI-relevant flags this codebase cannot enumerate a priori
+  (GCC/Clang/MSVC each have their own vocabulary), and a strict allowlist
+  would need that vocabulary built out first — its own scoped project, not
+  a reactive expansion of this fix. (A fourth review round briefly caught a
+  correctness gap in a since-reverted sentinel the family-aware
+  `_compose_gcc_options()` fix needed — moot now that the fix itself is
+  reverted, see above; not detailed here since it no longer applies to any
+  code that ships.) Still **not** implemented, and out of
+  scope for that fix (each needs its own
+  scoped design, not a drive-by extension of the same narrow correction):
+  a real toolchain-identity probe that validates a resolved `binding`'s
+  actual compiler family/version/target against the profile's declared
+  constraints (`compiler_version` is still parsed but never checked against
+  anything); a profile-specific AST frontend (there is still only one
+  global `--ast-frontend`); and a genuine family-specific argv resolver —
+  in particular MSVC `/std:`/`/D` spellings, which this fix does not
+  attempt (no `compiler_family: msvc` caller/test exists yet to validate
+  against, and a wrong guess here is worse than the pre-existing gap).
 - **Deferred entirely, not attempted this pass** (heavier structural
   changes, each needing its own scoped design rather than a drive-by
   addition):
@@ -497,6 +614,98 @@ Once a root command genuinely clears the bar above, pick the right home:
     a broad task suite plus a scoring/leaderboard story, which should grow
     from real usage of the one-task harness rather than being speculatively
     built out now.
+- **Evidence-provider model — investigated, found not to reproduce as
+  described; no fix applied.** A status-review follow-up asked whether
+  `evidence_status_for_result`'s report-level downgrade (kind-level
+  `ARTIFACT_PROVEN` → `UNATTRIBUTED` only when `DiffResult.evidence_tiers`
+  is header-only for the *whole* comparison) can let an individual
+  header-derived `BREAKING_KINDS` finding read as artifact-proven merely
+  because *some other, unrelated* part of the same report had binary
+  evidence. Traced this for the highest-stakes family it could apply to —
+  layout findings (`TYPE_SIZE_CHANGED`/`TYPE_ALIGNMENT_CHANGED`,
+  `diff_types.py`) — and it does not hold up: (1) the direct-clang L2
+  backend's `RecordType.size_bits`/`alignment_bits` are populated **only**
+  when `dumper_layout_backfill.backfill_dwarf_layout()` actually
+  corroborates them against real DWARF (`model.py`'s own
+  `dwarf_layout_coherence` docstring) — with no DWARF to backfill against,
+  those fields stay `None` and `_append_type_size_and_alignment_changes`'s
+  own `is not None` guard means no finding is even emitted, so an
+  "unconfirmed clang-derived layout finding" cannot occur; (2) the castxml
+  backend computes struct layout itself, via its own bundled real compiler
+  targeting the resolved ABI — `model.py` already documents this as
+  deliberately treated as sufficient L2 evidence ("trivially self-consistent
+  by construction", not needing DWARF corroboration), a prior, intentional
+  design decision this pass would have to *overturn*, not merely patch.
+  The one place this class of risk is genuinely live is exactly the
+  already-tracked toolchain-identity-probe gap above (castxml/clang invoked
+  with compiler/ABI flags that don't match the real build) — not a separate
+  evidence-status bug. A **real** per-finding provider model (recording,
+  per `Change`, which of L0–L5 actually produced/corroborated it) would
+  need new provenance plumbing through all ~45 `Change(...)` construction
+  sites across `diff_*.py`/`buildsource/*.py`, each individually verified
+  against the FP-rate/mutation-score gates — a multi-day project on its
+  own, not attempted here.
+- **Type reachability (direct vs. transitive stdlib references) — computed
+  and wired into `diff_types.py`'s RecordType-based detectors; enum/typedef
+  paths remain unwired.** `abicheck/type_reachability.py`
+  (`directly_referenced_stdlib_types()`) computes, from a snapshot alone,
+  which `std::`/`__gnu_cxx::`/etc. record types are directly referenced by
+  a non-stdlib function's signature or a non-stdlib type's own field — as
+  opposed to only reachable via deep template-instantiation internals
+  (`std::string::_Alloc_hider`, `std::_Rb_tree_node_base`) that
+  `is_non_abi_surface_type`'s existing whole-name-prefix filter already
+  correctly excludes as toolchain-artifact churn either way. A Codex review
+  round found and fixed a real correctness gap in the computational claim:
+  candidate identification originally matched only `RecordType.name`, but
+  castxml/direct-clang populate the bare leaf there and the
+  namespace-qualified spelling separately in `qualified_name` (`model.py`,
+  `dumper_clang.py`) — so `name` alone never carries a `std::` prefix for
+  those two backends and the helper silently found nothing on any real
+  castxml/clang-produced snapshot. Fixed by identifying candidates via
+  `qualified_name or name`. That fix alone was still insufficient, confirmed
+  by dumping a real compiled `std::vector<int>` parameter end to end:
+  `Function.return_type`/`Param.type` spell the outer type **bare**
+  (`"vector<int, std::allocator<int> >"`) even when the matching
+  `RecordType`'s identity is fully qualified
+  (`"std::vector<int, std::allocator<int> >"`), across *all three* backends
+  (DWARF bakes the qualified form straight into `name` with no separate
+  field; castxml/clang keep `name` bare and `qualified_name` separate) — so
+  a pure full-identity substring match still couldn't connect the two.
+  Fixed by also generating a namespace-prefix-stripped spelling per
+  candidate and matching against either form. **Still not fixed, and out of
+  scope for that fix**: a signature spelled with a typedef alias
+  (`std::string`, `std::wstring`, ...) names the alias, not the real
+  underlying class (`std::basic_string<char, ...>`) that owns the
+  `RecordType` entry, and no current model field maps one back to the
+  other — resolving that needs a dedicated typedef-alias-resolution layer
+  (walking `snapshot.typedefs`), a separate scoped project.
+
+  **Wiring (this pass):** `diff_types.py`'s single choke-point gate,
+  `_is_abi_surface_type()`, now accepts a `directly_referenced` set (built
+  once per detector via `_directly_referenced(old, new)`) and un-filters a
+  std:: record that set names, instead of blanket-filtering every std::
+  record regardless of direct use. Because every RecordType-based
+  struct/union/field/kind/reserved detector in that file already shares this
+  one gate function, wiring it there once covers all of them uniformly —
+  not 9 independent, individually-drifting call sites. While wiring this in,
+  the FP-rate corpus's own new cases (`stdlib-direct-reference` category)
+  surfaced a second, *pre-existing* correctness gap in the gate's std::
+  check itself (independent of `directly_referenced`): it filtered using
+  `_is_non_abi_surface_type(t.name, ...)`, i.e. bare `t.name` only, the exact
+  same bare-vs-qualified split as the `type_reachability.py` fix above — so
+  a real castxml/clang-produced std:: record (bare `name`, qualified
+  `qualified_name`) was **never actually filtered as std:: at all**,
+  independent of whether anything referenced it. Fixed in the same gate by
+  keying the std:: prefix check on `qualified_name or name` (the anonymous-
+  type-marker half of the check still uses bare `name`, unaffected).
+  `diff_platform.py`/`diff_symbols.py`/`diff_vtable_layout.py`/
+  `diff_stdlib_impl.py`/`diff_layout.py`/`diff_filtering.py`/
+  `diff_type_spellings.py`, plus `diff_types.py`'s own enum/typedef paths
+  (which call `is_non_abi_surface_type`/`is_abi_surface_type_name` directly
+  on enum/typedef names, not through `_is_abi_surface_type`), remain
+  unwired and carry the identical bare-name gap — each needs its own
+  individually-verified follow-up (FP-rate/mutation-score gates), not a
+  drive-by extension of this pass's RecordType-scoped fix.
 
 ## What NOT to do
 

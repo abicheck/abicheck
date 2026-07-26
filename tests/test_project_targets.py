@@ -1605,6 +1605,128 @@ def test_profile_compile_overlay_rejects_whitespace_injection_in_abi_macros() ->
         )
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("standard", "gnu++17'"),
+        ("stdlib", 'libstdc++"'),
+        ("target", "x86_64\\-linux-gnu"),
+    ],
+)
+def test_profile_compile_overlay_rejects_quote_backslash_in_scalar_fields(
+    field: str, value: str
+) -> None:
+    """A quote/backslash survives the whitespace check but is not inert: the
+    composed compile_gcc_options string is later re-split with shlex, which
+    can reconstitute a different, unvalidated token -- and since shlex
+    parses the whole joined string in one pass, an unbalanced quote in one
+    atom can shift where token boundaries fall in a NEIGHBORING atom too, so
+    this is checked for every compile.* field, not just args (Codex
+    review)."""
+    with pytest.raises(ValueError, match="quote/backslash"):
+        ProjectTargetsConfig.from_dict(
+            {"profiles": {"linux": {"compile": {field: value}}}}
+        )
+
+
+def test_profile_compile_overlay_rejects_quote_backslash_in_abi_macros() -> None:
+    with pytest.raises(ValueError, match="quote/backslash"):
+        ProjectTargetsConfig.from_dict(
+            {
+                "profiles": {
+                    "linux": {"compile": {"abi_macros": {"FOO": "'1'"}}},
+                }
+            }
+        )
+
+
+def test_profile_compile_overlay_rejects_quoted_dangerous_arg_shlex_round_trip() -> (
+    None
+):
+    """The exact bypass Codex demonstrated: compile.args:
+    ["'-fplugin=./evil.so'"] starts with a quote, not `-fplugin=`, so a raw
+    prefix check alone would accept it -- but shlex.split() (what
+    dumper.py's --gcc-options handling actually re-parses the composed
+    string with) strips the quotes and reconstitutes the exact blocked
+    flag."""
+    import shlex
+
+    smuggled = "'-fplugin=./evil.so'"
+    assert shlex.split(smuggled) == ["-fplugin=./evil.so"]  # confirms the bypass
+    with pytest.raises(ValueError, match="quote/backslash"):
+        ProjectTargetsConfig.from_dict(
+            {"profiles": {"linux": {"compile": {"args": [smuggled]}}}}
+        )
+
+
+@pytest.mark.parametrize(
+    "dangerous_arg",
+    [
+        "-Xclang",
+        "-load",
+        "-fplugin=./evil.so",
+        "-fplugin-arg-evil-key=value",
+        "-fpass-plugin=./evil.so",
+        "-specs=evil.specs",
+        "-specs",
+        "--specs=evil.specs",
+        "--specs",
+        "-wrapper",
+        "@evil-response-file",
+        "--config",
+        "--config=evil.cfg",
+        "--config-system-dir=/tmp/evil",
+        "--config-user-dir=/tmp/evil",
+        "-Xpreprocessor",
+        "-Xassembler",
+        "-Xlinker",
+        "-Wp,-fplugin=./evil.so",
+        "-Wa,--defsym,evil=1",
+        "-Wl,-plugin=./evil.dso",
+        "-Wl,--plugin=./evil.dso",
+        "--castxml-cc-gnu",
+        "--castxml-cc-gnu-c",
+        "--castxml-cc-msvc",
+        "-B./tools/",
+        "-B",
+        "-B/some/dir",
+        "/clang:-fplugin=./evil.so",
+        "/link",
+        "-cc1",
+        "-cc1as",
+    ],
+)
+def test_profile_compile_overlay_rejects_dangerous_args(dangerous_arg: str) -> None:
+    """A single-atom (no whitespace) flag that reaches a compiler's own
+    plugin/response-file/spec-substitution machinery must still be rejected
+    -- the whitespace check alone lets each of these through since they need
+    no embedded space to smuggle executable configuration (P0 trust-boundary
+    audit)."""
+    with pytest.raises(ValueError, match="not allowed"):
+        ProjectTargetsConfig.from_dict(
+            {"profiles": {"linux": {"compile": {"args": [dangerous_arg]}}}}
+        )
+
+
+def test_profile_compile_overlay_allows_safe_args() -> None:
+    config = ProjectTargetsConfig.from_dict(
+        {"profiles": {"linux": {"compile": {"args": ["-fno-rtti", "-fno-exceptions"]}}}}
+    )
+    assert config.profiles["linux"].compile.args == ["-fno-rtti", "-fno-exceptions"]
+
+
+def test_profile_compile_overlay_dangerous_prefix_only_checked_on_args() -> None:
+    """The plugin/response-file denylist is scoped to ``args`` -- the escape
+    hatch appended to argv as standalone flags -- not to ``standard``/
+    ``stdlib``/``target``, which are always folded into a fixed ``-std=``/
+    ``-stdlib=``/``--target=`` prefix and so cannot stand alone as a flag
+    even if their value happens to look like one."""
+    config = ProjectTargetsConfig.from_dict(
+        {"profiles": {"linux": {"compile": {"standard": "-wrapper"}}}}
+    )
+    assert config.profiles["linux"].compile.standard == "-wrapper"
+
+
 def test_profile_compile_overlay_args_wrong_type_raises() -> None:
     with pytest.raises(ValueError, match="args must be a list of strings"):
         ProjectTargetsConfig.from_dict(

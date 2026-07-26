@@ -97,7 +97,7 @@ dicts can forward each field through with no renaming.
 | `bundle_members` | `kind: bundle` | Member target ids. |
 | `member_binary_patterns` | `kind: bundle` | Member target id → that member's own `binary_pattern`, so a caller can stage a member-binaries directory without re-reading `.abicheck.yml`. |
 | `compile_gcc_path` | this cell's profile declares `compile.binding` *and* `--toolchain-bindings` was given | That binding, resolved to an exact executable path — forwarded as `check-target`'s `gcc-path` input. Empty (field omitted) when the profile has no `compile:` overlay, declares no `binding`, or `--toolchain-bindings` was omitted/the binding wasn't found in it — a caller then falls back to its own global `gcc-path`. |
-| `compile_gcc_options` | this cell's profile's `compile` overlay sets any of `standard`/`stdlib`/`target`/`abi_macros`/`args` | Those axes composed into one space-joined extra-flags string (`-std=<standard> -stdlib=<stdlib> --target=<target> -D<macro>[=<value>] ... <args...>`, macros sorted by name, `args` appended verbatim last) — forwarded as `check-target`'s `gcc-options` input. |
+| `compile_gcc_options` | this cell's profile's `compile` overlay sets any of `standard`/`stdlib`/`target`/`abi_macros`/`args` | Those axes composed into one space-joined extra-flags string (`-std=<standard> -stdlib=<stdlib> --target=<target> -D<macro>[=<value>] ... <args...>`, macros sorted by name, `args` appended verbatim last) — forwarded as `check-target`'s `gcc-options` input. Not filtered by `compile.compiler_family`: the composed string is always consumed by a Clang-based frontend in this pipeline (castxml's internal bundled Clang, or the direct-clang backend), never a literal GCC binary, so `-stdlib=`/`--target=` are emitted regardless of the declared family — see `_compose_gcc_options`'s own docstring for why an earlier attempt to drop them for `compiler_family: gcc` was reverted. |
 
 **`profiles.<id>.compile` reaches the cell (P1 toolchain-profile audit).**
 [`project-targets-schema.md`'s `profiles:`](project-targets-schema.md#profiles)
@@ -106,10 +106,13 @@ consumer" its `binding` field's docs promised. `compiler_family`/
 `compiler_version` are validated shape-wise by `project validate`
 but **not** projected into `compile_gcc_path`/`compile_gcc_options` —
 `compiler_family` only selects a toolchain through `binding` (there is no
-separate "pick a family" flag to forward), and `compiler_version` is a
-*constraint* (e.g. `">=14.0,<15"`), not a value; verifying a resolved
-binding's actual version against it needs a real toolchain-identity probe,
-which stays out of this pure, no-subprocess module by design.
+separate "pick a family" flag to forward; the composed `compile_gcc_options`
+string is always consumed by a Clang-based frontend in this pipeline, never
+a literal GCC binary, so there is nothing correct for `compiler_family` to
+gate there), and `compiler_version` is a *constraint* (e.g. `">=14.0,<15"`),
+not a value; verifying a resolved binding's actual version against it needs
+a real toolchain-identity probe, which stays out of this pure, no-subprocess
+module by design.
 
 **No build-output paths are carried through.** `build-output.json` is used
 purely as an existence/membership oracle here — the candidate artifact a

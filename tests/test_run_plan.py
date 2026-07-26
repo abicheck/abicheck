@@ -33,12 +33,16 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.buildsource.build_output import BuildOutput, BuildOutputTarget
-from abicheck.buildsource.project_targets import ProjectTargetsConfig
+from abicheck.buildsource.project_targets import (
+    ProfileCompileSpec,
+    ProjectTargetsConfig,
+)
 from abicheck.buildsource.run_plan import (
     RUN_PLAN_KIND_BUNDLE,
     RUN_PLAN_KIND_TARGET,
     RunPlan,
     RunPlanCheck,
+    _compose_gcc_options,
     generate_run_plan,
     to_aggregate_manifest,
 )
@@ -741,6 +745,79 @@ class TestProfileCompileOverlayProjection:
         [check] = plan.checks
         assert check.compile_gcc_path == "/opt/gcc14/bin/g++"
         assert check.compile_gcc_options == "-std=gnu++20"
+
+
+class TestComposeGccOptionsNotFamilyAware:
+    """Regression guard for the revert documented in `_compose_gcc_options`'s
+    own docstring: a P0 audit round briefly dropped `-stdlib=`/`--target=`
+    for `compiler_family: gcc`, reasoning a real GCC binary rejects both
+    (true) -- but a later review round found the composed string is never
+    actually fed to a literal GCC binary anywhere in this pipeline (only
+    ever to Clang: castxml's internal frontend, or the direct-clang
+    backend's `_resolve_clang_bin`, which rejects a non-clang-family
+    `gcc-path` and falls back to host clang), and that dropping `--target=`
+    broke real cross-compilation-target correctness for the direct-clang
+    backend (no other signal steers it away from the host architecture).
+    Reverted; `compiler_family` must not affect this function's output."""
+
+    _compose = staticmethod(_compose_gcc_options)
+
+    def _spec(self, **kw: object) -> ProfileCompileSpec:
+        return ProfileCompileSpec(**kw)  # type: ignore[arg-type]
+
+    def test_gcc_family_still_emits_stdlib_and_target(self) -> None:
+        spec = self._spec(
+            compiler_family="gcc",
+            standard="gnu++17",
+            stdlib="libstdc++",
+            target="x86_64-linux-gnu",
+        )
+        assert self._compose(spec) == (
+            "-std=gnu++17 -stdlib=libstdc++ --target=x86_64-linux-gnu"
+        )
+
+    def test_clang_family_emits_stdlib_and_target(self) -> None:
+        spec = self._spec(
+            compiler_family="clang",
+            standard="gnu++20",
+            stdlib="libc++",
+            target="x86_64-linux-gnu",
+        )
+        assert self._compose(spec) == (
+            "-std=gnu++20 -stdlib=libc++ --target=x86_64-linux-gnu"
+        )
+
+    def test_unset_family_emits_stdlib_and_target(self) -> None:
+        spec = self._spec(
+            standard="gnu++17", stdlib="libstdc++", target="x86_64-linux-gnu"
+        )
+        assert self._compose(spec) == (
+            "-std=gnu++17 -stdlib=libstdc++ --target=x86_64-linux-gnu"
+        )
+
+    def test_gcc_family_still_emits_standard_macros_and_args(self) -> None:
+        spec = self._spec(
+            compiler_family="gcc",
+            standard="gnu++17",
+            stdlib="libstdc++",
+            abi_macros={"FOO": "1"},
+            args=["-fno-rtti"],
+        )
+        assert self._compose(spec) == (
+            "-std=gnu++17 -stdlib=libstdc++ -DFOO=1 -fno-rtti"
+        )
+
+    def test_no_fields_set_at_all_returns_empty_string(self) -> None:
+        spec = self._spec(compiler_family="gcc", binding="gcc14")
+        assert self._compose(spec) == ""
+
+    def test_gcc_family_target_only_still_emitted(self) -> None:
+        """The specific correctness case a review round caught: a
+        GCC-family profile with only `target:` set (used with the
+        direct-clang backend, which has no other way to steer parsing away
+        from the host architecture) must still emit --target=."""
+        spec = self._spec(compiler_family="gcc", target="aarch64-linux-gnu")
+        assert self._compose(spec) == "--target=aarch64-linux-gnu"
 
 
 class TestToolchainMatrixFixtureExample:

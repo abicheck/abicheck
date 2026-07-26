@@ -14,6 +14,7 @@ from abicheck.model import (
     EnumMember,
     EnumType,
     Function,
+    Param,
     RecordType,
     TypeField,
     Visibility,
@@ -56,6 +57,84 @@ def test_stdlib_type_filter_uses_elf_soname_for_runtime_snapshots() -> None:
     result = compare(old, new)
 
     assert ChangeKind.TYPE_SIZE_CHANGED in _kinds(result)
+
+
+def test_directly_referenced_stdlib_type_layout_change_is_breaking() -> None:
+    """Status-review item 3 (type_reachability.py wired into diff_types.py):
+    a public function taking a std:: type directly by value means the
+    library's own ABI genuinely depends on that type's layout -- unlike an
+    unreferenced std:: record, this must not be filtered as toolchain noise.
+    Mirrors the real castxml/DWARF shape (bare RecordType.name, "std::"
+    prefix only in qualified_name)."""
+    old = _snap(
+        functions=[
+            _pub_func(
+                "foo", "_Z3fooSt6vectorIiSaIiEE",
+                params=[Param(name="v", type="vector<int, std::allocator<int> >")],
+            )
+        ],
+        types=[
+            RecordType(
+                name="vector<int, std::allocator<int> >",
+                kind="class",
+                size_bits=192,
+                qualified_name="std::vector<int, std::allocator<int> >",
+            )
+        ],
+    )
+    new = _snap(
+        functions=[
+            _pub_func(
+                "foo", "_Z3fooSt6vectorIiSaIiEE",
+                params=[Param(name="v", type="vector<int, std::allocator<int> >")],
+            )
+        ],
+        types=[
+            RecordType(
+                name="vector<int, std::allocator<int> >",
+                kind="class",
+                size_bits=256,
+                qualified_name="std::vector<int, std::allocator<int> >",
+            )
+        ],
+    )
+
+    result = compare(old, new)
+
+    assert ChangeKind.TYPE_SIZE_CHANGED in _kinds(result)
+    assert result.verdict == Verdict.BREAKING
+
+
+def test_unreferenced_stdlib_type_layout_change_stays_filtered() -> None:
+    """Guard against over-un-filtering: a std:: RecordType present in the
+    snapshot but never named by any public declaration must stay filtered,
+    even though its identity (qualified_name) does carry a std:: prefix."""
+    old = _snap(
+        functions=[_pub_func("foo", "_Z3foov")],
+        types=[
+            RecordType(
+                name="vector<int, std::allocator<int> >",
+                kind="class",
+                size_bits=192,
+                qualified_name="std::vector<int, std::allocator<int> >",
+            )
+        ],
+    )
+    new = _snap(
+        functions=[_pub_func("foo", "_Z3foov")],
+        types=[
+            RecordType(
+                name="vector<int, std::allocator<int> >",
+                kind="class",
+                size_bits=256,
+                qualified_name="std::vector<int, std::allocator<int> >",
+            )
+        ],
+    )
+
+    result = compare(old, new)
+
+    assert ChangeKind.TYPE_SIZE_CHANGED not in _kinds(result)
 
 
 # ── Union field changes (2-3 refs each) ──────────────────────────────────

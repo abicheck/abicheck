@@ -52,10 +52,10 @@ With less input, abicheck degrades gracefully *down the staircase* rather than f
 
 ## Installation
 
-**Full installation (recommended)** — conda-forge bundles `abicheck` with `castxml` and a compiler, so header AST analysis (L2) works out of the box:
+**Full installation (recommended)** — conda-forge bundles `abicheck` with `castxml` as a run dependency, so header AST analysis (L2) is available without a separate `castxml` install. The feedstock does **not** pull in a C/C++ compiler as a run dependency, and its `castxml >=0.6.3` floor is looser than abicheck's own `>=0.6.11` version gate — pin `castxml>=0.6.11` explicitly, as shown below, so a fresh environment doesn't land a `castxml` build old enough for abicheck's own gate to then reject it:
 
 ```bash
-conda create -n abicheck -c conda-forge python=3.12 abicheck
+conda create -n abicheck -c conda-forge python=3.12 abicheck "castxml>=0.6.11"
 conda activate abicheck
 ```
 
@@ -65,7 +65,7 @@ conda activate abicheck
 pip install abicheck
 ```
 
-`pip install abicheck` does **not** install `castxml` or a compiler. Without them, abicheck still works in binary-only (L0) and, where the Python DWARF/PDB parsers apply, debug-info (L1) mode — it can also load and compare pre-built snapshots, and run every report format. For header AST analysis (L2) on a pip install, point `abicheck` at a separately managed, modern `castxml`/direct-Clang toolchain — **don't** `pip install castxml`: that installs the unmaintained legacy PyPI distribution (last released 0.4.5 in 2018), which abicheck's version gate rejects by default for an authoritative L2 scan.
+`pip install abicheck` does **not** install `castxml` or a compiler. Without them, abicheck still works in binary-only (L0) and, where the Python DWARF/PDB parsers apply, debug-info (L1) mode — it can also load and compare pre-built snapshots, and run every report format. For header AST analysis (L2) on a pip install, point `abicheck` at a separately managed, modern `castxml`/direct-Clang toolchain — **don't** `pip install castxml`: that installs the unmaintained legacy PyPI distribution (last released 0.4.5 in September 2022, with no bundled-Clang metadata at all), which abicheck's version gate rejects by default for an authoritative L2 scan.
 
 See [Getting Started](https://abicheck.github.io/abicheck/getting-started/) for per-platform setup and cross-compilation.
 

@@ -644,13 +644,46 @@ The recommendation is **policy-aware** (it honours `--policy` and
 | `COMPATIBLE` (quality only) | patch | no bump needed |
 
 In **JSON** output the recommendation is always present (no flag needed) under
-the `release_recommendation` key, so CI and agents can gate on it directly:
+the `release_recommendation` key, so CI and agents can gate on it — **check
+`state` first**, before ever reading `version_bump`:
 
 ```bash
 abicheck compare old.so new.so -H include/ --format json \
-  | jq -r '.release_recommendation | "\(.version_bump) (\(.soname_action))"'
-# major (bump_required)
+  | jq -r '.release_recommendation
+      | if .state == "actionable" then
+          "release: bump \(.version_bump), soname \(.soname_action)"
+        elif .state == "review" then
+          "needs human review: \(.rationale)"
+        else
+          "no confirmed evidence: \(.rationale)"
+        end'
+# release: bump major, soname bump_required
 ```
+
+The `elif`/`else` branches never read `.version_bump` — for `"review"` it's
+still a real value but unconfirmed against binary evidence, and for
+`"unavailable"` it's `null` (schema 2.20+); either way the branch that treats
+it as actionable is exactly the one this example skips.
+
+`state` is one of `actionable` (act on `version_bump`/`soname_action`
+directly), `review` (a source/API break was found but no binary evidence
+confirms a SONAME action either way — `version_bump` is still a real value,
+route to a human), or `unavailable` (abicheck had no binary evidence at all
+to back a confident bump — **`version_bump` is `null`**, not a
+plausible-looking string, so automation that reads `version_bump` without
+checking `state` first can silently treat a real, unconfirmed break as "no
+action needed" or crash on the unexpected `null`).
+
+`possible_impact` is always a non-null string — the bump abicheck would
+recommend if its evidence were sufficient to confirm one. It equals
+`version_bump` when `state` is `actionable`; for `review`/`unavailable` it is
+the machine-readable form of what `rationale` prose already says (e.g. sizing
+a human-review queue), **not** a substitute for checking `state` before
+acting — an automated release job must still gate on `version_bump`/`state`,
+never on `possible_impact` alone. `rationale` always explains what abicheck
+would still recommend even when `state` isn't `actionable`. See the
+compare-report [JSON Schema](../reference/schemas/v1/compare_report.schema.json)'s
+`release_recommendation` object for the full field contract.
 
 ---
 
