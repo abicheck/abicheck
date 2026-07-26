@@ -345,7 +345,16 @@ def _looks_like_itanium_encoding(rest: str) -> bool:
         # bare "_ZGV" is not a complete encoding either.
         return _operand_looks_valid(rest[2:])
     if rest[0] == "S" and len(rest) > 1 and (rest[1].isalnum() or rest[1] == "_"):
-        # substitution-abbreviated std:: name
+        # substitution-abbreviated std:: name. "St" specifically
+        # abbreviates the std:: NAMESPACE PREFIX only, not a complete
+        # substitution by itself -- it must be followed by an
+        # unqualified-name (e.g. "St9terminate" for std::terminate),
+        # unlike the other single-letter abbreviations (Sa/Sb/Sd/Si/So/Ss,
+        # each a complete named substitution on its own) or numbered
+        # back-references (S_, S0_, ...). A bare "_ZSt" previously passed
+        # this check with nothing after it (Codex review, fresh evidence).
+        if rest[1] == "t":
+            return len(rest) > 2
         return True
     # Two <operator-name> codes are not complete by themselves the way the
     # other 47 are: "cv" (conversion operator) requires a following

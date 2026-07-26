@@ -250,6 +250,21 @@ class TestNormalizeMangledName:
     def test_std_substitution_abbreviated_name_is_accepted(self) -> None:
         assert normalize_mangled_name("_ZSt3foo", None) == "_ZSt3foo"
 
+    def test_bare_std_namespace_prefix_without_name_is_rejected(self) -> None:
+        # Codex review, fresh evidence: "St" specifically abbreviates the
+        # std:: namespace prefix only, not a complete substitution by
+        # itself -- it must be followed by an unqualified-name. A bare
+        # "_ZSt" previously passed the substitution-abbreviation check
+        # with nothing after it.
+        assert normalize_mangled_name("_ZSt", "_ZSt") is None
+
+    def test_other_std_substitution_abbreviations_stay_accepted(self) -> None:
+        # Sa/Sb/Sd/Si/So/Ss (each a complete named substitution) and
+        # numbered back-references (S_) are unaffected by the "St"
+        # special-case -- they're complete on their own.
+        assert normalize_mangled_name("_ZSaIcE", None) == "_ZSaIcE"
+        assert normalize_mangled_name("_ZS_", None) == "_ZS_"
+
     def test_extern_c_bare_name_is_rejected(self) -> None:
         assert normalize_mangled_name("foo", "foo") is None
 
