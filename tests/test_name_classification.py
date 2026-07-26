@@ -98,6 +98,11 @@ def test_is_local_name_symbol_false(name: str) -> None:
         "_ZZNKSi1fEvE1x",  # std::istream
         "_ZZNKSo1fEvE1x",  # std::ostream
         "_ZZNKSd1fEvE1x",  # std::iostream
+        # Codex review, PR #641: libstdc++ debug mode's __gnu_debug::
+        # namespace is already a recognized stdlib/runtime implementation
+        # namespace elsewhere (_STDLIB_TYPE_NAMESPACE_PREFIXES); a local
+        # static in one of its functions must match here too.
+        "_ZZN11__gnu_debug6vectorIiSaIiEE9push_backERKiE1x",
     ],
 )
 def test_is_stdlib_local_name_symbol_true(name: str) -> None:

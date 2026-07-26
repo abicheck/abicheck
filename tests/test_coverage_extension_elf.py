@@ -512,6 +512,16 @@ class TestObjectAlignmentReduced:
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r), sym
 
+    # Codex review, PR #641: libstdc++ debug mode's __gnu_debug:: namespace
+    # is already recognized as a stdlib/runtime implementation namespace
+    # elsewhere (name_classification._STDLIB_TYPE_NAMESPACE_PREFIXES).
+    def test_gnu_debug_local_name_is_exempt(self):
+        sym = "_ZZN11__gnu_debug6vectorIiSaIiEE9push_backERKiE1x"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
+
     def test_real_mangled_data_object_still_fires(self):
         # The exemption is by RTTI prefix, not "looks mangled": a genuine
         # namespace-scoped global variable (_ZN…E, not _ZT*) is real data whose

@@ -152,10 +152,15 @@ LOCAL_NAME_PREFIX = "_ZZ"
 # ``std::allocator<int>::f() const`` mangles as ``_ZZNKSaIiE1fEvE1x``, where
 # ``Sa`` occupies the exact grammar position ``St`` would, so it was missed
 # entirely by the earlier version and left the alignment false positive live
-# for this common class of stdlib type.
+# for this common class of stdlib type. ``11__gnu_debug`` is included too
+# (Codex review, PR #641): libstdc++ debug mode (``_GLIBCXX_DEBUG``) wraps
+# containers in the ``__gnu_debug::`` namespace -- already recognized as a
+# stdlib/runtime implementation namespace elsewhere in this module (see
+# ``_STDLIB_TYPE_NAMESPACE_PREFIXES`` below) -- so a local static in one of
+# its functions must be recognized here too, the same way ``9__gnu_cxx`` is.
 _STDLIB_LOCAL_NAME_RE = re.compile(
     r"^_ZZN?[rVK]{0,3}[RO]?"
-    r"(?:St|Sa|Sb|Ss|Si|So|Sd|3std|9__gnu_cxx|10__cxxabiv1|7__cxx11)"
+    r"(?:St|Sa|Sb|Ss|Si|So|Sd|3std|9__gnu_cxx|11__gnu_debug|10__cxxabiv1|7__cxx11)"
 )
 
 # Length-prefixed Itanium namespace components (``<len><name>``) for the

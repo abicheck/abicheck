@@ -198,7 +198,7 @@ rejection case caught in a later review pass — see below),
 Full fast unit suite (19543 passed at this point / 30 skipped / 4 xfailed,
 `--cov-branch` 96–98% line/branch coverage on both touched modules), `mypy
 abicheck/`, and `ruff check abicheck/ tests/` all clean at this point in the
-review (see two more rounds of fixes below — 19556 passed is the true final
+review (see more rounds of fixes below — 19558 passed is the true final
 count).
 
 **Further refined after two more PR review passes** (`chatgpt-codex-connector`,
@@ -237,8 +237,29 @@ Both confirmed and fixed in the same PR, with new regression tests: a
 `library="libstdc++.so.6"` snapshot pair proving the alignment finding still
 fires when the runtime is the thing under test, and one parametrized case
 per standard-substitution code. Full fast unit suite (19556 passed / 30
-skipped / 4 xfailed), mypy/ruff clean after this revision too — this is the
-final state of the fix.
+skipped / 4 xfailed), mypy/ruff clean after this revision too.
+
+**A fifth review pass** (`chatgpt-codex-connector`) found one more gap in the
+same regex and one unrelated issue in this section's recommended workflow
+YAML:
+
+- `_STDLIB_LOCAL_NAME_RE` still missed libstdc++ debug mode
+  (`_GLIBCXX_DEBUG`)'s `__gnu_debug::` namespace (mangled as `11__gnu_debug`)
+  — already a recognized stdlib/runtime implementation namespace elsewhere
+  in `name_classification.py` (`_STDLIB_TYPE_NAMESPACE_PREFIXES`), so a local
+  static in one of its functions still produced the false positive. Added.
+- The recommended workflow above grants `security-events: write` but
+  referenced `actions/checkout@v4` and `github/codeql-action/upload-sarif@v3`
+  by mutable tag — this repo's own convention (`AGENTS.md`) is to pin every
+  action running with an elevated permission to a full commit SHA, so a
+  repointed/compromised tag can't run with that token. Fixed by reusing this
+  repo's own already-audited pins for both (the same ones `action.yml` and
+  `.github/workflows/ci.yml`/`security.yml` use).
+
+Fixed with one more regression test (`test_gnu_debug_local_name_is_exempt`)
+and the two `uses:` lines below now SHA-pinned. Full fast unit suite (19558
+passed / 30 skipped / 4 xfailed), mypy/ruff clean — this is the final state
+of the fix.
 
 ## CI / GitHub Action integration — verified end-to-end
 
@@ -277,18 +298,25 @@ castxml-having runner was not available to test directly here, but
 `ast-frontend: clang` is confirmed as the correct fallback for a
 clang-only/no-castxml runner, which this whole validation pass ran under):
 
-Two corrections from an initial draft of this section, both caught in PR
-review (`chatgpt-codex-connector`) and confirmed against `action.yml`/
-`action/run.sh` before fixing: a bare `header:` applies that *one* tree to
-**both** operands (`old-header:`/`new-header:` are the side-scoped inputs —
-required here since old and new genuinely have different header sets, the
-F8 scenario above), and `format: sarif` is rejected before comparison runs
-for a directory/package operand (`old-library`/`new-library` pointing at a
-directory fans out over both SONAME-matched libraries, but SARIF/
-`upload-sarif` is single-pair-only). The corrected form below instead does
-one single-pair `compare` per library — the same operand shape this report's
-"CI / GitHub Action integration" section above actually ran and verified,
-not a new untested shape:
+Three corrections from an initial draft of this section, all caught in PR
+review (`chatgpt-codex-connector`) and confirmed before fixing: a bare
+`header:` applies that *one* tree to **both** operands (`old-header:`/
+`new-header:` are the side-scoped inputs — required here since old and new
+genuinely have different header sets, the F8 scenario above), `format: sarif`
+is rejected before comparison runs for a directory/package operand
+(`old-library`/`new-library` pointing at a directory fans out over both
+SONAME-matched libraries, but SARIF/`upload-sarif` is single-pair-only), and
+— since this job grants `security-events: write` — every third-party action
+running in it must be pinned to a full commit SHA (a repointed/compromised
+mutable tag would otherwise run with that elevated token and could tamper
+with code-scanning results), per this repo's own convention
+(`AGENTS.md`, and `action.yml`'s own `actions/setup-python`/
+`github/codeql-action/upload-sarif` pins). The corrected form below instead
+does one single-pair `compare` per library — the same operand shape this
+report's "CI / GitHub Action integration" section above actually ran and
+verified, not a new untested shape — and reuses this repo's own
+already-audited pins for `actions/checkout` and
+`github/codeql-action/upload-sarif`:
 
 ```yaml
 # .github/workflows/abi.yml (for epics-base/pvxs)
@@ -307,7 +335,7 @@ jobs:
       matrix:
         lib: [libpvxs, libpvxsIoc]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
         with: { fetch-depth: 0 }
       - name: Build old + new (EPICS Base + both pvxs refs, -g -Og)
         run: ./ci/build-two-refs.sh   # produces old/lib/<arch> and new/lib/<arch>
@@ -328,7 +356,7 @@ jobs:
           # extra-args: '--diagnostic-comparison' for that one PR, or the
           # step correctly fails closed with a clear message instead of a
           # wrong verdict — this is NOT something to blanket-set by default.
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a  # v4
         if: always()
         with: { sarif_file: abi-${{ matrix.lib }}.sarif }
 ```
@@ -365,7 +393,7 @@ whole library.
 - **Fixed & tested in this branch:** F9 (a second, differently-mangled
   RTTI-adjacent alignment false positive — Itanium local-name-production
   symbols, scoped to the stdlib-owned subset after PR review). Full fast
-  unit suite green (19556 passed / 30 skipped / 4 xfailed), mypy/ruff clean.
+  unit suite green (19558 passed / 30 skipped / 4 xfailed), mypy/ruff clean.
 - **Verified working, no code change needed:** the full 1.4.0→1.5.0→1.5.1→
   1.5.2 tag-to-tag matrix (real, from-scratch EPICS Base R7.0.10 + pvxs
   builds — the acceptance spike's "still owed" step); the abicheck GitHub
