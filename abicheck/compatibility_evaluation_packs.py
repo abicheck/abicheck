@@ -162,7 +162,17 @@ class LoadedPack:
     letting `identity.sha256` (digested over the manifest's original bytes)
     silently stop matching the actual assignments a later
     ``detect_pack_conflicts``/config-composition call observes -- defeating
-    ADR-049 D6's exact-replay guarantee (Codex review).
+    ADR-049 D6's exact-replay guarantee (Codex review). Freezing only the
+    outer mapping is not enough for a directly constructed ``LoadedPack``
+    (bypassing :func:`load_pack_manifest`, whose own ``_to_hashable`` pass
+    already converts every list to a tuple): a caller-supplied mutable list
+    *value* would still be the same aliased object, so mutating it after
+    construction would change the pack's content without changing
+    ``identity.sha256`` either. Every value is re-run through
+    :func:`_to_hashable` here too, so a directly constructed pack gets the
+    identical list-to-tuple deep-freeze (and the identical
+    hashability/no-nested-mapping validation) the manifest-loading path
+    already gets (Codex review, second round).
     """
 
     identity: ImmutableIdentity
@@ -170,7 +180,11 @@ class LoadedPack:
     assignments: Mapping[str, Hashable]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "assignments", MappingProxyType(dict(self.assignments)))
+        frozen = {
+            key: _to_hashable(value, where=f"assignments[{key!r}]")
+            for key, value in self.assignments.items()
+        }
+        object.__setattr__(self, "assignments", MappingProxyType(frozen))
 
 
 def _to_hashable(value: Any, *, where: str) -> Hashable:

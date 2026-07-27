@@ -157,6 +157,28 @@ class TestLoadPackManifestHappyPath:
         mutable["exit_code_scheme"] = "legacy"
         assert pack.assignments["exit_code_scheme"] == "severity"
 
+    def test_directly_constructed_pack_deep_freezes_a_mutable_list_value(self) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        mutable_list = ["a", "b"]
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.CONTRACT,
+            assignments={"contract.overlays": mutable_list},
+        )
+        mutable_list.append("c")
+        assert pack.assignments["contract.overlays"] == ("a", "b")
+
+    def test_directly_constructed_pack_rejects_unhashable_value(self) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        with pytest.raises(PackManifestError, match="not hashable"):
+            LoadedPack(
+                identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+                kind=PackKind.CONTRACT,
+                assignments={"contract.overlays": {1, 2, 3}},
+            )
+
 
 class TestLoadPackManifestValidation:
     def test_missing_file_raises(self, tmp_path: Path) -> None:
