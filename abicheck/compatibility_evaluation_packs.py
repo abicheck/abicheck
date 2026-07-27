@@ -60,13 +60,14 @@ front-end's job, tracked alongside the rest of Phase 1's remaining wiring in
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any
 
 import yaml
 
@@ -227,6 +228,32 @@ class LoadedPack:
         object.__setattr__(self, "assignments", MappingProxyType(frozen))
 
 
+#: The exact scalar vocabulary a real YAML manifest's ``SafeLoader`` can ever
+#: produce: ``str``, ``bool``/``int``/``float`` (the implicit bool/int/float
+#: resolvers), ``bytes`` (the explicit ``!!binary`` tag), and
+#: ``datetime.date`` (the implicit timestamp resolver -- ``datetime.datetime``
+#: is itself a ``datetime.date`` subclass, so one entry covers both). ``bool``
+#: is listed even though it is an ``int`` subclass, for clarity at the call
+#: site. Checking membership in this closed set, rather than merely that
+#: ``hash(value)`` succeeds, matters because hashability is not proof of
+#: immutability: a caller bypassing YAML entirely via direct ``LoadedPack``
+#: construction (this class's own documented escape hatch) could pass a
+#: custom object that defines ``__hash__`` while remaining fully mutable,
+#: which would then alias into ``pack.assignments`` and let a later mutation
+#: change the pack's content without changing ``identity.sha256`` -- the
+#: same exact-replay violation the list-freezing fix above closed for a
+#: mutable list, but for an arbitrary mutable-yet-hashable object instead
+#: (Codex review, sixth round).
+_HASHABLE_SCALAR_TYPES: tuple[type, ...] = (
+    str,
+    bool,
+    int,
+    float,
+    bytes,
+    datetime.date,
+)
+
+
 def _to_hashable(value: Any, *, where: str) -> Hashable:
     """Convert a decoded YAML scalar/list into a hashable value.
 
@@ -237,8 +264,17 @@ def _to_hashable(value: Any, *, where: str) -> Hashable:
     inside a list -- bypass that guard entirely (a tuple containing an
     unhashable dict still raises only when something actually calls
     ``hash()`` on it).
+
+    A ``tuple`` is accepted alongside ``list`` (recursing the same way, not
+    just added to :data:`_HASHABLE_SCALAR_TYPES`) because ``LoadedPack.__post_init__``
+    re-validates unconditionally on every construction, including
+    :func:`load_pack_manifest`'s own internal ``LoadedPack(...)`` call with
+    assignments this function *already* converted once -- a bare scalar
+    allowlist entry for ``tuple`` would accept it without recursing into its
+    elements, silently skipping their own type validation on that second
+    pass.
     """
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return tuple(
             _to_hashable(v, where=f"{where}[{i}]") for i, v in enumerate(value)
         )
@@ -249,16 +285,14 @@ def _to_hashable(value: Any, *, where: str) -> Hashable:
         )
     if value is None:
         raise PackManifestError(f"{where}: assignment value must not be null")
-    try:
-        hash(value)
-    except TypeError as exc:
+    if not isinstance(value, _HASHABLE_SCALAR_TYPES):
+        type_names = ", ".join(t.__name__ for t in _HASHABLE_SCALAR_TYPES)
         raise PackManifestError(
-            f"{where}: assignment value {value!r} is not hashable ({exc})"
-        ) from exc
-    # value is `Any` (a decoded YAML scalar) -- the hash() call above only
-    # proves it's *runtime*-hashable, which mypy can't narrow from; cast
-    # rather than widen this function's declared return type to Any.
-    return cast(Hashable, value)
+            f"{where}: assignment value {value!r} has unsupported type "
+            f"{type(value).__name__} (not hashable-and-immutable) -- must be "
+            f"one of {type_names}, or a list of these"
+        )
+    return value
 
 
 def _parse_policy_assignments(

@@ -172,12 +172,51 @@ class TestLoadPackManifestHappyPath:
     def test_directly_constructed_pack_rejects_unhashable_value(self) -> None:
         from abicheck.compatibility_evaluation_config import ImmutableIdentity
 
-        with pytest.raises(PackManifestError, match="not hashable"):
+        with pytest.raises(PackManifestError, match="unsupported type"):
             LoadedPack(
                 identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
                 kind=PackKind.CONTRACT,
                 assignments={"contract.overlays": {1, 2, 3}},
             )
+
+    def test_directly_constructed_pack_rejects_mutable_but_hashable_value(
+        self,
+    ) -> None:
+        # Regression (Codex review): hash(value) succeeding is not proof of
+        # immutability -- a custom class can define __hash__ while remaining
+        # fully mutable, aliasing into pack.assignments and letting a later
+        # mutation change the pack's content without changing
+        # identity.sha256. Only the closed scalar type set a real YAML
+        # manifest can ever produce is accepted now.
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        class MutableButHashable:
+            def __init__(self) -> None:
+                self.value = 1
+
+            def __hash__(self) -> int:
+                return 42
+
+        with pytest.raises(PackManifestError, match="unsupported type"):
+            LoadedPack(
+                identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+                kind=PackKind.CONTRACT,
+                assignments={"field": MutableButHashable()},
+            )
+
+    def test_directly_constructed_pack_accepts_a_timestamp_value(self) -> None:
+        # A YAML manifest's implicit timestamp resolver produces a real
+        # datetime.date/datetime -- both must stay accepted (immutable).
+        import datetime
+
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.CONTRACT,
+            assignments={"field": datetime.date(2026, 1, 1)},
+        )
+        assert pack.assignments["field"] == datetime.date(2026, 1, 1)
 
     def test_directly_constructed_policy_pack_coerces_raw_severity_string(
         self,
