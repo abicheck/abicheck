@@ -1,13 +1,23 @@
 # ADR-055: Typed Request/Result Completeness and a Schema-Version Registry
 
-**Date:** 2026-07-27
+**Date:** 2026-07-27 (D1–D3); Gap 3/D4 added 2026-07-27 after a second,
+more detailed external review of the same subject was checked line-by-line
+against `mcp_server.py` (see "Amendment" note below Gap 2)
 **Status:** Proposed — not implemented. Written up after an external
 API-layer review of `abicheck` (CLI/Python/MCP/Actions/schemas) turned out to
 be largely stale against current `main` — G22/ADR-037 already landed the CLI
-consolidation and MCP↔Tier-2 chokepoint the review flagged as missing — but
-verifying that review's claims against the actual code (`service.py`,
-`api_types.py`) surfaced two real, narrower, already-self-documented gaps.
-This ADR proposes closing them; it does not implement anything itself.
+consolidation and the `checker.compare`-vs-Tier-2 chokepoint the review
+flagged as missing — but verifying that review's claims against the actual
+code (`service.py`, `api_types.py`) surfaced two real, narrower,
+already-self-documented gaps. **Correction:** this ADR's first version also
+asserted, as a Non-goal, that `abi_compare` "already routes through
+`compare_snapshots`/the same Tier-2 layer as the CLI" and therefore needed no
+further MCP-surface work. Re-checking that specific claim against
+`mcp_server.py` line-by-line (prompted by a second, independent review
+raising the same point with more detail) found it true only for the final
+snapshot-diffing step, not for the tool as a whole — see Gap 3 below, now
+folded in as D4 rather than left a Non-goal. This ADR proposes closing all
+four; it does not implement anything itself.
 **Decision maker:** (pending)
 
 ---
@@ -69,16 +79,40 @@ integrator) can query once for "what version does this abicheck build
 currently emit for artifact X" — current-version discovery only; this
 proposes no compatibility metadata or cross-version lookup (see D3 below).
 
+### Gap 3 — `abi_compare` uses only half of the Tier-2 chokepoint
+
+This ADR's first version claimed, as a Non-goal, that `abi_compare` "already
+routes through `compare_snapshots`/the same Tier-2 layer as the CLI." That is
+true, but incomplete in a way that changes the conclusion: reading
+`mcp_server.py`'s `abi_compare` end to end (lines ~602–900 at the time of
+writing) shows it calls `service.compare_snapshots` — the "classify two
+already-resolved snapshots" half of Tier-2 — for the middle diffing step
+only. Everything upstream and downstream of that one call is a second,
+hand-rolled implementation, not the `run_compare_request(CompareRequest)`
+chokepoint the CLI's `compare` command uses:
+
+- input resolution: its own local `_resolve_input` helper, not
+  `service.resolve_input`/a `CompareRequest`;
+- policy/suppression loading: its own direct `PolicyFile.load`/
+  `SuppressionList.load` calls, duplicating what `run_compare_request`
+  already does internally from `CompareRequest` fields;
+- severity/exit-code computation: its own `compute_exit_code`/legacy-verdict
+  branch, separate from any equivalent CLI code path;
+- `used_by`/`required_symbols` app-scoping (ADR-043): its own scoping logic,
+  not shared with `appcompat.py`'s equivalent.
+
+So `CompareRequest`/`run_compare_request` is not yet a real universal
+chokepoint — `abi_compare` is a second, parallel compare engine that happens
+to borrow one internal function from the first. This is exactly the
+duplication a fuller external review (checked against this same code,
+independently of the review that originally prompted D1–D3) identified as
+its top-priority finding. See D4 below.
+
 ## Non-goals
 
 - **Not** re-litigating anything ADR-037/G22 already shipped (CLI decorator
   families, the `--depth` ladder, command folding, `.abicheck.yml`
   rebalance) — that's done, per the ADR-037 status line.
-- **Not** touching the MCP server's tool surface. `abi_compare` already
-  routes through `compare_snapshots`/the same Tier-2 layer as the CLI; a
-  wider MCP tool surface (e.g. exposing the new `CompareRequest` fields as
-  MCP params) is a natural follow-on once D1 below lands, but is out of
-  scope for this decision.
 - **Not** proposing to make ADR-049's `CompatibilityEvaluationConfig` (a
   separate, already-accepted, phased effort) authoritative anywhere. If D1's
   extended `CompareRequest` and ADR-049's evaluation config end up
@@ -186,16 +220,65 @@ claim is exactly the failure mode this closes: a docs generator (or a new
 number from one place instead of a human hand-copying one, which is how it
 went stale in the first place.
 
+### D4. Route `abi_compare` through `run_compare_request`
+
+Once D1 lands (so `CompareRequest`/`InputSpec` can express everything
+`abi_compare`'s current parameters need), rewrite `mcp_server.py`'s
+`abi_compare` to build one `CompareRequest` and call `run_compare_request`
+for the resolve+classify step, instead of its own `_resolve_input` +
+`compare_snapshots` pair:
+
+```python
+request = CompareRequest(old=..., new=..., ...)
+diff_result, old_snap, new_snap = run_compare_request(request)
+```
+
+Concretely, in terms of the current tool's parameters:
+
+- `old_input`/`new_input`/`old_headers`/`new_headers`/`headers`/
+  `include_dirs`/`language` map onto `InputSpec.path`/`headers`/`includes`,
+  same as the CLI's own `resolve_input` call;
+- `policy`/`policy_file`/`suppression_file` map onto `CompareRequest` fields
+  once D1 (or a small preceding slice) adds them — `CompareRequest` has no
+  suppression/policy-file field today, so this is new surface for
+  `CompareRequest` itself, not something D1 already covers; scope it before
+  starting D4, don't assume it falls out of D1 for free.
+
+What D4 deliberately does **not** try to fold into `CompareRequest`/
+`CompareResult`:
+
+- `used_by`/`required_symbols` app-scoping (ADR-043) and `diagnostic_comparison`
+  (ADR-050 D2) are cross-cutting concerns applied *after* a `CompareResult`
+  exists, not part of resolving/classifying the comparison itself — they stay
+  a thin wrapper layer in `mcp_server.py` that consumes a `CompareResult`,
+  the same way `appcompat.py` would if it were rewritten today. Folding them
+  into the request/result types themselves would re-introduce the "everything
+  is one growing struct" problem D1/D2 exist to avoid.
+- `severity_*`/exit-code computation stays MCP-specific glue over
+  `CompareResult.diff.changes` — exit-code *schemes* (legacy vs.
+  severity-aware) are a CLI/MCP presentation concern, not part of the typed
+  result itself.
+
+**Acceptance test:** `mcp_server.py`'s `abi_compare` has no local
+`_resolve_input` call and no direct `PolicyFile.load`/`SuppressionList.load`
+calls of its own — every one of those goes through `run_compare_request`.
+A parity test (comparing `abi_compare`'s output for a fixed input against
+the CLI `compare` command's output for the equivalent flags) is the
+regression guard against silent behavior drift during the rewrite.
+
 ## Files & surfaces (sketch, for whoever picks this up)
 
 | Module | Change |
 |---|---|
-| `abicheck/api_types.py` | New `InputSpec`/`CompareRequest` fields (D1) |
+| `abicheck/api_types.py` | New `InputSpec`/`CompareRequest` fields (D1); policy/suppression fields for D4 |
 | `abicheck/service.py` | `run_compare_request` reads the new fields instead of falling back to `resolve_input` kwargs; new `CompareResult` (D2) |
 | `abicheck/schemas.py` *(new or extended)* | `current(name)` registry (D3) |
+| `abicheck/mcp_server.py` | `abi_compare` rewritten to build a `CompareRequest` and call `run_compare_request` (D4) |
 | `docs/reference/python-api-reference.md` | Regenerate after D1/D2 (generated file) |
+| `docs/reference/mcp-tools-reference.md` | Regenerate after D4 (generated file) |
 | `tests/test_api_types.py` | New field defaults/round-trip tests |
 | `tests/test_service_unit.py` | Parity test: a `CompareRequest` built with the new fields set produces the same `DiffResult` as the equivalent `resolve_input`/kwargs call today |
+| `tests/test_mcp_server_unit.py` | Parity test: `abi_compare`'s output for a fixed input matches the CLI `compare` command's output for the equivalent flags, before and after the D4 rewrite |
 
 ## Alternatives considered
 
@@ -223,5 +306,12 @@ went stale in the first place.
 Same phased-PR discipline ADR-037/G22 used: D3 (schema registry) is
 independently shippable and lowest-risk — land it first. D1 is the larger
 slice (needs `DumpManifest`/`CompileContext` per-side wiring in
-`run_compare_request`) and should land behind its own parity test
-(`test_service_unit.py`, above) before D2's wrapper type is worth adding.
+`run_compare_request`, plus the policy/suppression fields D4 needs) and
+should land behind its own parity test (`test_service_unit.py`, above)
+before D2's wrapper type is worth adding. D4 (the `abi_compare` rewrite) is
+deliberately last and gated on D1: rewriting the MCP tool before
+`CompareRequest` can express its full parameter set would either lose
+capability or force D4 to invent its own ad hoc `CompareRequest` extension
+outside this ADR's decision. See
+[G33](../plans/g33-typed-api-and-mcp-convergence.md) for the implementation
+plan and current per-phase status.
