@@ -316,6 +316,60 @@ def load_aggregate_report_schema() -> dict[str, Any]:
     return data
 
 
+#: Artifact names :func:`current` accepts, each mapped to the module-level
+#: constant that already owns its version (ADR-055 D3). Read-only lookup
+#: facade -- adding an entry here never changes that constant's own value or
+#: bump policy, and this dict is rebuilt fresh per :func:`current` call (via
+#: function-local imports) rather than imported at module scope, since some
+#: of these modules transitively import this package themselves (e.g.
+#: ``buildsource.run_plan`` -> ``buildsource.check_report`` -> ``schemas``)
+#: and a module-level import here would turn that into a real import cycle.
+_ARTIFACT_NAMES = frozenset(
+    {"snapshot", "compare", "scan", "aggregate", "build-output", "run-plan"}
+)
+
+
+def current(name: str) -> str | int:
+    """Return the current version abicheck emits for persisted artifact *name*.
+
+    One read-only lookup facade over the version constants each artifact's
+    own module already owns (ADR-055 D3) -- current-version discovery only;
+    this is not a new versioning scheme, and does not add compatibility
+    metadata or cross-version lookup. *name* is one of ``"snapshot"``,
+    ``"compare"``, ``"scan"``, ``"aggregate"``, ``"build-output"``, or
+    ``"run-plan"``.
+
+    A doc generator (or an external integrator) can pull every current
+    version number from here instead of a human hand-copying one -- the
+    exact failure mode that let ``docs/use/python-api.md`` claim snapshots
+    carried ``schema_version 8`` long after the real value reached 17.
+    """
+    if name not in _ARTIFACT_NAMES:
+        raise ValueError(
+            f"Unknown schema artifact {name!r}; expected one of "
+            f"{sorted(_ARTIFACT_NAMES)}"
+        )
+    if name == "snapshot":
+        from ..serialization import SCHEMA_VERSION
+
+        return SCHEMA_VERSION
+    if name == "compare":
+        return REPORT_SCHEMA_VERSION
+    if name == "scan":
+        return SCAN_SCHEMA_VERSION
+    if name == "aggregate":
+        from ..aggregate import AGGREGATE_SCHEMA_VERSION
+
+        return AGGREGATE_SCHEMA_VERSION
+    if name == "build-output":
+        from ..buildsource.build_output import BUILD_OUTPUT_SCHEMA
+
+        return BUILD_OUTPUT_SCHEMA
+    from ..buildsource.run_plan import RUN_PLAN_SCHEMA
+
+    return RUN_PLAN_SCHEMA
+
+
 __all__ = [
     "REPORT_SCHEMA_VERSION",
     "SCAN_SCHEMA_VERSION",
@@ -323,4 +377,5 @@ __all__ = [
     "AGGREGATE_REPORT_SCHEMA_PATH",
     "load_compare_report_schema",
     "load_aggregate_report_schema",
+    "current",
 ]

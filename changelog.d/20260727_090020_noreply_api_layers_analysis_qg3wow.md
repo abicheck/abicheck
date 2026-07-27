@@ -138,3 +138,29 @@
   before `_call_with_timeout` was even reached, so `ABICHECK_MCP_TIMEOUT`
   never got a chance to return the advertised structured timeout for that
   I/O. Moved inside the same bounded worker as `check_single_env`.
+- **`abi_deps` no longer resolves a host symlink before rebasing an absolute
+  path under `sysroot`** — `_safe_read_path` always follows symlinks, so an
+  absolute `binary_path`/`search_paths` entry that traverses one (e.g. a
+  merged-`/usr` host's `/lib` -> `/usr/lib`) was rebased under
+  `<sysroot>/usr/lib/...` instead of the resolver/loader-semantic
+  `<sysroot>/lib/...` `resolver._seed_root`/`_build_search_order` actually
+  parse — potentially validating the wrong file or reporting a false
+  "not found". The sysroot rebase now applies to the raw, un-resolved
+  absolute path, matching how the CLI's own non-resolving Click `Path`
+  handling behaves.
+- **`abi_project_validate`/`abi_project_plan`/`abi_aggregate` now count
+  their remaining single-file existence/size preflight checks (config,
+  manifest, run-plan, toolchain-bindings, build-output) against
+  `--timeout` too** — each was still a synchronous `stat()`/existence check
+  before `_call_with_timeout` started; a stalled filesystem could block on
+  any single one of them with no chance of the advertised structured
+  timeout, even though the directory-wide and parsing steps around them
+  were already bounded. All moved inside their tool's bounded worker,
+  alongside a new shared `_ToolPreflightError` (generalizing `abi_deps`'s
+  `_BinaryProbeError`) so a plain "config file not found"/"Binary file not
+  found" preflight result can't be conflated with an unrelated
+  `ValueError`/`FileNotFoundError` the wrapped operation itself might raise.
+- **`abi_aggregate`'s "reports_dir is not a directory" error no longer
+  leaks the full path** — it returned the caller-supplied `reports_dir`
+  string verbatim instead of going through the same basename-only
+  convention every other path-leak fix in this PR uses.

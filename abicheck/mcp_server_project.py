@@ -138,12 +138,16 @@ def _call_with_timeout(
         pool.shutdown(wait=False)
 
 
-class _BinaryProbeError(Exception):
-    """Raised inside ``abi_deps``'s timed worker for a preflight failure that
-    is not itself a dependency-resolution error (missing file / wrong
-    format) -- kept distinct from ``ValueError``/``FileNotFoundError`` so it
-    can't be conflated with an unrelated exception ``check_single_env``
-    itself might raise for those same built-in types."""
+class _ToolPreflightError(Exception):
+    """Raised inside a tool's timed worker for a preflight failure that is
+    not itself a domain error from the wrapped operation (missing input /
+    wrong format) -- kept distinct from ``ValueError``/``FileNotFoundError``
+    so it can't be conflated with an unrelated exception the wrapped
+    operation itself might raise for those same built-in types. Every
+    preflight check (existence/format/size) runs inside the timed worker
+    alongside the wrapped operation, not before it, so a stalled filesystem
+    can't defeat the tool's advertised ``--timeout`` (ADR-021b D2, Codex
+    review)."""
 
 
 @mcp.tool()
@@ -183,27 +187,36 @@ def abi_deps(
         # would get wrongly rebased under sysroot at the absolutized cwd,
         # rather than left alone (Codex review).
         binary_was_absolute = Path(binary_path).is_absolute() if binary_path else False
-        bin_path = _safe_read_path(binary_path, label="binary_path")
+        # Validate (empty-string/type errors) via _safe_read_path, but do NOT
+        # use its resolved return value for an absolute path: .resolve()
+        # follows host symlinks (e.g. a merged-/usr host's "/lib" -> "/usr/
+        # lib"), so a sysroot-rebase computed from that resolved value lands
+        # at "<sysroot>/usr/lib/app" instead of the resolver/loader-semantic
+        # "<sysroot>/lib/app" -- the sysroot rebase must apply to the raw,
+        # symbolic path the caller asked for, the same way resolver._seed_root
+        # rebases the CLI's own un-resolved Click Path (Codex review).
+        _safe_read_path(binary_path, label="binary_path")
+        raw_bin_path = Path(binary_path)
         sysroot_path = _safe_read_path(sysroot, label="sysroot") if sysroot else None
-        resolve_target = bin_path if binary_was_absolute else Path(binary_path)
+        resolve_target = raw_bin_path
         effective_path = (
-            _resolve_sysroot_path(bin_path, sysroot_path)
+            _resolve_sysroot_path(raw_bin_path, sysroot_path)
             if binary_was_absolute
-            else bin_path
+            else raw_bin_path
         )
-        # Same relative/absolute preservation as binary_path above: resolver.
-        # _build_search_order joins a relative search_path directly onto
-        # sysroot (`<sysroot>/lib`), but only after _safe_read_path has
-        # already absolutized it does joining it onto sysroot instead produce
-        # `<sysroot>/<cwd>/lib` (Codex review) -- validate each entry through
-        # _safe_read_path for its safety checks, but keep the original
-        # relative Path when the caller's own input was relative.
-        sp_paths = [
-            _safe_read_path(p, label="search_path")
-            if Path(p).is_absolute()
-            else Path(p)
-            for p in (search_paths or [])
-        ]
+        bin_path = raw_bin_path
+        # Same relative/absolute preservation as binary_path above -- and the
+        # same host-symlink preservation for the absolute case: resolver.
+        # _build_search_order joins a search_path directly onto sysroot
+        # (`<sysroot>/lib`), so an absolute entry must reach it un-resolved,
+        # exactly like binary_path above (Codex review). _safe_read_path is
+        # still called on an absolute entry for its validation side effect;
+        # its resolved return value is intentionally discarded.
+        sp_paths = []
+        for p in search_paths or []:
+            if Path(p).is_absolute():
+                _safe_read_path(p, label="search_path")
+            sp_paths.append(Path(p))
 
         def _do_deps() -> StackCheckResult:
             # The existence/format/size preflight reads effective_path (a
@@ -211,10 +224,10 @@ def abi_deps(
             # run it inside the same bounded worker as check_single_env
             # itself, not before _call_with_timeout starts (Codex review).
             if not effective_path.exists():
-                raise _BinaryProbeError("Binary file not found")
+                raise _ToolPreflightError("Binary file not found")
             fmt = _detect_binary_format(effective_path)
             if fmt != "elf":
-                raise _BinaryProbeError(
+                raise _ToolPreflightError(
                     f"abi_deps requires an ELF binary; got {fmt or 'unknown format'}"
                 )
             _check_file_size(effective_path, label="binary_path")
@@ -237,7 +250,7 @@ def abi_deps(
                     "error": f"abi_deps timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
             )
-        except _BinaryProbeError as exc:
+        except _ToolPreflightError as exc:
             return json.dumps({"status": "error", "error": str(exc)})
 
         elapsed = _time.monotonic() - t0
@@ -310,28 +323,29 @@ def abi_aggregate(
             return json.dumps(
                 {
                     "status": "error",
-                    "error": f"reports_dir is not a directory: {reports_dir}",
+                    "error": f"reports_dir is not a directory: {reports_path.name}",
                 }
             )
         manifest_path = (
             _safe_read_path(manifest, label="manifest") if manifest else None
         )
-        if manifest_path is not None:
-            _check_file_size(manifest_path, label="manifest")
         run_plan_path = (
             _safe_read_path(run_plan, label="run_plan") if run_plan else None
         )
-        if run_plan_path is not None:
-            _check_file_size(run_plan_path, label="run_plan")
 
         def _do_aggregate() -> AggregateResult:
             # Report-directory discovery (an unbounded glob+stat over every
-            # *.json entry) and expected-set parsing both run inside the same
-            # bounded worker as aggregate_reports_dir (ADR-021b D2): a large
-            # reports_dir or a slow manifest/run-plan read must count against
-            # --timeout too, not just the aggregate call that follows them
-            # (Codex review).
+            # *.json entry), the manifest/run-plan size probes, and
+            # expected-set parsing all run inside the same bounded worker as
+            # aggregate_reports_dir (ADR-021b D2): a large reports_dir, a
+            # stalled filesystem's single stat() call, or a slow manifest/
+            # run-plan read must all count against --timeout too, not just
+            # the aggregate call that follows them (Codex review).
             _check_dir_json_file_sizes(reports_path, label="report")
+            if manifest_path is not None:
+                _check_file_size(manifest_path, label="manifest")
+            if run_plan_path is not None:
+                _check_file_size(run_plan_path, label="run_plan")
             expected = _resolve_expected(
                 manifest_path,
                 run_plan_path,
@@ -427,23 +441,24 @@ def abi_project_validate(
         from .cli_project import _load_project_targets_config
 
         config_path = _safe_read_path(config, label="config")
-        if not config_path.exists():
-            return json.dumps({"status": "error", "error": "config file not found"})
-        _check_file_size(config_path, label="config")
-
         bindings_path = (
             _safe_read_path(toolchain_bindings, label="toolchain_bindings")
             if toolchain_bindings is not None
             else None
         )
-        if bindings_path is not None:
-            _check_file_size(bindings_path, label="toolchain_bindings")
 
         def _do_validate() -> ProjectTargetsValidationReport:
-            # Config/bindings parsing runs inside the same bounded worker as
-            # validate_project_targets (ADR-021b D2): a slow-to-read/parse
-            # config or bindings file must count against --timeout too, not
-            # just the validation call that follows it (Codex review).
+            # Existence/size preflight and config/bindings parsing all run
+            # inside the same bounded worker as validate_project_targets
+            # (ADR-021b D2): a stalled filesystem's stat() call or a
+            # slow-to-read/parse config/bindings file must count against
+            # --timeout too, not just the validation call that follows them
+            # (Codex review).
+            if not config_path.exists():
+                raise _ToolPreflightError("config file not found")
+            _check_file_size(config_path, label="config")
+            if bindings_path is not None:
+                _check_file_size(bindings_path, label="toolchain_bindings")
             parsed = _load_project_targets_config(config_path)
             bindings_file = (
                 load_bindings_file(bindings_path) if bindings_path is not None else None
@@ -471,6 +486,8 @@ def abi_project_validate(
                     "error": f"abi_project_validate timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
             )
+        except _ToolPreflightError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
         except (click.UsageError, BindingsFileError) as exc:
             redact_args = [config_path]
             if bindings_path is not None:
@@ -554,38 +571,40 @@ def abi_project_plan(
         from .cli_project import _load_project_targets_config, _parse_build_output_specs
 
         config_path = _safe_read_path(config, label="config")
-        if not config_path.exists():
-            return json.dumps({"status": "error", "error": "config file not found"})
-        _check_file_size(config_path, label="config")
-
         # _parse_build_output_specs reads each PROFILE=DIR's build-output.json
-        # itself; check every one's size *before* that parse (ADR-021b D3) --
-        # a best-effort pre-check keyed on the same "=" split it uses, so a
-        # malformed spec here just falls through to that function's own error.
+        # itself; the "=" split here is a best-effort pre-parse (ADR-021b D3)
+        # just to collect each dir for the size probe below and for error
+        # redaction -- a malformed spec still falls through to that
+        # function's own error.
         build_output_dirs: list[str] = []
         for spec in build_outputs or ():
             _, sep, dir_str = spec.partition("=")
             if sep:
                 build_output_dirs.append(dir_str)
-                _check_file_size(
-                    Path(dir_str) / "build-output.json", label="build_output"
-                )
 
         bindings_path = (
             _safe_read_path(toolchain_bindings, label="toolchain_bindings")
             if toolchain_bindings is not None
             else None
         )
-        if bindings_path is not None:
-            _check_file_size(bindings_path, label="toolchain_bindings")
 
         def _do_plan() -> tuple[RunPlan, RunPlanGenerationReport]:
-            # Config/build-output/bindings parsing, validation, and binding
-            # resolution all run inside the same bounded worker as run-plan
-            # generation (ADR-021b D2): a large or slow-to-read config,
+            # Existence/size preflight, config/build-output/bindings parsing,
+            # validation, and binding resolution all run inside the same
+            # bounded worker as run-plan generation (ADR-021b D2): a stalled
+            # filesystem's stat() call or a large/slow-to-read config,
             # build-output, or bindings file must count against --timeout
             # too, not just the generate_run_plan call that follows them
             # (Codex review).
+            if not config_path.exists():
+                raise _ToolPreflightError("config file not found")
+            _check_file_size(config_path, label="config")
+            for dir_str in build_output_dirs:
+                _check_file_size(
+                    Path(dir_str) / "build-output.json", label="build_output"
+                )
+            if bindings_path is not None:
+                _check_file_size(bindings_path, label="toolchain_bindings")
             parsed = _load_project_targets_config(config_path)
             resolved_build_outputs = _parse_build_output_specs(
                 tuple(build_outputs or ())
@@ -643,6 +662,8 @@ def abi_project_plan(
                     ),
                 }
             )
+        except _ToolPreflightError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
         except (click.UsageError, BindingsFileError) as exc:
             redact_args: list[str | Path] = [config_path, *build_output_dirs]
             if bindings_path is not None:

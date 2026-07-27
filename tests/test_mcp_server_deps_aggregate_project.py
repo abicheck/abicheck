@@ -191,6 +191,47 @@ class TestAbiDeps:
         assert payload["status"] == "error"
         assert "elf" in payload["error"].lower()
 
+    def test_symlinked_absolute_binary_path_is_not_resolved_before_sysroot_rebase(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # resolver._seed_root rebases the *raw, symbolic* path a caller asked
+        # for (e.g. "/lib/app" on a merged-/usr host), never the host's
+        # resolved symlink target ("/usr/lib/app") -- _safe_read_path always
+        # resolves symlinks, so using its return value for the sysroot
+        # rebase would land at the wrong location under sysroot (Codex
+        # review).
+        if sys.platform != "linux":
+            pytest.skip("sysroot rebasing needs a POSIX-absolute binary_path")
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        host_link = tmp_path / "hostlink"
+        host_link.symlink_to(real_dir)
+        binary_path = host_link / "app"
+        sysroot_dir = tmp_path / "sysroot"
+        # The correct rebase preserves the raw "hostlink" path component.
+        correct_rebased = sysroot_dir / str(binary_path).lstrip("/")
+        correct_rebased.parent.mkdir(parents=True)
+        correct_rebased.write_bytes(b"\x7fELF" + b"\x00" * 4096)
+        # Deliberately do NOT create the buggy, host-resolved rebase
+        # (.../sysroot/.../real/app) -- if the preflight used that path
+        # instead, it would report "Binary file not found" rather than
+        # reaching check_single_env.
+
+        received: list[Path] = []
+
+        def _spy(binary_arg, **kwargs):
+            received.append(binary_arg)
+            raise RuntimeError("stop after capturing args")
+
+        monkeypatch.setattr("abicheck.stack_checker.check_single_env", _spy)
+        raw = abi_deps(str(binary_path), sysroot=str(sysroot_dir))
+        payload = json.loads(raw)
+        assert payload == {
+            "status": "error",
+            "error": "abi_deps failed: unexpected error",
+        }
+        assert received == [binary_path]
+
     def test_relative_binary_path_is_not_rebased_under_sysroot(
         self, tmp_path: Path, monkeypatch
     ):
@@ -329,6 +370,45 @@ class TestAbiAggregate:
         payload = json.loads(raw)
         assert payload["status"] == "error"
         assert "directory" in payload["error"].lower()
+
+    def test_reports_dir_not_a_directory_error_does_not_leak_its_path(
+        self, tmp_path: Path
+    ):
+        f = tmp_path / "not_a_dir.json"
+        f.write_text("{}")
+        raw = abi_aggregate(str(f), discovered_only=True)
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert str(f) not in payload["error"]
+        assert f.name in payload["error"]
+
+    def test_timeout_includes_manifest_size_check(self, tmp_path: Path, monkeypatch):
+        # ADR-021b D2: a stalled filesystem's single stat() call for the
+        # manifest must count against --timeout too, not just report
+        # discovery/expected-set parsing/aggregation (Codex review).
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "aggregate_manifest_version": "1.0",
+                    "targets": [{"id": "linux-x86_64", "required": True}],
+                }
+            )
+        )
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(path, *, label="input"):
+            if label == "manifest":
+                time.sleep(1.0)
+                raise AssertionError("should have timed out first")
+            return None
+
+        monkeypatch.setattr("abicheck.mcp_server_project._check_file_size", _slow)
+        raw = abi_aggregate(str(tmp_path), manifest=str(manifest))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
 
     def test_missing_reports_dir_produces_coverage_result(self, tmp_path: Path):
         # aggregate.collect_reports deliberately treats a missing directory

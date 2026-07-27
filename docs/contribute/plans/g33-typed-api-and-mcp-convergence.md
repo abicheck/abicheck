@@ -140,9 +140,20 @@ current value or bump policy.
 generated from this registry (or a page that itself reads from it), not a
 hand-copied literal.
 
-**Progress:** not started. Lowest-risk phase — no behavior change, only a
-new read-only accessor — and independently shippable ahead of every other
-phase (ADR-055's own rollout note).
+**Progress:** the registry itself is done —
+`abicheck.schemas.current(name)` (`abicheck/schemas/__init__.py`) covers
+all six artifact names above, backed by each artifact's existing constant
+via a function-local import (a module-level import would create a real
+cycle: `run-plan` needs `buildsource.run_plan.RUN_PLAN_SCHEMA`, but
+`buildsource/run_plan.py` imports `buildsource/check_report.py`, which
+already imports `abicheck.schemas` — confirmed by reading both modules
+before choosing the deferred-import shape). Covered by
+`tests/test_schemas_registry.py`. Still remaining: wiring an actual doc
+page or generator to *read from* `current()` instead of a hand-copied
+literal — `docs/reference/snapshot-format.md` (the designated fact-owner
+page for the snapshot version) still states "17" by hand, same as every
+other artifact's own doc page. That's a separate, larger follow-up (a real
+doc-generator change, reviewed on its own), not bundled into this slice.
 
 ### Phase 2 — extend `InputSpec`/`CompareRequest` (ADR-055 D1)
 
