@@ -806,6 +806,24 @@ wiring also landed:
 `resolve_field` — not called from any live command yet (that's the Phase 3
 shadow evaluator's job).
 
+A second real wiring landed the same way: `resolve_internal_namespaces`
+resolves `surface.internal_namespaces` from a real `--policy-file` YAML's
+`internal_namespaces` list (`policy_file.py`'s `PolicyFile` — the only front
+end that can set this field today, since no CLI flag exists for it). An
+absent `--policy-file`, or one that sets the key to an empty list
+(indistinguishable, once parsed, from never setting it), contributes no
+candidate and falls through to the built-in default (`()`, equal to
+`SurfaceConfig.internal_namespaces`'s own default), the same "a selector
+layer only participates when it actually selected something" principle the
+first wiring's untouched-flag case already applies. The candidate value is
+sorted+deduped before being handed to `resolve_field`, mirroring
+`SurfaceConfig.__post_init__`'s own canonicalization of this exact
+order-insensitive field (and `compatibility_evaluation_packs.py`'s
+`_canonicalize_order_insensitive_field`, which already treats
+`surface.internal_namespaces` the same way at the pack-manifest layer) —
+two policy files listing the same namespaces in a different order resolve
+to an equal value, per D7. Also not called from any live command yet.
+
 Pack *content* loading has also landed: `abicheck/compatibility_evaluation_packs.py`'s
 `load_pack_manifest` reads a small versioned YAML pack-manifest format
 (`id`/`version`/`kind: contract|policy|gate`/`assignments`) into a
@@ -831,8 +849,9 @@ to a run, call `detect_pack_conflicts` itself, or fold a policy pack's
 resolved overrides into `CompatibilityPolicyConfig.overrides`.
 
 Still remaining: wiring any other field (`cli_options.py`'s other shared
-option families, `.abicheck.yml` schema/reference docs, service/API request
-models) to construct real `FieldCandidate`s, and selecting/composing loaded
+option families beyond `scope_options`, `.abicheck.yml` schema/reference
+docs, service/API request models) to construct real `FieldCandidate`s, and
+selecting/composing loaded
 packs into `ContractConfig.packs`/`CompatibilityPolicyConfig.packs`/
 `GateConfig.packs` for a real run (today a pack's `ImmutableIdentity` can be
 referenced there, but no front end resolves a `--pack <name>`-style CLI/config
