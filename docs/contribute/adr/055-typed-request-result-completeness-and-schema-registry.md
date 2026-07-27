@@ -202,16 +202,21 @@ class CompareResult:
     new_snapshot: AbiSnapshot
 ```
 
-`run_compare_request` gains a `return_result: bool = False`-style opt-in (or,
-more in keeping with ADR-037's own precedent of a parallel typed entry point
-rather than a flag, a new `run_compare_request_v2`/`compare()` function
-returning `CompareResult` while the tuple-returning original stays exactly as
-it is) — either way, no existing caller's code changes. The point of the
-wrapper is purely to give a *future* field (resolved depth, an
+**Decided: a new parallel function, `run_compare_request_v2(request) ->
+CompareResult`.** The tuple-returning `run_compare_request` stays exactly as
+it is — no existing caller's code changes. `run_compare_request_v2` is not
+Click-decorated and carries no CLI-facing surface of its own; it exists
+purely as a typed Python/service entry point for whoever picks up D1, so the
+naming isn't user-facing API surface a caller types day to day the way
+`run_scan`/`run_compare_request` are — it's an internal migration seam. The
+point of the wrapper is purely to give a *future* field (resolved depth, an
 `EvaluationReceipt` once ADR-049 wires one up, a coverage summary) somewhere
 to land without a second tuple-shape break down the line — the same reasoning
 ADR-035 already applied to `ScanRequest`/`ScanResult`, generalized to
-`compare`.
+`compare`. Once D4 (and any other typed-result migration) is complete and
+`run_compare_request`'s tuple-returning callers are gone, a follow-up ADR can
+decide whether to rename `run_compare_request_v2` to something permanent —
+that rename is explicitly out of scope here.
 
 ### D3. A minimal schema-version registry
 
@@ -325,6 +330,20 @@ regression guard against silent behavior drift during the rewrite.
   not have to rediscover why a "just add a lookup function" change needed a
   decision record at all — mostly it's here for traceability, not because
   D3 alone is architecturally significant.
+- **D2's `CompareResult` entry point: a `return_result: bool = False` flag on
+  the existing `run_compare_request`.** Rejected: Python can't cleanly type a
+  return shape that depends on a boolean *value* without `@overload(Literal[
+  True]/Literal[False])` boilerplate at every call site, and a boolean flag
+  that switches a function's return shape is a mild API smell in its own
+  right — same class of thing this repo's own review process tends to flag
+  elsewhere.
+- **D2's `CompareResult` entry point: a bare `compare()` function.** Rejected
+  in favor of `run_compare_request_v2` after checking this ADR's own claimed
+  precedent (ADR-035's `ScanRequest`/`ScanResult`) against the actual code:
+  the real function there is `run_scan(req: ScanRequest) -> ScanResult`, not
+  a bare `scan()` — it followed the existing `run_<verb>` naming family from
+  day one. A bare `compare()` would be a naming departure from that
+  precedent, not a match to it.
 
 ## Rollout
 
