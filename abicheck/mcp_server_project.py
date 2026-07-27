@@ -464,6 +464,13 @@ def abi_aggregate(
                     redact_args.append(_safe_read_path(run_plan, label="run_plan"))
                 except ValueError:
                     pass
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_aggregate",
+                {"reports_dir": Path(reports_dir).name},
+                elapsed,
+                "error",
+            )
             return json.dumps(
                 {"status": "error", "error": _redact_paths(str(exc), *redact_args)}
             )
@@ -596,6 +603,10 @@ def abi_project_validate(
                     )
                 except ValueError:
                     pass
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_project_validate", {"config": Path(config).name}, elapsed, "error"
+            )
             return json.dumps(
                 {"status": "error", "error": _redact_paths(str(exc), *redact_args)}
             )
@@ -756,6 +767,10 @@ def abi_project_plan(
                 }
             )
         except _ProjectPlanValidationError as exc:
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_project_plan", {"config": Path(config).name}, elapsed, "error"
+            )
             return json.dumps(
                 {
                     "status": "error",
@@ -789,6 +804,10 @@ def abi_project_plan(
                     )
                 except ValueError:
                     pass
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_project_plan", {"config": Path(config).name}, elapsed, "error"
+            )
             return json.dumps(
                 {"status": "error", "error": _redact_paths(str(exc), *redact_args)}
             )

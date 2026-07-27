@@ -234,6 +234,18 @@
   `_ToolPreflightError` handler in all four tools returned its structured
   error without logging the attempt, leaving preflight rejections (missing
   file, bad format, oversized input) invisible to the audit trail.
+- **`abi_aggregate`/`abi_project_validate`/`abi_project_plan`'s remaining
+  domain-error handlers are now audit-logged too** — four more exception
+  handlers (`abi_aggregate`'s `click.UsageError`/`AggregateError`/
+  `ValueError` catch; `abi_project_validate`'s and `abi_project_plan`'s
+  `click.UsageError`/`BindingsFileError` catch; `abi_project_plan`'s
+  `_ProjectPlanValidationError` catch) had the same gap as the
+  `_ToolPreflightError` handlers above but were missed in that pass — a
+  malformed config, bindings file, run-plan, or build-output spec (arguably
+  the most common real-world error class for these tools) produced a
+  structured error response with no audit-log entry at all (code review
+  finding). Fixed identically; regression tests added asserting
+  `caplog`/`_audit_log` output for each of the four handlers.
 - **`docs/integration/index.md` no longer misstates the Actions composition
   direction** — it claimed both the "Single-Action step" and "Reusable
   workflow" layers are "built out of" the "Primitive Actions" layer below.

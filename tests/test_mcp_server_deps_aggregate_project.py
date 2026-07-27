@@ -25,6 +25,7 @@ Mocks the ``mcp`` package at import time, mirroring test_mcp_server_unit.py.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import sys
 import time
@@ -675,6 +676,20 @@ class TestAbiAggregate:
         assert str(run_plan) not in payload["error"]
         assert run_plan.name in payload["error"]
 
+    def test_malformed_run_plan_error_is_audit_logged(self, tmp_path: Path, caplog):
+        # This except (click.UsageError, AggregateError, ValueError) handler
+        # previously returned without calling _audit_log at all -- every
+        # other exit path (ok/timeout/_ToolPreflightError/outer Exception)
+        # already did (review finding).
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        run_plan = tmp_path / "run-plan.json"
+        run_plan.write_text("not json")
+        with caplog.at_level(logging.INFO, logger="abicheck.mcp"):
+            raw = abi_aggregate(str(tmp_path), run_plan=str(run_plan))
+        assert json.loads(raw)["status"] == "error"
+        assert "tool=abi_aggregate" in caplog.text
+        assert "status=error" in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # abi_project_validate / abi_project_plan
@@ -881,6 +896,18 @@ class TestAbiProjectValidate:
         assert str(config) not in payload["error"]
         assert config.name in payload["error"]
 
+    def test_malformed_yaml_error_is_audit_logged(self, tmp_path: Path, caplog):
+        # This except (click.UsageError, BindingsFileError) handler
+        # previously returned without calling _audit_log at all -- every
+        # other exit path already did (review finding).
+        config = tmp_path / ".abicheck.yml"
+        config.write_text("- just\n- a\n- list\n", encoding="utf-8")
+        with caplog.at_level(logging.INFO, logger="abicheck.mcp"):
+            raw = abi_project_validate(str(config))
+        assert json.loads(raw)["status"] == "error"
+        assert "tool=abi_project_validate" in caplog.text
+        assert "status=error" in caplog.text
+
 
 class TestAbiProjectPlan:
     def test_generates_a_run_plan(self, tmp_path: Path):
@@ -929,11 +956,37 @@ class TestAbiProjectPlan:
         payload = json.loads(raw)
         assert payload["status"] == "error"
 
+    def test_invalid_project_config_error_is_audit_logged(self, tmp_path: Path, caplog):
+        # This except _ProjectPlanValidationError handler previously
+        # returned without calling _audit_log at all -- every other exit
+        # path already did (review finding).
+        raw_cfg = json.loads(json.dumps(_SINGLE_PROFILE_LIBRARY_RAW))
+        raw_cfg["targets"]["libfoo"]["checks"][0]["channel"] = "does-not-exist"
+        config = _write_config(tmp_path, raw_cfg)
+        with caplog.at_level(logging.INFO, logger="abicheck.mcp"):
+            raw = abi_project_plan(str(config))
+        assert json.loads(raw)["status"] == "error"
+        assert "tool=abi_project_plan" in caplog.text
+        assert "status=error" in caplog.text
+
     def test_malformed_build_output_spec_is_an_error(self, tmp_path: Path):
         config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
         raw = abi_project_plan(str(config), build_outputs=["not-a-valid-spec"])
         payload = json.loads(raw)
         assert payload["status"] == "error"
+
+    def test_malformed_build_output_spec_error_is_audit_logged(
+        self, tmp_path: Path, caplog
+    ):
+        # This except (click.UsageError, BindingsFileError) handler
+        # previously returned without calling _audit_log at all -- every
+        # other exit path already did (review finding).
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        with caplog.at_level(logging.INFO, logger="abicheck.mcp"):
+            raw = abi_project_plan(str(config), build_outputs=["not-a-valid-spec"])
+        assert json.loads(raw)["status"] == "error"
+        assert "tool=abi_project_plan" in caplog.text
+        assert "status=error" in caplog.text
 
     def test_missing_config_is_an_error(self, tmp_path: Path):
         raw = abi_project_plan(str(tmp_path / "nope.yml"))
