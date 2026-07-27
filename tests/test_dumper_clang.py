@@ -2158,6 +2158,62 @@ def test_clang_header_dump_dpcpp_empty_stream_raises_ast_context_missing(
         _clang_header_dump([header], [], frontend_context="device")
 
 
+def test_clang_header_dump_fno_sycl_skips_multi_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review (P2): an explicit ``-fno-sycl`` in gcc_options on a
+    DPC++-capable compiler must not be silently overridden by
+    dpcpp_multi_context's unconditional ``-fsycl`` append -- the actual
+    clang invocation must not re-enable SYCL, and the decode falls back to
+    the ordinary single-document path (resolved_kind is None)."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx")
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    captured_cmds: list[list[str]] = []
+
+    def _run(cmd, **kwargs):
+        captured_cmds.append(cmd)
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    root, resolved_kind = _clang_header_dump([header], [], gcc_options="-fno-sycl")
+    assert resolved_kind is None
+    assert root["kind"] == "TranslationUnitDecl"
+    assert captured_cmds and all("-fsycl" not in cmd for cmd in captured_cmds)
+
+
+def test_clang_header_dump_device_context_with_fno_sycl_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Companion: requesting --frontend-context device while gcc_options
+    explicitly disables SYCL is a contradictory combination that must fail
+    fast with AstContextMissingError -- never silently re-enable SYCL to
+    honor frontend_context, nor silently ignore -fno-sycl (Codex review,
+    P2)."""
+    from abicheck.errors import AstContextMissingError
+
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx")
+    calls = {"n": 0}
+
+    def _run(cmd, **kwargs):
+        calls["n"] += 1
+        return _fake_proc(returncode=0)
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    with pytest.raises(AstContextMissingError, match="-fno-sycl"):
+        _clang_header_dump(
+            [header], [], gcc_options="-fno-sycl", frontend_context="device"
+        )
+    assert calls["n"] == 0  # fails before any subprocess is invoked
+
+
 def test_clang_header_dump_non_host_on_plain_frontend_raises_immediately(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

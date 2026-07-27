@@ -284,3 +284,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (or later) one is never joined or parsed at all, mirroring how a
   definitely-non-matching document is already skipped (Codex review,
   fourth round).
+- `dumper._clang_header_dump`'s `dpcpp_multi_context` flag unconditionally
+  forced `-fsycl -v` onto every DPC++-capable invocation (icx/icpx/dpcpp/
+  dpcpp-cl), silently overriding an explicit `-fno-sycl` in the caller's own
+  `--gcc-options`/`--gcc-option` — either re-enabling SYCL against the
+  caller's wishes, or, combined with an explicit `--frontend-context
+  device` request, producing a genuinely contradictory compile. New
+  `dumper_clang._user_explicitly_disabled_sycl`/`_resolve_dpcpp_multi_
+  context` detect a caller's own trailing `-fno-sycl` (last-flag-wins) and
+  skip the multi-pass SYCL decode path for it; `--frontend-context device`
+  combined with an explicit `-fno-sycl` now fails fast with
+  `AstContextMissingError` instead of silently resolving the contradiction
+  either way (Codex review).

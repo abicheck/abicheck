@@ -64,12 +64,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shlex
 import shutil
 from pathlib import Path
 from typing import Any
 
-from .errors import SnapshotError
+from .errors import AstContextMissingError, SnapshotError
 from .model import (
     AccessLevel,
     EnumMember,
@@ -170,6 +172,69 @@ _SYCL_DEFAULT_ON_DRIVER_NAMES = frozenset({"dpcpp", "dpcpp-cl"})
 def _dpcpp_defaults_sycl_on(cc_bin: str) -> bool:
     """True if *cc_bin* is one of Intel's SYCL-implied legacy driver names."""
     return Path(cc_bin).stem.lower() in _SYCL_DEFAULT_ON_DRIVER_NAMES
+
+
+def _user_explicitly_disabled_sycl(tokens: list[str]) -> bool:
+    """True if *tokens* (the caller's own ``--gcc-options``/``--gcc-option``
+    tokens -- never anything abicheck itself appends) end with an explicit
+    ``-fno-sycl`` with no later ``-fsycl`` to re-enable it: i.e. the caller
+    explicitly asked for a non-SYCL compile (Codex review, P2: ADR-050 D5's
+    ``dumper._clang_header_dump`` unconditionally forces ``-fsycl`` onto
+    every DPC++-capable invocation via ``dpcpp_multi_context``, which would
+    otherwise silently override this last-flag-wins signal).
+
+    Distinct from :func:`_dpcpp_defaults_sycl_on`/its use in
+    :func:`_needs_sycl_host_only`'s "is SYCL effectively enabled" question
+    (which decides whether an *already* ``-fsycl``'d build should collapse
+    to one pass) -- here, silence (no ``-fsycl``/``-fno-sycl`` at all) is
+    NOT an opt-out; only an explicit trailing ``-fno-sycl`` is.
+    """
+    disabled = False
+    for tok in tokens:
+        if tok == "-fsycl":
+            disabled = False
+        elif tok == "-fno-sycl":
+            disabled = True
+    return disabled
+
+
+def _resolve_dpcpp_multi_context(
+    clang_bin: str,
+    frontend_context: str,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+) -> bool:
+    """Validate *frontend_context* against *clang_bin* and the caller's own
+    SYCL-enable/disable tokens, returning whether
+    :func:`abicheck.dumper._clang_header_dump` should engage the multi-pass
+    SYCL decode path for this invocation.
+
+    Raises :class:`abicheck.errors.AstContextMissingError` when
+    *frontend_context* requests a non-host context but either *clang_bin*
+    isn't DPC++-capable (:func:`_is_dpcpp_family_binary`), or the caller's own
+    ``gcc_options``/``gcc_option_tokens`` explicitly disable SYCL
+    (:func:`_user_explicitly_disabled_sycl`) -- neither case is silently
+    resolved (Codex review, P2).
+    """
+    is_dpcpp = _is_dpcpp_family_binary(clang_bin)
+    if frontend_context != "host" and not is_dpcpp:
+        raise AstContextMissingError(
+            f"--frontend-context {frontend_context!r} requires a DPC++-capable "
+            f"compiler (icx/icpx/dpcpp/dpcpp-cl); {clang_bin!r} is a plain "
+            "clang/gcc invocation with no device AST context to select."
+        )
+    user_tokens = (
+        shlex.split(gcc_options, posix=os.name != "nt") if gcc_options else []
+    ) + list(gcc_option_tokens)
+    sycl_explicitly_off = is_dpcpp and _user_explicitly_disabled_sycl(user_tokens)
+    if frontend_context != "host" and sycl_explicitly_off:
+        raise AstContextMissingError(
+            f"--frontend-context {frontend_context!r} requires SYCL to be "
+            "enabled, but the given --gcc-options/--gcc-option explicitly "
+            "disable it (-fno-sycl) -- remove -fno-sycl or drop "
+            "--frontend-context device."
+        )
+    return is_dpcpp and not sycl_explicitly_off
 
 
 def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:

@@ -68,6 +68,7 @@ from .dumper_clang import (
     _is_dpcpp_family_binary as _is_dpcpp_family_binary,
     _needs_sycl_host_only,
     _resolve_clang_bin as _resolve_clang_bin,
+    _resolve_dpcpp_multi_context,
 )
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
@@ -370,19 +371,17 @@ def _clang_header_dump(
     clang is missing, times out, or emits no usable AST.
 
     ``frontend_context`` (ADR-050 D5, G32 Phase D) is ``"host"``/``"device"``.
-    ``resolved_kind`` is *frontend_context* itself when *clang_bin* is
-    DPC++-capable (:func:`_is_dpcpp_family_binary`), else ``None``. A
-    non-``"host"`` request against a non-DPC++-capable *clang_bin* fails
-    immediately with :class:`abicheck.errors.AstContextMissingError`.
+    ``resolved_kind`` is *frontend_context* when the multi-pass SYCL decode
+    path is engaged, else ``None``. A non-``"host"`` request fails immediately
+    with :class:`abicheck.errors.AstContextMissingError` when *clang_bin*
+    isn't DPC++-capable, or when its own ``gcc_options``/``gcc_option_tokens``
+    explicitly disable SYCL (``-fno-sycl``) -- never silently resolved by
+    re-enabling SYCL ourselves (Codex review, P2).
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
-    is_dpcpp = _is_dpcpp_family_binary(clang_bin)
-    if frontend_context != "host" and not is_dpcpp:
-        raise AstContextMissingError(
-            f"--frontend-context {frontend_context!r} requires a DPC++-capable "
-            f"compiler (icx/icpx/dpcpp/dpcpp-cl); {clang_bin!r} is a plain "
-            "clang/gcc invocation with no device AST context to select."
-        )
+    dpcpp_multi_context = _resolve_dpcpp_multi_context(
+        clang_bin, frontend_context, gcc_options, gcc_option_tokens
+    )
     force_cpp, force_cpp20, explicit_c_request, cc_id = _resolve_clang_langmode(
         lang,
         headers,
@@ -445,7 +444,7 @@ def _clang_header_dump(
         force_cpp20=force_cpp20,
         frontend_context=frontend_context,
     )
-    resolved_kind = frontend_context if is_dpcpp else None
+    resolved_kind = frontend_context if dpcpp_multi_context else None
     cached = _cache_path(key, backend="clang")
     if cached.exists():
         # A cache hit still costs time parsing a potentially huge AST (Codex review).
@@ -489,7 +488,7 @@ def _clang_header_dump(
             force_cpp=fcpp,
             force_cpp20=fcpp20,
             system_includes=sysinc,
-            dpcpp_multi_context=is_dpcpp,
+            dpcpp_multi_context=dpcpp_multi_context,
         )
         # DeadlineExceeded propagates uncaught, mapped by run_scan_core to _BudgetOverflow.
         deadline.check()
@@ -545,7 +544,7 @@ def _clang_header_dump(
             cached,
             _ast_paths[-1],
             cache_write=identities_stable,
-            dpcpp_capable=is_dpcpp,
+            dpcpp_capable=dpcpp_multi_context,
             frontend_context=frontend_context,
         )
         return root, resolved_kind
