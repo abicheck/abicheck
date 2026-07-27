@@ -101,27 +101,22 @@ class TestNotApplicableKinds:
         assert decision.reason_code == "non_entity_finding"
 
     def test_ordinary_entity_kind_is_not_not_applicable(self) -> None:
-        assert ChangeKind.FUNC_REMOVED.value not in {
-            "soname_changed",
-            "relro_weakened",
-        }
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision.relevance is not ContractRelevance.NOT_APPLICABLE
 
 
 class TestUnsupportedMode:
-    def test_exports_mode_raises_not_implemented(self) -> None:
-        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="")
-        with pytest.raises(NotImplementedError):
-            evaluate_change_contract_relevance(
-                c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.EXPORTS
-            )
-
-    def test_bare_exports_string_also_raises_not_implemented(self) -> None:
+    @pytest.mark.parametrize("mode", [ContractMode.EXPORTS, "exports"])
+    def test_exports_mode_raises_not_implemented(self, mode: object) -> None:
         # A bare serialized value must be coerced through ContractMode(...)
         # the same as a real enum member, not silently misrouted.
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="")
         with pytest.raises(NotImplementedError):
             evaluate_change_contract_relevance(
-                c, _UNRESOLVABLE, _UNRESOLVABLE, mode="exports"
+                c, _UNRESOLVABLE, _UNRESOLVABLE, mode=mode
             )
 
     def test_invalid_mode_value_raises_value_error(self) -> None:

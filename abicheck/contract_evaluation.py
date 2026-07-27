@@ -215,6 +215,26 @@ def _unresolved_decision(
     )
 
 
+def _decision_for_surface_reason(reason: str) -> ContractEvaluationDecision:
+    """Map a surface-exclusion reason to its terminal/weak decision.
+
+    Shared by the already-excluded-by-pipeline short-circuit and the fresh
+    :func:`~abicheck.surface.classify_change_surface` fallback in
+    :func:`evaluate_change_contract_relevance`, so the two paths cannot
+    silently diverge if one branch's mapping changes without the other
+    (CodeRabbit review).
+    """
+    if reason in _TERMINAL_SURFACE_REASONS:
+        return ContractEvaluationDecision(
+            relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
+            reason_code="terminal_authoritative_exclusion",
+            assurance=ContractAssurance.COMPLETE,
+        )
+    return _unresolved_decision(
+        "required_evidence_incomplete", ContractAssurance.PARTIAL
+    )
+
+
 def evaluate_change_contract_relevance(
     change: Change,
     surf_old: PublicSurface,
@@ -281,16 +301,8 @@ def evaluate_change_contract_relevance(
     # module's own (different, coarser) reachability closure even though
     # the specialized internal-leak check already proved no leak path
     # exists, which would wrongly reclassify it IN_CONTRACT (Codex review).
-    if change.surface_exclusion_reason in _TERMINAL_SURFACE_REASONS:
-        return ContractEvaluationDecision(
-            relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
-            reason_code="terminal_authoritative_exclusion",
-            assurance=ContractAssurance.COMPLETE,
-        )
-    if change.surface_exclusion_reason in _WEAK_SURFACE_REASONS:
-        return _unresolved_decision(
-            "required_evidence_incomplete", ContractAssurance.PARTIAL
-        )
+    if change.surface_exclusion_reason in _ALL_SURFACE_REASONS:
+        return _decision_for_surface_reason(change.surface_exclusion_reason)
 
     if not (surf_old.resolvable and surf_new.resolvable):
         # No header-derived visibility on one or both sides: no confident
@@ -322,15 +334,7 @@ def evaluate_change_contract_relevance(
     # branch above already handled the unresolvable case) -- see that
     # function's own reason-code constants.
     assert reason in _ALL_SURFACE_REASONS, f"unrecognized surface reason: {reason!r}"
-    if reason in _TERMINAL_SURFACE_REASONS:
-        return ContractEvaluationDecision(
-            relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
-            reason_code="terminal_authoritative_exclusion",
-            assurance=ContractAssurance.COMPLETE,
-        )
-    return _unresolved_decision(
-        "required_evidence_incomplete", ContractAssurance.PARTIAL
-    )
+    return _decision_for_surface_reason(reason)
 
 
 def evaluate_snapshot_pair_contract_relevance(
