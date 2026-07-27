@@ -60,6 +60,7 @@ def _import_mcp_server_symbols():  # noqa: ANN202
         sys.modules.setdefault(key, mod)
 
     import abicheck.mcp_server as _ms
+    import abicheck.mcp_shared as _mcp_shared
 
     # Restore sys.modules to look exactly as it did before this import, so we
     # don't enable mcp for files collected after us.
@@ -67,11 +68,11 @@ def _import_mcp_server_symbols():  # noqa: ANN202
         sys.modules.pop(key, None)
     if not mcp_server_was_present:
         sys.modules.pop("abicheck.mcp_server", None)
-    return _ms
+    return _ms, _mcp_shared
 
 
-_ms = _import_mcp_server_symbols()
-_env_int = _ms._env_int
+_ms, mcp_shared = _import_mcp_server_symbols()
+_env_int = mcp_shared._env_int
 _check_file_size = _ms._check_file_size
 _audit_log = _ms._audit_log
 _impact_category = _ms._impact_category
@@ -621,7 +622,7 @@ class TestMcpCheckFileSize:
         """Oversized file raises (line 107)."""
         p = tmp_path / "big.so"
         p.write_bytes(b"\x00" * 16)
-        with patch.object(_ms, "MCP_MAX_FILE_SIZE", 4):
+        with patch.object(mcp_shared, "MCP_MAX_FILE_SIZE", 4):
             with pytest.raises(ValueError, match="exceeds limit"):
                 _check_file_size(p, label="input")
 
@@ -637,7 +638,7 @@ class TestMcpAuditLog:
         """Structured logging emits a JSON record (line 130)."""
         import json as _json
 
-        with patch.object(_ms, "_structured_logging", True):
+        with patch.object(mcp_shared, "_structured_logging", True):
             with caplog.at_level("INFO", logger="abicheck.mcp"):
                 _audit_log("t", {"a": "b"}, 1.5, "ok", verdict="BREAKING")
         # Last record is valid JSON carrying our fields.
@@ -646,7 +647,7 @@ class TestMcpAuditLog:
         assert payload["verdict"] == "BREAKING"
 
     def test_text_logging(self, caplog) -> None:
-        with patch.object(_ms, "_structured_logging", False):
+        with patch.object(mcp_shared, "_structured_logging", False):
             with caplog.at_level("INFO", logger="abicheck.mcp"):
                 _audit_log("t", {"a": "b"}, 1.5, "ok")
         assert "tool=t" in caplog.text

@@ -45,7 +45,9 @@ if "mcp" not in sys.modules or not isinstance(sys.modules["mcp"], MagicMock):
     _mock_mcp_instance.tool.return_value = lambda fn: fn
     _mock_fastmcp.return_value = _mock_mcp_instance
 
-from abicheck import mcp_server_project as msp  # noqa: E402
+from abicheck import (
+    mcp_shared,  # noqa: E402
+)
 from abicheck.mcp_server import (  # noqa: E402
     abi_aggregate,
     abi_deps,
@@ -109,7 +111,7 @@ class TestAbiDeps:
         binary = _first_existing("/bin/ls", "/usr/bin/ls", "ls")
         if binary is None:
             pytest.skip("no ELF binary available to resolve")
-        monkeypatch.setattr(msp, "_MAX_FILE_SIZE", 1)
+        monkeypatch.setattr(mcp_shared, "MCP_MAX_FILE_SIZE", 1)
         raw = abi_deps(binary)
         payload = json.loads(raw)
         assert payload["status"] == "error"
@@ -123,7 +125,7 @@ class TestAbiDeps:
         binary = _first_existing("/bin/ls", "/usr/bin/ls", "ls")
         if binary is None:
             pytest.skip("no ELF binary available to resolve")
-        monkeypatch.setattr(msp, "_MCP_TIMEOUT", 0.1)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
 
         def _slow(*a, **k):
             time.sleep(1.0)
@@ -156,9 +158,7 @@ class TestAbiAggregate:
 
     def test_expect_gates_required_coverage(self, tmp_path: Path):
         _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
-        raw = abi_aggregate(
-            str(tmp_path), expect=["linux-x86_64", "windows-x86_64"]
-        )
+        raw = abi_aggregate(str(tmp_path), expect=["linux-x86_64", "windows-x86_64"])
         payload = json.loads(raw)
         assert payload["status"] == "ok"
         # windows-x86_64 never reported -> required coverage gap -> exit 1.
@@ -242,7 +242,7 @@ class TestAbiAggregate:
     def test_oversized_report_is_rejected(self, tmp_path: Path, monkeypatch):
         # ADR-021b D3: every report file under reports_dir must be bounded.
         _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
-        monkeypatch.setattr(msp, "_MAX_FILE_SIZE", 1)
+        monkeypatch.setattr(mcp_shared, "MCP_MAX_FILE_SIZE", 1)
         raw = abi_aggregate(str(tmp_path), discovered_only=True)
         payload = json.loads(raw)
         assert payload["status"] == "error"
@@ -259,7 +259,7 @@ class TestAbiAggregate:
                 }
             )
         )
-        monkeypatch.setattr(msp, "_MAX_FILE_SIZE", 1)
+        monkeypatch.setattr(mcp_shared, "MCP_MAX_FILE_SIZE", 1)
         raw = abi_aggregate(str(tmp_path), manifest=str(manifest))
         payload = json.loads(raw)
         assert payload["status"] == "error"
@@ -267,7 +267,7 @@ class TestAbiAggregate:
 
     def test_timeout(self, tmp_path: Path, monkeypatch):
         _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
-        monkeypatch.setattr(msp, "_MCP_TIMEOUT", 0.1)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
 
         def _slow(*a, **k):
             time.sleep(1.0)
@@ -359,9 +359,7 @@ class TestAbiProjectValidate:
         payload = json.loads(raw)
         assert payload["status"] == "error"
 
-    def test_toolchain_bindings_with_nothing_declared_is_a_noop(
-        self, tmp_path: Path
-    ):
+    def test_toolchain_bindings_with_nothing_declared_is_a_noop(self, tmp_path: Path):
         # _SINGLE_PROFILE_LIBRARY_RAW's "linux" profile declares no
         # compile.binding, so check_profile_bindings_resolve has nothing to
         # check -- this only exercises that the bindings file still loads.
@@ -407,7 +405,7 @@ class TestAbiProjectValidate:
 
     def test_oversized_config_is_rejected(self, tmp_path: Path, monkeypatch):
         config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
-        monkeypatch.setattr(msp, "_MAX_FILE_SIZE", 1)
+        monkeypatch.setattr(mcp_shared, "MCP_MAX_FILE_SIZE", 1)
         raw = abi_project_validate(str(config))
         payload = json.loads(raw)
         assert payload["status"] == "error"
@@ -424,7 +422,7 @@ class TestAbiProjectValidate:
             ),
             encoding="utf-8",
         )
-        monkeypatch.setattr(msp, "_MAX_FILE_SIZE", 1)
+        monkeypatch.setattr(mcp_shared, "MCP_MAX_FILE_SIZE", 1)
         raw = abi_project_validate(str(config), toolchain_bindings=str(bindings))
         payload = json.loads(raw)
         assert payload["status"] == "error"
@@ -432,7 +430,7 @@ class TestAbiProjectValidate:
 
     def test_timeout(self, tmp_path: Path, monkeypatch):
         config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
-        monkeypatch.setattr(msp, "_MCP_TIMEOUT", 0.1)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
 
         def _slow(*a, **k):
             time.sleep(1.0)
@@ -462,9 +460,7 @@ class TestAbiProjectPlan:
         ]
         assert payload["plan"]["project"] == "o/r"
 
-    def test_empty_plan_without_allow_empty_is_a_generation_error(
-        self, tmp_path: Path
-    ):
+    def test_empty_plan_without_allow_empty_is_a_generation_error(self, tmp_path: Path):
         empty_raw = {
             "targets": {},
             "profiles": {"linux": {"contract": True}},

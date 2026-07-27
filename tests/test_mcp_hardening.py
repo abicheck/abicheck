@@ -5,7 +5,7 @@ import logging
 import pytest
 
 try:
-    import abicheck.mcp_server as ms
+    import abicheck.mcp_shared as ms
     _has_mcp = True
 except ImportError:
     _has_mcp = False

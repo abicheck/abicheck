@@ -536,11 +536,11 @@ variables override defaults.
 | `--max-file-size <bytes>` | `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` (500 MB) | Maximum size of any input artifact — `library_path` (`abi_dump`/`abi_audit`), `old_input`/`new_input` (`abi_compare`), `binary_path`/`compile_db`/`against` (`abi_scan`), and the binary/report/config/bindings paths `abi_deps`/`abi_aggregate`/`abi_project_validate`/`abi_project_plan` read |
 | `--log-format text\|json` | — | `text` | Audit log format on stderr |
 
-`abi_deps`/`abi_aggregate`/`abi_project_validate`/`abi_project_plan` read
-`ABICHECK_MCP_TIMEOUT`/`ABICHECK_MCP_MAX_FILE_SIZE` independently of the four
-original tools — the env vars apply to both, but `--timeout`/`--max-file-size`
-passed as CLI flags to a running server only reconfigure the original four;
-set the env vars instead if you need one value that covers all eleven tools.
+All eleven tools share one configuration source: `--timeout`/`--max-file-size`
+passed as CLI flags to a running server, or the `ABICHECK_MCP_TIMEOUT`/
+`ABICHECK_MCP_MAX_FILE_SIZE` environment variables, apply uniformly across
+`abi_dump`/`abi_compare`/`abi_audit`/`abi_scan`/`abi_deps`/`abi_aggregate`/
+`abi_project_validate`/`abi_project_plan`.
 
 Example invocation tuned for large libraries:
 

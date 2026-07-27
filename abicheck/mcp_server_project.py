@@ -29,58 +29,45 @@ command calls (``stack_checker.check_single_env``,
 behavior can't drift between the CLI and MCP surfaces.
 
 Deliberately imports its stable helpers (``mcp``/``_safe_read_path``/
-``_sanitize_error``) from the leaf module ``mcp_shared`` rather than from
-:mod:`abicheck.mcp_server` itself: this module is imported *by*
-``mcp_server`` (for tool registration), so importing back from it here would
-recreate an import cycle the split was meant to avoid (AGENTS.md "What NOT to
-do" — a new cycle needs a leaf module, not an allowlist entry). The
-``_check_file_size``/``_audit_log``/``_MCP_TIMEOUT`` guards below are
-therefore small local copies with their own module-level config (ADR-021b
-D2/D3 apply here the same as every other tool), not shared with
-``mcp_server.py``'s mutable ``MCP_TIMEOUT``/``MCP_MAX_FILE_SIZE``/
-``--log-format`` state — the ``ABICHECK_MCP_TIMEOUT``/
-``ABICHECK_MCP_MAX_FILE_SIZE`` env vars still apply to both, only the
-``--timeout``/``--max-file-size``/``--log-format`` CLI-flag overrides on a
-running server don't retroactively reach these four tools.
+``_sanitize_error``/``_check_file_size``/``_audit_log``) from the leaf module
+``mcp_shared`` rather than from :mod:`abicheck.mcp_server` itself: this
+module is imported *by* ``mcp_server`` (for tool registration), so importing
+back from it here would recreate an import cycle the split was meant to
+avoid (AGENTS.md "What NOT to do" — a new cycle needs a leaf module, not an
+allowlist entry). ``_check_file_size``/``_audit_log`` are pure functions, so
+importing them as bare names is safe — a function's global lookups always
+resolve against its *defining* module (``mcp_shared``), regardless of which
+module calls it. The mutable ``MCP_TIMEOUT``/``MCP_MAX_FILE_SIZE``/
+``--log-format`` config is different: it's read via module-qualified
+``mcp_shared.MCP_TIMEOUT`` (never a bare imported name) so this module's
+tools observe the same ``--timeout``/``--max-file-size``/``--log-format``
+override :func:`abicheck.mcp_server.main` applies to
+``mcp_shared`` at startup — see that module's own docstring for why a bare
+``from .mcp_shared import MCP_TIMEOUT`` would bind a stale snapshot instead.
 """
 
 from __future__ import annotations
 
 import concurrent.futures as _futures
 import json
-import os as _os
 import time as _time
 from collections.abc import Callable
 from pathlib import Path
 from typing import ParamSpec, TypeVar
 
+from . import mcp_shared
 from .binary_utils import detect_binary_format as _detect_binary_format
-from .mcp_shared import _logger, _safe_read_path, _sanitize_error, mcp
+from .mcp_shared import (
+    _audit_log,
+    _check_file_size,
+    _logger,
+    _safe_read_path,
+    _sanitize_error,
+    mcp,
+)
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
-
-#: Local copies of mcp_server.py's guard defaults (see module docstring for
-#: why these aren't shared mutable state with that module).
-_MAX_FILE_SIZE = int(
-    _os.environ.get("ABICHECK_MCP_MAX_FILE_SIZE", str(500 * 1024 * 1024))
-)
-_MCP_TIMEOUT = int(_os.environ.get("ABICHECK_MCP_TIMEOUT", "120"))
-
-
-def _check_file_size(path: Path, *, label: str = "input") -> None:
-    """Raise ValueError if *path* exceeds ``_MAX_FILE_SIZE`` (ADR-021b D3)."""
-    try:
-        size = path.stat().st_size
-    except FileNotFoundError:
-        return  # let downstream handle missing files
-    except OSError as exc:
-        raise ValueError(f"Cannot check {label} file size: {exc}") from exc
-    if size > _MAX_FILE_SIZE:
-        raise ValueError(
-            f"{label} is {size / (1024 * 1024):.1f} MB, "
-            f"exceeds limit of {_MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
-        )
 
 
 def _check_dir_json_file_sizes(directory: Path, *, label: str = "input") -> None:
@@ -91,23 +78,10 @@ def _check_dir_json_file_sizes(directory: Path, *, label: str = "input") -> None
         _check_file_size(entry, label=f"{label} ({entry.name})")
 
 
-def _audit_log(
-    tool: str,
-    inputs: dict[str, str],
-    duration_s: float,
-    status: str,
-) -> None:
-    """Log a tool invocation for audit purposes (plain-text format)."""
-    parts = [f"tool={tool}"]
-    for k, v in inputs.items():
-        parts.append(f"{k}={v}")
-    parts.append(f"duration={duration_s:.3f}s")
-    parts.append(f"status={status}")
-    _logger.info(" ".join(parts))
-
-
-def _call_with_timeout(fn: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs) -> _R:
-    """Run ``fn(*args, **kwargs)`` in a thread bounded by ``_MCP_TIMEOUT``.
+def _call_with_timeout(
+    fn: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs
+) -> _R:
+    """Run ``fn(*args, **kwargs)`` in a thread bounded by ``mcp_shared.MCP_TIMEOUT``.
 
     ADR-021b D2: every tool invocation must have a configurable timeout
     rather than blocking the MCP stdio server indefinitely. Raises
@@ -115,10 +89,20 @@ def _call_with_timeout(fn: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwa
     raises propagates unchanged (re-raised by ``future.result()``) so callers
     can catch their own domain exceptions the same way they would a direct
     call.
+
+    Uses an explicit ``pool.shutdown(wait=False)`` in a ``finally`` rather
+    than ``with ThreadPoolExecutor(...) as pool:`` — the ``with`` form calls
+    ``shutdown(wait=True)`` on exit, which blocks until the still-running
+    worker finishes even after ``future.result(timeout=...)`` has already
+    raised ``TimeoutError``, defeating the point of the timeout for a
+    genuinely stuck call.
     """
-    with _futures.ThreadPoolExecutor(max_workers=1) as pool:
+    pool = _futures.ThreadPoolExecutor(max_workers=1)
+    try:
         future = pool.submit(fn, *args, **kwargs)
-        return future.result(timeout=_MCP_TIMEOUT)
+        return future.result(timeout=mcp_shared.MCP_TIMEOUT)
+    finally:
+        pool.shutdown(wait=False)
 
 
 @mcp.tool()
@@ -178,7 +162,7 @@ def abi_deps(
             return json.dumps(
                 {
                     "status": "error",
-                    "error": f"abi_deps timed out after {_MCP_TIMEOUT}s",
+                    "error": f"abi_deps timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
             )
 
@@ -289,7 +273,7 @@ def abi_aggregate(
             return json.dumps(
                 {
                     "status": "error",
-                    "error": f"abi_aggregate timed out after {_MCP_TIMEOUT}s",
+                    "error": f"abi_aggregate timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
             )
         except (AggregateError, ValueError) as exc:
@@ -386,13 +370,15 @@ def abi_project_validate(
         except _futures.TimeoutError:
             elapsed = _time.monotonic() - t0
             _audit_log(
-                "abi_project_validate", {"config": config_path.name}, elapsed,
+                "abi_project_validate",
+                {"config": config_path.name},
+                elapsed,
                 "timeout",
             )
             return json.dumps(
                 {
                     "status": "error",
-                    "error": f"abi_project_validate timed out after {_MCP_TIMEOUT}s",
+                    "error": f"abi_project_validate timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
             )
 
@@ -543,7 +529,7 @@ def abi_project_plan(
             return json.dumps(
                 {
                     "status": "error",
-                    "error": f"abi_project_plan timed out after {_MCP_TIMEOUT}s",
+                    "error": f"abi_project_plan timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
             )
 

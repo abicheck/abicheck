@@ -16,3 +16,19 @@
   test_resolves_a_real_elf_binary` now skips on non-Linux** — `abi_deps`
   wraps an ELF-only resolver; macOS/Windows CI runners have no ELF binary at
   the well-known paths the test probed (macOS system binaries are Mach-O).
+- **`abi_deps`/`abi_aggregate`/`abi_project_validate`/`abi_project_plan` now
+  observe a running server's `--timeout`/`--max-file-size`/`--log-format`
+  overrides** — these four tools previously read their own local
+  `ABICHECK_MCP_TIMEOUT`/`ABICHECK_MCP_MAX_FILE_SIZE` env-var snapshots and
+  always logged in plain text, so an operator reconfiguring a running server
+  via CLI flags silently didn't reach them. `abicheck/mcp_shared.py` is now
+  the single source of truth for `MCP_TIMEOUT`/`MCP_MAX_FILE_SIZE`/the
+  structured-logging flag, and every tool module reads it module-qualified
+  (`mcp_shared.MCP_TIMEOUT`) so a CLI-flag override reaches all eleven tools
+  uniformly.
+- **The new tools' timeout guard no longer blocks past its own deadline** —
+  `_call_with_timeout` used `with ThreadPoolExecutor(...) as pool:`, whose
+  `__exit__` calls `shutdown(wait=True)` and therefore still waited for a
+  genuinely stuck worker to finish even after `future.result(timeout=...)`
+  had already raised. Now shuts the pool down with `wait=False` in a
+  `finally` instead.

@@ -28,7 +28,6 @@ from __future__ import annotations
 import concurrent.futures as _futures
 import json
 import logging
-import os as _os
 import platform
 import sys
 import time as _time
@@ -41,6 +40,7 @@ if TYPE_CHECKING:
     from .severity import SeverityConfig
     from .suppression import SuppressionList
 
+from . import mcp_shared
 from .checker import DiffResult
 from .checker_policy import (
     API_BREAK_KINDS,
@@ -56,6 +56,8 @@ from .checker_policy import (
 )
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .mcp_shared import (
+    _audit_log,
+    _check_file_size,
     _logger,
     _safe_read_path,
     _sanitize_error,
@@ -69,27 +71,13 @@ from .service import compare_snapshots
 # ---------------------------------------------------------------------------
 # Configuration (environment variables or CLI flags)
 # ---------------------------------------------------------------------------
-
-
-def _env_int(name: str, default: str) -> int:
-    """Parse an integer environment variable with a clear error on bad input."""
-    raw = _os.environ.get(name, default)
-    try:
-        return int(raw)
-    except ValueError:
-        raise ValueError(
-            f"Environment variable {name}={raw!r} is not a valid integer"
-        ) from None
-
-
-#: Maximum seconds for a single tool invocation (abi_dump / abi_compare).
-MCP_TIMEOUT: int = _env_int("ABICHECK_MCP_TIMEOUT", "120")
-
-#: Maximum input file size in bytes (default 500 MB).
-MCP_MAX_FILE_SIZE: int = _env_int("ABICHECK_MCP_MAX_FILE_SIZE", str(500 * 1024 * 1024))
-
-#: Structured JSON log format flag (set via --log-format json).
-_structured_logging: bool = False
+#
+# MCP_TIMEOUT/MCP_MAX_FILE_SIZE/_structured_logging live in mcp_shared (the
+# single source of truth every tool module reads, ADR-021b D2/D3/D4) — this
+# module accesses them as `mcp_shared.NAME`, never as a bare imported name,
+# so main()'s runtime mutation is visible everywhere; see mcp_shared's own
+# module docstring for why a bare `from .mcp_shared import MCP_TIMEOUT`
+# would silently go stale.
 
 #: The public depth ladder (ADR-043 D2): exactly the four user-facing rungs.
 #: ``full``/``symbols``/``graph`` are internal-only vocabulary and must not
@@ -125,50 +113,6 @@ def _validate_public_depth(depth: str | None) -> str | None:
             f"Unknown depth: {depth!r}. Valid depths: {sorted(_PUBLIC_DEPTHS)}"
         )
     return depth
-
-
-def _check_file_size(path: Path, *, label: str = "input") -> None:
-    """Raise ValueError if *path* exceeds MCP_MAX_FILE_SIZE."""
-    try:
-        size = path.stat().st_size
-    except FileNotFoundError:
-        return  # let downstream handle missing files
-    except OSError as exc:
-        raise ValueError(f"Cannot check {label} file size: {exc}") from exc
-    if size > MCP_MAX_FILE_SIZE:
-        raise ValueError(
-            f"{label} is {size / (1024 * 1024):.1f} MB, "
-            f"exceeds limit of {MCP_MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
-        )
-
-
-def _audit_log(
-    tool: str,
-    inputs: dict[str, str],
-    duration_s: float,
-    status: str,
-    verdict: str | None = None,
-) -> None:
-    """Log a tool invocation for audit purposes."""
-    record = {
-        "tool": tool,
-        "inputs": inputs,
-        "duration_s": round(duration_s, 3),
-        "status": status,
-    }
-    if verdict is not None:
-        record["verdict"] = verdict
-    if _structured_logging:
-        _logger.info(json.dumps(record))
-    else:
-        parts = [f"tool={tool}"]
-        for k, v in inputs.items():
-            parts.append(f"{k}={v}")
-        parts.append(f"duration={duration_s:.3f}s")
-        parts.append(f"status={status}")
-        if verdict is not None:
-            parts.append(f"verdict={verdict}")
-        _logger.info(" ".join(parts))
 
 
 # ---------------------------------------------------------------------------
@@ -611,14 +555,14 @@ def abi_dump(
                 public_headers=hdr_paths,
             )
             try:
-                snap = future.result(timeout=MCP_TIMEOUT)
+                snap = future.result(timeout=mcp_shared.MCP_TIMEOUT)
             except _futures.TimeoutError:
                 elapsed = _time.monotonic() - t0
                 _audit_log("abi_dump", {"library": lib.name}, elapsed, "timeout")
                 return json.dumps(
                     {
                         "status": "error",
-                        "error": f"abi_dump timed out after {MCP_TIMEOUT}s",
+                        "error": f"abi_dump timed out after {mcp_shared.MCP_TIMEOUT}s",
                     }
                 )
         snap_json = snapshot_to_json(snap)
@@ -890,7 +834,7 @@ def abi_compare(
         with _futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(_do_compare)
             try:
-                old_snap, new_snap, result, pf, suppression = future.result(timeout=MCP_TIMEOUT)
+                old_snap, new_snap, result, pf, suppression = future.result(timeout=mcp_shared.MCP_TIMEOUT)
             except _futures.TimeoutError:
                 elapsed = _time.monotonic() - t0
                 _audit_log(
@@ -902,7 +846,7 @@ def abi_compare(
                 return json.dumps(
                     {
                         "status": "error",
-                        "error": f"abi_compare timed out after {MCP_TIMEOUT}s",
+                        "error": f"abi_compare timed out after {mcp_shared.MCP_TIMEOUT}s",
                     }
                 )
             except (ProfileMismatchError, ScopeMismatchError) as exc:
@@ -1480,14 +1424,14 @@ def abi_audit(
                 public_headers=hdr_paths,
             )
             try:
-                snap = future.result(timeout=MCP_TIMEOUT)
+                snap = future.result(timeout=mcp_shared.MCP_TIMEOUT)
             except _futures.TimeoutError:
                 elapsed = _time.monotonic() - t0
                 _audit_log("abi_audit", {"library": lib.name}, elapsed, "timeout")
                 return json.dumps(
                     {
                         "status": "error",
-                        "error": f"abi_audit timed out after {MCP_TIMEOUT}s",
+                        "error": f"abi_audit timed out after {mcp_shared.MCP_TIMEOUT}s",
                     }
                 )
 
@@ -1702,14 +1646,14 @@ def abi_scan(
         # timeout is *terminated* (process + clang subtree) instead of orphaned to
         # keep burning CPU after the timeout response is sent (Codex review).
         try:
-            payload = run_scan_subprocess(req, MCP_TIMEOUT)
+            payload = run_scan_subprocess(req, mcp_shared.MCP_TIMEOUT)
         except TimeoutError:
             elapsed = _time.monotonic() - t0
             _audit_log("abi_scan", {"binary": bin_path.name}, elapsed, "timeout")
             return json.dumps(
                 {
                     "status": "error",
-                    "error": f"abi_scan timed out after {MCP_TIMEOUT}s",
+                    "error": f"abi_scan timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
             )
 
@@ -1743,22 +1687,20 @@ from .mcp_server_project import (  # noqa: E402,F401
 
 def main() -> None:
     """Run the abicheck MCP server (stdio transport)."""
-    global MCP_TIMEOUT, MCP_MAX_FILE_SIZE, _structured_logging  # noqa: PLW0603
-
     import argparse
 
     parser = argparse.ArgumentParser(description="abicheck MCP server")
     parser.add_argument(
         "--timeout",
         type=int,
-        default=MCP_TIMEOUT,
-        help=f"Timeout in seconds for tool calls (default: {MCP_TIMEOUT})",
+        default=mcp_shared.MCP_TIMEOUT,
+        help=f"Timeout in seconds for tool calls (default: {mcp_shared.MCP_TIMEOUT})",
     )
     parser.add_argument(
         "--max-file-size",
         type=int,
-        default=MCP_MAX_FILE_SIZE,
-        help=f"Max input file size in bytes (default: {MCP_MAX_FILE_SIZE})",
+        default=mcp_shared.MCP_MAX_FILE_SIZE,
+        help=f"Max input file size in bytes (default: {mcp_shared.MCP_MAX_FILE_SIZE})",
     )
     parser.add_argument(
         "--log-format",
@@ -1772,13 +1714,16 @@ def main() -> None:
         parser.error("--timeout must be a positive integer")
     if args.max_file_size <= 0:
         parser.error("--max-file-size must be a positive integer")
-    MCP_TIMEOUT = args.timeout
-    MCP_MAX_FILE_SIZE = args.max_file_size
-    _structured_logging = args.log_format == "json"
+    # Module-qualified assignment (not `global`): MCP_TIMEOUT/MCP_MAX_FILE_SIZE/
+    # _structured_logging are owned by mcp_shared so every tool module (not
+    # just this one) observes the override — see mcp_shared's own docstring.
+    mcp_shared.MCP_TIMEOUT = args.timeout
+    mcp_shared.MCP_MAX_FILE_SIZE = args.max_file_size
+    mcp_shared._structured_logging = args.log_format == "json"
 
     # Redirect logging to stderr to avoid corrupting stdio JSON-RPC
     handler = logging.StreamHandler(sys.stderr)
-    if _structured_logging:
+    if mcp_shared._structured_logging:
         handler.setFormatter(logging.Formatter("%(message)s"))
     else:
         handler.setFormatter(logging.Formatter("%(levelname)s: %(name)s: %(message)s"))

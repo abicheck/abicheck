@@ -43,11 +43,11 @@ _mock_mcp_instance.tool.return_value = lambda fn: fn
 _mock_fastmcp.return_value = _mock_mcp_instance
 
 import abicheck.mcp_server as ms  # noqa: E402
+import abicheck.mcp_shared as mcp_shared  # noqa: E402
 import abicheck.service as service  # noqa: E402
 from abicheck.mcp_server import (  # noqa: E402
     _audit_log,
     _check_file_size,
-    _env_int,
     abi_audit,
     abi_compare,
     abi_dump,
@@ -55,6 +55,7 @@ from abicheck.mcp_server import (  # noqa: E402
     abi_scan,
     main,
 )
+from abicheck.mcp_shared import _env_int  # noqa: E402
 from abicheck.model import AbiSnapshot  # noqa: E402
 from abicheck.serialization import snapshot_to_json  # noqa: E402
 
@@ -133,7 +134,7 @@ class TestAbiAudit:
     def test_timeout_branch(self, tmp_path: Path, monkeypatch):
         """A resolve that outruns MCP_TIMEOUT yields a timeout error payload."""
         snap = _snapshot_file(tmp_path)
-        monkeypatch.setattr(ms, "MCP_TIMEOUT", 0.1)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
 
         def _slow(*a, **k):
             time.sleep(1.0)
@@ -318,7 +319,7 @@ class TestAbiEstimateDepthValidation:
 class TestToolTimeouts:
     def test_abi_dump_timeout(self, tmp_path: Path, monkeypatch):
         so = _fake_elf(tmp_path)
-        monkeypatch.setattr(ms, "MCP_TIMEOUT", 0.1)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
 
         def _slow(*a, **k):
             time.sleep(1.0)
@@ -332,7 +333,7 @@ class TestToolTimeouts:
     def test_abi_compare_timeout(self, tmp_path: Path, monkeypatch):
         old = _snapshot_file(tmp_path, "old.json")
         new = _snapshot_file(tmp_path, "new.json")
-        monkeypatch.setattr(ms, "MCP_TIMEOUT", 0.1)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
 
         def _slow(*a, **k):
             time.sleep(1.0)
@@ -362,7 +363,7 @@ class TestConfigHelpers:
     def test_check_file_size_over_limit_raises(self, tmp_path: Path, monkeypatch):
         f = tmp_path / "big.so"
         f.write_bytes(b"\x00" * 4096)
-        monkeypatch.setattr(ms, "MCP_MAX_FILE_SIZE", 16)
+        monkeypatch.setattr(mcp_shared, "MCP_MAX_FILE_SIZE", 16)
         with pytest.raises(ValueError, match="exceeds limit"):
             _check_file_size(f, label="library_path")
 
@@ -382,7 +383,7 @@ class TestConfigHelpers:
 
     def test_audit_log_structured_json(self, monkeypatch, caplog):
         """With structured logging enabled, the audit record is emitted as JSON."""
-        monkeypatch.setattr(ms, "_structured_logging", True)
+        monkeypatch.setattr(mcp_shared, "_structured_logging", True)
         with caplog.at_level("INFO", logger="abicheck.mcp"):
             _audit_log(
                 "abi_dump", {"library": "libx.so"}, 0.5, "ok", verdict="BREAKING"
@@ -417,15 +418,15 @@ class TestMainArgValidation:
         monkeypatch.setattr(
             sys, "argv", ["abicheck-mcp", "--log-format", "json", "--timeout", "5"]
         )
-        # main() mutates these module globals via `global` (not monkeypatch), so
+        # main() mutates mcp_shared's module globals (not monkeypatch), so
         # capture and restore them ourselves to keep later tests isolated.
-        saved_timeout = ms.MCP_TIMEOUT
+        saved_timeout = mcp_shared.MCP_TIMEOUT
         try:
             main()
             assert calls == ["stdio"]
-            assert ms._structured_logging is True
-            assert ms.MCP_TIMEOUT == 5
+            assert mcp_shared._structured_logging is True
+            assert mcp_shared.MCP_TIMEOUT == 5
         finally:
             # Restore module-level globals mutated by main().
-            ms._structured_logging = False
-            ms.MCP_TIMEOUT = saved_timeout
+            mcp_shared._structured_logging = False
+            mcp_shared.MCP_TIMEOUT = saved_timeout
