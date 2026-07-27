@@ -1806,24 +1806,34 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
     # Step 1: the main snapshot pass's own parser construction (mirrors
     # dumper._header_ast_parser's `_run_clang()` inner call for
     # `--ast-frontend clang`) -- the exact path a real ELF/PE/Mach-O
-    # clang-frontend dump takes.
-    parser = dumper._header_ast_parser(
-        [header],
-        [],
-        backend="clang",
-        compiler="c++",
-        gcc_path=None,
-        gcc_prefix=None,
-        gcc_options=None,
-        gcc_option_tokens=(),
-        sysroot=None,
-        nostdinc=False,
-        lang="c",
-        exported_dynamic=set(),
-        exported_static=set(),
-        public_header_paths=[],
-        public_dir_paths=[],
-    )
+    # clang-frontend dump takes. Wrapped in ast_memoize_scope() -- the same
+    # scope service.run_dump's own format branches open around their
+    # primary dump call -- since without it _clang_header_dump's memoize
+    # resolves to False and step 2 below would only prove disk-cache reuse
+    # (pre-existing behaviour), not the new in-process AST memo this test
+    # is meant to guard (CodeRabbit review).
+    with dumper_cache.ast_memoize_scope():
+        parser = dumper._header_ast_parser(
+            [header],
+            [],
+            backend="clang",
+            compiler="c++",
+            gcc_path=None,
+            gcc_prefix=None,
+            gcc_options=None,
+            gcc_option_tokens=(),
+            sysroot=None,
+            nostdinc=False,
+            lang="c",
+            exported_dynamic=set(),
+            exported_static=set(),
+            public_header_paths=[],
+            public_dir_paths=[],
+        )
+        # The memo slot now holds the parsed AST, primed for step 2's pop --
+        # proving this test actually exercises the memo handoff, not just
+        # the pre-existing disk-cache dedup.
+        assert dumper_cache._ast_memo_slot.get() is not None
     assert calls["n"] == 1
 
     # Step 2: the post-dump header-graph attach step, over the identical

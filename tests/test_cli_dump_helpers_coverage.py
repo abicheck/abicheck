@@ -667,7 +667,7 @@ def test_perform_elf_dump_scopes_primary_dump_for_ast_memo_reuse(
 
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", _dump_stub)
 
-    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+    _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
 
     perform_elf_dump(
         so,
