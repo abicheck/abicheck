@@ -676,6 +676,36 @@ class TestAbiAggregate:
         assert str(run_plan) not in payload["error"]
         assert run_plan.name in payload["error"]
 
+    def test_malformed_run_plan_error_redaction_reuses_resolved_paths(
+        self, tmp_path: Path
+    ):
+        # Error-message redaction previously called _safe_read_path a
+        # *second* time from the outer, untimed handler after
+        # _call_with_timeout had already returned -- a stalled filesystem
+        # there could block past --timeout while only preparing the error
+        # message (Codex review). Now redaction reuses reports_path/
+        # manifest_path/run_plan_path already resolved inside _do_aggregate,
+        # so _safe_read_path is called exactly once per path argument.
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        run_plan = tmp_path / "run-plan.json"
+        run_plan.write_text("not json")
+        calls: list[str] = []
+        real_safe_read_path = mcp_server_project._safe_read_path
+
+        def _counting(path, *, label="input"):
+            calls.append(label)
+            return real_safe_read_path(path, label=label)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "abicheck.mcp_server_project._safe_read_path", _counting
+            )
+            raw = abi_aggregate(str(tmp_path), run_plan=str(run_plan))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert calls.count("run_plan") == 1
+        assert calls.count("reports_dir") == 1
+
     def test_malformed_run_plan_error_is_audit_logged(self, tmp_path: Path, caplog):
         # This except (click.UsageError, AggregateError, ValueError) handler
         # previously returned without calling _audit_log at all -- every

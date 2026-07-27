@@ -172,6 +172,19 @@ class _ToolPreflightError(Exception):
     review)."""
 
 
+class _RedactedDomainError(Exception):
+    """Raised inside a tool's timed worker to carry an already-redacted
+    message for a genuine domain error the wrapped operation itself raised
+    (``click.UsageError``/``AggregateError``/``BindingsFileError``/
+    ``ValueError``) -- kept distinct from :class:`_ToolPreflightError`,
+    which is specifically for failures *before* the wrapped operation runs.
+    Redaction reuses the paths the worker already resolved for its own
+    preflight rather than calling ``_safe_read_path`` again from the outer
+    (untimed) handler -- an extra resolution there, on a stalled filesystem,
+    could block past ``--timeout`` while merely preparing the error message
+    (ADR-021b D2, Codex review)."""
+
+
 @mcp.tool()
 def abi_deps(
     binary_path: str,
@@ -413,21 +426,41 @@ def abi_aggregate(
                 _check_file_size(manifest_path, label="manifest")
             if run_plan_path is not None:
                 _check_file_size(run_plan_path, label="run_plan")
-            expected = _resolve_expected(
-                manifest_path,
-                run_plan_path,
-                tuple(expect or ()),
-                tuple(optional or ()),
-                discovered_only,
-            )
-            return aggregate_reports_dir(
-                reports_path,
-                expected=expected,
-                discovered_only=discovered_only,
-                on_missing_required=OnMissingRequired(on_missing_required),
-                on_unexpected_target=OnUnexpectedTarget(on_unexpected_target),
-                prefix=report_prefix,
-            )
+            try:
+                expected = _resolve_expected(
+                    manifest_path,
+                    run_plan_path,
+                    tuple(expect or ()),
+                    tuple(optional or ()),
+                    discovered_only,
+                )
+                return aggregate_reports_dir(
+                    reports_path,
+                    expected=expected,
+                    discovered_only=discovered_only,
+                    on_missing_required=OnMissingRequired(on_missing_required),
+                    on_unexpected_target=OnUnexpectedTarget(on_unexpected_target),
+                    prefix=report_prefix,
+                )
+            except (click.UsageError, AggregateError, ValueError) as exc:
+                # aggregate_reports_dir/_resolve_expected embed the
+                # *resolved* path in some error text, not the raw
+                # caller-supplied string -- redact both forms, reusing the
+                # paths already resolved above rather than calling
+                # _safe_read_path again (that retry previously ran in the
+                # outer, untimed handler -- Codex review).
+                redact_args: list[str | Path] = [Path(reports_dir), reports_path]
+                if manifest is not None:
+                    redact_args.append(Path(manifest))
+                    if manifest_path is not None:
+                        redact_args.append(manifest_path)
+                if run_plan is not None:
+                    redact_args.append(Path(run_plan))
+                    if run_plan_path is not None:
+                        redact_args.append(run_plan_path)
+                raise _RedactedDomainError(
+                    _redact_paths(str(exc), *redact_args)
+                ) from exc
 
         try:
             result = _call_with_timeout(_do_aggregate)
@@ -454,28 +487,7 @@ def abi_aggregate(
                 "error",
             )
             return json.dumps({"status": "error", "error": str(exc)})
-        except (click.UsageError, AggregateError, ValueError) as exc:
-            redact_args: list[str | Path] = [Path(reports_dir)]
-            # aggregate_reports_dir/_resolve_expected embed the *resolved*
-            # reports_dir in some error text, not the raw caller-supplied
-            # string -- redact both forms. Best-effort: an error here just
-            # means one fewer path substituted, not a failure to respond.
-            try:
-                redact_args.append(_safe_read_path(reports_dir, label="reports_dir"))
-            except ValueError:
-                pass
-            if manifest is not None:
-                redact_args.append(Path(manifest))
-                try:
-                    redact_args.append(_safe_read_path(manifest, label="manifest"))
-                except ValueError:
-                    pass
-            if run_plan is not None:
-                redact_args.append(Path(run_plan))
-                try:
-                    redact_args.append(_safe_read_path(run_plan, label="run_plan"))
-                except ValueError:
-                    pass
+        except _RedactedDomainError as exc:
             elapsed = _time.monotonic() - t0
             _audit_log(
                 "abi_aggregate",
@@ -483,9 +495,7 @@ def abi_aggregate(
                 elapsed,
                 "error",
             )
-            return json.dumps(
-                {"status": "error", "error": _redact_paths(str(exc), *redact_args)}
-            )
+            return json.dumps({"status": "error", "error": str(exc)})
 
         elapsed = _time.monotonic() - t0
         _audit_log(
@@ -564,16 +574,32 @@ def abi_project_validate(
             _check_file_size(config_path, label="config")
             if bindings_path is not None:
                 _check_file_size(bindings_path, label="toolchain_bindings")
-            parsed = _load_project_targets_config(config_path)
-            bindings_file = (
-                load_bindings_file(bindings_path) if bindings_path is not None else None
-            )
-            report = validate_project_targets(parsed)
-            if bindings_file is not None:
-                report.errors.extend(
-                    check_profile_bindings_resolve(parsed.profiles, bindings_file)
+            try:
+                parsed = _load_project_targets_config(config_path)
+                bindings_file = (
+                    load_bindings_file(bindings_path)
+                    if bindings_path is not None
+                    else None
                 )
-            return report
+                report = validate_project_targets(parsed)
+                if bindings_file is not None:
+                    report.errors.extend(
+                        check_profile_bindings_resolve(parsed.profiles, bindings_file)
+                    )
+                return report
+            except (click.UsageError, BindingsFileError) as exc:
+                # Reuses config_path/bindings_path already resolved above
+                # instead of calling _safe_read_path again from the outer
+                # (untimed) handler -- that retry previously ran after
+                # _call_with_timeout returned (Codex review).
+                redact_args: list[str | Path] = [Path(config), config_path]
+                if toolchain_bindings is not None:
+                    redact_args.append(Path(toolchain_bindings))
+                    if bindings_path is not None:
+                        redact_args.append(bindings_path)
+                raise _RedactedDomainError(
+                    _redact_paths(str(exc), *redact_args)
+                ) from exc
 
         try:
             report = _call_with_timeout(_do_validate)
@@ -597,31 +623,12 @@ def abi_project_validate(
                 "abi_project_validate", {"config": Path(config).name}, elapsed, "error"
             )
             return json.dumps({"status": "error", "error": str(exc)})
-        except (click.UsageError, BindingsFileError) as exc:
-            redact_args: list[str | Path] = [Path(config)]
-            if toolchain_bindings is not None:
-                redact_args.append(Path(toolchain_bindings))
-            # Best-effort: also redact the resolved forms, since some errors
-            # embed the resolved path rather than the raw caller-supplied
-            # string. One fewer path substituted is not a failure to respond.
-            try:
-                redact_args.append(_safe_read_path(config, label="config"))
-            except ValueError:
-                pass
-            if toolchain_bindings is not None:
-                try:
-                    redact_args.append(
-                        _safe_read_path(toolchain_bindings, label="toolchain_bindings")
-                    )
-                except ValueError:
-                    pass
+        except _RedactedDomainError as exc:
             elapsed = _time.monotonic() - t0
             _audit_log(
                 "abi_project_validate", {"config": Path(config).name}, elapsed, "error"
             )
-            return json.dumps(
-                {"status": "error", "error": _redact_paths(str(exc), *redact_args)}
-            )
+            return json.dumps({"status": "error", "error": str(exc)})
 
         elapsed = _time.monotonic() - t0
         _audit_log("abi_project_validate", {"config": Path(config).name}, elapsed, "ok")
@@ -731,39 +738,59 @@ def abi_project_plan(
                 )
             if bindings_path is not None:
                 _check_file_size(bindings_path, label="toolchain_bindings")
-            parsed = _load_project_targets_config(config_path)
-            resolved_build_outputs = _parse_build_output_specs(
-                tuple(build_outputs or ())
-            )
-            bindings_file = (
-                load_bindings_file(bindings_path) if bindings_path is not None else None
-            )
-            resolved_bindings = (
-                bindings_file.bindings if bindings_file is not None else None
-            )
-            validation = validate_project_targets(parsed)
-            if not validation.ok:
-                raise _ProjectPlanValidationError(validation.errors)
-            binding_errors = (
-                check_profile_bindings_resolve(parsed.profiles, bindings_file)
-                if bindings_file is not None
-                else []
-            )
-            plan, report = generate_run_plan(
-                parsed,
-                resolved_build_outputs,
-                project=project,
-                head_sha=head_sha,
-                resolved_bindings=resolved_bindings,
-            )
-            report.errors.extend(binding_errors)
-            if not plan.checks and not allow_empty:
-                report.errors.append(
-                    "run-plan resolved to zero checks -- pass allow_empty=true to "
-                    "accept this (e.g. bootstrapping .abicheck.yml before any "
-                    "targets:/bundles: checks[] are declared yet)."
+            try:
+                parsed = _load_project_targets_config(config_path)
+                resolved_build_outputs = _parse_build_output_specs(
+                    tuple(build_outputs or ())
                 )
-            return plan, report
+                bindings_file = (
+                    load_bindings_file(bindings_path)
+                    if bindings_path is not None
+                    else None
+                )
+                resolved_bindings = (
+                    bindings_file.bindings if bindings_file is not None else None
+                )
+                validation = validate_project_targets(parsed)
+                if not validation.ok:
+                    raise _ProjectPlanValidationError(validation.errors)
+                binding_errors = (
+                    check_profile_bindings_resolve(parsed.profiles, bindings_file)
+                    if bindings_file is not None
+                    else []
+                )
+                plan, report = generate_run_plan(
+                    parsed,
+                    resolved_build_outputs,
+                    project=project,
+                    head_sha=head_sha,
+                    resolved_bindings=resolved_bindings,
+                )
+                report.errors.extend(binding_errors)
+                if not plan.checks and not allow_empty:
+                    report.errors.append(
+                        "run-plan resolved to zero checks -- pass allow_empty=true to "
+                        "accept this (e.g. bootstrapping .abicheck.yml before any "
+                        "targets:/bundles: checks[] are declared yet)."
+                    )
+                return plan, report
+            except (click.UsageError, BindingsFileError) as exc:
+                # Reuses config_path/bindings_path already resolved above
+                # instead of calling _safe_read_path again from the outer
+                # (untimed) handler -- that retry previously ran after
+                # _call_with_timeout returned (Codex review).
+                redact_args: list[str | Path] = [
+                    Path(config),
+                    config_path,
+                    *build_output_dirs,
+                ]
+                if toolchain_bindings is not None:
+                    redact_args.append(Path(toolchain_bindings))
+                    if bindings_path is not None:
+                        redact_args.append(bindings_path)
+                raise _RedactedDomainError(
+                    _redact_paths(str(exc), *redact_args)
+                ) from exc
 
         try:
             plan, report = _call_with_timeout(_do_plan)
@@ -798,31 +825,12 @@ def abi_project_plan(
                 "abi_project_plan", {"config": Path(config).name}, elapsed, "error"
             )
             return json.dumps({"status": "error", "error": str(exc)})
-        except (click.UsageError, BindingsFileError) as exc:
-            redact_args: list[str | Path] = [Path(config), *build_output_dirs]
-            if toolchain_bindings is not None:
-                redact_args.append(Path(toolchain_bindings))
-            # Best-effort: also redact the resolved forms, since some errors
-            # embed the resolved path rather than the raw caller-supplied
-            # string. One fewer path substituted is not a failure to respond.
-            try:
-                redact_args.append(_safe_read_path(config, label="config"))
-            except ValueError:
-                pass
-            if toolchain_bindings is not None:
-                try:
-                    redact_args.append(
-                        _safe_read_path(toolchain_bindings, label="toolchain_bindings")
-                    )
-                except ValueError:
-                    pass
+        except _RedactedDomainError as exc:
             elapsed = _time.monotonic() - t0
             _audit_log(
                 "abi_project_plan", {"config": Path(config).name}, elapsed, "error"
             )
-            return json.dumps(
-                {"status": "error", "error": _redact_paths(str(exc), *redact_args)}
-            )
+            return json.dumps({"status": "error", "error": str(exc)})
 
         elapsed = _time.monotonic() - t0
         _audit_log("abi_project_plan", {"config": Path(config).name}, elapsed, "ok")

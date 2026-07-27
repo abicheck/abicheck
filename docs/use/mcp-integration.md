@@ -521,8 +521,16 @@ Common causes:
 | Unrecognized change kind | `"Unknown change kind: 'foo'. Use abi_list_changes to see all available kinds."` |
 | Unparseable input | `"Cannot detect input format. Expected: ELF (.so), PE (.dll), Mach-O (.dylib), JSON snapshot, or ABICC Perl dump."` |
 
-The MCP server process keeps running on errors — only the failing tool
-invocation is terminated.
+The MCP server process keeps running on errors and returns a structured
+error for the failing call, but "the failing invocation is terminated" is
+only literally true for `abi_scan` (a killable child process). The other
+seven bounded tools run their work in a thread; on timeout the *response*
+returns immediately, but the underlying thread is not killed (Python has no
+API to forcibly stop a running thread) — it keeps running in the
+background until it finishes on its own. A single stuck call is therefore
+bounded from the *caller's* perspective, not fully isolated at the process
+level; see ["Read-side protections"](#read-side-protections) below for the
+per-tool breakdown of which mechanism each uses.
 
 ## Runtime configuration
 
@@ -684,7 +692,9 @@ they follow the same access controls as the user running the MCP server.
 
 ### Read-side protections
 
-In addition to the write-path policy above, every tool call is bounded
+In addition to the write-path policy above, every tool call that runs
+bounded work (all but `abi_estimate`/`abi_list_changes`/`abi_explain_change`
+— see ["Runtime configuration"](#runtime-configuration) above) is bounded
 to keep one bad input from disabling the server:
 
 - **File-size cap**: input artifacts larger than `--max-file-size` (default

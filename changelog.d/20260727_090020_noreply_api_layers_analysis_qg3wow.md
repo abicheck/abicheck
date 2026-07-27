@@ -270,6 +270,31 @@
   structured timeout, even though the size check and expected-set parsing
   right after them were already bounded. Both moved inside `_do_aggregate`,
   alongside `reports_dir`'s existing resolution.
+- **`abi_aggregate`/`abi_project_validate`/`abi_project_plan`'s error-message
+  redaction no longer runs a second, untimed filesystem resolution after
+  `_call_with_timeout` returns** — each tool's domain-error handler
+  (`click.UsageError`/`AggregateError`/`BindingsFileError`) called
+  `_safe_read_path` a second time on the same config/manifest/run_plan/
+  toolchain_bindings path purely to redact it, in the outer, untimed
+  handler; a stalled filesystem there could block past `--timeout` while
+  only preparing the error message (Codex review). Domain-error handling
+  and redaction now happen inside each tool's timed worker closure, reusing
+  the paths already resolved for the initial preflight instead of
+  re-resolving them — a new `_RedactedDomainError` carries the
+  already-redacted message out to the (now much simpler) outer handler.
+- **`docs/use/mcp-integration.md`/`docs/contribute/adr/021-mcp-security-model.md`
+  no longer make inconsistent or stale claims about the timeout guarantee**
+  — the integration guide claimed "only the failing tool invocation is
+  terminated," which is false for every bounded tool except `abi_scan`
+  (its killable subprocess): the other seven run in a thread that is never
+  actually killed on timeout (Python has no API to forcibly stop a running
+  thread), just abandoned in the background. Also said "every tool call is
+  bounded" in one section while another section of the same page correctly
+  excluded three tools (`abi_estimate`/`abi_list_changes`/
+  `abi_explain_change`) — narrowed to match. ADR-021b's evidence table
+  still cited only `mcp_server.py` and the original four tools; updated to
+  cover `mcp_server_project.py`'s four tools and the `mcp_shared.py` split,
+  and to state the thread-not-killed caveat plainly (Codex review).
 - **`_redact_paths` no longer leaves a nested path partially redacted** —
   it substituted paths in caller-supplied order; when one resolved path was
   a literal prefix of another (e.g. a bindings file nested under a config
