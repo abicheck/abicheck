@@ -48,10 +48,17 @@ def _rec(name, fields=(), bases=()):
 
 
 class TestScopeSnapshotToPublicSurface:
+    """Every success-path snapshot below sets ``from_headers=True``: scoping's
+    whole premise (an over-broad header-AST dump) only applies to header-parsed
+    snapshots, so the scoper gates on it explicitly — see
+    ``TestFromHeadersGate`` for the regression this guards against (Codex
+    review)."""
+
     def test_drops_unreferenced_dependency_type(self):
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
+            from_headers=True,
             functions=[_fn("run", params=("Used *",))],
             types=[
                 _rec("Used", fields=(("x", "int"),)),
@@ -68,6 +75,7 @@ class TestScopeSnapshotToPublicSurface:
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
+            from_headers=True,
             functions=[_fn("run", params=("std::string *",))],
             types=[_rec("std::string", fields=(("data", "char *"),))],
         )
@@ -78,6 +86,7 @@ class TestScopeSnapshotToPublicSurface:
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
+            from_headers=True,
             functions=[_fn("run", params=("Outer *",))],
             types=[
                 _rec("Outer", fields=(("inner", "Inner"),), bases=("Base",)),
@@ -93,6 +102,7 @@ class TestScopeSnapshotToPublicSurface:
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
+            from_headers=True,
             functions=[
                 _fn("public_fn", vis=Visibility.PUBLIC),
                 _fn("hidden_fn", vis=Visibility.HIDDEN, mangled="_Z9hidden_fn"),
@@ -120,6 +130,7 @@ class TestScopeSnapshotToPublicSurface:
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
+            from_headers=True,
             functions=[_fn("run", params=("Alias *",))],
             types=[_rec("Real", fields=(("x", "int"),))],
             typedefs={"Alias": "Real", "Unreached": "AlsoUnrelated"},
@@ -148,6 +159,7 @@ class TestScopeSnapshotToPublicSurface:
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
+            from_headers=True,
             functions=[
                 _fn("run", params=("Used *",)),
                 _fn("hidden", vis=Visibility.HIDDEN, mangled="_Z6hidden"),
@@ -159,3 +171,26 @@ class TestScopeSnapshotToPublicSurface:
         scope_snapshot_to_public_surface(snap)
         assert len(snap.functions) == original_fn_count
         assert len(snap.types) == original_type_count
+
+
+class TestFromHeadersGate:
+    """Regression coverage for the Codex-review finding: a DWARF-derived
+    snapshot (no -H/--header at all) can carry Visibility.PUBLIC declarations
+    with full type layout from debug info, making
+    ``surface.PublicSurface.resolvable`` True even though this flag's whole
+    premise -- a header-AST dump pulling in unreferenced transitive
+    #include dependency declarations -- does not apply to it. Scoping must
+    require ``from_headers`` explicitly, not just ``resolvable``."""
+
+    def test_dwarf_derived_snapshot_without_headers_raises(self):
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=False,  # DWARF-only / no -H: elf_only_mode is also
+            # False (real type info exists from debug info), so `resolvable`
+            # alone would incorrectly accept this snapshot for scoping.
+            functions=[_fn("run", params=("Used *",))],
+            types=[_rec("Used", fields=(("x", "int"),))],
+        )
+        with pytest.raises(PublicSurfaceScopingError):
+            scope_snapshot_to_public_surface(snap)

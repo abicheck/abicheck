@@ -330,6 +330,7 @@ class TestWriteSnapshotOutput:
         snap = AbiSnapshot(
             library="lib.so",
             version="1.0",
+            from_headers=True,
             functions=[
                 Function(
                     name="run",

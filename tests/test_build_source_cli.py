@@ -2220,6 +2220,28 @@ def test_dump_source_only_no_binary(tmp_path):
     assert len(snap.build_source.build_evidence.compile_units) == 1
 
 
+def test_dump_source_only_public_surface_only_is_usage_error(tmp_path):
+    """`dump --sources <tree> --public-surface-only` (no SO_PATH) must not
+    silently ignore the flag (Codex review): a source-only snapshot carries no
+    functions/variables at all, so it has no resolvable public surface to
+    scope from -- the CLI must surface that as a usage error, not succeed
+    with an unscoped artifact as if the flag had no effect.
+    """
+    tree = tmp_path / "src"
+    tree.mkdir()
+    cdb = [{"directory": str(tree), "file": "foo.cpp",
+            "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"]}]
+    (tree / "compile_commands.json").write_text(json.dumps(cdb))
+
+    out = tmp_path / "libfoo.src.json"
+    result = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(tree), "--public-surface-only", "-o", str(out)],
+    )
+    assert result.exit_code != 0
+    assert not out.exists()
+
+
 def test_dump_with_no_binary_and_no_inputs_errors():
     """A bare `dump` (no SO_PATH, no --sources/--build-info) errors clearly."""
     result = CliRunner().invoke(main, ["dump"])

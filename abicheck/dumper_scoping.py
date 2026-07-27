@@ -37,9 +37,9 @@ from .surface import compute_public_surface
 
 
 class PublicSurfaceScopingError(ValidationError):
-    """Raised when ``--public-surface-only`` is requested but the snapshot's
-    public surface cannot be resolved (no header-derived public symbols —
-    e.g. a binary-only/ELF-only dump with no ``-H``/``--header`` at all)."""
+    """Raised when ``--public-surface-only`` is requested but the snapshot has
+    no header-AST-derived declarations to scope (no ``-H``/``--header`` at
+    all, or a DWARF-only/export-table-only dump)."""
 
 
 def scope_snapshot_to_public_surface(snap: AbiSnapshot) -> AbiSnapshot:
@@ -53,8 +53,16 @@ def scope_snapshot_to_public_surface(snap: AbiSnapshot) -> AbiSnapshot:
 
     Raises :class:`PublicSurfaceScopingError` if the snapshot has no
     resolvable public surface at all (see
-    :attr:`surface.PublicSurface.resolvable`) — scoping an export-table-only
-    dump would silently drop everything, which is never the caller's intent.
+    :attr:`surface.PublicSurface.resolvable`), **or** if it was not parsed
+    from headers at all (:attr:`AbiSnapshot.from_headers` False) — scoping an
+    export-table-only dump would silently drop everything, which is never the
+    caller's intent, and gating on ``resolvable`` alone is not enough: a
+    DWARF-derived dump (no ``-H`` at all, e.g. the auto-DWARF-fallback path or
+    ``--dwarf-only``) can carry ``Visibility.PUBLIC`` declarations with full
+    type layout from debug info, making ``resolvable`` True even though this
+    flag's whole premise — a full header-AST dump pulling in unreferenced
+    transitive ``#include`` dependency declarations — does not apply to it at
+    all (Codex review).
 
     The result is a lossy artifact: a later ``compare`` against it can only
     see what this closure kept, so comparing a scoped snapshot against an
@@ -63,12 +71,11 @@ def scope_snapshot_to_public_surface(snap: AbiSnapshot) -> AbiSnapshot:
     same way.
     """
     surface = compute_public_surface(snap)
-    if not surface.resolvable:
+    if not surface.resolvable or not snap.from_headers:
         raise PublicSurfaceScopingError(
-            "--public-surface-only requires a resolvable public surface "
-            "(pass -H/--header so functions/variables are parsed with "
-            "header-derived visibility; an export-table-only/ELF-only dump "
-            "has nothing to scope from)."
+            "--public-surface-only requires a header-AST-derived snapshot "
+            "(pass -H/--header); a DWARF-only, export-table-only, or "
+            "source-only dump has no header-parsed declarations to scope."
         )
     return dataclasses.replace(
         snap,

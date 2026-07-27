@@ -847,7 +847,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # Source-only dump (no binary) for the parallel-baseline flow.
     if so_path is None:
         from .cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth, public_surface_only=public_surface_only)
         return
 
     effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
