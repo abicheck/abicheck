@@ -88,6 +88,13 @@ class PackKind(str, Enum):
 _VALID_PACK_KINDS: frozenset[str] = frozenset(k.value for k in PackKind)
 _VALID_CHANGE_KIND_SLUGS: frozenset[str] = frozenset(k.value for k in ChangeKind)
 
+#: The complete top-level manifest field set. ADR-049 D7: "unknown config
+#: keys/enum values fail at load time" -- reading only these four fields via
+#: ``.get()`` would otherwise silently ignore an extra or misspelled key
+#: (e.g. ``assigments:`` for ``assignments:``) instead of rejecting it,
+#: silently discarding the pack author's actual intent (Codex review).
+_TOP_LEVEL_MANIFEST_FIELDS: frozenset[str] = frozenset({"id", "version", "kind", "assignments"})
+
 
 class _StrictLoader(yaml.SafeLoader):
     """A ``SafeLoader`` that rejects a duplicate key in the same mapping.
@@ -111,6 +118,17 @@ def _construct_strict_mapping(
     mapping: dict[Any, Any] = {}
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node, deep=True)
+        # A complex YAML key (e.g. `? [a, b] : value`) constructs to an
+        # unhashable list -- `key in seen`/`seen.add(key)` would otherwise
+        # raise a raw TypeError instead of the documented PackManifestError
+        # (Codex review).
+        try:
+            hash(key)
+        except TypeError as exc:
+            raise PackManifestError(
+                f"unhashable mapping key {key!r} "
+                f"(line {key_node.start_mark.line + 1}): {exc}"
+            ) from exc
         if key in seen:
             raise PackManifestError(
                 f"duplicate key {key!r} in the same mapping "
@@ -288,6 +306,17 @@ def load_pack_manifest(path: str | Path) -> LoadedPack:
         raise PackManifestError(
             f"{manifest_path}: top-level pack manifest document must be a "
             f"YAML mapping, got {type(document).__name__}"
+        )
+
+    # An unknown/misspelled top-level key (e.g. `assigments:` for
+    # `assignments:`) would otherwise be silently ignored -- every field
+    # below is read with `.get()`, which has no way to notice an unread key
+    # sitting right next to the one it was meant to replace (Codex review).
+    unknown_top_level = sorted(set(document) - _TOP_LEVEL_MANIFEST_FIELDS)
+    if unknown_top_level:
+        raise PackManifestError(
+            f"{manifest_path}: unknown top-level field(s) {unknown_top_level} "
+            f"(accepted: {sorted(_TOP_LEVEL_MANIFEST_FIELDS)})"
         )
 
     pack_id = document.get("id")

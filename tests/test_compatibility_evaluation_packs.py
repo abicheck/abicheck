@@ -328,6 +328,35 @@ class TestLoadPackManifestValidation:
         with pytest.raises(PackManifestError, match="duplicate key 'func_removed'"):
             load_pack_manifest(path)
 
+    def test_unhashable_mapping_key_raises_pack_manifest_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A complex YAML key (`? [a, b] : value`) constructs to an unhashable
+        # list -- `key in seen` must not surface a raw TypeError instead of
+        # the documented PackManifestError (Codex review).
+        path = _write(
+            tmp_path,
+            "unhashable_key.yaml",
+            "id: p\nversion: 1\nkind: gate\n"
+            "assignments:\n  ? [a, b]\n  : value\n",
+        )
+        with pytest.raises(PackManifestError, match="unhashable mapping key"):
+            load_pack_manifest(path)
+
+    def test_unknown_top_level_field_raises(self, tmp_path: Path) -> None:
+        # A misspelled `assigments:` alongside a well-formed `assignments: {}`
+        # must not silently resolve to an empty pack -- every top-level key
+        # must be recognized (ADR-049 D7: unknown config keys fail at load
+        # time) (Codex review).
+        path = _write(
+            tmp_path,
+            "unknown_field.yaml",
+            "id: p\nversion: 1\nkind: gate\nassignments: {}\n"
+            "assigments: {exit_code_scheme: legacy}\n",
+        )
+        with pytest.raises(PackManifestError, match="unknown top-level field"):
+            load_pack_manifest(path)
+
 
 class TestAssignmentsForConflictCheck:
     def test_feeds_detect_pack_conflicts_directly(self, tmp_path: Path) -> None:

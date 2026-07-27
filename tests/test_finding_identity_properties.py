@@ -64,20 +64,30 @@ _HSETTINGS = settings(
     suppress_health_check=[HealthCheck.too_slow],
 )
 
-# Identifiers shaped so f"_Z{len(ident)}{ident}v" is a real, structurally
-# verifiable Itanium <encoding> (a zero-parameter free function returning
-# int) -- confirmed against normalize_mangled_name directly. Restricting to
-# ASCII letters/underscore avoids incidentally generating a digit-leading
-# identifier that would change the encoding's own byte-length arithmetic in
-# a way unrelated to what these properties test.
+# Identifiers shaped so both f"_Z{len(ident)}{ident}v" (a zero-parameter free
+# function returning int) and the bare f"_Z{len(ident)}{ident}" (a data name,
+# e.g. a global variable) are real, structurally verifiable Itanium
+# <encoding>s -- confirmed against normalize_mangled_name directly for both
+# forms. Restricting to ASCII letters/underscore avoids incidentally
+# generating a digit-leading identifier that would change the encoding's own
+# byte-length arithmetic in a way unrelated to what these properties test.
 _identifier = st.text(alphabet=string.ascii_letters + "_", min_size=1, max_size=12)
 _type_name = st.sampled_from(
     ["int", "char", "double", "long", "unsigned int", "float", "bool", "void*"]
 )
 
 
-def _mangled_for(ident: str) -> str:
+def _function_mangled_for(ident: str) -> str:
+    """A zero-parameter function <encoding>: <source-name> + 'v' (void params)."""
     return f"_Z{len(ident)}{ident}v"
+
+
+def _data_mangled_for(ident: str) -> str:
+    """A data-name <encoding> (e.g. a global variable): bare <source-name>,
+    with no parameter-list suffix -- unlike a function, a variable has no
+    signature to encode (Codex review: reusing the function form for
+    variable test fixtures doesn't model a real data-name mangling)."""
+    return f"_Z{len(ident)}{ident}"
 
 
 @st.composite
@@ -87,7 +97,7 @@ def _functions(draw: st.DrawFn) -> Function:
     params = [Param(name=f"p{i}", type=draw(_type_name)) for i in range(n_params)]
     return Function(
         name=ident,
-        mangled=_mangled_for(ident),
+        mangled=_function_mangled_for(ident),
         return_type=draw(_type_name),
         params=params,
     )
@@ -96,7 +106,9 @@ def _functions(draw: st.DrawFn) -> Function:
 @st.composite
 def _variables(draw: st.DrawFn) -> Variable:
     ident = draw(_identifier)
-    return Variable(name=ident, mangled=_mangled_for(ident), type=draw(_type_name))
+    return Variable(
+        name=ident, mangled=_data_mangled_for(ident), type=draw(_type_name)
+    )
 
 
 class TestIdentityIsDeterministic:
@@ -178,22 +190,22 @@ class TestDistinctEntitiesDoNotCollide:
         assert identity_a.primary_id != identity_b.primary_id
 
 
+_FUNCTION_CHANGE_KINDS = (ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_ADDED)
+_VARIABLE_CHANGE_KINDS = (ChangeKind.VAR_REMOVED, ChangeKind.VAR_ADDED)
+
+
 @st.composite
 def _symbol_level_changes(draw: st.DrawFn) -> Change:
-    kind = draw(
-        st.sampled_from(
-            [
-                ChangeKind.FUNC_REMOVED,
-                ChangeKind.FUNC_ADDED,
-                ChangeKind.VAR_REMOVED,
-                ChangeKind.VAR_ADDED,
-            ]
-        )
-    )
+    kind = draw(st.sampled_from(_FUNCTION_CHANGE_KINDS + _VARIABLE_CHANGE_KINDS))
     ident = draw(_identifier)
+    mangled = (
+        _function_mangled_for(ident)
+        if kind in _FUNCTION_CHANGE_KINDS
+        else _data_mangled_for(ident)
+    )
     return Change(
         kind=kind,
-        symbol=_mangled_for(ident),
+        symbol=mangled,
         description=draw(st.text(max_size=40)),
         old_value=draw(st.none() | st.text(max_size=10)),
         new_value=draw(st.none() | st.text(max_size=10)),
