@@ -399,6 +399,16 @@ def abi_project_validate(
         )
 
 
+class _ProjectPlanValidationError(Exception):
+    """Raised inside the timeout-bounded worker when the project config
+    fails ``validate_project_targets`` (ADR-021b D2: validation over a large
+    config must count against the same timeout as run-plan generation)."""
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("invalid project config")
+        self.errors = errors
+
+
 @mcp.tool()
 def abi_project_plan(
     config: str = ".abicheck.yml",
@@ -456,19 +466,6 @@ def abi_project_plan(
         except click.UsageError as exc:
             return json.dumps({"status": "error", "error": str(exc)})
 
-        validation = validate_project_targets(parsed)
-        if not validation.ok:
-            return json.dumps(
-                {
-                    "status": "error",
-                    "error": (
-                        "cannot generate a run-plan from an invalid project "
-                        f"config ({len(validation.errors)} error(s)): "
-                        + "; ".join(validation.errors)
-                    ),
-                }
-            )
-
         # _parse_build_output_specs reads each PROFILE=DIR's build-output.json
         # itself; check every one's size *before* that parse (ADR-021b D3) --
         # a best-effort pre-check keyed on the same "=" split it uses, so a
@@ -487,7 +484,7 @@ def abi_project_plan(
             return json.dumps({"status": "error", "error": str(exc)})
 
         resolved_bindings: dict[str, str] | None = None
-        binding_errors: list[str] = []
+        bindings_file = None
         if toolchain_bindings is not None:
             bindings_path = _safe_read_path(
                 toolchain_bindings, label="toolchain_bindings"
@@ -498,11 +495,20 @@ def abi_project_plan(
             except BindingsFileError as exc:
                 return json.dumps({"status": "error", "error": str(exc)})
             resolved_bindings = bindings_file.bindings
-            binding_errors = check_profile_bindings_resolve(
-                parsed.profiles, bindings_file
-            )
 
         def _do_plan() -> tuple[RunPlan, RunPlanGenerationReport]:
+            # Validation and binding resolution run inside the same bounded
+            # worker as run-plan generation (ADR-021b D2): a large config's
+            # cross-reference validation must count against --timeout too,
+            # not just the generate_run_plan call that follows it.
+            validation = validate_project_targets(parsed)
+            if not validation.ok:
+                raise _ProjectPlanValidationError(validation.errors)
+            binding_errors = (
+                check_profile_bindings_resolve(parsed.profiles, bindings_file)
+                if bindings_file is not None
+                else []
+            )
             plan, report = generate_run_plan(
                 parsed,
                 resolved_build_outputs,
@@ -530,6 +536,16 @@ def abi_project_plan(
                 {
                     "status": "error",
                     "error": f"abi_project_plan timed out after {mcp_shared.MCP_TIMEOUT}s",
+                }
+            )
+        except _ProjectPlanValidationError as exc:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": (
+                        "cannot generate a run-plan from an invalid project "
+                        f"config ({len(exc.errors)} error(s)): " + "; ".join(exc.errors)
+                    ),
                 }
             )
 

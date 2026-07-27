@@ -32,3 +32,8 @@
   genuinely stuck worker to finish even after `future.result(timeout=...)`
   had already raised. Now shuts the pool down with `wait=False` in a
   `finally` instead.
+- **`abi_project_plan` now counts config validation against `--timeout` too**
+  — `validate_project_targets`/`check_profile_bindings_resolve` previously
+  ran unbounded before the timeout-wrapped `generate_run_plan` call, so a
+  large but size-compliant config could stall past the advertised
+  per-invocation deadline. Both now run inside the same bounded worker.

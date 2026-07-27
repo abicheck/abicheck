@@ -502,3 +502,22 @@ class TestAbiProjectPlan:
         raw = abi_project_plan(str(tmp_path / "nope.yml"))
         payload = json.loads(raw)
         assert payload["status"] == "error"
+
+    def test_timeout_includes_validation(self, tmp_path: Path, monkeypatch):
+        # ADR-021b D2: validate_project_targets runs inside the same bounded
+        # worker as generate_run_plan, so a stall there is caught by the
+        # timeout too rather than blocking unbounded before it.
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(1.0)
+            raise AssertionError("should have timed out first")
+
+        monkeypatch.setattr(
+            "abicheck.buildsource.project_targets.validate_project_targets", _slow
+        )
+        raw = abi_project_plan(str(config))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
