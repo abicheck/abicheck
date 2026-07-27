@@ -910,6 +910,43 @@ Implement a leaf `contract_surface`/`contract_evaluation` module with no CLI
 imports. Produce relevance, assurance, reasons, and provider ledgers in reports,
 but leave the old gate authoritative.
 
+**Progress:** a first cut of the leaf module has landed
+(`abicheck/contract_evaluation.py`, `evaluate_change_contract_relevance`/
+`evaluate_snapshot_pair_contract_relevance`), computing a
+`ContractEvaluationDecision` (relevance/reason/assurance) per finding from
+evidence that already exists: `surface.py`'s public-surface resolution
+(ADR-024) for the entity-membership question, and `finding_identity.py`'s
+identity tiers (Phase 2) for the identity-ambiguity downgrade. It is a true
+shadow module — not called from `checker.py`, the CLI, or any report path —
+so this is not yet the "produce relevance/assurance/reasons in reports" half
+of this phase's gate, only the decision-computation half. Scope is
+deliberately narrower than the full phase:
+
+- Only `ContractMode.PUBLIC` and `ContractMode.ALL` are implemented;
+  `EXPORTS` raises `NotImplementedError` rather than approximating, since no
+  export-root-closure evidence provider exists yet (`surface.py` only
+  computes a header-derived public closure, not an export-symbol-rooted
+  one — a real `EXPORTS` implementation is separate, scoped follow-up work).
+- `ContractRelevance.UNKNOWN_UNPROVEN` is never emitted (see the module's
+  own docstring): that value requires a closed-world "the declared evidence
+  domain was searched completely" claim this module cannot verify with
+  today's evidence providers, so every such case degrades to the weaker
+  `UNKNOWN_UNRESOLVED` with reason `required_evidence_incomplete` instead —
+  a deliberate under-claim, not a shortcut.
+- The `NOT_APPLICABLE` (non-entity) `ChangeKind` set is curated by hand
+  (SONAME/RPATH, architecture/file-format identity, security-hardening
+  posture, toolchain/runtime identity — ~31 kinds) and explicitly
+  non-exhaustive; a kind missing from it simply falls through to ordinary
+  entity classification rather than crashing.
+- The provider ledger this phase's gate calls for ("every shadow delta has
+  evidence") is not built yet — a decision today is the relevance/reason/
+  assurance triple only, with no persisted per-provider evidence record.
+
+Not yet done: wiring this into `checker.compare`'s output (even as a
+non-authoritative shadow field), the provider-evidence ledger, the
+delta/unresolved-rate/proven-loss measurement this phase's gate requires,
+and `EXPORTS` mode.
+
 Measure:
 
 - delta by old/new decision;

@@ -10,9 +10,13 @@ implemented (`abicheck/contract_relevance_types.py`,
 is wired: `diff_filtering.py`'s cross-detector dedup key now uses
 `resolve_change_identity`. `diff_symbols.py`'s own old/new matching engine
 remains unwired (deliberately deferred, see the plan's Phase 2 section).
-Nothing here is wired into the CLI, contract/compatibility policy, or
-reports yet — see `docs/contribute/plans/public-contract-default.md`'s
-"Work breakdown" for current per-phase progress.
+Phase 3's shadow evaluator (`abicheck/contract_evaluation.py`) is
+implemented for `ContractMode.PUBLIC`/`ALL` only (`EXPORTS` raises
+`NotImplementedError` — no export-root-closure evidence provider exists
+yet) and is not called from any pipeline stage. Nothing here is wired into
+the CLI, contract/compatibility policy, or reports yet — see
+`docs/contribute/plans/public-contract-default.md`'s "Work breakdown" for
+current per-phase progress.
 **Decision maker:** napetrov
 
 ## Context
