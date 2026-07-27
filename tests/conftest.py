@@ -42,6 +42,26 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_ast_memo():
+    """Clear the in-process clang-AST memo (``dumper_cache._AST_MEMO``,
+    G31 Phase C AST reuse) before and after every test.
+
+    Several fixture headers across ``test_dumper_clang.py`` share identical
+    trivial content (e.g. ``int foo(void);``), so two unrelated tests can
+    compute the same content-addressed cache key — without this, a memo
+    entry left behind by one test could serve a stale/wrong result to a
+    later test expecting a genuine cache miss (the same hazard
+    ``_isolate_snapshot_cache`` above already guards against for the
+    whole-snapshot disk cache).
+    """
+    from abicheck import dumper_cache
+
+    dumper_cache._AST_MEMO.clear()
+    yield
+    dumper_cache._AST_MEMO.clear()
+
+
 @pytest.fixture
 def source_tree_with_compile_db(tmp_path: Path) -> Path:
     """A minimal source tree with a compile_commands.json for L3/L4 scan tests.

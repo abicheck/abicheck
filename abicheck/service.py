@@ -816,12 +816,18 @@ def _attach_header_graph(
     """Build and embed the header-only (L2) semantic graph (ADR-041 addendum).
 
     A no-op when ``header_graph`` was not requested or no headers were parsed.
-    Runs a second, independent ``clang -ast-dump=json`` pass over the same
-    header aggregate ``dumper._clang_header_dump`` already knows how to build —
-    reused directly (private only by convention; ``dumper.py`` sits at its
-    2000-line hard cap, so a public wrapper is not added there) rather than
-    threading the parser's already-consumed AST back out through three
-    format-specific builders. Mirrors ``_dump_elf``'s own header-expansion
+    Calls the same ``dumper._clang_header_dump`` the main clang-frontend
+    snapshot pass already used — reused directly (private only by
+    convention; ``dumper.py`` sits at its 2000-line hard cap, so a public
+    wrapper is not added there) rather than threading the parser's
+    already-consumed AST back out through three format-specific builders.
+    When the main snapshot pass ran under ``--ast-frontend clang`` with the
+    identical resolved headers/includes, this is no longer a second
+    *independent* parse: ``dumper_cache``'s in-process AST memo (G31 Phase C)
+    returns the already-parsed dict straight away, skipping a second disk
+    read/JSON re-parse. It stays a genuine second ``clang`` invocation only
+    when the main pass used ``castxml`` (the default backend), which never
+    calls ``_clang_header_dump`` at all. Mirrors ``_dump_elf``'s own header-expansion
     (``expand_header_inputs`` — a ``headers`` entry may be a directory) and
     inferred-include-root derivation (``resolve_inferred_header_roots`` — an
     umbrella header's relative ``#include``s need the same auto-added ``-I``/

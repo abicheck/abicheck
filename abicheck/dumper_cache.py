@@ -9,9 +9,77 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 from pathlib import Path
+from typing import Any
+
+from . import deadline
 
 log = logging.getLogger(__name__)
+
+#: In-process memo for an already-parsed AST, keyed by (backend, cache key)
+#: -- e.g. the header-only semantic graph's own AST pass (ADR-041/G31, always
+#: on) over the identical header aggregate the main L2 clang dump already
+#: parsed for the same snapshot. A memo hit skips both the disk read and the
+#: JSON re-parse of what can be a multi-GB tree (see ``_atomic_copy``'s own
+#: docstring); a disk-cache hit is memoized too, so a third same-process
+#: reader (or a retry) doesn't pay for it either. Bounded so a long-lived
+#: process (the MCP server, ``scan`` over many libraries) can't accumulate
+#: unbounded trees across unrelated dumps -- a handful of entries covers one
+#: dump's own old/new pair plus its header-graph reuse, not a general cache.
+_AST_MEMO_LOCK = threading.Lock()
+_AST_MEMO: dict[tuple[str, str], Any] = {}
+_AST_MEMO_MAXSIZE = 4
+
+
+def store_cached_ast(key: str, backend: str, root: Any) -> None:
+    """Memoize an already-parsed AST *root* for (*backend*, *key*) in-process."""
+    with _AST_MEMO_LOCK:
+        _AST_MEMO[(backend, key)] = root
+        while len(_AST_MEMO) > _AST_MEMO_MAXSIZE:
+            _AST_MEMO.pop(next(iter(_AST_MEMO)))
+
+
+def load_cached_ast(key: str, backend: str, cache_path: Path) -> Any | None:
+    """Return a previously-parsed AST for (*backend*, *key*), or ``None``.
+
+    *cache_path* is the caller's own already-resolved :func:`_cache_path`
+    result, not recomputed here -- callers that patch ``_cache_path`` in
+    their own module namespace (as several tests do) must have that
+    override actually govern the disk path this function reads, which a
+    second, independent ``_cache_path`` call from this module could not see.
+
+    Checks the in-process memo first (see :data:`_AST_MEMO`'s own docstring),
+    falling back to the on-disk cache -- deadline-checked the same way the
+    original inline disk-cache read was (once before the parse, so an
+    already-exceeded deadline skips it, and once after, since parsing a huge
+    cached AST can itself eat the rest of the budget). A corrupt/unreadable
+    cache file is evicted, same as before. Never a staleness risk: this only
+    ever returns a value this same process already validated (from disk or a
+    fresh parse) under this identical content-addressed key.
+
+    A memo hit is itself deadline-checked too, even though it does no real
+    work -- a caller relying on ``--budget``/``deadline.deadline_scope`` to
+    bound the whole scan must see a consistently-enforced deadline on every
+    path back out of this function, not just the ones that happen to be
+    expensive (mirrors the disk-cache-hit contract PR #591 established).
+    """
+    with _AST_MEMO_LOCK:
+        memoized = _AST_MEMO.get((backend, key))
+    if memoized is not None:
+        deadline.check()
+        return memoized
+    if not cache_path.exists():
+        return None
+    deadline.check()
+    try:
+        root = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        cache_path.unlink(missing_ok=True)
+        return None
+    deadline.check()  # loading a huge cached AST can eat the rest of the budget
+    store_cached_ast(key, backend, root)
+    return root
 
 
 def _atomic_copy(src: Path, dst: Path) -> None:

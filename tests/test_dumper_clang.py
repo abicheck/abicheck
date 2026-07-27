@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import dumper, dumper_clang, dumper_clang_errors
+from abicheck import dumper, dumper_cache, dumper_clang, dumper_clang_errors
 from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
@@ -1770,6 +1770,80 @@ def test_clang_header_dump_success_and_cache(
     assert calls["n"] == 1
 
 
+def test_header_graph_attach_reuses_primary_snapshot_ast(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """G31 Phase C: the always-on header-only graph's own AST pass
+    (``service._attach_header_graph``) must reuse the identical clang AST the
+    main ``--ast-frontend clang`` snapshot pass already parsed for the same
+    resolved headers/includes -- not a second, independent
+    ``clang -ast-dump=json`` invocation. This is the fix for the perf
+    regression G31 Phase A introduced by making the graph unconditional
+    (docs/contribute/plans/g31-header-graph-default-on-followup.md): before
+    this fix, every ``--ast-frontend clang`` dump paid a full second
+    disk-read/JSON-reparse (or a second subprocess, on a cold cache) purely
+    to build the graph.
+    """
+    from abicheck.model import AbiSnapshot
+    from abicheck.service import _attach_header_graph
+
+    header = tmp_path / "api.h"
+    header.write_text("int f(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    calls = {"n": 0}
+
+    def _run(cmd, **kwargs):
+        calls["n"] += 1
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+
+    # Step 1: the main snapshot pass's own parser construction (mirrors
+    # dumper._header_ast_parser's `_run_clang()` inner call for
+    # `--ast-frontend clang`) -- the exact path a real ELF/PE/Mach-O
+    # clang-frontend dump takes.
+    parser = dumper._header_ast_parser(
+        [header],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        gcc_option_tokens=(),
+        sysroot=None,
+        nostdinc=False,
+        lang="c",
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+    assert calls["n"] == 1
+
+    # Step 2: the post-dump header-graph attach step, over the identical
+    # resolved header/includes -- must not invoke the clang pass again.
+    snap = AbiSnapshot(
+        library="lib", version="1.0", functions=list(parser.parse_functions())
+    )
+    _attach_header_graph(
+        snap,
+        header_graph=True,
+        header_graph_includes=False,
+        headers=[header],
+        includes=[],
+        lang="c",
+        compile=None,
+        public_headers=None,
+        public_header_dirs=None,
+    )
+    assert calls["n"] == 1  # unchanged: reused the in-process AST memo
+
+
 def test_clang_only_dump_does_not_require_gxx_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1845,14 +1919,22 @@ def test_clang_header_dump_rechecks_deadline_after_cache_load(
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
     _clang_header_dump([header], [])  # warms the cache
     assert cache.exists()
+    # Force the second call past the in-process AST memo (G31 Phase C reuse)
+    # onto the on-disk read this test is actually about -- a memo hit would
+    # skip json.loads (and the slow-patched cost below) entirely, which is
+    # exactly the intended optimization but not what this test exercises.
+    dumper_cache._AST_MEMO.clear()
 
-    real_json_loads = dumper.json.loads
+    # The disk-cache read (json.loads) now lives in dumper_cache.py, not
+    # dumper.py itself (G31 Phase C AST reuse split the read into
+    # dumper_cache.load_cached_ast) -- patch the module that actually calls it.
+    real_json_loads = dumper_cache.json.loads
 
     def _slow_loads(text):
         time.sleep(0.05)
         return real_json_loads(text)
 
-    monkeypatch.setattr(dumper.json, "loads", _slow_loads)
+    monkeypatch.setattr(dumper_cache.json, "loads", _slow_loads)
     with dumper.deadline.deadline_scope(0.03):
         with pytest.raises(dumper.deadline.DeadlineExceeded):
             _clang_header_dump([header], [])
