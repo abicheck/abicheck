@@ -49,9 +49,51 @@ from __future__ import annotations
 
 import dataclasses
 
+from .dwarf_metadata import DwarfMetadata
 from .errors import ValidationError
 from .model import AbiSnapshot, Visibility
-from .surface import compute_public_surface
+from .surface import PublicSurface, compute_public_surface
+
+
+def _keep_dwarf_name(name: str, public_types: set[str]) -> bool:
+    # Mirrors diff_platform._diff_dwarf's own _allow_name: a DWARF struct/enum
+    # key may be namespace-qualified while surface.public_types also carries
+    # the bare tail (surface._index_surface_types indexes both).
+    return name in public_types or name.split("::")[-1] in public_types
+
+
+def _scoped_dwarf(
+    dwarf: DwarfMetadata | None, surface: PublicSurface
+) -> DwarfMetadata | None:
+    """Filter a DWARF layout map to the same public-surface closure.
+
+    Without this, an ELF snapshot with both a header model and DWARF debug
+    info can scope its flat ``types``/``enums`` lists down to nothing (e.g. a
+    public API that only uses primitive types) while leaving ``snap.dwarf``
+    untouched -- ``diff_platform._diff_dwarf`` treats an empty
+    header-model-derived allow-set as "no header model at all" and falls back
+    to comparing *every* DWARF struct/enum, including private ones the
+    scoping was supposed to exclude. That falls straight back into a false
+    ``struct_size_changed``/etc. finding on an unreachable private type, even
+    between two ``--public-surface-only`` snapshots (Codex review). Filtering
+    ``dwarf.structs``/``dwarf.enums`` here the same way keeps that allow-set
+    genuinely empty end to end, instead of behaving like DWARF-only mode.
+    """
+    if dwarf is None or not dwarf.has_dwarf:
+        return dwarf
+    return dataclasses.replace(
+        dwarf,
+        structs={
+            k: v
+            for k, v in dwarf.structs.items()
+            if _keep_dwarf_name(k, surface.public_types)
+        },
+        enums={
+            k: v
+            for k, v in dwarf.enums.items()
+            if _keep_dwarf_name(k, surface.public_types)
+        },
+    )
 
 
 class PublicSurfaceScopingError(ValidationError):
@@ -67,7 +109,13 @@ def scope_snapshot_to_public_surface(snap: AbiSnapshot) -> AbiSnapshot:
     record/enum/typedef in the transitive closure reachable from their
     signatures (per :func:`surface.compute_public_surface`). Drops
     unreferenced dependency internals (unused stdlib/SYCL/etc. declarations)
-    that a full header-AST dump otherwise serializes wholesale.
+    that a full header-AST dump otherwise serializes wholesale. When the
+    snapshot also carries DWARF (an ELF dump with both a header model and
+    debug info), ``dwarf.structs``/``dwarf.enums`` are filtered by the same
+    closure (see :func:`_scoped_dwarf`) — leaving them unfiltered would let
+    ``diff_platform._diff_dwarf``'s own empty-allow-set fallback silently
+    re-expand to comparing every DWARF type, defeating the scoping (Codex
+    review).
 
     Raises :class:`PublicSurfaceScopingError` if the snapshot has no
     resolvable public surface at all (see
@@ -105,6 +153,7 @@ def scope_snapshot_to_public_surface(snap: AbiSnapshot) -> AbiSnapshot:
         typedefs={
             k: v for k, v in snap.typedefs.items() if k in surface.public_typedefs
         },
+        dwarf=_scoped_dwarf(snap.dwarf, surface),
         # dataclasses.replace() otherwise carries these lazy lookup-index
         # caches over from *snap* verbatim: if the input snapshot's index()
         # was already called (e.g. by an earlier pipeline step), the copy

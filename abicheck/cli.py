@@ -659,18 +659,10 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
 
-    # A source-only dump (no SO_PATH, --sources/--build-info only) never
-    # produces functions/variables at all -- --public-surface-only is
-    # statically known to fail there (dump_source_only's snapshot always
-    # hits scope_snapshot_to_public_surface's "nothing to scope from" error).
-    # Reject it here, before the --dry-run early return below, so preflight
-    # doesn't approve a command the real run always rejects (Codex review).
-    if so_path is None and public_surface_only:
-        raise click.UsageError(
-            "--public-surface-only has nothing to scope from a source-only "
-            "dump (--sources/--build-info with no SO_PATH carries no "
-            "functions/variables at all)."
-        )
+    from .cli_dump_helpers import reject_statically_headerless_public_surface_only
+    reject_statically_headerless_public_surface_only(
+        so_path, headers, dump_manifest_path, public_surface_only
+    )
 
     # ADR-050 D3: parsed before the collect/compile-context resolution below so
     # a bad manifest fails fast, and validated against the *raw* CLI values

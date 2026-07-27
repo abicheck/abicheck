@@ -135,6 +135,40 @@ def _attach_build_context(
         snap.conditional_fields = bc_conditional
 
 
+def reject_statically_headerless_public_surface_only(
+    so_path: Path | None,
+    headers: tuple[Path, ...],
+    dump_manifest_path: Path | None,
+    public_surface_only: bool,
+) -> None:
+    """Reject ``dump --public-surface-only`` invocations known to fail before
+    any real parse attempt, so ``--dry-run`` preflight can't approve a
+    command the real run always rejects (Codex review, twice).
+
+    Two shapes are *statically* certain to leave nothing to scope from:
+    a source-only dump (no ``SO_PATH``) -- ``dump_source_only()``'s snapshot
+    never parses ``-H``/``--header`` at all, it doesn't even accept a headers
+    param -- and no header source given at all (``-H``/``--header`` empty and
+    no ``--dump-manifest``), since with nothing to parse
+    ``AbiSnapshot.from_headers`` cannot become ``True`` on any dispatch path
+    (ELF/PE/Mach-O). ``--dwarf-only`` alone (with ``-H`` given) is
+    deliberately NOT rejected here: whether it actually skips the header
+    parse depends on whether DWARF resolves at dump time, not known this
+    early -- rejecting it unconditionally would falsely reject a combination
+    that can still succeed (DWARF absent -> falls through to the header
+    parse).
+    """
+    if public_surface_only and (
+        so_path is None or (not headers and dump_manifest_path is None)
+    ):
+        raise click.UsageError(
+            "--public-surface-only has nothing to scope from: a source-only "
+            "dump (--sources/--build-info with no SO_PATH) never parses "
+            "headers, and no -H/--header or --dump-manifest was given to "
+            "produce a header-AST-derived snapshot."
+        )
+
+
 def resolve_dump_debug_format(
     debug_format_opt: str | None,
     debug_format: str | None,
