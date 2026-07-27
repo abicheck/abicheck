@@ -499,7 +499,13 @@ def decode_and_select_frontend_context_from_path(
     one chunk of over-read into the next document), not the combined size
     of every pass in the stream.
     """
-    with open(ast_path, encoding="utf-8") as fh:
-        return _select_from_document_stream(
-            lambda: fh.read(chunk_size), stderr, requested_kind
-        )
+    try:
+        with open(ast_path, encoding="utf-8") as fh:
+            return _select_from_document_stream(
+                lambda: fh.read(chunk_size), stderr, requested_kind
+            )
+    except UnicodeDecodeError as exc:
+        raise SnapshotError(
+            f"DPC++ frontend's AST document stream ({ast_path}) is not valid "
+            f"UTF-8: {exc}"
+        ) from exc

@@ -114,6 +114,11 @@ def _tu_jobs(n_units: int) -> int:
         try:
             requested = max(1, int(env))
         except ValueError:
+            log.warning(
+                "ABICHECK_TU_JOBS=%r is not a valid integer; falling back to 1 "
+                "(serial) worker.",
+                env,
+            )
             return 1
         ceiling = process_resources.jobs_ceiling()
         if requested > ceiling:
@@ -319,15 +324,15 @@ def _run_tu_fragments(
             frontend_context=frontend_context,
         )
 
-    def _handle_failure(tu: TranslationUnit) -> None:
+    def _handle_failure(tu: TranslationUnit, exc: BaseException) -> None:
         if tu.required:
-            raise
+            raise exc
         log.warning(
             "Optional translation unit %r failed to extract; skipping "
             "(required=false). Its declarations are absent from this "
             "snapshot.",
             tu.name,
-            exc_info=True,
+            exc_info=exc,
         )
 
     fragments: list[TuFragment] = []
@@ -335,8 +340,8 @@ def _run_tu_fragments(
         for tu in tus:
             try:
                 fragments.append(_run_one(tu))
-            except Exception:
-                _handle_failure(tu)
+            except Exception as exc:
+                _handle_failure(tu, exc)
         return fragments
 
     # Results are recorded by INDEX (declared order), but observed in
@@ -380,7 +385,7 @@ def _run_tu_fragments(
         tu = tus[idx]
         try:
             results[idx] = fut.result()
-        except Exception:
+        except Exception as exc:
             if tu.required:
                 # Cancel whatever hasn't started yet (best effort -- a
                 # future already running its subprocess can't be
@@ -394,7 +399,7 @@ def _run_tu_fragments(
                 for other_fut in future_to_index:
                     other_fut.cancel()
                 pool.shutdown(wait=False)
-            _handle_failure(tu)
+            _handle_failure(tu, exc)
     pool.shutdown(wait=True)
     fragments.extend(r for r in results if r is not None)
     return fragments

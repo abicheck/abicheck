@@ -214,3 +214,13 @@ def test_mem_cap_divides_available_by_budget(monkeypatch) -> None:
     monkeypatch.setattr(pr, "available_mem_gib", lambda: 6.0)
     assert pr.mem_cap(3.0) == 2
     assert pr.mem_cap(1.0) == 6
+
+
+def test_mem_cap_non_positive_budget_returns_none(monkeypatch) -> None:
+    """CodeRabbit review: a zero or negative budget used to raise
+    ZeroDivisionError (or invert the clamp for a negative budget) instead of
+    being treated like "can't be read" -- job_mem_budget_gib floors at 0.25
+    today, but mem_cap itself had no guard of its own."""
+    monkeypatch.setattr(pr, "available_mem_gib", lambda: 6.0)
+    assert pr.mem_cap(0.0) is None
+    assert pr.mem_cap(-1.0) is None
