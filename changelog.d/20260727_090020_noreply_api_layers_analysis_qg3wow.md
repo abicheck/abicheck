@@ -132,3 +132,9 @@
   sanitized-error envelope every other MCP error path uses. A new
   `_redact_paths` helper replaces every path this tool itself resolved with
   just its basename before the message reaches the caller.
+- **`abi_deps` now counts its existence/format/size preflight against
+  `--timeout`** — a FIFO or a stalled filesystem could previously block on
+  `effective_path.exists()`/`_detect_binary_format`/`_check_file_size`
+  before `_call_with_timeout` was even reached, so `ABICHECK_MCP_TIMEOUT`
+  never got a chance to return the advertised structured timeout for that
+  I/O. Moved inside the same bounded worker as `check_single_env`.

@@ -138,6 +138,14 @@ def _call_with_timeout(
         pool.shutdown(wait=False)
 
 
+class _BinaryProbeError(Exception):
+    """Raised inside ``abi_deps``'s timed worker for a preflight failure that
+    is not itself a dependency-resolution error (missing file / wrong
+    format) -- kept distinct from ``ValueError``/``FileNotFoundError`` so it
+    can't be conflated with an unrelated exception ``check_single_env``
+    itself might raise for those same built-in types."""
+
+
 @mcp.tool()
 def abi_deps(
     binary_path: str,
@@ -161,7 +169,7 @@ def abi_deps(
     """
     t0 = _time.monotonic()
     try:
-        from .stack_checker import check_single_env
+        from .stack_checker import StackCheckResult, check_single_env
         from .stack_report import stack_to_json
 
         # _safe_read_path always resolves to an absolute path (path-safety), so
@@ -183,17 +191,6 @@ def abi_deps(
             if binary_was_absolute
             else bin_path
         )
-        if not effective_path.exists():
-            return json.dumps({"status": "error", "error": "Binary file not found"})
-        fmt = _detect_binary_format(effective_path)
-        if fmt != "elf":
-            return json.dumps(
-                {
-                    "status": "error",
-                    "error": f"abi_deps requires an ELF binary; got {fmt or 'unknown format'}",
-                }
-            )
-        _check_file_size(effective_path, label="binary_path")
         # Same relative/absolute preservation as binary_path above: resolver.
         # _build_search_order joins a relative search_path directly onto
         # sysroot (`<sysroot>/lib`), but only after _safe_read_path has
@@ -208,15 +205,29 @@ def abi_deps(
             for p in (search_paths or [])
         ]
 
-        try:
-            result = _call_with_timeout(
-                check_single_env,
+        def _do_deps() -> StackCheckResult:
+            # The existence/format/size preflight reads effective_path (a
+            # FIFO or a stalled filesystem could block on any of these) --
+            # run it inside the same bounded worker as check_single_env
+            # itself, not before _call_with_timeout starts (Codex review).
+            if not effective_path.exists():
+                raise _BinaryProbeError("Binary file not found")
+            fmt = _detect_binary_format(effective_path)
+            if fmt != "elf":
+                raise _BinaryProbeError(
+                    f"abi_deps requires an ELF binary; got {fmt or 'unknown format'}"
+                )
+            _check_file_size(effective_path, label="binary_path")
+            return check_single_env(
                 resolve_target,
                 search_paths=sp_paths or None,
                 sysroot=sysroot_path,
                 ld_library_path=ld_library_path,
                 max_file_size=mcp_shared.MCP_MAX_FILE_SIZE,
             )
+
+        try:
+            result = _call_with_timeout(_do_deps)
         except _futures.TimeoutError:
             elapsed = _time.monotonic() - t0
             _audit_log("abi_deps", {"binary": bin_path.name}, elapsed, "timeout")
@@ -226,6 +237,8 @@ def abi_deps(
                     "error": f"abi_deps timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
             )
+        except _BinaryProbeError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
 
         elapsed = _time.monotonic() - t0
         _audit_log("abi_deps", {"binary": bin_path.name}, elapsed, "ok")

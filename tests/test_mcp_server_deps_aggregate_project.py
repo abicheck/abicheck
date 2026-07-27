@@ -138,6 +138,25 @@ class TestAbiDeps:
         assert payload["status"] == "error"
         assert "timed out" in payload["error"]
 
+    def test_timeout_includes_binary_probe(self, tmp_path: Path, monkeypatch):
+        # ADR-021b D2: the existence/format/size preflight reads
+        # effective_path (a FIFO or a stalled filesystem could block on any
+        # of these); it must count against --timeout too, not just
+        # check_single_env (Codex review).
+        binary = tmp_path / "app"
+        binary.write_bytes(b"\x7fELF")
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(1.0)
+            raise AssertionError("should have timed out first")
+
+        monkeypatch.setattr("abicheck.mcp_server_project._detect_binary_format", _slow)
+        raw = abi_deps(str(binary))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
+
     def test_oversized_sysroot_resolved_binary_is_rejected(
         self, tmp_path: Path, monkeypatch
     ):
