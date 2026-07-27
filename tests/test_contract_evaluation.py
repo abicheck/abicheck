@@ -1842,6 +1842,94 @@ class TestPublicModeForcePublicOverlay:
         assert decisions[0].relevance is ContractRelevance.IN_CONTRACT
 
 
+class TestPublicModePostManifestOverlay:
+    """``public_surface_allowlist`` (the ``--post-manifest`` committed-export
+    set) is the identical "pipeline already made an unconditional decision
+    this module can't otherwise see" shape as ``force_public_symbols`` above:
+    ``FilterNonPublicSurface._run_allowlist`` keeps a matching change in
+    ``kept`` without ever setting ``surface_exclusion_reason``, so a
+    from-scratch ``classify_change_surface`` recomputation with no knowledge
+    of the committed set could reach a conclusion that contradicts the
+    pipeline's own commitment decision (Codex review, fresh evidence)."""
+
+    def test_post_manifest_committed_symbol_is_in_contract_despite_private_header_origin(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("pp_foo", origin=ScopeOrigin.PRIVATE_HEADER)],
+        )
+        s = compute_public_surface(snap)
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="pp_foo", description="")
+        # Without the overlay, a confident private-header origin resolves
+        # to a terminal exclusion.
+        baseline = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert baseline.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        decision = evaluate_change_contract_relevance(
+            c,
+            s,
+            s,
+            mode=ContractMode.PUBLIC,
+            public_surface_allowlist=frozenset({"pp_foo"}),
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_post_manifest_match_is_exact_not_qualified_tail(self) -> None:
+        # Unlike force_public_symbols' suffix-tolerant _change_matches_symbols,
+        # the committed-export manifest is matched by EXACT name only --
+        # mirroring _run_allowlist's own "match exactly" rule (a suffix match
+        # would let an uncommitted namespaced helper masquerade as a
+        # committed bare name). A qualified "ns::pp_foo" must NOT match a
+        # committed bare "pp_foo".
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="ns::pp_foo", description="")
+        decision = evaluate_change_contract_relevance(
+            c,
+            _UNRESOLVABLE,
+            _UNRESOLVABLE,
+            mode=ContractMode.PUBLIC,
+            public_surface_allowlist=frozenset({"pp_foo"}),
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+    def test_non_matching_symbol_is_unaffected_by_the_manifest_overlay(self) -> None:
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="unrelated", description="")
+        decision = evaluate_change_contract_relevance(
+            c,
+            _UNRESOLVABLE,
+            _UNRESOLVABLE,
+            mode=ContractMode.PUBLIC,
+            public_surface_allowlist=frozenset({"pp_foo"}),
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+    def test_empty_manifest_overlay_is_a_no_op(self) -> None:
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="whatever", description="")
+        decision = evaluate_change_contract_relevance(
+            c,
+            _UNRESOLVABLE,
+            _UNRESOLVABLE,
+            mode=ContractMode.PUBLIC,
+            public_surface_allowlist=frozenset(),
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+    def test_evaluate_snapshot_pair_propagates_the_manifest_overlay(self) -> None:
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="pp_foo", description="")
+        decisions = evaluate_snapshot_pair_contract_relevance(
+            [c],
+            _UNRESOLVABLE,
+            _UNRESOLVABLE,
+            mode=ContractMode.PUBLIC,
+            public_surface_allowlist=frozenset({"pp_foo"}),
+        )
+        assert decisions[0].relevance is ContractRelevance.IN_CONTRACT
+
+
 class TestNeverEmitsUnknownUnproven:
     """The module's central safety rule (see its docstring): no code path
     constructs UNKNOWN_UNPROVEN, ever."""

@@ -159,6 +159,18 @@ def resolve_internal_namespaces(
     principle :func:`resolve_legacy_contract_mode`'s untouched-flag case
     already applies (ADR-049 D7).
 
+    Tagged :data:`~abicheck.contract_relevance_types.SelectorLayer.EXPLICIT_CLI`,
+    not ``PROJECT_CONFIG`` -- ``--policy-file`` is a flag the user explicitly
+    passed on *this* invocation, the same selection mechanism
+    ``resolve_legacy_contract_mode``'s explicit flag case models, not an
+    implicitly-discovered project file a future ``.abicheck.yml``-reading
+    front end would contribute at ``PROJECT_CONFIG`` tier. Tagging it
+    ``PROJECT_CONFIG`` previously meant a lower-precedence-by-mechanism
+    candidate (``RUN_RECIPE``/``RUN_PROFILE``) could silently outrank an
+    explicitly user-selected manifest, and the provenance receipt itself
+    misrepresented how the value was actually chosen (Codex review, fresh
+    evidence).
+
     Sorts and dedupes the list before building the candidate, mirroring
     ``SurfaceConfig.__post_init__``'s own canonicalization and
     ``compatibility_evaluation_packs.py``'s
@@ -185,12 +197,12 @@ def resolve_internal_namespaces(
         candidates.append(
             FieldCandidate(
                 provenance=ValueProvenance(
-                    layer=SelectorLayer.PROJECT_CONFIG,
+                    layer=SelectorLayer.EXPLICIT_CLI,
                     source_kind="policy_file",
                     path=source_path,
                     selected_by=(
                         SelectedByEntry(
-                            layer=SelectorLayer.PROJECT_CONFIG,
+                            layer=SelectorLayer.EXPLICIT_CLI,
                             option="--policy-file",
                             path=source_path,
                         ),

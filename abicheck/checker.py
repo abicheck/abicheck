@@ -562,6 +562,16 @@ def _apply_contract_evaluation_shadow(
     already-excluded-by-pipeline fast path (``contract_evaluation.py``'s own
     module docstring), resolving it to ``PROVEN_OUT_OF_CONTRACT`` without
     needing fresh surface evidence for that finding specifically.
+
+    ``pp_ctx.public_surface_allowlist`` (the ``--post-manifest`` committed-
+    export set) is forwarded too, mirroring ``force_public_symbols`` above:
+    a ``kept`` finding committed by POST-manifest despite private-header
+    provenance never gets a ``surface_exclusion_reason`` set either (the
+    same "pipeline made an unconditional decision this module can't
+    otherwise see" shape), so without forwarding it a fresh
+    ``classify_change_surface`` recomputation could wrongly reach
+    ``PROVEN_OUT_OF_CONTRACT`` for a finding POST-manifest already proved
+    committed (Codex review, fresh evidence).
     """
     from .contract_evaluation import evaluate_snapshot_pair_contract_relevance
     from .contract_relevance_types import ContractMode
@@ -592,6 +602,11 @@ def _apply_contract_evaluation_shadow(
         mode=mode,
         force_public_symbols=(
             frozenset(force_public_symbols) if force_public_symbols else None
+        ),
+        public_surface_allowlist=(
+            frozenset(pp_ctx.public_surface_allowlist)
+            if pp_ctx.public_surface_allowlist
+            else None
         ),
     )
     for change, decision in zip(all_changes, decisions):

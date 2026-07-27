@@ -41,6 +41,7 @@ from abicheck.model import (
     EnumType,
     Function,
     RecordType,
+    ScopeOrigin,
     TypeField,
     Visibility,
 )
@@ -342,6 +343,62 @@ class TestReportValidatesAgainstSchema:
             assert "contract_relevance" not in e
             assert "contract_reason_code" not in e
             assert "contract_assurance" not in e
+
+    def test_contract_evaluation_honors_post_manifest_commitment(self):
+        # Regression (Codex review, fresh evidence): _apply_contract_evaluation_shadow
+        # forwarded only header surfaces and force_public_symbols, not
+        # public_surface_allowlist (the --post-manifest committed-export
+        # set) -- so a symbol POST-manifest committed despite private-header
+        # provenance was stamped PROVEN_OUT_OF_CONTRACT by a fresh
+        # classify_change_surface recomputation that had no knowledge of the
+        # commitment, inverting the pipeline's own kept (not demoted)
+        # decision for that exact finding.
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            functions=[
+                Function(
+                    name="pp_foo",
+                    mangled="pp_foo",
+                    return_type="int",
+                    visibility=Visibility.ELF_ONLY,
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                )
+            ],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            functions=[
+                Function(
+                    name="pp_foo",
+                    mangled="pp_foo",
+                    return_type="double",
+                    visibility=Visibility.ELF_ONLY,
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                )
+            ],
+        )
+        result = compare(
+            old,
+            new,
+            public_surface_allowlist={"pp_foo"},
+            contract_evaluation=True,
+        )
+        committed = [c for c in result.changes if c.symbol == "pp_foo"]
+        assert committed, "fixture must produce a kept, committed pp_foo finding"
+        assert not any(c.symbol == "pp_foo" for c in result.out_of_surface_changes)
+        for c in committed:
+            assert c.contract_relevance is not None
+            assert c.contract_relevance.value == "IN_CONTRACT"
+            assert c.contract_reason_code == "public_root_membership"
+
+        payload = json.loads(reporter.to_json(result))
+        entries = [c for c in payload["changes"] if c["symbol"] == "pp_foo"]
+        assert entries
+        for e in entries:
+            assert e["contract_relevance"] == "IN_CONTRACT"
+            assert e["contract_reason_code"] == "public_root_membership"
 
 
 @_requires_jsonschema

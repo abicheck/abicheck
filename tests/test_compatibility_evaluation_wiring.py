@@ -94,16 +94,21 @@ class TestNoPolicyFile:
 
 
 class TestPolicyFileSetsNamespaces:
-    def test_policy_file_with_namespaces_resolves_to_project_config(self):
+    def test_policy_file_with_namespaces_resolves_to_explicit_cli(self):
+        # --policy-file is a flag the user explicitly passed on this
+        # invocation -- EXPLICIT_CLI tier, not PROJECT_CONFIG (which is for
+        # an implicitly-discovered project file), so it isn't silently
+        # outranked by a lower-precedence-by-mechanism candidate (Codex
+        # review, fresh evidence).
         pf = PolicyFile(internal_namespaces=["detail", "impl"])
         namespaces, prov = resolve_internal_namespaces(policy_file=pf)
         assert namespaces == ("detail", "impl")
-        assert prov.layer is SelectorLayer.PROJECT_CONFIG
+        assert prov.layer is SelectorLayer.EXPLICIT_CLI
 
     def test_policy_file_with_empty_list_resolves_to_default_layer(self):
         # An explicit empty list is indistinguishable, once parsed, from the
         # key never being set at all -- both must fall through to the
-        # built-in default, not be treated as a real PROJECT_CONFIG selection.
+        # built-in default, not be treated as a real EXPLICIT_CLI selection.
         pf = PolicyFile(internal_namespaces=[])
         namespaces, prov = resolve_internal_namespaces(policy_file=pf)
         assert namespaces == ()

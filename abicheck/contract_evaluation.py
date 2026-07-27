@@ -763,6 +763,7 @@ def evaluate_change_contract_relevance(
     mode: ContractMode = ContractMode.PUBLIC,
     unions: SurfaceUnions | None = None,
     force_public_symbols: frozenset[str] | None = None,
+    public_surface_allowlist: frozenset[str] | None = None,
 ) -> ContractEvaluationDecision:
     """Compute *change*'s shadow contract-relevance decision.
 
@@ -776,7 +777,10 @@ def evaluate_change_contract_relevance(
     ``force_public_symbols`` mirrors ``PipelineContext.force_public_symbols``
     (ADR-024 D6's widening overlay, ``FilterNonPublicSurface``'s
     ``_run_scope``/``_run_allowlist``) -- omit it (the default) when the
-    caller has no such overlay configured for this run.
+    caller has no such overlay configured for this run. ``public_surface_allowlist``
+    mirrors ``PipelineContext.public_surface_allowlist`` (the ``--post-manifest``
+    committed-export set consulted by ``FilterNonPublicSurface._run_allowlist``)
+    -- omit it (the default) for a run with no POST manifest configured.
 
     Never raises for a *finding* it cannot confidently classify -- every such
     case degrades to ``UNKNOWN_UNRESOLVED`` (see the module docstring's
@@ -894,6 +898,31 @@ def evaluate_change_contract_relevance(
             assurance=ContractAssurance.COMPLETE,
         )
 
+    # `public_surface_allowlist` (the `--post-manifest` committed-export set)
+    # is the identical "pipeline already made an unconditional, authoritative
+    # decision this module cannot see" shape as `force_public_symbols` above
+    # -- `FilterNonPublicSurface._run_allowlist` keeps a matching change in
+    # `kept` *without* ever setting `Change.surface_exclusion_reason` (that
+    # field is only set on the demotion branch), so the already-excluded-
+    # by-pipeline fast path earlier in this function never fires for it
+    # either, and a from-scratch `classify_change_surface` recomputation
+    # below has no way to know the commitment exists -- reaching e.g.
+    # `REASON_PRIVATE_HEADER` (terminal) for a symbol POST-manifest just
+    # proved is a real, committed export, contradicting the pipeline's own
+    # decision for that same finding (Codex review, fresh evidence). Matched
+    # by *exact* membership, not `_change_matches_symbols`'s suffix-tolerant
+    # rule -- `_run_allowlist` itself deliberately uses exact-name matching
+    # only (its own comment: a suffix-tolerant match would let an
+    # uncommitted namespaced helper masquerade as a committed bare name,
+    # contradicting the manifest's exact-name contract), so this check must
+    # mirror that, not the widening overlay's looser rule.
+    if public_surface_allowlist and (change.symbol or "") in public_surface_allowlist:
+        return ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
     # ADR-049 D4: "If the authoritative side is unresolved, evidence from
     # the other side cannot manufacture confidence." Checking the
     # *authoritative* side specifically (not "either side" -- a prior
@@ -950,11 +979,13 @@ def evaluate_snapshot_pair_contract_relevance(
     *,
     mode: ContractMode = ContractMode.PUBLIC,
     force_public_symbols: frozenset[str] | None = None,
+    public_surface_allowlist: frozenset[str] | None = None,
 ) -> list[ContractEvaluationDecision]:
     """:func:`evaluate_change_contract_relevance` for a whole comparison's
     findings, computing the surface unions once (see that function's
-    ``unions`` parameter) rather than once per finding. ``force_public_symbols``
-    is passed through to every call -- see that function's own parameter."""
+    ``unions`` parameter) rather than once per finding. ``force_public_symbols``/
+    ``public_surface_allowlist`` are passed through to every call -- see that
+    function's own parameters."""
     unions = surface_unions(surf_old, surf_new)
     return [
         evaluate_change_contract_relevance(
@@ -964,6 +995,7 @@ def evaluate_snapshot_pair_contract_relevance(
             mode=mode,
             unions=unions,
             force_public_symbols=force_public_symbols,
+            public_surface_allowlist=public_surface_allowlist,
         )
         for change in changes
     ]
