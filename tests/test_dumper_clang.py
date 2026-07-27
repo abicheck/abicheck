@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1795,7 +1796,7 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     calls = {"n": 0}
 
-    def _run(cmd, **kwargs):
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
         calls["n"] += 1
         _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
         return _fake_proc()
@@ -1842,6 +1843,64 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
         public_header_dirs=None,
     )
     assert calls["n"] == 1  # unchanged: reused the in-process AST memo
+
+
+def test_clang_header_dump_skips_memo_write_on_toolchain_change(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CodeRabbit review: a compiler-identity change mid-parse already skips
+    the on-disk cache write (``cache_write=identities_stable``) -- the
+    in-process memo write must honor the same safeguard, or a result
+    produced by the replacement toolchain could be served back under the
+    original tool's cache key on a later same-process call."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    # First call (frontend_identity) returns "v1"; every later call (the
+    # post-parse identities_stable check, plus this same probe on the second
+    # _clang_header_dump call below) returns "v2" -- simulating the
+    # toolchain changing under us mid-execution.
+    identities = iter(["v1"])
+    monkeypatch.setattr(
+        dumper, "_tool_identity", lambda *a, **k: next(identities, "v2")
+    )
+    calls = {"n": 0}
+
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
+        calls["n"] += 1
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+
+    _clang_header_dump([header], [])
+    assert not cache.exists()  # disk write skipped, as before this PR
+
+    # A second call must NOT hit the memo either -- it should re-invoke the
+    # subprocess rather than serve the unstable-toolchain result back.
+    _clang_header_dump([header], [])
+    assert calls["n"] == 2
+
+
+def test_ast_memo_evicts_oldest_entry_past_maxsize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CodeRabbit/Codex review: the memo is a single-consumption handoff, not
+    a general cache -- ``_AST_MEMO_MAXSIZE`` is only the last-resort bound for
+    entries that get written but never read (e.g. the header graph disabled
+    after the main pass ran). Storing past that bound must evict the oldest
+    entry rather than grow unbounded."""
+    monkeypatch.setattr(dumper_cache, "_AST_MEMO_MAXSIZE", 2)
+    dumper_cache.store_cached_ast("k1", "clang", {"n": 1})
+    dumper_cache.store_cached_ast("k2", "clang", {"n": 2})
+    dumper_cache.store_cached_ast("k3", "clang", {"n": 3})
+    assert len(dumper_cache._AST_MEMO) == 2
+    assert ("clang", "k1") not in dumper_cache._AST_MEMO
+    assert ("clang", "k2") in dumper_cache._AST_MEMO
+    assert ("clang", "k3") in dumper_cache._AST_MEMO
 
 
 def test_clang_only_dump_does_not_require_gxx_identity(
@@ -1930,7 +1989,7 @@ def test_clang_header_dump_rechecks_deadline_after_cache_load(
     # dumper_cache.load_cached_ast) -- patch the module that actually calls it.
     real_json_loads = dumper_cache.json.loads
 
-    def _slow_loads(text):
+    def _slow_loads(text: str) -> Any:
         time.sleep(0.05)
         return real_json_loads(text)
 

@@ -17,19 +17,27 @@ from . import deadline
 
 log = logging.getLogger(__name__)
 
-#: In-process memo for an already-parsed AST, keyed by (backend, cache key)
-#: -- e.g. the header-only semantic graph's own AST pass (ADR-041/G31, always
-#: on) over the identical header aggregate the main L2 clang dump already
-#: parsed for the same snapshot. A memo hit skips both the disk read and the
-#: JSON re-parse of what can be a multi-GB tree (see ``_atomic_copy``'s own
-#: docstring); a disk-cache hit is memoized too, so a third same-process
-#: reader (or a retry) doesn't pay for it either. Bounded so a long-lived
-#: process (the MCP server, ``scan`` over many libraries) can't accumulate
-#: unbounded trees across unrelated dumps -- a handful of entries covers one
-#: dump's own old/new pair plus its header-graph reuse, not a general cache.
+#: In-process, single-consumption handoff for an already-parsed AST, keyed by
+#: (backend, cache key) -- e.g. the header-only semantic graph's own AST pass
+#: (ADR-041/G31, always on) over the identical header aggregate the main L2
+#: clang dump already parsed for the same snapshot. A memo hit skips both the
+#: disk read and the JSON re-parse of what can be a multi-GB tree (see
+#: ``_atomic_copy``'s own docstring).
+#:
+#: Deliberately evicted on first read (:func:`load_cached_ast` pops, not
+#: gets), not kept around as a general cache: the only intended reader is the
+#: header-graph attach step immediately following the main snapshot pass that
+#: wrote it, so once consumed there is no legitimate reason to keep a
+#: potentially multi-GB tree strongly referenced (Codex/CodeRabbit review --
+#: bounding by entry count alone still let a long-lived process, e.g. the MCP
+#: server or ``scan`` over many libraries, accumulate several such trees at
+#: once). ``_AST_MEMO_MAXSIZE`` is only a last-resort safety net for an entry
+#: that is written but never consumed (header graph disabled, or an
+#: exception between the write and the would-be read) -- kept small since
+#: pop-on-read already handles the common single-handoff case.
 _AST_MEMO_LOCK = threading.Lock()
 _AST_MEMO: dict[tuple[str, str], Any] = {}
-_AST_MEMO_MAXSIZE = 4
+_AST_MEMO_MAXSIZE = 2
 
 
 def store_cached_ast(key: str, backend: str, root: Any) -> None:
@@ -49,14 +57,16 @@ def load_cached_ast(key: str, backend: str, cache_path: Path) -> Any | None:
     override actually govern the disk path this function reads, which a
     second, independent ``_cache_path`` call from this module could not see.
 
-    Checks the in-process memo first (see :data:`_AST_MEMO`'s own docstring),
-    falling back to the on-disk cache -- deadline-checked the same way the
-    original inline disk-cache read was (once before the parse, so an
-    already-exceeded deadline skips it, and once after, since parsing a huge
-    cached AST can itself eat the rest of the budget). A corrupt/unreadable
-    cache file is evicted, same as before. Never a staleness risk: this only
-    ever returns a value this same process already validated (from disk or a
-    fresh parse) under this identical content-addressed key.
+    Checks the in-process memo first (see :data:`_AST_MEMO`'s own docstring)
+    -- popping it on a hit, since the memo is a single-consumption handoff,
+    not a general cache -- falling back to the on-disk cache -- deadline-
+    checked the same way the original inline disk-cache read was (once
+    before the parse, so an already-exceeded deadline skips it, and once
+    after, since parsing a huge cached AST can itself eat the rest of the
+    budget). A corrupt/unreadable cache file is evicted, same as before.
+    Never a staleness risk: this only ever returns a value this same process
+    already validated (from disk or a fresh parse) under this identical
+    content-addressed key.
 
     A memo hit is itself deadline-checked too, even though it does no real
     work -- a caller relying on ``--budget``/``deadline.deadline_scope`` to
@@ -65,7 +75,7 @@ def load_cached_ast(key: str, backend: str, cache_path: Path) -> Any | None:
     expensive (mirrors the disk-cache-hit contract PR #591 established).
     """
     with _AST_MEMO_LOCK:
-        memoized = _AST_MEMO.get((backend, key))
+        memoized = _AST_MEMO.pop((backend, key), None)
     if memoized is not None:
         deadline.check()
         return memoized

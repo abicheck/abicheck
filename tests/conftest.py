@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -43,7 +44,7 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
 
 
 @pytest.fixture(autouse=True)
-def _isolate_ast_memo():
+def _isolate_ast_memo() -> Iterator[None]:
     """Clear the in-process clang-AST memo (``dumper_cache._AST_MEMO``,
     G31 Phase C AST reuse) before and after every test.
 

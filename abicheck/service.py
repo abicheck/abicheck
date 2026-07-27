@@ -874,8 +874,19 @@ def _attach_header_graph(
     try:
         resolved_headers = expand_header_inputs(headers)
         if resolved_headers:
+            # Root inference reads the RAW `headers` (matching `_dump_elf`'s
+            # own `resolve_inferred_header_roots(headers, ...)` call), not
+            # `resolved_headers` -- `_implicit_header_includes` treats a
+            # directory input as a single root but a directory *expanded*
+            # into its individual nested files as one root per subdirectory,
+            # so using the expanded list here diverged from the main pass
+            # for any directory `-H` input with nested subdirectories,
+            # producing a different eff_includes/eff_tokens and therefore a
+            # different `_clang_header_dump` cache key -- silently missing
+            # the in-process AST memo in exactly the large-header-tree case
+            # this reuse targets (Codex review).
             inc_extra, deferred = resolve_inferred_header_roots(
-                resolved_headers,
+                headers,
                 list(includes),
                 gcc_options=cc.gcc_options,
                 gcc_option_tokens=cc.gcc_option_tokens,

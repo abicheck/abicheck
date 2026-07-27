@@ -545,7 +545,8 @@ def _clang_header_dump(
             dpcpp_capable=dpcpp_multi_context,
             frontend_context=frontend_context,
         )
-        store_cached_ast(key, "clang", root)
+        if identities_stable:
+            store_cached_ast(key, "clang", root)
         return root, resolved_kind
     finally:
         agg_path.unlink(missing_ok=True)
