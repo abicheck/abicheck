@@ -526,11 +526,15 @@ def main() -> None:
                    "internals (e.g. unused stdlib/SYCL declarations pulled in by "
                    "#include) that a full header-AST dump otherwise serializes "
                    "wholesale, which can dominate the file size for a library with a "
-                   "large dependency stack. Requires -H/--header (a snapshot with no "
-                   "resolvable public surface, e.g. an export-table-only ELF dump, "
-                   "is a usage error). A scoped snapshot is a lossy artifact: compare "
+                   "large dependency stack. Requires a header-AST-derived snapshot "
+                   "(-H/--header, or --dump-manifest); a DWARF-only, "
+                   "export-table-only, or source-only dump has nothing to scope from "
+                   "and is a usage error. A scoped snapshot is a lossy artifact: compare "
                    "both sides of a `compare` the same way, don't mix scoped and "
-                   "unscoped snapshots.")
+                   "unscoped snapshots. Filters the flat function/variable/type/enum/"
+                   "typedef lists only -- an embedded header-only semantic graph "
+                   "(always attached by default) is not filtered and may still carry "
+                   "unreferenced-dependency nodes/edges.")
 @click.option("--version", "version", default="unknown", show_default=True,
               help="Library version string to embed in snapshot.")
 @lang_option
@@ -654,6 +658,19 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
 
     reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
+
+    # A source-only dump (no SO_PATH, --sources/--build-info only) never
+    # produces functions/variables at all -- --public-surface-only is
+    # statically known to fail there (dump_source_only's snapshot always
+    # hits scope_snapshot_to_public_surface's "nothing to scope from" error).
+    # Reject it here, before the --dry-run early return below, so preflight
+    # doesn't approve a command the real run always rejects (Codex review).
+    if so_path is None and public_surface_only:
+        raise click.UsageError(
+            "--public-surface-only has nothing to scope from a source-only "
+            "dump (--sources/--build-info with no SO_PATH carries no "
+            "functions/variables at all)."
+        )
 
     # ADR-050 D3: parsed before the collect/compile-context resolution below so
     # a bad manifest fails fast, and validated against the *raw* CLI values

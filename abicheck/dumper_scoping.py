@@ -25,6 +25,24 @@ public API (including a `std::`/SYCL type actually named in a public
 signature or field — dropping those would blind layout-based detectors to a
 real ABI break in a used dependency type) is kept; anything the public API
 never reaches is not.
+
+**Known limitation (Codex review, investigated, deliberately not fixed
+here):** this filters the flat snapshot lists (`functions`/`variables`/
+`types`/`enums`/`typedefs`) only. `service._attach_header_graph` (G29 Phase A,
+always-on by default -- `_HEADER_GRAPH_ENABLED`) separately embeds a semantic
+header-only graph (`snap.build_source.source_graph`, a
+`buildsource.source_graph.SourceGraphSummary`) built from the *same*
+unscoped header AST, and `scope_snapshot_to_public_surface` leaves it
+untouched -- a `--public-surface-only` dump can therefore still carry graph
+nodes/edges for dependency declarations the flat-list scoping just dropped.
+Correctly scoping the graph too needs its own closure walk over
+`GraphNode`/`GraphEdge` (each carrying its own `facts`/`resolved`/
+`conflicts`/`provenance`/`confidence` evidence-merge state -- ADR-046 D2),
+handling dangling edges when a node is removed, without corrupting a
+legitimate real L3/L4/L5 collection merged into the same pack from an
+explicit `--sources`/`--build-info` alongside this flag. That's a separate,
+independently-scoped project, not a drive-by extension of this flag's flat
+public-surface closure.
 """
 
 from __future__ import annotations
@@ -74,8 +92,9 @@ def scope_snapshot_to_public_surface(snap: AbiSnapshot) -> AbiSnapshot:
     if not surface.resolvable or not snap.from_headers:
         raise PublicSurfaceScopingError(
             "--public-surface-only requires a header-AST-derived snapshot "
-            "(pass -H/--header); a DWARF-only, export-table-only, or "
-            "source-only dump has no header-parsed declarations to scope."
+            "(-H/--header, or --dump-manifest); a DWARF-only, "
+            "export-table-only, or source-only dump has no header-parsed "
+            "declarations to scope."
         )
     return dataclasses.replace(
         snap,
@@ -86,4 +105,15 @@ def scope_snapshot_to_public_surface(snap: AbiSnapshot) -> AbiSnapshot:
         typedefs={
             k: v for k, v in snap.typedefs.items() if k in surface.public_typedefs
         },
+        # dataclasses.replace() otherwise carries these lazy lookup-index
+        # caches over from *snap* verbatim: if the input snapshot's index()
+        # was already called (e.g. by an earlier pipeline step), the copy
+        # would keep pointing at the unscoped functions/types lists even
+        # though its own .functions/.types are now filtered, so
+        # func_by_mangled()/type_by_name() on the *returned* snapshot could
+        # resolve a declaration this scoping just dropped (Codex review).
+        # None forces a lazy rebuild from the scoped lists on next access.
+        _func_by_mangled=None,
+        _var_by_mangled=None,
+        _type_by_name=None,
     )

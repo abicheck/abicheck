@@ -2242,6 +2242,24 @@ def test_dump_source_only_public_surface_only_is_usage_error(tmp_path):
     assert not out.exists()
 
 
+def test_dump_source_only_public_surface_only_rejected_in_dry_run_too(tmp_path):
+    """The same source-only + --public-surface-only combination must be
+    rejected during --dry-run preflight too (Codex review): it's statically
+    known to fail on a real run, so dry-run must not approve it.
+    """
+    tree = tmp_path / "src"
+    tree.mkdir()
+    cdb = [{"directory": str(tree), "file": "foo.cpp",
+            "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"]}]
+    (tree / "compile_commands.json").write_text(json.dumps(cdb))
+
+    result = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(tree), "--public-surface-only", "--dry-run"],
+    )
+    assert result.exit_code != 0
+
+
 def test_dump_with_no_binary_and_no_inputs_errors():
     """A bare `dump` (no SO_PATH, no --sources/--build-info) errors clearly."""
     result = CliRunner().invoke(main, ["dump"])

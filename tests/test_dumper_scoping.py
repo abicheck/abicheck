@@ -27,7 +27,13 @@ from abicheck.model import (
 )
 
 
-def _fn(name, ret="void", params=(), vis=Visibility.PUBLIC, mangled=None):
+def _fn(
+    name: str,
+    ret: str = "void",
+    params: tuple[str, ...] = (),
+    vis: Visibility = Visibility.PUBLIC,
+    mangled: str | None = None,
+) -> Function:
     return Function(
         name=name,
         mangled=mangled if mangled is not None else f"_Z{len(name)}{name}",
@@ -37,7 +43,11 @@ def _fn(name, ret="void", params=(), vis=Visibility.PUBLIC, mangled=None):
     )
 
 
-def _rec(name, fields=(), bases=()):
+def _rec(
+    name: str,
+    fields: tuple[tuple[str, str], ...] = (),
+    bases: tuple[str, ...] = (),
+) -> RecordType:
     return RecordType(
         name=name,
         kind="struct",
@@ -171,6 +181,30 @@ class TestScopeSnapshotToPublicSurface:
         scope_snapshot_to_public_surface(snap)
         assert len(snap.functions) == original_fn_count
         assert len(snap.types) == original_type_count
+
+    def test_lazy_lookup_indexes_rebuild_from_scoped_lists(self):
+        """dataclasses.replace() otherwise carries the input snapshot's
+        already-built lazy indexes over verbatim (Codex review): if the
+        caller had already looked up something on *snap* before scoping, the
+        returned copy's func_by_mangled()/type_by_name() must not keep
+        resolving a declaration this scoping just dropped."""
+        hidden = _fn("hidden", vis=Visibility.HIDDEN, mangled="_Z6hidden")
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Used *",)), hidden],
+            types=[_rec("Used"), _rec("Unused")],
+        )
+        # Force the lazy indexes to build against the *unscoped* lists,
+        # simulating an earlier pipeline step that already looked something up.
+        assert snap.func_by_mangled(hidden.mangled) is hidden
+        assert snap.type_by_name("Unused") is not None
+
+        scoped = scope_snapshot_to_public_surface(snap)
+        assert scoped.func_by_mangled(hidden.mangled) is None
+        assert scoped.type_by_name("Unused") is None
+        assert scoped.type_by_name("Used") is not None
 
 
 class TestFromHeadersGate:
