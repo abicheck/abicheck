@@ -5,14 +5,16 @@
 [G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md) for the
 per-phase implementation record, including the post-merge D5/D6 review
 follow-up. One thing remains intentionally unbuilt, not a gap in this ADR's
-model: `service.py`'s `CompareRequest`/`InputSpec` has no `dump_manifest`
-field at all, so the service/API/MCP surface cannot reach a manifest-driven
-dump today — the only reachable manifest-driven `compare` path is the
-native CLI (`cli_resolve._resolve_compare_snapshots`). This is deliberate
-(no code for a hypothetical caller — there is none yet), not an oversight;
-should `CompareRequest` gain manifest support later, `run_compare_request`'s
-existing `ABICHECK_PARALLEL_EXTRACTION` sequential fallback is already the
-right lever to route it through.
+model: `service.run_dump` itself accepts `dump_manifest` (public API,
+documented), so a direct caller can already dump both sides manifest-driven
+and hand the snapshots to `compare_snapshots` — but the one-call
+`CompareRequest`/`run_compare_request` path and the MCP tools have no
+`dump_manifest` field at all, so *those specific* entry points can't reach
+a manifest-driven comparison in a single call. This is deliberate (no code
+for a hypothetical caller — none needs the one-call path yet), not an
+oversight; should `CompareRequest` gain manifest support later,
+`run_compare_request`'s existing `ABICHECK_PARALLEL_EXTRACTION` sequential
+fallback is already the right lever to route it through.
 **Decision maker:** (pending — recorded per repository convention.)
 
 **Amendments:**
