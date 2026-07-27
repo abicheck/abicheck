@@ -164,8 +164,10 @@ Core pipeline (in order of data flow):
      `diff_symbols._diff_functions`. Mirrors the "most specific available
      identity, ambiguity-safe fallback" principle ADR-045 established for
      flat type matching (`diff_helpers.TypeMap`) and ADR-048 established for
-     L5 source-graph nodes (`buildsource/entity_identity.py`). Pure, leaf,
-     not yet wired into any live old/new matching or dedup path — see
+     L5 source-graph nodes (`buildsource/entity_identity.py`). Partially
+     wired: `diff_filtering.py`'s cross-detector dedup key now uses
+     `resolve_change_identity()`; `diff_symbols.py`'s own old/new function
+     and variable matching is deliberately still unwired — see
      `docs/contribute/plans/public-contract-default.md`'s Phase 2 section
 4. **Detection** — classify changes
    - `detectors.py` — individual detection rules

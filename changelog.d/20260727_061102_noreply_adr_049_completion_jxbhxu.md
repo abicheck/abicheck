@@ -27,6 +27,8 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   content-identical declarations (never a spurious removal+addition pair),
   that distinct verified mangled names never collide onto the same
   CANONICAL-tier identity, and that a batch-shaped finding's identity is
-  invariant under which arbitrary export was sampled into it. No wiring
-  changes — `finding_identity.py` remains unconsulted by any live
-  comparison path.
+  invariant under which arbitrary export was sampled into it. This fragment
+  itself introduces no wiring change; the following fragment in this same
+  release wires `resolve_change_identity()` into cross-detector
+  deduplication — `diff_symbols.py`'s own old/new matching remains
+  unwired.

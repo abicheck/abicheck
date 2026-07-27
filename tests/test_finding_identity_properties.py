@@ -15,11 +15,13 @@
 
 """ADR-049 Phase 2: fact-conservation property tests for ``finding_identity.py``.
 
-``finding_identity.py`` is not wired into any live old/new matching or
-cross-detector dedup path yet (see that module's own docstring) --
-``docs/contribute/plans/public-contract-default.md``'s Phase 2 section
-tracks wiring a real call site as separate, remaining work. This file is the
-other piece Phase 2 calls out as remaining: a Hypothesis property suite
+``finding_identity.py`` is partially wired: ``diff_filtering.py``'s
+cross-detector dedup key now uses ``resolve_change_identity()``, while
+``diff_symbols.py``'s own old/new function and variable matching remains
+unwired (see that module's own docstring and
+``docs/contribute/plans/public-contract-default.md``'s Phase 2 section for
+the remaining, deliberately deferred matching-engine work). This file is
+the other piece Phase 2 calls out as remaining: a Hypothesis property suite
 exercising the invariants a real reconciliation call site would need to hold
 for ADR-049 D9's "every detector fact must be conserved in exactly one
 visible outcome" to actually be checkable once wired in. A matching
