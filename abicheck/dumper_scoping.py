@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import dataclasses
 
+from .dwarf_advanced import AdvancedDwarfMetadata
 from .dwarf_metadata import DwarfMetadata
 from .errors import ValidationError
 from .model import AbiSnapshot, Visibility
@@ -96,6 +97,60 @@ def _scoped_dwarf(
     )
 
 
+def _scoped_dwarf_advanced(
+    adv: AdvancedDwarfMetadata | None, surface: PublicSurface
+) -> AdvancedDwarfMetadata | None:
+    """Filter Sprint-4 advanced DWARF metadata to the same public-surface
+    closure (Codex review, second finding on this signal).
+
+    ``checker._diff_advanced_dwarf`` -> ``dwarf_advanced.diff_advanced_dwarf``
+    compares ``packed_structs``/``all_struct_names`` and the per-function
+    ``calling_conventions``/``value_abi_traits``/``return_value_sizes``/
+    ``return_memory_classified``/``frame_registers``/``callee_saved_regs``
+    dicts directly, with no allow-set/fallback mechanism of its own (unlike
+    ``diff_platform._diff_dwarf``'s ``allowed_structs``) -- so leaving this
+    metadata unfiltered means a private, unreachable type's packing change
+    (or a private function's calling-convention drift) still produces a
+    breaking finding between two ``--public-surface-only`` snapshots,
+    regardless of what the flat lists were scoped to. Type-keyed collections
+    filter via :func:`_keep_dwarf_name` (``surface.public_types``);
+    function-keyed collections (keyed by mangled ``linkage_name``) filter via
+    ``surface.public_symbols``, which already carries every public function's
+    mangled name (``surface._symbol_keys``).
+    """
+    if adv is None or not adv.has_dwarf:
+        return adv
+    public_types = surface.public_types
+    public_symbols = surface.public_symbols
+    return dataclasses.replace(
+        adv,
+        calling_conventions={
+            k: v for k, v in adv.calling_conventions.items() if k in public_symbols
+        },
+        value_abi_traits={
+            k: v for k, v in adv.value_abi_traits.items() if k in public_symbols
+        },
+        return_value_sizes={
+            k: v for k, v in adv.return_value_sizes.items() if k in public_symbols
+        },
+        return_memory_classified={
+            k for k in adv.return_memory_classified if k in public_symbols
+        },
+        packed_structs={
+            k for k in adv.packed_structs if _keep_dwarf_name(k, public_types)
+        },
+        all_struct_names={
+            k for k in adv.all_struct_names if _keep_dwarf_name(k, public_types)
+        },
+        frame_registers={
+            k: v for k, v in adv.frame_registers.items() if k in public_symbols
+        },
+        callee_saved_regs={
+            k: v for k, v in adv.callee_saved_regs.items() if k in public_symbols
+        },
+    )
+
+
 class PublicSurfaceScopingError(ValidationError):
     """Raised when ``--public-surface-only`` is requested but the snapshot has
     no header-AST-derived declarations to scope (no ``-H``/``--header`` at
@@ -111,11 +166,13 @@ def scope_snapshot_to_public_surface(snap: AbiSnapshot) -> AbiSnapshot:
     unreferenced dependency internals (unused stdlib/SYCL/etc. declarations)
     that a full header-AST dump otherwise serializes wholesale. When the
     snapshot also carries DWARF (an ELF dump with both a header model and
-    debug info), ``dwarf.structs``/``dwarf.enums`` are filtered by the same
-    closure (see :func:`_scoped_dwarf`) — leaving them unfiltered would let
-    ``diff_platform._diff_dwarf``'s own empty-allow-set fallback silently
-    re-expand to comparing every DWARF type, defeating the scoping (Codex
-    review).
+    debug info), ``dwarf.structs``/``dwarf.enums`` (see :func:`_scoped_dwarf`)
+    and every type-/function-keyed collection in ``dwarf_advanced`` (see
+    :func:`_scoped_dwarf_advanced`) are filtered by the same closure —
+    leaving either unfiltered lets a private, unreachable type's or
+    function's layout/ABI-trait change still produce a breaking finding
+    between two ``--public-surface-only`` snapshots, defeating the scoping
+    (Codex review, twice).
 
     Raises :class:`PublicSurfaceScopingError` if the snapshot has no
     resolvable public surface at all (see
@@ -154,6 +211,7 @@ def scope_snapshot_to_public_surface(snap: AbiSnapshot) -> AbiSnapshot:
             k: v for k, v in snap.typedefs.items() if k in surface.public_typedefs
         },
         dwarf=_scoped_dwarf(snap.dwarf, surface),
+        dwarf_advanced=_scoped_dwarf_advanced(snap.dwarf_advanced, surface),
         # dataclasses.replace() otherwise carries these lazy lookup-index
         # caches over from *snap* verbatim: if the input snapshot's index()
         # was already called (e.g. by an earlier pipeline step), the copy

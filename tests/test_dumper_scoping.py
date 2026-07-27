@@ -16,6 +16,7 @@ from abicheck.dumper_scoping import (
     PublicSurfaceScopingError,
     scope_snapshot_to_public_surface,
 )
+from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.dwarf_metadata import DwarfMetadata, StructLayout
 from abicheck.model import (
     AbiSnapshot,
@@ -290,3 +291,75 @@ class TestDwarfScoping:
         new_scoped = scope_snapshot_to_public_surface(_snap(16))
         assert old_scoped.types == [] and new_scoped.types == []  # the hazard condition
         assert _diff_dwarf(old_scoped, new_scoped) == []
+
+
+class TestDwarfAdvancedScoping:
+    """Regression coverage for the Codex-review finding: dwarf_advanced
+    (Sprint 4 metadata -- packed_structs/all_struct_names, and per-function
+    calling_conventions/value_abi_traits/etc.) was left completely unfiltered
+    by scoping. Unlike diff_platform._diff_dwarf, dwarf_advanced.diff_advanced_dwarf
+    has no allow-set/fallback mechanism of its own -- it always compares
+    whatever these collections contain -- so a private, unreachable type's
+    packing change (or a private function's ABI-trait drift) still produced a
+    breaking finding between two --public-surface-only snapshots regardless
+    of the flat-list scoping."""
+
+    def test_type_and_symbol_keyed_collections_filtered(self):
+        hidden = _fn("hidden", vis=Visibility.HIDDEN, mangled="_Z6hidden")
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Used *",)), hidden],
+            types=[_rec("Used"), _rec("Private")],
+            dwarf_advanced=AdvancedDwarfMetadata(
+                has_dwarf=True,
+                packed_structs={"Used", "Private"},
+                all_struct_names={"Used", "Private"},
+                calling_conventions={"_Z3run": "normal", hidden.mangled: "ms_abi"},
+                value_abi_traits={"_Z3run": "v", hidden.mangled: "v"},
+                return_value_sizes={"_Z3run": 4, hidden.mangled: 8},
+                return_memory_classified={hidden.mangled},
+                frame_registers={"_Z3run": "rbp", hidden.mangled: "rsp"},
+                callee_saved_regs={hidden.mangled: frozenset({"rbx"})},
+            ),
+        )
+        scoped = scope_snapshot_to_public_surface(snap)
+        assert scoped.dwarf_advanced is not None
+        adv = scoped.dwarf_advanced
+        assert adv.packed_structs == {"Used"}
+        assert adv.all_struct_names == {"Used"}
+        assert set(adv.calling_conventions) == {"_Z3run"}
+        assert set(adv.value_abi_traits) == {"_Z3run"}
+        assert set(adv.return_value_sizes) == {"_Z3run"}
+        assert adv.return_memory_classified == set()
+        assert set(adv.frame_registers) == {"_Z3run"}
+        assert adv.callee_saved_regs == {}
+
+    def test_no_false_positive_struct_packing_finding_for_private_type(self):
+        """End-to-end reproduction: a private struct's packing changes between
+        old and new, but the public API only uses primitive types. Without
+        dwarf_advanced scoping, _diff_struct_packing would still compare the
+        unfiltered packed_structs sets and flag this as breaking."""
+        from abicheck.dwarf_advanced import _diff_struct_packing
+
+        def _snap(packed):
+            return AbiSnapshot(
+                library="libfoo.so",
+                version="1.0",
+                from_headers=True,
+                functions=[_fn("run", params=("int",))],  # primitive-only API
+                dwarf_advanced=AdvancedDwarfMetadata(
+                    has_dwarf=True,
+                    packed_structs={"Private"} if packed else set(),
+                    all_struct_names={"Private"},
+                ),
+            )
+
+        old_scoped = scope_snapshot_to_public_surface(_snap(False))
+        new_scoped = scope_snapshot_to_public_surface(_snap(True))
+        assert old_scoped.types == [] and new_scoped.types == []  # the hazard condition
+        assert (
+            _diff_struct_packing(old_scoped.dwarf_advanced, new_scoped.dwarf_advanced)
+            == []
+        )
