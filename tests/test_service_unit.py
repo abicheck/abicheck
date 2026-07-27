@@ -1751,12 +1751,96 @@ class TestDiagnosticComparisonThreading:
     def test_diagnostic_comparison_appended_last_preserves_positional_order(self):
         # Same rule as debuginfod_url (Codex review, PR #551): appended after
         # every pre-existing parameter so a positional caller's existing
-        # bindings don't shift.
+        # bindings don't shift. contract_evaluation (ADR-049 Phase 3) was
+        # later appended after it by the same rule, so "last" itself moved
+        # on again -- see
+        # TestContractEvaluationThreading.test_contract_evaluation_appended_last_preserves_positional_order
+        # for that -- but diagnostic_comparison's own position relative to
+        # its pre-existing neighbor must still be unchanged.
         import inspect
 
         params = list(inspect.signature(run_compare).parameters)
-        assert params[-1] == "diagnostic_comparison"
-        assert params[-2] == "debuginfod_url"
+        assert params.index("diagnostic_comparison") == (
+            params.index("debuginfod_url") + 1
+        )
+
+
+class TestContractEvaluationThreading:
+    """ADR-049 Phase 3's shadow contract evaluator (contract_evaluation.py)
+    was wired into checker.compare() (stamping Change.contract_relevance/
+    contract_reason_code/contract_assurance) but unreachable from every real
+    front-end: none of compare_snapshots/run_compare_request/run_compare
+    forwarded a contract_evaluation flag, and no front-end may call
+    checker.compare directly (cli-contract AI-readiness gate, ADR-037
+    D10.1). These tests build a genuine function-signature change and
+    confirm the flag reaches checker.compare from each Tier-2 entry point
+    and actually stamps the finding, mirroring
+    TestDiagnosticComparisonThreading's pattern for the sibling
+    diagnostic_comparison escape hatch."""
+
+    def _changed_pair(self, tmp_path):
+        def _snap(version, return_type):
+            return AbiSnapshot(
+                library="libtest.so",
+                version=version,
+                functions=[
+                    Function(
+                        name="f",
+                        mangled="f",
+                        return_type=return_type,
+                        visibility=Visibility.PUBLIC,
+                        is_extern_c=True,
+                    )
+                ],
+            )
+
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        save_snapshot(_snap("1.0", "int"), old_p)
+        save_snapshot(_snap("2.0", "long"), new_p)
+        return old_p, new_p
+
+    def test_compare_snapshots_default_leaves_contract_relevance_unset(self, tmp_path):
+        old_p, new_p = self._changed_pair(tmp_path)
+        result = compare_snapshots(load_snapshot(old_p), load_snapshot(new_p))
+        assert result.changes
+        assert all(c.contract_relevance is None for c in result.changes)
+
+    def test_compare_snapshots_contract_evaluation_stamps_relevance(self, tmp_path):
+        old_p, new_p = self._changed_pair(tmp_path)
+        result = compare_snapshots(
+            load_snapshot(old_p), load_snapshot(new_p), contract_evaluation=True
+        )
+        assert result.changes
+        assert any(c.contract_relevance is not None for c in result.changes)
+
+    def test_run_compare_request_contract_evaluation_stamps_relevance(self, tmp_path):
+        old_p, new_p = self._changed_pair(tmp_path)
+        request = CompareRequest(
+            old=InputSpec(path=old_p),
+            new=InputSpec(path=new_p),
+            contract_evaluation=True,
+        )
+        result, _, _ = run_compare_request(request)
+        assert result.changes
+        assert any(c.contract_relevance is not None for c in result.changes)
+
+    def test_run_compare_shim_contract_evaluation_stamps_relevance(self, tmp_path):
+        old_p, new_p = self._changed_pair(tmp_path)
+        result, _, _ = run_compare(old_p, new_p, contract_evaluation=True)
+        assert result.changes
+        assert any(c.contract_relevance is not None for c in result.changes)
+
+    def test_contract_evaluation_appended_last_preserves_positional_order(self):
+        # Same rule as debuginfod_url/diagnostic_comparison (Codex review,
+        # PR #551 and ADR-050 D2 follow-up): appended after every
+        # pre-existing parameter so a positional caller's existing bindings
+        # don't shift.
+        import inspect
+
+        params = list(inspect.signature(run_compare).parameters)
+        assert params[-1] == "contract_evaluation"
+        assert params[-2] == "diagnostic_comparison"
 
 
 class TestParallelOldNewExtraction:

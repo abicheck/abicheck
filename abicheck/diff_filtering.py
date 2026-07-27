@@ -23,6 +23,7 @@ from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .diff_helpers import make_change
 from .diff_symbols import _PUBLIC_VIS, _public_functions
+from .finding_identity import resolve_change_identity
 from .model import AbiSnapshot, Function
 
 # ── Post-processing: enrich and deduplicate ────────────────────────────────
@@ -1327,9 +1328,17 @@ def _deduplicate_ast_dwarf(changes: list[Change]) -> list[Change]:
 def _deduplicate_cross_detector(changes: list[Change]) -> list[Change]:
     """Remove cross-detector duplicates that the per-detector guards may miss.
 
-    Centralised dedup applied after all detectors have run.  Uses
-    (change_category, symbol) as the dedup key to collapse overlapping
-    reports from different detectors for the same logical event.
+    Centralised dedup applied after all detectors have run. The dedup key is
+    ``finding_identity.resolve_change_identity(c).primary_id`` (ADR-049 Phase 2
+    wiring) rather than a hand-rolled ``(change_category, symbol)`` tuple --
+    ``resolve_change_identity`` already collapses exactly these kind pairs
+    onto one shared ``category:<name>`` discriminator via its own
+    ``_EQUIVALENT_CHANGE_CATEGORIES`` table (kept in sync with the categories
+    below by that module's own docstring), while additionally applying its
+    tiered canonical/normalized/reduced identity to the entity portion of the
+    key -- the same primitive ``diff_symbols._diff_functions`` already uses
+    for its extern-C matching fallback, generalized here per
+    ``docs/contribute/plans/public-contract-default.md``'s Phase 2 section.
 
     Categories:
     - "func_removal": FUNC_REMOVED, FUNC_REMOVED_ELF_ONLY
@@ -1372,7 +1381,7 @@ def _deduplicate_cross_detector(changes: list[Change]) -> list[Change]:
         if c.kind is ChangeKind.SYMBOL_MOVED_VERSION_NODE
     }
 
-    seen: set[tuple[str, str]] = set()
+    seen: set[str] = set()
     result: list[Change] = []
     for c in changes:
         # Only collapse the alias-change into a co-reported node-move when the
@@ -1387,12 +1396,11 @@ def _deduplicate_cross_detector(changes: list[Change]) -> list[Change]:
             and (c.symbol, c.old_value, c.new_value) in moved_transitions
         ):
             continue
-        cat = _DEDUP_CATEGORIES.get(c.kind)
-        if cat is not None:
-            key = (cat, c.symbol)
-            if key in seen:
+        if c.kind in _DEDUP_CATEGORIES:
+            identity_key = resolve_change_identity(c).primary_id
+            if identity_key in seen:
                 continue
-            seen.add(key)
+            seen.add(identity_key)
         result.append(c)
     return result
 

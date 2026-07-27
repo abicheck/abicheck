@@ -210,6 +210,23 @@ def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:
     """
     if not result.scope_to_public_surface:
         return
+
+    def _out_of_surface_entry(c: Change) -> dict[str, object]:
+        entry: dict[str, object] = {
+            "kind": c.kind.value,
+            "symbol": c.symbol,
+            "description": c.description,
+            "source_location": c.source_location,
+            "reason": getattr(c, "surface_exclusion_reason", None),
+        }
+        # ADR-049 Phase 3 (shadow contract evaluator, opt-in
+        # `compare(..., contract_evaluation=True)`) -- a demoted finding's
+        # shadow decision (typically PROVEN_OUT_OF_CONTRACT, resolved via
+        # its own surface_exclusion_reason above) is exposed here too, not
+        # just on an ordinary `changes` entry (Codex review, fresh evidence).
+        _add_contract_evaluation_fields(entry, c)
+        return entry
+
     d["surface_scope"] = {
         "enabled": True,
         # ADR-024 §D5.3 — structured confidence in the resolution itself.
@@ -217,14 +234,7 @@ def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:
         "notes": list(result.surface_scope_notes),
         "out_of_surface_count": result.out_of_surface_count,
         "out_of_surface_changes": [
-            {
-                "kind": c.kind.value,
-                "symbol": c.symbol,
-                "description": c.description,
-                "source_location": c.source_location,
-                "reason": getattr(c, "surface_exclusion_reason", None),
-            }
-            for c in result.out_of_surface_changes
+            _out_of_surface_entry(c) for c in result.out_of_surface_changes
         ],
     }
 
@@ -1082,6 +1092,29 @@ def _reviewer_action_for_change(
     return _ADDITION_REVIEWER_ACTION.get(kind_val, _DEFAULT_ADDITION_REVIEWER_ACTION)
 
 
+def _add_contract_evaluation_fields(d: dict[str, object], c: object) -> None:
+    """Attach ADR-049 Phase 3's shadow contract-relevance decision fields to
+    *d*, if *c* carries one.
+
+    Shared by :func:`_change_to_dict` (ordinary ``changes`` entries) and
+    :func:`_add_surface_scope` (``out_of_surface_changes`` entries) so a
+    demoted finding's shadow decision is exposed in reports the same way a
+    kept finding's already is (Codex review, fresh evidence) -- before this,
+    only ``checker.py``'s ``_apply_contract_evaluation_shadow`` stamped
+    ``out_of_surface`` findings at all, but no report path serialized what
+    it stamped there. ``None`` (the default, and every existing caller that
+    doesn't opt into ``contract_evaluation=True``) emits nothing.
+    """
+    contract_relevance = getattr(c, "contract_relevance", None)
+    if contract_relevance is None:
+        return
+    d["contract_relevance"] = contract_relevance.value
+    d["contract_reason_code"] = getattr(c, "contract_reason_code", None)
+    contract_assurance = getattr(c, "contract_assurance", None)
+    if contract_assurance is not None:
+        d["contract_assurance"] = contract_assurance.value
+
+
 def _change_to_dict(
     c: object,
     *,
@@ -1239,6 +1272,7 @@ def _change_to_dict(
     d["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
         d["impact_assessment"] = assessment.to_dict()
+    _add_contract_evaluation_fields(d, c)
     return d
 
 

@@ -72,6 +72,20 @@ _SEVERITY_MAP: dict[str, Verdict] = {
     "ignore": Verdict.COMPATIBLE,
 }
 
+
+def parse_severity_value(value: Any) -> Verdict | None:
+    """Map a policy-file severity spelling to its :class:`Verdict`.
+
+    Case-insensitive, matching ``break``/``warn``/``risk``/``ignore``; returns
+    ``None`` for anything else. Public (unlike ``_SEVERITY_MAP`` itself) so
+    another loader for the same severity vocabulary -- ADR-049 D8's
+    pack-manifest ``kind: policy`` assignments
+    (``compatibility_evaluation_packs.py``) -- shares one source of truth
+    instead of re-declaring the four spellings a second time.
+    """
+    return _SEVERITY_MAP.get(str(value).lower())
+
+
 _VALID_BASE_POLICIES = VALID_BASE_POLICIES  # re-export alias for backward compat
 
 # ADR-033 D7 — evidence-aware policy controls. Each knob maps a *category* of
@@ -199,7 +213,7 @@ def _parse_overrides(overrides_raw: Any, path: Path) -> dict[ChangeKind, Verdict
         if kind is None:
             unknown_kinds.append(str(slug))
             continue
-        verdict = _SEVERITY_MAP.get(str(severity).lower())
+        verdict = parse_severity_value(severity)
         if verdict is None:
             unknown_severities.append(f"{slug}: {severity!r}")
             continue

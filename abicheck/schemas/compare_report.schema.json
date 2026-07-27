@@ -629,6 +629,20 @@
             }
           },
           "required": ["reachability_state", "public_reachable", "confidence", "decision"]
+        },
+        "contract_relevance": {
+          "type": "string",
+          "description": "ADR-049 Phase 3 (schema 2.23): present only when the caller opted into compare(..., contract_evaluation=True) -- a still non-authoritative shadow evaluation that changes no verdict, severity, or exit code. Whether this finding's subject is confirmed within the evaluated contract's evidence domain (IN_CONTRACT), confirmed outside it (PROVEN_OUT_OF_CONTRACT), not about a contract entity at all (NOT_APPLICABLE, e.g. SONAME/RPATH/DT_NEEDED changes), or the evaluator could not resolve it either way (UNKNOWN_UNRESOLVED -- the only unresolved value this evaluator emits; see contract_reason_code). UNKNOWN_UNPROVEN is a fifth ADR-049 value this evaluator never emits (see contract_evaluation.py's own module docstring) but is included here since the enum is shared with a future authoritative evaluator.",
+          "enum": ["IN_CONTRACT", "UNKNOWN_UNRESOLVED", "UNKNOWN_UNPROVEN", "PROVEN_OUT_OF_CONTRACT", "NOT_APPLICABLE"]
+        },
+        "contract_reason_code": {
+          "type": "string",
+          "description": "ADR-049 Phase 3 (schema 2.23): the stable reason code backing contract_relevance -- e.g. 'public_root_membership' (in_contract, confirmed public-root/closure membership), 'required_evidence_incomplete' (unknown_unresolved, an unresolvable or identity-ambiguous surface), 'non_entity_finding' (not_applicable), 'terminal_authoritative_exclusion' (proven_out_of_contract), or 'all_mode_normalized_entity' (in_contract under contract=all, which makes no closed-world evidence claim). Present iff contract_relevance is."
+        },
+        "contract_assurance": {
+          "type": "string",
+          "description": "ADR-049 Phase 3 (schema 2.23): how much confidence backs contract_relevance -- 'complete' (a terminal or positively-confirmed determination), 'partial' (a weak surface-exclusion reason with no stronger corroboration), or 'unavailable' (the required surface was unresolvable). Present only alongside contract_relevance, and only when the evaluator itself set a value (this field is None internally only in unreached code paths).",
+          "enum": ["complete", "partial", "unavailable"]
         }
       }
     }

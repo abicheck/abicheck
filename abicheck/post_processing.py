@@ -278,7 +278,7 @@ def _snapshot_export_ids(snap: AbiSnapshot) -> set[str]:
     return ids
 
 
-def _change_matches_symbols(change: Change, symbols: set[str]) -> bool:
+def _change_matches_symbols(change: Change, symbols: set[str] | frozenset[str]) -> bool:
     """True if *change*'s symbol matches the widening allowlist.
 
     Matches the raw symbol (mangled or demangled, as recorded on the change)

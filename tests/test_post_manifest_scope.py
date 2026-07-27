@@ -63,6 +63,27 @@ def test_private_kernel_churn_demoted_under_manifest_scope() -> None:
     assert any("__pp_foo_impl" in c.symbol for c in scoped.out_of_surface_changes)
 
 
+def test_demotion_reason_matches_contract_evaluation_constant() -> None:
+    # Drift guard: contract_evaluation.py's shadow evaluator recognizes this
+    # exact literal as a terminal exclusion (_REASON_POST_MANIFEST_NOT_COMMITTED)
+    # via a duplicated string rather than a shared import (post_processing.py
+    # is at the repo's 2000-line hard cap and cannot export a constant without
+    # a separate splitting effort) -- this test fails loudly if the two ever
+    # drift apart instead of silently stopping recognizing the reason.
+    import abicheck.contract_evaluation as contract_evaluation_mod
+
+    old = _snap([_cfn("pp_foo"), _cfn("__pp_foo_impl")])
+    new = _snap([_cfn("pp_foo")])
+    scoped = compare(old, new, public_surface_allowlist={"pp_foo"})
+    demoted = next(
+        c for c in scoped.out_of_surface_changes if "__pp_foo_impl" in c.symbol
+    )
+    assert (
+        demoted.surface_exclusion_reason
+        == contract_evaluation_mod._REASON_POST_MANIFEST_NOT_COMMITTED
+    )
+
+
 def test_committed_symbol_break_still_caught_under_manifest_scope() -> None:
     # Removing a *committed* pp_* symbol must still break, even when scoped.
     old = _snap([_cfn("pp_foo"), _cfn("__pp_foo_impl")])

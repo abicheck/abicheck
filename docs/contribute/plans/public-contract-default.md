@@ -804,13 +804,59 @@ wiring also landed:
 `resolve_legacy_contract_mode` resolves `contract.mode` from the real
 `--scope-public-headers`/`--no-scope-public-headers` CLI flag via
 `resolve_field` — not called from any live command yet (that's the Phase 3
-shadow evaluator's job). Still remaining: wiring any other field
-(`cli_options.py`'s other shared option families, `.abicheck.yml`
-schema/reference docs, service/API request models) to construct real
-`FieldCandidate`s, and loading actual pack *content* (a pack-manifest
-format `detect_pack_conflicts` can consume — today it only has the
-conflict-detection algorithm, no loader) — packs are otherwise unused
-beyond `CompatibilityEvaluationConfig`'s own `ImmutableIdentity` references.
+shadow evaluator's job).
+
+A second real wiring landed the same way: `resolve_internal_namespaces`
+resolves `surface.internal_namespaces` from a real `--policy-file` YAML's
+`internal_namespaces` list (`policy_file.py`'s `PolicyFile` — the only front
+end that can set this field today, since no CLI flag exists for it). An
+absent `--policy-file`, or one that sets the key to an empty list
+(indistinguishable, once parsed, from never setting it), contributes no
+candidate and falls through to the built-in default (`()`, equal to
+`SurfaceConfig.internal_namespaces`'s own default), the same "a selector
+layer only participates when it actually selected something" principle the
+first wiring's untouched-flag case already applies. The candidate value is
+sorted+deduped before being handed to `resolve_field`, mirroring
+`SurfaceConfig.__post_init__`'s own canonicalization of this exact
+order-insensitive field (and `compatibility_evaluation_packs.py`'s
+`_canonicalize_order_insensitive_field`, which already treats
+`surface.internal_namespaces` the same way at the pack-manifest layer) —
+two policy files listing the same namespaces in a different order resolve
+to an equal value, per D7. Also not called from any live command yet.
+
+Pack *content* loading has also landed: `abicheck/compatibility_evaluation_packs.py`'s
+`load_pack_manifest` reads a small versioned YAML pack-manifest format
+(`id`/`version`/`kind: contract|policy|gate`/`assignments`) into a
+`LoadedPack` (an `ImmutableIdentity` content-digested over the manifest's raw
+bytes, paired with the pack's resolved `field name -> value` assignments),
+and `assignments_for_conflict_check` projects a list of `LoadedPack`s,
+grouped by `PackKind`, into the `(ImmutableIdentity, Mapping[str, Hashable])`
+pairs `detect_pack_conflicts` already accepts -- a caller will need to run
+`detect_pack_conflicts` once per returned kind group, since D8's conflict
+rule is scoped to comparing packs *within* one namespace, not across them
+(a flat, ungrouped projection previously let a policy pack's `ChangeKind`
+slug and an unrelated gate pack's own field name collide by string
+coincidence alone). A `kind: policy` manifest's
+assignments are `ChangeKind` slug -> severity spelling, converted through
+`policy_file.py`'s now-public `parse_severity_value` (extracted from
+`_parse_overrides` so the two loaders share one severity vocabulary instead
+of each declaring it independently) with the identical unknown-slug hard
+error as `--policy-file`. A `kind: contract`/`kind: gate` manifest's
+assignments are arbitrary field-name -> scalar/list values, recursively
+converted to hashable tuples. This module only loads pack content into the
+shape `detect_pack_conflicts` accepts — it does not select which packs apply
+to a run, call `detect_pack_conflicts` itself, or fold a policy pack's
+resolved overrides into `CompatibilityPolicyConfig.overrides`.
+
+Still remaining: wiring any other field (`cli_options.py`'s other shared
+option families beyond `scope_options`, `.abicheck.yml` schema/reference
+docs, service/API request models) to construct real `FieldCandidate`s, and
+selecting/composing loaded
+packs into `ContractConfig.packs`/`CompatibilityPolicyConfig.packs`/
+`GateConfig.packs` for a real run (today a pack's `ImmutableIdentity` can be
+referenced there, but no front end resolves a `--pack <name>`-style CLI/config
+input into one, and no call site invokes `detect_pack_conflicts` with real
+packs during config resolution).
 
 ### Phase 2 — canonical identity and fact conservation
 
@@ -827,22 +873,145 @@ extern-C fallback already hand-rolled in `diff_symbols._diff_functions`
 into one documented canonical/normalized/reduced-tier primitive, following
 the same principle ADR-045 established for flat type matching
 (`diff_helpers.TypeMap`) and ADR-048 for L5 source-graph nodes
-(`buildsource/entity_identity.py`). Deliberately not wired into any live
-comparison path yet — `diff_symbols.py`'s old/new function and variable
-matching and `diff_filtering.py`'s `_deduplicate_cross_detector` dedup key
-are unchanged. Still remaining: wiring a call site to actually consult it
-(a real refactor against the existing hand-tuned matching logic and its
-extensive golden/FP-rate/tier-accuracy test coverage, not a drive-by
-change), and the fact-conservation property test itself (a Hypothesis
-check that no old-side symbol silently vanishes without either a matched
-new-side counterpart or an emitted removal finding) — this module is only
-the identity primitive that gate will consume.
+(`buildsource/entity_identity.py`).
+
+A first live call site is now wired: `diff_filtering.py`'s
+`_deduplicate_cross_detector` uses `resolve_change_identity(c).primary_id`
+as its cross-detector dedup key, replacing the hand-rolled
+`(change_category, symbol)` tuple it used before —
+`resolve_change_identity`'s own `_EQUIVALENT_CHANGE_CATEGORIES` table
+already mirrors that function's `_DEDUP_CATEGORIES` exactly (rich-vs-L0
+function/variable add/remove, symbol-version-node pairs), so the swap is
+behavior-preserving for every kind that stage collapses — verified both by
+a dedicated unit suite
+(`tests/test_diff_filtering_cross_detector_identity.py`: same-category/
+same-symbol collapses, same-category/different-symbol and
+different-category/same-symbol do not, first occurrence wins, the
+pre-existing symbol-version-alias special case is unaffected) and by the
+full existing FP-rate-gate/tier-accuracy-gate/golden/detector-oracle/
+detector-property test suites, all of which exercise this stage indirectly
+through `checker.compare` and all passed unchanged after the wiring.
+
+Still **not** wired: `diff_symbols.py`'s own old/new function and variable
+*matching* (`_diff_functions`/`_match_old_function`/`_diff_variables`) —
+deliberately deferred. That matching engine interleaves elf-only-mode/
+unconfirmed-parameter/LLP64 threading, the extern-C ambiguity-resolution
+fallback (unique-candidate-only), and interactions with
+virtual-method-addition, inline-transition, and hidden-friend detection in
+one function; replacing its core join with an identity-primitive lookup is
+a substantially larger, higher-risk refactor against that hand-tuned logic
+and its extensive golden/FP-rate/tier-accuracy test coverage than the
+dedup-key swap above, and does not fit a single well-scoped, independently
+verifiable change — it needs its own dedicated pass.
+
+**Re-investigated 2026-07-27, conclusion unchanged.** Re-read
+`_match_old_function` end to end (not just this paragraph) to check whether
+the assessment above was still accurate rather than assuming it. Confirmed
+it still holds, for a reason specific to `resolve_function_identity` itself,
+not only `_match_old_function`'s surrounding complexity: the identity
+resolver returns exactly one `primary_id` per function and has no built-in
+notion of "ambiguous, so don't match" — the extern-C fallback's own
+correctness depends entirely on the *caller* counting candidates and
+declining to match when more than one shares a name
+(`len(extern_c_candidates) == 1`). Keying a lookup dict by
+`resolve_function_identity(f).primary_id` instead of the current
+`new_by_name` multimap would not eliminate that counting step, only move it
+behind a different key — the ambiguity-safe fallback logic still has to be
+reimplemented on top, so this would not be the same kind of drop-in swap the
+`diff_filtering.py` dedup-key wiring was (that call site only needed a
+*key*, never an ambiguity *decision*). Attempting it now would mean
+rewriting `_match_old_function`'s core join under this session's normal
+verification budget, against golden/FP-rate/tier-accuracy/mutation-score
+gates it was never exercised against before — exactly the "does not fit a
+single well-scoped, independently verifiable change" case above, not a new
+finding. Left deferred; a real attempt needs its own dedicated pass with
+room for that full gate re-verification, not a fold-in alongside Phase 3/1
+work.
+
+A Hypothesis property suite for the identity primitive itself
+(`tests/test_finding_identity_properties.py`, `slow`) is also done, covering
+determinism (the same declaration always resolves to the same identity),
+that two independently-built but content-identical declarations (modeling
+an unchanged entity on the old and new side of a comparison) resolve to the
+*same* primary id (never a spurious removal+addition pair), that two
+declarations with genuinely distinct verified mangled names never collide
+onto the same CANONICAL-tier primary id (never masking a real removal), and
+that a batch-shaped finding's identity is invariant under which arbitrary
+export happened to be sampled into it.
+
+The end-to-end fact-conservation property test over `checker.compare`
+itself is also done (`tests/test_fact_conservation_properties.py`, `slow`):
+for randomized old/new public function and variable sets, every removed
+symbol always surfaces as a `FUNC_REMOVED`/`FUNC_REMOVED_ELF_ONLY`/
+`VAR_REMOVED` finding referencing it, and every retained symbol never does
+— exercised through the real, now-partially-wired pipeline (matching +
+detection + the identity-based dedup stage above), not a mock.
 
 ### Phase 3 — shadow contract evaluator
 
 Implement a leaf `contract_surface`/`contract_evaluation` module with no CLI
 imports. Produce relevance, assurance, reasons, and provider ledgers in reports,
 but leave the old gate authoritative.
+
+**Progress:** a first cut of the leaf module has landed
+(`abicheck/contract_evaluation.py`, `evaluate_change_contract_relevance`/
+`evaluate_snapshot_pair_contract_relevance`), computing a
+`ContractEvaluationDecision` (relevance/reason/assurance) per finding from
+evidence that already exists: `surface.py`'s public-surface resolution
+(ADR-024) for the entity-membership question, and `finding_identity.py`'s
+identity tiers (Phase 2) for the identity-ambiguity downgrade. It is a true
+shadow module — not called from `checker.py`, the CLI, or any report path —
+so this is not yet the "produce relevance/assurance/reasons in reports" half
+of this phase's gate, only the decision-computation half. Scope is
+deliberately narrower than the full phase:
+
+- Only `ContractMode.PUBLIC` and `ContractMode.ALL` are implemented;
+  `EXPORTS` raises `NotImplementedError` rather than approximating, since no
+  export-root-closure evidence provider exists yet (`surface.py` only
+  computes a header-derived public closure, not an export-symbol-rooted
+  one — a real `EXPORTS` implementation is separate, scoped follow-up work).
+- `ContractRelevance.UNKNOWN_UNPROVEN` is never emitted (see the module's
+  own docstring): that value requires a closed-world "the declared evidence
+  domain was searched completely" claim this module cannot verify with
+  today's evidence providers, so every such case degrades to the weaker
+  `UNKNOWN_UNRESOLVED` with reason `required_evidence_incomplete` instead —
+  a deliberate under-claim, not a shortcut.
+- The `NOT_APPLICABLE` (non-entity) `ChangeKind` set is curated by hand
+  (SONAME/RPATH, architecture/file-format identity, security-hardening
+  posture, toolchain/runtime identity — ~31 kinds) and explicitly
+  non-exhaustive; a kind missing from it simply falls through to ordinary
+  entity classification rather than crashing.
+- The provider ledger this phase's gate calls for ("every shadow delta has
+  evidence") is not built yet — a decision today is the relevance/reason/
+  assurance triple only, with no persisted per-provider evidence record.
+- A finding a pipeline step has already demoted to the audit ledger
+  (`post_processing.py`'s `DemoteOffPythonSurface`/
+  `DemoteUnreachableInternalChurn`, ADR-024/ADR-028) carries that step's own
+  `Change.surface_exclusion_reason` — `evaluate_change_contract_relevance`
+  consults it directly before falling back to a from-scratch
+  `classify_change_surface` recomputation, since re-deriving from the raw
+  surface pair alone can disagree with the specialized detector that
+  produced it (an off-Python-surface finding has no C-header surface to
+  recompute against at all; an internal-namespace finding's own dedicated
+  leak check is a finer-grained, different reachability model than this
+  module's coarse public/private split).
+- `classify_change_surface`'s `True` verdict is not itself proof of
+  confirmed public-root/closure membership — it also covers `surface.py`'s
+  own anti-hiding "cannot place this finding, so keep it" fallback (an
+  implicated type absent from either snapshot's type universe entirely, or
+  an internal-namespace type deferred to the internal-leak detector).
+  `_in_surface_result_is_confirmed()` distinguishes the two via
+  `public_symbols`/`public_types` membership (mirroring, not
+  reimplementing, `classify_change_surface`'s own candidate derivation via
+  `_type_identifiers`), downgrading the conservative-retention case to
+  `UNKNOWN_UNRESOLVED` — while still trusting `_NEVER_FILTER_KIND_NAMES`/
+  `python_*` findings unconditionally, since those are public by
+  construction and would never appear in those sets at all.
+
+Not yet done: wiring this into `checker.compare`'s output (even as a
+non-authoritative shadow field), the provider-evidence ledger, the
+delta/unresolved-rate/proven-loss measurement this phase's gate requires,
+and `EXPORTS` mode.
 
 Measure:
 

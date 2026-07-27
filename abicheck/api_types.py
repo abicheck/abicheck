@@ -167,6 +167,16 @@ class CompareRequest:
     # caller can still see a result but knows not to trust it. Forwarded
     # to ``checker.compare``'s own ``diagnostic_comparison`` parameter.
     diagnostic_comparison: bool = False
+    # ADR-049 Phase 3: stamp each finding's shadow, non-authoritative
+    # contract-relevance decision (``Change.contract_relevance``/
+    # ``contract_reason_code``/``contract_assurance``). Opt-in; changes no
+    # verdict, severity, or exit code. Forwarded to ``checker.compare``'s
+    # own ``contract_evaluation`` parameter -- previously reachable only by
+    # calling the Tier-1 core directly, which no front-end may do
+    # (``cli-contract`` AI-readiness gate, ADR-037 D10.1), so this field is
+    # what makes the shadow evaluator reachable through the real Tier-2
+    # chokepoint at all (Codex review, fresh evidence).
+    contract_evaluation: bool = False
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).

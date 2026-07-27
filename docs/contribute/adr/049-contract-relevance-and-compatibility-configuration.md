@@ -1,13 +1,22 @@
 # ADR-049: Contract Relevance and Compatibility Configuration
 
 **Date:** 2026-07-21
-**Status:** Accepted (2026-07-26). Phase 0 and Phase 1 slices 1–2 are
+**Status:** Accepted (2026-07-26). Phase 0 and Phase 1 slices 1–3 are
 implemented (`abicheck/contract_relevance_types.py`,
 `abicheck/compatibility_evaluation_config.py`,
-`abicheck/compatibility_evaluation_resolver.py`); see
+`abicheck/compatibility_evaluation_resolver.py`,
+`abicheck/compatibility_evaluation_packs.py`). Phase 2's identity primitive
+(`abicheck/finding_identity.py`) is implemented and its first live call site
+is wired: `diff_filtering.py`'s cross-detector dedup key now uses
+`resolve_change_identity`. `diff_symbols.py`'s own old/new matching engine
+remains unwired (deliberately deferred, see the plan's Phase 2 section).
+Phase 3's shadow evaluator (`abicheck/contract_evaluation.py`) is
+implemented for `ContractMode.PUBLIC`/`ALL` only (`EXPORTS` raises
+`NotImplementedError` — no export-root-closure evidence provider exists
+yet) and is not called from any pipeline stage. Nothing here is wired into
+the CLI, contract/compatibility policy, or reports yet — see
 `docs/contribute/plans/public-contract-default.md`'s "Work breakdown" for
-current per-phase progress. Nothing here is wired into detection, policy,
-the CLI, or reports yet.
+current per-phase progress.
 **Decision maker:** napetrov
 
 ## Context

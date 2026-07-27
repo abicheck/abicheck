@@ -41,6 +41,7 @@ from abicheck.model import (
     EnumType,
     Function,
     RecordType,
+    ScopeOrigin,
     TypeField,
     Visibility,
 )
@@ -203,6 +204,201 @@ class TestReportValidatesAgainstSchema:
         ]
         for c in additions:
             assert c["reviewer_action"] in declared_enum
+
+    def test_contract_evaluation_report_validates(self):
+        # ADR-049 Phase 3 (schema 2.23): compare(..., contract_evaluation=True)
+        # stamps three new optional per-finding keys -- validate a real
+        # payload against the packaged schema (not just the docs mirror,
+        # same "don't just check no error" reasoning as the reviewer_action
+        # regression guard above) and pin the enum casing
+        # ContractRelevance/ContractAssurance actually serialize with.
+        old, new = _breaking_pair()
+        payload = json.loads(
+            reporter.to_json(compare(old, new, contract_evaluation=True))
+        )
+        self._validate(payload)
+        stamped = [c for c in payload["changes"] if "contract_relevance" in c]
+        assert stamped, "fixture must produce at least one shadow-evaluated finding"
+        for c in stamped:
+            assert c["contract_relevance"] in {
+                "IN_CONTRACT",
+                "UNKNOWN_UNRESOLVED",
+                "UNKNOWN_UNPROVEN",
+                "PROVEN_OUT_OF_CONTRACT",
+                "NOT_APPLICABLE",
+            }
+            assert isinstance(c["contract_reason_code"], str)
+            assert c["contract_assurance"] in {"complete", "partial", "unavailable"}
+
+    def test_contract_evaluation_omitted_by_default(self):
+        # The flag defaults to False -- an ordinary report carries none of
+        # the three keys, matching every existing caller's unchanged output.
+        old, new = _breaking_pair()
+        payload = json.loads(reporter.to_json(compare(old, new)))
+        self._validate(payload)
+        for c in payload["changes"]:
+            assert "contract_relevance" not in c
+            assert "contract_reason_code" not in c
+            assert "contract_assurance" not in c
+
+    def test_contract_evaluation_all_mode_report_validates(self):
+        # scope_to_public_surface=False means FilterNonPublicSurface never
+        # runs its header-scoping path, so PipelineContext.surf_old/surf_new
+        # stay None -- _apply_contract_evaluation_shadow must fall back to
+        # computing them independently rather than leave shadow evaluation
+        # unresolvable for this run shape. mode is contract=all (the
+        # --no-scope-public-headers alias), so every finding normalizes to
+        # IN_CONTRACT/all_mode_normalized_entity.
+        old, new = _breaking_pair()
+        payload = json.loads(
+            reporter.to_json(
+                compare(
+                    old, new, contract_evaluation=True, scope_to_public_surface=False
+                )
+            )
+        )
+        self._validate(payload)
+        stamped = [c for c in payload["changes"] if "contract_relevance" in c]
+        assert stamped, "fixture must produce at least one shadow-evaluated finding"
+        for c in stamped:
+            assert c["contract_relevance"] == "IN_CONTRACT"
+            assert c["contract_reason_code"] == "all_mode_normalized_entity"
+            assert c["contract_assurance"] == "complete"
+
+    def test_contract_evaluation_stamps_demoted_out_of_surface_findings(self):
+        # Regression (Codex review, fresh evidence): _apply_contract_evaluation_shadow
+        # previously evaluated only `kept`, so a finding public-surface
+        # scoping already demoted to out_of_surface never got a shadow
+        # decision at all -- exactly the false-positive-reduction case
+        # Phase 3 exists to measure. An internal (unreferenced) type's
+        # layout change is demoted to out_of_surface by scope_to_public_surface,
+        # and must now resolve to PROVEN_OUT_OF_CONTRACT via its own
+        # surface_exclusion_reason ("non-public-type").
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[
+                RecordType(name="Result", kind="struct", size_bits=64),
+                RecordType(name="InternalCache", kind="struct", size_bits=64),
+            ],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[
+                RecordType(name="Result", kind="struct", size_bits=64),
+                RecordType(name="InternalCache", kind="struct", size_bits=128),
+            ],
+        )
+        result = compare(
+            old, new, scope_to_public_surface=True, contract_evaluation=True
+        )
+        assert result.out_of_surface_count >= 1
+        demoted = [
+            c for c in result.out_of_surface_changes if c.symbol == "InternalCache"
+        ]
+        assert demoted, "fixture must produce a demoted InternalCache finding"
+        for c in demoted:
+            assert c.contract_relevance is not None
+            assert c.contract_relevance.value == "PROVEN_OUT_OF_CONTRACT"
+            assert c.contract_reason_code == "terminal_authoritative_exclusion"
+
+        payload = json.loads(reporter.to_json(result))
+        entries = payload["surface_scope"]["out_of_surface_changes"]
+        stamped_entries = [e for e in entries if e["symbol"] == "InternalCache"]
+        assert stamped_entries
+        for e in stamped_entries:
+            assert e["contract_relevance"] == "PROVEN_OUT_OF_CONTRACT"
+            assert e["contract_reason_code"] == "terminal_authoritative_exclusion"
+            assert e["contract_assurance"] == "complete"
+
+    def test_out_of_surface_findings_omit_contract_fields_by_default(self):
+        # Without contract_evaluation=True, out_of_surface_changes entries
+        # must stay exactly as before -- no new keys at all.
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[
+                RecordType(name="Result", kind="struct", size_bits=64),
+                RecordType(name="InternalCache", kind="struct", size_bits=64),
+            ],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[
+                RecordType(name="Result", kind="struct", size_bits=64),
+                RecordType(name="InternalCache", kind="struct", size_bits=128),
+            ],
+        )
+        result = compare(old, new, scope_to_public_surface=True)
+        payload = json.loads(reporter.to_json(result))
+        entries = payload["surface_scope"]["out_of_surface_changes"]
+        assert entries
+        for e in entries:
+            assert "contract_relevance" not in e
+            assert "contract_reason_code" not in e
+            assert "contract_assurance" not in e
+
+    def test_contract_evaluation_honors_post_manifest_commitment(self):
+        # Regression (Codex review, fresh evidence): _apply_contract_evaluation_shadow
+        # forwarded only header surfaces and force_public_symbols, not
+        # public_surface_allowlist (the --post-manifest committed-export
+        # set) -- so a symbol POST-manifest committed despite private-header
+        # provenance was stamped PROVEN_OUT_OF_CONTRACT by a fresh
+        # classify_change_surface recomputation that had no knowledge of the
+        # commitment, inverting the pipeline's own kept (not demoted)
+        # decision for that exact finding.
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            functions=[
+                Function(
+                    name="pp_foo",
+                    mangled="pp_foo",
+                    return_type="int",
+                    visibility=Visibility.ELF_ONLY,
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                )
+            ],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            functions=[
+                Function(
+                    name="pp_foo",
+                    mangled="pp_foo",
+                    return_type="double",
+                    visibility=Visibility.ELF_ONLY,
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                )
+            ],
+        )
+        result = compare(
+            old,
+            new,
+            public_surface_allowlist={"pp_foo"},
+            contract_evaluation=True,
+        )
+        committed = [c for c in result.changes if c.symbol == "pp_foo"]
+        assert committed, "fixture must produce a kept, committed pp_foo finding"
+        assert not any(c.symbol == "pp_foo" for c in result.out_of_surface_changes)
+        for c in committed:
+            assert c.contract_relevance is not None
+            assert c.contract_relevance.value == "IN_CONTRACT"
+            assert c.contract_reason_code == "public_root_membership"
+
+        payload = json.loads(reporter.to_json(result))
+        entries = [c for c in payload["changes"] if c["symbol"] == "pp_foo"]
+        assert entries
+        for e in entries:
+            assert e["contract_relevance"] == "IN_CONTRACT"
+            assert e["contract_reason_code"] == "public_root_membership"
 
 
 @_requires_jsonschema

@@ -217,7 +217,9 @@ disable_error_code = ["import-untyped"]
 # ``class _StrictLoader(yaml.SafeLoader)`` (ADR-050 D3 duplicate-key
 # rejection) — without stubs ``yaml.SafeLoader`` types as ``Any``, so
 # subclassing it also trips ``misc`` ("cannot subclass Any").
-module = ["abicheck.dump_manifest"]
+# ``compatibility_evaluation_packs`` (ADR-049 D8 pack-manifest loader) adds
+# its own, independent ``_StrictLoader`` for the identical reason.
+module = ["abicheck.dump_manifest", "abicheck.compatibility_evaluation_packs"]
 disable_error_code = ["import-untyped", "misc"]
 
 [tool.pytest.ini_options]

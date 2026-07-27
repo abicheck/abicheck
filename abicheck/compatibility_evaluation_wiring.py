@@ -13,32 +13,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-049 Phase 1's first real front-end wiring: legacy scope flag -> mode.
+"""ADR-049 Phase 1's real front-end wirings: real CLI/config inputs ->
+resolved ``CompatibilityEvaluationConfig`` fields.
 
 Every other ADR-049 module built so far (``contract_relevance_types.py``,
 ``compatibility_evaluation_config.py``, ``compatibility_evaluation_resolver.py``)
-is pure vocabulary/shape/resolution logic that no front end calls with real
-input yet. This module is the first exception: :func:`resolve_legacy_contract_mode`
-takes the *actual* ``--scope-public-headers``/``--no-scope-public-headers``
-CLI flag (``cli_options.py``'s ``scope_options``, the only scope-shaped
-option that exists in the CLI today) and produces a real ``contract.mode``
-resolution via :func:`~abicheck.compatibility_evaluation_resolver.resolve_field`
-and the D2 alias table in :data:`~abicheck.contract_relevance_types.LEGACY_SCOPE_FLAG_CONTRACT_MODE`.
+is pure vocabulary/shape/resolution logic. This module is where real input
+first reaches :func:`~abicheck.compatibility_evaluation_resolver.resolve_field`:
 
-This function is **not** called from any live command yet. ADR-049's own
-rollout plan puts wiring the resolved value into an authoritative code path
-behind a later phase (Phase 3's shadow contract evaluator validates
-resolution against real traffic before it can affect a gate decision, and
-the default flip is Phase 7) -- see
-``docs/contribute/plans/public-contract-default.md``. Landing the wiring
-function itself, fully tested against the real CLI flag's semantics, is
-what Phase 1's gate asks for: "every front end resolves equivalent semantic
+- :func:`resolve_legacy_contract_mode` takes the *actual*
+  ``--scope-public-headers``/``--no-scope-public-headers`` CLI flag
+  (``cli_options.py``'s ``scope_options``, the only scope-shaped option that
+  exists in the CLI today) and produces a real ``contract.mode`` resolution,
+  via the D2 alias table in
+  :data:`~abicheck.contract_relevance_types.LEGACY_SCOPE_FLAG_CONTRACT_MODE`.
+- :func:`resolve_internal_namespaces` takes the *actual* ``--policy-file``
+  YAML's ``internal_namespaces`` list (``policy_file.py``'s ``PolicyFile``,
+  the only front end that can set this field today -- there is no CLI flag
+  for it) and produces a real ``surface.internal_namespaces`` resolution.
+
+Neither function is called from any live command yet. ADR-049's own rollout
+plan puts wiring a resolved value into an authoritative code path behind a
+later phase (Phase 3's shadow contract evaluator validates resolution
+against real traffic before it can affect a gate decision, and the default
+flip is Phase 7) -- see
+``docs/contribute/plans/public-contract-default.md``. Landing each wiring
+function itself, fully tested against its real input's semantics, is what
+Phase 1's gate asks for: "every front end resolves equivalent semantic
 input to an equal ``CompatibilityEvaluationConfig`` and provenance receipt."
 """
 
 from __future__ import annotations
 
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from .compatibility_evaluation_config import SelectedByEntry, ValueProvenance
 from .compatibility_evaluation_resolver import FieldCandidate, resolve_field
@@ -48,6 +55,9 @@ from .contract_relevance_types import (
     LegacyScopeFlag,
     SelectorLayer,
 )
+
+if TYPE_CHECKING:
+    from .policy_file import PolicyFile
 
 _CONTRACT_MODE_FIELD = "contract.mode"
 
@@ -120,3 +130,89 @@ def resolve_legacy_contract_mode(
 
     value, provenance = resolve_field(_CONTRACT_MODE_FIELD, candidates, default=default)
     return cast(ContractMode, value), provenance
+
+
+_INTERNAL_NAMESPACES_FIELD = "surface.internal_namespaces"
+
+#: What ``surface.internal_namespaces`` resolves to when no ``--policy-file``
+#: set it -- equal to ``SurfaceConfig.internal_namespaces``'s own default
+#: (empty tuple), so accepting ADR-049 does not, by itself, change today's
+#: real default behavior (each consuming step falls back to its own
+#: ``DEFAULT_INTERNAL_NAMESPACES``, exactly as it does today with no policy
+#: file at all).
+_BUILT_IN_DEFAULT_INTERNAL_NAMESPACES: tuple[str, ...] = ()
+
+
+def resolve_internal_namespaces(
+    *, policy_file: PolicyFile | None
+) -> tuple[tuple[str, ...], ValueProvenance]:
+    """Resolve ``surface.internal_namespaces`` from a real ``--policy-file``.
+
+    ``internal_namespaces`` has no CLI flag of its own -- ``policy_file.py``'s
+    ``PolicyFile.internal_namespaces`` (populated only when a real
+    ``--policy-file`` YAML sets the key) is the only front end that can set
+    it today. ``policy_file is None`` (no ``--policy-file`` given at all) or
+    an empty ``internal_namespaces`` list (indistinguishable, once parsed,
+    from the key never being set) both contribute no candidate at all and
+    fall through to :data:`_BUILT_IN_DEFAULT_INTERNAL_NAMESPACES`, the same
+    "a selector layer only participates when it actually selected something"
+    principle :func:`resolve_legacy_contract_mode`'s untouched-flag case
+    already applies (ADR-049 D7).
+
+    Tagged :data:`~abicheck.contract_relevance_types.SelectorLayer.EXPLICIT_CLI`,
+    not ``PROJECT_CONFIG`` -- ``--policy-file`` is a flag the user explicitly
+    passed on *this* invocation, the same selection mechanism
+    ``resolve_legacy_contract_mode``'s explicit flag case models, not an
+    implicitly-discovered project file a future ``.abicheck.yml``-reading
+    front end would contribute at ``PROJECT_CONFIG`` tier. Tagging it
+    ``PROJECT_CONFIG`` previously meant a lower-precedence-by-mechanism
+    candidate (``RUN_RECIPE``/``RUN_PROFILE``) could silently outrank an
+    explicitly user-selected manifest, and the provenance receipt itself
+    misrepresented how the value was actually chosen (Codex review, fresh
+    evidence).
+
+    Sorts and dedupes the list before building the candidate, mirroring
+    ``SurfaceConfig.__post_init__``'s own canonicalization and
+    ``compatibility_evaluation_packs.py``'s
+    ``_canonicalize_order_insensitive_field`` (both already treat
+    ``surface.internal_namespaces`` as an order-insensitive set, not an
+    ordered sequence) -- two policy files listing the same namespaces in a
+    different order must resolve to the same value, per D7's "equivalent
+    semantic inputs must resolve to an equivalent object".
+
+    Returns the resolved ``tuple[str, ...]`` and its
+    :class:`~abicheck.compatibility_evaluation_config.ValueProvenance`. This
+    performs no I/O -- *policy_file*, if given, must already be loaded by the
+    caller (e.g. via ``PolicyFile.load``).
+    """
+    default = FieldCandidate(
+        provenance=ValueProvenance(layer=SelectorLayer.BUILT_IN_DEFAULT),
+        value=_BUILT_IN_DEFAULT_INTERNAL_NAMESPACES,
+    )
+
+    candidates: list[FieldCandidate] = []
+    if policy_file is not None and policy_file.internal_namespaces:
+        canonical = tuple(dict.fromkeys(sorted(policy_file.internal_namespaces)))
+        source_path = str(policy_file.source_path) if policy_file.source_path else None
+        candidates.append(
+            FieldCandidate(
+                provenance=ValueProvenance(
+                    layer=SelectorLayer.EXPLICIT_CLI,
+                    source_kind="policy_file",
+                    path=source_path,
+                    selected_by=(
+                        SelectedByEntry(
+                            layer=SelectorLayer.EXPLICIT_CLI,
+                            option="--policy-file",
+                            path=source_path,
+                        ),
+                    ),
+                ),
+                value=canonical,
+            )
+        )
+
+    value, provenance = resolve_field(
+        _INTERNAL_NAMESPACES_FIELD, candidates, default=default
+    )
+    return cast("tuple[str, ...]", value), provenance

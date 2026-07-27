@@ -44,13 +44,22 @@ underlying principle -- and deliberately does not import
 ``buildsource.entity_identity`` (the optional L3-L5 layer must depend on
 this core package, never the other way around).
 
-**Not yet wired into any live comparison path.** ``diff_symbols.py``'s
-old/new function and variable matching and ``diff_filtering.py``'s
-``_deduplicate_cross_detector`` cross-detector dedup key are unchanged by
-this module -- see ``docs/contribute/plans/public-contract-default.md``'s
-Phase 2 section for the remaining wiring and fact-conservation-gate work.
-This module is additive only: existing detection behavior is unchanged
-until a follow-up change opts a call site in.
+**Partially wired.** ``diff_filtering.py``'s ``_deduplicate_cross_detector``
+now uses :func:`resolve_change_identity` as its cross-detector dedup key
+(ADR-049 Phase 2 wiring), replacing the hand-rolled ``(change_category,
+symbol)`` tuple it used before -- verified behavior-equivalent for every
+kind that dedup stage collapses (see
+``tests/test_diff_filtering_cross_detector_identity.py`` and the
+pipeline-level ``tests/test_fact_conservation_properties.py``). Still
+**not** wired: ``diff_symbols.py``'s own old/new function and variable
+*matching* (``_diff_functions``/``_match_old_function``/``_diff_variables``)
+is unchanged by this module -- that is a substantially larger, higher-risk
+refactor against extensive hand-tuned matching logic (elf-only-mode,
+unconfirmed-parameter, and LLP64 threading; extern-C ambiguity resolution;
+interaction with virtual-method-addition, inline-transition, and
+hidden-friend detection) and its golden/FP-rate/tier-accuracy test coverage
+-- see ``docs/contribute/plans/public-contract-default.md``'s Phase 2
+section for that remaining, deliberately deferred work.
 
 NEVER invents a fact a producer did not supply: a tier is only claimed
 when the corresponding input field is actually present.
@@ -902,13 +911,14 @@ def _is_batch_shaped_change(change: Change, kind_value: str) -> bool:
 
 
 #: Change kinds ``diff_filtering`` already treats as one logical event
-#: reported by two different detectors -- mirrored here (not imported, so
-#: this leaf module stays independent of the diff layer; future wiring work
-#: has ``diff_filtering`` depend on this module, not the reverse). Keep in
-#: sync with the two mappings this generalizes:
+#: reported by two different detectors -- mirrored here (this leaf module
+#: still doesn't import ``diff_filtering``, so the dependency direction stays
+#: one-way: ``diff_filtering`` depends on this module for its
+#: ``_deduplicate_cross_detector`` dedup key, ADR-049 Phase 2 wiring, not the
+#: reverse). Keep in sync with the two mappings this generalizes:
 #: ``_deduplicate_cross_detector``'s local ``_DEDUP_CATEGORIES``
-#: (rich-vs-L0 function/variable add/remove, symbol-version-node pairs) and
-#: module-level ``_DWARF_TO_AST_EQUIV``'s two *whole-type* pairs
+#: (rich-vs-L0 function/variable add/remove, symbol-version-node pairs --
+#: wired) and module-level ``_DWARF_TO_AST_EQUIV``'s two *whole-type* pairs
 #: (``STRUCT_SIZE_CHANGED``/``TYPE_SIZE_CHANGED``,
 #: ``STRUCT_ALIGNMENT_CHANGED``/``TYPE_ALIGNMENT_CHANGED``) -- safe to
 #: collapse because ``symbol`` names the whole type on both sides, with no

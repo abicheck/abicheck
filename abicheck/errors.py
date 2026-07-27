@@ -225,6 +225,19 @@ class PolicyError(AbicheckError, ValueError):
     """
 
 
+class PackManifestError(AbicheckError, ValueError):
+    """Invalid ADR-049 D8 compatibility/contract/gate pack manifest.
+
+    A sibling of :class:`PolicyError`, not a subclass -- a pack manifest is a
+    distinct configuration artifact from a ``--policy-file`` document (ADR-049
+    D8: "Policy bases, rule packs, gate packs, contract/language packs ... are
+    distinct"), even though both are hard load-time errors for the same
+    reason (an unknown ``ChangeKind`` slug must never be silently skipped).
+    Inherits ValueError for the same backward-compatible catch-all reason
+    every other error in this module does.
+    """
+
+
 class ReportError(AbicheckError):
     """Error during report generation."""
 
