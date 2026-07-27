@@ -33,6 +33,7 @@ from .checker_policy import (
     Verdict,
     policy_kind_sets as _policy_kind_sets,
 )
+from .contract_relevance_types import ContractAssurance, ContractRelevance
 from .detectors import DetectorResult
 from .impact.model import ImpactAssessment
 from .model import AbiSnapshot
@@ -261,6 +262,23 @@ class Change:
     # yet been migrated — the flat fields above remain the sole source of
     # truth for those, exactly as before this field existed.
     impact_assessment: ImpactAssessment | None = None
+    # ADR-049 Phase 3 (shadow contract evaluator, opt-in `compare(...,
+    # contract_evaluation=True)`) — `contract_evaluation.
+    # evaluate_snapshot_pair_contract_relevance`'s per-finding decision,
+    # flattened into three fields (mirroring every other producer-attached
+    # enrichment above) rather than a single nested
+    # `ContractEvaluationDecision` object: `checker_types.py` cannot import
+    # that dataclass from `contract_evaluation.py` without a circular
+    # import (`contract_evaluation.py` itself imports `Change` from this
+    # module), but `ContractRelevance`/`ContractAssurance` live in the
+    # dependency-free leaf module `contract_relevance_types.py`, which this
+    # module can safely import. Purely additive and shadow -- never
+    # consulted by verdict computation, policy, or exit-code logic; `None`
+    # for every finding when the caller didn't opt in (the default), and
+    # for the still-unimplemented `ContractMode.EXPORTS`.
+    contract_relevance: ContractRelevance | None = None
+    contract_reason_code: str | None = None
+    contract_assurance: ContractAssurance | None = None
 
 
 @dataclass

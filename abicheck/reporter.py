@@ -1239,6 +1239,17 @@ def _change_to_dict(
     d["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
         d["impact_assessment"] = assessment.to_dict()
+    # ADR-049 Phase 3 (shadow contract evaluator, opt-in
+    # `compare(..., contract_evaluation=True)`) -- `None` (the default, and
+    # every existing caller that doesn't opt in) emits nothing, matching
+    # this function's own "don't pad every plain finding" convention above.
+    contract_relevance = getattr(c, "contract_relevance", None)
+    if contract_relevance is not None:
+        d["contract_relevance"] = contract_relevance.value
+        d["contract_reason_code"] = getattr(c, "contract_reason_code", None)
+        contract_assurance = getattr(c, "contract_assurance", None)
+        if contract_assurance is not None:
+            d["contract_assurance"] = contract_assurance.value
     return d
 
 

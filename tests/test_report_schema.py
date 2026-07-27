@@ -204,6 +204,66 @@ class TestReportValidatesAgainstSchema:
         for c in additions:
             assert c["reviewer_action"] in declared_enum
 
+    def test_contract_evaluation_report_validates(self):
+        # ADR-049 Phase 3 (schema 2.23): compare(..., contract_evaluation=True)
+        # stamps three new optional per-finding keys -- validate a real
+        # payload against the packaged schema (not just the docs mirror,
+        # same "don't just check no error" reasoning as the reviewer_action
+        # regression guard above) and pin the enum casing
+        # ContractRelevance/ContractAssurance actually serialize with.
+        old, new = _breaking_pair()
+        payload = json.loads(
+            reporter.to_json(compare(old, new, contract_evaluation=True))
+        )
+        self._validate(payload)
+        stamped = [c for c in payload["changes"] if "contract_relevance" in c]
+        assert stamped, "fixture must produce at least one shadow-evaluated finding"
+        for c in stamped:
+            assert c["contract_relevance"] in {
+                "IN_CONTRACT",
+                "UNKNOWN_UNRESOLVED",
+                "UNKNOWN_UNPROVEN",
+                "PROVEN_OUT_OF_CONTRACT",
+                "NOT_APPLICABLE",
+            }
+            assert isinstance(c["contract_reason_code"], str)
+            assert c["contract_assurance"] in {"complete", "partial", "unavailable"}
+
+    def test_contract_evaluation_omitted_by_default(self):
+        # The flag defaults to False -- an ordinary report carries none of
+        # the three keys, matching every existing caller's unchanged output.
+        old, new = _breaking_pair()
+        payload = json.loads(reporter.to_json(compare(old, new)))
+        self._validate(payload)
+        for c in payload["changes"]:
+            assert "contract_relevance" not in c
+            assert "contract_reason_code" not in c
+            assert "contract_assurance" not in c
+
+    def test_contract_evaluation_all_mode_report_validates(self):
+        # scope_to_public_surface=False means FilterNonPublicSurface never
+        # runs its header-scoping path, so PipelineContext.surf_old/surf_new
+        # stay None -- _apply_contract_evaluation_shadow must fall back to
+        # computing them independently rather than leave shadow evaluation
+        # unresolvable for this run shape. mode is contract=all (the
+        # --no-scope-public-headers alias), so every finding normalizes to
+        # IN_CONTRACT/all_mode_normalized_entity.
+        old, new = _breaking_pair()
+        payload = json.loads(
+            reporter.to_json(
+                compare(
+                    old, new, contract_evaluation=True, scope_to_public_surface=False
+                )
+            )
+        )
+        self._validate(payload)
+        stamped = [c for c in payload["changes"] if "contract_relevance" in c]
+        assert stamped, "fixture must produce at least one shadow-evaluated finding"
+        for c in stamped:
+            assert c["contract_relevance"] == "IN_CONTRACT"
+            assert c["contract_reason_code"] == "all_mode_normalized_entity"
+            assert c["contract_assurance"] == "complete"
+
 
 @_requires_jsonschema
 class TestNotComparableReportSchema:

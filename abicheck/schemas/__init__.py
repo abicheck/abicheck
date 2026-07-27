@@ -261,7 +261,21 @@ from typing import Any
 #:       ``possible_impact`` is additive (new optional key, existing fields
 #:       unchanged) and equals ``version_bump`` whenever ``state ==
 #:       "actionable"`` — a MINOR bump.
-REPORT_SCHEMA_VERSION = "2.22"
+#:   2.23: added three additive optional per-finding keys, present only when
+#:       the caller opts into ``compare(..., contract_evaluation=True)``
+#:       (ADR-049 Phase 3's still-non-authoritative shadow evaluator) --
+#:       ``contract_relevance`` (one of "IN_CONTRACT"/"UNKNOWN_UNRESOLVED"/
+#:       "UNKNOWN_UNPROVEN"/"PROVEN_OUT_OF_CONTRACT"/"NOT_APPLICABLE" --
+#:       matching ``ContractRelevance``'s own uppercase ``.value``, unlike
+#:       ``contract_assurance``'s lowercase one below),
+#:       ``contract_reason_code`` (a stable slug, e.g.
+#:       "public_root_membership"/"required_evidence_incomplete"/
+#:       "non_entity_finding"), and ``contract_assurance`` (one of
+#:       "complete"/"partial"/"unavailable"). Purely additive and
+#:       shadow: absent for every existing caller that doesn't pass
+#:       ``contract_evaluation=True`` (the default), and never affects
+#:       ``verdict``, ``severity``, or any exit code.
+REPORT_SCHEMA_VERSION = "2.23"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

@@ -533,6 +533,60 @@ def _compute_scope_confidence(
     )
 
 
+def _apply_contract_evaluation_shadow(
+    kept: list[Change],
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    scope_to_public_surface: bool,
+    force_public_symbols: set[str] | None,
+    pp_ctx: PipelineContext,
+) -> None:
+    """Attach ADR-049 Phase 3's shadow contract-relevance decision to every
+    *kept* finding, in place. Called only when ``contract_evaluation=True``.
+
+    Purely additive -- never consulted by verdict computation, policy, or
+    exit-code logic (see ``Change.contract_relevance``'s own docstring).
+    This is the "produce relevance/assurance/reasons in reports, but leave
+    the old gate authoritative" half of Phase 3's own gate (ADR-049 plan
+    Section 9); the shadow evaluator itself already existed
+    (``contract_evaluation.py``) but was never called from ``compare()``.
+    """
+    from .contract_evaluation import evaluate_snapshot_pair_contract_relevance
+    from .contract_relevance_types import ContractMode
+    from .surface import compute_public_surface
+
+    surf_old = pp_ctx.surf_old
+    surf_new = pp_ctx.surf_new
+    if surf_old is None or surf_new is None:
+        # FilterNonPublicSurface only populates pp_ctx.surf_old/surf_new on
+        # the header-scoping path (_run_scope) -- a POST-manifest-only run
+        # (public_surface_allowlist set) or scope_to_public_surface=False
+        # never computes them, so compute independently here (mirroring
+        # that step's own call) rather than leave shadow evaluation
+        # entirely unresolvable for those runs.
+        surf_old = compute_public_surface(old)
+        surf_new = compute_public_surface(new)
+
+    # ADR-049 plan Section 6.1/7: --no-scope-public-headers is the exact
+    # alias for contract=all (no root/closure evidence required at all);
+    # a header-scoping run corresponds to contract=public.
+    mode = ContractMode.PUBLIC if scope_to_public_surface else ContractMode.ALL
+
+    decisions = evaluate_snapshot_pair_contract_relevance(
+        kept,
+        surf_old,
+        surf_new,
+        mode=mode,
+        force_public_symbols=(
+            frozenset(force_public_symbols) if force_public_symbols else None
+        ),
+    )
+    for change, decision in zip(kept, decisions):
+        change.contract_relevance = decision.relevance
+        change.contract_reason_code = decision.reason_code
+        change.contract_assurance = decision.assurance
+
+
 def _old_public_symbol_count(old: AbiSnapshot) -> int | None:
     """Return the count of public-visibility symbols in *old*, or None if zero."""
     count = sum(1 for f in old.functions if f.visibility in _PUBLIC_VIS) + sum(
@@ -558,6 +612,7 @@ def compare(
     reconcile_build_context: bool = False,
     env_matrix: EnvironmentMatrix | None = None,
     diagnostic_comparison: bool = False,
+    contract_evaluation: bool = False,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -587,6 +642,17 @@ def compare(
             ordinary diff whose ``DiffResult.assurance`` is stamped
             ``"none"``, so the caller can still see *a* result but knows not
             to trust it the way an ordinary comparable diff is trusted.
+        contract_evaluation: ADR-049 Phase 3 (shadow contract evaluator,
+            ``contract_evaluation.py``). When True, stamps every retained
+            finding's ``Change.contract_relevance``/``contract_reason_code``/
+            ``contract_assurance`` from
+            :func:`~abicheck.contract_evaluation.evaluate_snapshot_pair_contract_relevance`
+            -- ``contract=public`` when *scope_to_public_surface* is True,
+            ``contract=all`` otherwise (the exact `--no-scope-public-headers`
+            alias, per the ADR-049 plan). Purely additive and non-authoritative:
+            it changes no verdict, exit code, or existing report field, and
+            defaults to off so every existing caller behaves exactly as
+            before.
 
     Raises:
         ProfileMismatchError: *old* and *new* were extracted under
@@ -912,6 +978,16 @@ def compare(
             policy_file,
             evidence_tier,
             verdict,
+        )
+
+    # ADR-049 Phase 3: shadow contract-relevance evaluation (opt-in). Runs
+    # last, over the final `kept` list, so every finding added by any
+    # earlier opt-in step above (surface metrics, pattern verdicts, the
+    # declared-floor/wheel checks) also gets a shadow decision, not just the
+    # post-processing-stage subset. Never affects `verdict` or any exit code.
+    if contract_evaluation:
+        _apply_contract_evaluation_shadow(
+            kept, old, new, scope_to_public_surface, force_public_symbols, pp_ctx
         )
 
     return DiffResult(
