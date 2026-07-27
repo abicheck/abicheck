@@ -136,14 +136,17 @@ snapshot of it. **Progress:** done, including the correction.
 ### Phase 1 — schema-version registry (ADR-055 D3)
 
 Add `abicheck.schemas.current(name)` (or an equivalent lookup), backed by
-the *existing* constants: `serialization.SCHEMA_VERSION` (17),
-`abicheck.schemas.REPORT_SCHEMA_VERSION` ("2.22"),
-`abicheck.schemas.SCAN_SCHEMA_VERSION` ("1.3"),
-`aggregate.AGGREGATE_SCHEMA_VERSION` ("1.1"),
+the *existing* constants: `serialization.SCHEMA_VERSION`,
+`abicheck.schemas.REPORT_SCHEMA_VERSION`,
+`abicheck.schemas.SCAN_SCHEMA_VERSION`,
+`aggregate.AGGREGATE_SCHEMA_VERSION`,
 `buildsource.build_output.BUILD_OUTPUT_SCHEMA`,
 `buildsource.run_plan.RUN_PLAN_SCHEMA`. Read-only lookup facade — no new
 versioning scheme, no compatibility metadata, no change to any constant's
-current value or bump policy.
+current value or bump policy. (Deliberately not quoting each constant's
+current value here — this page would go stale exactly the same way the
+`docs/use/python-api.md` bug that motivated D3 did; call `schemas.current()`
+or read the owning module's docstring for the live value.)
 
 **Gate:** every persisted-artifact version number quoted in `docs/` is
 generated from this registry (or a page that itself reads from it), not a

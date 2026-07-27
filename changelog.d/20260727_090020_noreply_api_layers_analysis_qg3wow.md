@@ -282,6 +282,15 @@
   the paths already resolved for the initial preflight instead of
   re-resolving them — a new `_RedactedDomainError` carries the
   already-redacted message out to the (now much simpler) outer handler.
+- **`docs/contribute/plans/g33-typed-api-and-mcp-convergence.md` no longer
+  hand-copies four persisted-artifact version numbers right next to the
+  gate that says not to** — Phase 1's own text quoted `SCHEMA_VERSION`/
+  `REPORT_SCHEMA_VERSION`/`SCAN_SCHEMA_VERSION`/`AGGREGATE_SCHEMA_VERSION`'s
+  exact current values, which would go stale the same way the
+  `docs/use/python-api.md` bug that motivated D3 did (Codex review).
+- **`docs/contribute/adr/index.md`'s ADR-055 row no longer says "not
+  implemented"** — D3 (the schema registry) is implemented; the summary
+  row now matches ADR-055's own status line (Codex review).
 - **`docs/use/mcp-integration.md`/`docs/contribute/adr/021-mcp-security-model.md`
   no longer make inconsistent or stale claims about the timeout guarantee**
   — the integration guide claimed "only the failing tool invocation is
