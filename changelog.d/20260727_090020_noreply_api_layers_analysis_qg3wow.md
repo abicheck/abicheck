@@ -164,3 +164,30 @@
   leaks the full path** — it returned the caller-supplied `reports_dir`
   string verbatim instead of going through the same basename-only
   convention every other path-leak fix in this PR uses.
+- **`abi_aggregate` now counts `reports_dir`'s own path resolution and
+  type check against `--timeout`** — `_safe_read_path(reports_dir)`'s
+  symlink-following `.resolve()` call and the `exists()`/`is_dir()` check
+  ran before `_call_with_timeout` started; a stalled NFS/FUSE mount could
+  block on either with no chance of the advertised structured timeout,
+  even though report discovery and aggregation right after them were
+  already bounded. Both moved inside `_do_aggregate`.
+- **`abi_deps` now rejects a missing/typo'd `search_paths` entry with a
+  clear error instead of a falsely-unresolved dependency** — the CLI's
+  `deps tree --search-path` is declared `click.Path(exists=True)`, but the
+  MCP tool passed every entry straight to the resolver with no existence
+  check, silently reporting the dependency as unresolved instead of
+  flagging the bad input. The existence check runs inside the same timed
+  worker as the rest of `abi_deps`'s preflight, preserving each entry's
+  original relative/absolute form for sysroot rebasing.
+- **`mcp_shared._check_file_size`'s size-check `OSError` no longer leaks
+  the checked path** — a real OS-raised `OSError` (e.g. a permission
+  failure) carries the filename as a constructor argument, and `str(exc)`
+  embeds it; since `_sanitize_error` surfaces `ValueError` messages
+  verbatim, this bypassed the sanitized-error contract for every one of
+  `_check_file_size`'s eight-plus call sites across all MCP tools. Now uses
+  only `exc.strerror` (the human-readable message, no filename).
+- **`docs/reference/environment.md`'s MCP timeout/file-size entries no
+  longer contradict `docs/use/mcp-integration.md`** — they still named only
+  `abi_dump`/`abi_compare` and `mcp_server.py` as the owning module; now
+  they link to the authoritative "Runtime configuration" table instead of
+  restating a stale subset, and correctly point at `mcp_shared.py`.

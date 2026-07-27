@@ -275,7 +275,9 @@ class TestAbiDeps:
         binary.write_bytes(b"\x7fELF")
         sysroot_dir = tmp_path / "sysroot"
         sysroot_dir.mkdir()
+        (tmp_path / "lib").mkdir()
         absolute_search_path = tmp_path / "abs-lib"
+        absolute_search_path.mkdir()
 
         received: dict[str, object] = {}
 
@@ -295,6 +297,18 @@ class TestAbiDeps:
             Path("lib"),
             absolute_search_path.resolve(),
         ]
+
+    def test_missing_search_path_is_a_clear_error(self, tmp_path: Path):
+        # `deps tree`'s --search-path is declared click.Path(exists=True);
+        # without an equivalent check here, a typo'd/missing search
+        # directory silently produced a falsely-unresolved dependency
+        # instead of a clear error (Codex review).
+        binary = tmp_path / "app"
+        binary.write_bytes(b"\x7fELF")
+        raw = abi_deps(str(binary), search_paths=[str(tmp_path / "does-not-exist")])
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "does not exist" in payload["error"]
 
 
 class TestResolveSysrootPath:
@@ -556,6 +570,25 @@ class TestAbiAggregate:
         monkeypatch.setattr(
             "abicheck.mcp_server_project._check_dir_json_file_sizes", _slow
         )
+        raw = abi_aggregate(str(tmp_path), discovered_only=True)
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
+
+    def test_timeout_includes_reports_dir_resolution(self, tmp_path: Path, monkeypatch):
+        # ADR-021b D2: _safe_read_path(reports_dir)'s symlink-following
+        # .resolve() call and the subsequent exists()/is_dir() type check
+        # must count against --timeout too, not just report discovery/
+        # aggregation (Codex review). No manifest/run_plan is passed, so
+        # this is the only _safe_read_path call abi_aggregate makes here.
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(1.0)
+            raise AssertionError("should have timed out first")
+
+        monkeypatch.setattr("abicheck.mcp_server_project._safe_read_path", _slow)
         raw = abi_aggregate(str(tmp_path), discovered_only=True)
         payload = json.loads(raw)
         assert payload["status"] == "error"

@@ -205,18 +205,6 @@ def abi_deps(
             else raw_bin_path
         )
         bin_path = raw_bin_path
-        # Same relative/absolute preservation as binary_path above -- and the
-        # same host-symlink preservation for the absolute case: resolver.
-        # _build_search_order joins a search_path directly onto sysroot
-        # (`<sysroot>/lib`), so an absolute entry must reach it un-resolved,
-        # exactly like binary_path above (Codex review). _safe_read_path is
-        # still called on an absolute entry for its validation side effect;
-        # its resolved return value is intentionally discarded.
-        sp_paths = []
-        for p in search_paths or []:
-            if Path(p).is_absolute():
-                _safe_read_path(p, label="search_path")
-            sp_paths.append(Path(p))
 
         def _do_deps() -> StackCheckResult:
             # The existence/format/size preflight reads effective_path (a
@@ -231,6 +219,27 @@ def abi_deps(
                     f"abi_deps requires an ELF binary; got {fmt or 'unknown format'}"
                 )
             _check_file_size(effective_path, label="binary_path")
+            # Same relative/absolute preservation as binary_path above -- and
+            # the same host-symlink preservation for the absolute case:
+            # resolver._build_search_order joins a search_path directly onto
+            # sysroot (`<sysroot>/lib`), so an absolute entry must reach it
+            # un-resolved, exactly like binary_path above (Codex review).
+            # _safe_read_path is still called on an absolute entry for its
+            # validation side effect; its resolved return value is
+            # intentionally discarded. Existence is validated the same way
+            # `deps tree`'s `click.Path(exists=True)` --search-path option
+            # does, so a typo'd/missing search directory is a clear error
+            # instead of a falsely-unresolved dependency (Codex review).
+            sp_paths = []
+            for p in search_paths or []:
+                p_path = Path(p)
+                if p_path.is_absolute():
+                    _safe_read_path(p, label="search_path")
+                if not p_path.exists():
+                    raise _ToolPreflightError(
+                        f"search_path does not exist: {p_path.name}"
+                    )
+                sp_paths.append(p_path)
             return check_single_env(
                 resolve_target,
                 search_paths=sp_paths or None,
@@ -313,19 +322,6 @@ def abi_aggregate(
         )
         from .cli_aggregate import _resolve_expected
 
-        reports_path = _safe_read_path(reports_dir, label="reports_dir")
-        # A *missing* reports_dir is deliberately not an error here --
-        # aggregate.collect_reports treats it as zero reports so a full
-        # build-matrix outage still produces a structured required-coverage
-        # failure (exit code 1) instead of a generic tool error; only reject
-        # a path that exists but isn't a directory (Codex review).
-        if reports_path.exists() and not reports_path.is_dir():
-            return json.dumps(
-                {
-                    "status": "error",
-                    "error": f"reports_dir is not a directory: {reports_path.name}",
-                }
-            )
         manifest_path = (
             _safe_read_path(manifest, label="manifest") if manifest else None
         )
@@ -334,13 +330,24 @@ def abi_aggregate(
         )
 
         def _do_aggregate() -> AggregateResult:
-            # Report-directory discovery (an unbounded glob+stat over every
-            # *.json entry), the manifest/run-plan size probes, and
-            # expected-set parsing all run inside the same bounded worker as
-            # aggregate_reports_dir (ADR-021b D2): a large reports_dir, a
-            # stalled filesystem's single stat() call, or a slow manifest/
-            # run-plan read must all count against --timeout too, not just
-            # the aggregate call that follows them (Codex review).
+            # reports_dir path resolution (a symlink-following .resolve()
+            # call), the exists()/is_dir() type check, report-directory
+            # discovery (an unbounded glob+stat over every *.json entry),
+            # the manifest/run-plan size probes, and expected-set parsing
+            # all run inside the same bounded worker as aggregate_reports_dir
+            # (ADR-021b D2): a stalled NFS/FUSE mount blocking any one of
+            # these filesystem calls must count against --timeout too, not
+            # just the aggregate call that follows them (Codex review).
+            reports_path = _safe_read_path(reports_dir, label="reports_dir")
+            # A *missing* reports_dir is deliberately not an error here --
+            # aggregate.collect_reports treats it as zero reports so a full
+            # build-matrix outage still produces a structured required-coverage
+            # failure (exit code 1) instead of a generic tool error; only reject
+            # a path that exists but isn't a directory (Codex review).
+            if reports_path.exists() and not reports_path.is_dir():
+                raise _ToolPreflightError(
+                    f"reports_dir is not a directory: {reports_path.name}"
+                )
             _check_dir_json_file_sizes(reports_path, label="report")
             if manifest_path is not None:
                 _check_file_size(manifest_path, label="manifest")
@@ -366,7 +373,10 @@ def abi_aggregate(
         except _futures.TimeoutError:
             elapsed = _time.monotonic() - t0
             _audit_log(
-                "abi_aggregate", {"reports_dir": reports_path.name}, elapsed, "timeout"
+                "abi_aggregate",
+                {"reports_dir": Path(reports_dir).name},
+                elapsed,
+                "timeout",
             )
             return json.dumps(
                 {
@@ -374,8 +384,18 @@ def abi_aggregate(
                     "error": f"abi_aggregate timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
             )
+        except _ToolPreflightError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
         except (click.UsageError, AggregateError, ValueError) as exc:
-            redact_args = [reports_path]
+            redact_args: list[str | Path] = [Path(reports_dir)]
+            # aggregate_reports_dir/_resolve_expected embed the *resolved*
+            # reports_dir in some error text, not the raw caller-supplied
+            # string -- redact both forms. Best-effort: an error here just
+            # means one fewer path substituted, not a failure to respond.
+            try:
+                redact_args.append(_safe_read_path(reports_dir, label="reports_dir"))
+            except ValueError:
+                pass
             if manifest_path is not None:
                 redact_args.append(manifest_path)
             if run_plan_path is not None:
@@ -385,7 +405,9 @@ def abi_aggregate(
             )
 
         elapsed = _time.monotonic() - t0
-        _audit_log("abi_aggregate", {"reports_dir": reports_path.name}, elapsed, "ok")
+        _audit_log(
+            "abi_aggregate", {"reports_dir": Path(reports_dir).name}, elapsed, "ok"
+        )
         return json.dumps(
             {
                 "status": "ok",

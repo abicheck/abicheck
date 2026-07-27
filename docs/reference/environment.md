@@ -91,8 +91,8 @@ rule).
 
 | Variable | Values | Default | Effect | Module |
 |----------|--------|---------|--------|--------|
-| `ABICHECK_MCP_TIMEOUT` | integer (seconds) | `120` | Maximum seconds for a single MCP tool invocation (`abi_dump` / `abi_compare`). | `mcp_server.py` (`MCP_TIMEOUT`) |
-| `ABICHECK_MCP_MAX_FILE_SIZE` | integer (bytes) | `524288000` (500 MB) | Maximum accepted input file size for MCP tools. | `mcp_server.py` (`MCP_MAX_FILE_SIZE`) |
+| `ABICHECK_MCP_TIMEOUT` | integer (seconds) | `120` | Maximum seconds for a single MCP tool invocation. See [MCP integration](../use/mcp-integration.md#runtime-configuration) for the current list of bounded tools. | `mcp_shared.py` (`MCP_TIMEOUT`) |
+| `ABICHECK_MCP_MAX_FILE_SIZE` | integer (bytes) | `524288000` (500 MB) | Maximum accepted input file size for MCP tools. See [MCP integration](../use/mcp-integration.md#runtime-configuration) for the current list of covered inputs. | `mcp_shared.py` (`MCP_MAX_FILE_SIZE`) |
 
 See [MCP integration](../use/mcp-integration.md).
 

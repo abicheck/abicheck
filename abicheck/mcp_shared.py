@@ -118,7 +118,13 @@ def _check_file_size(path: Path, *, label: str = "input") -> None:
     except FileNotFoundError:
         return  # let downstream handle missing files
     except OSError as exc:
-        raise ValueError(f"Cannot check {label} file size: {exc}") from exc
+        # str(exc) on an OSError embeds the full filename (e.g. "[Errno 13]
+        # Permission denied: '/home/user/private/x.yml'") -- ValueError
+        # messages are surfaced verbatim by _sanitize_error below, so use
+        # only the strerror portion to avoid leaking the path (Codex review).
+        raise ValueError(
+            f"Cannot check {label} file size: {exc.strerror or exc}"
+        ) from exc
     if size > MCP_MAX_FILE_SIZE:
         raise ValueError(
             f"{label} is {size / (1024 * 1024):.1f} MB, "
