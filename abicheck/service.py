@@ -32,7 +32,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .api_types import CompareRequest, InputSpec
+from .api_types import CompareRequest, InputSpec, OutputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .clang_layout_tool import attach_clang_layout
@@ -1900,6 +1900,7 @@ __all__ = [
     "CostEstimate",
     "InputSpec",
     "LayerResult",
+    "OutputSpec",
     "ScanRequest",
     "ScanResult",
     "collect_metadata",

@@ -113,9 +113,11 @@ result = compare_snapshots(old, new, suppression, policy_file=policy_file)
 
 If you only have file paths and don't want to pre-load them, call `run_compare`
 (or `run_compare_request`) instead — it accepts `suppress=`/`policy_file_path=`
-as paths and does the loading for you. Snapshots are serialised as `.abi.json`
-(`schema_version` `8`); see [Output Formats](output-formats.md) for the on-disk
-contract and [Baseline Management](baseline-management.md) for the baseline workflow.
+as paths and does the loading for you. Snapshots are serialised as `.abi.json`;
+see [Snapshot Format](../reference/snapshot-format.md) for the on-disk contract
+and current `schema_version`, [Output Formats](output-formats.md) for the
+comparison-report shape, and [Baseline Management](baseline-management.md) for
+the baseline workflow.
 
 ## Render results
 
