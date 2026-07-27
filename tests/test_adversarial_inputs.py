@@ -273,7 +273,13 @@ class TestMalformedPolicyFiles:
             PolicyFile.load(p)
 
     def test_unknown_change_kind_in_overrides(self, tmp_path: Path) -> None:
-        """Unknown change kind name in overrides -- should warn, not raise."""
+        """Unknown change kind name in overrides -- a hard load error.
+
+        ADR-049 D8: a renamed/misspelled ChangeKind slug must not silently
+        drop its override -- warning-and-skip was replaced with a raise.
+        """
+        from abicheck.errors import PolicyError
+
         content = (
             "base_policy: strict_abi\n"
             "overrides:\n"
@@ -281,9 +287,8 @@ class TestMalformedPolicyFiles:
         )
         p = tmp_path / "unknown_kind.yaml"
         p.write_text(content, encoding="utf-8")
-        # Unknown kinds are skipped with a warning, not raised
-        pf = PolicyFile.load(p)
-        assert len(pf.overrides) == 0
+        with pytest.raises(PolicyError, match="totally_made_up_kind"):
+            PolicyFile.load(p)
 
     def test_invalid_severity_in_overrides(self, tmp_path: Path) -> None:
         """Valid change kind but invalid severity -- should raise ValueError."""

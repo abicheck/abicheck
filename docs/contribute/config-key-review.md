@@ -287,11 +287,14 @@ guide.
 (default `strict_abi`), `overrides` (ChangeKind → `break|warn|risk|ignore`),
 `frozen_namespaces` (glob patterns that block downgrades). Clean, minimal, no
 redundancy. Unknown `base_policy` values are **rejected** with a `PolicyError`
-listing the valid names (`policy_file.py:150-154`); unknown `overrides` slugs are
-warned-and-skipped (`policy_file.py:177-182`, intentional typo tolerance). The
-silent `strict_abi` fallback that exists in the low-level `get_policy()` helper
-(`checker_policy.py:715`) is **not** reachable through `--policy-file`, because
-`PolicyFile.load()` validates the name first. No change needed here.
+listing the valid names (`policy_file.py:150-154`); unknown `overrides` slugs
+are also **rejected** with a `PolicyError` (ADR-049 D8, 2026-07-26 —
+previously warned-and-skipped as intentional typo tolerance, changed because a
+silently-dropped override for a renamed/misspelled kind can leave that kind on
+its base-policy verdict with no indication the override was ever dropped).
+The silent `strict_abi` fallback that exists in the low-level `get_policy()`
+helper (`checker_policy.py:715`) is **not** reachable through `--policy-file`,
+because `PolicyFile.load()` validates the name first. No change needed here.
 
 **Suppression file** (`--suppress`, `suppression.py`): selectors `symbol`,
 `symbol_pattern`, `type_pattern`, `member_name`, `change_kind`, `namespace`,

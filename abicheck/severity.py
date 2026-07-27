@@ -310,6 +310,28 @@ class SeverityConfig:
     quality_issues: SeverityLevel = SeverityLevel.WARNING
     addition: SeverityLevel = SeverityLevel.INFO
 
+    def __post_init__(self) -> None:
+        # The four annotations aren't runtime-enforced, so an untyped
+        # manifest/API adapter (e.g. compatibility_evaluation_config.py's
+        # GateConfig, which only validates the outer isinstance(...,
+        # SeverityConfig)) could otherwise construct
+        # SeverityConfig(abi_breaking="erorr") -- has_errors() would then
+        # treat an ABI-breaking finding as non-error (potentially making a
+        # release gate green on a real break), and describe() would crash
+        # on the raw string's missing .value (Codex review).
+        for field_name in (
+            "abi_breaking",
+            "potential_breaking",
+            "quality_issues",
+            "addition",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, SeverityLevel):
+                raise TypeError(
+                    f"SeverityConfig.{field_name} must be a SeverityLevel, "
+                    f"not {value!r}."
+                )
+
     def level_for(self, category: IssueCategory) -> SeverityLevel:
         """Return the configured severity level for *category*.
 

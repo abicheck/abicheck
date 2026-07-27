@@ -156,7 +156,12 @@ def test_policy_file_describe_no_overrides(tmp_path: Path) -> None:
     assert "overrides: (none)" in text
 
 
-def test_policy_file_unknown_kind_logs_warning(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_policy_file_unknown_kind_raises(tmp_path: Path) -> None:
+    # ADR-049 D8: an unknown ChangeKind slug is a hard load error, not a
+    # warning-and-skip -- a renamed/misspelled kind must not silently drop
+    # its override.
+    from abicheck.errors import PolicyError
+
     p = tmp_path / "unknown_kind.yaml"
     p.write_text(
         """
@@ -166,11 +171,27 @@ overrides:
         encoding="utf-8",
     )
 
-    with caplog.at_level("WARNING"):
-        pf = PolicyFile.load(p)
+    with pytest.raises(PolicyError, match="not_a_real_kind"):
+        PolicyFile.load(p)
 
-    assert pf.overrides == {}
-    assert "unknown ChangeKind slugs" in caplog.text
+
+def test_policy_file_multiple_unknown_kinds_all_reported(tmp_path: Path) -> None:
+    from abicheck.errors import PolicyError
+
+    p = tmp_path / "unknown_kinds.yaml"
+    p.write_text(
+        """
+overrides:
+  not_a_real_kind: ignore
+  also_not_real: warn
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PolicyError) as exc_info:
+        PolicyFile.load(p)
+    assert "not_a_real_kind" in str(exc_info.value)
+    assert "also_not_real" in str(exc_info.value)
 
 
 def test_policy_file_risk_severity_produces_compatible_with_risk(tmp_path: Path) -> None:

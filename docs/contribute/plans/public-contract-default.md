@@ -1,6 +1,7 @@
 # Public-contract default: implementation and rollout plan
 
-**Status:** Proposed — specification only; no implementation in this PR
+**Status:** ADR-049 accepted (2026-07-26); implementation in progress — see
+"Work breakdown" below for current per-phase status
 **Normative decision:** [ADR-049](../adr/049-contract-relevance-and-compatibility-configuration.md)
 **Related:** ADR-010, ADR-013, ADR-015, ADR-024, ADR-028/033, ADR-037/040/043, ADR-042, ADR-048, PR #494 / case97
 **Scope:** `compare`, the comparison portion of `scan --against`, service/API
@@ -307,8 +308,10 @@ explicit per-kind override > selected packs > base policy
 
 Conflicting packs are a usage error until an explicit final override resolves
 the field. File order never resolves conflicts. Unknown `ChangeKind` slugs in
-custom policy are hard errors; replace the current warning-and-skip behavior in
-the implementation phase so a renamed kind cannot silently disable policy.
+custom policy are hard errors, so a renamed kind cannot silently disable
+policy — implemented (2026-07-26, ADR-049 D8) in `policy_file.py`'s
+`_parse_overrides` and `CompatibilityPolicyConfig.overrides`, replacing the
+prior warning-and-skip behavior.
 
 ## 4. Evidence model and completeness
 
@@ -763,6 +766,13 @@ or aggregate required-target coverage.
 **Gate:** docs and schemas have no `exports == all`, `PRIVATE`, hidden
 `public_contract` preset, or policy/contract conflation.
 
+**Progress:** ADR-049 accepted (2026-07-26, decision maker: napetrov).
+Vocabulary/reason-code/schema-version types reserved
+(`abicheck/contract_relevance_types.py`); nothing wired into detection,
+policy, the CLI, or reports yet — the remaining Phase 0 items are pure
+documentation/schema artifacts that ride along with Phase 1's wiring work
+rather than being separately actionable.
+
 ### Phase 1 — effective resolver
 
 Likely surfaces:
@@ -779,6 +789,29 @@ and hard errors for unknown `ChangeKind` slugs.
 **Gate:** every front end resolves equivalent semantic input to an equal
 `CompatibilityEvaluationConfig` and provenance receipt.
 
+**Progress:** the typed `CompatibilityEvaluationConfig` shape (slice 1,
+`abicheck/compatibility_evaluation_config.py`), the field-level precedence
+resolver (slice 2, `abicheck/compatibility_evaluation_resolver.py`
+`resolve_field`, implementing this phase's conflicts/aliases rules), pack
+conflict detection (`detect_pack_conflicts`, generalized to any pack field,
+not only `ChangeKind` overrides), and the unknown-`ChangeKind`-slug hard
+error are done — enforced at both the YAML edge (`policy_file.py`'s
+`_parse_overrides` raises `PolicyError`) and the typed-config edge
+(`CompatibilityPolicyConfig.overrides` rejects an unknown slug regardless
+of which front end constructs it directly). The first real front-end
+wiring also landed:
+`abicheck/compatibility_evaluation_wiring.py`'s
+`resolve_legacy_contract_mode` resolves `contract.mode` from the real
+`--scope-public-headers`/`--no-scope-public-headers` CLI flag via
+`resolve_field` — not called from any live command yet (that's the Phase 3
+shadow evaluator's job). Still remaining: wiring any other field
+(`cli_options.py`'s other shared option families, `.abicheck.yml`
+schema/reference docs, service/API request models) to construct real
+`FieldCandidate`s, and loading actual pack *content* (a pack-manifest
+format `detect_pack_conflicts` can consume — today it only has the
+conflict-detection algorithm, no loader) — packs are otherwise unused
+beyond `CompatibilityEvaluationConfig`'s own `ImmutableIdentity` references.
+
 ### Phase 2 — canonical identity and fact conservation
 
 Build finding identity on ADR-048 principles: most specific available identity,
@@ -786,6 +819,24 @@ ambiguity-safe fallback, deterministic joins. Refactor L0 collection before any
 contract evaluator changes the gate.
 
 **Gate:** rich+L0 conservation and dedup properties; no detector fact loss.
+
+**Progress:** the tiered identity resolver (`abicheck/finding_identity.py`)
+is done — `resolve_function_identity`/`resolve_variable_identity`/
+`resolve_change_identity` generalize the mangled-primary + name-based
+extern-C fallback already hand-rolled in `diff_symbols._diff_functions`
+into one documented canonical/normalized/reduced-tier primitive, following
+the same principle ADR-045 established for flat type matching
+(`diff_helpers.TypeMap`) and ADR-048 for L5 source-graph nodes
+(`buildsource/entity_identity.py`). Deliberately not wired into any live
+comparison path yet — `diff_symbols.py`'s old/new function and variable
+matching and `diff_filtering.py`'s `_deduplicate_cross_detector` dedup key
+are unchanged. Still remaining: wiring a call site to actually consult it
+(a real refactor against the existing hand-tuned matching logic and its
+extensive golden/FP-rate/tier-accuracy test coverage, not a drive-by
+change), and the fact-conservation property test itself (a Hypothesis
+check that no old-side symbol silently vanishes without either a matched
+new-side counterpart or an emitted removal finding) — this module is only
+the identity primitive that gate will consume.
 
 ### Phase 3 — shadow contract evaluator
 
