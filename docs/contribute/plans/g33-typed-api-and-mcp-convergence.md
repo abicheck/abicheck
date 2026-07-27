@@ -170,9 +170,36 @@ today).
 has no explicit `--gcc-options` equivalent today"; "no lower-level
 'parse only, don't classify' mode") are no longer true.
 
-**Progress:** not started. Depends on `DumpManifest`/`CompileContext`
-per-side wiring — track against [G32](g32-comparability-contract-and-multi-tu-manifest.md)'s
-own phase status for that machinery, don't invent a second shape.
+**Progress:** not started; a real complication found while scoping it,
+not yet reflected in ADR-055 itself. `run_compare_request` (the function
+`CompareRequest` feeds) is **not** what the CLI `compare` command actually
+calls for its full depth/sources/build-info/multi-TU-manifest feature set
+— reading `cli_compare_helpers.py` and `cli_resolve.py` shows the CLI's
+own resolution goes through `cli_resolve._resolve_compare_snapshots`, a
+CLI-layer function with a much richer parameter set (per-side
+`CompileContext`/`dump_manifest`/debug-root/debuginfod overrides, explicit
+old/new format detection, dependency-graph following) that itself calls
+`service.resolve_input`/`compare_snapshots` directly — not
+`run_compare_request`. So today there are genuinely **two** independent
+resolution paths: the CLI's rich one (`_resolve_compare_snapshots`) and
+the typed one (`run_compare_request`, what `CompareRequest` feeds, and
+what a future `abi_compare` rewrite in Phase 4 would use). Adding fields to
+`CompareRequest`/`InputSpec` without addressing this split would give the
+typed request a way to *carry* depth/sources/build-info in, but would not
+by itself make `CompareRequest` capable of everything the CLI supports —
+`_resolve_compare_snapshots`'s extra logic (dependency-graph following,
+per-side backend override, debug-root/debuginfod per side) would still
+need to either move into `run_compare_request` or be reconciled with it.
+Before writing code, whoever picks this up should decide: (a) migrate the
+CLI `compare` command onto an extended `run_compare_request` (higher risk,
+touches the CLI's own heavily-tested resolution path), or (b) extend
+`run_compare_request` to match `_resolve_compare_snapshots`'s capability
+set in parallel, keeping both paths but eliminating the *capability* gap
+between them (lower risk, but the two-path duplication ADR-055 D1 set out
+to close would persist one level down). Depends on `DumpManifest`/
+`CompileContext` per-side wiring either way — track against
+[G32](g32-comparability-contract-and-multi-tu-manifest.md)'s own phase
+status for that machinery, don't invent a second shape.
 
 ### Phase 3 — `CompareResult` wrapper (ADR-055 D2)
 
