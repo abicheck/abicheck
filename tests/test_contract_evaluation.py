@@ -53,6 +53,7 @@ from abicheck.model import (
 )
 from abicheck.surface import (
     REASON_NO_PROVENANCE,
+    REASON_NOT_EXPORTED,
     REASON_OFF_PYTHON_SURFACE,
     REASON_PRIVATE_INTERNAL_UNREACHABLE,
     PublicSurface,
@@ -332,6 +333,50 @@ class TestPublicModeAlreadyExcludedByPipeline:
             symbol="Foo",
             description="",
             surface_exclusion_reason=REASON_NO_PROVENANCE,
+        )
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="required_evidence_incomplete",
+            assurance=ContractAssurance.PARTIAL,
+        )
+
+    def test_not_exported_pipeline_reason_with_unknown_symbol_stays_unresolved(
+        self,
+    ) -> None:
+        # A REASON_NOT_EXPORTED already recorded by the pipeline whose
+        # symbol isn't present in origin_by_key at all (e.g. surfaces
+        # passed here don't correspond to the ones the pipeline originally
+        # scoped against) must fall through to the weak default rather than
+        # crash or wrongly confirm.
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="totally_unknown_symbol",
+            description="",
+            surface_exclusion_reason=REASON_NOT_EXPORTED,
+        )
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="required_evidence_incomplete",
+            assurance=ContractAssurance.PARTIAL,
+        )
+
+    def test_not_exported_pipeline_reason_with_unknown_qualified_symbol_stays_unresolved(
+        self,
+    ) -> None:
+        # Same as above, but for a qualified symbol whose tail also isn't
+        # present in origin_by_key -- covers the qualified-tail lookup's
+        # own miss branch.
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::totally_unknown_symbol",
+            description="",
+            surface_exclusion_reason=REASON_NOT_EXPORTED,
         )
         decision = evaluate_change_contract_relevance(
             c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
@@ -1342,17 +1387,20 @@ class TestPublicModeWeakReason:
             assurance=ContractAssurance.PARTIAL,
         )
 
-    def test_public_header_but_hidden_visibility_is_unresolved_not_terminal(
-        self,
-    ) -> None:
-        # The concrete real-world shape the finding above names: a function
+    def test_public_header_but_hidden_visibility_is_in_contract(self) -> None:
+        # Regression (Codex review, fresh evidence): the concrete real-world
+        # shape the eleventh-round finding above names -- a function
         # genuinely declared in a public header (origin PUBLIC_HEADER) but
         # not ELF-exported (e.g. an inline, or explicit visibility-hidden
         # attribute) -- confirmed empirically that surface.py's own
         # _classify_symbol_level emits REASON_NOT_EXPORTED for exactly this
-        # shape (no private/system-header signal fires first). Treating it
-        # as terminal would have wrongly resolved a real public-header
-        # declaration to PROVEN_OUT_OF_CONTRACT.
+        # shape (no private/system-header signal fires first). A bare
+        # "weak, so stay unresolved" treatment under-claims this exact case:
+        # ADR-049 D2's `public` domain includes "declared-public providers"
+        # independent of export status, so a confidently PUBLIC_HEADER
+        # origin on the authoritative side is itself genuine "declared
+        # public" proof, not merely "we couldn't tell" -- this must resolve
+        # to IN_CONTRACT, not stay stuck at UNKNOWN_UNRESOLVED.
         snap = AbiSnapshot(
             library="l",
             version="1",
@@ -1368,8 +1416,58 @@ class TestPublicModeWeakReason:
         s = compute_public_surface(snap)
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="inline_api", description="")
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
-        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
-        assert decision.reason_code == "required_evidence_incomplete"
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_not_exported_with_unknown_origin_still_stays_unresolved(self) -> None:
+        # The genuinely-can't-tell case must not be upgraded: an origin
+        # that is merely UNKNOWN (not confidently PUBLIC_HEADER) on the
+        # authoritative side stays at the weak, unresolved default.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn("internal", vis=Visibility.ELF_ONLY, origin=ScopeOrigin.UNKNOWN),
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description=""
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="required_evidence_incomplete",
+            assurance=ContractAssurance.PARTIAL,
+        )
+
+    def test_not_exported_qualified_symbol_matches_via_tail(self) -> None:
+        # The bare/qualified-tail matching mirrors _classify_symbol_level's
+        # own two branches -- a qualified change.symbol must still resolve
+        # via the tail's own origin.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "inline_api",
+                    vis=Visibility.HIDDEN,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="ns::inline_api", description=""
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
 
 
 class TestPublicModeForcePublicOverlay:

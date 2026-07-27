@@ -283,6 +283,48 @@ def _plain_str(value: str) -> str:
     return str(value)
 
 
+def _canonicalize_tzinfo(
+    value: datetime.datetime, *, where: str
+) -> datetime.tzinfo | None:
+    """Reconstruct *value*'s ``tzinfo`` as a plain, immutable
+    ``datetime.timezone`` fixed to this exact instant's UTC offset, rather
+    than passing through the original ``tzinfo`` object unchanged.
+
+    A directly constructed :class:`LoadedPack` (this module's own
+    documented escape hatch) could otherwise carry an aware ``datetime``
+    whose ``tzinfo`` is a custom, mutable implementation (``utcoffset()``
+    reading mutable instance state) -- the reconstructed value would still
+    alias that same ``tzinfo`` object, so mutating it later changes the
+    stored assignment's effective equality/hash without changing
+    ``identity.sha256``, the same exact-replay violation the mutable-
+    subclass fix above closed for ordinary scalars (Codex review, fresh
+    evidence; confirmed empirically: two packs assigning equal-offset
+    aware datetimes through distinct mutable ``tzinfo`` instances agreed
+    initially, then ``detect_pack_conflicts`` flipped from no-conflict to
+    conflict purely from mutating one ``tzinfo`` afterward). ``datetime``
+    equality/comparison for aware values is defined by the represented UTC
+    instant, not by ``tzinfo`` identity or type, so collapsing to a fixed
+    ``datetime.timezone`` at this value's own ``utcoffset()`` preserves
+    the exact semantics of *this* stored instant while making it immutable
+    and independent of the original ``tzinfo`` instance -- the same
+    "snapshot this one value, not a live rule" treatment every other field
+    here already gets. A ``tzinfo`` present but returning a ``None``
+    offset (a malformed/incomplete implementation) is rejected rather than
+    silently treated as naive, consistent with this module's "reject
+    rather than silently produce an ambiguous value" rule elsewhere.
+    """
+    if value.tzinfo is None:
+        return None
+    offset = value.utcoffset()
+    if offset is None:
+        raise PackManifestError(
+            f"{where}: assignment value {value!r} has a tzinfo that does "
+            "not report a UTC offset -- aware datetimes must resolve to a "
+            "concrete offset"
+        )
+    return datetime.timezone(offset)
+
+
 def _canonicalize_scalar(value: Any, *, where: str) -> Hashable:
     """Reconstruct *value* as a plain instance of its exact allowed base
     type, discarding any subclass-added state.
@@ -351,7 +393,7 @@ def _canonicalize_scalar(value: Any, *, where: str) -> Hashable:
             value.minute,
             value.second,
             value.microsecond,
-            value.tzinfo,
+            _canonicalize_tzinfo(value, where=where),
             fold=value.fold,
         )
     if isinstance(value, datetime.date):

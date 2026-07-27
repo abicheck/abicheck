@@ -306,7 +306,29 @@ def _unresolved_decision(
     )
 
 
-def _decision_for_surface_reason(reason: str) -> ContractEvaluationDecision:
+def _symbol_authoritative_origin_is_public_header(
+    change: Change, surf_old: PublicSurface, surf_new: PublicSurface
+) -> bool:
+    """Whether *change*'s symbol is confidently ``PUBLIC_HEADER`` on the
+    authoritative side (ADR-049 D4), mirroring
+    ``surface._classify_symbol_level``'s own bare/qualified-tail matching
+    against ``origin_by_key`` -- the only two shapes that can ever reach
+    ``REASON_NOT_EXPORTED`` in the first place.
+    """
+    auth = _authoritative_surface(change, surf_old, surf_new)
+    sym = change.symbol or ""
+    if sym in auth.origin_by_key:
+        return auth.origin_by_key[sym] == ScopeOrigin.PUBLIC_HEADER
+    if sym and "::" in sym:
+        tail = sym.rsplit("::", 1)[1]
+        if tail in auth.origin_by_key:
+            return auth.origin_by_key[tail] == ScopeOrigin.PUBLIC_HEADER
+    return False
+
+
+def _decision_for_surface_reason(
+    reason: str, change: Change, surf_old: PublicSurface, surf_new: PublicSurface
+) -> ContractEvaluationDecision:
     """Map a surface-exclusion reason to its terminal/weak decision.
 
     Shared by the already-excluded-by-pipeline short-circuit and the fresh
@@ -314,11 +336,35 @@ def _decision_for_surface_reason(reason: str) -> ContractEvaluationDecision:
     :func:`evaluate_change_contract_relevance`, so the two paths cannot
     silently diverge if one branch's mapping changes without the other
     (CodeRabbit review).
+
+    ``REASON_NOT_EXPORTED`` is weak, not terminal (see
+    ``_WEAK_SURFACE_REASONS``'s own comment: ADR-049 D2's ``public`` domain
+    includes "declared-public providers" independent of ELF-export status)
+    -- but a bare "weak, so stay unresolved" treatment under-claims exactly
+    the case D2 names: a declaration whose authoritative-side origin *is*
+    confidently ``PUBLIC_HEADER`` (an inline function, or one with explicit
+    hidden visibility, still declared in a public header) is genuinely
+    "declared public" by ADR-049's own definition, not merely "we couldn't
+    tell." Checking the authoritative side's origin directly resolves that
+    case to `IN_CONTRACT` instead of leaving a definitively public-header
+    declaration stuck at `UNKNOWN_UNRESOLVED` (Codex review, fresh
+    evidence). A `REASON_NOT_EXPORTED` symbol whose authoritative origin is
+    *not* confidently `PUBLIC_HEADER` (merely `UNKNOWN`, the "we genuinely
+    can't tell" case `_origin_reason` also routes here) still degrades to
+    the weak, unresolved default.
     """
     if reason in _TERMINAL_SURFACE_REASONS:
         return ContractEvaluationDecision(
             relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
             reason_code="terminal_authoritative_exclusion",
+            assurance=ContractAssurance.COMPLETE,
+        )
+    if reason == REASON_NOT_EXPORTED and _symbol_authoritative_origin_is_public_header(
+        change, surf_old, surf_new
+    ):
+        return ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
             assurance=ContractAssurance.COMPLETE,
         )
     return _unresolved_decision(
@@ -654,7 +700,9 @@ def evaluate_change_contract_relevance(
     # the specialized internal-leak check already proved no leak path
     # exists, which would wrongly reclassify it IN_CONTRACT (Codex review).
     if change.surface_exclusion_reason in _ALL_SURFACE_REASONS:
-        return _decision_for_surface_reason(change.surface_exclusion_reason)
+        return _decision_for_surface_reason(
+            change.surface_exclusion_reason, change, surf_old, surf_new
+        )
 
     # A `python_*` finding lives on a distinct evidence axis (the Python
     # API/stub surface) the C/C++ header-surface universes below don't cover
@@ -765,7 +813,7 @@ def evaluate_change_contract_relevance(
     # still be unresolvable and fall through to here, in which case
     # `classify_change_surface`'s own gate keeps it at `in_surface=True`).
     assert reason in _ALL_SURFACE_REASONS, f"unrecognized surface reason: {reason!r}"
-    return _decision_for_surface_reason(reason)
+    return _decision_for_surface_reason(reason, change, surf_old, surf_new)
 
 
 def evaluate_snapshot_pair_contract_relevance(

@@ -364,6 +364,71 @@ class TestLoadPackManifestHappyPath:
         )
         assert pack.assignments["field"].fold == 1
 
+    def test_directly_constructed_pack_snapshots_a_mutable_tzinfo(self) -> None:
+        # Codex review, fresh evidence: an aware datetime's tzinfo object is
+        # passed straight through unchanged by the naive reconstruction --
+        # a custom, mutable tzinfo whose utcoffset() reads mutable state
+        # therefore stays aliased into pack.assignments, so mutating it
+        # after construction changes the stored value's effective equality
+        # without changing identity.sha256 (confirmed empirically: two
+        # packs assigning equal-offset aware datetimes through distinct
+        # mutable tzinfo instances agreed initially, then detect_pack_conflicts
+        # flipped to a conflict purely from mutating one tzinfo afterward).
+        import datetime
+
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        class MutableTZ(datetime.tzinfo):
+            def __init__(self, offset_minutes: int = 0) -> None:
+                self.offset_minutes = offset_minutes
+
+            def utcoffset(self, dt: object) -> datetime.timedelta:
+                return datetime.timedelta(minutes=self.offset_minutes)
+
+            def dst(self, dt: object) -> datetime.timedelta:
+                return datetime.timedelta(0)
+
+            def tzname(self, dt: object) -> str:
+                return "MUT"
+
+        tz = MutableTZ(0)
+        value = datetime.datetime(2026, 1, 1, tzinfo=tz)
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.CONTRACT,
+            assignments={"field": value},
+        )
+        stored = pack.assignments["field"]
+        assert stored.tzinfo is not tz
+        assert type(stored.tzinfo) is datetime.timezone
+        assert stored == value
+
+        tz.offset_minutes = 60
+        assert stored == datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+
+    def test_directly_constructed_pack_rejects_a_tzinfo_with_no_offset(self) -> None:
+        import datetime
+
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        class NoOffsetTZ(datetime.tzinfo):
+            def utcoffset(self, dt: object) -> None:
+                return None
+
+            def dst(self, dt: object) -> None:
+                return None
+
+            def tzname(self, dt: object) -> str:
+                return "NONE"
+
+        value = datetime.datetime(2026, 1, 1, tzinfo=NoOffsetTZ())
+        with pytest.raises(PackManifestError, match="does not report a UTC offset"):
+            LoadedPack(
+                identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+                kind=PackKind.CONTRACT,
+                assignments={"field": value},
+            )
+
     def test_directly_constructed_policy_pack_flattens_a_changekind_slug_key(
         self,
     ) -> None:
