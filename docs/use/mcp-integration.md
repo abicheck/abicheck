@@ -648,6 +648,10 @@ The server uses **stdio** transport — the agent spawns `abicheck-mcp` as a loc
 │     abi_audit                    │
 │     abi_estimate                 │
 │     abi_scan                     │
+│     abi_deps                     │
+│     abi_aggregate                │
+│     abi_project_validate         │
+│     abi_project_plan             │
 └──────────┬───────────────────────┘
            │ Python imports
            ▼
@@ -684,10 +688,15 @@ In addition to the write-path policy above, every tool call is bounded
 to keep one bad input from disabling the server:
 
 - **File-size cap**: input artifacts larger than `--max-file-size` (default
-  500 MB) are rejected before any parsing begins — this covers
-  `library_path` (`abi_dump`/`abi_audit`), `old_input`/`new_input`
-  (`abi_compare`), and `binary_path`/`compile_db`/`against` (`abi_scan`).
-- **Per-call timeout**: `abi_dump`, `abi_compare`, and `abi_audit` run in a
+  500 MB) are rejected before any parsing begins. See the
+  ["Runtime configuration"](#runtime-configuration) table above for the full,
+  current list of covered inputs across all eight bounded tools — don't
+  restate the list here, it drifts out of sync with that single source of
+  truth otherwise (as it previously did, when this section still named only
+  the original four tools after `abi_deps`/`abi_aggregate`/
+  `abi_project_validate`/`abi_project_plan` were added).
+- **Per-call timeout**: `abi_dump`, `abi_compare`, `abi_audit`, `abi_deps`,
+  `abi_aggregate`, `abi_project_validate`, and `abi_project_plan` run in a
   worker thread bounded by `--timeout` (default 120 s); `abi_scan` runs in a
   killable child process bounded by the same timeout (so a hung deep scan is
   terminated, not orphaned). On timeout the tool returns a structured error

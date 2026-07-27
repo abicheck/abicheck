@@ -93,6 +93,24 @@ def _check_dir_json_file_sizes(directory: Path, *, label: str = "input") -> None
         _check_file_size(entry, label=f"{label} ({entry.name})")
 
 
+def _redact_paths(message: str, *paths: str | Path) -> str:
+    """Replace any occurrence of a known local path with its basename.
+
+    ``click.UsageError``s raised by the shared CLI parsing helpers this
+    module reuses (``_load_project_targets_config``, ``_parse_build_output_
+    specs``, ``_resolve_expected``) embed the full path for a human terminal
+    reader; an MCP response must not leak local filesystem structure the
+    same way ``_check_file_size``'s own errors already avoid it (ADR-021b,
+    Codex review) -- every path this tool itself resolved is substituted
+    with just its final component before the message reaches the caller.
+    """
+    for p in paths:
+        p_str = str(p)
+        if p_str:
+            message = message.replace(p_str, Path(p_str).name)
+    return message
+
+
 def _call_with_timeout(
     fn: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs
 ) -> _R:
@@ -282,7 +300,6 @@ def abi_aggregate(
                     "error": f"reports_dir is not a directory: {reports_dir}",
                 }
             )
-        _check_dir_json_file_sizes(reports_path, label="report")
         manifest_path = (
             _safe_read_path(manifest, label="manifest") if manifest else None
         )
@@ -295,10 +312,13 @@ def abi_aggregate(
             _check_file_size(run_plan_path, label="run_plan")
 
         def _do_aggregate() -> AggregateResult:
-            # Expected-set parsing runs inside the same bounded worker as
-            # aggregate_reports_dir (ADR-021b D2): a slow manifest/run-plan
-            # read must count against --timeout too, not just the aggregate
-            # call that follows it (Codex review).
+            # Report-directory discovery (an unbounded glob+stat over every
+            # *.json entry) and expected-set parsing both run inside the same
+            # bounded worker as aggregate_reports_dir (ADR-021b D2): a large
+            # reports_dir or a slow manifest/run-plan read must count against
+            # --timeout too, not just the aggregate call that follows them
+            # (Codex review).
+            _check_dir_json_file_sizes(reports_path, label="report")
             expected = _resolve_expected(
                 manifest_path,
                 run_plan_path,
@@ -328,7 +348,14 @@ def abi_aggregate(
                 }
             )
         except (click.UsageError, AggregateError, ValueError) as exc:
-            return json.dumps({"status": "error", "error": str(exc)})
+            redact_args = [reports_path]
+            if manifest_path is not None:
+                redact_args.append(manifest_path)
+            if run_plan_path is not None:
+                redact_args.append(run_plan_path)
+            return json.dumps(
+                {"status": "error", "error": _redact_paths(str(exc), *redact_args)}
+            )
 
         elapsed = _time.monotonic() - t0
         _audit_log("abi_aggregate", {"reports_dir": reports_path.name}, elapsed, "ok")
@@ -391,24 +418,23 @@ def abi_project_validate(
             return json.dumps({"status": "error", "error": "config file not found"})
         _check_file_size(config_path, label="config")
 
-        try:
-            parsed = _load_project_targets_config(config_path)
-        except click.UsageError as exc:
-            return json.dumps({"status": "error", "error": str(exc)})
-
-        if toolchain_bindings is not None:
-            bindings_path = _safe_read_path(
-                toolchain_bindings, label="toolchain_bindings"
-            )
+        bindings_path = (
+            _safe_read_path(toolchain_bindings, label="toolchain_bindings")
+            if toolchain_bindings is not None
+            else None
+        )
+        if bindings_path is not None:
             _check_file_size(bindings_path, label="toolchain_bindings")
-            try:
-                bindings_file = load_bindings_file(bindings_path)
-            except BindingsFileError as exc:
-                return json.dumps({"status": "error", "error": str(exc)})
-        else:
-            bindings_file = None
 
         def _do_validate() -> ProjectTargetsValidationReport:
+            # Config/bindings parsing runs inside the same bounded worker as
+            # validate_project_targets (ADR-021b D2): a slow-to-read/parse
+            # config or bindings file must count against --timeout too, not
+            # just the validation call that follows it (Codex review).
+            parsed = _load_project_targets_config(config_path)
+            bindings_file = (
+                load_bindings_file(bindings_path) if bindings_path is not None else None
+            )
             report = validate_project_targets(parsed)
             if bindings_file is not None:
                 report.errors.extend(
@@ -431,6 +457,13 @@ def abi_project_validate(
                     "status": "error",
                     "error": f"abi_project_validate timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
+            )
+        except (click.UsageError, BindingsFileError) as exc:
+            redact_args = [config_path]
+            if bindings_path is not None:
+                redact_args.append(bindings_path)
+            return json.dumps(
+                {"status": "error", "error": _redact_paths(str(exc), *redact_args)}
             )
 
         elapsed = _time.monotonic() - t0
@@ -512,46 +545,44 @@ def abi_project_plan(
             return json.dumps({"status": "error", "error": "config file not found"})
         _check_file_size(config_path, label="config")
 
-        try:
-            parsed = _load_project_targets_config(config_path)
-        except click.UsageError as exc:
-            return json.dumps({"status": "error", "error": str(exc)})
-
         # _parse_build_output_specs reads each PROFILE=DIR's build-output.json
         # itself; check every one's size *before* that parse (ADR-021b D3) --
         # a best-effort pre-check keyed on the same "=" split it uses, so a
         # malformed spec here just falls through to that function's own error.
+        build_output_dirs: list[str] = []
         for spec in build_outputs or ():
             _, sep, dir_str = spec.partition("=")
             if sep:
+                build_output_dirs.append(dir_str)
                 _check_file_size(
                     Path(dir_str) / "build-output.json", label="build_output"
                 )
-        try:
+
+        bindings_path = (
+            _safe_read_path(toolchain_bindings, label="toolchain_bindings")
+            if toolchain_bindings is not None
+            else None
+        )
+        if bindings_path is not None:
+            _check_file_size(bindings_path, label="toolchain_bindings")
+
+        def _do_plan() -> tuple[RunPlan, RunPlanGenerationReport]:
+            # Config/build-output/bindings parsing, validation, and binding
+            # resolution all run inside the same bounded worker as run-plan
+            # generation (ADR-021b D2): a large or slow-to-read config,
+            # build-output, or bindings file must count against --timeout
+            # too, not just the generate_run_plan call that follows them
+            # (Codex review).
+            parsed = _load_project_targets_config(config_path)
             resolved_build_outputs = _parse_build_output_specs(
                 tuple(build_outputs or ())
             )
-        except click.UsageError as exc:
-            return json.dumps({"status": "error", "error": str(exc)})
-
-        resolved_bindings: dict[str, str] | None = None
-        bindings_file = None
-        if toolchain_bindings is not None:
-            bindings_path = _safe_read_path(
-                toolchain_bindings, label="toolchain_bindings"
+            bindings_file = (
+                load_bindings_file(bindings_path) if bindings_path is not None else None
             )
-            _check_file_size(bindings_path, label="toolchain_bindings")
-            try:
-                bindings_file = load_bindings_file(bindings_path)
-            except BindingsFileError as exc:
-                return json.dumps({"status": "error", "error": str(exc)})
-            resolved_bindings = bindings_file.bindings
-
-        def _do_plan() -> tuple[RunPlan, RunPlanGenerationReport]:
-            # Validation and binding resolution run inside the same bounded
-            # worker as run-plan generation (ADR-021b D2): a large config's
-            # cross-reference validation must count against --timeout too,
-            # not just the generate_run_plan call that follows it.
+            resolved_bindings = (
+                bindings_file.bindings if bindings_file is not None else None
+            )
             validation = validate_project_targets(parsed)
             if not validation.ok:
                 raise _ProjectPlanValidationError(validation.errors)
@@ -598,6 +629,13 @@ def abi_project_plan(
                         f"config ({len(exc.errors)} error(s)): " + "; ".join(exc.errors)
                     ),
                 }
+            )
+        except (click.UsageError, BindingsFileError) as exc:
+            redact_args: list[str | Path] = [config_path, *build_output_dirs]
+            if bindings_path is not None:
+                redact_args.append(bindings_path)
+            return json.dumps(
+                {"status": "error", "error": _redact_paths(str(exc), *redact_args)}
             )
 
         elapsed = _time.monotonic() - t0

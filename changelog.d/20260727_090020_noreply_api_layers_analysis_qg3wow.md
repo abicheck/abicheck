@@ -110,3 +110,25 @@
   validate a path outside the sysroot the caller configured. Both now use
   `Path.is_relative_to()`, matching them to each other and closing the
   false-negative.
+- **`abi_project_validate`/`abi_project_plan` now count config/build-output/
+  bindings parsing against `--timeout`** — `_load_project_targets_config`,
+  `_parse_build_output_specs`, and `load_bindings_file` previously ran
+  synchronously before the timeout-wrapped validation/generation call, so a
+  slow-to-read config, build-output manifest, or bindings file could stall
+  past the advertised per-invocation deadline. All three now run inside the
+  same bounded worker as the call that follows them.
+- **`abi_aggregate` now counts report-directory discovery against
+  `--timeout`** — `_check_dir_json_file_sizes`'s `*.json` glob+stat over
+  `reports_dir` previously ran before the timeout wrapper started; a very
+  large or stalled reports directory could stall past the deadline even
+  though expected-set parsing and aggregation were already bounded. Moved
+  inside the same bounded worker.
+- **`abi_project_validate`/`abi_project_plan`/`abi_aggregate` no longer leak
+  local filesystem paths in parser error messages** — `click.UsageError`s
+  raised by the shared CLI config/build-output/bindings/manifest/run-plan
+  parsing helpers embed the full resolved path for a human terminal reader
+  (e.g. `"/home/user/private/.abicheck.yml must contain a YAML mapping"`);
+  these three tools previously returned that message verbatim, bypassing the
+  sanitized-error envelope every other MCP error path uses. A new
+  `_redact_paths` helper replaces every path this tool itself resolved with
+  just its basename before the message reaches the caller.

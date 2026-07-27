@@ -441,6 +441,40 @@ class TestAbiAggregate:
         assert payload["status"] == "error"
         assert "timed out" in payload["error"]
 
+    def test_timeout_includes_report_directory_discovery(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # ADR-021b D2: the *.json glob+stat over reports_dir must count
+        # against --timeout too, not just aggregate_reports_dir itself
+        # (Codex review).
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(1.0)
+            raise AssertionError("should have timed out first")
+
+        monkeypatch.setattr(
+            "abicheck.mcp_server_project._check_dir_json_file_sizes", _slow
+        )
+        raw = abi_aggregate(str(tmp_path), discovered_only=True)
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
+
+    def test_malformed_run_plan_error_does_not_leak_its_path(self, tmp_path: Path):
+        # cli_aggregate._resolve_expected's own error embeds the full
+        # run_plan path for a terminal reader; the MCP response must not
+        # leak local filesystem structure the same way (Codex review).
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        run_plan = tmp_path / "run-plan.json"
+        run_plan.write_text("not json")
+        raw = abi_aggregate(str(tmp_path), run_plan=str(run_plan))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert str(run_plan) not in payload["error"]
+        assert run_plan.name in payload["error"]
+
 
 # ---------------------------------------------------------------------------
 # abi_project_validate / abi_project_plan
@@ -605,6 +639,31 @@ class TestAbiProjectValidate:
         assert payload["status"] == "error"
         assert "timed out" in payload["error"]
 
+    def test_timeout_includes_config_parsing(self, tmp_path: Path, monkeypatch):
+        # ADR-021b D2: a slow-to-read/parse config must count against
+        # --timeout too, not just validate_project_targets (Codex review).
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(1.0)
+            raise AssertionError("should have timed out first")
+
+        monkeypatch.setattr("abicheck.cli_project._load_project_targets_config", _slow)
+        raw = abi_project_validate(str(config))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
+
+    def test_malformed_yaml_error_does_not_leak_config_path(self, tmp_path: Path):
+        config = tmp_path / ".abicheck.yml"
+        config.write_text("- just\n- a\n- list\n", encoding="utf-8")
+        raw = abi_project_validate(str(config))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert str(config) not in payload["error"]
+        assert config.name in payload["error"]
+
 
 class TestAbiProjectPlan:
     def test_generates_a_run_plan(self, tmp_path: Path):
@@ -682,3 +741,39 @@ class TestAbiProjectPlan:
         payload = json.loads(raw)
         assert payload["status"] == "error"
         assert "timed out" in payload["error"]
+
+    def test_timeout_includes_config_parsing(self, tmp_path: Path, monkeypatch):
+        # ADR-021b D2: a slow-to-read/parse config must count against
+        # --timeout too, not just generate_run_plan (Codex review).
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(1.0)
+            raise AssertionError("should have timed out first")
+
+        monkeypatch.setattr("abicheck.cli_project._load_project_targets_config", _slow)
+        raw = abi_project_plan(str(config))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
+
+    def test_missing_config_error_does_not_leak_config_path(self, tmp_path: Path):
+        config = tmp_path / ".abicheck.yml"
+        config.write_text("- just\n- a\n- list\n", encoding="utf-8")
+        raw = abi_project_plan(str(config))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert str(config) not in payload["error"]
+        assert config.name in payload["error"]
+
+    def test_malformed_build_output_error_does_not_leak_dir_path(self, tmp_path: Path):
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        build_dir = tmp_path / "build-linux"
+        build_dir.mkdir()
+        (build_dir / "build-output.json").write_text("not json", encoding="utf-8")
+        raw = abi_project_plan(str(config), build_outputs=[f"linux={build_dir}"])
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert str(build_dir) not in payload["error"]
+        assert build_dir.name in payload["error"]
