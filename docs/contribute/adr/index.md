@@ -65,7 +65,7 @@ against the code as unverified, regardless of how confident it reads.
 | [024](024-public-abi-surface-resolution.md) | Public ABI Surface Resolution and False-Positive Traceability | Accepted — implemented |
 | [025](025-pr-diff-source-evaluation.md) | PR-Diff-Aware ABI Evaluation (Source Diff as Trigger and Localizer) | Proposed; D1–D3 absorbed by ADR-033/035, D4 still future work |
 | [026](026-source-only-undetectable-changes.md) | Source-Only Changes and the Evidence-Tier Boundary | Accepted — substantially superseded by ADR-028/030/035/038 (its "no embedded Clang" conclusion was reversed) |
-| [027](027-api-surface-intelligence.md) | API Surface Intelligence — Structure Metrics, Idiom Detection, Cross-Library Reasoning, Pattern-Aware Verdicts | Accepted |
+| [027](027-api-surface-intelligence.md) | API Surface Intelligence — Structure Metrics, Idiom Detection, Cross-Library Reasoning, Pattern-Aware Verdicts | Accepted — Phases 0-5 implemented; `--pattern-verdicts` default-on flip deferred pending release-cycle FP-rate/parity validation |
 | [028](028-source-build-evidence-pack.md) | Optional Source and Build Evidence Pack Architecture | Accepted — implemented |
 | [029](029-build-graph-toolchain-context-capture.md) | Build Graph and Toolchain Context Capture | Accepted — implemented |
 | [030](030-source-abi-replay-and-linked-source-surface.md) | Source ABI Replay and Linked Source Surface | Accepted — implemented |
@@ -74,22 +74,22 @@ against the code as unverified, regardless of how confident it reads.
 | [033](033-ci-rollout-performance-and-validation.md) | CI Rollout, Performance, Caching, and Validation Strategy | Accepted — implemented |
 | [034](034-managed-runtime-and-non-c-abi-frontends.md) | Managed-Runtime and Non-C ABI Frontends | Proposed |
 | [035](035-pr-tier-source-intelligence-and-crosscheck.md) | PR-Tier Source Intelligence and Cross-Source Validation | Accepted — implemented (G19, D1–D10) |
-| [036](036-report-view-model.md) | Report view-model and canonical report severity | Accepted |
+| [036](036-report-view-model.md) | Report view-model and canonical report severity | Accepted — core implemented (Increments 1-2); Increment 3 (routing `html_report.py`/`pr_comment.py` through `ReportModel`) remains optional cleanup |
 | [037](037-cli-interface-contract.md) | CLI Interface Contract, Configuration Balance, and Extension Policy | Accepted — implemented (G22) |
 | [038](038-build-integrated-fact-collection-variants.md) | Working With Sources — Full-Scan and Two Build-Injection Flows | Accepted — implemented |
 | [039](039-build-context-reconciliation.md) | Build-Context Reconciliation of Context-Free Header-Parse Artifacts | Accepted — implemented |
-| [040](040-compare-surface-reduction.md) | `compare` Surface Reduction — Side-Aware Flags, Config Demotion, Run Profiles | Accepted — phased (Phase A landed) |
-| [041](041-compiler-facts-semantic-impact-graph.md) | Compiler-Facts Semantic Impact Graph — Roadmap and P0 Slice | Accepted — P0 slice 1 implemented |
-| [042](042-compatibility-and-gate-decision-separation.md) | Formal separation of CompatibilityDecision and GateDecision | Accepted — implemented for JSON/SARIF/compare-release gate summaries |
+| [040](040-compare-surface-reduction.md) | `compare` Surface Reduction — Side-Aware Flags, Config Demotion, Run Profiles | Accepted — phased implementation substantially complete (Phase A + Phase B landed, Phase C Lever-1 landed except the `ast-frontend` carve-out, Phase D landed as a constraint-aware subset) |
+| [041](041-compiler-facts-semantic-impact-graph.md) | Compiler-Facts Semantic Impact Graph — Roadmap and P0 Slice | Accepted — P0 slices 1-4, the header-only-graph addendum, and P1 items 1-5 implemented; remainder is roadmap, not a shipping commitment |
+| [042](042-compatibility-and-gate-decision-separation.md) | Formal separation of CompatibilityDecision and GateDecision | Accepted — implemented for JSON/SARIF/`compare-release` gate summaries and `html_report.py`'s CI Gate card; `mcp_server.py`/`junit_report.py` still compute an exit code inline in places |
 | [043](043-cli-pre-1.0-surface-reset.md) | Pre-1.0 CLI Surface Reset — Root Command Collapse, Depth Ladder Narrowing, and Dry-Run Unification | Accepted — implemented |
-| [044](044-reachability-aware-suppression.md) | Reachability-Aware Suppression and the Effective Public ABI | Accepted — P0 slice implemented |
+| [044](044-reachability-aware-suppression.md) | Reachability-Aware Suppression and the Effective Public ABI | Accepted — P0, P1, and P2 all implemented (see ADR for exact scope) |
 | [045](045-identity-based-old-new-entity-matching.md) | Identity-Based Old/New Entity Matching | Accepted — implemented for `RecordType` and `EnumType` |
-| [046](046-source-graph-identity-v2-and-evidence-merge.md) | Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge | Accepted — D1 (`relation_key` half), D2 (evidence-preserving merge), D3 (per-role coverage matrix), D5 (partial, `TraversalPolicy` for the call-graph walk), D6 (partial, two-tier proof-path preference) implemented; D1's `occurrence_id` half open; D4 deliberately deferred (ADR-048 covers its practical value at smaller scope) |
-| [047](047-github-actions-integration-model.md) | GitHub Actions Integration Model — Project Lifecycle Over Aggregate-Centric Design | Proposed — not implemented; see [G30](../plans/g30-github-actions-integration-model.md) |
+| [046](046-source-graph-identity-v2-and-evidence-merge.md) | Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge | Accepted — D1-D6 all implemented, each to the documented scope (D4 is a deliberately scoped subset of the originally sketched full rewrite; see ADR for exactly what's covered per decision) |
+| [047](047-github-actions-integration-model.md) | GitHub Actions Integration Model — Project Lifecycle Over Aggregate-Centric Design | Accepted — substantially implemented (P0 and the main P1 lifecycle implemented; P2 partially implemented, see ADR); see [G30](../plans/g30-github-actions-integration-model.md) |
 | [048](048-canonical-entity-identity-and-graph-reconciliation.md) | Canonical Entity Identity and Graph Reconciliation (G31 Phase B) | Accepted — implemented |
-| [049](049-contract-relevance-and-compatibility-configuration.md) | Contract Relevance and Compatibility Configuration | Proposed — not implemented |
-| [050](050-comparability-contract-and-multi-tu-manifest.md) | Comparability Contract — Profile/Scope Fingerprints and the Multi-TU Manifest | Proposed — not implemented; see [G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md) |
-| [051](051-documentation-operational-model.md) | Documentation Operational Model (Ownership Registry + Docs-Contract Gate) | Accepted — partially implemented (Stage 1 done; Stages 2-5 deferred) |
-| [052](052-unified-impact-assessment-model.md) | Unified Impact Assessment Model (G29 Phase 3, slices 1-5) | Accepted — slices 1-5 implemented |
+| [049](049-contract-relevance-and-compatibility-configuration.md) | Contract Relevance and Compatibility Configuration | Accepted (2026-07-26) — Phase 0 and Phase 1 slices 1-2 implemented (vocabulary, config, resolver, first legacy-mode wiring); live shadow evaluator and detection/gate/report wiring not yet started |
+| [050](050-comparability-contract-and-multi-tu-manifest.md) | Comparability Contract — Profile/Scope Fingerprints and the Multi-TU Manifest | Accepted — implemented (Phase 0 and Phases A-E; D1-D6); see [G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md) |
+| [051](051-documentation-operational-model.md) | Documentation Operational Model (Ownership Registry + Docs-Contract Gate) | Accepted — Stages 1-4 implemented; Stage 5 explicitly deferred |
+| [052](052-unified-impact-assessment-model.md) | Unified Impact Assessment Model (G29 Phase 3, slices 1-9) | Accepted — slices 1-9 implemented |
 | [053](053-tu-link-unit-dso-attribution.md) | TU → Link-Unit → DSO Source-Evidence Attribution | Accepted — implemented (core algorithm + validator; CLI/Action pipeline wiring deferred, see D5) |
 | [054](054-cli-project-integration-surface-consolidation.md) | CLI Project-Integration Surface Consolidation | Accepted — implemented |

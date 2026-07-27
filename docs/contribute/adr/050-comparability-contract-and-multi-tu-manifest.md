@@ -1,9 +1,18 @@
 # ADR-050: Comparability Contract — Profile/Scope Fingerprints and the Multi-TU Manifest
 
 **Date:** 2026-07-22
-**Status:** Proposed — not implemented. This ADR records the target model and
-component surface; [G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md)
-carries the phased implementation backlog.
+**Status:** Accepted — implemented (Phase 0 and Phases A–E; D1–D6). See
+[G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md) for the
+per-phase implementation record, including the post-merge D5/D6 review
+follow-up. One thing remains intentionally unbuilt, not a gap in this ADR's
+model: `service.py`'s `CompareRequest`/`InputSpec` has no `dump_manifest`
+field at all, so the service/API/MCP surface cannot reach a manifest-driven
+dump today — the only reachable manifest-driven `compare` path is the
+native CLI (`cli_resolve._resolve_compare_snapshots`). This is deliberate
+(no code for a hypothetical caller — there is none yet), not an oversight;
+should `CompareRequest` gain manifest support later, `run_compare_request`'s
+existing `ABICHECK_PARALLEL_EXTRACTION` sequential fallback is already the
+right lever to route it through.
 **Decision maker:** (pending — recorded per repository convention.)
 
 **Amendments:**

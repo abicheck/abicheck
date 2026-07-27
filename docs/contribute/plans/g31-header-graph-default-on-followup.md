@@ -88,7 +88,12 @@ re-runs unconditionally and fails soft (degrades to not_collected/partial
 coverage) when clang is unavailable, with no cheaper incremental path of
 its own. See Phase C's sequencing note.
 
-## Phase B — Unify graph/public-surface vocabulary + canonical entity identity
+## Phase B (done) — Unify graph/public-surface vocabulary + canonical entity identity
+
+**Status: done.** Implemented via [ADR-048](../adr/048-canonical-entity-identity-and-graph-reconciliation.md)
+("Canonical Entity Identity and Graph Reconciliation") — see that ADR for
+the shipped scope. The problem/scope description below is retained as the
+original planning record.
 
 **Problem.** The header-only graph and the build-integrated
 (`--sources`/`--build-info`) graph currently identify the same declaration

@@ -12,6 +12,20 @@ below as the original design intent, not current behavior — see "Implementatio
 status" at the end of this ADR for the as-shipped summary.
 **Decision maker:** Nikolay Petrov
 
+**Amendment (2026-07-27):** the CI-facing half of "baseline lifecycle" this
+ADR originally scoped — publish a baseline, resolve it in CI, refresh it on
+main — is now separately covered by [ADR-047](047-github-actions-integration-model.md)/[G30](../plans/g30-github-actions-integration-model.md):
+`release-contract` (GitHub Release asset) and `accepted-main` (Actions cache)
+channels, `actions/resolve-baseline`'s fail-loud resolution taxonomy, and
+`publish-baseline.yml`/`update-main-baseline.yml`. That work supersedes this
+ADR's `.abicheck.yml` registry-config/auto-detection phases for the CI use
+case specifically — a project on G30's baseline lifecycle does not need this
+ADR's remaining phases to get a working CI baseline story. This ADR's own
+remaining backends (git-native, OCI, signing, retention/`gc`) stay a
+generic, registry-driven distribution mechanism for non-CI consumers; they
+should be picked up only against concrete demand, not implemented solely to
+close out this ADR's original phase list.
+
 ---
 
 ## Context
