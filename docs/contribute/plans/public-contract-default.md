@@ -885,6 +885,30 @@ and its extensive golden/FP-rate/tier-accuracy test coverage than the
 dedup-key swap above, and does not fit a single well-scoped, independently
 verifiable change — it needs its own dedicated pass.
 
+**Re-investigated 2026-07-27, conclusion unchanged.** Re-read
+`_match_old_function` end to end (not just this paragraph) to check whether
+the assessment above was still accurate rather than assuming it. Confirmed
+it still holds, for a reason specific to `resolve_function_identity` itself,
+not only `_match_old_function`'s surrounding complexity: the identity
+resolver returns exactly one `primary_id` per function and has no built-in
+notion of "ambiguous, so don't match" — the extern-C fallback's own
+correctness depends entirely on the *caller* counting candidates and
+declining to match when more than one shares a name
+(`len(extern_c_candidates) == 1`). Keying a lookup dict by
+`resolve_function_identity(f).primary_id` instead of the current
+`new_by_name` multimap would not eliminate that counting step, only move it
+behind a different key — the ambiguity-safe fallback logic still has to be
+reimplemented on top, so this would not be the same kind of drop-in swap the
+`diff_filtering.py` dedup-key wiring was (that call site only needed a
+*key*, never an ambiguity *decision*). Attempting it now would mean
+rewriting `_match_old_function`'s core join under this session's normal
+verification budget, against golden/FP-rate/tier-accuracy/mutation-score
+gates it was never exercised against before — exactly the "does not fit a
+single well-scoped, independently verifiable change" case above, not a new
+finding. Left deferred; a real attempt needs its own dedicated pass with
+room for that full gate re-verification, not a fold-in alongside Phase 3/1
+work.
+
 A Hypothesis property suite for the identity primitive itself
 (`tests/test_finding_identity_properties.py`, `slow`) is also done, covering
 determinism (the same declaration always resolves to the same identity),
