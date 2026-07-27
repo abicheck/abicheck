@@ -41,10 +41,33 @@ from abicheck.model import AbiSnapshot, Function, Visibility
 
 def _import_mcp_server_symbols():  # noqa: ANN202
     """Import the mcp_server symbols we test, leaving sys.modules unperturbed."""
+    # abicheck.mcp_server's own import graph pulls in both sibling modules
+    # (mcp_shared for shared state/helpers, mcp_server_project for its own
+    # @mcp.tool() registrations) -- restore all three afterward, not just
+    # mcp_server itself, or a module imported here under the temporary mock
+    # stays cached in sys.modules for every later-collected test file.
+    _abicheck_mcp_modules = (
+        "abicheck.mcp_server",
+        "abicheck.mcp_shared",
+        "abicheck.mcp_server_project",
+    )
     injected = [
         k for k in ("mcp", "mcp.server", "mcp.server.fastmcp") if k not in sys.modules
     ]
-    mcp_server_was_present = "abicheck.mcp_server" in sys.modules
+    was_present = {name: name in sys.modules for name in _abicheck_mcp_modules}
+    # Importing "abicheck.X" also sets an `X` attribute on the already-loaded
+    # `abicheck` package object -- popping sys.modules alone leaves that
+    # attribute pointing at this function's mock-backed module, and a later
+    # `from abicheck import mcp_server` (etc.) resolves via that attribute
+    # first, bypassing sys.modules entirely (CodeRabbit review; mirrors the
+    # fix in test_mcp_reference.py's own MCP-isolation fixture).
+    abicheck_pkg = sys.modules.get("abicheck")
+    pkg_attrs = tuple(name.split(".", 1)[1] for name in _abicheck_mcp_modules)
+    had_attr = {
+        attr: abicheck_pkg is not None and hasattr(abicheck_pkg, attr)
+        for attr in pkg_attrs
+    }
+    saved_attr = {attr: getattr(abicheck_pkg, attr, None) for attr in pkg_attrs}
 
     _mock_fastmcp = MagicMock()
     _mock_mcp_module = MagicMock()
@@ -60,18 +83,25 @@ def _import_mcp_server_symbols():  # noqa: ANN202
         sys.modules.setdefault(key, mod)
 
     import abicheck.mcp_server as _ms
+    import abicheck.mcp_shared as _mcp_shared
 
     # Restore sys.modules to look exactly as it did before this import, so we
     # don't enable mcp for files collected after us.
     for key in injected:
         sys.modules.pop(key, None)
-    if not mcp_server_was_present:
-        sys.modules.pop("abicheck.mcp_server", None)
-    return _ms
+    for name in _abicheck_mcp_modules:
+        if not was_present[name]:
+            sys.modules.pop(name, None)
+    for attr in pkg_attrs:
+        if had_attr[attr]:
+            setattr(abicheck_pkg, attr, saved_attr[attr])
+        elif abicheck_pkg is not None and hasattr(abicheck_pkg, attr):
+            delattr(abicheck_pkg, attr)
+    return _ms, _mcp_shared
 
 
-_ms = _import_mcp_server_symbols()
-_env_int = _ms._env_int
+_ms, mcp_shared = _import_mcp_server_symbols()
+_env_int = mcp_shared._env_int
 _check_file_size = _ms._check_file_size
 _audit_log = _ms._audit_log
 _impact_category = _ms._impact_category
@@ -621,7 +651,7 @@ class TestMcpCheckFileSize:
         """Oversized file raises (line 107)."""
         p = tmp_path / "big.so"
         p.write_bytes(b"\x00" * 16)
-        with patch.object(_ms, "MCP_MAX_FILE_SIZE", 4):
+        with patch.object(mcp_shared, "MCP_MAX_FILE_SIZE", 4):
             with pytest.raises(ValueError, match="exceeds limit"):
                 _check_file_size(p, label="input")
 
@@ -637,7 +667,7 @@ class TestMcpAuditLog:
         """Structured logging emits a JSON record (line 130)."""
         import json as _json
 
-        with patch.object(_ms, "_structured_logging", True):
+        with patch.object(mcp_shared, "_structured_logging", True):
             with caplog.at_level("INFO", logger="abicheck.mcp"):
                 _audit_log("t", {"a": "b"}, 1.5, "ok", verdict="BREAKING")
         # Last record is valid JSON carrying our fields.
@@ -646,7 +676,7 @@ class TestMcpAuditLog:
         assert payload["verdict"] == "BREAKING"
 
     def test_text_logging(self, caplog) -> None:
-        with patch.object(_ms, "_structured_logging", False):
+        with patch.object(mcp_shared, "_structured_logging", False):
             with caplog.at_level("INFO", logger="abicheck.mcp"):
                 _audit_log("t", {"a": "b"}, 1.5, "ok")
         assert "tool=t" in caplog.text
@@ -758,6 +788,9 @@ class _TimeoutPool:
 
     def submit(self, *_a, **_k):  # noqa: ANN002, ANN003, ANN201
         return _TimeoutFuture()
+
+    def shutdown(self, *_a, **_k) -> None:  # noqa: ANN002, ANN003
+        pass
 
 
 class TestMcpDumpTool:

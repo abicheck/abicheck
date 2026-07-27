@@ -28,7 +28,6 @@ from __future__ import annotations
 import concurrent.futures as _futures
 import json
 import logging
-import os as _os
 import platform
 import sys
 import time as _time
@@ -41,21 +40,7 @@ if TYPE_CHECKING:
     from .severity import SeverityConfig
     from .suppression import SuppressionList
 
-try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError as _exc:
-    _msg = (
-        "MCP support requires the 'mcp' package. "
-        "Install it with: pip install abicheck[mcp]"
-    )
-    raise ImportError(_msg) from _exc
-except Exception as _exc:  # noqa: BLE001
-    # Guard against partial installs or other init-time failures from mcp internals
-    raise ImportError(
-        f"Failed to initialise MCP support: {_exc}. "
-        "Try: pip install --upgrade 'abicheck[mcp]'"
-    ) from _exc
-
+from . import mcp_shared
 from .checker import DiffResult
 from .checker_policy import (
     API_BREAK_KINDS,
@@ -69,38 +54,31 @@ from .checker_policy import (
     policy_for,
     policy_kind_sets,
 )
-from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
+from .errors import ProfileMismatchError, ScopeMismatchError
+from .mcp_shared import (
+    _audit_log,
+    _call_with_timeout,
+    _check_file_size,
+    _logger,
+    _safe_read_path,
+    _sanitize_error,
+    mcp,
+)
 from .model import AbiSnapshot
 from .reporter import _finding_id, to_json, to_markdown
 from .serialization import snapshot_to_json
 from .service import compare_snapshots
 
-_logger = logging.getLogger("abicheck.mcp")
-
 # ---------------------------------------------------------------------------
 # Configuration (environment variables or CLI flags)
 # ---------------------------------------------------------------------------
-
-
-def _env_int(name: str, default: str) -> int:
-    """Parse an integer environment variable with a clear error on bad input."""
-    raw = _os.environ.get(name, default)
-    try:
-        return int(raw)
-    except ValueError:
-        raise ValueError(
-            f"Environment variable {name}={raw!r} is not a valid integer"
-        ) from None
-
-
-#: Maximum seconds for a single tool invocation (abi_dump / abi_compare).
-MCP_TIMEOUT: int = _env_int("ABICHECK_MCP_TIMEOUT", "120")
-
-#: Maximum input file size in bytes (default 500 MB).
-MCP_MAX_FILE_SIZE: int = _env_int("ABICHECK_MCP_MAX_FILE_SIZE", str(500 * 1024 * 1024))
-
-#: Structured JSON log format flag (set via --log-format json).
-_structured_logging: bool = False
+#
+# MCP_TIMEOUT/MCP_MAX_FILE_SIZE/_structured_logging live in mcp_shared (the
+# single source of truth every tool module reads, ADR-021b D2/D3/D4) — this
+# module accesses them as `mcp_shared.NAME`, never as a bare imported name,
+# so main()'s runtime mutation is visible everywhere; see mcp_shared's own
+# module docstring for why a bare `from .mcp_shared import MCP_TIMEOUT`
+# would silently go stale.
 
 #: The public depth ladder (ADR-043 D2): exactly the four user-facing rungs.
 #: ``full``/``symbols``/``graph`` are internal-only vocabulary and must not
@@ -138,76 +116,22 @@ def _validate_public_depth(depth: str | None) -> str | None:
     return depth
 
 
-def _check_file_size(path: Path, *, label: str = "input") -> None:
-    """Raise ValueError if *path* exceeds MCP_MAX_FILE_SIZE."""
-    try:
-        size = path.stat().st_size
-    except FileNotFoundError:
-        return  # let downstream handle missing files
-    except OSError as exc:
-        raise ValueError(f"Cannot check {label} file size: {exc}") from exc
-    if size > MCP_MAX_FILE_SIZE:
-        raise ValueError(
-            f"{label} is {size / (1024 * 1024):.1f} MB, "
-            f"exceeds limit of {MCP_MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
-        )
-
-
-def _audit_log(
-    tool: str,
-    inputs: dict[str, str],
-    duration_s: float,
-    status: str,
-    verdict: str | None = None,
-) -> None:
-    """Log a tool invocation for audit purposes."""
-    record = {
-        "tool": tool,
-        "inputs": inputs,
-        "duration_s": round(duration_s, 3),
-        "status": status,
-    }
-    if verdict is not None:
-        record["verdict"] = verdict
-    if _structured_logging:
-        _logger.info(json.dumps(record))
-    else:
-        parts = [f"tool={tool}"]
-        for k, v in inputs.items():
-            parts.append(f"{k}={v}")
-        parts.append(f"duration={duration_s:.3f}s")
-        parts.append(f"status={status}")
-        if verdict is not None:
-            parts.append(f"verdict={verdict}")
-        _logger.info(" ".join(parts))
-
-
 # ---------------------------------------------------------------------------
 # Path safety helpers
 # ---------------------------------------------------------------------------
+#
+# ``_safe_read_path``/``_sanitize_error``/``mcp`` itself now live in the leaf
+# module ``mcp_shared`` (imported above) so a sibling tool module
+# (``mcp_server_project``) can depend on them without this module depending
+# back on that sibling for shared state — see ``mcp_shared``'s own docstring.
+# ``_safe_write_path`` stays here: no tool outside this module writes an
+# output file.
 
 # Allowed extensions for output files written by abi_dump
 _ALLOWED_OUTPUT_SUFFIXES = frozenset({".json"})
 
 # Allowed extensions for input binary files
 _ALLOWED_BINARY_SUFFIXES = frozenset({".so", ".dll", ".dylib", ".json", ".dump", ""})
-
-
-def _safe_read_path(raw: str, *, label: str = "path") -> Path:
-    """Resolve and validate a path for reading.
-
-    - Resolves symlinks and `..` components.
-    - Does NOT restrict to a specific directory (read paths are user-specified).
-    - Returns the resolved Path.
-
-    Raises ValueError with a generic message on obviously bad input.
-    """
-    if not raw or raw.strip() == "":
-        raise ValueError(f"Empty {label} is not allowed")
-    try:
-        return Path(raw).resolve()
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"Invalid {label}: {exc!s}") from exc
 
 
 def _safe_write_path(raw: str, *, label: str = "output_path") -> Path:
@@ -294,39 +218,6 @@ def _safe_write_path(raw: str, *, label: str = "output_path") -> Path:
                 raise
 
     return p
-
-
-def _sanitize_error(exc: Exception, *, context: str = "operation") -> str:
-    """Return a safe error message that does not leak filesystem paths or internals."""
-    # Known domain errors: safe to surface as-is
-    if isinstance(exc, AbicheckError):
-        return str(exc)
-    if isinstance(exc, (ValueError, KeyError)):
-        return str(exc)
-    # OS/IO errors: return generic message, log details internally
-    if isinstance(exc, (OSError, FileNotFoundError, PermissionError)):
-        _logger.debug("OS error in %s: %s", context, exc, exc_info=True)
-        return f"{context} failed: file system error (check logs for details)"
-    # All others: generic
-    _logger.debug("Unexpected error in %s: %s", context, exc, exc_info=True)
-    return f"{context} failed: unexpected error"
-
-
-try:
-    mcp = FastMCP(
-        "abicheck",
-        instructions=(
-            "ABI compatibility checker for C/C++ shared libraries. "
-            "Detects breaking changes in .so/.dll/.dylib files before they reach production. "
-            "Use abi_compare to diff two library versions, abi_dump to extract ABI snapshots, "
-            "abi_list_changes to browse change kinds, and abi_explain_change for detailed explanations."
-        ),
-    )
-except Exception as _exc:  # noqa: BLE001
-    raise ImportError(
-        f"Failed to initialise MCP support: {_exc}. "
-        "Try: pip install --upgrade 'abicheck[mcp]'"
-    ) from _exc
 
 
 # ---------------------------------------------------------------------------
@@ -648,15 +539,22 @@ def abi_dump(
 
         _check_file_size(lib, label="library_path")
         hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
+        for hdr in hdr_paths:
+            _check_file_size(hdr, label="header")
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
         ]
 
         # Run the expensive resolve+serialize in a thread with a real timeout
-        # so we don't block the MCP stdio server indefinitely.
-        with _futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(
-                _resolve_input,
+        # so we don't block the MCP stdio server indefinitely. Uses the
+        # shared _call_with_timeout (mcp_shared.py) rather than a local
+        # `with ThreadPoolExecutor(...) as pool:` block -- the `with` form's
+        # `shutdown(wait=True)` on exit blocked even after a TimeoutError had
+        # already fired, defeating the timeout for a genuinely stuck resolve
+        # (Codex review; same fix already applied to the four project tools
+        # in mcp_server_project.py).
+        def _resolve() -> AbiSnapshot:
+            return _resolve_input(
                 lib,
                 hdr_paths,
                 inc_paths,
@@ -664,17 +562,18 @@ def abi_dump(
                 language,
                 public_headers=hdr_paths,
             )
-            try:
-                snap = future.result(timeout=MCP_TIMEOUT)
-            except _futures.TimeoutError:
-                elapsed = _time.monotonic() - t0
-                _audit_log("abi_dump", {"library": lib.name}, elapsed, "timeout")
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": f"abi_dump timed out after {MCP_TIMEOUT}s",
-                    }
-                )
+
+        try:
+            snap = _call_with_timeout(_resolve)
+        except _futures.TimeoutError:
+            elapsed = _time.monotonic() - t0
+            _audit_log("abi_dump", {"library": lib.name}, elapsed, "timeout")
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"abi_dump timed out after {mcp_shared.MCP_TIMEOUT}s",
+                }
+            )
         snap_json = snapshot_to_json(snap)
 
         elapsed = _time.monotonic() - t0
@@ -879,6 +778,8 @@ def abi_compare(
             if new_headers is not None
             else shared
         )
+        for hdr in {*old_h, *new_h}:
+            _check_file_size(hdr, label="header")
         inc = [_safe_read_path(d, label="include_dir") for d in (include_dirs or [])]
 
         # Validate output_format early (before expensive work)
@@ -916,16 +817,18 @@ def abi_compare(
             if suppression_file:
                 from .suppression import SuppressionList
 
-                suppression = SuppressionList.load(
-                    _safe_read_path(suppression_file, label="suppression_file"),
+                suppression_path = _safe_read_path(
+                    suppression_file, label="suppression_file"
                 )
+                _check_file_size(suppression_path, label="suppression_file")
+                suppression = SuppressionList.load(suppression_path)
             pf = None
             if policy_file:
                 from .policy_file import PolicyFile
 
-                pf = PolicyFile.load(
-                    _safe_read_path(policy_file, label="policy_file"),
-                )
+                policy_path = _safe_read_path(policy_file, label="policy_file")
+                _check_file_size(policy_path, label="policy_file")
+                pf = PolicyFile.load(policy_path)
             return (
                 old_snap,
                 new_snap,
@@ -941,37 +844,35 @@ def abi_compare(
                 suppression,
             )
 
-        with _futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_do_compare)
-            try:
-                old_snap, new_snap, result, pf, suppression = future.result(timeout=MCP_TIMEOUT)
-            except _futures.TimeoutError:
-                elapsed = _time.monotonic() - t0
-                _audit_log(
-                    "abi_compare",
-                    {"old": old_path.name, "new": new_path.name},
-                    elapsed,
-                    "timeout",
-                )
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": f"abi_compare timed out after {MCP_TIMEOUT}s",
-                    }
-                )
-            except (ProfileMismatchError, ScopeMismatchError) as exc:
-                # ADR-050 D2: a genuine comparability-gate mismatch is a
-                # distinct, expected outcome -- not an "error" the caller
-                # should treat as an abicheck bug -- so it gets its own
-                # status, ordered before the generic except Exception below.
-                elapsed = _time.monotonic() - t0
-                _audit_log(
-                    "abi_compare",
-                    {"old": old_path.name, "new": new_path.name},
-                    elapsed,
-                    "not_comparable",
-                )
-                return json.dumps({"status": "not_comparable", "reason": str(exc)})
+        try:
+            old_snap, new_snap, result, pf, suppression = _call_with_timeout(_do_compare)
+        except _futures.TimeoutError:
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_compare",
+                {"old": old_path.name, "new": new_path.name},
+                elapsed,
+                "timeout",
+            )
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"abi_compare timed out after {mcp_shared.MCP_TIMEOUT}s",
+                }
+            )
+        except (ProfileMismatchError, ScopeMismatchError) as exc:
+            # ADR-050 D2: a genuine comparability-gate mismatch is a
+            # distinct, expected outcome -- not an "error" the caller
+            # should treat as an abicheck bug -- so it gets its own
+            # status, ordered before the generic except Exception below.
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_compare",
+                {"old": old_path.name, "new": new_path.name},
+                elapsed,
+                "not_comparable",
+            )
+            return json.dumps({"status": "not_comparable", "reason": str(exc)})
 
         # Use the active policy from the result (may differ from input when
         # policy_file overrides the base policy).
@@ -1519,13 +1420,14 @@ def abi_audit(
             return json.dumps({"status": "error", "error": "Library file not found"})
         _check_file_size(lib, label="library_path")
         hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
+        for hdr in hdr_paths:
+            _check_file_size(hdr, label="header")
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
         ]
 
-        with _futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(
-                _resolve_input,
+        def _resolve() -> AbiSnapshot:
+            return _resolve_input(
                 lib,
                 hdr_paths,
                 inc_paths,
@@ -1533,17 +1435,18 @@ def abi_audit(
                 language,
                 public_headers=hdr_paths,
             )
-            try:
-                snap = future.result(timeout=MCP_TIMEOUT)
-            except _futures.TimeoutError:
-                elapsed = _time.monotonic() - t0
-                _audit_log("abi_audit", {"library": lib.name}, elapsed, "timeout")
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": f"abi_audit timed out after {MCP_TIMEOUT}s",
-                    }
-                )
+
+        try:
+            snap = _call_with_timeout(_resolve)
+        except _futures.TimeoutError:
+            elapsed = _time.monotonic() - t0
+            _audit_log("abi_audit", {"library": lib.name}, elapsed, "timeout")
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"abi_audit timed out after {mcp_shared.MCP_TIMEOUT}s",
+                }
+            )
 
         cc = run_crosschecks(snap)
         pattern = scan_files([*hdr_paths], None)
@@ -1706,6 +1609,8 @@ def abi_scan(
         except ValueError as exc:
             return json.dumps({"status": "error", "error": str(exc)})
         hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
+        for hdr in hdr_paths:
+            _check_file_size(hdr, label="header")
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
         ]
@@ -1756,14 +1661,14 @@ def abi_scan(
         # timeout is *terminated* (process + clang subtree) instead of orphaned to
         # keep burning CPU after the timeout response is sent (Codex review).
         try:
-            payload = run_scan_subprocess(req, MCP_TIMEOUT)
+            payload = run_scan_subprocess(req, mcp_shared.MCP_TIMEOUT)
         except TimeoutError:
             elapsed = _time.monotonic() - t0
             _audit_log("abi_scan", {"binary": bin_path.name}, elapsed, "timeout")
             return json.dumps(
                 {
                     "status": "error",
-                    "error": f"abi_scan timed out after {MCP_TIMEOUT}s",
+                    "error": f"abi_scan timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
             )
 
@@ -1779,6 +1684,17 @@ def abi_scan(
         )
 
 
+# abi_deps / abi_aggregate / abi_project_validate / abi_project_plan live in
+# the sibling module below (file-size split); imported here for side-effect
+# (registers them via @mcp.tool()) and so they still resolve as
+# ``abicheck.mcp_server.abi_deps`` etc. for existing callers/tests.
+from .mcp_server_project import (  # noqa: E402,F401
+    abi_aggregate,
+    abi_deps,
+    abi_project_plan,
+    abi_project_validate,
+)
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -1786,22 +1702,20 @@ def abi_scan(
 
 def main() -> None:
     """Run the abicheck MCP server (stdio transport)."""
-    global MCP_TIMEOUT, MCP_MAX_FILE_SIZE, _structured_logging  # noqa: PLW0603
-
     import argparse
 
     parser = argparse.ArgumentParser(description="abicheck MCP server")
     parser.add_argument(
         "--timeout",
         type=int,
-        default=MCP_TIMEOUT,
-        help=f"Timeout in seconds for tool calls (default: {MCP_TIMEOUT})",
+        default=mcp_shared.MCP_TIMEOUT,
+        help=f"Timeout in seconds for tool calls (default: {mcp_shared.MCP_TIMEOUT})",
     )
     parser.add_argument(
         "--max-file-size",
         type=int,
-        default=MCP_MAX_FILE_SIZE,
-        help=f"Max input file size in bytes (default: {MCP_MAX_FILE_SIZE})",
+        default=mcp_shared.MCP_MAX_FILE_SIZE,
+        help=f"Max input file size in bytes (default: {mcp_shared.MCP_MAX_FILE_SIZE})",
     )
     parser.add_argument(
         "--log-format",
@@ -1815,13 +1729,16 @@ def main() -> None:
         parser.error("--timeout must be a positive integer")
     if args.max_file_size <= 0:
         parser.error("--max-file-size must be a positive integer")
-    MCP_TIMEOUT = args.timeout
-    MCP_MAX_FILE_SIZE = args.max_file_size
-    _structured_logging = args.log_format == "json"
+    # Module-qualified assignment (not `global`): MCP_TIMEOUT/MCP_MAX_FILE_SIZE/
+    # _structured_logging are owned by mcp_shared so every tool module (not
+    # just this one) observes the override — see mcp_shared's own docstring.
+    mcp_shared.MCP_TIMEOUT = args.timeout
+    mcp_shared.MCP_MAX_FILE_SIZE = args.max_file_size
+    mcp_shared._structured_logging = args.log_format == "json"
 
     # Redirect logging to stderr to avoid corrupting stdio JSON-RPC
     handler = logging.StreamHandler(sys.stderr)
-    if _structured_logging:
+    if mcp_shared._structured_logging:
         handler.setFormatter(logging.Formatter("%(message)s"))
     else:
         handler.setFormatter(logging.Formatter("%(levelname)s: %(name)s: %(message)s"))

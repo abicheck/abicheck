@@ -43,11 +43,11 @@ _mock_mcp_instance.tool.return_value = lambda fn: fn
 _mock_fastmcp.return_value = _mock_mcp_instance
 
 import abicheck.mcp_server as ms  # noqa: E402
+import abicheck.mcp_shared as mcp_shared  # noqa: E402
 import abicheck.service as service  # noqa: E402
 from abicheck.mcp_server import (  # noqa: E402
     _audit_log,
     _check_file_size,
-    _env_int,
     abi_audit,
     abi_compare,
     abi_dump,
@@ -55,6 +55,7 @@ from abicheck.mcp_server import (  # noqa: E402
     abi_scan,
     main,
 )
+from abicheck.mcp_shared import _env_int  # noqa: E402
 from abicheck.model import AbiSnapshot  # noqa: E402
 from abicheck.serialization import snapshot_to_json  # noqa: E402
 
@@ -133,7 +134,7 @@ class TestAbiAudit:
     def test_timeout_branch(self, tmp_path: Path, monkeypatch):
         """A resolve that outruns MCP_TIMEOUT yields a timeout error payload."""
         snap = _snapshot_file(tmp_path)
-        monkeypatch.setattr(ms, "MCP_TIMEOUT", 0.1)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
 
         def _slow(*a, **k):
             time.sleep(1.0)
@@ -318,7 +319,7 @@ class TestAbiEstimateDepthValidation:
 class TestToolTimeouts:
     def test_abi_dump_timeout(self, tmp_path: Path, monkeypatch):
         so = _fake_elf(tmp_path)
-        monkeypatch.setattr(ms, "MCP_TIMEOUT", 0.1)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
 
         def _slow(*a, **k):
             time.sleep(1.0)
@@ -332,7 +333,7 @@ class TestToolTimeouts:
     def test_abi_compare_timeout(self, tmp_path: Path, monkeypatch):
         old = _snapshot_file(tmp_path, "old.json")
         new = _snapshot_file(tmp_path, "new.json")
-        monkeypatch.setattr(ms, "MCP_TIMEOUT", 0.1)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
 
         def _slow(*a, **k):
             time.sleep(1.0)
@@ -342,6 +343,132 @@ class TestToolTimeouts:
         data = json.loads(abi_compare(str(old), str(new)))
         assert data["status"] == "error"
         assert "abi_compare timed out" in data["error"]
+
+    def test_abi_dump_timeout_returns_promptly(self, tmp_path: Path, monkeypatch):
+        # abi_dump/abi_compare/abi_audit each used a local `with
+        # ThreadPoolExecutor(...) as pool:` block, whose shutdown(wait=True)
+        # on exit blocked the *response* until the stuck worker finished --
+        # even after future.result(timeout=...) had already raised
+        # TimeoutError -- defeating the timeout for the caller too (Codex
+        # review). Now routed through mcp_shared._call_with_timeout
+        # (shutdown(wait=False)), so the call must return close to
+        # MCP_TIMEOUT, not close to the worker's full sleep duration.
+        so = _fake_elf(tmp_path)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(2.0)
+            return AbiSnapshot(library="x", version="1.0")
+
+        monkeypatch.setattr(ms, "_resolve_input", _slow)
+        started = time.monotonic()
+        data = json.loads(abi_dump(str(so)))
+        elapsed = time.monotonic() - started
+        assert data["status"] == "error"
+        assert "abi_dump timed out" in data["error"]
+        assert elapsed < 1.0, f"blocked for {elapsed}s -- shutdown(wait=True) regression"
+
+    def test_abi_compare_timeout_returns_promptly(self, tmp_path: Path, monkeypatch):
+        old = _snapshot_file(tmp_path, "old.json")
+        new = _snapshot_file(tmp_path, "new.json")
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(2.0)
+            return AbiSnapshot(library="x", version="1.0")
+
+        monkeypatch.setattr(ms, "_resolve_input", _slow)
+        started = time.monotonic()
+        data = json.loads(abi_compare(str(old), str(new)))
+        elapsed = time.monotonic() - started
+        assert data["status"] == "error"
+        assert "abi_compare timed out" in data["error"]
+        assert elapsed < 1.0, f"blocked for {elapsed}s -- shutdown(wait=True) regression"
+
+    def test_abi_audit_timeout_returns_promptly(self, tmp_path: Path, monkeypatch):
+        so = _fake_elf(tmp_path)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(2.0)
+            return AbiSnapshot(library="x", version="1.0")
+
+        monkeypatch.setattr(ms, "_resolve_input", _slow)
+        started = time.monotonic()
+        data = json.loads(abi_audit(str(so)))
+        elapsed = time.monotonic() - started
+        assert data["status"] == "error"
+        assert "abi_audit timed out" in data["error"]
+        assert elapsed < 1.0, f"blocked for {elapsed}s -- shutdown(wait=True) regression"
+
+
+class TestAuxiliaryInputSizeChecks:
+    """ADR-021b D3 claims every input artifact is size-bounded, but a review
+    found abi_dump/abi_audit never checked their header files and
+    abi_compare never checked suppression_file/policy_file -- only the
+    primary library_path/old_input/new_input were covered (Codex review).
+    """
+
+    def _oversized_header(self, tmp_path: Path, monkeypatch) -> Path:
+        monkeypatch.setattr(mcp_shared, "MCP_MAX_FILE_SIZE", 16)
+        hdr = tmp_path / "big.h"
+        hdr.write_text("x" * 64, encoding="utf-8")
+        return hdr
+
+    def test_abi_dump_oversized_header_is_rejected(self, tmp_path: Path, monkeypatch):
+        so = _fake_elf(tmp_path)
+        hdr = self._oversized_header(tmp_path, monkeypatch)
+        data = json.loads(abi_dump(str(so), headers=[str(hdr)]))
+        assert data["status"] == "error"
+        assert "exceeds limit" in data["error"]
+
+    def test_abi_audit_oversized_header_is_rejected(self, tmp_path: Path, monkeypatch):
+        so = _fake_elf(tmp_path)
+        hdr = self._oversized_header(tmp_path, monkeypatch)
+        data = json.loads(abi_audit(str(so), headers=[str(hdr)]))
+        assert data["status"] == "error"
+        assert "exceeds limit" in data["error"]
+
+    def test_abi_scan_oversized_header_is_rejected(self, tmp_path: Path, monkeypatch):
+        so = _fake_elf(tmp_path)
+        hdr = self._oversized_header(tmp_path, monkeypatch)
+        data = json.loads(abi_scan(str(so), headers=[str(hdr)]))
+        assert data["status"] == "error"
+        assert "exceeds limit" in data["error"]
+
+    def test_abi_compare_oversized_header_is_rejected(self, tmp_path: Path, monkeypatch):
+        old = _snapshot_file(tmp_path, "old.json")
+        new = _snapshot_file(tmp_path, "new.json")
+        hdr = self._oversized_header(tmp_path, monkeypatch)
+        data = json.loads(abi_compare(str(old), str(new), headers=[str(hdr)]))
+        assert data["status"] == "error"
+        assert "exceeds limit" in data["error"]
+
+    def test_abi_compare_oversized_suppression_file_is_rejected(
+        self, tmp_path: Path, monkeypatch
+    ):
+        old = _snapshot_file(tmp_path, "old.json")
+        new = _snapshot_file(tmp_path, "new.json")
+        monkeypatch.setattr(mcp_shared, "MCP_MAX_FILE_SIZE", 16)
+        supp = tmp_path / "suppress.yml"
+        supp.write_text("x" * 64, encoding="utf-8")
+        data = json.loads(
+            abi_compare(str(old), str(new), suppression_file=str(supp))
+        )
+        assert data["status"] == "error"
+        assert "exceeds limit" in data["error"]
+
+    def test_abi_compare_oversized_policy_file_is_rejected(
+        self, tmp_path: Path, monkeypatch
+    ):
+        old = _snapshot_file(tmp_path, "old.json")
+        new = _snapshot_file(tmp_path, "new.json")
+        monkeypatch.setattr(mcp_shared, "MCP_MAX_FILE_SIZE", 16)
+        pol = tmp_path / "policy.yml"
+        pol.write_text("x" * 64, encoding="utf-8")
+        data = json.loads(abi_compare(str(old), str(new), policy_file=str(pol)))
+        assert data["status"] == "error"
+        assert "exceeds limit" in data["error"]
 
 
 # ===================================================================
@@ -362,7 +489,7 @@ class TestConfigHelpers:
     def test_check_file_size_over_limit_raises(self, tmp_path: Path, monkeypatch):
         f = tmp_path / "big.so"
         f.write_bytes(b"\x00" * 4096)
-        monkeypatch.setattr(ms, "MCP_MAX_FILE_SIZE", 16)
+        monkeypatch.setattr(mcp_shared, "MCP_MAX_FILE_SIZE", 16)
         with pytest.raises(ValueError, match="exceeds limit"):
             _check_file_size(f, label="library_path")
 
@@ -382,7 +509,7 @@ class TestConfigHelpers:
 
     def test_audit_log_structured_json(self, monkeypatch, caplog):
         """With structured logging enabled, the audit record is emitted as JSON."""
-        monkeypatch.setattr(ms, "_structured_logging", True)
+        monkeypatch.setattr(mcp_shared, "_structured_logging", True)
         with caplog.at_level("INFO", logger="abicheck.mcp"):
             _audit_log(
                 "abi_dump", {"library": "libx.so"}, 0.5, "ok", verdict="BREAKING"
@@ -417,15 +544,16 @@ class TestMainArgValidation:
         monkeypatch.setattr(
             sys, "argv", ["abicheck-mcp", "--log-format", "json", "--timeout", "5"]
         )
-        # main() mutates these module globals via `global` (not monkeypatch), so
+        # main() mutates mcp_shared's module globals (not monkeypatch), so
         # capture and restore them ourselves to keep later tests isolated.
-        saved_timeout = ms.MCP_TIMEOUT
+        saved_timeout = mcp_shared.MCP_TIMEOUT
+        saved_structured_logging = mcp_shared._structured_logging
         try:
             main()
             assert calls == ["stdio"]
-            assert ms._structured_logging is True
-            assert ms.MCP_TIMEOUT == 5
+            assert mcp_shared._structured_logging is True
+            assert mcp_shared.MCP_TIMEOUT == 5
         finally:
             # Restore module-level globals mutated by main().
-            ms._structured_logging = False
-            ms.MCP_TIMEOUT = saved_timeout
+            mcp_shared._structured_logging = saved_structured_logging
+            mcp_shared.MCP_TIMEOUT = saved_timeout

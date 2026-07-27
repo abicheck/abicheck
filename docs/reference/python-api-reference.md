@@ -107,6 +107,17 @@ Per-layer coverage of an *executed* scan (ADR-035 D10; reuses LayerCoverage).
 | `detail` | `str` | `''` |
 | `counters` | `dict[str, int]` | `{}` |
 
+## `OutputSpec`
+
+Where/how a result is rendered — the invocation-level output choice.
+
+*Dataclass.*
+
+| Field | Type | Default |
+|---|---|---|
+| `fmt` | `str` | `'text'` |
+| `path` | `Path \| None` | `None` |
+
 ## `ScanRequest`
 
 Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.

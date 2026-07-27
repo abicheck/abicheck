@@ -42,7 +42,14 @@ def _mcp_extra_installed() -> bool:
 if not _mcp_extra_installed():
     pytest.skip("mcp extra not installed", allow_module_level=True)
 
-_TAINTED_MODULE_NAMES = ("mcp", "mcp.server", "mcp.server.fastmcp", "abicheck.mcp_server")
+_TAINTED_MODULE_NAMES = (
+    "mcp",
+    "mcp.server",
+    "mcp.server.fastmcp",
+    "abicheck.mcp_shared",
+    "abicheck.mcp_server",
+    "abicheck.mcp_server_project",
+)
 
 
 def _mcp_server_is_tainted() -> bool:
@@ -85,20 +92,35 @@ def _real_abicheck_mcp_server():
     tainted = _mcp_server_is_tainted()
     saved = {name: sys.modules.get(name) for name in _TAINTED_MODULE_NAMES}
     abicheck_pkg = sys.modules.get("abicheck")
-    had_attr = abicheck_pkg is not None and hasattr(abicheck_pkg, "mcp_server")
-    saved_attr = getattr(abicheck_pkg, "mcp_server", None)
+    # Every "abicheck.X" submodule name (not just "abicheck.mcp_server") gets
+    # its own attribute set on the cached `abicheck` package object the
+    # moment it's first imported; popping sys.modules alone doesn't clear
+    # that attribute. All three of mcp_shared/mcp_server/mcp_server_project
+    # need the same treatment, or a later test's `from abicheck import
+    # mcp_shared` (etc.) would keep resolving to a stale mocked module via
+    # the attribute even after sys.modules has been restored (CodeRabbit
+    # review: the original fix only handled mcp_server).
+    _pkg_attrs = tuple(
+        name.split(".", 1)[1] for name in _TAINTED_MODULE_NAMES if name.startswith("abicheck.")
+    )
+    had_attr = {
+        attr: abicheck_pkg is not None and hasattr(abicheck_pkg, attr)
+        for attr in _pkg_attrs
+    }
+    saved_attr = {attr: getattr(abicheck_pkg, attr, None) for attr in _pkg_attrs}
     if tainted:
         for name in _TAINTED_MODULE_NAMES:
             sys.modules.pop(name, None)
-        # Popping "abicheck.mcp_server" from sys.modules isn't enough on its
-        # own: Python's `from abicheck import mcp_server` first tries
+        # Popping "abicheck.mcp_server" (etc.) from sys.modules isn't enough
+        # on its own: Python's `from abicheck import mcp_server` first tries
         # `getattr(abicheck, "mcp_server")`, and the earlier (mocked) import
         # already left that attribute set on the cached `abicheck` package
         # object -- so without this, `from abicheck import mcp_server` below
         # (including inside gen_mcp_reference.py's own render()) would keep
         # resolving to the stale mocked module instead of a fresh real one.
-        if had_attr:
-            delattr(abicheck_pkg, "mcp_server")
+        for attr in _pkg_attrs:
+            if had_attr[attr]:
+                delattr(abicheck_pkg, attr)
     try:
         yield
     finally:
@@ -108,14 +130,16 @@ def _real_abicheck_mcp_server():
                     sys.modules[name] = mod
                 else:
                     sys.modules.pop(name, None)
-            if had_attr:
-                abicheck_pkg.mcp_server = saved_attr
-            elif abicheck_pkg is not None and hasattr(abicheck_pkg, "mcp_server"):
-                # had_attr was False, so the fresh real import our own test
-                # triggered is what created this attribute -- leaving it in
-                # place would let a later test's `from abicheck import
-                # mcp_server` bypass the mock we just restored in sys.modules.
-                delattr(abicheck_pkg, "mcp_server")
+            for attr in _pkg_attrs:
+                if had_attr[attr]:
+                    setattr(abicheck_pkg, attr, saved_attr[attr])
+                elif abicheck_pkg is not None and hasattr(abicheck_pkg, attr):
+                    # had_attr[attr] was False, so the fresh real import our
+                    # own test triggered is what created this attribute --
+                    # leaving it in place would let a later test's `from
+                    # abicheck import X` bypass the mock we just restored in
+                    # sys.modules.
+                    delattr(abicheck_pkg, attr)
 
 
 def _load_gen():
