@@ -789,6 +789,9 @@ class _TimeoutPool:
     def submit(self, *_a, **_k):  # noqa: ANN002, ANN003, ANN201
         return _TimeoutFuture()
 
+    def shutdown(self, *_a, **_k) -> None:  # noqa: ANN002, ANN003
+        pass
+
 
 class TestMcpDumpTool:
     def test_missing_library_reports_error(self, tmp_path: Path) -> None:

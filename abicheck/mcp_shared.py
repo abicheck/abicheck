@@ -44,9 +44,12 @@ output file, so it has no reason to be shared state.
 
 from __future__ import annotations
 
+import concurrent.futures as _futures
 import logging
 import os as _os
+from collections.abc import Callable
 from pathlib import Path
+from typing import ParamSpec, TypeVar
 
 from .errors import AbicheckError
 
@@ -66,6 +69,46 @@ except Exception as _exc:  # noqa: BLE001
     ) from _exc
 
 _logger = logging.getLogger("abicheck.mcp")
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _call_with_timeout(
+    fn: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs
+) -> _R:
+    """Run ``fn(*args, **kwargs)`` in a thread bounded by ``MCP_TIMEOUT``.
+
+    ADR-021b D2: every tool invocation must have a configurable timeout
+    rather than blocking the MCP stdio server indefinitely. Raises
+    ``concurrent.futures.TimeoutError`` on expiry; any exception *fn* itself
+    raises propagates unchanged (re-raised by ``future.result()``) so callers
+    can catch their own domain exceptions the same way they would a direct
+    call.
+
+    Uses an explicit ``pool.shutdown(wait=False)`` in a ``finally`` rather
+    than ``with ThreadPoolExecutor(...) as pool:`` — the ``with`` form calls
+    ``shutdown(wait=True)`` on exit (including on a ``return`` from inside
+    the block, which still runs ``__exit__`` before the function actually
+    returns control to its caller), which blocks until the still-running
+    worker finishes even after ``future.result(timeout=...)`` has already
+    raised ``TimeoutError``, defeating the point of the timeout for a
+    genuinely stuck call. Originally implemented only in
+    ``mcp_server_project.py`` for the four project tools; moved here and
+    also wired into ``mcp_server.py``'s ``abi_dump``/``abi_compare``/
+    ``abi_audit`` after a review found those three still used the blocking
+    ``with`` form, so a stuck resolve/compare there could exceed the
+    advertised timeout indefinitely (Codex review) — this module's own
+    ``MCP_TIMEOUT`` is referenced directly (not via a qualified import),
+    since a function defined in this module always sees its own module's
+    live global, unlike a caller in another module importing the bare name.
+    """
+    pool = _futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        future = pool.submit(fn, *args, **kwargs)
+        return future.result(timeout=MCP_TIMEOUT)
+    finally:
+        pool.shutdown(wait=False)
 
 
 def _env_int(name: str, default: str) -> int:

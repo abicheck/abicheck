@@ -1,8 +1,9 @@
 # G33 — Typed API convergence: schema registry, Request/Result completeness, MCP dedup
 
-**Status:** Not started (Phase 0 partially landed, see per-phase status below)
+**Status:** Phase 0 (verification) and Phase 1 (schema-version registry,
+ADR-055 D3) done; Phases 2-6 not started — see per-phase status below
 **Normative decision:** [ADR-055](../adr/055-typed-request-result-completeness-and-schema-registry.md)
-(Proposed — not implemented)
+(Proposed — D3 implemented; D1/D2/D4 not started)
 **Related:** ADR-037 (G22, CLI consolidation — done), ADR-049 (contract relevance,
 see [public-contract-default.md](public-contract-default.md) for its own
 rollout), ADR-043 (`used_by`/`required_symbols` app scoping), ADR-050

@@ -51,24 +51,20 @@ from __future__ import annotations
 import concurrent.futures as _futures
 import json
 import time as _time
-from collections.abc import Callable
 from pathlib import Path
-from typing import ParamSpec, TypeVar
 
 from . import mcp_shared
 from .aggregate import DEFAULT_REPORT_PREFIX
 from .binary_utils import detect_binary_format as _detect_binary_format
 from .mcp_shared import (
     _audit_log,
+    _call_with_timeout,
     _check_file_size,
     _logger,
     _safe_read_path,
     _sanitize_error,
     mcp,
 )
-
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
 
 
 def _resolve_sysroot_path(binary: Path, sysroot: Path | None) -> Path:
@@ -131,33 +127,6 @@ def _redact_paths(message: str, *paths: str | Path) -> str:
         if p_str:
             message = message.replace(p_str, Path(p_str).name)
     return message
-
-
-def _call_with_timeout(
-    fn: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs
-) -> _R:
-    """Run ``fn(*args, **kwargs)`` in a thread bounded by ``mcp_shared.MCP_TIMEOUT``.
-
-    ADR-021b D2: every tool invocation must have a configurable timeout
-    rather than blocking the MCP stdio server indefinitely. Raises
-    ``concurrent.futures.TimeoutError`` on expiry; any exception *fn* itself
-    raises propagates unchanged (re-raised by ``future.result()``) so callers
-    can catch their own domain exceptions the same way they would a direct
-    call.
-
-    Uses an explicit ``pool.shutdown(wait=False)`` in a ``finally`` rather
-    than ``with ThreadPoolExecutor(...) as pool:`` — the ``with`` form calls
-    ``shutdown(wait=True)`` on exit, which blocks until the still-running
-    worker finishes even after ``future.result(timeout=...)`` has already
-    raised ``TimeoutError``, defeating the point of the timeout for a
-    genuinely stuck call.
-    """
-    pool = _futures.ThreadPoolExecutor(max_workers=1)
-    try:
-        future = pool.submit(fn, *args, **kwargs)
-        return future.result(timeout=mcp_shared.MCP_TIMEOUT)
-    finally:
-        pool.shutdown(wait=False)
 
 
 class _ToolPreflightError(Exception):

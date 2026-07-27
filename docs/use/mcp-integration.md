@@ -541,7 +541,7 @@ variables override defaults.
 | CLI flag | Environment variable | Default | Purpose |
 |---|---|---|---|
 | `--timeout <s>` | `ABICHECK_MCP_TIMEOUT` | `120` | Per-call timeout (seconds) for `abi_dump`, `abi_compare`, `abi_audit`, `abi_scan`, `abi_deps`, `abi_aggregate`, `abi_project_validate`, and `abi_project_plan`. On timeout the tool returns a structured error; the server stays up |
-| `--max-file-size <bytes>` | `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` (500 MB) | Maximum size of any input artifact — `library_path` (`abi_dump`/`abi_audit`), `old_input`/`new_input` (`abi_compare`), `binary_path`/`compile_db`/`against` (`abi_scan`), and the binary/report/config/bindings paths `abi_deps`/`abi_aggregate`/`abi_project_validate`/`abi_project_plan` read |
+| `--max-file-size <bytes>` | `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` (500 MB) | Maximum size of any input artifact — `library_path`/`headers` (`abi_dump`/`abi_audit`), `old_input`/`new_input`/`headers`/`old_headers`/`new_headers`/`suppression_file`/`policy_file` (`abi_compare`), `binary_path`/`headers`/`compile_db`/`against` (`abi_scan`), and the binary/report/config/bindings paths `abi_deps`/`abi_aggregate`/`abi_project_validate`/`abi_project_plan` read. Does *not* cover `include_dirs`/`public_header_dirs` (directories, not single files this check meaningfully bounds) or `abi_estimate`'s inputs (that tool never runs bounded work at all — see below) |
 | `--log-format text\|json` | — | `text` | Audit log format on stderr |
 
 The eight tools above share one configuration source: `--timeout`/

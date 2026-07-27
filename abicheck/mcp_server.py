@@ -57,6 +57,7 @@ from .checker_policy import (
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .mcp_shared import (
     _audit_log,
+    _call_with_timeout,
     _check_file_size,
     _logger,
     _safe_read_path,
@@ -538,15 +539,22 @@ def abi_dump(
 
         _check_file_size(lib, label="library_path")
         hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
+        for hdr in hdr_paths:
+            _check_file_size(hdr, label="header")
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
         ]
 
         # Run the expensive resolve+serialize in a thread with a real timeout
-        # so we don't block the MCP stdio server indefinitely.
-        with _futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(
-                _resolve_input,
+        # so we don't block the MCP stdio server indefinitely. Uses the
+        # shared _call_with_timeout (mcp_shared.py) rather than a local
+        # `with ThreadPoolExecutor(...) as pool:` block -- the `with` form's
+        # `shutdown(wait=True)` on exit blocked even after a TimeoutError had
+        # already fired, defeating the timeout for a genuinely stuck resolve
+        # (Codex review; same fix already applied to the four project tools
+        # in mcp_server_project.py).
+        def _resolve() -> AbiSnapshot:
+            return _resolve_input(
                 lib,
                 hdr_paths,
                 inc_paths,
@@ -554,17 +562,18 @@ def abi_dump(
                 language,
                 public_headers=hdr_paths,
             )
-            try:
-                snap = future.result(timeout=mcp_shared.MCP_TIMEOUT)
-            except _futures.TimeoutError:
-                elapsed = _time.monotonic() - t0
-                _audit_log("abi_dump", {"library": lib.name}, elapsed, "timeout")
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": f"abi_dump timed out after {mcp_shared.MCP_TIMEOUT}s",
-                    }
-                )
+
+        try:
+            snap = _call_with_timeout(_resolve)
+        except _futures.TimeoutError:
+            elapsed = _time.monotonic() - t0
+            _audit_log("abi_dump", {"library": lib.name}, elapsed, "timeout")
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"abi_dump timed out after {mcp_shared.MCP_TIMEOUT}s",
+                }
+            )
         snap_json = snapshot_to_json(snap)
 
         elapsed = _time.monotonic() - t0
@@ -769,6 +778,8 @@ def abi_compare(
             if new_headers is not None
             else shared
         )
+        for hdr in {*old_h, *new_h}:
+            _check_file_size(hdr, label="header")
         inc = [_safe_read_path(d, label="include_dir") for d in (include_dirs or [])]
 
         # Validate output_format early (before expensive work)
@@ -806,16 +817,18 @@ def abi_compare(
             if suppression_file:
                 from .suppression import SuppressionList
 
-                suppression = SuppressionList.load(
-                    _safe_read_path(suppression_file, label="suppression_file"),
+                suppression_path = _safe_read_path(
+                    suppression_file, label="suppression_file"
                 )
+                _check_file_size(suppression_path, label="suppression_file")
+                suppression = SuppressionList.load(suppression_path)
             pf = None
             if policy_file:
                 from .policy_file import PolicyFile
 
-                pf = PolicyFile.load(
-                    _safe_read_path(policy_file, label="policy_file"),
-                )
+                policy_path = _safe_read_path(policy_file, label="policy_file")
+                _check_file_size(policy_path, label="policy_file")
+                pf = PolicyFile.load(policy_path)
             return (
                 old_snap,
                 new_snap,
@@ -831,37 +844,35 @@ def abi_compare(
                 suppression,
             )
 
-        with _futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_do_compare)
-            try:
-                old_snap, new_snap, result, pf, suppression = future.result(timeout=mcp_shared.MCP_TIMEOUT)
-            except _futures.TimeoutError:
-                elapsed = _time.monotonic() - t0
-                _audit_log(
-                    "abi_compare",
-                    {"old": old_path.name, "new": new_path.name},
-                    elapsed,
-                    "timeout",
-                )
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": f"abi_compare timed out after {mcp_shared.MCP_TIMEOUT}s",
-                    }
-                )
-            except (ProfileMismatchError, ScopeMismatchError) as exc:
-                # ADR-050 D2: a genuine comparability-gate mismatch is a
-                # distinct, expected outcome -- not an "error" the caller
-                # should treat as an abicheck bug -- so it gets its own
-                # status, ordered before the generic except Exception below.
-                elapsed = _time.monotonic() - t0
-                _audit_log(
-                    "abi_compare",
-                    {"old": old_path.name, "new": new_path.name},
-                    elapsed,
-                    "not_comparable",
-                )
-                return json.dumps({"status": "not_comparable", "reason": str(exc)})
+        try:
+            old_snap, new_snap, result, pf, suppression = _call_with_timeout(_do_compare)
+        except _futures.TimeoutError:
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_compare",
+                {"old": old_path.name, "new": new_path.name},
+                elapsed,
+                "timeout",
+            )
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"abi_compare timed out after {mcp_shared.MCP_TIMEOUT}s",
+                }
+            )
+        except (ProfileMismatchError, ScopeMismatchError) as exc:
+            # ADR-050 D2: a genuine comparability-gate mismatch is a
+            # distinct, expected outcome -- not an "error" the caller
+            # should treat as an abicheck bug -- so it gets its own
+            # status, ordered before the generic except Exception below.
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_compare",
+                {"old": old_path.name, "new": new_path.name},
+                elapsed,
+                "not_comparable",
+            )
+            return json.dumps({"status": "not_comparable", "reason": str(exc)})
 
         # Use the active policy from the result (may differ from input when
         # policy_file overrides the base policy).
@@ -1409,13 +1420,14 @@ def abi_audit(
             return json.dumps({"status": "error", "error": "Library file not found"})
         _check_file_size(lib, label="library_path")
         hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
+        for hdr in hdr_paths:
+            _check_file_size(hdr, label="header")
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
         ]
 
-        with _futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(
-                _resolve_input,
+        def _resolve() -> AbiSnapshot:
+            return _resolve_input(
                 lib,
                 hdr_paths,
                 inc_paths,
@@ -1423,17 +1435,18 @@ def abi_audit(
                 language,
                 public_headers=hdr_paths,
             )
-            try:
-                snap = future.result(timeout=mcp_shared.MCP_TIMEOUT)
-            except _futures.TimeoutError:
-                elapsed = _time.monotonic() - t0
-                _audit_log("abi_audit", {"library": lib.name}, elapsed, "timeout")
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": f"abi_audit timed out after {mcp_shared.MCP_TIMEOUT}s",
-                    }
-                )
+
+        try:
+            snap = _call_with_timeout(_resolve)
+        except _futures.TimeoutError:
+            elapsed = _time.monotonic() - t0
+            _audit_log("abi_audit", {"library": lib.name}, elapsed, "timeout")
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"abi_audit timed out after {mcp_shared.MCP_TIMEOUT}s",
+                }
+            )
 
         cc = run_crosschecks(snap)
         pattern = scan_files([*hdr_paths], None)
@@ -1596,6 +1609,8 @@ def abi_scan(
         except ValueError as exc:
             return json.dumps({"status": "error", "error": str(exc)})
         hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
+        for hdr in hdr_paths:
+            _check_file_size(hdr, label="header")
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
         ]

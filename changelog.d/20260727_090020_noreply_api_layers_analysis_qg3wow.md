@@ -1,5 +1,29 @@
 ### Fixed
 
+- **`abi_dump`/`abi_compare`/`abi_audit` no longer block their own timeout
+  response on a stuck worker thread** — each used a local `with
+  ThreadPoolExecutor(...) as pool:` block; the `with` form's implicit
+  `shutdown(wait=True)` on exit (including on a `return` from inside the
+  block) blocked until the still-running worker finished, even after
+  `future.result(timeout=...)` had already raised `TimeoutError` for the
+  caller — the exact bug the four newer project tools' own
+  `_call_with_timeout` was built to avoid, but which these three original
+  tools still had (Codex review). Fixed by moving `_call_with_timeout`
+  itself into the shared `mcp_shared.py` (previously duplicated, in effect,
+  only in `mcp_server_project.py`) and wiring all seven thread-based tools
+  onto the one shared helper. Regression tests assert each of the three
+  fixed tools now returns within ~1s of a stuck 2s worker instead of
+  blocking for the full duration.
+- **`abi_dump`/`abi_audit`/`abi_scan`'s `headers` and `abi_compare`'s
+  `headers`/`old_headers`/`new_headers`/`suppression_file`/`policy_file`
+  now count against `--max-file-size`** — `docs/use/mcp-integration.md`
+  already claimed "every input artifact" is size-bounded, but only each
+  tool's primary `library_path`/`old_input`/`new_input`/`binary_path` was
+  actually checked; a caller could submit an arbitrarily large auxiliary
+  file regardless of a small `--max-file-size` (Codex review). `include_dirs`/
+  `public_header_dirs` remain uncovered by design — they're directories, and
+  a single file's byte size doesn't meaningfully bound one; `abi_estimate`
+  remains excluded too, since it never runs bounded work at all.
 - **`abi_deps`/`abi_aggregate`/`abi_project_validate`/`abi_project_plan` now
   honor ADR-021b's per-invocation timeout and input-size guards** — the
   four MCP tools added in the prior commit ran the CLI-equivalent work
