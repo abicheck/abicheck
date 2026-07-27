@@ -69,7 +69,7 @@ from .contract_relevance_types import (
 )
 from .finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
 from .model import ScopeOrigin
-from .post_processing import _PUBLIC_SOURCE_ABI_KINDS
+from .post_processing import _PUBLIC_SOURCE_ABI_KINDS, _change_matches_symbols
 from .surface import (
     _HIDDEN_FRIEND_KIND_NAMES,
     _MEMBER_LEVEL_TYPE_KIND_NAMES,
@@ -500,6 +500,7 @@ def evaluate_change_contract_relevance(
     *,
     mode: ContractMode = ContractMode.PUBLIC,
     unions: SurfaceUnions | None = None,
+    force_public_symbols: frozenset[str] | None = None,
 ) -> ContractEvaluationDecision:
     """Compute *change*'s shadow contract-relevance decision.
 
@@ -510,6 +511,10 @@ def evaluate_change_contract_relevance(
     ``unions`` (:func:`~abicheck.surface.surface_unions`) when evaluating many
     changes against the same pair, mirroring
     :func:`~abicheck.surface.classify_change_surface`'s own guidance.
+    ``force_public_symbols`` mirrors ``PipelineContext.force_public_symbols``
+    (ADR-024 D6's widening overlay, ``FilterNonPublicSurface``'s
+    ``_run_scope``/``_run_allowlist``) -- omit it (the default) when the
+    caller has no such overlay configured for this run.
 
     Never raises for a *finding* it cannot confidently classify -- every such
     case degrades to ``UNKNOWN_UNRESOLVED`` (see the module docstring's
@@ -606,14 +611,50 @@ def evaluate_change_contract_relevance(
             assurance=ContractAssurance.COMPLETE,
         )
 
-    if not (surf_old.resolvable and surf_new.resolvable):
-        # No header-derived visibility on one or both sides: no confident
+    # `force_public_symbols` (ADR-024 D6's widening overlay) is a
+    # user-guaranteed override: `FilterNonPublicSurface._run_scope`/
+    # `_run_allowlist` keep a matching change in-surface *unconditionally*,
+    # bypassing their own demotion path entirely -- such a change therefore
+    # never gets a `surface_exclusion_reason` set for this reason (the check
+    # above never fires for it), and a from-scratch `classify_change_surface`
+    # recomputation here has no way to know the override exists at all, so it
+    # can reach a private-header/system-header conclusion that directly
+    # contradicts the pipeline's own forced-public decision for the same
+    # symbol. Checked at this same early-trust point, mirroring the pipeline
+    # step's own "regardless of provenance/export classification" rule
+    # (Codex review, fresh evidence).
+    if force_public_symbols and _change_matches_symbols(change, force_public_symbols):
+        return ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    if not (surf_old.resolvable or surf_new.resolvable):
+        # Neither side has header-derived visibility at all: no confident
         # contract-relevance claim is possible for any other C/C++ entity
         # finding -- that rule is about not *hiding* a finding from a
         # report, an entirely different question from "can this shadow
-        # evaluator confidently label it". (A `python_*`/never-filter
-        # finding never reaches this branch at all -- see the early return
-        # above.)
+        # evaluator confidently label it". (A `python_*`/never-filter/
+        # force-public finding never reaches this branch at all -- see the
+        # early returns above.)
+        #
+        # Deliberately `or`, not `and` (Codex review, fresh evidence): a
+        # *positive* public-root proof from whichever side is resolvable is
+        # sufficient on its own -- e.g. a `FUNC_REMOVED` finding is proven by
+        # the *old* side alone (the function existed and was public there;
+        # the new side's own header availability is irrelevant to that
+        # fact). Only a *negative* exclusion claim genuinely needs both
+        # sides' agreement, and `classify_change_surface`'s own internal
+        # gate (`if not (surf_old.resolvable and surf_new.resolvable):
+        # return True, None`) already guarantees `in_surface` is never
+        # confidently `False` whenever either side is unresolvable -- so
+        # falling through to the ordinary classify/confirm path below with
+        # only one side resolvable can still correctly reach `IN_CONTRACT`
+        # (confirmed via the resolvable side's real universe data, since
+        # `surface_unions` of a real surface and a bare/unresolvable one is
+        # just the real side's own sets) but can never wrongly reach
+        # `PROVEN_OUT_OF_CONTRACT`.
         return _unresolved_decision(
             "required_evidence_incomplete", ContractAssurance.UNAVAILABLE
         )
@@ -638,10 +679,12 @@ def evaluate_change_contract_relevance(
             "required_evidence_incomplete", ContractAssurance.PARTIAL
         )
 
-    # `classify_change_surface` only returns `in_surface=False` with a reason
-    # drawn from `_ALL_SURFACE_REASONS` once both sides are resolvable (the
-    # branch above already handled the unresolvable case) -- see that
-    # function's own reason-code constants.
+    # `classify_change_surface` only returns `in_surface=False` (with a
+    # reason drawn from `_ALL_SURFACE_REASONS`) when *both* sides are
+    # resolvable -- its own internal gate returns `(True, None)` whenever
+    # either side isn't (see the `or`-gate comment above), so this branch is
+    # only reachable with full two-sided evidence even though the gate
+    # above only bails out when *neither* side is resolvable.
     assert reason in _ALL_SURFACE_REASONS, f"unrecognized surface reason: {reason!r}"
     return _decision_for_surface_reason(reason)
 
@@ -652,14 +695,21 @@ def evaluate_snapshot_pair_contract_relevance(
     surf_new: PublicSurface,
     *,
     mode: ContractMode = ContractMode.PUBLIC,
+    force_public_symbols: frozenset[str] | None = None,
 ) -> list[ContractEvaluationDecision]:
     """:func:`evaluate_change_contract_relevance` for a whole comparison's
     findings, computing the surface unions once (see that function's
-    ``unions`` parameter) rather than once per finding."""
+    ``unions`` parameter) rather than once per finding. ``force_public_symbols``
+    is passed through to every call -- see that function's own parameter."""
     unions = surface_unions(surf_old, surf_new)
     return [
         evaluate_change_contract_relevance(
-            change, surf_old, surf_new, mode=mode, unions=unions
+            change,
+            surf_old,
+            surf_new,
+            mode=mode,
+            unions=unions,
+            force_public_symbols=force_public_symbols,
         )
         for change in changes
     ]

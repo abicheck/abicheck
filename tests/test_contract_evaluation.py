@@ -199,6 +199,64 @@ class TestPublicModeUnresolvedSurface:
         assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
         assert decision.reason_code == "required_evidence_incomplete"
 
+    def test_confirmed_public_on_the_resolvable_side_alone_is_in_contract(
+        self,
+    ) -> None:
+        # Regression (Codex review, fresh evidence): a positive public-root
+        # proof from *one* resolvable side is sufficient on its own -- e.g.
+        # a FUNC_REMOVED finding is proven by the old side alone (the
+        # function existed and was public there; the new side's own header
+        # availability, or complete absence of one, is irrelevant to that
+        # fact). Only a *negative* exclusion claim needs both sides'
+        # agreement, and classify_change_surface's own internal gate
+        # already guarantees it never confidently returns in_surface=False
+        # when either side is unresolvable -- so relaxing the blanket both-
+        # sides-required gate here can only ever *gain* a correct
+        # IN_CONTRACT, never wrongly reach PROVEN_OUT_OF_CONTRACT.
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        resolvable = compute_public_surface(snap)
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3api", description="")
+        decision = evaluate_change_contract_relevance(
+            c, resolvable, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_confirmed_public_on_the_new_side_alone_is_in_contract(self) -> None:
+        # Symmetric case: a FUNC_ADDED finding proven by the *new* side
+        # alone, with the old side completely unresolvable (e.g. a
+        # from-scratch comparison against an empty baseline).
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        resolvable = compute_public_surface(snap)
+        c = Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3api", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, resolvable, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_neither_side_resolvable_still_downgrades_with_unavailable_assurance(
+        self,
+    ) -> None:
+        # The fully-blind case (both sides unresolvable) must keep its
+        # original UNAVAILABLE assurance -- only the one-sided case gains
+        # the finer PARTIAL distinction.
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3api", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="required_evidence_incomplete",
+            assurance=ContractAssurance.UNAVAILABLE,
+        )
+
     def test_python_prefixed_kind_bypasses_unresolvable_surface(self) -> None:
         # Regression (Codex review, eleventh round): a `python_*` finding
         # lives on a distinct evidence axis (the Python API/stub surface)
@@ -1091,6 +1149,93 @@ class TestPublicModeWeakReason:
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
         assert decision.reason_code == "required_evidence_incomplete"
+
+
+class TestPublicModeForcePublicOverlay:
+    """``force_public_symbols`` (ADR-024 D6's widening overlay) is a
+    user-guaranteed override: ``FilterNonPublicSurface``'s
+    ``_run_scope``/``_run_allowlist`` keep a matching change in-surface
+    unconditionally, bypassing their own demotion path -- so such a change
+    never gets a ``surface_exclusion_reason`` set, and a from-scratch
+    ``classify_change_surface`` recomputation with no knowledge of the
+    overlay could reach a conclusion that contradicts the pipeline's own
+    forced-public decision (Codex review, fresh evidence)."""
+
+    def test_force_public_symbol_is_in_contract_despite_private_header_origin(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("secret_impl", origin=ScopeOrigin.PRIVATE_HEADER)],
+        )
+        s = compute_public_surface(snap)
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="secret_impl", description="")
+        # Without the overlay, a confident private-header origin resolves
+        # to a terminal exclusion.
+        baseline = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert baseline.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        decision = evaluate_change_contract_relevance(
+            c,
+            s,
+            s,
+            mode=ContractMode.PUBLIC,
+            force_public_symbols=frozenset({"secret_impl"}),
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_force_public_matches_the_qualified_tail_too(self) -> None:
+        # Mirrors _change_matches_symbols' own suffix-tolerant matching: an
+        # overlay entry "secret_impl" matches a qualified "ns::secret_impl".
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="ns::secret_impl", description=""
+        )
+        decision = evaluate_change_contract_relevance(
+            c,
+            _UNRESOLVABLE,
+            _UNRESOLVABLE,
+            mode=ContractMode.PUBLIC,
+            force_public_symbols=frozenset({"secret_impl"}),
+        )
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+    def test_non_matching_symbol_is_unaffected_by_the_overlay(self) -> None:
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="unrelated", description="")
+        decision = evaluate_change_contract_relevance(
+            c,
+            _UNRESOLVABLE,
+            _UNRESOLVABLE,
+            mode=ContractMode.PUBLIC,
+            force_public_symbols=frozenset({"secret_impl"}),
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+    def test_empty_overlay_is_a_no_op(self) -> None:
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="whatever", description="")
+        decision = evaluate_change_contract_relevance(
+            c,
+            _UNRESOLVABLE,
+            _UNRESOLVABLE,
+            mode=ContractMode.PUBLIC,
+            force_public_symbols=frozenset(),
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+    def test_evaluate_snapshot_pair_propagates_the_overlay(self) -> None:
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="secret_impl", description="")
+        decisions = evaluate_snapshot_pair_contract_relevance(
+            [c],
+            _UNRESOLVABLE,
+            _UNRESOLVABLE,
+            mode=ContractMode.PUBLIC,
+            force_public_symbols=frozenset({"secret_impl"}),
+        )
+        assert decisions[0].relevance is ContractRelevance.IN_CONTRACT
 
 
 class TestNeverEmitsUnknownUnproven:
