@@ -813,7 +813,7 @@ Pack *content* loading has also landed: `abicheck/compatibility_evaluation_packs
 bytes, paired with the pack's resolved `field name -> value` assignments),
 and `assignments_for_conflict_check` projects a list of `LoadedPack`s,
 grouped by `PackKind`, into the `(ImmutableIdentity, Mapping[str, Hashable])`
-pairs `detect_pack_conflicts` already accepts -- callers run
+pairs `detect_pack_conflicts` already accepts -- a caller will need to run
 `detect_pack_conflicts` once per returned kind group, since D8's conflict
 rule is scoped to comparing packs *within* one namespace, not across them
 (a flat, ungrouped projection previously let a policy pack's `ChangeKind`

@@ -78,12 +78,12 @@ def _var(ident: str) -> Variable:
 
 
 @st.composite
-def _removal_scenario(draw: st.DrawFn):
+def _removal_scenario(draw: st.DrawFn) -> list[tuple[str, bool]]:
     idents = draw(st.lists(_ident, min_size=1, max_size=10, unique=True))
     keep_mask = draw(
         st.lists(st.booleans(), min_size=len(idents), max_size=len(idents))
     )
-    return [(ident, keep) for ident, keep in zip(idents, keep_mask)]
+    return list(zip(idents, keep_mask, strict=True))
 
 
 class TestFunctionRemovalFactConservation:

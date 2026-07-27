@@ -13,4 +13,6 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   contract/gate pack's own field name collide by string coincidence
   alone, raising a spurious cross-namespace `PackConflictError` even
   though D8 scopes conflict detection to packs within one namespace.
-  Callers now run `detect_pack_conflicts()` once per returned kind group.
+  A caller will need to run `detect_pack_conflicts()` once per returned
+  kind group -- no such caller exists yet; this loader only fixes the
+  projection shape it will need to consume.
