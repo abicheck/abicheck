@@ -196,10 +196,11 @@ touches the CLI's own heavily-tested resolution path), or (b) extend
 `run_compare_request` to match `_resolve_compare_snapshots`'s capability
 set in parallel, keeping both paths but eliminating the *capability* gap
 between them (lower risk, but the two-path duplication ADR-055 D1 set out
-to close would persist one level down). Depends on `DumpManifest`/
-`CompileContext` per-side wiring either way — track against
-[G32](g32-comparability-contract-and-multi-tu-manifest.md)'s own phase
-status for that machinery, don't invent a second shape.
+to close would persist one level down). The `DumpManifest`/`CompileContext`
+machinery itself is no longer a blocker either way — G32 (Phase 0 and
+Phases A–E) is now done, per that plan's own status — so this phase's
+only real blocker is the resolution-path decision above, not missing
+lower-level machinery.
 
 ### Phase 3 — `CompareResult` wrapper (ADR-055 D2)
 
