@@ -209,6 +209,7 @@ module = [
     "abicheck.buildsource.inline",
     "abicheck.buildsource.project_targets",
     "abicheck.buildsource.toolchain_bindings",
+    "abicheck.compatibility_evaluation_packs",
 ]
 disable_error_code = ["import-untyped"]
 

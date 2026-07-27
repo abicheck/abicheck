@@ -804,13 +804,35 @@ wiring also landed:
 `resolve_legacy_contract_mode` resolves `contract.mode` from the real
 `--scope-public-headers`/`--no-scope-public-headers` CLI flag via
 `resolve_field` — not called from any live command yet (that's the Phase 3
-shadow evaluator's job). Still remaining: wiring any other field
-(`cli_options.py`'s other shared option families, `.abicheck.yml`
-schema/reference docs, service/API request models) to construct real
-`FieldCandidate`s, and loading actual pack *content* (a pack-manifest
-format `detect_pack_conflicts` can consume — today it only has the
-conflict-detection algorithm, no loader) — packs are otherwise unused
-beyond `CompatibilityEvaluationConfig`'s own `ImmutableIdentity` references.
+shadow evaluator's job).
+
+Pack *content* loading has also landed: `abicheck/compatibility_evaluation_packs.py`'s
+`load_pack_manifest` reads a small versioned YAML pack-manifest format
+(`id`/`version`/`kind: contract|policy|gate`/`assignments`) into a
+`LoadedPack` (an `ImmutableIdentity` content-digested over the manifest's raw
+bytes, paired with the pack's resolved `field name -> value` assignments),
+and `assignments_for_conflict_check` projects a list of `LoadedPack`s
+straight into the `(ImmutableIdentity, Mapping[str, Hashable])` pairs
+`detect_pack_conflicts` already accepts. A `kind: policy` manifest's
+assignments are `ChangeKind` slug -> severity spelling, converted through
+`policy_file.py`'s now-public `parse_severity_value` (extracted from
+`_parse_overrides` so the two loaders share one severity vocabulary instead
+of each declaring it independently) with the identical unknown-slug hard
+error as `--policy-file`. A `kind: contract`/`kind: gate` manifest's
+assignments are arbitrary field-name -> scalar/list values, recursively
+converted to hashable tuples. This module only loads pack content into the
+shape `detect_pack_conflicts` accepts — it does not select which packs apply
+to a run, call `detect_pack_conflicts` itself, or fold a policy pack's
+resolved overrides into `CompatibilityPolicyConfig.overrides`.
+
+Still remaining: wiring any other field (`cli_options.py`'s other shared
+option families, `.abicheck.yml` schema/reference docs, service/API request
+models) to construct real `FieldCandidate`s, and selecting/composing loaded
+packs into `ContractConfig.packs`/`CompatibilityPolicyConfig.packs`/
+`GateConfig.packs` for a real run (today a pack's `ImmutableIdentity` can be
+referenced there, but no front end resolves a `--pack <name>`-style CLI/config
+input into one, and no call site invokes `detect_pack_conflicts` with real
+packs during config resolution).
 
 ### Phase 2 — canonical identity and fact conservation
 
@@ -830,13 +852,31 @@ the same principle ADR-045 established for flat type matching
 (`buildsource/entity_identity.py`). Deliberately not wired into any live
 comparison path yet — `diff_symbols.py`'s old/new function and variable
 matching and `diff_filtering.py`'s `_deduplicate_cross_detector` dedup key
-are unchanged. Still remaining: wiring a call site to actually consult it
-(a real refactor against the existing hand-tuned matching logic and its
+are unchanged.
+
+A Hypothesis property suite for the identity primitive itself
+(`tests/test_finding_identity_properties.py`, `slow`) is also done, covering
+the invariants a real reconciliation call site will need to hold for D9's
+fact-conservation rule to be checkable once wired in: determinism (the same
+declaration always resolves to the same identity), that two independently-
+built but content-identical declarations (modeling an unchanged entity on
+the old and new side of a comparison) resolve to the *same* primary id
+(never a spurious removal+addition pair), that two declarations with
+genuinely distinct verified mangled names never collide onto the same
+CANONICAL-tier primary id (never masking a real removal), and that a
+batch-shaped finding's identity is invariant under which arbitrary export
+happened to be sampled into it. This tests the primitive in isolation, not
+`diff_symbols.py`/`diff_filtering.py`/`checker.compare` — it is not the
+end-to-end "no old-side symbol silently vanishes" property over an actual
+comparison run, which needs a real call site to exist first.
+
+Still remaining: wiring a call site to actually consult this identity (a
+real refactor against the existing hand-tuned matching logic and its
 extensive golden/FP-rate/tier-accuracy test coverage, not a drive-by
-change), and the fact-conservation property test itself (a Hypothesis
-check that no old-side symbol silently vanishes without either a matched
-new-side counterpart or an emitted removal finding) — this module is only
-the identity primitive that gate will consume.
+change), and — once that wiring exists — an end-to-end fact-conservation
+property test over `checker.compare` itself (old-side symbol sets always
+resolve to either a matched new-side counterpart or an emitted removal
+finding, never neither).
 
 ### Phase 3 — shadow contract evaluator
 

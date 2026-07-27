@@ -1,13 +1,15 @@
 # ADR-049: Contract Relevance and Compatibility Configuration
 
 **Date:** 2026-07-21
-**Status:** Accepted (2026-07-26). Phase 0 and Phase 1 slices 1–2 are
+**Status:** Accepted (2026-07-26). Phase 0 and Phase 1 slices 1–3 are
 implemented (`abicheck/contract_relevance_types.py`,
 `abicheck/compatibility_evaluation_config.py`,
-`abicheck/compatibility_evaluation_resolver.py`); see
-`docs/contribute/plans/public-contract-default.md`'s "Work breakdown" for
-current per-phase progress. Nothing here is wired into detection, policy,
-the CLI, or reports yet.
+`abicheck/compatibility_evaluation_resolver.py`,
+`abicheck/compatibility_evaluation_packs.py`), and Phase 2's identity
+primitive (`abicheck/finding_identity.py`) plus its property-test suite are
+implemented; see `docs/contribute/plans/public-contract-default.md`'s "Work
+breakdown" for current per-phase progress. Nothing here is wired into
+detection, policy, the CLI, or reports yet.
 **Decision maker:** napetrov
 
 ## Context
