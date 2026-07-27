@@ -27,6 +27,7 @@ sides while the per-side ``--old/new-ast-frontend`` override still wins.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import click
@@ -435,6 +436,65 @@ def test_probe_gnu_system_includes_bounded_by_local_cap_not_full_scan_budget(
         # startswith('lib') to an exact multilib-name set).
         ("/home/gcc/include", False),
         ("/opt/libfoo/gcc/x86_64-linux-gnu/13/include", False),
+        # Unresolved paths containing a literal '../' walk-back: GCC and
+        # Intel's icpx/icx report search dirs this way. The '..' segments
+        # must be normalized away before matching, or a real libstdc++/libc
+        # dir that happens to be reached by walking back out of the gcc/
+        # version dir is misclassified as the GCC resource dir it walks
+        # *through* rather than the dir it actually names.
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13", False),
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include", False),
+        (
+            "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/x86_64-linux-gnu/c++/13",
+            False,
+        ),
+        # A genuine GCC resource dir is still caught after normalization even
+        # when spelled with a redundant './'/'..' that lexically collapses
+        # back to the same resource path (not walked all the way out).
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/./include", True),
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/sub/../include-fixed", True),
+        # A real libstdc++ dir merely NESTED inside a lib/gcc/<triple>/<ver>
+        # tree (not the resource dir itself) must stay False: a scan for "any
+        # multilib+gcc pair" over-matches every descendant of that tree, not
+        # just the literal .../include[-fixed] resource dir (Codex review, PR
+        # #643, round 3).
+        ("/opt/lib/gcc/toolchain/13/include/c++/13", False),
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/include/c++/13", False),
+        # A trailing segment after 'include'/'include-fixed' breaks the exact
+        # end-of-path shape -- this is not the resource dir itself either.
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/include/nested", False),
+        # Homebrew's packaged GCC nests an extra 'current' alias segment and
+        # a second literal 'gcc' segment: its build is configured with
+        # --libdir=<prefix>/lib/gcc/current, and GCC's own build script
+        # always appends gcc/<target>/<version> beneath whatever libdir it
+        # is given (confirmed against a real Homebrew GCC install; Codex
+        # review, PR #643, round 6).
+        (
+            "/opt/homebrew/Cellar/gcc/14.2.0/lib/gcc/current/gcc/"
+            "aarch64-apple-darwin23/14/include-fixed",
+            True,
+        ),
+        (
+            "/opt/homebrew/Cellar/gcc/14.2.0/lib/gcc/current/gcc/"
+            "aarch64-apple-darwin23/14/include",
+            True,
+        ),
+        # The alias segment's value isn't checked -- only its structural
+        # position between the two 'gcc' segments -- so a differently-named
+        # alias (not literally "current") still matches the same shape.
+        (
+            "/opt/homebrew/Cellar/gcc/14.2.0/lib/gcc/14/gcc/"
+            "aarch64-apple-darwin23/14/include",
+            True,
+        ),
+        # The nested shape still requires a genuine 'gcc'/'gcc-cross' pair at
+        # both positions -- an unrelated intervening segment structure with
+        # only one real 'gcc' occurrence must not match.
+        (
+            "/opt/homebrew/Cellar/gcc/14.2.0/lib/gcc/current/notgcc/"
+            "aarch64-apple-darwin23/14/include",
+            False,
+        ),
     ],
 )
 def test_is_gnu_compiler_resource_dir(path: str, expected: bool) -> None:
@@ -469,6 +529,330 @@ def test_probe_gnu_system_includes_drops_gcc_resource_dir(
     )
     out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
     assert out == [str(libstdcxx), str(libc)]  # gcc resource dir filtered out
+
+
+def test_probe_gnu_system_includes_drops_homebrew_nested_gcc_resource_dir(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Homebrew's packaged GCC reports its resource dir as
+    # .../lib/gcc/current/gcc/<triple>/<ver>/include[-fixed] (confirmed
+    # against a real Homebrew GCC install; Codex review, PR #643, round 6).
+    # This must be dropped like any other GCC resource dir, not kept.
+    from abicheck import dumper_sysinc
+
+    libstdcxx = tmp_path / "include" / "c++" / "13"
+    homebrew_gcc_res = (
+        tmp_path
+        / "lib"
+        / "gcc"
+        / "current"
+        / "gcc"
+        / "aarch64-apple-darwin23"
+        / "14"
+        / "include-fixed"
+    )
+    for d in (libstdcxx, homebrew_gcc_res):
+        d.mkdir(parents=True, exist_ok=True)
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc,
+        "_parse_gnu_include_search_dirs",
+        lambda s: [str(homebrew_gcc_res), str(libstdcxx)],
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    assert out == [str(libstdcxx)]  # Homebrew's nested gcc resource dir filtered out
+
+
+def test_probe_gnu_system_includes_keeps_unresolved_walk_back_libstdcxx(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # GCC (and Intel's icpx/icx) report the real libstdc++ dir as an unresolved
+    # string that walks back out of the versioned gcc/ dir with literal '../'
+    # segments (e.g. '.../lib/gcc/<triple>/13/../../../../include/c++/13'),
+    # rather than the already-resolved '/usr/include/c++/13'. That must be
+    # kept, not dropped as though it were the GCC resource dir it walks
+    # *through* on the way there.
+    from abicheck import dumper_sysinc
+
+    real_libstdcxx = tmp_path / "include" / "c++" / "13"
+    real_libstdcxx.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "lib" / "gcc" / "x86_64-linux-gnu" / "13").mkdir(parents=True)
+    unresolved_libstdcxx = str(
+        tmp_path
+        / "lib"
+        / "gcc"
+        / "x86_64-linux-gnu"
+        / "13"
+        / ".."
+        / ".."
+        / ".."
+        / ".."
+        / "include"
+        / "c++"
+        / "13"
+    )
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc,
+        "_parse_gnu_include_search_dirs",
+        lambda s: [unresolved_libstdcxx],
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    assert out == [unresolved_libstdcxx]
+
+
+_SYMLINK_SKIP_REASON = (
+    "creates a directory symlink via Path.symlink_to(target_is_directory=True), "
+    "which needs SeCreateSymbolicLinkPrivilege/Developer Mode on native Windows "
+    "(same rationale as test_runtime_probe.py's symlink-dependent skips)"
+)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason=_SYMLINK_SKIP_REASON)
+def test_probe_gnu_system_includes_resolves_symlink_before_classifying(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Codex review (PR #643): lexically collapsing '..' is wrong once a
+    # symlink sits in the path -- the OS resolves '..' relative to the
+    # symlink's *target* directory, not the symlink's own location. Build a
+    # case where that distinction changes the classification: the reported
+    # path's literal segments walk (lexically) all the way out of lib/gcc to
+    # a location with no GCC-resource shape at all, but 'triple/13' is
+    # actually a symlink four levels *deeper* than a real version dir would
+    # be, so the same four '../' hops physically land back on a sibling
+    # '.../13.2.0/include-fixed' -- a real GCC resource dir, not system
+    # libstdc++ (the shape-tightening from round 3 of this same review means
+    # the landing spot must itself match the full resource-dir shape, not
+    # merely sit somewhere under lib/gcc).
+    from abicheck import dumper_sysinc
+
+    base = tmp_path / "base"
+    real_target = (
+        base
+        / "lib"
+        / "gcc"
+        / "x86_64-linux-gnu"
+        / "13.2.0"
+        / "extra1"
+        / "extra2"
+        / "extra3"
+        / "extra4"
+    )
+    real_target.mkdir(parents=True)
+    symlinked_ver = base / "lib" / "gcc" / "x86_64-linux-gnu" / "13"
+    symlinked_ver.symlink_to(real_target, target_is_directory=True)
+    # Where the four '../' hops *physically* land, starting from real_target:
+    # extra4 -> extra3 -> extra2 -> extra1 -> 13.2.0, then include-fixed.
+    physically_resolved = (
+        base / "lib" / "gcc" / "x86_64-linux-gnu" / "13.2.0" / "include-fixed"
+    )
+    physically_resolved.mkdir(parents=True)
+
+    reported = str(symlinked_ver / ".." / ".." / ".." / ".." / "include-fixed")
+    # Sanity check the fixture actually exercises the symlink hazard: lexical
+    # normpath must disagree with realpath, or this test proves nothing.
+    assert os.path.normpath(reported) != os.path.realpath(reported)
+    assert os.path.realpath(reported) == str(physically_resolved)
+    assert dumper_sysinc._is_gnu_compiler_resource_dir(reported) is False
+    assert (
+        dumper_sysinc._is_gnu_compiler_resource_dir(os.path.realpath(reported)) is True
+    )
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc, "_parse_gnu_include_search_dirs", lambda s: [reported]
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    # Physically this is still inside lib/gcc -- must be dropped, not kept.
+    assert out == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason=_SYMLINK_SKIP_REASON)
+def test_probe_gnu_system_includes_drops_terminal_symlinked_resource_dir(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Codex review (PR #643, round 2): the opposite symlink hazard from the
+    # walk-back case above. Here the reported path has no '..' at all -- it
+    # IS the canonical '.../lib/gcc/<triple>/<ver>/include' resource path --
+    # but that exact directory is itself a symlink to storage physically
+    # outside any lib/gcc hierarchy (e.g. a distro that stores GCC's
+    # intrinsics headers in a shared location). realpath() alone would
+    # resolve past the lib/gcc evidence and wrongly classify this as safe to
+    # keep, feeding clang GCC's incompatible intrinsics headers. The raw,
+    # lexically-normalized path must still be checked and win.
+    from abicheck import dumper_sysinc
+
+    base = tmp_path / "base"
+    external_storage = base / "external_storage" / "gcc13_include"
+    external_storage.mkdir(parents=True)
+    canonical_resource_dir = base / "lib" / "gcc" / "x86_64-linux-gnu" / "13"
+    canonical_resource_dir.mkdir(parents=True)
+    terminal_symlink = canonical_resource_dir / "include"
+    terminal_symlink.symlink_to(external_storage, target_is_directory=True)
+
+    reported = str(terminal_symlink)
+    # Sanity check the fixture actually exercises the hazard: the raw path
+    # lexically matches the resource-dir shape, but its realpath doesn't.
+    assert dumper_sysinc._is_gnu_compiler_resource_dir(reported) is True
+    assert (
+        dumper_sysinc._is_gnu_compiler_resource_dir(os.path.realpath(reported)) is False
+    )
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc, "_parse_gnu_include_search_dirs", lambda s: [reported]
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    # This is GCC's own named resource dir regardless of where it's
+    # symlinked to -- must be dropped, not kept.
+    assert out == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason=_SYMLINK_SKIP_REASON)
+def test_probe_gnu_system_includes_drops_aliased_symlink_to_resource_dir(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Codex review (PR #643, round 8): the mirror case of the terminal-symlink
+    # test above. There, the raw path IS the canonical resource-dir name but
+    # is symlinked *away* from it; here the raw path is an arbitrary,
+    # non-resource-shaped alias (no '..' either) that is symlinked *to* the
+    # real resource dir. The raw string alone (round 2's fix) misses this
+    # evidence entirely and would wrongly keep GCC's intrinsics headers under
+    # the innocuous-looking alias name. Both directions must be checked when
+    # there's no '..' to make the lexical form ambiguous.
+    from abicheck import dumper_sysinc
+
+    base = tmp_path / "base"
+    real_resource_dir = base / "lib" / "gcc" / "x86_64-linux-gnu" / "13" / "include"
+    real_resource_dir.mkdir(parents=True)
+    alias = base / "opt" / "toolchain" / "include"
+    alias.parent.mkdir(parents=True)
+    alias.symlink_to(real_resource_dir, target_is_directory=True)
+
+    reported = str(alias)
+    # Sanity check the fixture actually exercises the hazard: the raw path
+    # does NOT lexically match the resource-dir shape, but its realpath does.
+    assert dumper_sysinc._is_gnu_compiler_resource_dir(reported) is False
+    assert (
+        dumper_sysinc._is_gnu_compiler_resource_dir(os.path.realpath(reported)) is True
+    )
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc, "_parse_gnu_include_search_dirs", lambda s: [reported]
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    # This alias resolves to GCC's own resource dir -- must be dropped.
+    assert out == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason=_SYMLINK_SKIP_REASON)
+def test_probe_gnu_system_includes_keeps_real_dir_via_midpath_symlink(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Codex review (PR #643, round 7): checking the raw string in *addition
+    # to* realpath (an "or", as an earlier version of this fix did) is wrong
+    # once '..' is involved, not just insufficient on its own. Here a
+    # mid-path symlink component ('hop') sits between the version dir and a
+    # trailing '..': lexically this collapses right back to the canonical
+    # resource shape, but the compiler's actual open() call resolves through
+    # the symlink to a real, unrelated include dir elsewhere. Checking the
+    # raw string here would wrongly drop that real include dir -- only
+    # realpath is trustworthy once '..' is present.
+    from abicheck import dumper_sysinc
+
+    base = tmp_path / "base"
+    real_deep = base / "external" / "deep"
+    real_deep.mkdir(parents=True)
+    real_include = base / "external" / "include"
+    real_include.mkdir(parents=True)
+    ver_dir = base / "lib" / "gcc" / "x86_64-linux-gnu" / "13"
+    ver_dir.mkdir(parents=True)
+    hop = ver_dir / "hop"
+    hop.symlink_to(real_deep, target_is_directory=True)
+
+    reported = str(hop / ".." / "include")
+    # Sanity check the fixture actually exercises the hazard: the raw path
+    # lexically matches the resource-dir shape, but its realpath is a real,
+    # differently-shaped, unrelated directory.
+    assert dumper_sysinc._is_gnu_compiler_resource_dir(reported) is True
+    assert os.path.realpath(reported) == str(real_include)
+    assert (
+        dumper_sysinc._is_gnu_compiler_resource_dir(os.path.realpath(reported)) is False
+    )
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc, "_parse_gnu_include_search_dirs", lambda s: [reported]
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    # This is a real, unrelated include dir -- must be kept, not dropped.
+    assert out == [reported]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason=_SYMLINK_SKIP_REASON)
+def test_probe_gnu_system_includes_keeps_libstdcxx_symlinked_under_lib_gcc(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # Codex review (PR #643, round 3): a real libstdc++ dir reported by a
+    # plain, no-'..' path (no lib/gcc trace at all in the raw string) can be
+    # a symlink whose *target* happens to be physically stored underneath a
+    # lib/gcc/<triple>/<ver> tree -- e.g. a distro nesting real std:: headers
+    # inside its GCC install rather than GCC's own intrinsics dir. Before the
+    # round-3 shape fix, realpath(d) would see the lib/gcc pair anywhere in
+    # that resolved path and wrongly drop this real libstdc++ dir; the
+    # trailing shape must be checked precisely (ends in a bare
+    # include/include-fixed after exactly <triple>/<ver>, not merely
+    # "somewhere under lib/gcc").
+    from abicheck import dumper_sysinc
+
+    base = tmp_path / "base"
+    real_target = (
+        base / "opt" / "lib" / "gcc" / "toolchain" / "13" / "include" / "c++" / "13"
+    )
+    real_target.mkdir(parents=True)
+    reported_dir = base / "opt" / "include" / "c++" / "13"
+    reported_dir.parent.mkdir(parents=True)
+    reported_dir.symlink_to(real_target, target_is_directory=True)
+
+    reported = str(reported_dir)
+    # Sanity check the fixture actually exercises the hazard: the realpath
+    # does sit under a lib/gcc tree, but not in the exact resource shape.
+    assert dumper_sysinc._is_gnu_compiler_resource_dir(reported) is False
+    assert (
+        dumper_sysinc._is_gnu_compiler_resource_dir(os.path.realpath(reported)) is False
+    )
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc, "_parse_gnu_include_search_dirs", lambda s: [reported]
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    # A real libstdc++ dir -- must be kept, not dropped.
+    assert out == [reported]
 
 
 def test_buildconfig_compile_frontend_case_insensitive() -> None:

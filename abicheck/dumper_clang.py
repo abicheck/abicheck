@@ -113,6 +113,47 @@ def _is_clang_family_binary(path: str) -> bool:
     return "clang" in stem or stem in _CLANG_FAMILY_ALIAS_NAMES
 
 
+def _is_intel_sycl_driver(path: str) -> bool:
+    """True if *path* is Intel's oneAPI DPC++/C++ compiler (icx/icpx/dpcpp[-cl]).
+
+    These are the only clang-family drivers known to implement
+    ``-fsycl-host-only``/``-fsycl-device-only`` (Intel's SYCL
+    single-compilation-pass flags): stock upstream clang accepts a bare
+    ``-fsycl`` and parses it fine as a single pass, but hard-rejects both
+    flags with "unknown argument" (Codex review, PR #643: verified against a
+    real clang 17/18 install). Deliberately narrower than
+    :func:`_is_clang_family_binary` (which also matches plain
+    "clang"/"clang++") — widening this to that check would make
+    :func:`abicheck.dumper._needs_sycl_host_only` append a flag stock clang
+    cannot parse, breaking a ``--gcc-path clang`` + ``-fsycl`` combination
+    that previously worked.
+    """
+    return Path(path).stem.lower() in _CLANG_FAMILY_ALIAS_NAMES
+
+
+#: Intel's legacy, now-deprecated "dpcpp"/"dpcpp-cl" driver names predate the
+#: unified icx/icpx compiler and its explicit ``-fsycl`` opt-in: "dpcpp" was
+#: historically the SYCL-specific entry point (Intel's own migration guidance
+#: frames it as "switch to the C++ driver with -fsycl", implying dpcpp itself
+#: never needed the flag), so invoking one of these two names can enable SYCL
+#: even with no ``-fsycl``/``-fno-sycl`` token at all (Codex review, PR #643,
+#: round 8). Not independently confirmed in the current open-source
+#: intel/llvm driver sources (which show ``-fsycl`` defaulting to off
+#: regardless of argv0) — this may be packaging-layer behavior specific to
+#: Intel's binary distribution rather than the public driver code. Guarded
+#: for anyway: the cost of wrongly treating a plain "dpcpp" invocation as
+#: SYCL-enabled is at most an unused ``-fsycl-host-only`` (clang warns on an
+#: unused flag, it does not hard-fail), while the cost of not guarding, if
+#: the premise holds, is silently reintroducing the exact double-JSON-document
+#: failure this whole fix exists to prevent for a chunk of the driver family.
+_SYCL_DEFAULT_ON_DRIVER_NAMES = frozenset({"dpcpp", "dpcpp-cl"})
+
+
+def _dpcpp_defaults_sycl_on(cc_bin: str) -> bool:
+    """True if *cc_bin* is one of Intel's SYCL-implied legacy driver names."""
+    return Path(cc_bin).stem.lower() in _SYCL_DEFAULT_ON_DRIVER_NAMES
+
+
 def _resolve_clang_bin(
     compiler: str,
     gcc_path: str | None,

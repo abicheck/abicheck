@@ -459,7 +459,10 @@ def retry_excluding_error_headers(
 
 
 def run_clang_to_ast_file(
-    cmd: list[str], *, timeout: float, on_created: Callable[[Path], None],
+    cmd: list[str],
+    *,
+    timeout: float,
+    on_created: Callable[[Path], None],
 ) -> subprocess.CompletedProcess[str]:
     """Run *cmd* with stdout spilled to a fresh temp file; return the result.
 
@@ -479,13 +482,20 @@ def run_clang_to_ast_file(
     on_created(path)
     with os.fdopen(fd, "wb") as out:
         return deadline.run_bounded(
-            cmd, stdout=out, stderr=subprocess.PIPE, text=True, timeout=timeout,
+            cmd,
+            stdout=out,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
         )
 
 
 def _parse_clang_ast_result(
-    result: subprocess.CompletedProcess[str], cached: Path, ast_path: Path,
-    *, cache_write: bool = True,
+    result: subprocess.CompletedProcess[str],
+    cached: Path,
+    ast_path: Path,
+    *,
+    cache_write: bool = True,
 ) -> dict[str, Any]:
     """Validate a completed clang AST-dump, parse its JSON, and cache the tree.
 
@@ -530,7 +540,29 @@ def _parse_clang_ast_result(
         with open(ast_path, "rb") as fh:  # bytes: json detects encoding
             root = json.load(fh)
     except ValueError as exc:
-        raise SnapshotError(f"clang AST output was not valid JSON: {exc}") from exc
+        # "Extra data" means a second top-level JSON value follows the first —
+        # a driver flag that runs more than one -cc1 pass for this one compile
+        # (each with its own -Xclang -ast-dump=json) writes each pass's full
+        # document to this same stdout stream, back-to-back with no
+        # separator. A bare -fsycl is the known case (device pass + host
+        # pass; handled by auto-appending -fsycl-host-only, see
+        # dumper._needs_sycl_host_only), but any other multi-target offload
+        # flag (e.g. -fopenmp-targets=) that this codebase does not yet
+        # special-case would fail the same way — naming the likely cause here
+        # turns a cryptic byte-offset error into an actionable one.
+        hint = ""
+        if isinstance(exc, json.JSONDecodeError) and exc.msg == "Extra data":
+            hint = (
+                " -- this looks like more than one JSON document on stdout, "
+                "which happens when a compiler flag makes clang run multiple "
+                "-cc1 passes for one compile (e.g. a bare '-fsycl' without "
+                "'-fsycl-host-only'/'-fsycl-device-only', or an OpenMP/CUDA "
+                "offload target flag); pin a single compilation pass or use "
+                "--ast-frontend castxml"
+            )
+        raise SnapshotError(
+            f"clang AST output was not valid JSON: {exc}{hint}"
+        ) from exc
     # json.load() above can itself consume the remaining budget on a
     # multi-GB AST; re-check before the (also non-trivial, streamed) cache
     # copy so an expired deadline doesn't still complete it and hand the

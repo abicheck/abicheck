@@ -33,7 +33,9 @@ from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
     _clang_header_dump,
+    _dpcpp_defaults_sycl_on,
     _header_ast_parser,
+    _needs_sycl_host_only,
     _parse_gnu_include_search_dirs,
     _resolve_clang_system_includes,
     _resolve_header_backend,
@@ -44,6 +46,7 @@ from abicheck.dumper_clang import (
     _Decl,
     _function_qualifiers,
     _is_clang_family_binary,
+    _is_intel_sycl_driver,
     _pointer_depth,
     _return_type,
 )
@@ -778,6 +781,183 @@ def test_build_clang_header_command_cpp_and_c(tmp_path: Path) -> None:
     c_cmd = _build_clang_header_command("clang", "gnu", [], agg, force_cpp=False)
     assert "-std=gnu11" in c_cmd
     assert "-x" in c_cmd
+
+
+@pytest.mark.parametrize(
+    "cc_bin,tokens,expected",
+    [
+        ("icpx", ["-fsycl"], True),
+        ("icx", ["-fsycl", "-DFOO=1"], True),
+        ("/opt/oneapi/bin/dpcpp", ["-fsycl"], True),
+        ("dpcpp-cl", ["-fsycl"], True),
+        # No -fsycl at all: nothing to pin.
+        ("icpx", ["-DFOO=1"], False),
+        ("icpx", [], False),
+        # Caller already pinned a single pass explicitly: don't second-guess it.
+        ("icpx", ["-fsycl", "-fsycl-host-only"], False),
+        ("icpx", ["-fsycl", "-fsycl-device-only"], False),
+        # A flag that merely starts with "-fsycl" is not the bare enabling
+        # flag itself (exact-token match, not a prefix/substring check).
+        ("icpx", ["-fsycl-device-only"], False),
+        # Stock clang accepts a bare -fsycl as a single pass and does not
+        # recognize -fsycl-host-only at all (Codex review, PR #643) -- must
+        # never be gated on for a non-Intel clang-family binary.
+        ("clang", ["-fsycl"], False),
+        ("clang++", ["-fsycl"], False),
+        ("/usr/bin/clang-18", ["-fsycl"], False),
+        # The clang driver applies -fsycl/-fno-sycl last-flag-wins like any
+        # other toggle (confirmed via `clang++ -fsycl -fno-sycl -###`, which
+        # emits a single ordinary host -cc1, no device pass). A later
+        # -fno-sycl means SYCL is not actually enabled, so nothing needs
+        # pinning to a single pass (Codex review, PR #643, round 5).
+        ("icpx", ["-fsycl", "-fno-sycl"], False),
+        ("icpx", ["-fno-sycl", "-fsycl"], True),
+        ("icpx", ["-fsycl", "-fno-sycl", "-fsycl"], True),
+        ("icpx", ["-fno-sycl"], False),
+        # Intel's legacy "dpcpp"/"dpcpp-cl" driver names imply SYCL is
+        # already on even with no -fsycl token at all (Codex review, PR
+        # #643, round 8) -- an explicit -fno-sycl still overrides that
+        # default. icx/icpx are NOT in this default-on set: they need an
+        # explicit -fsycl, same as stock clang.
+        ("dpcpp", [], True),
+        ("dpcpp-cl", [], True),
+        ("/opt/oneapi/bin/dpcpp", [], True),
+        ("DPCPP", [], True),  # case-insensitive
+        ("dpcpp.exe", [], True),  # extension stripped, still matches
+        ("dpcpp", ["-DFOO=1"], True),
+        ("dpcpp", ["-fno-sycl"], False),
+        ("dpcpp", ["-fno-sycl", "-fsycl"], True),
+        ("icx", [], False),
+    ],
+)
+def test_needs_sycl_host_only(cc_bin: str, tokens: list[str], expected: bool) -> None:
+    assert _needs_sycl_host_only(cc_bin, tokens) is expected
+
+
+@pytest.mark.parametrize(
+    "cc_bin,expected",
+    [
+        ("dpcpp", True),
+        ("dpcpp-cl", True),
+        ("/opt/oneapi/bin/dpcpp", True),
+        ("DPCPP", True),
+        ("dpcpp.exe", True),
+        ("icx", False),
+        ("icpx", False),
+        ("clang", False),
+        ("clang++", False),
+        ("gcc", False),
+    ],
+)
+def test_dpcpp_defaults_sycl_on(cc_bin: str, expected: bool) -> None:
+    assert _dpcpp_defaults_sycl_on(cc_bin) is expected
+
+
+def test_build_clang_header_command_dpcpp_defaults_sycl_on(tmp_path: Path) -> None:
+    # Codex review (PR #643, round 8): "dpcpp" implies SYCL is already on
+    # even with no -fsycl token at all, so it must still get
+    # -fsycl-host-only pinned -- otherwise the double-JSON-document bug
+    # this whole fix targets reappears for this driver name.
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command("dpcpp", "gnu", [], agg, force_cpp=True)
+    assert "-fsycl-host-only" in cmd
+
+
+def test_build_clang_header_command_dpcpp_explicit_fno_sycl_overrides_default(
+    tmp_path: Path,
+) -> None:
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "dpcpp", "gnu", [], agg, force_cpp=True, gcc_options="-fno-sycl"
+    )
+    assert "-fsycl-host-only" not in cmd
+
+
+def test_build_clang_header_command_appends_sycl_host_only(tmp_path: Path) -> None:
+    # A bare -fsycl makes a SYCL-capable driver (icpx/dpcpp) run a device pass
+    # *and* a host pass, each emitting a full -ast-dump=json document to the
+    # same stdout stream -- the second document breaks json.load() with
+    # "Extra data". -fsycl-host-only pins the compile to the single pass that
+    # actually matches what links into the scanned binary.
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "icpx", "gnu", [], agg, force_cpp=True, gcc_options="-fsycl -DFOO=1"
+    )
+    assert "-fsycl-host-only" in cmd
+    assert cmd.count("-fsycl-host-only") == 1
+
+
+def test_build_clang_header_command_respects_explicit_sycl_device_only(
+    tmp_path: Path,
+) -> None:
+    # An explicit --gcc-options choice must never be second-guessed.
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "icpx",
+        "gnu",
+        [],
+        agg,
+        force_cpp=True,
+        gcc_options="-fsycl -fsycl-device-only",
+    )
+    assert "-fsycl-host-only" not in cmd
+
+
+def test_build_clang_header_command_respects_later_fno_sycl(tmp_path: Path) -> None:
+    # A later -fno-sycl disables SYCL under the driver's last-flag-wins
+    # semantics -- appending -fsycl-host-only anyway would tack a SYCL-only
+    # selector onto a non-SYCL compile (Codex review, PR #643, round 5).
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "icpx", "gnu", [], agg, force_cpp=True, gcc_options="-fsycl -fno-sycl"
+    )
+    assert "-fsycl-host-only" not in cmd
+
+
+def test_build_clang_header_command_without_sycl_unaffected(tmp_path: Path) -> None:
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command("clang++", "gnu", [], agg, force_cpp=True)
+    assert "-fsycl-host-only" not in cmd
+
+
+def test_build_clang_header_command_stock_clang_sycl_not_gated(tmp_path: Path) -> None:
+    # Codex review (PR #643): stock upstream clang accepts a bare -fsycl and
+    # parses it as a single pass fine, but does not recognize
+    # -fsycl-host-only at all -- it hard-rejects it with "unknown argument".
+    # Appending it here would turn a working --gcc-path clang + -fsycl parse
+    # into a guaranteed failure, so this must stay gated on the resolved
+    # binary actually being an Intel oneAPI driver (icx/icpx/dpcpp[-cl]).
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "clang++", "gnu", [], agg, force_cpp=True, gcc_options="-fsycl"
+    )
+    assert "-fsycl-host-only" not in cmd
+
+
+def test_build_clang_header_command_sycl_via_gcc_option_tokens(tmp_path: Path) -> None:
+    # The repeatable --gcc-option path (gcc_option_tokens) must be checked the
+    # same way as the shlex-split --gcc-options string.
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "icpx", "gnu", [], agg, force_cpp=True, gcc_option_tokens=("-fsycl",)
+    )
+    assert "-fsycl-host-only" in cmd
+
+
+def test_parse_clang_ast_result_rejects_concatenated_json_documents(
+    tmp_path: Path,
+) -> None:
+    # A SYCL device pass + host pass (or any other flag that makes clang run
+    # more than one -cc1 pass for one compile) each write a complete
+    # -ast-dump=json document to the same stdout stream, back-to-back with no
+    # separator -- json.load() parses only the first and raises on the rest.
+    # The error must name the likely cause instead of a bare byte offset.
+    ast_path = tmp_path / "ast.json"
+    doc = '{"kind": "TranslationUnitDecl", "inner": []}'
+    ast_path.write_text(doc + doc, encoding="utf-8")
+    result = _fake_proc(stdout="", stderr="", returncode=0)
+    with pytest.raises(SnapshotError, match="more than one JSON document"):
+        _parse_clang_ast_result(result, tmp_path / "cache.json", ast_path)
 
 
 def test_clang_header_dump_missing_clang_raises(
@@ -2391,6 +2571,30 @@ def test_is_clang_family_binary(path: str, expected: bool) -> None:
     alias-set branch (icx/icpx/dpcpp/dpcpp-cl) in isolation from the larger
     _clang_header_dump/_resolve_clang_bin call chain the tests below cover."""
     assert _is_clang_family_binary(path) is expected
+
+
+@pytest.mark.parametrize(
+    "path,expected",
+    [
+        ("icx", True),
+        ("icpx", True),
+        ("dpcpp", True),
+        ("dpcpp-cl", True),
+        ("/opt/intel/oneapi/compiler/2026.1/bin/icpx", True),
+        ("ICPX", True),  # case-insensitive
+        ("icpx.exe", True),  # extension stripped, still matches
+        # Stock clang is clang-family but NOT the Intel SYCL driver: it does
+        # not implement -fsycl-host-only/-fsycl-device-only at all.
+        ("clang", False),
+        ("clang++", False),
+        ("/usr/bin/clang-18", False),
+        ("clang-cl.exe", False),
+        ("gcc", False),
+        ("icc", False),
+    ],
+)
+def test_is_intel_sycl_driver(path: str, expected: bool) -> None:
+    assert _is_intel_sycl_driver(path) is expected
 
 
 def test_clang_header_dump_gcc_path_not_used_as_clang(
