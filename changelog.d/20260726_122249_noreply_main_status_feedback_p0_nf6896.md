@@ -158,3 +158,496 @@
   on the synthetic worst case, verified). A future pass could eliminate it
   safely by threading a shared per-comparison context through the detector
   registry — a bigger, separate structural change.
+- **`type_reachability.py`'s record-field scan now requires actual
+  reachability from a public root** (Codex review, fresh evidence): the
+  previous version scanned *every* non-stdlib record's fields
+  unconditionally (excluding only confirmed-private-origin ones) rather
+  than restricting to records the public surface actually reaches — a
+  purely internal record a DWARF-only snapshot retains with the default
+  `ScopeOrigin.UNKNOWN` (the common case, since origin classification is
+  opt-in) could make an unrelated stdlib type look directly referenced
+  just by existing in the snapshot with a matching-spelled field. Fixed
+  with a proper worklist-based closure: a non-stdlib record's fields are
+  only walked once that record is itself confirmed reachable, either by
+  direct mention in a public, non-hidden, non-private-origin function's
+  own signature, or transitively through another already-reachable
+  record's fields. New FP-rate corpus case
+  `internal_record_field_stdlib_churn_stays_filtered` guards this
+  specifically (distinct from `stdlib_type_unreferenced_stays_filtered`,
+  which has no owning record at all).
+
+  A second finding from the same review round — gating signature
+  reachability on pointer-vs-by-value use (a `std::vector<int> *`
+  parameter shouldn't unfilter `std::vector<int>`'s layout) — was
+  investigated and **not implemented**: it would regress this codebase's
+  own established, ADR-024 §D3-documented anti-hiding position.
+  `surface.py`'s own reachability closure deliberately does *not* apply
+  pointer-vs-value precision either, since "a pointer-reached type whose
+  full definition is public is still layout-observable (a consumer can
+  dereference/allocate it by value), so demoting it at this stage would
+  hide a real break" — the safe half of that precision (a pointer-only-
+  reached *opaque* handle) is already delivered downstream by the
+  existing opaque-size-change filter
+  (`diff_filtering._filter_opaque_size_changes`, gated on
+  `RecordType.is_opaque`), confirmed by reading that filter directly.
+  Applying the suggested pointer-depth gate here would create exactly the
+  false-negative risk that filter's own design note warns against, for a
+  precision axis this module was never meant to duplicate.
+- **`type_reachability.py` reachability closure gains two more fixes**
+  (Codex review, fresh evidence): (1) a public *method*'s own owner
+  class/struct is now seeded as reachable too — a public member like
+  `void Foo::run()` never repeats `Foo` in its own return/parameter types,
+  so without also consulting `diff_cxx_rules.owner_class_of()` the
+  reachability closure never queued `Foo` at all, silently missing a
+  genuine layout break in one of `Foo`'s fields. (2) a non-stdlib record's
+  bare-trailing-segment alias (e.g. `Inner` for `api::Inner`) is now
+  dropped rather than recorded when it is ambiguous — shared by two or
+  more *distinct* non-stdlib records (e.g. `api::Inner` and
+  `detail::Inner` both reducing to bare `Inner`) — since queuing every
+  colliding record would let a signature naming one of them wrongly walk
+  an unrelated internal record's fields too, misattributing its own
+  implementation-only churn as publicly reachable.
+- **`type_reachability.py`'s reachability closure now also seeds public
+  variables and resolves typedef aliases** (Codex review, fresh evidence):
+  (1) an exported public `Variable` (e.g. `Foo global`) is now a
+  reachability root the same way a public function is — the closure
+  previously only walked `snapshot.functions`, so a public global variable
+  of a non-stdlib record type never seeded that record at all. (2) a
+  signature/field type string spelled with a user-defined typedef alias
+  (e.g. a public function returning `Alias` where `snapshot.typedefs` maps
+  `"Alias"` to `"Foo"`) is now resolved to its target and scanned in turn,
+  mirroring `surface.py`'s own reachability closure — the alias's target
+  is a plain type-string substitution already present in
+  `snapshot.typedefs`, distinct from the still-unresolved, harder gap of a
+  signature spelled with a *stdlib* alias like `std::string` (which names
+  a compiler-internal alias with no reverse mapping back to the owning
+  `RecordType` in any current model field).
+- **`type_reachability.py`'s reachability closure now also follows base
+  classes** (Codex review, fresh evidence): a public `Derived` inheriting
+  a non-stdlib `Base` whose own field is a stdlib record was never
+  reached, since the worklist expansion only followed `rec.fields`, not
+  `rec.bases`/`rec.virtual_bases`. Fixed by enqueuing both direct and
+  virtual bases the same way `surface.py`'s own reachability closure does
+  — virtual inheritance still embeds the base subobject + vtable path, so
+  both are ABI-reachable through the derived type.
+- **`type_reachability.py` resolves the previously-documented typedef-
+  aliased-stdlib-type gap** (user-requested): a signature spelled with a
+  typedef alias (`std::string`, `std::wstring`, ...) names the alias, not
+  the real underlying class (`std::basic_string<char, ...>`) that owns the
+  `RecordType` entry. Verified empirically against a real DWARF-dumped
+  `std::string` parameter: `snapshot.typedefs["std::string"]` resolves to
+  the bare `"basic_string<char, std::char_traits<char>,
+  std::allocator<char> >"`, while the owning `RecordType.name` is the
+  fully-qualified `"std::__cxx11::basic_string<char, std::char_traits<char>,
+  std::allocator<char> >"` — libstdc++ wraps its own post-C++11 dual-ABI
+  types in an inline namespace (`__cxx11::`) the same way libc++ wraps its
+  whole standard library (`__1::`/`__ndk1::`, already handled), so that
+  list gained a third entry. The typedef *key* itself also needed the same
+  bare-vs-qualified treatment already applied to `RecordType` identities
+  (the DWARF backend spells the signature bare — `"string"`, never the
+  qualified key `"std::string"`), so a new `_typedef_spelling_targets()`
+  builds a `spelling -> target` index covering both the literal key and
+  its namespace-stripped bare form (an ambiguous stripped spelling is
+  dropped rather than recorded, same principle as the `RecordType`
+  spelling index), and the scan now follows a matched typedef alias to its
+  target the same way `surface.py`'s own reachability closure does. New
+  FP-rate corpus case `public_std_string_typedef_alias_layout_changed`
+  (real-break/FN sentinel) passes at baseline 0/0.
+- **`type_reachability.py`'s bare-alias derivation and single-pattern
+  scan each had one more real gap** (Codex review, fresh evidence): (1)
+  the non-stdlib bare-alias fallback derived a record's unqualified
+  spelling via `identity.rsplit("::", 1)`, which splits inside a *template
+  argument's own* qualified name rather than at the outer namespace
+  boundary — for `"api::Wrapper<dep::Tag>"`, the lexically last `"::"`
+  belongs to the template argument `dep::Tag`, not the outer namespace
+  path, so the old code derived the corrupted bare form `"Tag>"` instead
+  of `"Wrapper<dep::Tag>"`, and a real dumper backend's bare signature
+  spelling for that wrapper then never matched anything. Fixed with a new
+  `_bare_type_name()` that tracks `<`/`>` nesting depth and only treats a
+  `"::"` at depth zero as a namespace separator. (2) stdlib and non-stdlib
+  spellings were matched via one *combined* compiled pattern in a single
+  non-overlapping `finditer()` pass — when a non-stdlib record's own
+  identity embeds a stdlib type's spelling verbatim (e.g. a template
+  instantiation `"Wrapper<std::string>"` registered as its own record
+  identity), and a public signature names that wrapper's full identity
+  exactly, the combined pattern's longest-first alternation matches the
+  whole wrapper span first, consuming it — since regex matches never
+  overlap, the nested `"std::string"` substring inside that same span was
+  never independently found, even though it is directly present in the
+  public signature text. Fixed by splitting `_spelling_index()` into two
+  independent indices (stdlib vs. non-stdlib/record) with two
+  independently compiled patterns scanned separately over each
+  declaration, so one pattern's match can never mask the other's. New
+  regression tests cover both: an end-to-end case resolving a record via
+  its qualified-template-argument bare alias, and a wrapper-with-no-fields
+  case that can only pass via the independent nested-spelling match (not
+  the field-walk fallback).
+- **`type_reachability.py`'s collision guards missed a bare-alias case on
+  both the stdlib-stripping and typedef-stripping paths** (Codex review,
+  fresh evidence): both guards checked a stripped/typedef spelling only
+  against *full* non-stdlib record identities, not against the bare
+  (namespace-unqualified) alias a real dumper backend actually spells that
+  record with in a signature. A non-stdlib record like `api::vector<int>`
+  is spelled bare as `"vector<int>"`, the same bare spelling
+  `std::vector<int>` reduces to after namespace-stripping — since
+  `"vector<int>"` never equals the full identity `"api::vector<int>"`, the
+  old check let a signature naming the unrelated user type also mark the
+  real `std::vector<int>` as directly referenced. The identical gap
+  existed one level up on the typedef-key stripping path: `api::string`
+  spelled bare as `"string"` collides with what the `"std::string"`
+  typedef key strips to. Fixed with a new `_non_stdlib_signature_spellings()`
+  helper (full identity plus bare alias, deliberately keeping an ambiguous
+  bare alias that `_spelling_index`'s own `record_index` drops — it's
+  still a real spelling *some* non-stdlib record can be named by) used by
+  both `_spelling_index`'s stdlib-stripping loop and
+  `_typedef_spelling_targets`'s typedef-stripping loop. New regression
+  tests cover the collision set itself and both end-to-end paths
+  (bare-aliased non-stdlib type vs. an unrelated stdlib record with the
+  same bare spelling, through both the direct-record and typedef-alias
+  routes).
+- **`diff_cxx_rules.owner_class_of()` mis-parsed a public conversion
+  operator's owner when the operator's own target type is
+  namespace-qualified** (Codex review, fresh evidence, found via
+  `type_reachability.py`'s new owner-seeding call site but affecting every
+  caller of this shared helper — `diff_symbols.py`'s owner-based move
+  detection, `diff_cxx_rules.py`'s own member-move heuristics, and
+  `surface.py`'s reachability closure). Confirmed against a real compiled
+  and demangled symbol: `struct Foo { operator ns::Bar() const; };`
+  demangles to `"Foo::operator ns::Bar() const"`, and after the existing
+  signature-stripping step abicheck's own `Function.name` is exactly
+  `"Foo::operator ns::Bar"`. The old naive `rsplit("::", 1)` split at the
+  *lexically last* `"::"` — which belongs to the operator's own qualified
+  target (`ns::Bar`), not the owner/member boundary — producing the
+  corrupted owner `"Foo::operator ns"` instead of `"Foo"`. Fixed by
+  locating the literal `"::operator "` marker (present only for a
+  conversion-to-named-type operator, never for a symbol operator like
+  `operator+`/`operator[]`, which has no target type to separate from the
+  keyword with a space) and splitting there when present, falling back to
+  the previous behavior otherwise. New regression tests cover the direct
+  unit behavior (including a namespace-nested owner, to guard against
+  over-correcting) and the end-to-end `type_reachability.py` seeding path.
+- **`type_reachability.py`'s typedef-key bare-aliasing only covered
+  stdlib-namespaced keys** (Codex review, fresh evidence): the DWARF
+  backend stores a namespace-qualified typedef key like `"api::Alias"`
+  while a public declaration's own type string spells the bare `"Alias"`
+  — the same bare-vs-qualified split this module already handles
+  everywhere else, but `_typedef_spelling_targets()` only derived a bare
+  form via `_stripped_signature_spelling()` (stdlib-namespace-prefix-only),
+  so a non-stdlib qualified typedef key never got a bare alias at all —
+  silently missing a stdlib field reachable through that typedef's target.
+  Fixed by also deriving a candidate via `_bare_type_name()` (already
+  correct for qualified template arguments) for every typedef key, not
+  just stdlib-namespaced ones — reusing the existing collision guard
+  unchanged. New regression tests cover the end-to-end resolution, the
+  existing collision guard applied to this new candidate source, and a
+  guard against registering a spurious duplicate entry for an
+  already-bare key.
+- **`type_reachability.py`'s owner-class seeding could mark a purely
+  internal stdlib class as directly referenced** (Codex review, fresh
+  evidence): CastXML/direct-clang record a method's own `Function.name`
+  bare (e.g. `"touch"`, never `"__gnu_cxx::Node::touch"`), so the existing
+  `fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)` guard cannot catch
+  a retained, seemingly-public method whose *owner* is itself a
+  stdlib-internal class (e.g. libstdc++'s `__gnu_cxx::Node`) —
+  `owner_class_of()` correctly recovers that qualified owner via its
+  mangled-name fallback, and handing it straight to `_scan()` without a
+  second check marked the stdlib class itself as directly referenced,
+  unfiltering purely internal toolchain churn as a public break. Fixed by
+  also checking the recovered owner against
+  `STDLIB_TYPE_NAMESPACE_PREFIXES` before scanning it, mirroring the
+  existing `fn.name` guard. New regression tests (positive and negative)
+  plus a new FP-rate corpus case
+  (`stdlib_internal_owner_method_stays_filtered`, `stdlib-direct-reference`
+  category) reproducing the exact scenario; gate stays 0 FP/0 FN (32
+  cases).
+- **`type_reachability.py` gains two more fixes, closing a class of
+  partially-qualified backend spellings and a class of bare-named stdlib
+  declarations** (Codex review, fresh evidence): (1) A real backend does
+  not always spell a nested type as either the fully-qualified identity
+  or the fully-bare leaf — confirmed empirically via `clang -ast-dump` on
+  `namespace api { struct Outer { struct Inner {}; }; Outer::Inner g();
+  }`: direct-clang prints the return type as exactly `"Outer::Inner"`,
+  dropping the enclosing namespace (`api::`) while keeping the
+  class-nesting qualifier (`Outer::`). Neither the previous full-identity
+  match nor the single fully-bare-leaf match (`_bare_type_name`) covered
+  this partial qualification. Generalized `_bare_type_name` into
+  `_namespace_suffix_spellings()`, which returns every suffix obtainable
+  by dropping some prefix of the scope chain at each depth-zero `"::"`
+  boundary (not just the innermost one), and updated all three call sites
+  (`_spelling_index`'s record index, `_non_stdlib_signature_spellings`,
+  `_typedef_spelling_targets`) to register every suffix instead of only
+  the fully-bare one, with the same ambiguity-drop collision guard
+  extended to every suffix. `_bare_type_name` itself is kept (now a thin
+  wrapper returning the innermost suffix) since it's still independently
+  tested and used for its narrower semantics. (2) CastXML/direct-clang
+  record a function or namespace-scope variable's own display name bare
+  (e.g. `"touch"`, never `"__gnu_cxx::Node::touch"` or `"std::touch"`), so
+  the existing `name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)` guard
+  cannot catch a retained, seemingly-public declaration that is actually
+  part of the standard library itself — verified with two real Itanium
+  mangled-symbol repros (`_ZN3std5touchE` for a namespace-scope stdlib
+  variable, `_ZN3std5touchEv` for a stdlib free function) that both
+  incorrectly marked `std::string` as directly referenced before the fix.
+  Fixed by also checking the declaration's recovered qualified name
+  (`diff_cxx_rules.itanium_qualified_name`, from `mangled`) against the
+  stdlib prefixes for both functions and variables. This subsumes (and
+  replaces) the narrower owner-only check added earlier in this PR: since
+  a stdlib-prefixed owner always makes the full qualified name
+  stdlib-prefixed too, but not vice versa (a stdlib namespace's own direct
+  free function/variable is a single mangled scope component, so
+  `owner_class_of` returns a bare `"std"` with no trailing `"::"`, which
+  never matches the `"std::"` prefix string), the broader check is
+  strictly more correct and the redundant owner-only guard was removed.
+  New regression tests cover both fixes (positive, negative, and
+  ambiguity-guard cases); full suite green, 100% module coverage, FP-rate
+  gate stays 0 FP/0 FN.
+- **`type_reachability.py`'s owner-seeding gains a correctness fix, not
+  just a missing-spelling one** (Codex review, fresh evidence, confirmed
+  with a minimal repro): `owner_class_of()` derives its result by chopping
+  the trailing `"::"`-component off any already-qualified declaration name
+  or mangled-symbol scope chain, with no way to tell whether what remains
+  is really an enclosing class or just an enclosing namespace — a public
+  namespace function `api::run()` makes `owner_class_of` return the bare
+  namespace fragment `"api"`, which the general suffix-matching mechanism
+  could then coincidentally match against an unrelated internal record's
+  own bare-suffix spelling (`other::api`), wrongly walking its fields and
+  unfiltering its layout churn. Fixed by seeding an owner only on an exact
+  match against a non-stdlib record's full identity, bypassing the
+  suffix-matching mechanism entirely for this seed — safe because,
+  unlike a genuine signature type spelling, `owner_class_of`'s result is
+  always either the complete, exact scope chain of a real class or
+  namespace noise, never a partially-elided one. While verifying this fix
+  through the full `compare()` pipeline, the identical bug pattern was
+  found to independently exist in `surface.py`'s own, separate
+  `owner_class_of`-based public-surface seeding — deliberately left
+  unfixed here and documented in `AGENTS.md`'s "Known gaps", since
+  `surface.py` is a different, foundational module this PR doesn't
+  otherwise touch and its bare-tail lookup mechanism is shared by every
+  other seed type, needing its own careful, independently-verified design.
+- **GCC/Clang's Itanium `St` substitution for the `std::` scope prefix is
+  now recognized** (Codex review, fresh evidence, confirmed against two
+  real GCC-compiled symbols): the Itanium ABI mandates the 2-character
+  substitution `St` for the *first* occurrence of `std::` in a mangled
+  name — `namespace std { void touch() {} }` compiles to the bare
+  `_ZSt5touchv` (no `N…E` nested-name wrapper at all), while `namespace
+  std { namespace detail { void foo() {} } }` compiles to
+  `_ZNSt6detail3fooEv` (`St` right after the `N` marker). Neither form was
+  previously recognized by `itanium_scope_components()`, so a bare-named
+  stdlib function/variable using this (extremely common) substitution
+  bypassed the mangled-scope-recovery guard added earlier in this PR.
+  Fixed in the shared `diff_cxx_rules.py` parser (benefiting all of its
+  callers, not just `type_reachability.py`) by recognizing `St` as the
+  first scope component when it appears at the very start of parsing —
+  deliberately not attempting general Itanium substitution-table
+  resolution for the other substitution abbreviations (`Sa`/`Sb`/`Ss`/
+  `Si`/`So`/`Sd`), which stand for a complete template type rather than a
+  scope prefix and are irrelevant to this need. New regression tests
+  cover both the standalone and nested `St` forms for both functions and
+  variables, plus the owner-seeding exact-match fix (positive and
+  negative cases). Full suite green, 100% module coverage, FP-rate gate
+  stays 0 FP/0 FN.
+- **Two more ambiguity-tracking gaps found in `type_reachability.py`'s
+  collision guards** (Codex review, fresh evidence, both confirmed with
+  minimal repros): (1) when two non-stdlib records had identities
+  `"Inner"` and `"api::Inner"`, `_spelling_index`'s derived-suffix
+  collection only counted contributors to the *derived* suffix `"Inner"`
+  (from `"api::Inner"`) — since the unrelated global `"Inner"` identity
+  never contributes to that same tracking structure (it's already a full
+  identity, not a derived suffix), the ambiguity count saw only one
+  contributor and merged `"api::Inner"` straight into the pre-existing
+  full-identity entry for the global `"Inner"`. A public signature
+  spelling the global type as bare `"Inner"` then also queued the
+  unrelated `"api::Inner"` and its `std::` field. Fixed by also treating a
+  derived suffix that collides with a *different* record's own full
+  identity as ambiguous. (2) `_typedef_spelling_targets` gave an *exact*
+  pre-existing typedef key automatic priority over a derived suffix from
+  a different key, rather than tracking both through the same
+  ambiguity-counting structure: when `snapshot.typedefs` held both a
+  global `"Alias" -> "std::…"` and a qualified `"api::Alias" -> "Foo"`, a
+  declaration inside `api` can legitimately spell the latter as bare
+  `"Alias"` too — the bare spelling is genuinely ambiguous between the
+  two real typedefs, and silently preferring the pre-existing exact key
+  could resolve it to the wrong one (hiding a real non-stdlib reference or
+  fabricating a stdlib one). Fixed by unifying exact keys and derived
+  suffixes into one target-set-per-spelling structure, resolving a
+  spelling only when every contributing source agrees on exactly one
+  target. New regression tests cover both fixes (positive repro plus a
+  guard that an agreeing exact-key/derived-suffix pair is still kept).
+  Full suite green, 100% module coverage, FP-rate gate stays 0 FP/0 FN.
+- **A follow-up finding on the `"Inner"`/`"api::Inner"` collision guard
+  showed the earlier fix was necessary but not sufficient** (Codex
+  review, fresh evidence): refusing to *merge* the colliding record's
+  candidates into `record_index["Inner"]` still left that entry pointing
+  at the unrelated global `"Inner"` record. Since direct-clang's own
+  "drop the enclosing namespace" convention means a signature declared
+  *inside* namespace `api` can spell `api::Inner` bare as `"Inner"` too, a
+  public `api::f()` returning bare-spelled `api::Inner` would misattribute
+  its `std::` field to the unrelated global `Inner`'s own field. Fixed by
+  removing the colliding spelling from `record_index` entirely rather
+  than only refusing to merge in the other record's candidates. New
+  regression test covers the exact scenario. Full suite green, 100%
+  module coverage, FP-rate gate stays 0 FP/0 FN.
+- **A separate, deeper typedef-key gap investigated and deliberately not
+  implemented**: direct-clang's `parse_typedefs()` stores a typedef's
+  bare `node["name"]` (never the scope-joined qualified form used for
+  every other decl kind), so a namespaced alias loses its namespace at
+  snapshot-production time, not at this module's read time. Confirmed
+  empirically via a real `clang -ast-dump`: a namespaced `using Alias =
+  Foo` inside `namespace api` produces `snapshot.typedefs = {"Alias":
+  "Foo"}` while a real signature referencing it spells the fully-qualified
+  `"api::Alias"` — the inverse of the qualified-key/bare-signature shape
+  this module's existing typedef-suffix logic handles, and one no
+  string-level fix in this module can close (suffix-stripping only ever
+  shortens a key, it can't reconstruct a longer qualified spelling from
+  an already-bare one). Documented in `AGENTS.md`'s "Known gaps" as
+  needing either a producer-side fix in `dumper_clang.py` (its own
+  separate, broader-blast-radius change) or a speculative reverse-
+  namespace-guessing mechanism (real false-positive risk, not attempted).
+- **The mangled-scope-recovery guard was silently disabled on every
+  Mach-O direct-clang snapshot** (Codex review, fresh evidence): clang's
+  `mangledName` carries an extra platform leading underscore on macOS
+  (`dumper_clang.py`'s own `_visibility()` docstring documents
+  `"__ZN3lib3addEii"`), but `itanium_qualified_name()`'s underlying
+  `_itanium_strip_prefix()` only recognized the plain Itanium `"_Z"`
+  prefix — confirmed empirically: `itanium_scope_components("__ZSt5touchv")`
+  returned `None`. Since every function/variable's stdlib-scope check in
+  `type_reachability.py` (and `owner_class_of()`'s mangled fallback) relies
+  on this recovery, a bare-named stdlib declaration on macOS bypassed the
+  guard entirely, unfiltering purely internal toolchain churn as a public
+  break. Fixed in the shared `diff_cxx_rules.py` parser (benefiting all of
+  its callers) by normalizing away the extra leading underscore before the
+  Itanium-prefix check, mirroring `dumper_clang.py`'s own
+  `_symbol_candidates()` de-prefixing approach for the identical quirk.
+  New regression tests cover both the standalone and nested `St`
+  substitution forms under Mach-O mangling, plus an end-to-end guard that
+  genuine non-stdlib owner seeding still works. Full suite green, 100%
+  module coverage, FP-rate gate stays 0 FP/0 FN.
+- **A `clang-cl`/MSVC-mangled owner was never recognized at all — a
+  different mangling scheme, not another Mach-O-style prefix quirk**
+  (Codex review, fresh evidence): direct-clang snapshots taken with
+  `--target=*-windows-msvc` record a method's bare AST name (like
+  CastXML) but mangle `mangledName` in the proprietary Microsoft C++ ABI
+  scheme, not Itanium — confirmed by compiling real headers with
+  `clang --target=x86_64-pc-windows-msvc -fms-compatibility -Xclang
+  -ast-dump=json` (`Foo::run()` → `?run@Foo@@QEAAXXZ`). `owner_class_of()`'s
+  mangled-name fallback only ever tried the Itanium `_Z`/`__Z` prefix, so
+  this owner stayed unresolved and an embedded stdlib record's layout
+  break went unfiltered on the affected platform. Added a genuinely
+  separate `msvc_scope_components()`/`msvc_qualified_name()` parser in
+  `diff_cxx_rules.py` (scope components are written innermost-first and
+  `@`-terminated — the opposite convention from Itanium, confirmed against
+  nested-namespace, single-letter-class, and global-free-function cases),
+  tried as a second fallback after Itanium in `owner_class_of()` and wired
+  into `type_reachability.py`'s two direct stdlib-namespace guards too.
+  Deliberately conservative like its Itanium counterpart: constructors,
+  destructors, operators, and template instantiations are recognized and
+  rejected (return `None`) rather than mis-parsed, verified against real
+  compiler output for each. New regression tests cover the MSVC parser
+  directly plus an end-to-end owner-seeding guard through
+  `directly_referenced_stdlib_types`. Full suite green, 100% module
+  coverage, FP-rate gate stays 0 FP/0 FN.
+- **An exact typedef key could collide with an unrelated record's own
+  spelling and resolve the wrong thing** (Codex review, fresh evidence):
+  `_typedef_spelling_targets()` guarded every *derived* candidate spelling
+  against colliding with a non-stdlib record's own signature spelling, but
+  registered the typedef's *exact* key unconditionally, with no equivalent
+  guard. Combined with direct-clang's already-known typedef-scope-loss
+  (`parse_typedefs()` storing only the bare name), an exact key like
+  `"Alias"` could collide with an unrelated non-stdlib record also named
+  `Alias`, resolving a public function taking that record by value through
+  the unrelated typedef instead — confirmed empirically
+  (`directly_referenced_stdlib_types()` incorrectly returned
+  `{"std::string"}` for exactly this collision). Fixed by applying the same
+  `non_stdlib_spellings` guard to the exact-key registration. New
+  regression tests cover both the collision (dropped) and non-colliding
+  (still resolves) cases. Also split `tests/test_type_reachability.py`
+  (over the AI-readiness 2000-line hard cap after this round's additions)
+  into a new sibling `tests/test_type_reachability_mangling.py` holding the
+  mangled-name-derived reachability tests (namespace-suffix spellings,
+  Itanium/Mach-O/MSVC mangled-name recovery, and their ambiguity guards) —
+  a pure file split, no test behavior changed. Full suite green, 100%
+  module coverage, FP-rate gate stays 0 FP/0 FN.
+- **A conversion operator's owner still couldn't be recovered, even after
+  the earlier `"::operator "`-marker fix** (Codex review, fresh evidence):
+  direct-clang stores a conversion operator's AST name bare (`"operator
+  Bar"`, no owning-class prefix — confirmed via a real `clang -ast-dump`),
+  so `owner_class_of()`'s display-name branch never applies, and its
+  mangled-name fallback had no coverage either — `itanium_scope_components()`
+  aborted entirely on the Itanium `cv` (conversion-operator) code, which
+  `_ITANIUM_OPERATORS` correctly excludes from its own overload-grouping
+  set, but treating it as wholly unparseable discarded the class name
+  already recovered before it. Confirmed empirically:
+  `itanium_scope_components("_ZNK3FoocvN2ns3BarEEv")` returned `None`
+  outright. Fixed by recognizing `cv` as a distinct opaque leaf component
+  and stopping there (never attempting to parse the arbitrary target-type
+  encoding that follows, which recovering the scope prefix never needed).
+  New regression tests cover the parser directly and an end-to-end
+  `directly_referenced_stdlib_types` case. Full suite green, 100% module
+  coverage, FP-rate gate stays 0 FP/0 FN.
+- **A nested candidate spelling could still mask another one within the
+  same spelling index, even after the earlier cross-index split**
+  (Codex review, fresh evidence): `.finditer()` only returns non-overlapping
+  matches, so when one registered spelling is itself a substring of
+  another's in the *same* index (`"std::string"` inside
+  `"std::vector<std::string>"`, both stdlib; a non-stdlib `"Inner"` inside
+  `"Wrapper<Inner>"`; and, found while fixing this, the identical mechanism
+  in typedef-key matching too), the longest-first alternation matches the
+  outer candidate first and the inner one — though directly present in the
+  text — is never independently reported. Fixed with one shared
+  `_finditer_allow_nested()` helper (used at all three call sites) that
+  recurses into each match's own span to catch a shorter candidate nested
+  anywhere inside it, at any depth — verified against the existing
+  large-corpus performance regression guard to confirm this doesn't
+  reintroduce the quadratic cost the single-pattern rewrite eliminated.
+  Also fixed a narrower gap in the conversion-operator owner recovery
+  itself (CodeRabbit review): a bare-recorded conversion operator can still
+  carry a qualified target (`"operator ns::Bar"`, no owning-class prefix),
+  which neither the `"::operator "` marker nor the unqualified-bare check
+  caught, so the naive `rsplit` fallback still produced junk like
+  `"operator ns"` — fixed by detecting the `"operator "` prefix the same
+  way the already-fixed unqualified case is. Also reordered the cheap
+  visibility/origin filters ahead of mangled-name parsing in both the
+  function and variable reachability loops (CodeRabbit review) — a pure
+  perf reordering, no behavior change, since a rejected declaration now
+  skips the structural parse entirely instead of paying for a discarded
+  result. New regression tests cover all three nested-index cases, the
+  single-character-match edge case, and the qualified-target conversion
+  operator directly. Full suite green, 100% module coverage, FP-rate gate
+  stays 0 FP/0 FN.
+- **`_finditer_allow_nested()`'s own fix could crash on a genuinely deep
+  input, and the earlier `cv`-as-opaque-leaf fix had introduced a real
+  overload-grouping regression** (both Codex review, fresh evidence):
+  (1) the nested-match helper recursed one Python call per nesting level,
+  so 1,000 successively-nested registered spellings (plausible under a
+  compiler's template-instantiation-depth setting for metaprogramming-
+  heavy C++) raised `RecursionError` under Python's default recursion
+  limit, aborting the whole comparison — fixed by converting the
+  recursion into an explicit stack, which has no depth limit. (2) treating
+  the Itanium `cv` (conversion-operator) code as a single fixed-placeholder
+  leaf label made every conversion operator on a class share the same
+  scope-qualified name regardless of target type, so `diff_types`'
+  overload-uniqueness grouping collapsed genuinely distinct conversion
+  operators (`operator int()` vs `operator double()`) into one group and
+  fired a false `OVERLOAD_ADDED` — fixed by embedding the raw, un-decoded
+  mangled remainder after `cv` into the label instead of a placeholder
+  (deterministic mangling keeps identical targets in the same group and
+  distinct targets in distinct groups, without needing to actually decode
+  the target type). New regression tests cover the deep-nesting case, an
+  explicit start/end window unit test, and the conversion-operator
+  overload-grouping false positive end-to-end. Full suite green, 100%
+  module coverage, FP-rate gate stays 0 FP/0 FN.
+- **A duplicate record identity in `snapshot.types` could silently lose a
+  real stdlib field reference** (Codex review, fresh evidence):
+  `directly_referenced_stdlib_types()`'s own `non_stdlib_records` index was
+  a plain dict keyed by identity, so when two `RecordType` entries shared
+  the same identity (e.g. a complete definition alongside an ODR-duplicate
+  or incomplete declaration), a later entry silently overwrote an earlier
+  one — a public signature reaching that identity walked only the
+  survivor. `surface.py`'s own established `record_by_name` index already
+  keys on a *list* of records per identity for exactly this reason; this
+  module's new dict was a real regression relative to that pattern, not a
+  hypothetical edge case. Fixed by changing the index to
+  `dict[str, list[RecordType]]` and walking every record for a reached
+  identity, checking each one's own origin independently. New regression
+  tests cover both orderings and the origin-filtering interaction. Full
+  suite green, 100% module coverage, FP-rate gate stays 0 FP/0 FN.

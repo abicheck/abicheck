@@ -305,6 +305,90 @@ def _stdlib_type_unreferenced_stays_filtered() -> tuple[AbiSnapshot, AbiSnapshot
     return old, new
 
 
+def _stdlib_internal_owner_method_stays_filtered() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # Codex review, fresh evidence: CastXML/direct-clang record a method's
+    # own Function.name bare ("touch", never "__gnu_cxx::Node::touch"), so
+    # the fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES) guard cannot
+    # catch a retained, seemingly-public method whose *owner* is itself a
+    # stdlib-internal class -- owner_class_of correctly recovers the
+    # qualified "__gnu_cxx::Node" owner via the mangled fallback, and
+    # without also checking that recovered owner against the stdlib
+    # prefixes, layout churn on the internal owner class itself must not
+    # be reported as a public break.
+    old = _snap(
+        "1",
+        functions=[
+            Function(
+                name="touch",
+                mangled="_ZN9__gnu_cxx4Node5touchEv",
+                return_type="void",
+                params=[],
+            )
+        ],
+        types=[RecordType(name="__gnu_cxx::Node", kind="class", size_bits=64)],
+    )
+    new = _snap(
+        "2",
+        functions=[
+            Function(
+                name="touch",
+                mangled="_ZN9__gnu_cxx4Node5touchEv",
+                return_type="void",
+                params=[],
+            )
+        ],
+        types=[RecordType(name="__gnu_cxx::Node", kind="class", size_bits=128)],
+    )
+    return old, new
+
+
+def _internal_record_field_stdlib_churn_stays_filtered() -> tuple[
+    AbiSnapshot, AbiSnapshot
+]:
+    # Codex review, fresh evidence: an InternalCache-shaped record that no
+    # public function reaches (default ScopeOrigin.UNKNOWN -- the common
+    # case, since origin classification is opt-in) must not become a
+    # reachability root just because it exists in the snapshot. Guards the
+    # reachability-closure fix specifically -- distinct from
+    # stdlib_type_unreferenced_stays_filtered above, which has no owning
+    # record at all.
+    old = _snap(
+        "1",
+        functions=[_fn("api")],
+        types=[
+            _rec(
+                "InternalCache",
+                size=64,
+                fields=[("v", "vector<int, std::allocator<int> >")],
+            ),
+            RecordType(
+                name="vector<int, std::allocator<int> >",
+                kind="class",
+                size_bits=192,
+                qualified_name="std::vector<int, std::allocator<int> >",
+            ),
+        ],
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api")],
+        types=[
+            _rec(
+                "InternalCache",
+                size=64,
+                fields=[("v", "vector<int, std::allocator<int> >")],
+            ),
+            RecordType(
+                name="vector<int, std::allocator<int> >",
+                kind="class",
+                size_bits=256,
+                qualified_name="std::vector<int, std::allocator<int> >",
+            ),
+        ],
+    )
+    return old, new
+
+
 # --- enum-reachability + pointer/opaque precision (internal-noise) ------------
 # These lock in the by-value-vs-pointer (ADR-024 §D3) and enum/typedef
 # reachability behaviour the corpus previously left uncovered (see the NOTE
@@ -425,6 +509,40 @@ def _public_stdlib_type_used_directly_layout_changed() -> tuple[
                 qualified_name="std::vector<int, std::allocator<int> >",
             )
         ],
+    )
+    return old, new
+
+
+def _public_std_string_typedef_alias_layout_changed() -> tuple[
+    AbiSnapshot, AbiSnapshot
+]:
+    # Closes the last piece of the typedef-aliased-stdlib-type gap: a public
+    # function spelled with the real DWARF backend's bare signature form
+    # ("string") for a std::string parameter, resolved through
+    # snapshot.typedefs["std::string"] -> the real
+    # std::__cxx11::basic_string<...> RecordType (empirically verified
+    # against a real DWARF-dumped std::string parameter). Before this, the
+    # alias was never connected back to the RecordType that owns the real
+    # layout, so this size change was silently filtered as toolchain noise.
+    _BASIC_STRING = (
+        "std::__cxx11::basic_string<char, std::char_traits<char>, "
+        "std::allocator<char> >"
+    )
+    old = _snap(
+        "1",
+        functions=[_fn("api", params=("string",))],
+        types=[RecordType(name=_BASIC_STRING, kind="class", size_bits=256)],
+        typedefs={
+            "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
+        },
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api", params=("string",))],
+        types=[RecordType(name=_BASIC_STRING, kind="class", size_bits=320)],
+        typedefs={
+            "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
+        },
     )
     return old, new
 
@@ -728,6 +846,16 @@ CORPUS: list[Case] = [
         True,
         _stdlib_type_unreferenced_stays_filtered,
     ),
+    Case(
+        "internal_record_field_stdlib_churn_stays_filtered",
+        True,
+        _internal_record_field_stdlib_churn_stays_filtered,
+    ),
+    Case(
+        "stdlib_internal_owner_method_stays_filtered",
+        True,
+        _stdlib_internal_owner_method_stays_filtered,
+    ),
     # enum reachability + pointer/opaque precision — internal-noise polarity.
     Case("internal_enum_value_changed", True, _internal_enum_value_changed),
     Case("internal_enum_member_removed", True, _internal_enum_member_removed),
@@ -755,6 +883,11 @@ CORPUS: list[Case] = [
         "public_stdlib_type_used_directly_layout_changed",
         False,
         _public_stdlib_type_used_directly_layout_changed,
+    ),
+    Case(
+        "public_std_string_typedef_alias_layout_changed",
+        False,
+        _public_std_string_typedef_alias_layout_changed,
     ),
     Case("public_function_removed", False, _public_function_removed),
     Case("public_param_type_changed", False, _public_param_type_changed),
@@ -1181,7 +1314,10 @@ CASE_CATEGORY: dict[str, str] = {
     "cross_stdlib_embedded_layout_diverges": "stdlib-impl",
     # direct vs. transitive stdlib type reachability (status-review item 3)
     "stdlib_type_unreferenced_stays_filtered": "stdlib-direct-reference",
+    "internal_record_field_stdlib_churn_stays_filtered": "stdlib-direct-reference",
     "public_stdlib_type_used_directly_layout_changed": "stdlib-direct-reference",
+    "public_std_string_typedef_alias_layout_changed": "stdlib-direct-reference",
+    "stdlib_internal_owner_method_stays_filtered": "stdlib-direct-reference",
     # versioned-symbol scheme / multi-.so bundle
     "versioned_scheme_internal_churn": "versioned-scheme",
     "bundle_sibling_soname_churn": "versioned-scheme",

@@ -36,6 +36,8 @@ from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.diff_cxx_rules import (
     itanium_qualified_name,
     itanium_scope_components,
+    msvc_qualified_name,
+    msvc_scope_components,
     owner_class_of,
 )
 from abicheck.model import (
@@ -419,6 +421,29 @@ class TestOverloadAdded:
         assert ChangeKind.OVERLOAD_ADDED not in _kinds(result)
         assert ChangeKind.FUNC_ADDED in _kinds(result)
 
+    def test_added_conversion_operator_is_not_treated_as_overload(self):
+        # Codex review, fresh evidence: itanium_scope_components() previously
+        # reduced every conversion operator's leaf to the same fixed
+        # "{op:cv}" placeholder regardless of target type, so adding
+        # operator double() alongside an existing operator int() collapsed
+        # to the same _overload_group_key() and fired a false
+        # OVERLOAD_ADDED -- two conversion operators to different types are
+        # never overloads of each other (no shared `&Foo::operator T` can
+        # become ambiguous).
+        old = _snap(
+            functions=[
+                _method("operator int", "_ZNK3FoocviEv"),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _method("operator int", "_ZNK3FoocviEv"),
+                _method("operator double", "_ZNK3FoocvdEv"),
+            ]
+        )
+        result = compare(old, new)
+        assert ChangeKind.OVERLOAD_ADDED not in _kinds(result)
+
     def test_signature_change_is_not_overload_added(self):
         """A pure signature change (remove+add of the same name) must not look
         like an overload addition: the original declaration is gone."""
@@ -552,6 +577,20 @@ class TestItaniumScopeParser:
         ("_ZN1CD1Ev", ["C", "{dtor}"]),                      # C::~C() destructor
         ("_ZN5ArrayILi4EE4sizeEv", ["ArrayILi4EE", "size"]),  # Array<4>::size (non-type arg)
         ("_ZN1C3getB5cxx11Ev", ["C", "getBcxx11"]),          # C::get[abi:cxx11]()
+        ("_ZSt5touchv", ["std", "touch"]),                   # std::touch(), no N...E wrapper
+        ("_ZNSt6detail3fooEv", ["std", "detail", "foo"]),    # std::detail::foo()
+        # Mach-O direct-clang mangled names carry an extra platform leading
+        # underscore (Codex review, fresh evidence: dumper_clang.py's own
+        # _visibility() docstring documents "__ZN3lib3addEii" on macOS).
+        ("__ZN1C3barEv", ["C", "bar"]),                      # Mach-O member
+        ("__ZSt5touchv", ["std", "touch"]),                  # Mach-O std::touch()
+        # Conversion operator (Codex review, fresh evidence): the "cv" code
+        # is followed by the target type's own encoding, which is not
+        # parsed -- only the scope prefix before "cv" is needed for owner
+        # recovery -- but the leaf label embeds the raw remainder verbatim
+        # (not a fixed placeholder) so distinct conversion targets still
+        # produce distinct overload-grouping keys elsewhere.
+        ("_ZNK3FoocvN2ns3BarEEv", ["Foo", "{op:cv:N2ns3BarEEv}"]),  # Foo::operator ns::Bar() const
     ])
     def test_components(self, mangled, expected):
         assert itanium_scope_components(mangled) == expected
@@ -580,6 +619,33 @@ class TestItaniumScopeParser:
         f = Function(name="~C", mangled="_ZN1CD1Ev",
                      return_type="void", visibility=Visibility.PUBLIC)
         assert owner_class_of(f) == "C"
+
+    def test_conversion_operator_owner_resolves_from_mangled(self):
+        # direct-clang records a conversion operator's bare AST name
+        # ("operator Bar", no owning-class prefix, confirmed via a real
+        # clang -ast-dump) -- owner_class_of must fall back to the mangled
+        # name, whose "cv" code was previously unmodelled entirely (Codex
+        # review, fresh evidence).
+        f = Function(name="operator Bar", mangled="_ZNK3FoocvN2ns3BarEEv",
+                     return_type="ns::Bar", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) == "Foo"
+
+    def test_conversion_operator_owner_resolves_with_namespaced_class(self):
+        f = Function(name="operator Bar", mangled="_ZNK2ns3FoocvN2ns3BarEEv",
+                     return_type="ns::Bar", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) == "ns::Foo"
+
+    def test_bare_conversion_operator_with_qualified_target_falls_through(self):
+        # CodeRabbit review: a bare-recorded conversion operator (no owning-
+        # class prefix) can still carry a qualified target with its own
+        # "::" (e.g. "operator ns::Bar") -- the "::operator " marker isn't
+        # present (no owner precedes "operator"), so naively rsplit-ting at
+        # the last "::" would wrongly treat the target's own qualification
+        # as the owner/member boundary, returning junk like "operator ns"
+        # instead of falling through to the mangled-name recovery.
+        f = Function(name="operator ns::Bar", mangled="_ZNK3FoocvN2ns3BarEEv",
+                     return_type="ns::Bar", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) == "Foo"
 
     @pytest.mark.parametrize("mangled", [
         "foo",            # not Itanium-mangled (C symbol)
@@ -611,5 +677,69 @@ class TestItaniumScopeParser:
 
     def test_owner_none_for_free_function(self):
         f = Function(name="draw", mangled="_Z4drawi",
+                     return_type="void", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) is None
+
+
+class TestMsvcScopeParser:
+    """Structural parser for clang-cl/MSVC-mangled symbols (Codex review,
+    fresh evidence: confirmed against real ``clang --target=x86_64-pc-
+    windows-msvc -Xclang -ast-dump=json`` output for every case below)."""
+
+    @pytest.mark.parametrize("mangled,expected", [
+        ("?run@Foo@@QEAAXXZ", ["Foo", "run"]),                    # Foo::run()
+        ("?freefunc@ns@@YAXXZ", ["ns", "freefunc"]),              # ns::freefunc()
+        ("?method@Box@inner@outer@@QEAAXXZ",
+         ["outer", "inner", "Box", "method"]),                    # outer::inner::Box::method()
+        ("?instantiate@@YAXXZ", ["instantiate"]),                 # global free function
+        ("?vf@Base@@UEAAXXZ", ["Base", "vf"]),                    # virtual member
+        ("?f@A@@QEAAXXZ", ["A", "f"]),                            # single-letter class name
+        ("?g@A@N@@QEAAXXZ", ["N", "A", "g"]),                     # N::A::g()
+    ])
+    def test_components(self, mangled, expected):
+        assert msvc_scope_components(mangled) == expected
+
+    @pytest.mark.parametrize("mangled", [
+        "foo",                             # not MSVC-mangled (no leading ?)
+        "??0Box@inner@outer@@QEAA@XZ",      # constructor -- not modelled
+        "??_DBox@inner@outer@@QEAAXXZ",     # destructor -- not modelled
+        "??4Base@@QEAAAEAU0@AEBU0@@Z",      # operator= -- not modelled
+        "?go@?$Wrapper@H@@QEAAXXZ",         # template class -- not modelled
+        "??0?$Wrapper@H@@QEAA@XZ",          # template ctor -- not modelled
+        "?run@Foo@",                        # missing "@@" terminator
+        "?@@YAXXZ",                         # empty leaf name
+    ])
+    def test_unmodelled_or_degenerate_does_not_crash(self, mangled):
+        result = msvc_scope_components(mangled)
+        assert result is None or isinstance(result, list)
+
+    def test_qualified_name(self):
+        assert msvc_qualified_name("?run@Foo@@QEAAXXZ") == "Foo::run"
+        assert msvc_qualified_name("?instantiate@@YAXXZ") == "instantiate"
+
+    def test_owner_falls_back_to_msvc_mangled(self):
+        # clang-cl records a bare AST name (like CastXML) but MSVC mangling
+        # (unlike CastXML's Itanium mangling) -- owner_class_of must try both.
+        f = Function(name="run", mangled="?run@Foo@@QEAAXXZ",
+                     return_type="void", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) == "Foo"
+
+    def test_owner_none_for_unscoped_msvc_free_function(self):
+        f = Function(name="instantiate", mangled="?instantiate@@YAXXZ",
+                     return_type="void", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) is None
+
+    def test_owner_treats_namespaced_msvc_free_function_scope_as_owner(self):
+        # Same pre-existing namespace-vs-class ambiguity documented for the
+        # Itanium fallback (AGENTS.md "Known gaps" -- owner_class_of cannot
+        # syntactically tell a namespace from a class): a namespaced free
+        # function's enclosing scope resolves the same way a method's owning
+        # class would, for both mangling schemes alike.
+        f = Function(name="freefunc", mangled="?freefunc@ns@@YAXXZ",
+                     return_type="void", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) == "ns"
+
+    def test_owner_none_for_msvc_constructor(self):
+        f = Function(name="Box", mangled="??0Box@inner@outer@@QEAA@XZ",
                      return_type="void", visibility=Visibility.PUBLIC)
         assert owner_class_of(f) is None

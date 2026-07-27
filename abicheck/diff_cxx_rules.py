@@ -112,7 +112,19 @@ def _itanium_strip_prefix(mangled: str) -> tuple[str, bool] | None:
     first component and *is_nested* indicates whether a ``N`` nested-name
     wrapper was opened (and must be closed by ``E``). Returns ``None`` when
     the symbol does not carry the ``_Z`` Itanium prefix.
+
+    A Mach-O direct-clang mangled name carries an extra platform leading
+    underscore (Codex review, fresh evidence: confirmed via
+    ``dumper_clang.py``'s own ``_visibility()`` docstring — clang's
+    ``mangledName`` is ``"__ZN3lib3addEii"`` on macOS, not the plain
+    Itanium ``"_ZN3lib3addEii"``), so a bare ``mangled.startswith("_Z")``
+    check rejects every symbol on that platform. Normalized away here by
+    stripping one leading underscore before the check, mirroring
+    ``dumper_clang.py``'s own ``_symbol_candidates()`` de-prefixing
+    approach for the identical Mach-O quirk.
     """
+    if mangled.startswith("__Z"):
+        mangled = mangled[1:]
     if not mangled.startswith("_Z"):
         return None
     s = mangled[2:]
@@ -176,10 +188,64 @@ def _parse_ctor_dtor_component(s: str, i: int) -> tuple[str | None, int]:
 def _parse_operator_component(s: str, i: int) -> tuple[str | None, int]:
     """Parse an Itanium operator-function code at ``s[i]``.
 
-    Returns ``("{op:XX}", i+2)`` for a known 2-char operator code, or
-    ``(None, i)`` if ``s[i:i+2]`` is not in ``_ITANIUM_OPERATORS``.
+    Returns ``("{op:XX}", i+2)`` for a known 2-char operator code,
+    ``("{op:cv:<raw remainder>}", len(s))`` for a conversion operator (see
+    below), or ``(None, i)`` if ``s[i:i+2]`` is not a recognized operator
+    code.
+
+    A conversion operator's own Itanium code, ``cv``, is deliberately kept
+    out of ``_ITANIUM_OPERATORS`` for *signature-identity* purposes (a
+    fixed 2-char code there is used so operator overloads group together,
+    but every conversion operator carries a different target type and is
+    never an overload of another one) — handled separately here instead of
+    folded into that set, since it needs different treatment for *scope
+    recovery*: a direct-clang snapshot stores a conversion operator's own
+    ``Function.name`` bare (e.g. ``"operator Bar"``, confirmed via a real
+    ``clang -ast-dump``, no owning-class prefix at all — the same
+    unqualified-leaf convention CastXML uses for ordinary methods), so
+    ``owner_class_of()``'s mangled-name fallback is the only way to
+    recover the owner, and it previously failed outright here (Codex
+    review, fresh evidence): ``cv`` is immediately followed by the full
+    Itanium encoding of the conversion's target type (e.g.
+    ``cvN2ns3BarE`` for ``operator ns::Bar()``), which is not a simple
+    length-prefixed name — parsing an arbitrary Itanium ``<type>``
+    production (builtin codes, pointers, nested names, substitutions, ...)
+    is a much larger grammar than this structural parser attempts
+    elsewhere. Recovering the *scope* doesn't need the target type parsed
+    at all: ``cv`` is always this member's own leaf component (a
+    conversion operator can't itself enclose further nested-name
+    components), so it is safe to stop parsing immediately after
+    recognizing it — see the ``done`` override in
+    :func:`_step_next_component` — rather than attempt (and risk
+    mis-parsing) the type that follows.
+
+    The leaf *label* embeds the raw, unparsed remainder of the mangled
+    string after ``cv`` rather than a fixed placeholder (Codex review,
+    fresh evidence): ``diff_types._overload_group_key()`` uses
+    ``itanium_qualified_name()`` — which chains this label onto the scope
+    prefix — to decide whether two declarations are genuine overloads of
+    one another. A fixed placeholder made every conversion operator on a
+    class produce the *same* qualified name regardless of target (e.g.
+    both ``operator int()`` and ``operator double()`` on the same class
+    reduced to ``"Foo::{op:cv}"``), which collapsed two conversion
+    operators that are never overloads of each other (each is a distinct,
+    unambiguous conversion function — there is no shared ``&Foo::operator
+    T`` to become ambiguous) into one group, producing a false
+    ``OVERLOAD_ADDED`` — confirmed empirically:
+    ``_diff_overload_additions()`` fired for exactly this case before this
+    fix. The target type's mangled encoding is itself deterministic (the
+    same target always mangles identically, distinct targets always
+    mangle differently), so embedding the raw, un-decoded remainder
+    verbatim is sufficient to keep distinct targets in distinct groups and
+    identical targets in the same group, without needing to parse the
+    arbitrary ``<type>`` grammar it contains. Advances ``i`` to
+    ``len(s)`` (nothing meaningful follows for this parser's purposes
+    anyway, since :func:`_step_next_component` always stops immediately
+    after a ``cv`` component regardless of nesting).
     """
     code = s[i : i + 2]
+    if code == "cv":
+        return f"{{op:cv:{s[i + 2 :]}}}", len(s)
     if code in _ITANIUM_OPERATORS:
         # Keep the code so operator overloads group (e.g. operator[](int)/(long))
         # while distinct operators stay distinct. Conversion operators (`cv`) are
@@ -215,8 +281,8 @@ def _step_next_component(
       for a nested name, or a free-function's single component was consumed).
 
     Returns ``None`` (not a 3-tuple) when the component cannot be parsed at all
-    (conversion operator, substitution, vendor encoding, truncated source name)
-    so the caller propagates failure by returning ``None`` from its own scope.
+    (an unrecognized/vendor operator, substitution, truncated source name) so
+    the caller propagates failure by returning ``None`` from its own scope.
     """
     c = s[i]
     if nested and c == "E":
@@ -230,6 +296,12 @@ def _step_next_component(
     label, new_i = _parse_non_source_name_component(s, i)
     if label is None:
         return None  # conversion operator / substitution / vendor — not modelled
+    if label.startswith("{op:cv:"):
+        # A conversion operator's own leaf component is always last; its
+        # target type follows immediately and is deliberately not parsed
+        # (see _parse_operator_component) so stop right here regardless of
+        # nesting, rather than attempt to step into that unparsed type.
+        return label, new_i, True
     return label, new_i, not nested
 
 
@@ -248,9 +320,27 @@ def itanium_scope_components(mangled: str) -> list[str] | None:
         _ZNK1C3barEv                   -> ["C", "bar"]              (const member)
         _ZN3lib12experimental4sortEv   -> ["lib", "experimental", "sort"]
         _ZN3BoxIiE4sizeEv              -> ["BoxIiE", "size"]        (Box<int>::size)
+        _ZSt5touchv                    -> ["std", "touch"]          (std::touch(), no wrapper)
+        _ZNSt6detail3fooEv             -> ["std", "detail", "foo"]  (std::detail::foo())
+
+    The Itanium ABI mandates the 2-character substitution ``St`` for the
+    *first* occurrence of the ``std::`` scope prefix in a mangled name —
+    confirmed empirically against two real GCC-compiled symbols:
+    ``namespace std { void touch() {} }`` mangles to the bare ``_ZSt5touchv``
+    (``St`` directly after ``_Z``, no ``N…E`` nested-name wrapper needed for
+    a single trailing component), while ``namespace std { namespace detail {
+    void foo() {} } }`` mangles to ``_ZNSt6detail3fooEv`` (``St`` right after
+    the ``N`` nested-name marker, with further components following before
+    ``E``). Recognized only as the very first component (this parser does
+    not attempt general substitution-table resolution for the other
+    Itanium substitution abbreviations — ``Sa``/``Sb``/``Ss``/``Si``/``So``/
+    ``Sd`` — which stand for a complete template *type*, not a scope prefix
+    that can have more components appended, and are irrelevant to "what
+    scope is this declaration in").
 
     Returns ``None`` for forms it does not model (constructors/operators,
-    substitutions, non-Itanium or unmangled names) so callers fall back.
+    other substitutions, non-Itanium or unmangled names) so callers fall
+    back.
     """
     prefix = _itanium_strip_prefix(mangled)
     if prefix is None:
@@ -259,6 +349,9 @@ def itanium_scope_components(mangled: str) -> list[str] | None:
     components: list[str] = []
     i = 0
     n = len(s)
+    if s[i : i + 2] == "St":
+        components.append("std")
+        i += 2
     while i < n:
         step = _step_next_component(s, i, nested)
         if step is None:
@@ -277,6 +370,66 @@ def itanium_qualified_name(mangled: str) -> str | None:
     return "::".join(comps) if comps else None
 
 
+def msvc_scope_components(mangled: str) -> list[str] | None:
+    """Scope components of an MSVC-mangled C++ symbol, parsed structurally.
+
+    Direct-clang snapshots taken with ``clang-cl`` (or any ``--target=
+    *-windows-msvc`` invocation) record ``mangledName`` in the proprietary
+    Microsoft C++ ABI scheme, not Itanium — confirmed empirically::
+
+        ?run@Foo@@QEAAXXZ            -> ["Foo", "run"]        (Foo::run())
+        ?freefunc@ns@@YAXXZ          -> ["ns", "freefunc"]    (ns::freefunc())
+        ?method@Box@inner@outer@@... -> ["outer", "inner", "Box", "method"]
+        ?instantiate@@YAXXZ          -> ["instantiate"]       (free function)
+
+    The qualified name is written ``<leaf>@<scope1>@<scope2>...@@<type-enc>``
+    with scope components listed *innermost first*, terminated by the first
+    ``@@`` — the reverse order and terminator convention Itanium uses, so this
+    is a genuinely separate parser, not a reuse of ``itanium_scope_components``.
+
+    Returns ``None`` for forms it does not model, mirroring
+    ``itanium_scope_components``'s "return None, let the caller fall back"
+    contract:
+
+    * Special member functions and operators (constructors ``??0``,
+      destructors ``??1``/``??_D``, ``operator=`` ``??4``, ...) all mangle
+      with a *second* ``?`` immediately after the first — the "name" slot
+      is an operator code, not a plain identifier, so the simple
+      leaf/scope split below does not apply.
+    * Template classes/functions (``?$Name@Args@``) embed the template
+      argument list inside the same ``@``-delimited region as the scope
+      chain using the identical separator, and argument encodings can
+      themselves be arbitrary nested type strings — a naive split cannot
+      tell an argument token from a scope token, so any component
+      starting with ``?`` (the template marker ``?$`` or the anonymous-
+      namespace marker ``?A``) is rejected rather than mis-parsed.
+    * A bare-digit component is a name-backreference into MSVC's
+      per-symbol substitution table, not a literal identifier — no real
+      C++ identifier is all-digits, so this is an unambiguous signal to
+      bail rather than resolve it wrong.
+    """
+    if not mangled.startswith("?") or mangled[1:2] == "?":
+        return None
+    idx = mangled.find("@@")
+    if idx == -1:
+        return None
+    head = mangled[1:idx]
+    if not head:
+        return None
+    parts = head.split("@")
+    if any(not p or p.startswith("?") or p.isdigit() for p in parts):
+        return None
+    name = parts[0]
+    scope = list(reversed(parts[1:]))
+    return [*scope, name]
+
+
+def msvc_qualified_name(mangled: str) -> str | None:
+    """Fully scope-qualified name (``ns::C::bar``) from an MSVC-mangled symbol, or None."""
+    comps = msvc_scope_components(mangled)
+    return "::".join(comps) if comps else None
+
+
 def owner_class_of(f: Function) -> str | None:
     """The enclosing class/struct of a method.
 
@@ -284,10 +437,51 @@ def owner_class_of(f: Function) -> str | None:
     name when the dumper recorded an unqualified leaf (CastXML records the bare
     ``bar`` rather than ``C::bar``). ``Foo::bar`` → ``Foo``;
     ``ns::Foo::bar`` → ``ns::Foo``; a free function → ``None``.
+
+    A conversion operator's own target type can itself carry ``"::"`` (e.g.
+    ``"Foo::operator ns::Bar"`` for `operator ns::Bar()`, confirmed against a
+    real compiled+demangled symbol) — naively splitting at the *last* ``"::"``
+    would then wrongly treat that target's own qualification as the
+    owner/member boundary, producing ``"Foo::operator ns"`` instead of
+    ``"Foo"`` (Codex review, fresh evidence). A real demangled conversion
+    operator always renders as ``"<owner>::operator <target>"`` with exactly
+    one space after the ``operator`` keyword (never present for a symbol
+    operator like ``operator+``/``operator[]``, which has no target type to
+    separate from the keyword), so the true boundary is the ``"::"``
+    immediately before that literal ``"::operator "`` marker when present.
+
+    A direct-clang MSVC (``clang-cl``) snapshot preserves ``mangledName`` in
+    the Microsoft mangling scheme while still recording a bare AST name for a
+    member (the same "CastXML records the bare leaf" situation as above, just
+    with a different mangled-name dialect) — the Itanium-only mangled-name
+    fallback below left this owner unresolved (Codex review, fresh evidence).
+    Tried second, after Itanium: the two schemes are mutually exclusive by
+    their leading-byte convention (``_Z``/``__Z`` vs. ``?``), so trying both
+    in sequence is unambiguous and costs nothing on the common Itanium path.
+
+    A bare-recorded conversion operator (no owning-class prefix at all, the
+    shape CastXML/direct-clang actually produce — confirmed elsewhere in this
+    module) can still carry a qualified *target* type with its own ``"::"``
+    (e.g. ``"operator ns::Bar"``, no ``"Foo::"`` prefix) when the underlying
+    ``name`` attribute itself preserves that qualification (CodeRabbit
+    review): the ``"::operator "`` marker isn't present (there's no owner
+    before ``"operator"``), so the naive ``rsplit`` fallback would wrongly
+    treat the target's own ``"::"`` as the owner/member boundary, returning
+    junk like ``"operator ns"``. Detected the same way the bare, unqualified
+    ``"operator Bar"`` case already is — checking for the ``"operator "``
+    prefix — so both fall through to the mangled-name recovery below instead.
     """
     if "::" in f.name:
-        return f.name.rsplit("::", 1)[0]
-    comps = itanium_scope_components(f.mangled)
+        marker_idx = f.name.find("::operator ")
+        if marker_idx != -1:
+            return f.name[:marker_idx]
+        if not f.name.startswith("operator "):
+            return f.name.rsplit("::", 1)[0]
+        # Bare-recorded conversion operator with a qualified target
+        # ("operator ns::Bar") -- the only "::" belongs to the target type,
+        # not an owner/member boundary; fall through to mangled-name
+        # recovery for the real owner.
+    comps = itanium_scope_components(f.mangled) or msvc_scope_components(f.mangled)
     if not comps or len(comps) < 2:
         return None
     return "::".join(comps[:-1])
