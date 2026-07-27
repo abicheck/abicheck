@@ -177,9 +177,34 @@ _NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
         "text_relocation_introduced",
         "dt_relr_introduced",
         "dt_relr_removed",
+        # W^X/CET/BTI-PAC hardening posture -- the same binary-wide
+        # build-flag property as the security-hardening kinds immediately
+        # above, just omitted from the original curation (Codex review,
+        # fresh evidence): a writable+executable segment, and IBT/SHSTK
+        # (x86 CET) / BTI/PAC (AArch64 branch protection) gained or
+        # dropped, are never about one exported entity.
+        "writable_executable_segment",
+        "text_relocation_removed",
+        "cet_protection_weakened",
+        "branch_protection_weakened",
+        "cet_protection_improved",
+        "branch_protection_improved",
         # Toolchain/runtime identity, not a consumer-visible entity.
         "libcpp_abi_version_changed",
         "sycl_plugin_search_path_changed",
+        # Deployment/runtime-floor state (ADR-049 D2's "deployment" column):
+        # each is a synthesized headline finding over a synthetic subject
+        # (e.g. "libc.so.6:GLIBC_2" for RUNTIME_FLOOR_RAISED, per
+        # diff_platform_elf_symbols._runtime_floor_changes's own
+        # `symbol=f"{lib}:{prefix}"` construction) -- the minimum
+        # runtime/OS/CPU-ISA a binary now requires, never a specific
+        # function/variable/type a consumer's code references (Codex
+        # review, fresh evidence).
+        "runtime_floor_raised",
+        "platform_baseline_floor_raised",
+        "macos_deployment_target_raised",
+        "x86_isa_baseline_raised",
+        "os_deployment_floor_raised",
     }
 )
 

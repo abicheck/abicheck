@@ -213,6 +213,65 @@ class TestNotApplicableKinds:
             assurance=ContractAssurance.COMPLETE,
         )
 
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            ChangeKind.WRITABLE_EXECUTABLE_SEGMENT,
+            ChangeKind.TEXT_RELOCATION_REMOVED,
+            ChangeKind.CET_PROTECTION_WEAKENED,
+            ChangeKind.BRANCH_PROTECTION_WEAKENED,
+            ChangeKind.CET_PROTECTION_IMPROVED,
+            ChangeKind.BRANCH_PROTECTION_IMPROVED,
+        ],
+    )
+    def test_remaining_security_hardening_changes_are_not_applicable(
+        self, kind: ChangeKind
+    ) -> None:
+        # Regression (Codex review, fresh evidence): a writable+executable
+        # segment (W^X violation) and IBT/SHSTK (x86 CET) / BTI/PAC
+        # (AArch64 branch protection) gained or dropped are the same
+        # binary-wide build-flag hardening posture as the security kinds
+        # already covered (RELRO/PIE/canary/FORTIFY/...), but were omitted
+        # from the original curation.
+        c = Change(kind=kind, symbol="", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.NOT_APPLICABLE,
+            reason_code="non_entity_finding",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            ChangeKind.RUNTIME_FLOOR_RAISED,
+            ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+            ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
+            ChangeKind.X86_ISA_BASELINE_RAISED,
+            ChangeKind.OS_DEPLOYMENT_FLOOR_RAISED,
+        ],
+    )
+    def test_deployment_floor_changes_are_not_applicable(
+        self, kind: ChangeKind
+    ) -> None:
+        # Regression (Codex review, fresh evidence): each of these is a
+        # synthesized headline finding over a synthetic subject (e.g.
+        # "libc.so.6:GLIBC_2" for RUNTIME_FLOOR_RAISED) -- the minimum
+        # runtime/OS/CPU-ISA a binary now requires, never a specific
+        # function/variable/type a consumer's code references. Only the
+        # neighboring wheel-deployment checks were covered before this.
+        c = Change(kind=kind, symbol="libfoo.so.1:GLIBC_2", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.NOT_APPLICABLE,
+            reason_code="non_entity_finding",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
 
 class TestUnsupportedMode:
     @pytest.mark.parametrize("mode", [ContractMode.EXPORTS, "exports"])
