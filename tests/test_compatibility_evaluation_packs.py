@@ -242,6 +242,60 @@ class TestLoadPackManifestHappyPath:
                 assignments={"func_removed": "not_a_severity"},
             )
 
+    def test_directly_constructed_pack_coerces_a_bare_kind_string(self) -> None:
+        # Regression (Codex review): `kind="policy"` (a bare str, not the
+        # PackKind enum member) failed the `is PackKind.POLICY` identity
+        # check, silently skipping severity coercion, while
+        # assignments_for_conflict_check() still grouped it as a policy
+        # pack (equality/hash, not identity) -- the two disagreed.
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind="policy",
+            assignments={"func_removed": "break"},
+        )
+        assert pack.kind is PackKind.POLICY
+        assert pack.assignments["func_removed"] is Verdict.BREAKING
+
+    def test_directly_constructed_pack_with_bare_kind_string_does_not_false_conflict(
+        self,
+    ) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        bare_kind = LoadedPack(
+            identity=ImmutableIdentity(id="p1", version=1, sha256="deadbeef"),
+            kind="policy",
+            assignments={"func_removed": "break"},
+        )
+        typed_kind = LoadedPack(
+            identity=ImmutableIdentity(id="p2", version=1, sha256="beefdead"),
+            kind=PackKind.POLICY,
+            assignments={"func_removed": "break"},
+        )
+        grouped = assignments_for_conflict_check([bare_kind, typed_kind])
+        detect_pack_conflicts(grouped[PackKind.POLICY])  # must not raise
+
+    def test_directly_constructed_pack_rejects_unknown_kind(self) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        with pytest.raises(PackManifestError, match="kind must be one of"):
+            LoadedPack(
+                identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+                kind="bogus",
+                assignments={},
+            )
+
+    def test_directly_constructed_pack_rejects_unhashable_kind(self) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        with pytest.raises(PackManifestError, match="kind must be one of"):
+            LoadedPack(
+                identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+                kind=["policy"],
+                assignments={},
+            )
+
 
 class TestLoadPackManifestValidation:
     def test_missing_file_raises(self, tmp_path: Path) -> None:

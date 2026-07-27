@@ -179,7 +179,17 @@ class LoadedPack:
     real ``Verdict`` member this class's own contract promises, which would
     then compare unequal to an equivalent manifest-loaded pack's ``Verdict``
     value inside ``detect_pack_conflicts`` and raise a false
-    ``PackConflictError`` (Codex review, third round).
+    ``PackConflictError`` (Codex review, third round). ``kind`` itself is
+    coerced through ``PackKind(...)`` first, for the identical reason: an
+    untyped caller passing the bare string ``"policy"`` instead of
+    ``PackKind.POLICY`` would fail the ``is PackKind.POLICY`` identity check
+    above (a `str` value is never the same object as the enum member, even
+    though it compares equal), silently skipping the policy-specific
+    normalization -- while ``assignments_for_conflict_check`` still groups
+    it into the ``POLICY`` bucket regardless, since *that* grouping keys off
+    equality/hash, not identity. Rejecting or coercing an invalid ``kind``
+    here means the two checks can never disagree about which packs are
+    policy packs (Codex review, fourth round).
     """
 
     identity: ImmutableIdentity
@@ -187,7 +197,14 @@ class LoadedPack:
     assignments: Mapping[str, Hashable]
 
     def __post_init__(self) -> None:
-        if self.kind is PackKind.POLICY:
+        try:
+            kind = PackKind(self.kind)
+        except ValueError as exc:
+            raise PackManifestError(
+                f"kind must be one of {sorted(_VALID_PACK_KINDS)}, got {self.kind!r}"
+            ) from exc
+        object.__setattr__(self, "kind", kind)
+        if kind is PackKind.POLICY:
             coerced: dict[str, Hashable] = dict(
                 _parse_policy_assignments(
                     self.assignments, source="LoadedPack(...) (direct construction)"
