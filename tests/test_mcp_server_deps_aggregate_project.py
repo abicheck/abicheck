@@ -144,6 +144,12 @@ class TestAbiDeps:
         # ADR-021b D3: when a sysroot is active, resolver._seed_root parses
         # the sysroot-rebased path, not the host-absolute one passed in --
         # the pre-flight size/format checks must validate that same file.
+        # POSIX-style absolute paths (a bare leading "/") aren't recognized
+        # as absolute on Windows, so the sysroot-rebasing this test exercises
+        # is inherently POSIX-only -- same reasoning as the ELF-only skip
+        # above.
+        if sys.platform != "linux":
+            pytest.skip("sysroot rebasing needs a POSIX-absolute binary_path")
         sysroot_dir = tmp_path / "sysroot"
         rebased = sysroot_dir / "usr" / "lib" / "libfoo.so"
         rebased.parent.mkdir(parents=True)
@@ -155,6 +161,8 @@ class TestAbiDeps:
         assert "exceeds limit" in payload["error"]
 
     def test_non_elf_sysroot_resolved_binary_is_rejected(self, tmp_path: Path):
+        if sys.platform != "linux":
+            pytest.skip("sysroot rebasing needs a POSIX-absolute binary_path")
         sysroot_dir = tmp_path / "sysroot"
         rebased = sysroot_dir / "usr" / "lib" / "libfoo.so"
         rebased.parent.mkdir(parents=True)
@@ -164,6 +172,35 @@ class TestAbiDeps:
         assert payload["status"] == "error"
         assert "elf" in payload["error"].lower()
 
+    def test_relative_binary_path_is_not_rebased_under_sysroot(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # A relative binary_path is always resolved against cwd, matching
+        # `deps tree`'s Click-based (non-resolving) Path handling: sysroot
+        # only affects where a binary's *dependencies* are searched, never
+        # the root binary itself, when the caller passed a relative path
+        # (the CLI's own documented `deps tree ./app --sysroot ...` example).
+        # _safe_read_path always resolves its input to absolute, so without
+        # tracking the original relative-ness abi_deps would wrongly rebase
+        # this under "<sysroot>/<absolutized-cwd>/app" instead (Codex review).
+        monkeypatch.chdir(tmp_path)
+        binary = tmp_path / "app"
+        binary.write_bytes(b"\x7fELF")
+        sysroot_dir = tmp_path / "sysroot"
+        sysroot_dir.mkdir()
+
+        received: list[Path] = []
+
+        def _spy(binary_arg, **kwargs):
+            received.append(binary_arg)
+            raise RuntimeError("stop after capturing args")
+
+        monkeypatch.setattr("abicheck.stack_checker.check_single_env", _spy)
+        raw = abi_deps("app", sysroot=str(sysroot_dir))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert received == [Path("app")]
+
 
 class TestResolveSysrootPath:
     def test_no_sysroot_returns_binary_unchanged(self):
@@ -171,6 +208,10 @@ class TestResolveSysrootPath:
         assert _resolve_sysroot_path(binary, None) == binary
 
     def test_absolute_binary_rebased_under_sysroot(self, tmp_path: Path):
+        # A bare leading "/" isn't absolute on Windows (no drive), so this
+        # rebasing case only applies on POSIX.
+        if sys.platform == "win32":
+            pytest.skip("POSIX-absolute binary path needed for this case")
         binary = Path("/usr/lib/libfoo.so")
         assert (
             _resolve_sysroot_path(binary, tmp_path)

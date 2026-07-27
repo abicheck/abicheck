@@ -46,7 +46,10 @@ def _check_dso_size(path: Path, max_file_size: int | None) -> None:
     resolved dependency) when a caller supplies a limit -- a caller-controlled
     search_paths/ld_library_path/sysroot can otherwise steer resolution to an
     arbitrarily large file with no size guard of its own (ADR-021b D3, for
-    callers like the MCP ``abi_deps`` tool that need one).
+    callers like the MCP ``abi_deps`` tool that need one). The error message
+    names only *path*'s basename, not its full resolved path -- MCP error
+    responses are expected to stay free of filesystem-path detail (the same
+    contract ``mcp_shared._check_file_size``'s label-only message keeps).
     """
     if max_file_size is None:
         return
@@ -56,7 +59,7 @@ def _check_dso_size(path: Path, max_file_size: int | None) -> None:
         return  # let the caller's own existence/format checks report this
     if size > max_file_size:
         raise ValueError(
-            f"{path} is {size / (1024 * 1024):.1f} MB, "
+            f"{path.name} is {size / (1024 * 1024):.1f} MB, "
             f"exceeds limit of {max_file_size / (1024 * 1024):.0f} MB"
         )
 

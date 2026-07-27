@@ -57,3 +57,26 @@
   tools** — an MCP client reads this text to pick a tool; it previously
   named only four of the original seven, omitting `abi_audit`/`abi_scan`
   entirely and all four tools this PR added.
+- **`abi_deps`'s new size guard no longer leaks a filesystem path in its
+  error message** — `resolver._check_dso_size`'s `ValueError` embedded the
+  full resolved path of an oversized dependency; now names only its
+  basename, matching `mcp_shared._check_file_size`'s existing label-only
+  (no-path) contract for MCP error responses.
+- **A relative `binary_path` is no longer wrongly rebased under `sysroot`**
+  — `abi_deps` pre-resolves every path argument to an absolute one for
+  path-safety, which erased the relative/absolute distinction
+  `resolver._seed_root`'s sysroot rebasing depends on; a relative
+  `binary_path` combined with `sysroot` (the `deps tree ./app --sysroot
+  ...` pattern the CLI itself documents) was silently rebased under
+  `<sysroot>/<absolutized-cwd>/...` instead of being resolved against cwd
+  like the CLI does. `abi_deps` now tracks the caller's original
+  relative-vs-absolute input separately from the path-safety-resolved copy.
+- **MCP test-isolation fixtures now restore all three `abicheck.mcp_*`
+  package attributes, not just `mcp_server`'s** — importing
+  `abicheck.mcp_shared`/`abicheck.mcp_server_project` under a temporary
+  mock also sets the corresponding attribute on the already-loaded
+  `abicheck` package object; popping `sys.modules` alone left that
+  attribute pointing at the mock, so a later `from abicheck import
+  mcp_shared` (etc.) could resolve to a stale mocked module without
+  re-importing at all. Fixed in both `tests/test_mcp_reference.py`'s
+  isolation fixture and `tests/test_cov95_misc.py`'s import helper.

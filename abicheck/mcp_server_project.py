@@ -146,9 +146,25 @@ def abi_deps(
         from .stack_checker import check_single_env
         from .stack_report import stack_to_json
 
+        # _safe_read_path always resolves to an absolute path (path-safety), so
+        # its output can't tell us whether the caller's own input was relative
+        # or absolute -- capture that from the raw string first. resolver.
+        # _seed_root only rebases an *absolute* binary under sysroot; a
+        # relative one is always resolved against cwd regardless of sysroot,
+        # matching the `deps tree` CLI's Click-based (non-resolving) Path
+        # handling. Without this, a relative binary_path + sysroot combination
+        # (the CLI's own documented `deps tree ./app --sysroot ...` example)
+        # would get wrongly rebased under sysroot at the absolutized cwd,
+        # rather than left alone (Codex review).
+        binary_was_absolute = Path(binary_path).is_absolute() if binary_path else False
         bin_path = _safe_read_path(binary_path, label="binary_path")
         sysroot_path = _safe_read_path(sysroot, label="sysroot") if sysroot else None
-        effective_path = _resolve_sysroot_path(bin_path, sysroot_path)
+        resolve_target = bin_path if binary_was_absolute else Path(binary_path)
+        effective_path = (
+            _resolve_sysroot_path(bin_path, sysroot_path)
+            if binary_was_absolute
+            else bin_path
+        )
         if not effective_path.exists():
             return json.dumps({"status": "error", "error": "Binary file not found"})
         fmt = _detect_binary_format(effective_path)
@@ -167,7 +183,7 @@ def abi_deps(
         try:
             result = _call_with_timeout(
                 check_single_env,
-                bin_path,
+                resolve_target,
                 search_paths=sp_paths or None,
                 sysroot=sysroot_path,
                 ld_library_path=ld_library_path,

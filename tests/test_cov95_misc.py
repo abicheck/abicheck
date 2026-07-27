@@ -55,6 +55,19 @@ def _import_mcp_server_symbols():  # noqa: ANN202
         k for k in ("mcp", "mcp.server", "mcp.server.fastmcp") if k not in sys.modules
     ]
     was_present = {name: name in sys.modules for name in _abicheck_mcp_modules}
+    # Importing "abicheck.X" also sets an `X` attribute on the already-loaded
+    # `abicheck` package object -- popping sys.modules alone leaves that
+    # attribute pointing at this function's mock-backed module, and a later
+    # `from abicheck import mcp_server` (etc.) resolves via that attribute
+    # first, bypassing sys.modules entirely (CodeRabbit review; mirrors the
+    # fix in test_mcp_reference.py's own MCP-isolation fixture).
+    abicheck_pkg = sys.modules.get("abicheck")
+    pkg_attrs = tuple(name.split(".", 1)[1] for name in _abicheck_mcp_modules)
+    had_attr = {
+        attr: abicheck_pkg is not None and hasattr(abicheck_pkg, attr)
+        for attr in pkg_attrs
+    }
+    saved_attr = {attr: getattr(abicheck_pkg, attr, None) for attr in pkg_attrs}
 
     _mock_fastmcp = MagicMock()
     _mock_mcp_module = MagicMock()
@@ -79,6 +92,11 @@ def _import_mcp_server_symbols():  # noqa: ANN202
     for name in _abicheck_mcp_modules:
         if not was_present[name]:
             sys.modules.pop(name, None)
+    for attr in pkg_attrs:
+        if had_attr[attr]:
+            setattr(abicheck_pkg, attr, saved_attr[attr])
+        elif abicheck_pkg is not None and hasattr(abicheck_pkg, attr):
+            delattr(abicheck_pkg, attr)
     return _ms, _mcp_shared
 
 
