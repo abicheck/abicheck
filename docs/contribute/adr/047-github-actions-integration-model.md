@@ -1,9 +1,21 @@
 # ADR-047: GitHub Actions Integration Model — Project Lifecycle Over Aggregate-Centric Design
 
 **Date:** 2026-07-19
-**Status:** Proposed — not implemented. This ADR records the target domain
-model and component surface; `docs/contribute/plans/g30-github-actions-integration-model.md`
-carries the phased backlog that implements it.
+**Status:** Accepted — substantially implemented. P0 (onboarding blockers)
+and the main P1 project-integration lifecycle (`build-output.json`,
+`resolve-baseline`, `check-target`, the `check-single.yml`/`check-project.yml`
+reusable workflows, `.abicheck.yml` `targets:`/`profiles:`/`baseline:`,
+`publish-baseline.yml`/`update-main-baseline.yml`) are implemented — see
+`docs/contribute/plans/g30-github-actions-integration-model.md` for the
+per-item status. P2 (deeper architecture) is partially implemented: the
+TU→link-unit→DSO attribution core algorithm landed via
+[ADR-053](053-tu-link-unit-dso-attribution.md), but end-to-end
+`attribution_path` production through the `compare`/`dump` CLI pipeline,
+monorepo changed-component planning, and additional build-system provider
+plugins remain open. Also open: `check-project.yml` does not restore the
+`accepted-main` baseline cache automatically (a caller must prepare it), and
+a second real-upstream, multi-DSO/vendor-toolchain CI pilot (beyond the PVXS
+validation already run) has not been executed.
 **Decision maker:** Nikolay Petrov
 
 **Amendments:**
