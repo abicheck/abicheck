@@ -199,6 +199,28 @@ class TestPublicModeUnresolvedSurface:
         assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
         assert decision.reason_code == "required_evidence_incomplete"
 
+    def test_python_prefixed_kind_bypasses_unresolvable_surface(self) -> None:
+        # Regression (Codex review, eleventh round): a `python_*` finding
+        # lives on a distinct evidence axis (the Python API/stub surface)
+        # from the C/C++ header surface this gate checks -- a definitive
+        # event like PYTHON_API_FUNCTION_REMOVED must stay IN_CONTRACT even
+        # when the unrelated C header surface is completely unresolvable
+        # (e.g. a pure-Python-facing comparison with no header evidence at
+        # all), not be downgraded by a gate that doesn't apply to it.
+        c = Change(
+            kind=ChangeKind.PYTHON_API_FUNCTION_REMOVED,
+            symbol="mymodule.some_func",
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
 
 class TestPublicModeAlreadyExcludedByPipeline:
     """A finding already demoted to the audit ledger by an earlier pipeline
@@ -477,6 +499,90 @@ class TestPublicModeMemberLevelConfirmation:
         assert decision.reason_code == "public_root_membership"
 
 
+class TestPublicModeAmbiguousTypeRoot:
+    """When two distinct records/enums share one bare tail name (e.g.
+    ``one::Point``/``two::Point``, both spelled bare ``Point``) and an
+    unqualified ``Point *`` public signature cannot identify which one it
+    references, ``compute_public_surface`` deliberately keeps *both* in
+    ``public_types`` (its own anti-hiding rule) while recording ``Point`` in
+    ``ambiguous_type_names``. Confirmation must not treat that conservative
+    closure expansion as proof of root membership (Codex review, eleventh
+    round)."""
+
+    def test_ambiguous_bare_tail_is_unresolved_not_confirmed(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="void", params=["Point *"])],
+            types=[
+                RecordType(
+                    name="Point",
+                    kind="struct",
+                    size_bits=64,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    qualified_name="one::Point",
+                ),
+                RecordType(
+                    name="Point",
+                    kind="struct",
+                    size_bits=32,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    qualified_name="two::Point",
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert "Point" in s.ambiguous_type_names
+        assert "Point" in s.public_types
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Point", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
+
+    def test_unambiguous_candidate_still_confirms_alongside_an_ambiguous_one(
+        self,
+    ) -> None:
+        # A finding whose candidate set includes both an ambiguous name and
+        # a genuinely unambiguous public type must still confirm via the
+        # unambiguous one -- the ambiguity check should not overreject.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("api", ret="void", params=["Point *", "Clear *"]),
+            ],
+            types=[
+                RecordType(
+                    name="Point",
+                    kind="struct",
+                    size_bits=64,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    qualified_name="one::Point",
+                ),
+                RecordType(
+                    name="Point",
+                    kind="struct",
+                    size_bits=32,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    qualified_name="two::Point",
+                ),
+                RecordType(
+                    name="Clear",
+                    kind="struct",
+                    size_bits=8,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert "Point" in s.ambiguous_type_names
+        assert "Clear" not in s.ambiguous_type_names
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Clear", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+
 class TestPublicModeHiddenFriendConfirmation:
     """``hidden_friend_removed``/``hidden_friend_added`` findings go through
     ``surface._classify_hidden_friend_surface`` instead of the ordinary
@@ -598,23 +704,6 @@ class TestPublicModeHiddenFriendConfirmation:
 
 
 class TestPublicModeTerminalExclusion:
-    def test_not_exported_symbol_is_proven_out_of_contract(self) -> None:
-        snap = AbiSnapshot(
-            library="l",
-            version="1",
-            functions=[_fn("api"), _fn("internal", vis=Visibility.ELF_ONLY)],
-        )
-        s = compute_public_surface(snap)
-        c = Change(
-            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description=""
-        )
-        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
-        assert decision == ContractEvaluationDecision(
-            relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
-            reason_code="terminal_authoritative_exclusion",
-            assurance=ContractAssurance.COMPLETE,
-        )
-
     def test_non_public_type_is_proven_out_of_contract(self) -> None:
         snap = AbiSnapshot(
             library="l",
@@ -653,6 +742,60 @@ class TestPublicModeWeakReason:
             reason_code="required_evidence_incomplete",
             assurance=ContractAssurance.PARTIAL,
         )
+
+    def test_not_exported_symbol_is_unresolved_not_terminal(self) -> None:
+        # Regression (Codex review, eleventh round): ADR-049 D2 defines
+        # `public` mode's evidence domain as including "public declarations"
+        # independent of ELF-export status -- distinguishing exported vs.
+        # not is exactly what the separate `exports` mode is for. A symbol
+        # that is `known` but not `Visibility.PUBLIC` for a reason other
+        # than a confident private/system-header origin (REASON_NOT_EXPORTED)
+        # must therefore stay UNKNOWN_UNRESOLVED, not be treated as a
+        # terminal proof of exclusion.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api"), _fn("internal", vis=Visibility.ELF_ONLY)],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description=""
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="required_evidence_incomplete",
+            assurance=ContractAssurance.PARTIAL,
+        )
+
+    def test_public_header_but_hidden_visibility_is_unresolved_not_terminal(
+        self,
+    ) -> None:
+        # The concrete real-world shape the finding above names: a function
+        # genuinely declared in a public header (origin PUBLIC_HEADER) but
+        # not ELF-exported (e.g. an inline, or explicit visibility-hidden
+        # attribute) -- confirmed empirically that surface.py's own
+        # _classify_symbol_level emits REASON_NOT_EXPORTED for exactly this
+        # shape (no private/system-header signal fires first). Treating it
+        # as terminal would have wrongly resolved a real public-header
+        # declaration to PROVEN_OUT_OF_CONTRACT.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "inline_api",
+                    vis=Visibility.HIDDEN,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="inline_api", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
 
 
 class TestNeverEmitsUnknownUnproven:

@@ -95,7 +95,9 @@ _VALID_CHANGE_KIND_SLUGS: frozenset[str] = frozenset(k.value for k in ChangeKind
 #: ``.get()`` would otherwise silently ignore an extra or misspelled key
 #: (e.g. ``assigments:`` for ``assignments:``) instead of rejecting it,
 #: silently discarding the pack author's actual intent (Codex review).
-_TOP_LEVEL_MANIFEST_FIELDS: frozenset[str] = frozenset({"id", "version", "kind", "assignments"})
+_TOP_LEVEL_MANIFEST_FIELDS: frozenset[str] = frozenset(
+    {"id", "version", "kind", "assignments"}
+)
 
 
 class _StrictLoader(yaml.SafeLoader):
@@ -424,6 +426,45 @@ def _parse_policy_assignments(
     return result
 
 
+#: Pack-assignment fields whose value is an *unordered selection*, not an
+#: ordered sequence -- mirrors ``compatibility_evaluation_config.py``'s own
+#: ``ContractConfig.overlays`` field 1:1 (this module's docstring already
+#: shows ``contract.mode`` as the well-known ADR-049 D8 field-naming
+#: convention for the ``contract`` pack namespace; ``contract.overlays`` is
+#: that namespace's other established field). Two contract packs assigning
+#: the same overlay set in a different order (``[a, b]`` vs ``[b, a]``) are
+#: semantically identical -- ``ContractConfig.__post_init__`` already
+#: canonicalizes ``overlays`` by sorting+deduping for exactly this reason
+#: (D7: "equivalent semantic inputs must resolve to an equivalent object")
+#: -- but a pack's own ``assignments`` mapping is compared directly by
+#: ``detect_pack_conflicts()`` long before it ever reaches ``ContractConfig``,
+#: so without the identical canonicalization here, two packs assigning an
+#: equivalent overlay set in a different order raised a spurious
+#: ``PackConflictError`` (Codex review).
+_ORDER_INSENSITIVE_LIST_FIELDS: frozenset[str] = frozenset({"contract.overlays"})
+
+
+def _canonicalize_order_insensitive_field(
+    field_name: str, value: Hashable, *, source: str
+) -> Hashable:
+    """Sort+dedupe *value* if *field_name* is a known unordered-selection
+    field and *value* is a list-derived tuple; otherwise return it unchanged.
+
+    Mirrors ``compatibility_evaluation_config._canonical_tuple``'s own
+    sort+dedupe (via ``dict.fromkeys`` on the sorted sequence), applied at
+    the pack-manifest layer instead of the effective-config layer.
+    """
+    if field_name not in _ORDER_INSENSITIVE_LIST_FIELDS or not isinstance(value, tuple):
+        return value
+    non_str = [v for v in value if not isinstance(v, str)]
+    if non_str:
+        raise PackManifestError(
+            f"{source}: {field_name!r} must be a list of str, got "
+            f"non-str element(s) {non_str!r}"
+        )
+    return tuple(dict.fromkeys(sorted(value)))
+
+
 def _parse_field_assignments(
     raw: Mapping[Any, Any], *, source: str
 ) -> dict[str, Hashable]:
@@ -434,7 +475,11 @@ def _parse_field_assignments(
                 f"{source}: assignment key must be a non-empty str field "
                 f"name, got {field_name!r}"
             )
-        result[field_name] = _to_hashable(value, where=f"{source}:{field_name}")
+        field_source = f"{source}:{field_name}"
+        hashable_value = _to_hashable(value, where=field_source)
+        result[field_name] = _canonicalize_order_insensitive_field(
+            field_name, hashable_value, source=field_source
+        )
     return result
 
 
@@ -503,9 +548,7 @@ def load_pack_manifest(path: str | Path) -> LoadedPack:
     # would surface as an uncontextualized crash instead of the documented
     # PackManifestError this validation exists to produce (Codex review,
     # fresh evidence).
-    unknown_top_level = sorted(
-        (set(document) - _TOP_LEVEL_MANIFEST_FIELDS), key=repr
-    )
+    unknown_top_level = sorted((set(document) - _TOP_LEVEL_MANIFEST_FIELDS), key=repr)
     if unknown_top_level:
         raise PackManifestError(
             f"{manifest_path}: unknown top-level field(s) {unknown_top_level} "

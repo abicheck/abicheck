@@ -149,14 +149,13 @@ _SUPPORTED_MODES: frozenset[ContractMode] = frozenset(
 
 # Surface-exclusion reasons treated as an authoritative, terminal exclusion
 # (ADR-049's "terminal_authoritative_exclusion"): each is either a confident
-# linkage/reachability fact (not-exported, non-public-type), a provenance
-# demotion that `surface._origin_reason` only applies when *both* snapshot
-# sides agree on it (private-header, system-header), or a detector-confirmed
+# linkage/reachability fact (non-public-type), a provenance demotion that
+# `surface._origin_reason` only applies when *both* snapshot sides agree on
+# it (private-header, system-header), or a detector-confirmed
 # unreachability/off-surface determination (private-internal-unreachable,
 # off-python-surface). None of these is a "we simply couldn't tell" case.
 _TERMINAL_SURFACE_REASONS: frozenset[str] = frozenset(
     {
-        REASON_NOT_EXPORTED,
         REASON_NON_PUBLIC_TYPE,
         REASON_PRIVATE_HEADER,
         REASON_SYSTEM_HEADER,
@@ -169,7 +168,24 @@ _TERMINAL_SURFACE_REASONS: frozenset[str] = frozenset(
 # demotion made *without* the provenance corroboration available for the rest
 # of the snapshot (reduced confidence, by that module's own docstring) --
 # never treated as terminal here.
-_WEAK_SURFACE_REASONS: frozenset[str] = frozenset({REASON_NO_PROVENANCE})
+#
+# `not-exported` (REASON_NOT_EXPORTED) is weak, not terminal, for PUBLIC mode
+# specifically: ADR-049 D2 defines `public` mode's evidence domain as
+# "declared-public providers" (manifests, package symbol metadata, *public
+# declarations*, ...) -- a header-declared entity is in-domain independent of
+# whether it happens to be ELF-exported; distinguishing exported-vs-not is
+# exactly what the separate `exports` mode exists for. `surface.py`'s
+# `_classify_symbol_level` emits this reason for a symbol that is `known`
+# (declared, and not confidently private/system-header) but not
+# `Visibility.PUBLIC` -- confirmed empirically that this fires for a function
+# whose origin is `PUBLIC_HEADER` but whose visibility is e.g. `HIDDEN`
+# (an inline or explicitly-hidden public-header declaration), the exact case
+# ADR-049's `public` domain should still cover. Treating it as terminal here
+# wrongly resolved such a finding to `PROVEN_OUT_OF_CONTRACT` with `COMPLETE`
+# assurance, contradicting the ADR (Codex review).
+_WEAK_SURFACE_REASONS: frozenset[str] = frozenset(
+    {REASON_NO_PROVENANCE, REASON_NOT_EXPORTED}
+)
 
 _ALL_SURFACE_REASONS: frozenset[str] = _TERMINAL_SURFACE_REASONS | _WEAK_SURFACE_REASONS
 
@@ -292,10 +308,15 @@ def _in_surface_result_is_confirmed(
     - ``_NEVER_FILTER_KIND_NAMES`` (a leak finding, or a ``constant_*``
       finding -- public-contract by construction per the dumper's own
       extraction rule, so it would never even appear in
-      ``public_symbols``/``public_types``) and ``python_*``-prefixed
-      findings (a distinct evidence axis the header-surface universes
-      don't cover at all) are unconditionally trustworthy by construction,
-      independent of any universe-membership check.
+      ``public_symbols``/``public_types``) is unconditionally trustworthy
+      by construction, independent of any universe-membership check.
+      (``python_*``-prefixed findings are the same distinct-evidence-axis
+      shape, but are handled earlier in
+      :func:`evaluate_change_contract_relevance` itself -- before the
+      resolvable-surface gate, not here -- since that gate would otherwise
+      downgrade them whenever the C/C++ header surface happens to be
+      unresolvable, an entirely unrelated evidence domain for this kind
+      (Codex review, eleventh round).)
     - ``_HIDDEN_FRIEND_KIND_NAMES`` findings go through
       ``surface._classify_hidden_friend_surface`` instead of the ordinary
       symbol/type path -- delegated to :func:`_hidden_friend_confirmed_public`
@@ -328,10 +349,17 @@ def _in_surface_result_is_confirmed(
     naive raw-string comparison, since a raw ``caused_by_type`` spelling
     (``"const Foo *"``) would never literal-match a bare ``all_types``/
     ``public_types`` entry (``"Foo"``).
+
+    A type-candidate match is also rejected when every matching candidate is
+    flagged in either side's ``ambiguous_type_names`` (two distinct
+    records/enums sharing one bare tail, e.g. ``one::Point``/``two::Point``
+    both spelled bare ``Point``): ``compute_public_surface`` deliberately
+    keeps *both* records in ``public_types`` rather than silently dropping
+    either (its own anti-hiding rule), so intersection membership alone does
+    not establish which record -- or whether either -- this finding's root
+    actually resolves to (Codex review, eleventh round).
     """
-    if change.kind.value in _NEVER_FILTER_KIND_NAMES or change.kind.value.startswith(
-        "python_"
-    ):
+    if change.kind.value in _NEVER_FILTER_KIND_NAMES:
         return True
     if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
         return _hidden_friend_confirmed_public(change, surf_old, surf_new)
@@ -344,7 +372,9 @@ def _in_surface_result_is_confirmed(
         candidates = {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
     else:
         candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
-    return bool(candidates & unions.public_types)
+    matched = candidates & unions.public_types
+    ambiguous = surf_old.ambiguous_type_names | surf_new.ambiguous_type_names
+    return bool(matched - ambiguous)
 
 
 def evaluate_change_contract_relevance(
@@ -416,13 +446,33 @@ def evaluate_change_contract_relevance(
     if change.surface_exclusion_reason in _ALL_SURFACE_REASONS:
         return _decision_for_surface_reason(change.surface_exclusion_reason)
 
+    # A `python_*` finding lives on a distinct evidence axis (the Python
+    # API/stub surface) the C/C++ header-surface universes below don't cover
+    # at all -- public by construction, exactly like
+    # `classify_change_surface`'s own unconditional trust for this prefix.
+    # Checked *before* the resolvable-surface gate immediately below (unlike
+    # `_NEVER_FILTER_KIND_NAMES`, which genuinely is a C-header-surface fact
+    # and stays gated): gating a Python-axis finding on C/C++ header surface
+    # resolvability would downgrade a definitive event like
+    # `PYTHON_API_FUNCTION_REMOVED` to `UNKNOWN_UNRESOLVED` whenever the
+    # unrelated C header surface happens to be unresolvable (Codex review,
+    # eleventh round).
+    if change.kind.value.startswith("python_"):
+        return ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
     if not (surf_old.resolvable and surf_new.resolvable):
         # No header-derived visibility on one or both sides: no confident
-        # contract-relevance claim is possible for *any* entity finding,
-        # including one whose kind `surface.py` itself would always keep
-        # in-surface (a leak finding, a `python_*` finding) -- that rule is
-        # about not *hiding* a finding from a report, an entirely different
-        # question from "can this shadow evaluator confidently label it".
+        # contract-relevance claim is possible for *any* C/C++ entity
+        # finding, including one whose kind `surface.py` itself would always
+        # keep in-surface (a leak finding) -- that rule is about not
+        # *hiding* a finding from a report, an entirely different question
+        # from "can this shadow evaluator confidently label it". (A
+        # `python_*` finding never reaches this branch at all -- see the
+        # early return above.)
         return _unresolved_decision(
             "required_evidence_incomplete", ContractAssurance.UNAVAILABLE
         )
