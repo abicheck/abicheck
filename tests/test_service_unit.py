@@ -259,11 +259,14 @@ class TestResolveInput:
         args, _ = mock_attach.call_args
         assert args[5] == "c"
 
-    def test_header_graph_lang_unchanged_for_pe(self, tmp_path):
-        """PE/Mach-O's own main pass never normalizes ``lang`` (passes it
-        through as-is to ``dumper._header_ast_parser``) -- ``_attach_header_graph``
-        must keep matching that raw value for those formats, not the
-        ELF-specific normalization."""
+    def test_header_graph_lang_matches_pe_main_pass_normalization(self, tmp_path):
+        """Codex review (second pass): PE/Mach-O's own main pass, reached via
+        ``service_header_scoped._try_header_scoped_dump`` whenever headers
+        are given (the only case ``_attach_header_graph`` does anything at
+        all), normalizes ``lang`` the same way ELF's ``_dump_elf`` does
+        (case-insensitively) -- the earlier assumption that PE/Mach-O never
+        normalize was wrong; ``_attach_header_graph`` must match that
+        normalized value too, not the raw default "c++"."""
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         header = tmp_path / "api.h"
@@ -277,7 +280,26 @@ class TestResolveInput:
         ):
             run_dump(p, "pe", headers=[header], includes=[], lang="c++")
         args, _ = mock_attach.call_args
-        assert args[5] == "c++"
+        assert args[5] is None  # not the raw "c++" default
+
+    def test_header_graph_lang_forces_c_for_pe(self, tmp_path):
+        """The other half: an explicit (case-insensitive) ``lang="C"``
+        request must still reach ``_attach_header_graph`` as "C", matching
+        what ``_try_header_scoped_dump`` forwards for that explicit case."""
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n")
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch(
+                "abicheck.service._attach_header_graph", return_value=snap
+            ) as mock_attach,
+        ):
+            run_dump(p, "pe", headers=[header], includes=[], lang="C")
+        args, _ = mock_attach.call_args
+        assert args[5] == "C"
 
     def test_binary_detection_elf(self, tmp_path):
         p = tmp_path / "lib.so"

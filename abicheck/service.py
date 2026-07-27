@@ -560,19 +560,27 @@ def run_dump(
             f"dump_manifest is not yet supported for {binary_fmt.upper()} "
             "binaries (ADR-050 D3); use a single-header dump for this format."
         )
+    from . import dumper_cache
+
     _headers = headers or []
     _includes = includes or []
-    # _dump_elf's own dumper.dump() call normalizes `lang` to only ever force
-    # "c" explicitly, letting auto-detection run for anything else
-    # (including the default "c++") -- `_cache_key` hashes the raw `lang`
-    # value, so `_attach_header_graph`'s own _clang_header_dump call must
-    # pass this identical normalized value for ELF, or it hashes a different
-    # key than the main pass just used, permanently missing the AST memo for
-    # the default (non-explicit-"c") ELF workload (Codex review). PE/Mach-O's
-    # own main pass never normalizes `lang` this way (passes it through
-    # as-is), so no adjustment is made there.
+    # Every format's own main pass normalizes `lang` to only ever force a
+    # language explicitly requested, letting auto-detection run otherwise
+    # (including for the default "c++") -- `_cache_key` hashes the raw
+    # `lang` value, so `_attach_header_graph`'s own _clang_header_dump call
+    # must pass this identical normalized value, or it hashes a different
+    # key than the main pass just used, permanently missing the AST memo
+    # for the default (non-explicit-"c") workload (Codex review). ELF does
+    # this in `_dump_elf` below (case-sensitive `lang == "c"`); PE/Mach-O do
+    # it in `service_header_scoped._try_header_scoped_dump` -- reached
+    # whenever headers are given, the only case this graph attach does
+    # anything at all -- with a case-*insensitive* `lang.lower() == "c"`,
+    # so the two branches deliberately differ (Codex review, twice: the
+    # first pass wrongly assumed PE/Mach-O never normalized `lang` at all).
     _header_graph_lang = (
-        lang if binary_fmt != "elf" else (lang if lang == "c" else None)
+        (lang if lang == "c" else None)
+        if binary_fmt == "elf"
+        else (lang if lang.lower() == "c" else None)
     )
     # An explicit --ast-frontend on the compile context wins over the bare
     # header_backend arg (the latter is the compare-path default carrier).
@@ -634,20 +642,25 @@ def run_dump(
             include_labels=include_labels,
             dump_manifest=dump_manifest,
         )
-        castxml_snap = run_dump(
-            path,
-            binary_fmt,
-            header_backend="castxml",
-            compile=_forced_compile("castxml"),
-            **common_kwargs,
-        )
-        clang_snap = run_dump(
-            path,
-            binary_fmt,
-            header_backend="clang",
-            compile=_forced_compile("clang"),
-            **common_kwargs,
-        )
+        # In-process AST memoization (G31 Phase C) is only worthwhile inside
+        # this scope: the _attach_header_graph call below is a real
+        # downstream consumer, unlike a direct dumper.dump() caller with no
+        # such follow-up (Codex review) -- see dumper_cache.ast_memoize_scope.
+        with dumper_cache.ast_memoize_scope():
+            castxml_snap = run_dump(
+                path,
+                binary_fmt,
+                header_backend="castxml",
+                compile=_forced_compile("castxml"),
+                **common_kwargs,
+            )
+            clang_snap = run_dump(
+                path,
+                binary_fmt,
+                header_backend="clang",
+                compile=_forced_compile("clang"),
+                **common_kwargs,
+            )
         merged = merge_snapshots(castxml_snap, clang_snap)
         # No attach_clang_layout call here: clang_snap's own recursive
         # run_dump(header_backend="clang") call above already got it (this
@@ -670,27 +683,30 @@ def run_dump(
         )
 
     if binary_fmt == "elf":
-        snap = _dump_elf(
-            path,
-            _headers,
-            _includes,
-            version,
-            lang,
-            dwarf_only=dwarf_only,
-            debug_roots=debug_roots,
-            enable_debuginfod=enable_debuginfod,
-            debuginfod_url=debuginfod_url,
-            debug_format=debug_format,
-            symbols_only=symbols_only,
-            debug_presence_only=debug_presence_only,
-            header_backend=eff_backend,
-            compile=compile,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
-            notify=notify,
-            include_labels=include_labels,
-            dump_manifest=dump_manifest,
-        )
+        # See the hybrid-path scope above: _attach_header_graph below is a
+        # real downstream consumer of this primary pass's AST.
+        with dumper_cache.ast_memoize_scope():
+            snap = _dump_elf(
+                path,
+                _headers,
+                _includes,
+                version,
+                lang,
+                dwarf_only=dwarf_only,
+                debug_roots=debug_roots,
+                enable_debuginfod=enable_debuginfod,
+                debuginfod_url=debuginfod_url,
+                debug_format=debug_format,
+                symbols_only=symbols_only,
+                debug_presence_only=debug_presence_only,
+                header_backend=eff_backend,
+                compile=compile,
+                public_headers=public_headers,
+                public_header_dirs=public_header_dirs,
+                notify=notify,
+                include_labels=include_labels,
+                dump_manifest=dump_manifest,
+            )
         _try_attach_sycl_metadata(snap, path)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
@@ -725,19 +741,20 @@ def run_dump(
             snap, _headers, _includes, lang=lang, compile=compile
         )
     if binary_fmt == "pe":
-        snap = _dump_pe(
-            path,
-            version,
-            headers=_headers,
-            includes=_includes,
-            lang=lang,
-            pdb_path=pdb_path,
-            header_backend=eff_backend,
-            compile=compile,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
-            include_labels=include_labels,
-        )
+        with dumper_cache.ast_memoize_scope():
+            snap = _dump_pe(
+                path,
+                version,
+                headers=_headers,
+                includes=_includes,
+                lang=lang,
+                pdb_path=pdb_path,
+                header_backend=eff_backend,
+                compile=compile,
+                public_headers=public_headers,
+                public_header_dirs=public_header_dirs,
+                include_labels=include_labels,
+            )
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
@@ -752,7 +769,7 @@ def run_dump(
             and not symbols_only,
             _headers,
             _includes,
-            lang,
+            _header_graph_lang,
             compile,
             public_headers,
             public_header_dirs,
@@ -761,18 +778,19 @@ def run_dump(
             snap, _headers, _includes, lang=lang, compile=compile
         )
     if binary_fmt == "macho":
-        snap = _dump_macho(
-            path,
-            version,
-            headers=_headers,
-            includes=_includes,
-            header_backend=eff_backend,
-            lang=lang,
-            compile=compile,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
-            include_labels=include_labels,
-        )
+        with dumper_cache.ast_memoize_scope():
+            snap = _dump_macho(
+                path,
+                version,
+                headers=_headers,
+                includes=_includes,
+                header_backend=eff_backend,
+                lang=lang,
+                compile=compile,
+                public_headers=public_headers,
+                public_header_dirs=public_header_dirs,
+                include_labels=include_labels,
+            )
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
@@ -787,7 +805,7 @@ def run_dump(
             and not symbols_only,
             _headers,
             _includes,
-            lang,
+            _header_graph_lang,
             compile,
             public_headers,
             public_header_dirs,

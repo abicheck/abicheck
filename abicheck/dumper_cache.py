@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
@@ -10,12 +11,48 @@ import shutil
 import sys
 import tempfile
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from . import deadline
 
 log = logging.getLogger(__name__)
+
+#: Whether the calling thread is inside a scope where writing to the AST
+#: memo is actually worthwhile (mirrors ``deadline.py``'s own
+#: ``contextvars.ContextVar`` propagation pattern). Default ``False``: a
+#: direct :func:`abicheck.dumper.dump` caller with no downstream
+#: ``service._attach_header_graph`` consumer (``appcompat.
+#: check_app_compatibility``, a direct Python-API/MCP caller selecting the
+#: clang backend) would otherwise memoize an AST nothing will ever pop,
+#: holding a potentially multi-GB tree until evicted by the entry-count
+#: bound for no benefit (Codex review). ``service.run_dump`` activates this
+#: around its own primary ELF/PE/Mach-O dump call, since that is the one
+#: shape where ``_attach_header_graph`` really does follow and consume the
+#: memo. Does not cross a ``ThreadPoolExecutor`` boundary (same caveat as
+#: ``deadline``'s own ContextVar) -- not a concern today since header-graph
+#: attach isn't wired for the pooled manifest-dump path.
+_ast_memoize_scope: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_ast_memoize_scope", default=False
+)
+
+
+@contextmanager
+def ast_memoize_scope() -> Iterator[None]:
+    """Mark the current thread's AST parses as worth memoizing in-process."""
+    token = _ast_memoize_scope.set(True)
+    try:
+        yield
+    finally:
+        _ast_memoize_scope.reset(token)
+
+
+def ast_memoize_active() -> bool:
+    """Whether :func:`ast_memoize_scope` is active on the calling thread."""
+    return _ast_memoize_scope.get()
+
 
 #: In-process, single-consumption handoff for an already-parsed AST, keyed by
 #: (backend, cache key) -- e.g. the header-only semantic graph's own AST pass

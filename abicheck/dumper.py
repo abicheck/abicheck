@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 from defusedxml import ElementTree as DefusedET
 
-from . import deadline
+from . import deadline, dumper_cache
 from ._compiler_options import has_explicit_cpp_std, has_explicit_std
 from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
@@ -48,7 +48,7 @@ from .dumper_ast_config import (
     _resolve_compiler_binary as _resolve_compiler_binary,
 )
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers as _detect_cpp20_headers
-from .dumper_cache import _atomic_write, _cache_path, load_cached_ast, store_cached_ast
+from .dumper_cache import _atomic_write as _atomic_write, _cache_path as _cache_path
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
     _parse_vtable_index as _parse_vtable_index,
@@ -360,20 +360,18 @@ def _clang_header_dump(
     lang: str | None = None,
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_context: str = "host",
-    memoize: bool = True,
+    memoize: bool | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     """Run clang over *headers* and return ``(root, resolved_kind)``.
 
     The clang-frontend counterpart of :func:`_castxml_dump`: aggregates the
     headers into one ``#include`` TU, runs ``clang -ast-dump=json``, returns
     the JSON dict :class:`abicheck.dumper_clang._ClangAstParser` consumes.
-    Disk-cached like the castxml path, and also memoized in-process
-    (``dumper_cache.load_cached_ast``/``store_cached_ast``) so the always-on
-    header-only graph's own AST pass (``service._attach_header_graph``)
-    reuses the parsed dict instead of a second disk read/re-parse (G31 Phase
-    C AST reuse; *memoize=False* there -- it's the final AST consumer).
-    Raises :class:`SnapshotError` when clang is missing, times out, or emits
-    no usable AST.
+    Disk-cached like the castxml path, and memoized in-process (G31 Phase C)
+    for ``_attach_header_graph``'s reuse (``memoize=False``: final consumer;
+    ``None`` defers to ``ast_memoize_active()``, set only in ``run_dump``'s
+    primary-dump call). Raises :class:`SnapshotError` when clang is missing,
+    times out, or emits no usable AST.
 
     ``frontend_context`` (ADR-050 D5, G32 Phase D) is ``"host"``/``"device"``.
     ``resolved_kind`` is *frontend_context* when the multi-pass SYCL decode
@@ -451,9 +449,11 @@ def _clang_header_dump(
     )
     resolved_kind = frontend_context if dpcpp_multi_context else None
     cached = _cache_path(key, backend="clang")
-    # An in-process memo hit skips the disk read/JSON re-parse entirely
-    # (G31 Phase C AST reuse); a disk-cache hit still costs that.
-    _cached_result = load_cached_ast(key, "clang", cached, memoize=memoize)
+    # A memo hit (G31 Phase C) skips the disk read/JSON re-parse entirely.
+    _memoize = dumper_cache.ast_memoize_active() if memoize is None else memoize
+    _cached_result = dumper_cache.load_cached_ast(
+        key, "clang", cached, memoize=_memoize
+    )
     if _cached_result is not None:
         return cast("dict[str, Any]", _cached_result), resolved_kind
 
@@ -545,8 +545,8 @@ def _clang_header_dump(
             dpcpp_capable=dpcpp_multi_context,
             frontend_context=frontend_context,
         )
-        if identities_stable and memoize:
-            store_cached_ast(key, "clang", root)
+        if identities_stable and _memoize:
+            dumper_cache.store_cached_ast(key, "clang", root)
         return root, resolved_kind
     finally:
         agg_path.unlink(missing_ok=True)

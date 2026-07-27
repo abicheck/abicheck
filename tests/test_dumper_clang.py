@@ -1938,6 +1938,62 @@ def test_ast_memo_evicts_oldest_entry_past_maxsize(
     assert ("clang", "k3") in dumper_cache._AST_MEMO
 
 
+def test_clang_header_dump_direct_caller_never_memoizes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review: a direct ``_clang_header_dump`` caller with no
+    ``service.run_dump``-style downstream ``_attach_header_graph`` consumer
+    (``appcompat.check_app_compatibility``, a direct Python-API/MCP caller
+    selecting the clang backend) must not populate the in-process memo at
+    all -- outside ``dumper_cache.ast_memoize_scope()``, ``memoize=None``
+    (the default every such caller uses) resolves to ``False``, so the
+    entry is dead weight nothing will ever pop."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+
+    assert not dumper_cache.ast_memoize_active()
+    _clang_header_dump([header], [])  # no ast_memoize_scope() active
+    assert cache.exists()  # the disk cache is still populated, as always
+    assert not dumper_cache._AST_MEMO
+
+
+def test_clang_header_dump_memoizes_inside_ast_memoize_scope(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The other half: a caller inside ``service.run_dump``'s
+    ``ast_memoize_scope()`` (its primary-dump call) does get the memo
+    write, exactly the handoff ``_attach_header_graph`` then consumes."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+
+    with dumper_cache.ast_memoize_scope():
+        _clang_header_dump([header], [])
+        assert dumper_cache._AST_MEMO  # written while the scope is active
+    # The scope exiting doesn't itself clear the memo -- only a subsequent
+    # pop (the header-graph attach step) does; still present right after.
+    assert dumper_cache._AST_MEMO
+
+
 def test_clang_only_dump_does_not_require_gxx_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
