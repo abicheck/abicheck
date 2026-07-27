@@ -115,6 +115,22 @@ class TestUnsupportedMode:
                 c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.EXPORTS
             )
 
+    def test_bare_exports_string_also_raises_not_implemented(self) -> None:
+        # A bare serialized value must be coerced through ContractMode(...)
+        # the same as a real enum member, not silently misrouted.
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="")
+        with pytest.raises(NotImplementedError):
+            evaluate_change_contract_relevance(
+                c, _UNRESOLVABLE, _UNRESOLVABLE, mode="exports"
+            )
+
+    def test_invalid_mode_value_raises_value_error(self) -> None:
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="")
+        with pytest.raises(ValueError, match="mode must be one of"):
+            evaluate_change_contract_relevance(
+                c, _UNRESOLVABLE, _UNRESOLVABLE, mode="bogus"
+            )
+
 
 class TestAllMode:
     def test_ordinary_finding_is_in_contract(self) -> None:
@@ -143,6 +159,19 @@ class TestAllMode:
             c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.ALL
         )
         assert decision.relevance is ContractRelevance.NOT_APPLICABLE
+
+    def test_bare_all_string_is_coerced_to_the_real_enum_member(self) -> None:
+        # Regression (Codex review): `mode="all"` (a bare str, not the
+        # ContractMode enum member) satisfied the `_SUPPORTED_MODES`
+        # membership check (equality/hash) but then failed the
+        # `is ContractMode.ALL` identity check, silently falling through
+        # to the PUBLIC path -- so an unresolvable-surface finding wrongly
+        # came back UNKNOWN_UNRESOLVED instead of IN_CONTRACT.
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode="all"
+        )
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
 
 
 class TestPublicModeUnresolvedSurface:

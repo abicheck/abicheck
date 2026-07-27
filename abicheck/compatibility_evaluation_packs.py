@@ -189,7 +189,16 @@ class LoadedPack:
     it into the ``POLICY`` bucket regardless, since *that* grouping keys off
     equality/hash, not identity. Rejecting or coercing an invalid ``kind``
     here means the two checks can never disagree about which packs are
-    policy packs (Codex review, fourth round).
+    policy packs (Codex review, fourth round). A ``kind=CONTRACT``/
+    ``kind=GATE`` pack's assignments now also route through
+    :func:`_parse_field_assignments` (the same validation
+    ``load_pack_manifest`` already applies) instead of a bare
+    :func:`_to_hashable` comprehension -- otherwise a directly constructed
+    pack could carry a non-``str`` or empty-string key (``1``, ``""``)
+    that ``load_pack_manifest`` would reject outright: a non-``str`` key
+    would only fail later, inside conflict detection, with a less specific
+    error, and an empty key would be silently accepted as a real field and
+    ignored by later config composition (Codex review, fifth round).
     """
 
     identity: ImmutableIdentity
@@ -212,10 +221,9 @@ class LoadedPack:
             )
             object.__setattr__(self, "assignments", MappingProxyType(coerced))
             return
-        frozen = {
-            key: _to_hashable(value, where=f"assignments[{key!r}]")
-            for key, value in self.assignments.items()
-        }
+        frozen = _parse_field_assignments(
+            self.assignments, source="LoadedPack(...) (direct construction)"
+        )
         object.__setattr__(self, "assignments", MappingProxyType(frozen))
 
 

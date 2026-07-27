@@ -296,6 +296,32 @@ class TestLoadPackManifestHappyPath:
                 assignments={},
             )
 
+    @pytest.mark.parametrize("kind", [PackKind.CONTRACT, PackKind.GATE])
+    def test_directly_constructed_pack_rejects_empty_string_key(
+        self, kind: PackKind
+    ) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        with pytest.raises(PackManifestError, match="non-empty str field name"):
+            LoadedPack(
+                identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+                kind=kind,
+                assignments={"": "value"},
+            )
+
+    @pytest.mark.parametrize("kind", [PackKind.CONTRACT, PackKind.GATE])
+    def test_directly_constructed_pack_rejects_non_str_key(
+        self, kind: PackKind
+    ) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        with pytest.raises(PackManifestError, match="non-empty str field name"):
+            LoadedPack(
+                identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+                kind=kind,
+                assignments={1: "value"},
+            )
+
 
 class TestLoadPackManifestValidation:
     def test_missing_file_raises(self, tmp_path: Path) -> None:

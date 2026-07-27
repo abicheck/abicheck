@@ -235,9 +235,23 @@ def evaluate_change_contract_relevance(
 
     Never raises for a *finding* it cannot confidently classify -- every such
     case degrades to ``UNKNOWN_UNRESOLVED`` (see the module docstring's
-    ``UNKNOWN_UNPROVEN`` rule). It raises only for a *mode* this evaluator
-    does not implement at all.
+    ``UNKNOWN_UNPROVEN`` rule). It raises for an entirely invalid ``mode``
+    value (``ValueError``) or for a *mode* this evaluator does not implement
+    at all (``NotImplementedError``).
     """
+    # `ContractMode` is a `str` Enum, so an untyped caller passing the bare
+    # serialized value (e.g. `"all"` from a config/API adapter) would satisfy
+    # `mode in _SUPPORTED_MODES` (equality/hash) but then silently fail the
+    # `is ContractMode.ALL` identity check below, falling through to the
+    # PUBLIC path for a caller that actually asked for ALL (Codex review).
+    # Coercing through the enum constructor first (a no-op for an
+    # already-real member) means every later `is` comparison is safe.
+    try:
+        mode = ContractMode(mode)
+    except ValueError as exc:
+        raise ValueError(
+            f"mode must be one of {sorted(m.value for m in ContractMode)}, got {mode!r}"
+        ) from exc
     if mode not in _SUPPORTED_MODES:
         raise NotImplementedError(
             f"contract mode {mode!r} is not implemented by the Phase 3 shadow "
