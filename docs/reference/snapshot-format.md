@@ -19,13 +19,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`16`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`17`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 16,
+  "schema_version": 17,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -44,9 +44,10 @@ proving two snapshots were compared under a comparable profile/scope
 (`AbiSnapshot.contract`, ADR-050 D1 — *verdict-blocking*: see the
 compatibility table below), (v15) structured compile-context provenance
 for the header-AST parse (`ast_resolved_standard`, `ast_cplusplus_macro`,
-`ast_compile_args`, `ast_sysroot`), and (v16) DWARF-vs-header-AST layout
+`ast_compile_args`, `ast_sysroot`), (v16) DWARF-vs-header-AST layout
 coherence (`dwarf_layout_coherence`, `dwarf_layout_coherence_mismatches` —
-see "Compile-context provenance" below).
+see "Compile-context provenance" below), and (v17) which SYCL/DPC++ AST pass
+a header-AST snapshot was built from (`frontend_context_kind`, ADR-050 D5).
 
 ### Forward / backward compatibility
 
@@ -57,7 +58,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 16`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 17`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -95,7 +96,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `16`). |
+| `schema_version` | int | Snapshot format version (currently `17`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -162,6 +163,12 @@ gets backfilled, only report on it.
 | `dwarf_layout_coherence` | string \| null | `null` | One of `"matched"` (every record eligible for backfill was corroborated, or none needed it), `"partial"` (some corroborated, some had no DWARF candidate at all — benign, e.g. declared-but-never-instantiated), `"mismatch"` (at least one record found a uniquely-named DWARF candidate but the two disagreed — backfill already refused to merge that record's layout), or `"unavailable"` (the clang backend ran but the binary carried no usable DWARF at all). `null` on any snapshot not built via the clang L2 backend (a castxml snapshot computes layout directly — not a coherence question) and on any pre-v16 snapshot. |
 | `dwarf_layout_coherence_mismatches` | array of strings | `[]` | Header record names backfill found a uniquely-named DWARF candidate for but rejected as uncorroborated — populated only when `dwarf_layout_coherence == "mismatch"`. |
 
+### SYCL/DPC++ frontend context (schema v17, header-AST parses only)
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `frontend_context_kind` | string \| null | `null` | Which AST pass (`"host"` or `"device"`) this header-AST snapshot's clang backend selected via `--frontend-context` (ADR-050 D5, `sycl_context.py`). `null` on any non-SYCL/DPC++ invocation and on any pre-v17 snapshot. |
+
 ### ABI surface
 
 | Key | Type | Meaning |
@@ -218,7 +225,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `16`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `17`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

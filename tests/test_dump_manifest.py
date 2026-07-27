@@ -248,10 +248,12 @@ def test_frontend_context_host_is_accepted(tmp_path):
     assert manifest.frontend_context == "host"
 
 
-def test_frontend_context_device_rejected_as_not_yet_implemented(tmp_path):
+def test_frontend_context_device_is_accepted(tmp_path):
+    """ADR-050 D5 (G32 Phase D) lifts Phase B's blanket "device" rejection
+    now that sycl_context.py's selector exists to make it meaningful."""
     text = _MINIMAL + "frontend_context: device\n"
-    with pytest.raises(ManifestValidationError, match="Phase D"):
-        parse_manifest(text, base_dir=tmp_path)
+    manifest = parse_manifest(text, base_dir=tmp_path)
+    assert manifest.frontend_context == "device"
 
 
 def test_include_entry_bare_string_form(tmp_path):

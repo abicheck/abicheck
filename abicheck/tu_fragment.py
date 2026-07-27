@@ -63,6 +63,10 @@ class TuFragment:
     ast_fallback_reason: str | None = None
     ast_toolchain_supported: bool | None = None
     ast_toolchain_unsupported_reasons: tuple[str, ...] = ()
+    # ADR-050 D5, G32 Phase D: the resolved SYCL/DPC++ "host"/"device" kind,
+    # None for an ordinary non-DPC++ TU parse. Mirrors the other AST
+    # provenance fields above.
+    frontend_context_kind: str | None = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +90,7 @@ class MergedTuFragments:
     ast_fallback_reason: str | None
     ast_toolchain_supported: bool | None
     ast_toolchain_unsupported_reasons: tuple[str, ...]
+    frontend_context_kind: str | None
 
 
 def entity_key(kind: str, name: str) -> tuple[str, str]:

@@ -48,11 +48,14 @@ implementation has been replaced by the real one.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import deadline, process_resources
 from .dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from .dumper_clang import _ClangAstParser
 from .dumper_toolchain import (
@@ -60,6 +63,7 @@ from .dumper_toolchain import (
     _parser_ast_supported,
     _parser_ast_toolchain,
     _parser_ast_unsupported_reasons,
+    _parser_frontend_context_kind,
 )
 from .model import EnumType, Function, RecordType, Variable
 from .tu_fragment import (
@@ -73,6 +77,81 @@ if TYPE_CHECKING:
     from .dumper_castxml import _CastxmlParser
 
 log = logging.getLogger(__name__)
+
+#: Rough peak resident memory budget per concurrent per-TU worker (GiB) --
+#: same default as buildsource.source_replay's L4 pool
+#: (``_L4_JOB_MEM_BUDGET_GIB``), since both pools run the identical kind of
+#: work (one castxml/clang invocation, one heavy AST parse, per TU). Tunable
+#: via ``ABICHECK_TU_JOB_MEM_GIB``; the cap is skipped when RAM can't be read.
+_TU_JOB_MEM_BUDGET_GIB = 3.0
+
+
+def _tu_jobs(n_units: int) -> int:
+    """Worker count for the per-TU manifest-dump pool (ADR-050 D6, G32 Phase
+    E) -- ``run_tu_loop`` runs one castxml/clang invocation per translation
+    unit, instead of today's single aggregate-then-parse call, and this
+    function decides how many of those invocations run concurrently.
+
+    Ports ``buildsource.source_replay._l4_jobs``'s already-proven policy
+    verbatim (G32 Phase E's own "no new scheduling policy" note): auto ==
+    ``min(n_units, cpu_count, 8)``, clamped by available memory; an explicit
+    ``ABICHECK_TU_JOBS`` override (set ``1`` to force serial, e.g. for
+    deterministic tests) is clamped the same way. Uses this pool's own
+    ``ABICHECK_TU_JOBS``/``ABICHECK_TU_JOB_MEM_GIB`` env vars and log
+    messages rather than the L4 pool's ``ABICHECK_L4_*`` ones -- a
+    manifest dump and an L4 source replay are independent processes that
+    may run concurrently (e.g. ``compare --dump-manifest`` alongside a
+    separate ``--sources`` scan) and should be tunable independently.
+    Shares :mod:`abicheck.process_resources`'s RAM-probing/ceiling
+    primitives with the L4 pool rather than reimplementing them.
+    """
+    budget = process_resources.job_mem_budget_gib(
+        "ABICHECK_TU_JOB_MEM_GIB", _TU_JOB_MEM_BUDGET_GIB
+    )
+    cap = process_resources.mem_cap(budget)
+    env = os.environ.get("ABICHECK_TU_JOBS")
+    if env:
+        try:
+            requested = max(1, int(env))
+        except ValueError:
+            return 1
+        ceiling = process_resources.jobs_ceiling()
+        if requested > ceiling:
+            log.warning(
+                "ABICHECK_TU_JOBS=%d exceeds the oversubscription ceiling (%d "
+                "for %d CPUs); clamping to %d",
+                requested,
+                ceiling,
+                os.cpu_count() or 1,
+                ceiling,
+            )
+            requested = ceiling
+        if cap is not None and requested > cap:
+            log.warning(
+                "ABICHECK_TU_JOBS=%d may not fit in available memory (~%.1f GiB "
+                "at ~%.1f GiB/worker); clamping to %d to avoid an OOM-killed "
+                "manifest dump. Tune ABICHECK_TU_JOB_MEM_GIB, or split the "
+                "manifest into fewer translation units.",
+                requested,
+                process_resources.available_mem_gib() or 0.0,
+                budget,
+                cap,
+            )
+            return cap
+        return requested
+    auto = max(1, min(n_units, os.cpu_count() or 1, 8))
+    if cap is not None and cap < auto:
+        log.info(
+            "Per-TU manifest-dump workers reduced %d -> %d to fit available "
+            "memory (~%.1f GiB at ~%.1f GiB/worker); set ABICHECK_TU_JOBS / "
+            "ABICHECK_TU_JOB_MEM_GIB to override.",
+            auto,
+            cap,
+            process_resources.available_mem_gib() or 0.0,
+            budget,
+        )
+        return cap
+    return auto
 
 #: Signature of ``dumper._header_ast_parser`` -- injected by the caller
 #: rather than imported, see this module's own docstring.
@@ -105,6 +184,7 @@ def run_tu_fragment(
     public_header_paths: list[str],
     public_dir_paths: list[str],
     extra_hash_dirs: tuple[Path, ...] = (),
+    frontend_context: str = "host",
 ) -> TuFragment:
     """Run one castxml/clang invocation for *tu* via *header_ast_parser*
     (``dumper._header_ast_parser``, injected -- see this module's own
@@ -140,6 +220,7 @@ def run_tu_fragment(
         public_header_paths=public_header_paths,
         public_dir_paths=public_dir_paths,
         extra_hash_dirs=extra_hash_dirs,
+        frontend_context=frontend_context,
     )
     return TuFragment(
         tu_name=tu.name,
@@ -156,7 +237,167 @@ def run_tu_fragment(
         ast_toolchain_unsupported_reasons=tuple(
             _parser_ast_unsupported_reasons(parser)
         ),
+        frontend_context_kind=_parser_frontend_context_kind(parser),
     )
+
+
+def _run_tu_fragments(
+    tus: Sequence[TranslationUnit],
+    *,
+    header_ast_parser: HeaderAstParserFn,
+    backend: str,
+    compiler: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+    nostdinc: bool,
+    lang: str | None,
+    exported_dynamic: set[str],
+    exported_static: set[str],
+    public_header_paths: list[str],
+    public_dir_paths: list[str],
+    extra_hash_dirs: tuple[Path, ...],
+    frontend_context: str = "host",
+) -> list[TuFragment]:
+    """Run :func:`run_tu_fragment` for every TU in *tus*, under a
+    RAM-aware thread pool (ADR-050 D6, G32 Phase E) instead of a fully
+    sequential loop -- ``run_tu_loop``'s own extraction step, split out so
+    the pooled-vs-serial dispatch has one obvious home.
+
+    Fragments are always **assembled** in *tus*' own declared order (never
+    completion order) for the final return value -- :func:`merge_tu_fragments`
+    treats TU order as significant (which TU's declaration "wins" an
+    ODR-compatible merge), so a pool that returned results out of order would
+    make the merge outcome depend on scheduling luck instead of the
+    manifest's own declared TU order. Failures are, by contrast, *observed*
+    in completion order (not submission order) precisely so a required TU's
+    failure gets reacted to -- and its siblings' cancellation attempted --
+    as soon as it happens, not delayed behind an earlier-submitted, merely
+    slower TU's still-pending future (Codex review, PR #636). Each future's
+    successful result is recorded by its declared index as it completes;
+    the assembly pass at the end reads that index-ordered list, so
+    observation order and assembly order are decoupled rather than the same
+    loop conflating the two.
+
+    A ``required=True`` TU's failure (the default) still propagates and
+    fails the whole manifest dump -- any not-yet-started future is cancelled
+    (best effort; already-running ones are left to finish rather than
+    force-killed mid-subprocess) and the original exception re-raised
+    unchanged, so a killed/timed-out TU's real error (e.g. the descriptive
+    ``SnapshotError`` a castxml/clang timeout already raises, naming the
+    terminated process) surfaces exactly as it would from the sequential
+    loop -- never silently swallowed or replaced with an empty fragment. A
+    ``required=False`` TU's failure still degrades to a logged diagnostic,
+    identical to the pre-pool behavior.
+
+    A single TU, or a resolved worker count of 1 (``ABICHECK_TU_JOBS=1``,
+    used by tests to force determinism), takes the plain sequential path --
+    no pool overhead, and no ordering ambiguity to reason about at all.
+    """
+    jobs = _tu_jobs(len(tus))
+
+    def _run_one(tu: TranslationUnit) -> TuFragment:
+        return run_tu_fragment(
+            tu,
+            header_ast_parser=header_ast_parser,
+            backend=backend,
+            compiler=compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+            exported_dynamic=exported_dynamic,
+            exported_static=exported_static,
+            public_header_paths=public_header_paths,
+            public_dir_paths=public_dir_paths,
+            extra_hash_dirs=extra_hash_dirs,
+            frontend_context=frontend_context,
+        )
+
+    def _handle_failure(tu: TranslationUnit) -> None:
+        if tu.required:
+            raise
+        log.warning(
+            "Optional translation unit %r failed to extract; skipping "
+            "(required=false). Its declarations are absent from this "
+            "snapshot.",
+            tu.name,
+            exc_info=True,
+        )
+
+    fragments: list[TuFragment] = []
+    if jobs <= 1 or len(tus) <= 1:
+        for tu in tus:
+            try:
+                fragments.append(_run_one(tu))
+            except Exception:
+                _handle_failure(tu)
+        return fragments
+
+    # Results are recorded by INDEX (declared order), but observed in
+    # COMPLETION order (via as_completed), not submission order -- a
+    # required TU submitted late that fails immediately must not sit behind
+    # an earlier-submitted, merely-slow TU's future before its failure is
+    # even noticed. Waiting on futures strictly in submission order would
+    # let already-queued heavyweight AST jobs keep starting during that
+    # delay, making the cancellation below far less effective on a manifest
+    # already known to be doomed (Codex review, PR #636). The final
+    # `results`-to-`fragments` pass below is what restores declared order
+    # for the merge step, which still needs it.
+    # contextvars don't cross a ThreadPoolExecutor boundary, so a worker
+    # submitted here would otherwise see no active deadline and each TU's
+    # clang/castxml invocation would silently fall back to its fixed default
+    # timeout regardless of an active deadline.deadline_scope (e.g. `scan
+    # --budget`) around the caller -- the same class of gap PR #591 already
+    # closed for source_replay.py's L4 pool via _deadline_bound_worker
+    # (Codex review, PR #636). Captured once on the submitting thread and
+    # re-established inside each worker.
+    deadline_ts = deadline.current_deadline_ts()
+
+    def _run_one_with_deadline(tu: TranslationUnit) -> TuFragment:
+        with deadline.with_deadline_ts(deadline_ts):
+            return _run_one(tu)
+
+    # Deliberately NOT a `with ThreadPoolExecutor(...) as pool:` block: that
+    # context manager's __exit__ calls shutdown(wait=True), which blocks
+    # until every already-running future finishes -- silently re-imposing
+    # the wait a required failure is supposed to skip past. A still-running
+    # sibling can't be force-killed from here regardless, so waiting on it
+    # only delays the diagnostic and keeps burning its CPU/RAM for nothing
+    # (Codex review, PR #636 follow-up).
+    pool = ThreadPoolExecutor(max_workers=jobs)
+    results: list[TuFragment | None] = [None] * len(tus)
+    future_to_index = {
+        pool.submit(_run_one_with_deadline, tu): i for i, tu in enumerate(tus)
+    }
+    for fut in as_completed(future_to_index):
+        idx = future_to_index[fut]
+        tu = tus[idx]
+        try:
+            results[idx] = fut.result()
+        except Exception:
+            if tu.required:
+                # Cancel whatever hasn't started yet (best effort -- a
+                # future already running its subprocess can't be
+                # force-killed from here) and shut down without waiting on
+                # whatever's still running -- a `with`-managed executor's
+                # implicit shutdown(wait=True) on exit would silently
+                # re-impose exactly that wait (Codex review, PR #636
+                # follow-up). An optional TU's failure, by contrast, must
+                # not cancel its siblings -- the loop is meant to keep
+                # collecting the rest.
+                for other_fut in future_to_index:
+                    other_fut.cancel()
+                pool.shutdown(wait=False)
+            _handle_failure(tu)
+    pool.shutdown(wait=True)
+    fragments.extend(r for r in results if r is not None)
+    return fragments
 
 
 def run_tu_loop(
@@ -178,6 +419,7 @@ def run_tu_loop(
     exported_dynamic: set[str],
     exported_static: set[str],
     extra_hash_dirs: tuple[Path, ...] = (),
+    frontend_context: str = "host",
 ) -> MergedTuFragments:
     """Run every TU in *tus* (one castxml/clang invocation each) and merge
     the results via :func:`merge_tu_fragments` -- ADR-050 D3's "one
@@ -227,39 +469,38 @@ def run_tu_loop(
     explicit_public_paths = [str(p) for p in public_header_paths]
     explicit_public_dirs = [str(d) for d in public_header_dirs]
 
-    fragments: list[TuFragment] = []
-    for tu in tus:
-        try:
-            fragments.append(
-                run_tu_fragment(
-                    tu,
-                    header_ast_parser=header_ast_parser,
-                    backend=backend,
-                    compiler=compiler,
-                    gcc_path=gcc_path,
-                    gcc_prefix=gcc_prefix,
-                    gcc_options=gcc_options,
-                    gcc_option_tokens=gcc_option_tokens,
-                    sysroot=sysroot,
-                    nostdinc=nostdinc,
-                    lang=lang,
-                    exported_dynamic=exported_dynamic,
-                    exported_static=exported_static,
-                    public_header_paths=resolved_public_paths,
-                    public_dir_paths=resolved_public_dirs,
-                    extra_hash_dirs=extra_hash_dirs,
-                )
-            )
-        except Exception:
-            if tu.required:
-                raise
-            log.warning(
-                "Optional translation unit %r failed to extract; skipping "
-                "(required=false). Its declarations are absent from this "
-                "snapshot.",
-                tu.name,
-                exc_info=True,
-            )
+    fragments = _run_tu_fragments(
+        tus,
+        header_ast_parser=header_ast_parser,
+        backend=backend,
+        compiler=compiler,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        lang=lang,
+        exported_dynamic=exported_dynamic,
+        exported_static=exported_static,
+        public_header_paths=resolved_public_paths,
+        public_dir_paths=resolved_public_dirs,
+        extra_hash_dirs=extra_hash_dirs,
+        frontend_context=frontend_context,
+    )
+
+    # A `contributes_to_abi: false` TU exists purely to satisfy other TUs'
+    # compiles (e.g. a private support header) -- its own declarations must
+    # never reach the merged ABI surface. Parse-time's `contributes_to_abi
+    # =True ⇒ required=True` invariant only guarantees the FAILURE half of
+    # this (a dropped optional TU can never have been meant to contribute);
+    # this is the separate SUCCESS half -- a non-contributing TU that parses
+    # fine must still be excluded here, which neither this function nor
+    # merge_tu_fragments previously did (Codex review). `fragments` isn't
+    # reliably index-aligned with `tus` (an optional TU's failure drops its
+    # entry rather than leaving a placeholder), so match by name instead.
+    contributing_names = {tu.name for tu in tus if tu.contributes_to_abi}
+    fragments = [f for f in fragments if f.tu_name in contributing_names]
 
     return merge_tu_fragments(
         fragments,
@@ -289,6 +530,7 @@ class ElfHeaderAstResult:
     ast_toolchain_unsupported_reasons: tuple[str, ...]
     is_clang: bool
     provenance_headers: tuple[Path, ...]
+    frontend_context_kind: str | None = None
 
 
 def resolve_header_ast_result(
@@ -311,6 +553,7 @@ def resolve_header_ast_result(
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
     extra_hash_dirs: tuple[Path, ...] = (),
+    frontend_context: str = "host",
 ) -> ElfHeaderAstResult:
     """Run the header-AST parse for one dump -- manifest-driven (one
     invocation per TU, merged) when *dump_manifest* is given, otherwise the
@@ -351,6 +594,13 @@ def resolve_header_ast_result(
             exported_dynamic=exported_dynamic,
             exported_static=exported_static,
             extra_hash_dirs=extra_hash_dirs,
+            # A manifest's own frontend_context field is authoritative for
+            # every one of its TUs (ADR-050 D3's parse-time rule already
+            # forces one compiler/target per manifest) -- it takes
+            # precedence over the caller's own requested value, mirroring
+            # how public_header_paths/public_header_dirs above already
+            # prefer the manifest's own fields.
+            frontend_context=dump_manifest.frontend_context,
         )
         provenance_headers = tuple(dump_manifest.roots)
     else:
@@ -377,6 +627,7 @@ def resolve_header_ast_result(
             + [str(h) for h in (public_headers or [])],
             public_dir_paths=[str(d) for d in (public_header_dirs or [])],
             extra_hash_dirs=extra_hash_dirs,
+            frontend_context=frontend_context,
         )
         merged = MergedTuFragments(
             functions=fragment.functions,
@@ -390,6 +641,7 @@ def resolve_header_ast_result(
             ast_fallback_reason=fragment.ast_fallback_reason,
             ast_toolchain_supported=fragment.ast_toolchain_supported,
             ast_toolchain_unsupported_reasons=fragment.ast_toolchain_unsupported_reasons,
+            frontend_context_kind=fragment.frontend_context_kind,
         )
         provenance_headers = tuple(headers)
 
@@ -405,6 +657,7 @@ def resolve_header_ast_result(
         ast_fallback_reason=merged.ast_fallback_reason,
         ast_toolchain_supported=merged.ast_toolchain_supported,
         ast_toolchain_unsupported_reasons=merged.ast_toolchain_unsupported_reasons,
+        frontend_context_kind=merged.frontend_context_kind,
         is_clang=merged.ast_producer == "clang",
         provenance_headers=provenance_headers,
     )

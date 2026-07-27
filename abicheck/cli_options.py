@@ -589,10 +589,11 @@ def compile_context_options(func: F) -> F:
         show_default=True,
         type=click.Choice(["host", "device"], case_sensitive=False),
         help="Which AST context the L2 header frontend should target (ADR-050 "
-        "D3/D5). Only 'host' is honored so far -- 'device' (e.g. a SYCL/DPC++ "
-        "offload target) is rejected until the real device selector lands; "
-        "declared now so a manifest's own frontend_context field has a "
-        "matching CLI counterpart for the legacy, non-manifest path.",
+        "D3/D5). 'device' selects the SYCL/DPC++ offload-device AST from a "
+        "DPC++-capable compiler (icx/icpx/dpcpp) invoked with -fsycl; it fails "
+        "loudly if the configured frontend cannot produce a device context. "
+        "Matches a manifest's own frontend_context field for the legacy, "
+        "non-manifest path.",
     )(func)
     func = click.option(
         "--nostdinc/--no-nostdinc",
@@ -783,6 +784,11 @@ def merge_compile_config(
         sysroot=sysroot,
         nostdinc=nostdinc,
         frontend=frontend,
+        # No config-file equivalent of --frontend-context exists (ADR-050
+        # D5) -- config merging only ever narrows CLI-unset fields, so the
+        # CLI-resolved value must simply survive the merge instead of
+        # silently reverting to CompileContext's "host" default.
+        frontend_context=cli_ctx.frontend_context,
     )
     includes = tuple(cli_includes) + tuple(
         (base / p) if not Path(p).is_absolute() else Path(p)
@@ -816,17 +822,14 @@ def resolve_compile_context(
     a pinned config one). ``compare`` / ``dump`` / ``scan`` all call this so their
     L2 compile context cannot drift.
 
-    ``frontend_context`` (ADR-050 D3/D5) is validated here — the single choke
-    point all three commands share — rather than per-callback: only ``"host"``
-    is honored this phase (Phase D adds the real device/DPC++ selector), so a
-    ``"device"`` request is rejected loudly instead of silently extracted as
-    if it were host.
+    ``frontend_context`` (ADR-050 D3/D5) passes through unchanged here — Click's
+    own ``type=click.Choice(["host", "device"])`` on ``--frontend-context``
+    already rejects anything else at parse time. A ``"device"`` request that
+    the underlying compiler/invocation can't actually satisfy fails loudly
+    from the real extraction pipeline (``AstContextMissingError``/
+    ``AstContextAmbiguousError`` in ``sycl_context``), not from a blanket
+    reject here.
     """
-    if frontend_context != "host":
-        raise click.UsageError(
-            f"--frontend-context {frontend_context!r} is not supported yet "
-            "(ADR-050 D3/D5) — only 'host' is honored this phase."
-        )
     from .service_scan import CompileContext
 
     cli_ctx = CompileContext(

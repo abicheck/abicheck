@@ -296,6 +296,7 @@ def merge_fragments(
             ast_fallback_reason=None,
             ast_toolchain_supported=None,
             ast_toolchain_unsupported_reasons=(),
+            frontend_context_kind=None,
         )
 
     # Fixed, content-derived order (tu_name, never the caller's own sequence
@@ -329,6 +330,26 @@ def merge_fragments(
             "whole merged snapshot.",
             code=HETEROGENEOUS_ABI_CONTEXT,
             entity_key=("manifest", "ast_producer"),
+            tu_names=tuple(f.tu_name for f in ordered),
+        )
+
+    # Same reasoning, for frontend_context_kind (CodeRabbit review): every TU
+    # is parsed under the manifest's one, uniform frontend_context request
+    # (dump_manifest.py has no per-TU override) against one, uniform compiler
+    # binary, so this should never actually diverge -- but blindly copying
+    # ordered[0]'s value below would misrepresent the merged snapshot's
+    # provenance if that ever changed, exactly like an unguarded ast_producer
+    # copy would.
+    frontend_context_kinds = {f.frontend_context_kind for f in ordered}
+    if len(frontend_context_kinds) > 1:
+        raise TuMergeError(
+            "translation units resolved different SYCL/DPC++ frontend "
+            f"contexts ({sorted(str(k) for k in frontend_context_kinds)!r}) "
+            "-- every TU in a manifest is parsed under the same requested "
+            "frontend_context by construction, so this should be "
+            "unreachable; refusing to guess a representative value.",
+            code=HETEROGENEOUS_ABI_CONTEXT,
+            entity_key=("manifest", "frontend_context_kind"),
             tu_names=tuple(f.tu_name for f in ordered),
         )
 
@@ -462,6 +483,7 @@ def merge_fragments(
         ast_fallback_reason=representative.ast_fallback_reason,
         ast_toolchain_supported=representative.ast_toolchain_supported,
         ast_toolchain_unsupported_reasons=representative.ast_toolchain_unsupported_reasons,
+        frontend_context_kind=representative.frontend_context_kind,
     )
 
 

@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import deadline
+from .errors import AstContextAmbiguousError, AstContextMissingError
 from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
 from .model import AbiSnapshot, Visibility
 
@@ -136,6 +137,7 @@ def _try_header_scoped_dump(
                 lang=lang_arg,
                 header_backend=header_backend,
                 extra_hash_dirs=deferred_dirs,
+                frontend_context=cc.frontend_context,
             )
         else:
             snap = _dumper_macho(
@@ -153,6 +155,7 @@ def _try_header_scoped_dump(
                 lang=lang_arg,
                 header_backend=header_backend,
                 extra_hash_dirs=deferred_dirs,
+                frontend_context=cc.frontend_context,
             )
     except deadline.DeadlineExceeded:
         # A --budget deadline expiring mid-parse is not "this header backend is
@@ -164,6 +167,16 @@ def _try_header_scoped_dump(
         # aborted (Codex review). Propagate so run_scan_core's
         # except deadline.DeadlineExceeded -> _BudgetOverflow mapping applies,
         # same as the ELF L2 path.
+        raise
+    except (AstContextMissingError, AstContextAmbiguousError):
+        # These only ever come from a NON-"host" --frontend-context request
+        # (ADR-050 D5) -- there is no "device" default, so seeing either
+        # here always means the user explicitly asked for a SYCL/DPC++ AST
+        # context the configured compiler couldn't supply. Falling back to
+        # export-table mode would silently drop --header/--include and
+        # succeed anyway, exactly the "explicit request quietly ignored"
+        # failure mode --frontend-context is supposed to fail loudly on
+        # instead (Codex review).
         raise
     except Exception as exc:  # noqa: BLE001 — header backend/parse failure → fall back
         warnings.warn(

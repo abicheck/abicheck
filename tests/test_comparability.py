@@ -23,7 +23,9 @@ import pytest
 from abicheck.comparability import (
     IncludeDir,
     compute_extraction_contract,
+    manifest_tu_scope_field,
 )
+from abicheck.dump_manifest import parse_manifest
 from abicheck.errors import SnapshotError
 from abicheck.model import AbiSnapshot, ExtractionContract
 
@@ -1128,3 +1130,339 @@ def test_unreadable_header_content_raises_snapshot_error(tmp_path):
             declared_includes=[IncludeDir(tmp_path / "dep")],
             depfile_resolved_paths=[missing],
         )
+# ---------------------------------------------------------------------------
+# manifest_tu_scope_field / scope_fingerprint TU-level coverage (ADR-050 D1,
+# G32 Phase E prerequisite): scope_fingerprint must hash each TU's own name,
+# ordered includes/forced_includes (incl. project_owned), required, and
+# contributes_to_abi -- not just the manifest's flat `roots`/public-header
+# fields, which alone can't tell two structurally different manifests apart.
+# ---------------------------------------------------------------------------
+
+
+def _manifest(tmp_path: Path, body: str):
+    base = tmp_path / "manifest_dir"
+    base.mkdir(exist_ok=True)
+    return parse_manifest(body, base_dir=base, source="<test>")
+
+
+def test_manifest_tu_scope_field_is_stable_json_for_identical_manifests(tmp_path):
+    body = (
+        "roots: [a.h]\n"
+        "translation_units:\n"
+        "  - name: tu_a\n"
+        "    forced_includes: [a.h]\n"
+        "    includes: [vendor]\n"
+    )
+    m1 = _manifest(tmp_path, body)
+    m2 = _manifest(tmp_path, body)
+    assert manifest_tu_scope_field(m1) == manifest_tu_scope_field(m2)
+
+
+def test_manifest_scope_fingerprint_differs_when_tu_renamed(tmp_path):
+    old = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+    )
+    new = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n  - name: tu_b\n    forced_includes: [a.h]\n",
+    )
+    old_c = compute_extraction_contract(
+        declared_headers=list(old.roots), manifest_tu_scope=manifest_tu_scope_field(old)
+    )
+    new_c = compute_extraction_contract(
+        declared_headers=list(new.roots), manifest_tu_scope=manifest_tu_scope_field(new)
+    )
+    assert old_c.scope_fingerprint != new_c.scope_fingerprint
+
+
+def test_manifest_scope_fingerprint_ignores_tu_declaration_order(tmp_path):
+    # Codex review, PR #636: ADR-050 D1 -- "the set of translation units (by
+    # name, not by list position)... reordering two independent TU entries...
+    # must not change the fingerprint." Two manifests declaring the identical
+    # TUs in swapped YAML order must fingerprint identically.
+    old = _manifest(
+        tmp_path,
+        "roots: [a.h, b.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n"
+        "  - name: tu_b\n    forced_includes: [b.h]\n",
+    )
+    new = _manifest(
+        tmp_path,
+        "roots: [a.h, b.h]\ntranslation_units:\n"
+        "  - name: tu_b\n    forced_includes: [b.h]\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n",
+    )
+    old_c = compute_extraction_contract(
+        declared_headers=list(old.roots), manifest_tu_scope=manifest_tu_scope_field(old)
+    )
+    new_c = compute_extraction_contract(
+        declared_headers=list(new.roots), manifest_tu_scope=manifest_tu_scope_field(new)
+    )
+    assert old_c.scope_fingerprint == new_c.scope_fingerprint
+
+
+def test_manifest_scope_fingerprint_still_orders_includes_within_one_tu(tmp_path):
+    # The companion invariant: canonicalizing the OUTER TU order must not
+    # accidentally also canonicalize (e.g. sort) a single TU's own INTERNAL
+    # includes/forced_includes order, which stays genuinely order-sensitive
+    # (ADR-050 D1: "reordering includes *within* one TU... must" change the
+    # fingerprint) -- already covered by
+    # test_manifest_scope_fingerprint_differs_when_includes_reordered, this
+    # asserts the same property survives the outer-order fix specifically.
+    old = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [vendor, extra]\n",
+    )
+    new = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [extra, vendor]\n",
+    )
+    assert manifest_tu_scope_field(old) != manifest_tu_scope_field(new)
+
+
+def test_manifest_scope_fingerprint_differs_when_includes_reordered(tmp_path):
+    old = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [vendor, extra]\n",
+    )
+    new = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [extra, vendor]\n",
+    )
+    old_c = compute_extraction_contract(
+        declared_headers=list(old.roots), manifest_tu_scope=manifest_tu_scope_field(old)
+    )
+    new_c = compute_extraction_contract(
+        declared_headers=list(new.roots), manifest_tu_scope=manifest_tu_scope_field(new)
+    )
+    assert old_c.scope_fingerprint != new_c.scope_fingerprint
+
+
+def test_manifest_scope_fingerprint_differs_when_contributes_to_abi_flipped(tmp_path):
+    old = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n"
+        "  - name: tu_b\n    forced_includes: [a.h]\n"
+        "    required: false\n    contributes_to_abi: false\n",
+    )
+    new = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n"
+        "  - name: tu_b\n    forced_includes: [a.h]\n"
+        "    required: true\n    contributes_to_abi: true\n",
+    )
+    old_c = compute_extraction_contract(
+        declared_headers=list(old.roots), manifest_tu_scope=manifest_tu_scope_field(old)
+    )
+    new_c = compute_extraction_contract(
+        declared_headers=list(new.roots), manifest_tu_scope=manifest_tu_scope_field(new)
+    )
+    assert old_c.scope_fingerprint != new_c.scope_fingerprint
+
+
+def test_manifest_scope_fingerprint_differs_on_project_owned_bit(tmp_path):
+    old = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n"
+        "    includes: [{path: ../src, project_owned: false}]\n",
+    )
+    new = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n"
+        "    includes: [{path: ../src, project_owned: true}]\n",
+    )
+    old_c = compute_extraction_contract(
+        declared_headers=list(old.roots), manifest_tu_scope=manifest_tu_scope_field(old)
+    )
+    new_c = compute_extraction_contract(
+        declared_headers=list(new.roots), manifest_tu_scope=manifest_tu_scope_field(new)
+    )
+    assert old_c.scope_fingerprint != new_c.scope_fingerprint
+
+
+def test_manifest_scope_fingerprint_matches_across_mount_points(tmp_path):
+    # Two checkouts of the identical manifest structure at different absolute
+    # mount points must still fingerprint identically -- TU paths normalize
+    # relative to the manifest's own base_dir (ADR-050: "for the manifest
+    # path, both fingerprints' roots are simply the manifest file's own
+    # directory").
+    body = (
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [../src]\n"
+    )
+    old_base = tmp_path / "checkout1" / "manifest_dir"
+    new_base = tmp_path / "checkout2" / "manifest_dir"
+    old_base.mkdir(parents=True)
+    new_base.mkdir(parents=True)
+    old = parse_manifest(body, base_dir=old_base, source="<old>")
+    new = parse_manifest(body, base_dir=new_base, source="<new>")
+    old_c = compute_extraction_contract(
+        declared_headers=list(old.roots), manifest_tu_scope=manifest_tu_scope_field(old)
+    )
+    new_c = compute_extraction_contract(
+        declared_headers=list(new.roots), manifest_tu_scope=manifest_tu_scope_field(new)
+    )
+    assert old_c.scope_fingerprint == new_c.scope_fingerprint
+
+
+def test_manifest_scope_fingerprint_ignores_symlink_target_and_checkout_depth(
+    tmp_path,
+):
+    # Codex review, PR #636: a relative-declared manifest path that
+    # traverses a symlink (e.g. a checkout-local `vendor -> /opt/sdk`) must
+    # not have that symlink followed before computing the relative form --
+    # .resolve() would climb a `../` distance to the symlink's REAL target
+    # that depends on how deeply THIS checkout happens to be nested, even
+    # though the manifest itself only ever declares the lexical `vendor`.
+    sdk_target = tmp_path / "sdk"
+    sdk_target.mkdir()
+    body = (
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [vendor]\n"
+    )
+    shallow_base = tmp_path / "checkout1" / "manifest_dir"
+    deep_base = tmp_path / "checkout2" / "nested" / "much" / "deeper" / "manifest_dir"
+    shallow_base.mkdir(parents=True)
+    deep_base.mkdir(parents=True)
+    (shallow_base / "vendor").symlink_to(sdk_target, target_is_directory=True)
+    (deep_base / "vendor").symlink_to(sdk_target, target_is_directory=True)
+    shallow = parse_manifest(body, base_dir=shallow_base, source="<shallow>")
+    deep = parse_manifest(body, base_dir=deep_base, source="<deep>")
+    shallow_c = compute_extraction_contract(
+        declared_headers=list(shallow.roots),
+        manifest_tu_scope=manifest_tu_scope_field(shallow),
+    )
+    deep_c = compute_extraction_contract(
+        declared_headers=list(deep.roots), manifest_tu_scope=manifest_tu_scope_field(deep)
+    )
+    assert shallow_c.scope_fingerprint == deep_c.scope_fingerprint
+
+
+def test_manifest_scope_fingerprint_external_absolute_path_ignores_checkout_depth(
+    tmp_path,
+):
+    # Codex review, PR #636: an absolute, genuinely-external manifest entry
+    # (e.g. `/usr/include`) has no structural relationship to the checkout
+    # at all. Relativizing it against base_dir would climb a `../` distance
+    # that depends on how deeply THIS checkout happens to be nested -- two
+    # otherwise-identical manifests whose checkouts sit at different depths
+    # must still fingerprint identically.
+    external = tmp_path / "usr" / "include"
+    external.mkdir(parents=True)
+    body = (
+        f"roots: [a.h]\ntranslation_units:\n"
+        f"  - name: tu_a\n    forced_includes: [a.h]\n"
+        f"    includes: ['{external}']\n"
+    )
+    shallow_base = tmp_path / "checkout1" / "manifest_dir"
+    deep_base = tmp_path / "checkout2" / "nested" / "much" / "deeper" / "manifest_dir"
+    shallow_base.mkdir(parents=True)
+    deep_base.mkdir(parents=True)
+    shallow = parse_manifest(body, base_dir=shallow_base, source="<shallow>")
+    deep = parse_manifest(body, base_dir=deep_base, source="<deep>")
+    shallow_c = compute_extraction_contract(
+        declared_headers=list(shallow.roots),
+        manifest_tu_scope=manifest_tu_scope_field(shallow),
+    )
+    deep_c = compute_extraction_contract(
+        declared_headers=list(deep.roots), manifest_tu_scope=manifest_tu_scope_field(deep)
+    )
+    assert shallow_c.scope_fingerprint == deep_c.scope_fingerprint
+
+
+def test_manifest_tu_scope_field_handles_base_dir_ending_in_separator():
+    # CodeRabbit review, PR #636: a base_dir that already ends in a path
+    # separator (a filesystem root "/" or a Windows drive root "C:\\") must
+    # not gain a second one -- "//"/"C:\\\\" would never prefix-match any
+    # real child path string, so a path genuinely under such a root-level
+    # checkout would be misclassified as "external" and fingerprinted as an
+    # absolute string instead of being properly relativized.
+    from abicheck.dump_manifest import IncludeEntry, TranslationUnit
+
+    class _FakeManifest:
+        def __init__(self, base_dir, translation_units):
+            self.base_dir = base_dir
+            self.translation_units = translation_units
+
+    manifest = _FakeManifest(
+        base_dir=Path("/"),
+        translation_units=(
+            TranslationUnit(
+                name="tu_a",
+                forced_includes=(Path("/a.h"),),
+                includes=(IncludeEntry(path=Path("/vendor")),),
+            ),
+        ),
+    )
+    data = json.loads(manifest_tu_scope_field(manifest))
+    # A path genuinely under base_dir="/" must relativize (no leading "/"),
+    # not fall through to the "external absolute path" branch.
+    assert data[0]["forced_includes"] == ["a.h"]
+    assert data[0]["includes"][0]["path"] == "vendor"
+
+
+def test_manifest_tu_scope_field_falls_back_on_cross_drive_relpath_error(
+    tmp_path, monkeypatch
+):
+    # A genuinely cross-drive Windows path makes os.path.relpath raise
+    # ValueError (no relative form exists) -- manifest_tu_scope_field must
+    # fall back to the resolved absolute path rather than propagate the
+    # error (mirroring dumper_contract._manifest_declared_includes's
+    # identical handling).
+    manifest = _manifest(
+        tmp_path,
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [vendor]\n",
+    )
+
+    def _raise_value_error(*_args, **_kwargs):
+        raise ValueError("cross-drive path")
+
+    monkeypatch.setattr(os.path, "relpath", _raise_value_error)
+    field = manifest_tu_scope_field(manifest)
+    data = json.loads(field)
+    assert data[0]["forced_includes"] == [str((manifest.base_dir / "a.h").resolve())]
+    assert data[0]["includes"][0]["path"] == str(
+        (manifest.base_dir / "vendor").resolve()
+    )
+
+
+def test_legacy_scope_fingerprint_unaffected_by_translation_units_field(tmp_path):
+    # A plain, non-manifest declared_headers call (no manifest_tu_scope
+    # given) must still leave scope_fingerprint driven only by the header
+    # identity -- adding the "translation_units" field must not itself
+    # introduce spurious mismatches between two ordinary legacy dumps.
+    old_h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
+    new_h = _write(tmp_path / "v2" / "foo.h", "int f(void);\n")
+    old = compute_extraction_contract(declared_headers=[old_h])
+    new = compute_extraction_contract(declared_headers=[new_h])
+    assert old.scope_fingerprint == new.scope_fingerprint
+    assert old.scope_fields["translation_units"] == "[]"
+
+
+def test_legacy_scope_fingerprint_matches_pre_translation_units_algorithm(tmp_path):
+    # Codex review, PR #636: a persisted, pre-upgrade .abi.json baseline's
+    # contract.scope_fingerprint is a bare hash string frozen at dump time
+    # (never recomputed on load) -- a fresh, post-upgrade dump of the
+    # IDENTICAL legacy header set must hash to the exact same value the
+    # pre-upgrade algorithm (headers + public_header_dirs only, no
+    # translation_units field folded in at all) would have produced, or an
+    # ordinary "compare a committed baseline against a fresh dump" workflow
+    # spuriously trips ScopeMismatchError after nothing about the header set
+    # itself changed.
+    from abicheck.comparability import SCOPE_FIELD_KEYS, _sha256_of
+
+    h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
+    contract = compute_extraction_contract(declared_headers=[h])
+    pre_upgrade_hash = _sha256_of(*[contract.scope_fields[k] for k in SCOPE_FIELD_KEYS])
+    assert contract.scope_fingerprint == pre_upgrade_hash
+    assert SCOPE_FIELD_KEYS == ("headers", "public_header_dirs")

@@ -162,6 +162,41 @@ class TuMergeError(SnapshotError):
         self.tu_names = tu_names
 
 
+class AstContextMissingError(SnapshotError):
+    """Raised by :mod:`abicheck.sycl_context` when no decoded AST context
+    matches the requested ``frontend_context`` ``kind`` (ADR-050 D5, G32
+    Phase D) — either a DPC++-capable invocation's document stream contains
+    zero contexts of the requested ``kind`` (e.g. only a ``device`` context
+    when ``host`` was requested, or a broken/truncated toolchain invocation
+    decoded to nothing), or the invocation was positively identified as a
+    plain, non-SYCL frontend and something other than the default ``host``
+    was requested — there is no device-context stream to select from at
+    all in that case, the same underlying condition.
+
+    A subclass of :class:`SnapshotError` — existing ``except SnapshotError``
+    handling around ``dump()``/``compare()`` already treats it as an
+    ordinary extraction failure, the same precedent :class:`HeaderToolchainError`
+    documents. A dedicated class (rather than a bare :class:`SnapshotError`)
+    so a caller building a remediation message can distinguish "nothing to
+    select" from :class:`AstContextAmbiguousError`'s "too much to select
+    from without a tiebreaker" — the two need different guidance.
+    """
+
+
+class AstContextAmbiguousError(SnapshotError):
+    """Raised by :mod:`abicheck.sycl_context` when more than one decoded AST
+    context shares the requested ``frontend_context`` ``kind`` (ADR-050 D5,
+    G32 Phase D) — e.g. a multi-target DPC++ invocation producing two
+    distinct ``device`` contexts for different offload targets. There is no
+    implicit tiebreaker; the caller must narrow the request (e.g. to a
+    specific target) rather than have one context silently chosen for them.
+
+    A subclass of :class:`SnapshotError`, mirroring :class:`AstContextMissingError`'s
+    reasoning for why existing ``except SnapshotError`` handling still
+    catches it unchanged while remaining a dedicated, branchable class.
+    """
+
+
 class UnsupportedCastxmlVersionError(SnapshotError):
     """Raised when a CastXML build outside the supported version range would
     be used for an authoritative L2 scan, before any header is parsed.

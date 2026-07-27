@@ -1,0 +1,1883 @@
+{
+  "id": "0x561aeae9fe48",
+  "kind": "TranslationUnitDecl",
+  "loc": {},
+  "range": {
+    "begin": {},
+    "end": {}
+  },
+  "inner": [
+    {
+      "id": "0x561aeaea1478",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__int128_t",
+      "type": {
+        "qualType": "__int128"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0410",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__int128"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea14e8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__uint128_t",
+      "type": {
+        "qualType": "unsigned __int128"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0430",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "unsigned __int128"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1878",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__NSConstantString",
+      "type": {
+        "qualType": "__NSConstantString_tag"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea1840",
+          "kind": "RecordType",
+          "type": {
+            "qualType": "__NSConstantString_tag"
+          },
+          "decl": {
+            "id": "0x561aeaea1540",
+            "kind": "CXXRecordDecl",
+            "name": "__NSConstantString_tag"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea18e0",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_event_t",
+      "type": {
+        "qualType": "event_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0c50",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "event_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1948",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampler_t",
+      "type": {
+        "qualType": "sampler_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0c30",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "sampler_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea19b0",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image1d_ro_t",
+      "type": {
+        "qualType": "__read_only image1d_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0630",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_only image1d_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1a18",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image1d_array_ro_t",
+      "type": {
+        "qualType": "__read_only image1d_array_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0650",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_only image1d_array_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1a80",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image1d_buffer_ro_t",
+      "type": {
+        "qualType": "__read_only image1d_buffer_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0670",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_only image1d_buffer_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1ae8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_ro_t",
+      "type": {
+        "qualType": "__read_only image2d_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0690",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_only image2d_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1b50",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_array_ro_t",
+      "type": {
+        "qualType": "__read_only image2d_array_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea06b0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_only image2d_array_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1bb8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_depth_ro_t",
+      "type": {
+        "qualType": "__read_only image2d_depth_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea06d0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_only image2d_depth_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1c20",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_array_depth_ro_t",
+      "type": {
+        "qualType": "__read_only image2d_array_depth_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea06f0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_only image2d_array_depth_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1c88",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_msaa_ro_t",
+      "type": {
+        "qualType": "__read_only image2d_msaa_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0710",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_only image2d_msaa_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1cf0",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_array_msaa_ro_t",
+      "type": {
+        "qualType": "__read_only image2d_array_msaa_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0730",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_only image2d_array_msaa_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1d58",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_msaa_depth_ro_t",
+      "type": {
+        "qualType": "__read_only image2d_msaa_depth_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0750",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_only image2d_msaa_depth_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1dc0",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_array_msaa_depth_ro_t",
+      "type": {
+        "qualType": "__read_only image2d_array_msaa_depth_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0770",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_only image2d_array_msaa_depth_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1e28",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image3d_ro_t",
+      "type": {
+        "qualType": "__read_only image3d_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0790",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_only image3d_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1e90",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image1d_wo_t",
+      "type": {
+        "qualType": "__write_only image1d_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea07b0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__write_only image1d_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1ef8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image1d_array_wo_t",
+      "type": {
+        "qualType": "__write_only image1d_array_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea07d0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__write_only image1d_array_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1f60",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image1d_buffer_wo_t",
+      "type": {
+        "qualType": "__write_only image1d_buffer_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea07f0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__write_only image1d_buffer_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1fc8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_wo_t",
+      "type": {
+        "qualType": "__write_only image2d_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0810",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__write_only image2d_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea2030",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_array_wo_t",
+      "type": {
+        "qualType": "__write_only image2d_array_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0830",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__write_only image2d_array_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea2098",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_depth_wo_t",
+      "type": {
+        "qualType": "__write_only image2d_depth_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0850",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__write_only image2d_depth_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea2100",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_array_depth_wo_t",
+      "type": {
+        "qualType": "__write_only image2d_array_depth_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0870",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__write_only image2d_array_depth_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea2168",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_msaa_wo_t",
+      "type": {
+        "qualType": "__write_only image2d_msaa_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0890",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__write_only image2d_msaa_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea21d0",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_array_msaa_wo_t",
+      "type": {
+        "qualType": "__write_only image2d_array_msaa_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea08b0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__write_only image2d_array_msaa_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea2238",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_msaa_depth_wo_t",
+      "type": {
+        "qualType": "__write_only image2d_msaa_depth_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea08d0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__write_only image2d_msaa_depth_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea22a0",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_array_msaa_depth_wo_t",
+      "type": {
+        "qualType": "__write_only image2d_array_msaa_depth_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea08f0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__write_only image2d_array_msaa_depth_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeff840",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image3d_wo_t",
+      "type": {
+        "qualType": "__write_only image3d_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0910",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__write_only image3d_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeff8a8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image1d_rw_t",
+      "type": {
+        "qualType": "__read_write image1d_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0930",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_write image1d_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeff910",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image1d_array_rw_t",
+      "type": {
+        "qualType": "__read_write image1d_array_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0950",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_write image1d_array_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeff978",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image1d_buffer_rw_t",
+      "type": {
+        "qualType": "__read_write image1d_buffer_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0970",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_write image1d_buffer_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeff9e0",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_rw_t",
+      "type": {
+        "qualType": "__read_write image2d_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0990",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_write image2d_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffa48",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_array_rw_t",
+      "type": {
+        "qualType": "__read_write image2d_array_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea09b0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_write image2d_array_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffab0",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_depth_rw_t",
+      "type": {
+        "qualType": "__read_write image2d_depth_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea09d0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_write image2d_depth_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffb18",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_array_depth_rw_t",
+      "type": {
+        "qualType": "__read_write image2d_array_depth_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea09f0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_write image2d_array_depth_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffb80",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_msaa_rw_t",
+      "type": {
+        "qualType": "__read_write image2d_msaa_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0a10",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_write image2d_msaa_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffbe8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_array_msaa_rw_t",
+      "type": {
+        "qualType": "__read_write image2d_array_msaa_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0a30",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_write image2d_array_msaa_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffc50",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_msaa_depth_rw_t",
+      "type": {
+        "qualType": "__read_write image2d_msaa_depth_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0a50",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_write image2d_msaa_depth_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffcb8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image2d_array_msaa_depth_rw_t",
+      "type": {
+        "qualType": "__read_write image2d_array_msaa_depth_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0a70",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_write image2d_array_msaa_depth_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffd20",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_image3d_rw_t",
+      "type": {
+        "qualType": "__read_write image3d_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0a90",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__read_write image3d_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffd88",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampled_image1d_ro_t",
+      "type": {
+        "qualType": "__ocl_sampled_image1d_ro_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0ab0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__ocl_sampled_image1d_ro_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffdf0",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampled_image1d_array_ro_t",
+      "type": {
+        "qualType": "__ocl_sampled_image1d_array_ro_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0ad0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__ocl_sampled_image1d_array_ro_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffe58",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampled_image1d_buffer_ro_t",
+      "type": {
+        "qualType": "__ocl_sampled_image1d_buffer_ro_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0af0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__ocl_sampled_image1d_buffer_ro_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffec0",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampled_image2d_ro_t",
+      "type": {
+        "qualType": "__ocl_sampled_image2d_ro_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0b10",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__ocl_sampled_image2d_ro_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaefff28",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampled_image2d_array_ro_t",
+      "type": {
+        "qualType": "__ocl_sampled_image2d_array_ro_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0b30",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__ocl_sampled_image2d_array_ro_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaefff90",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampled_image2d_depth_ro_t",
+      "type": {
+        "qualType": "__ocl_sampled_image2d_depth_ro_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0b50",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__ocl_sampled_image2d_depth_ro_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaeffff8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampled_image2d_array_depth_ro_t",
+      "type": {
+        "qualType": "__ocl_sampled_image2d_array_depth_ro_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0b70",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__ocl_sampled_image2d_array_depth_ro_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaf00060",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampled_image2d_msaa_ro_t",
+      "type": {
+        "qualType": "__ocl_sampled_image2d_msaa_ro_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0b90",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__ocl_sampled_image2d_msaa_ro_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaf000c8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampled_image2d_array_msaa_ro_t",
+      "type": {
+        "qualType": "__ocl_sampled_image2d_array_msaa_ro_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0bb0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__ocl_sampled_image2d_array_msaa_ro_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaf00130",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampled_image2d_msaa_depth_ro_t",
+      "type": {
+        "qualType": "__ocl_sampled_image2d_msaa_depth_ro_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0bd0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__ocl_sampled_image2d_msaa_depth_ro_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaf00198",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampled_image2d_array_msaa_depth_ro_t",
+      "type": {
+        "qualType": "__ocl_sampled_image2d_array_msaa_depth_ro_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0bf0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__ocl_sampled_image2d_array_msaa_depth_ro_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaf00200",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__ocl_sampled_image3d_ro_t",
+      "type": {
+        "qualType": "__ocl_sampled_image3d_ro_t"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea0c10",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__ocl_sampled_image3d_ro_t"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaea1408",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__builtin_va_list",
+      "type": {
+        "qualType": "void *"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaea1340",
+          "kind": "PointerType",
+          "type": {
+            "qualType": "void *"
+          },
+          "inner": [
+            {
+              "id": "0x561aeae9feb0",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "void"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaf00258",
+      "kind": "CXXRecordDecl",
+      "loc": {
+        "offset": 544,
+        "file": "header.h",
+        "line": 9,
+        "col": 8,
+        "tokLen": 5
+      },
+      "range": {
+        "begin": {
+          "offset": 537,
+          "col": 1,
+          "tokLen": 6
+        },
+        "end": {
+          "offset": 574,
+          "line": 12,
+          "col": 1,
+          "tokLen": 1
+        }
+      },
+      "name": "Point",
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "definitionData": {
+        "canPassInRegisters": true,
+        "copyAssign": {
+          "hasConstParam": true,
+          "implicitHasConstParam": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        },
+        "copyCtor": {
+          "hasConstParam": true,
+          "implicitHasConstParam": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        },
+        "defaultCtor": {
+          "exists": true,
+          "needsImplicit": true,
+          "trivial": true
+        },
+        "dtor": {
+          "irrelevant": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        },
+        "isAggregate": true,
+        "isLiteral": true,
+        "isPOD": true,
+        "isStandardLayout": true,
+        "isTrivial": true,
+        "isTriviallyCopyable": true,
+        "moveAssign": {
+          "exists": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        },
+        "moveCtor": {
+          "exists": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        }
+      },
+      "inner": [
+        {
+          "id": "0x561aeaf00350",
+          "kind": "CXXRecordDecl",
+          "loc": {
+            "offset": 544,
+            "line": 9,
+            "col": 8,
+            "tokLen": 5
+          },
+          "range": {
+            "begin": {
+              "offset": 537,
+              "col": 1,
+              "tokLen": 6
+            },
+            "end": {
+              "offset": 544,
+              "col": 8,
+              "tokLen": 5
+            }
+          },
+          "isImplicit": true,
+          "name": "Point",
+          "tagUsed": "struct"
+        },
+        {
+          "id": "0x561aeaf003f8",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 560,
+            "line": 10,
+            "col": 9,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 556,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 560,
+              "col": 9,
+              "tokLen": 1
+            }
+          },
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "id": "0x561aeaf00460",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 571,
+            "line": 11,
+            "col": 9,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 567,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 571,
+              "col": 9,
+              "tokLen": 1
+            }
+          },
+          "name": "y",
+          "type": {
+            "qualType": "int"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561aeaf00678",
+      "kind": "FunctionDecl",
+      "loc": {
+        "offset": 582,
+        "line": 14,
+        "col": 5,
+        "tokLen": 3
+      },
+      "range": {
+        "begin": {
+          "offset": 578,
+          "col": 1,
+          "tokLen": 3
+        },
+        "end": {
+          "offset": 598,
+          "col": 21,
+          "tokLen": 1
+        }
+      },
+      "name": "add",
+      "mangledName": "_Z3addii",
+      "type": {
+        "qualType": "int (int, int)"
+      },
+      "inner": [
+        {
+          "id": "0x561aeaf00500",
+          "kind": "ParmVarDecl",
+          "loc": {
+            "offset": 590,
+            "col": 13,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 586,
+              "col": 9,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 590,
+              "col": 13,
+              "tokLen": 1
+            }
+          },
+          "name": "a",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "id": "0x561aeaf00588",
+          "kind": "ParmVarDecl",
+          "loc": {
+            "offset": 597,
+            "col": 20,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 593,
+              "col": 16,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 597,
+              "col": 20,
+              "tokLen": 1
+            }
+          },
+          "name": "b",
+          "type": {
+            "qualType": "int"
+          }
+        }
+      ]
+    }
+  ]
+}{
+  "id": "0x561227223878",
+  "kind": "TranslationUnitDecl",
+  "loc": {},
+  "range": {
+    "begin": {},
+    "end": {}
+  },
+  "inner": [
+    {
+      "id": "0x561227224558",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__int128_t",
+      "type": {
+        "qualType": "__int128"
+      },
+      "inner": [
+        {
+          "id": "0x561227223e40",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__int128"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x5612272245c8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__uint128_t",
+      "type": {
+        "qualType": "unsigned __int128"
+      },
+      "inner": [
+        {
+          "id": "0x561227223e60",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "unsigned __int128"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x56122727d3c8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__NSConstantString",
+      "type": {
+        "qualType": "__NSConstantString_tag"
+      },
+      "inner": [
+        {
+          "id": "0x56122727d390",
+          "kind": "RecordType",
+          "type": {
+            "qualType": "__NSConstantString_tag"
+          },
+          "decl": {
+            "id": "0x561227224620",
+            "kind": "CXXRecordDecl",
+            "name": "__NSConstantString_tag"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x561227224158",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__builtin_ms_va_list",
+      "type": {
+        "qualType": "char *"
+      },
+      "inner": [
+        {
+          "id": "0x561227224110",
+          "kind": "PointerType",
+          "type": {
+            "qualType": "char *"
+          },
+          "inner": [
+            {
+              "id": "0x561227223920",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "char"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x5612272244e8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__builtin_va_list",
+      "type": {
+        "qualType": "__va_list_tag[1]"
+      },
+      "inner": [
+        {
+          "id": "0x561227224490",
+          "kind": "ConstantArrayType",
+          "type": {
+            "qualType": "__va_list_tag[1]"
+          },
+          "size": 1,
+          "inner": [
+            {
+              "id": "0x561227224450",
+              "kind": "RecordType",
+              "type": {
+                "qualType": "__va_list_tag"
+              },
+              "decl": {
+                "id": "0x5612272241b0",
+                "kind": "CXXRecordDecl",
+                "name": "__va_list_tag"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x56122727d420",
+      "kind": "CXXRecordDecl",
+      "loc": {
+        "offset": 544,
+        "file": "header.h",
+        "line": 9,
+        "col": 8,
+        "tokLen": 5
+      },
+      "range": {
+        "begin": {
+          "offset": 537,
+          "col": 1,
+          "tokLen": 6
+        },
+        "end": {
+          "offset": 574,
+          "line": 12,
+          "col": 1,
+          "tokLen": 1
+        }
+      },
+      "name": "Point",
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "definitionData": {
+        "canPassInRegisters": true,
+        "copyAssign": {
+          "hasConstParam": true,
+          "implicitHasConstParam": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        },
+        "copyCtor": {
+          "hasConstParam": true,
+          "implicitHasConstParam": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        },
+        "defaultCtor": {
+          "exists": true,
+          "needsImplicit": true,
+          "trivial": true
+        },
+        "dtor": {
+          "irrelevant": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        },
+        "isAggregate": true,
+        "isLiteral": true,
+        "isPOD": true,
+        "isStandardLayout": true,
+        "isTrivial": true,
+        "isTriviallyCopyable": true,
+        "moveAssign": {
+          "exists": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        },
+        "moveCtor": {
+          "exists": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        }
+      },
+      "inner": [
+        {
+          "id": "0x56122727d518",
+          "kind": "CXXRecordDecl",
+          "loc": {
+            "offset": 544,
+            "line": 9,
+            "col": 8,
+            "tokLen": 5
+          },
+          "range": {
+            "begin": {
+              "offset": 537,
+              "col": 1,
+              "tokLen": 6
+            },
+            "end": {
+              "offset": 544,
+              "col": 8,
+              "tokLen": 5
+            }
+          },
+          "isImplicit": true,
+          "name": "Point",
+          "tagUsed": "struct"
+        },
+        {
+          "id": "0x56122727d5c0",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 560,
+            "line": 10,
+            "col": 9,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 556,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 560,
+              "col": 9,
+              "tokLen": 1
+            }
+          },
+          "name": "x",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "id": "0x56122727d628",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 571,
+            "line": 11,
+            "col": 9,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 567,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 571,
+              "col": 9,
+              "tokLen": 1
+            }
+          },
+          "name": "y",
+          "type": {
+            "qualType": "int"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x56122727d848",
+      "kind": "FunctionDecl",
+      "loc": {
+        "offset": 582,
+        "line": 14,
+        "col": 5,
+        "tokLen": 3
+      },
+      "range": {
+        "begin": {
+          "offset": 578,
+          "col": 1,
+          "tokLen": 3
+        },
+        "end": {
+          "offset": 598,
+          "col": 21,
+          "tokLen": 1
+        }
+      },
+      "name": "add",
+      "mangledName": "_Z3addii",
+      "type": {
+        "qualType": "int (int, int)"
+      },
+      "inner": [
+        {
+          "id": "0x56122727d6d0",
+          "kind": "ParmVarDecl",
+          "loc": {
+            "offset": 590,
+            "col": 13,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 586,
+              "col": 9,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 590,
+              "col": 13,
+              "tokLen": 1
+            }
+          },
+          "name": "a",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "id": "0x56122727d758",
+          "kind": "ParmVarDecl",
+          "loc": {
+            "offset": 597,
+            "col": 20,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 593,
+              "col": 16,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 597,
+              "col": 20,
+              "tokLen": 1
+            }
+          },
+          "name": "b",
+          "type": {
+            "qualType": "int"
+          }
+        }
+      ]
+    }
+  ]
+}

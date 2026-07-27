@@ -64,12 +64,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shlex
 import shutil
 from pathlib import Path
 from typing import Any
 
-from .errors import SnapshotError
+from .errors import AstContextMissingError, SnapshotError
 from .model import (
     AccessLevel,
     EnumMember,
@@ -131,6 +133,24 @@ def _is_intel_sycl_driver(path: str) -> bool:
     return Path(path).stem.lower() in _CLANG_FAMILY_ALIAS_NAMES
 
 
+def _is_dpcpp_family_binary(path: str) -> bool:
+    """Whether *path* is specifically Intel's DPC++-capable compiler
+    (``icx``/``icpx``/``dpcpp``/``dpcpp-cl``) — narrower than
+    :func:`_is_clang_family_binary`, which also matches plain ``clang``/
+    ``clang++`` (not SYCL/``-fsycl``-capable). Used to decide whether a
+    clang header-AST invocation should add ``-fsycl -v`` and route its
+    output through :mod:`abicheck.sycl_context`'s multi-document decoder
+    (ADR-050 D5, G32 Phase D) instead of the plain single-document path.
+
+    Same underlying name set as :func:`_is_intel_sycl_driver` (PR #643) --
+    kept as a separate function since the two checks serve distinct
+    call sites (single-pass host-only collapsing vs. multi-pass host/device
+    selection) with independent docstrings/callers, not because the
+    underlying test differs.
+    """
+    return Path(path).stem.lower() in _CLANG_FAMILY_ALIAS_NAMES
+
+
 #: Intel's legacy, now-deprecated "dpcpp"/"dpcpp-cl" driver names predate the
 #: unified icx/icpx compiler and its explicit ``-fsycl`` opt-in: "dpcpp" was
 #: historically the SYCL-specific entry point (Intel's own migration guidance
@@ -152,6 +172,123 @@ _SYCL_DEFAULT_ON_DRIVER_NAMES = frozenset({"dpcpp", "dpcpp-cl"})
 def _dpcpp_defaults_sycl_on(cc_bin: str) -> bool:
     """True if *cc_bin* is one of Intel's SYCL-implied legacy driver names."""
     return Path(cc_bin).stem.lower() in _SYCL_DEFAULT_ON_DRIVER_NAMES
+
+
+def _user_explicitly_disabled_sycl(tokens: list[str]) -> bool:
+    """True if *tokens* (the caller's own ``--gcc-options``/``--gcc-option``
+    tokens -- never anything abicheck itself appends) end with an explicit
+    ``-fno-sycl`` with no later ``-fsycl`` to re-enable it: i.e. the caller
+    explicitly asked for a non-SYCL compile (Codex review, P2: ADR-050 D5's
+    ``dumper._clang_header_dump`` unconditionally forces ``-fsycl`` onto
+    every DPC++-capable invocation via ``dpcpp_multi_context``, which would
+    otherwise silently override this last-flag-wins signal).
+
+    Distinct from :func:`_dpcpp_defaults_sycl_on`/its use in
+    :func:`_needs_sycl_host_only`'s "is SYCL effectively enabled" question
+    (which decides whether an *already* ``-fsycl``'d build should collapse
+    to one pass) -- here, silence (no ``-fsycl``/``-fno-sycl`` at all) is
+    NOT an opt-out; only an explicit trailing ``-fno-sycl`` is.
+    """
+    disabled = False
+    for tok in tokens:
+        if tok == "-fsycl":
+            disabled = False
+        elif tok == "-fno-sycl":
+            disabled = True
+    return disabled
+
+
+def _resolve_dpcpp_multi_context(
+    clang_bin: str,
+    frontend_context: str,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+) -> bool:
+    """Validate *frontend_context* against *clang_bin* and the caller's own
+    SYCL-enable/disable tokens, returning whether
+    :func:`abicheck.dumper._clang_header_dump` should engage the multi-pass
+    SYCL decode path for this invocation.
+
+    Raises :class:`abicheck.errors.AstContextMissingError` when
+    *frontend_context* requests a non-host context but either *clang_bin*
+    isn't DPC++-capable (:func:`_is_dpcpp_family_binary`), or the caller's own
+    ``gcc_options``/``gcc_option_tokens`` explicitly disable SYCL
+    (:func:`_user_explicitly_disabled_sycl`) -- neither case is silently
+    resolved (Codex review, P2).
+    """
+    is_dpcpp = _is_dpcpp_family_binary(clang_bin)
+    if frontend_context != "host" and not is_dpcpp:
+        raise AstContextMissingError(
+            f"--frontend-context {frontend_context!r} requires a DPC++-capable "
+            f"compiler (icx/icpx/dpcpp/dpcpp-cl); {clang_bin!r} is a plain "
+            "clang/gcc invocation with no device AST context to select."
+        )
+    user_tokens = (
+        shlex.split(gcc_options, posix=os.name != "nt") if gcc_options else []
+    ) + list(gcc_option_tokens)
+    sycl_explicitly_off = is_dpcpp and _user_explicitly_disabled_sycl(user_tokens)
+    if frontend_context != "host" and sycl_explicitly_off:
+        raise AstContextMissingError(
+            f"--frontend-context {frontend_context!r} requires SYCL to be "
+            "enabled, but the given --gcc-options/--gcc-option explicitly "
+            "disable it (-fno-sycl) -- remove -fno-sycl or drop "
+            "--frontend-context device."
+        )
+    return is_dpcpp and not sycl_explicitly_off
+
+
+def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
+    """True if *tokens* enable SYCL on a driver that needs a pinned single pass.
+
+    A bare ``-fsycl`` makes Intel's oneAPI DPC++/C++ driver (icx/icpx/dpcpp[-cl],
+    :func:`_is_intel_sycl_driver`) run *two* separate ``-cc1`` passes for one
+    compile -- a device-side pass and a host-side pass, each with its own
+    ``-Xclang -ast-dump=json``, writing a complete JSON document to the same
+    stdout stream back-to-back with no separator. ``json.load()`` in
+    :func:`abicheck.dumper_clang_errors._parse_clang_ast_result` parses only
+    the first document and raises on the leftover bytes ("Extra data"). The
+    device-side AST is also the wrong evidence even if it parsed: it
+    describes SPIR-V kernel code that never becomes part of a host ``.so``'s
+    exported symbols. ``-fsycl-host-only`` collapses the compile back to a
+    single host-side pass, which is what actually links into the scanned
+    binary. Skipped when the caller already pinned a single pass explicitly
+    (``-fsycl-host-only``/``-fsycl-device-only``). Also skipped by the one
+    caller (:func:`abicheck.dumper._build_clang_header_command`) when an
+    explicit multi-context request (``dpcpp_multi_context``, ADR-050 D5) is
+    in play -- that request must never be silently collapsed back to a
+    single pass by this function's own default-case behavior.
+
+    Gated on *cc_bin* being specifically an Intel oneAPI driver, not any
+    clang-family binary: stock upstream clang accepts a bare ``-fsycl`` but
+    does not split into two passes and hard-rejects both
+    ``-fsycl-host-only``/``-fsycl-device-only`` as "unknown argument"
+    (Codex review, PR #643) -- appending the flag unconditionally would
+    turn a working ``--gcc-path clang`` + ``-fsycl`` parse into a failure.
+
+    A plain ``"-fsycl" in tokens`` membership check is not enough: the
+    driver applies ``-fsycl``/``-fno-sycl`` last-flag-wins (confirmed with
+    ``clang++ -fsycl -fno-sycl -###``, one ordinary host ``-cc1``, no
+    device pass), so ``--gcc-options "-fsycl -fno-sycl"`` has SYCL
+    disabled overall and must not get the flag appended either (Codex
+    review, PR #643, round 5) -- the *last* occurrence of either flag
+    decides the effective state, scanned below.
+
+    The initial state is not always "off": Intel's legacy "dpcpp"/
+    "dpcpp-cl" driver names imply SYCL is already on with no ``-fsycl``
+    token at all (:func:`_dpcpp_defaults_sycl_on`, Codex review, PR #643,
+    round 8) -- an explicit ``-fno-sycl`` still overrides that default.
+    """
+    if not _is_intel_sycl_driver(cc_bin):
+        return False
+    if "-fsycl-host-only" in tokens or "-fsycl-device-only" in tokens:
+        return False
+    sycl_enabled = _dpcpp_defaults_sycl_on(cc_bin)
+    for tok in tokens:
+        if tok == "-fsycl":
+            sycl_enabled = True
+        elif tok == "-fno-sycl":
+            sycl_enabled = False
+    return sycl_enabled
 
 
 def _resolve_clang_bin(

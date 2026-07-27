@@ -8,6 +8,7 @@ from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.service_dump_cache import (
     _dump_cache_extra_key,
     _dump_is_cacheable,
+    _manifest_cache_paths,
     cached_run_dump,
 )
 
@@ -40,6 +41,19 @@ def _cacheable_kwargs(**overrides):
     )
     base.update(overrides)
     return base
+
+
+class _FakeManifest:
+    """Minimal ``.translation_units``-shaped stand-in for a real
+    ``DumpManifest`` -- just enough for ``_manifest_all_tus_required`` to
+    read, without needing a full ``parse_manifest`` round-trip."""
+
+    def __init__(self, *, all_required: bool) -> None:
+        class _Tu:
+            def __init__(self, required: bool) -> None:
+                self.required = required
+
+        self.translation_units = [_Tu(True), _Tu(all_required)]
 
 
 class TestDumpIsCacheable:
@@ -83,6 +97,21 @@ class TestDumpIsCacheable:
         _dump_is_cacheable no longer takes them — the plain shape stays
         cacheable, which is what actually matters here now."""
         assert _dump_is_cacheable(**_cacheable_kwargs()) is True
+
+    def test_dump_manifest_is_cacheable(self):
+        # ADR-050 D3/D6 (G32 Phase E): a manifest-driven dump used to be
+        # unconditionally excluded; it is now cacheable like any other plain
+        # shape once the cache key covers the manifest's own scope.
+        kwargs = _cacheable_kwargs(dump_manifest=_FakeManifest(all_required=True))
+        assert _dump_is_cacheable(**kwargs) is True
+
+    def test_dump_manifest_with_optional_tu_not_cacheable(self):
+        # Codex review, PR #636: a required=False TU's failure degrades to a
+        # logged diagnostic rather than failing the dump, so a transient
+        # failure could otherwise get permanently cached as a "successful"
+        # but silently-degraded snapshot.
+        kwargs = _cacheable_kwargs(dump_manifest=_FakeManifest(all_required=False))
+        assert _dump_is_cacheable(**kwargs) is False
 
 
 class TestDumpCacheExtraKey:
@@ -484,4 +513,526 @@ class TestCachedRunDump:
             fake_run_dump, binary, "elf", [], [], "1.0", "c++", dwarf_only=True
         )
 
+        assert len(calls) == 2
+
+
+class TestManifestCachePaths:
+    """Direct unit tests for _manifest_cache_paths's dedup + public-dir
+    folding, mirroring test_dumper_manifest.py's own manifest-construction
+    style (parse_manifest over a YAML body, not a hand-built DumpManifest)."""
+
+    def _manifest(self, tmp_path: Path, body: str):
+        from abicheck.dump_manifest import parse_manifest
+
+        base = tmp_path / "manifest_dir"
+        base.mkdir(exist_ok=True)
+        return parse_manifest(body, base_dir=base, source="<test>")
+
+    def test_dedups_a_repeated_root(self, tmp_path):
+        # dump_manifest.py's parser does not reject a literally-repeated
+        # roots entry.
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h, a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        headers, _includes = _manifest_cache_paths(manifest)
+        assert headers == [manifest.roots[0]]
+
+    def test_dedups_a_root_repeated_as_a_forced_include(self, tmp_path):
+        # The documented real-world shape: a TU's forced_includes commonly
+        # names the same header a manifest's roots also declares.
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        headers, _includes = _manifest_cache_paths(manifest)
+        assert headers == list(manifest.roots)
+
+    def test_dedups_a_forced_include_repeated_across_tus(self, tmp_path):
+        # b.h is never a root, so its first occurrence (tu_a) genuinely adds
+        # it; its second occurrence (tu_b) must be the one deduplicated --
+        # unlike a.h, which (being a root) is already seen before either TU's
+        # forced_includes loop even runs and so never exercises this branch.
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h, b.h]\n"
+            "  - name: tu_b\n    forced_includes: [b.h]\n",
+        )
+        headers, _includes = _manifest_cache_paths(manifest)
+        assert [str(h.name) for h in headers] == ["a.h", "b.h"]
+
+    def test_dedups_an_include_dir_repeated_across_tus(self, tmp_path):
+        # roots: [a.h]'s own implicit parent-directory root (manifest_dir --
+        # a real, existing directory, since the _manifest() helper creates
+        # it) also lands in `includes` alongside `vendor` (see
+        # test_implicit_header_parent_dir_folds_into_includes below), so this
+        # asserts the repeated `vendor` entry specifically dedups to one
+        # occurrence rather than asserting the list's total length.
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [vendor]\n"
+            "  - name: tu_b\n    forced_includes: [a.h]\n    includes: [vendor]\n",
+        )
+        _headers, includes = _manifest_cache_paths(manifest)
+        vendor = manifest.translation_units[0].includes[0].path
+        assert includes.count(vendor) == 1
+
+    def test_public_header_dirs_fold_into_includes(self, tmp_path):
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\npublic_header_dirs: [pub]\n"
+            "translation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        _headers, includes = _manifest_cache_paths(manifest)
+        assert manifest.public_header_dirs[0] in includes
+
+    def test_public_header_dir_already_an_include_is_not_duplicated(self, tmp_path):
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\npublic_header_dirs: [vendor]\n"
+            "translation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n    includes: [vendor]\n",
+        )
+        _headers, includes = _manifest_cache_paths(manifest)
+        vendor = manifest.public_header_dirs[0]
+        assert includes.count(vendor) == 1
+
+    def test_implicit_header_parent_dir_folds_into_includes(self, tmp_path):
+        # Codex review, PR #636: a header force-included with no matching
+        # TU `includes`/manifest `public_header_dirs` entry can still
+        # quote-include an unnamed sibling from its own directory (ADR-050
+        # D1's "a declared header's own parent directory is implicitly
+        # project-owned, no -I needed" rule) -- that directory must still be
+        # walked for content changes.
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        _headers, includes = _manifest_cache_paths(manifest)
+        assert manifest.base_dir in includes
+
+    def test_implicit_header_parent_dir_already_a_tu_include_is_not_duplicated(
+        self, tmp_path
+    ):
+        # The implicit parent-dir root is only found for a directory that
+        # actually exists on disk (_implicit_header_includes's own
+        # .is_dir() guard), so this test needs the real directory present,
+        # unlike the sibling tests above that only reference bare filenames
+        # under the always-created manifest_dir root itself.
+        (tmp_path / "manifest_dir" / "include").mkdir(parents=True)
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [include/foo.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [include/foo.h]\n"
+            "    includes: [include]\n",
+        )
+        _headers, includes = _manifest_cache_paths(manifest)
+        include_dir = manifest.translation_units[0].includes[0].path
+        assert includes.count(include_dir) == 1
+
+    def test_public_header_paths_fold_into_headers(self, tmp_path):
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\npublic_header_paths: [pub.h]\n"
+            "translation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        headers, _includes = _manifest_cache_paths(manifest)
+        assert [h.name for h in headers] == ["a.h", "pub.h"]
+
+    def test_public_header_path_already_a_root_is_not_duplicated(self, tmp_path):
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\npublic_header_paths: [a.h]\n"
+            "translation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        headers, _includes = _manifest_cache_paths(manifest)
+        assert headers == [manifest.roots[0]]
+
+
+class TestCachedRunDumpManifest:
+    """ADR-050 D3/D6 (G32 Phase E) — a manifest-driven dump is now cacheable,
+    keyed on the manifest's own content + structural identity (TU names,
+    ordered includes/forced_includes, required/contributes_to_abi,
+    project_owned)."""
+
+    def _manifest(self, tmp_path: Path, body: str):
+        from abicheck.dump_manifest import parse_manifest
+
+        base = tmp_path / "manifest_dir"
+        base.mkdir(exist_ok=True)
+        return parse_manifest(body, base_dir=base, source="<test>")
+
+    def _write_header(self, tmp_path: Path, name: str, content: str) -> Path:
+        p = tmp_path / "manifest_dir" / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def test_cache_hit_skips_run_dump_and_threads_manifest_on_miss(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        calls: list[object] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            # The dormant bug this test guards: cached_run_dump's live-dump
+            # call used to omit dump_manifest entirely once manifest dumps
+            # became reachable past the (former) unconditional exclusion --
+            # silently falling back to a legacy single-TU dump on every
+            # cache miss instead of the real manifest-driven one.
+            calls.append(kwargs.get("dump_manifest"))
+            return _sample_snap()
+
+        snap1 = cached_run_dump(
+            fake_run_dump,
+            binary,
+            "elf",
+            [],
+            [],
+            "1.0",
+            "c++",
+            dump_manifest=manifest,
+        )
+        snap2 = cached_run_dump(
+            fake_run_dump,
+            binary,
+            "elf",
+            [],
+            [],
+            "1.0",
+            "c++",
+            dump_manifest=manifest,
+        )
+        assert len(calls) == 1
+        assert calls[0] is manifest
+        assert snap1.functions[0].name == snap2.functions[0].name == "foo"
+
+    def test_forced_include_content_edit_invalidates_manifest_cache(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        header = self._write_header(tmp_path, "a.h", "int f(void);\n")
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=manifest
+        )
+        header.write_text("int f(void);\nint g(void);\n", encoding="utf-8")
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=manifest
+        )
+        assert len(calls) == 2
+
+    def test_implicit_sibling_header_edit_invalidates_manifest_cache(self, tmp_path):
+        # Codex review, PR #636: a header force-included with no matching TU
+        # `includes` entry or manifest `public_header_dirs` can still
+        # quote-include an unnamed sibling support header from its own
+        # directory -- the same "a declared header's own parent directory is
+        # implicitly project-owned, no -I needed" rule ADR-050 D1 documents
+        # for profile_fingerprint, needed here too so the cache key doesn't
+        # under-count exactly the same way. The legacy CLI path already
+        # covers this via header_utils.resolve_inferred_header_roots.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        include_dir = tmp_path / "manifest_dir" / "include"
+        include_dir.mkdir(parents=True)
+        (include_dir / "foo.h").write_text('#include "detail.h"\nint f(void);\n')
+        detail = include_dir / "detail.h"
+        detail.write_text("struct detail { int x; };\n")
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [include/foo.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [include/foo.h]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=manifest
+        )
+        detail.write_text("struct detail { int x; int y; };\n")
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=manifest
+        )
+        assert len(calls) == 2
+
+    def test_public_header_path_content_edit_invalidates_manifest_cache(self, tmp_path):
+        # Codex review, PR #636: a `public_header_paths` entry that names
+        # neither a declared root nor any TU's forced_includes (a
+        # provenance-only header) must still be content-hashed, or an edit
+        # to it is silently invisible to the cache key.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        pub_header = self._write_header(tmp_path, "pub.h", "int g(void);\n")
+        manifest = self._manifest(
+            tmp_path,
+            "roots: [a.h]\npublic_header_paths: [pub.h]\n"
+            "translation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=manifest
+        )
+        pub_header.write_text("int g(void);\nint h(void);\n", encoding="utf-8")
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=manifest
+        )
+        assert len(calls) == 2
+
+    def test_tu_rename_invalidates_manifest_cache(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        old = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        new = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n  - name: tu_b\n    forced_includes: [a.h]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=old
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=new
+        )
+        assert len(calls) == 2
+
+    def test_frontend_context_change_invalidates_manifest_cache(self, tmp_path):
+        # ADR-050 D5 (G32 Phase D, Codex review): a manifest's own
+        # frontend_context selects a genuinely different AST (host vs.
+        # device) -- manifest_tu_scope_field only covers per-TU fields, so
+        # without folding this manifest-level field into the cache key too,
+        # two manifests differing only here would share a cached snapshot.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        old = self._manifest(
+            tmp_path,
+            "frontend_context: host\nroots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        new = self._manifest(
+            tmp_path,
+            "frontend_context: device\nroots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=old
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=new
+        )
+        assert len(calls) == 2
+
+    def test_roots_membership_change_invalidates_manifest_cache(self, tmp_path):
+        # Codex review, PR #636: a header already reachable via a TU's
+        # forced_includes produces an identical _manifest_cache_paths()
+        # flattened header list whether or not it is ALSO declared a root
+        # -- but `roots` is what dumper.dump() uses as the manifest's own
+        # declared-surface `headers` (dumper.py's `headers=list(dump_manifest
+        # .roots)`), driving provenance/public classification independently
+        # of file content. Both manifests here have an identical flattened
+        # header set (forced_includes already names both a.h and b.h) and
+        # identical TU structure, so only a dedicated roots key component
+        # can tell them apart.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        self._write_header(tmp_path, "b.h", "int g(void);\n")
+        old = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h, b.h]\n",
+        )
+        new = self._manifest(
+            tmp_path,
+            "roots: [a.h, b.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h, b.h]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=old
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=new
+        )
+        assert len(calls) == 2
+
+    def test_tu_includes_reorder_invalidates_manifest_cache(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        (tmp_path / "manifest_dir" / "vendor").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "manifest_dir" / "extra").mkdir(parents=True, exist_ok=True)
+        old = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n"
+            "    includes: [vendor, extra]\n",
+        )
+        new = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n"
+            "    includes: [extra, vendor]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=old
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=new
+        )
+        assert len(calls) == 2
+
+    def test_contributes_to_abi_flip_invalidates_manifest_cache(self, tmp_path):
+        # Both variants keep every TU required=True (contributes_to_abi=False
+        # doesn't force required=False, only the reverse implication holds)
+        # so BOTH manifests stay cacheable -- otherwise a required=False TU
+        # would make `old` uncacheable on its own and this would stop
+        # actually exercising cache-key sensitivity to the flag flip at all.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        old = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n"
+            "  - name: tu_b\n    forced_includes: [a.h]\n"
+            "    contributes_to_abi: false\n",
+        )
+        new = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n"
+            "  - name: tu_b\n    forced_includes: [a.h]\n"
+            "    contributes_to_abi: true\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=old
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=new
+        )
+        assert len(calls) == 2
+
+    def test_public_header_paths_change_invalidates_manifest_cache(self, tmp_path):
+        # Codex review, PR #636: dumper.dump() replaces the caller-supplied
+        # public_headers/public_header_dirs with the manifest's own
+        # public_header_paths/public_header_dirs for provenance/contract
+        # purposes whenever a manifest is given -- the cache key must
+        # classify the same way, or two manifests differing only in
+        # public_header_paths (a real ScopeOrigin-affecting difference) would
+        # hash identically and silently share a cached snapshot whose
+        # declarations were classified public/private under the wrong set.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        self._write_header(tmp_path, "b.h", "int g(void);\n")
+        old = self._manifest(
+            tmp_path,
+            "roots: [a.h, b.h]\npublic_header_paths: [a.h]\n"
+            "translation_units:\n  - name: tu_a\n    forced_includes: [a.h, b.h]\n",
+        )
+        new = self._manifest(
+            tmp_path,
+            "roots: [a.h, b.h]\npublic_header_paths: [a.h, b.h]\n"
+            "translation_units:\n  - name: tu_a\n    forced_includes: [a.h, b.h]\n",
+        )
+        calls: list[list[str]] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(sorted(str(p) for p in (kwargs.get("public_headers") or [])))
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=old
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=new
+        )
+        # Two live dumps (cache miss both times), not a spurious hit.
+        assert len(calls) == 2
+
+    def test_project_owned_flip_invalidates_manifest_cache(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        self._write_header(tmp_path, "a.h", "int f(void);\n")
+        (tmp_path / "src").mkdir(parents=True, exist_ok=True)
+        old = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n"
+            "    includes: [{path: ../src, project_owned: false}]\n",
+        )
+        new = self._manifest(
+            tmp_path,
+            "roots: [a.h]\ntranslation_units:\n"
+            "  - name: tu_a\n    forced_includes: [a.h]\n"
+            "    includes: [{path: ../src, project_owned: true}]\n",
+        )
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=old
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dump_manifest=new
+        )
         assert len(calls) == 2

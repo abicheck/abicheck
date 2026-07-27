@@ -638,7 +638,7 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: sentinel)
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (sentinel, None))
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     parser = _header_ast_parser(
@@ -665,7 +665,7 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: sentinel)
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (sentinel, None))
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     parser = _header_ast_parser(
@@ -692,6 +692,88 @@ def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypat
     with pytest.raises(SnapshotError):
         _header_ast_parser(
             [Path("a.h")], [], backend="castxml", **_ast_parser_kwargs(tmp_path)
+        )
+
+
+def test_header_ast_parser_explicit_castxml_rejects_device_context(
+    tmp_path, monkeypatch
+):
+    """ADR-050 D5 (G32 Phase D): an explicit --ast-frontend castxml with a
+    non-"host" frontend_context fails immediately -- castxml has no SYCL/
+    DPC++ context concept at all, so it must never silently hand back an
+    ordinary castxml dump the caller could mistake for device-derived."""
+    from abicheck import dumper
+    from abicheck.dumper import _header_ast_parser
+    from abicheck.errors import AstContextMissingError
+
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+
+    with pytest.raises(AstContextMissingError, match="castxml"):
+        _header_ast_parser(
+            [Path("a.h")],
+            [],
+            backend="castxml",
+            frontend_context="device",
+            **_ast_parser_kwargs(tmp_path),
+        )
+
+
+def test_header_ast_parser_auto_device_routes_to_clang_not_rejected(
+    tmp_path, monkeypatch
+):
+    """ADR-050 D5 (Codex review): --ast-frontend auto (the default) also
+    resolves to "castxml", so a device request must not be rejected the
+    same way an EXPLICIT --ast-frontend castxml is -- auto's own
+    documented contract is "a non-host request skips castxml entirely",
+    routing straight to clang instead. Regression: the resolved-backend
+    check alone couldn't distinguish "auto happened to resolve to castxml"
+    from "the user explicitly asked for castxml", so a device request
+    through plain auto (no --ast-frontend given at all) incorrectly raised
+    before ever reaching the clang backend that could actually satisfy it.
+    """
+    from abicheck import dumper
+    from abicheck.dumper import _ClangAstParser, _header_ast_parser
+
+    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+    ast = {"kind": "TranslationUnitDecl", "inner": []}
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, "device"))
+
+    parser = _header_ast_parser(
+        [Path("a.h")],
+        [],
+        backend="auto",
+        frontend_context="device",
+        **_ast_parser_kwargs(tmp_path),
+    )
+    assert isinstance(parser, _ClangAstParser)
+
+
+def test_header_ast_parser_env_pinned_castxml_rejects_device_context(
+    tmp_path, monkeypatch
+):
+    """Codex review, PR #636 follow-up: ABICHECK_AST_FRONTEND=castxml with a
+    bare --ast-frontend auto (no explicit CLI flag) must be treated the same
+    as an EXPLICIT --ast-frontend castxml, not the same as plain auto with no
+    pin at all -- docs/reference/environment.md's own contract is "Pins the
+    AST frontend when the request is auto ... honoured verbatim". The
+    previous fix (routing auto+device to clang) checked only the literal
+    `backend` argument, which can't distinguish "auto defaulted to castxml"
+    from "auto was pinned to castxml by the environment" -- both produce
+    backend="auto" -- so an env pin was silently overridden by a device
+    request instead of being honored as the equivalent of an explicit flag.
+    """
+    from abicheck.dumper import _header_ast_parser
+    from abicheck.errors import AstContextMissingError
+
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "castxml")
+
+    with pytest.raises(AstContextMissingError, match="castxml"):
+        _header_ast_parser(
+            [Path("a.h")],
+            [],
+            backend="auto",
+            frontend_context="device",
+            **_ast_parser_kwargs(tmp_path),
         )
 
 
@@ -722,7 +804,7 @@ def test_header_ast_parser_clang_backend_returns_clang_parser(tmp_path, monkeypa
     from abicheck.dumper import _ClangAstParser, _header_ast_parser
 
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "clang")
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: {})
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: ({}, None))
 
     parser = _header_ast_parser(
         [Path("a.h")], [], backend="clang", **_ast_parser_kwargs(tmp_path)

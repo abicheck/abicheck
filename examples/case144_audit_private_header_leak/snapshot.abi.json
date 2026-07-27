@@ -73,6 +73,7 @@
   "enums": [],
   "fact_provenance": {},
   "from_headers": true,
+  "frontend_context_kind": null,
   "functions": [
     {
       "access": "public",
@@ -121,7 +122,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 16,
+  "schema_version": 17,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

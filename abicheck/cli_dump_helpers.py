@@ -687,13 +687,23 @@ def render_dump_dry_run(
         f"headers: {', '.join(str(h) for h in headers)}" if headers else None,
     )
     if dump_manifest is not None:
-        from .comparability import compute_extraction_contract
+        from .comparability import compute_extraction_contract, manifest_tu_scope_field
+        from .dumper_contract import _manifest_declared_includes
 
         contract = compute_extraction_contract(
             declared_headers=list(dump_manifest.roots),
+            # Purely manifest-document-derived (no compiler invocation),
+            # exactly like manifest_tu_scope below -- the real (non-dry) path
+            # folds both into scope_fingerprint via this same helper (Codex
+            # review: the legacy field set either omission would otherwise
+            # fall back to omits every TU's own includes/structure), so
+            # without them the dry-run's printed fingerprint could never
+            # match what the real extraction actually computes.
+            declared_includes=_manifest_declared_includes(dump_manifest),
             public_header_paths=list(dump_manifest.public_header_paths),
             public_header_dirs=list(dump_manifest.public_header_dirs),
             l2_frontend_ran=False,
+            manifest_tu_scope=manifest_tu_scope_field(dump_manifest),
         )
         scope_fingerprint = contract.scope_fingerprint if contract is not None else None
         manifest_lines = [
@@ -1471,6 +1481,16 @@ def perform_elf_dump(
             debug_info_path=debug_info_path,
             dump_manifest=dump_manifest,
             extra_include_labels=include_labels,
+            # This call bypasses service.run_dump (which already threads
+            # compile.frontend_context into dumper.dump for the scan/compare/
+            # PE/Mach-O paths) -- without this, `dump --frontend-context
+            # device` silently fell back to dumper.dump's own "host" default
+            # instead of forwarding the request (Codex review, PR #636).
+            frontend_context=(
+                compile_context.frontend_context
+                if compile_context is not None
+                else "host"
+            ),
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         # The header parse itself failed -- nothing downstream (including a

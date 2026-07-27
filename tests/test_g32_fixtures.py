@@ -1,8 +1,9 @@
 """G32 Phase 0: assert the raw ADR-050/G32 fixtures under tests/fixtures/g32/
 are present, non-empty, and structurally sane. No production code reads
 these yet (Phase 0 is fixture capture only) -- see
-tests/fixtures/g32/README.md for what each fixture is for and, for the
-DPC++ multi-document capture, why it is not present yet."""
+tests/fixtures/g32/README.md for what each fixture is for, including the
+real DPC++ multi-document capture Phase D's stream parser is designed
+against."""
 
 from __future__ import annotations
 
@@ -17,6 +18,9 @@ _EXPECTED_FILES = [
     "README.md",
     "plain_clang/header.h",
     "plain_clang/ast_dump.json",
+    "dpcpp/header.h",
+    "dpcpp/ast_dump.json",
+    "dpcpp/compiler_invocation.log",
     "odr_safe/tu_a.h",
     "odr_safe/tu_b.h",
     "odr_conflict/tu_a.h",
@@ -47,6 +51,63 @@ def test_plain_clang_ast_dump_is_single_json_document() -> None:
     host+device concatenated stream."""
     data = json.loads((_G32_DIR / "plain_clang" / "ast_dump.json").read_text())
     assert data["kind"] == "TranslationUnitDecl"
+
+
+def test_dpcpp_ast_dump_is_two_concatenated_json_documents() -> None:
+    """Contrast case for `test_plain_clang_ast_dump_is_single_json_document`:
+    a real `icpx -fsycl` capture is genuinely TWO back-to-back
+    `TranslationUnitDecl` JSON documents with no separator between them
+    (`...}{...`), the exact document-boundary-detection problem Phase D's
+    `sycl_context.py` decoder exists to solve. Uses `json.JSONDecoder.raw_decode`
+    (real streaming decode) rather than a naive bracket/string split, matching
+    what the production decoder must do -- a bracket counter would already be
+    wrong here in general (braces inside a JSON string value), even though
+    this particular capture's string values happen not to contain one."""
+    raw = (_G32_DIR / "dpcpp" / "ast_dump.json").read_text()
+    decoder = json.JSONDecoder()
+    docs = []
+    pos = 0
+    while pos < len(raw):
+        pos += len(raw[pos:]) - len(raw[pos:].lstrip())  # skip inter-doc whitespace
+        if pos >= len(raw):
+            break
+        doc, end = decoder.raw_decode(raw, pos)
+        docs.append(doc)
+        if len(docs) == 1:
+            # The inter-doc whitespace skip above must not mask a genuine
+            # separator: the fixture's defining property is that the two
+            # documents are truly back-to-back with nothing between them
+            # (CodeRabbit review) -- a newline-delimited stream would still
+            # pass without this assertion.
+            assert raw[end] == "{", "documents must be directly concatenated"
+        pos = end
+    assert len(docs) == 2
+    assert all(doc["kind"] == "TranslationUnitDecl" for doc in docs)
+    # Both passes still see the header's own declarations.
+    for doc in docs:
+        names = {child.get("name") for child in doc["inner"]}
+        assert "Point" in names
+        assert "add" in names
+
+
+def test_dpcpp_compiler_invocation_log_correlates_kind_and_target() -> None:
+    """The raw AST JSON alone carries no host/device `kind` -- it's ordinary
+    clang AST-dump JSON, oblivious to the driver-level SYCL split. The
+    correlating `-cc1 ... -triple <T> ... -fsycl-is-(host|device)` lines live
+    on stderr (`compiler_invocation.log`), in the same order as their
+    stdout documents: first line is the device pass, second is host."""
+    log = (_G32_DIR / "dpcpp" / "compiler_invocation.log").read_text()
+    # " -cc1 " alone also matches the unrelated "clang -cc1 version ..." banner
+    # line printed after each real invocation; only the real invocation line
+    # also names a -triple.
+    cc1_lines = [
+        line for line in log.splitlines() if " -cc1 " in line and "-triple" in line
+    ]
+    assert len(cc1_lines) == 2
+    assert "-fsycl-is-device" in cc1_lines[0]
+    assert "-triple spir64-unknown-unknown" in cc1_lines[0]
+    assert "-fsycl-is-host" in cc1_lines[1]
+    assert "-triple x86_64-unknown-linux-gnu" in cc1_lines[1]
 
 
 def test_odr_safe_pair_is_forward_decl_then_definition() -> None:

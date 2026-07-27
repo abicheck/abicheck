@@ -65,9 +65,10 @@ from .dumper_castxml_probe import (
 from .dumper_clang import (
     _clang_available as _clang_available,
     _ClangAstParser as _ClangAstParser,
-    _dpcpp_defaults_sycl_on,
-    _is_intel_sycl_driver,
+    _is_dpcpp_family_binary as _is_dpcpp_family_binary,
+    _needs_sycl_host_only,
     _resolve_clang_bin as _resolve_clang_bin,
+    _resolve_dpcpp_multi_context,
 )
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
@@ -134,6 +135,7 @@ from .dumper_toolchain import (
     _parser_ast_supported as _parser_ast_supported,
     _parser_ast_toolchain as _parser_ast_toolchain,
     _parser_ast_unsupported_reasons as _parser_ast_unsupported_reasons,
+    _parser_frontend_context_kind as _parser_frontend_context_kind,
     _resolve_selected_tool as _resolve_selected_tool,
     _resolve_standard_provenance as _resolve_standard_provenance,
     _safe_mtime as _safe_mtime,
@@ -142,7 +144,12 @@ from .dumper_toolchain import (
     _tool_identity_metadata as _tool_identity_metadata,
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
-from .errors import SnapshotError, UnsupportedCastxmlVersionError, ValidationError
+from .errors import (
+    AstContextMissingError,
+    SnapshotError,
+    UnsupportedCastxmlVersionError,
+    ValidationError,
+)
 from .model import (
     AbiSnapshot,
     Function,
@@ -183,64 +190,6 @@ def _resolve_header_backend(backend: str | None) -> str:
     return "castxml"
 
 
-def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
-    """True if *tokens* enable SYCL on a driver that needs a pinned single pass.
-
-    A bare ``-fsycl`` makes Intel's oneAPI DPC++/C++ driver (icx/icpx/dpcpp[-cl],
-    :func:`abicheck.dumper_clang._is_intel_sycl_driver`) run *two* separate
-    ``-cc1`` passes for one compile — a device-side pass (``-fsycl-is-device``,
-    ``-triple spir64-unknown-unknown``) and a host-side pass
-    (``-fsycl-is-host``) — each with its own ``-Xclang -ast-dump=json``, both
-    writing a complete JSON document to the same stdout stream abicheck
-    captures, back-to-back with no separator. ``json.load()`` in
-    :func:`abicheck.dumper_clang_errors._parse_clang_ast_result` parses only
-    the first document and raises on the leftover bytes ("Extra data").
-
-    The device-side AST is also the wrong evidence even if it parsed: it
-    describes SPIR-V kernel code that never becomes part of a host ``.so``'s
-    exported symbols or public header surface. ``-fsycl-host-only`` collapses
-    the compile back to a single ``-cc1`` pass over the host-side AST, which
-    is what actually links into the scanned binary. Skipped when the caller
-    already pinned a single pass explicitly (``-fsycl-host-only`` or
-    ``-fsycl-device-only``) so an explicit choice is never second-guessed.
-
-    Gated on *cc_bin* being specifically an Intel oneAPI driver, not any
-    clang-family binary: stock upstream clang also accepts a bare ``-fsycl``,
-    but does not split into two passes and does not recognize
-    ``-fsycl-host-only``/``-fsycl-device-only`` at all — it hard-rejects
-    either with "unknown argument" (Codex review, PR #643: verified against a
-    real clang 17/18 install). Appending the flag unconditionally would turn
-    a working ``--gcc-path clang`` + ``-fsycl`` parse into a hard failure.
-
-    A plain ``"-fsycl" in tokens`` membership check is not enough: the clang
-    driver applies ``-fsycl``/``-fno-sycl`` last-flag-wins, like any other
-    toggle flag (confirmed with ``clang++ -fsycl -fno-sycl -###``, which
-    emits one ordinary host ``-cc1`` invocation, no device pass). A caller
-    passing ``-fsycl -fno-sycl`` through ``--gcc-options`` has SYCL
-    *disabled* overall, so appending ``-fsycl-host-only`` would tack a
-    SYCL-only selector onto a non-SYCL compile — at best a no-op, at worst
-    rejected by the driver as contradictory (Codex review, PR #643, round
-    5). The *last* occurrence of either flag decides the effective state.
-
-    The initial state before scanning is not always "off": Intel's legacy
-    "dpcpp"/"dpcpp-cl" driver names imply SYCL is already on even with no
-    ``-fsycl`` token at all (:func:`_dpcpp_defaults_sycl_on`, Codex review,
-    PR #643, round 8) — an explicit ``-fno-sycl`` still overrides that
-    default via the same last-flag-wins scan.
-    """
-    if not _is_intel_sycl_driver(cc_bin):
-        return False
-    if "-fsycl-host-only" in tokens or "-fsycl-device-only" in tokens:
-        return False
-    sycl_enabled = _dpcpp_defaults_sycl_on(cc_bin)
-    for tok in tokens:
-        if tok == "-fsycl":
-            sycl_enabled = True
-        elif tok == "-fno-sycl":
-            sycl_enabled = False
-    return sycl_enabled
-
-
 def _build_clang_header_command(
     cc_bin: str,
     cc_id: str,
@@ -254,31 +203,33 @@ def _build_clang_header_command(
     force_cpp: bool = False,
     force_cpp20: bool = False,
     system_includes: tuple[str, ...] = (),
+    dpcpp_multi_context: bool = False,
 ) -> list[str]:
     """Build the ``clang -ast-dump=json`` command for the aggregate header.
 
     Mirrors :func:`_build_castxml_command`'s flag handling (includes, sysroot,
     ``-nostdinc``, pass-through options, C-vs-C++ language mode and the C++20
-    bump) so the clang backend parses the same TU under the same context — it is
-    just a different frontend over the identical inputs. ``-fsyntax-only`` (no
-    codegen) with ``-ferror-limit=0`` keeps parsing past recoverable errors so a
-    single bad decl does not blank the whole dump.
+    bump) so the clang backend parses the same TU under the same context.
+    ``-fsyntax-only``/``-ferror-limit=0`` keeps parsing past recoverable
+    errors so a single bad decl does not blank the whole dump.
 
     ``system_includes`` are host-compiler-probed system dirs (see
-    :func:`_probe_gnu_system_includes`) injected as ``-isystem`` so clang finds
-    the same libstdc++/libc headers castxml gets via ``--castxml-cc-gnu`` — the
-    castxml↔clang capability-parity fix. They are emitted **last** (after the
-    user's ``-I`` *and* the pass-through ``--gcc-options``/``--gcc-option``) so
-    auto-detection stays a genuine fallback: a user-supplied ``-isystem`` for a
-    cross/hermetic SDK is searched first and wins. Skipped under ``-nostdinc``.
+    :func:`_probe_gnu_system_includes`) injected as ``-isystem`` so clang
+    finds the same libstdc++/libc headers castxml gets via
+    ``--castxml-cc-gnu``. Emitted **last** (after the user's ``-I`` and
+    pass-through ``--gcc-options``/``--gcc-option``) so a user-supplied
+    ``-isystem`` for a cross/hermetic SDK wins. Skipped under ``-nostdinc``.
 
-    On an Intel oneAPI driver (``cc_bin`` one of icx/icpx/dpcpp[-cl]), a bare
-    ``-fsycl`` in ``gcc_options``/``gcc_option_tokens`` gets
-    ``-fsycl-host-only`` appended (see :func:`_needs_sycl_host_only`) so the
-    compile stays a single ``-cc1``/AST-dump pass instead of splitting into a
-    SYCL device pass and a host pass that both write JSON to the same
-    stdout stream. Left alone on stock clang, which does not recognize
-    either ``-fsycl-host-only`` or ``-fsycl-device-only``.
+    On an Intel oneAPI driver, ``-fsycl-host-only`` is appended per
+    :func:`_needs_sycl_host_only` (PR #643) -- skipped when
+    ``dpcpp_multi_context`` is set, since that request wants both passes.
+
+    ``dpcpp_multi_context`` (ADR-050 D5, G32 Phase D) adds ``-fsycl -v``
+    when *cc_bin* is DPC++-capable (:func:`_is_dpcpp_family_binary`) --
+    ``-fsycl`` splits the driver into a host + one-or-more-device
+    compilation passes, and ``-v`` emits the ``-cc1 ... -triple <T> ...
+    -fsycl-is-(host|device)`` stderr lines :mod:`abicheck.sycl_context`
+    needs to correlate each stdout document back to a host/device ``kind``.
     """
     cmd = [cc_bin]
     for inc in extra_includes:
@@ -291,11 +242,10 @@ def _build_clang_header_command(
         cmd += shlex.split(gcc_options, posix=os.name != "nt")
     # Repeatable --gcc-option: one literal argument each (no shlex split).
     cmd += list(gcc_option_tokens)
-    if _needs_sycl_host_only(cc_bin, cmd):
+    if not dpcpp_multi_context and _needs_sycl_host_only(cc_bin, cmd):
         cmd.append("-fsycl-host-only")
     # Auto-probed host system dirs go *after* the user's pass-through flags, so a
-    # user-supplied -isystem (cross/hermetic SDK) keeps higher search priority
-    # (Codex review). Auto-detection is a fallback, never an override.
+    # user-supplied -isystem (cross/hermetic SDK) keeps higher priority (Codex review).
     for sysinc in system_includes:
         cmd += ["-isystem", sysinc]
     explicit_std = has_explicit_std(gcc_options, gcc_option_tokens)
@@ -310,6 +260,8 @@ def _build_clang_header_command(
         cmd += ["-x", "c++"]
         if force_cpp20:
             cmd += ["-std=gnu++20"]
+    if dpcpp_multi_context:
+        cmd += ["-fsycl", "-v"]
     cmd += [
         "-fsyntax-only",
         "-ferror-limit=0",
@@ -408,17 +360,28 @@ def _clang_header_dump(
     nostdinc: bool = False,
     lang: str | None = None,
     extra_hash_dirs: tuple[Path, ...] = (),
-) -> dict[str, Any]:
-    """Run clang over *headers* and return the parsed ``-ast-dump=json`` root.
+    frontend_context: str = "host",
+) -> tuple[dict[str, Any], str | None]:
+    """Run clang over *headers* and return ``(root, resolved_kind)``.
 
-    The clang-frontend counterpart of :func:`_castxml_dump`: it aggregates the
-    headers into one ``#include`` TU, runs ``clang -ast-dump=json``, and returns
-    the JSON dict that :class:`abicheck.dumper_clang._ClangAstParser` consumes.
-    Results are disk-cached (keyed on header mtimes + toolchain + backend) like
-    the castxml path. Raises :class:`SnapshotError` when clang is missing, times
-    out, or emits no usable AST.
+    The clang-frontend counterpart of :func:`_castxml_dump`: aggregates the
+    headers into one ``#include`` TU, runs ``clang -ast-dump=json``, returns
+    the JSON dict :class:`abicheck.dumper_clang._ClangAstParser` consumes.
+    Disk-cached like the castxml path. Raises :class:`SnapshotError` when
+    clang is missing, times out, or emits no usable AST.
+
+    ``frontend_context`` (ADR-050 D5, G32 Phase D) is ``"host"``/``"device"``.
+    ``resolved_kind`` is *frontend_context* when the multi-pass SYCL decode
+    path is engaged, else ``None``. A non-``"host"`` request fails immediately
+    with :class:`abicheck.errors.AstContextMissingError` when *clang_bin*
+    isn't DPC++-capable, or when its own ``gcc_options``/``gcc_option_tokens``
+    explicitly disable SYCL (``-fno-sycl``) -- never silently resolved by
+    re-enabling SYCL ourselves (Codex review, P2).
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+    dpcpp_multi_context = _resolve_dpcpp_multi_context(
+        clang_bin, frontend_context, gcc_options, gcc_option_tokens
+    )
     force_cpp, force_cpp20, explicit_c_request, cc_id = _resolve_clang_langmode(
         lang,
         headers,
@@ -479,7 +442,9 @@ def _clang_header_dump(
         frontend_identity=frontend_identity,
         compiler_identity=compiler_identity,
         force_cpp20=force_cpp20,
+        frontend_context=frontend_context,
     )
+    resolved_kind = frontend_context if dpcpp_multi_context else None
     cached = _cache_path(key, backend="clang")
     if cached.exists():
         # A cache hit still costs time parsing a potentially huge AST (Codex review).
@@ -491,11 +456,8 @@ def _clang_header_dump(
         except (ValueError, OSError):
             cached.unlink(missing_ok=True)
         else:
-            # The load itself can consume the rest of the budget on a huge
-            # cached AST; re-check before handing it to the AST walker
-            # (Codex review, PR #591, round 3).
-            deadline.check()
-            return _cached_result
+            deadline.check()  # loading a huge cached AST can eat the rest of the budget
+            return _cached_result, resolved_kind
 
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
@@ -526,6 +488,7 @@ def _clang_header_dump(
             force_cpp=fcpp,
             force_cpp20=fcpp20,
             system_includes=sysinc,
+            dpcpp_multi_context=dpcpp_multi_context,
         )
         # DeadlineExceeded propagates uncaught, mapped by run_scan_core to _BudgetOverflow.
         deadline.check()
@@ -576,9 +539,15 @@ def _clang_header_dump(
             log.warning(
                 "AST toolchain changed during clang execution; skipping cache write"
             )
-        return _parse_clang_ast_result(
-            result, cached, _ast_paths[-1], cache_write=identities_stable
+        root = _parse_clang_ast_result(
+            result,
+            cached,
+            _ast_paths[-1],
+            cache_write=identities_stable,
+            dpcpp_capable=dpcpp_multi_context,
+            frontend_context=frontend_context,
         )
+        return root, resolved_kind
     finally:
         agg_path.unlink(missing_ok=True)
         for _p in _ast_paths:
@@ -603,10 +572,17 @@ def _header_ast_parser(
     public_header_paths: list[str],
     public_dir_paths: list[str],
     extra_hash_dirs: tuple[Path, ...] = (),
+    frontend_context: str = "host",
 ) -> _CastxmlParser | _ClangAstParser:
     """Run the resolved L2 backend and return its CastXML/Clang parser.
 
     Both parser implementations expose the same format-builder interface.
+
+    ``frontend_context`` (ADR-050 D5, G32 Phase D) is only satisfiable by the
+    clang backend (:func:`abicheck.sycl_context`'s host/device selector).
+    An explicit ``--ast-frontend castxml`` with a non-``"host"`` request
+    fails immediately rather than silently returning an ordinary castxml
+    dump; under ``"auto"`` a non-``"host"`` request skips castxml entirely.
     """
     resolved = _resolve_header_backend(backend)
     if resolved == "hybrid":
@@ -615,6 +591,20 @@ def _header_ast_parser(
         raise ValidationError(
             '"hybrid" AST frontend has no single parser here '
             "(see dumper_hybrid.run_hybrid_dump)."
+        )
+    # `resolved` alone can't tell explicit/env-pinned/defaulted castxml apart; an env pin counts as explicit (environment.md: "honoured verbatim").
+    _env_pinned_castxml = (backend or "auto").lower() == "auto" and (
+        os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower() == "castxml"
+    )
+    if (
+        resolved == "castxml"
+        and frontend_context != "host"
+        and ((backend or "auto").lower() == "castxml" or _env_pinned_castxml)
+    ):
+        raise AstContextMissingError(
+            f"--frontend-context {frontend_context!r} requires the clang "
+            "header backend (--ast-frontend clang); castxml has no SYCL/"
+            "DPC++ host/device context concept."
         )
 
     def _stamp_parser(
@@ -663,7 +653,7 @@ def _header_ast_parser(
 
     def _run_clang(*, fallback_reason: str | None = None) -> _ClangAstParser:
         clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
-        ast_root = _clang_header_dump(
+        ast_root, resolved_kind = _clang_header_dump(
             headers,
             extra_includes,
             compiler=compiler,
@@ -675,6 +665,7 @@ def _header_ast_parser(
             nostdinc=nostdinc,
             lang=lang,
             extra_hash_dirs=extra_hash_dirs,
+            frontend_context=frontend_context,
         )
         parser = _ClangAstParser(
             ast_root,
@@ -683,7 +674,7 @@ def _header_ast_parser(
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
         )
-        return cast(
+        stamped = cast(
             _ClangAstParser,
             _stamp_parser(
                 parser,
@@ -692,8 +683,12 @@ def _header_ast_parser(
                 fallback_reason=fallback_reason,
             ),
         )
+        # ADR-050 D5: resolved SYCL kind, None for a plain clang dump --
+        # read by dumper_contract._attach_extraction_contract.
+        setattr(stamped, "_abicheck_frontend_context_kind", resolved_kind)
+        return stamped
 
-    if resolved == "clang":
+    if resolved == "clang" or frontend_context != "host":
         return _run_clang()
 
     # Auto mode may use the explicit opt-in fallback for known toolchain or
@@ -963,10 +958,7 @@ def _castxml_dump(
         if _cached_root is None:
             cached.unlink(missing_ok=True)
         else:
-            # The parse itself can consume the rest of the budget on a huge
-            # cached XML tree; re-check before handing it off (Codex review,
-            # PR #591, round 3).
-            deadline.check()
+            deadline.check()  # parsing a huge cached tree can eat the rest of the budget
             return cast(Element, _cached_root)
 
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
@@ -1044,11 +1036,8 @@ def _castxml_dump(
                 _atomic_write(cached, out_xml.read_bytes())
             except OSError as exc:
                 log.warning("Could not write castxml AST cache %s: %s", cached, exc)
-        # Re-reading the whole XML file (read_bytes) and writing the cache copy
-        # can itself consume real time on a huge fresh tree; re-check before
-        # handing the already-parsed root back to the caller, mirroring the
-        # pre-cache-write check in _validate_castxml_output (Codex review,
-        # PR #591, round 10).
+        # Re-reading/caching a huge fresh tree can itself consume real time;
+        # re-check before returning (mirrors _validate_castxml_output's pre-cache-write check, Codex review).
         deadline.check()
         return root
     finally:
@@ -1207,6 +1196,7 @@ def dump(
     extra_include_labels: dict[Path, str] | None = None,
     dump_manifest: DumpManifest | None = None,
     scope_header_dirs: list[Path] | None = None,
+    frontend_context: str = "host",
 ) -> AbiSnapshot:
     """Create an AbiSnapshot from a shared library + headers.
 
@@ -1303,6 +1293,14 @@ def dump(
                 "dump_manifest is not yet supported with the 'hybrid' AST "
                 "frontend; pass an explicit --ast-frontend castxml/clang."
             )
+        if frontend_context != "host":
+            # Hybrid has no device concept (castxml+clang merge); reject
+            # rather than silently defaulting both recursive calls to "host".
+            raise AstContextMissingError(
+                f"--frontend-context {frontend_context!r} requires the "
+                "clang header backend (--ast-frontend clang); 'hybrid' "
+                "merges castxml+clang and has no device-context semantics."
+            )
         from .dumper_hybrid import run_hybrid_dump
 
         return run_hybrid_dump(
@@ -1388,6 +1386,7 @@ def dump(
         header_backend=header_backend,
         extra_hash_dirs=extra_hash_dirs,
         dump_manifest=dump_manifest,
+        frontend_context=frontend_context,
         **extra,
     )
 
@@ -1473,6 +1472,7 @@ def _dump_elf(
     extra_hash_dirs: tuple[Path, ...] = (),
     debug_info_path: Path | None = None,
     dump_manifest: DumpManifest | None = None,
+    frontend_context: str = "host",
 ) -> AbiSnapshot:
     """ELF-specific dump: pyelftools + debug info (DWARF/BTF/CTF) + header AST.
 
@@ -1494,12 +1494,8 @@ def _dump_elf(
     ) = _elf_classify_symbols(elf_meta, exported_dynamic, library_name=so_path.name)
     # A DWARF metadata parse that finds real debug info leaves its open
     # DwarfSession in ``_dwarf_session_out`` so the snapshot build below can
-    # reuse the same DWARFInfo (and its warm DIE cache) rather than re-parsing
-    # every DIE from a second open (F5b). Metadata resolution and the snapshot
-    # attempt run inside the try; the finally closes any opened session on every
-    # exit path (including an exception during resolution), so no descriptor
-    # leaks. The built snapshot holds extracted model objects, not live DIE
-    # references, so closing after it is returned is safe.
+    # reuse the same DWARFInfo/DIE cache instead of re-parsing (F5b); the
+    # finally below closes it on every exit path, including exceptions.
     _dwarf_session_out: list[DwarfSession] = []
     # Auto-detect can resolve to BTF/CTF with debug_format still None (Codex review).
     _dwarf_format_out: list[str | None] = []
@@ -1567,9 +1563,8 @@ def _dump_elf(
                 dwarf_only_types,
                 profile_hint,
             )
-        # Built here (session still open): "auto" can fall back to clang internally
-        # (G16), so ast_result.is_clang is the only reliable signal (Codex review).
-        # N per-TU invocations for a dump_manifest, one flat parse otherwise (ADR-050 D3).
+        # Built here (session open): "auto" can fall back to clang (G16), so
+        # ast_result.is_clang is the only reliable signal (Codex review).
         from .dumper_manifest import resolve_header_ast_result
 
         ast_result = resolve_header_ast_result(
@@ -1591,19 +1586,29 @@ def _dump_elf(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             extra_hash_dirs=extra_hash_dirs,
+            frontend_context=frontend_context,
         )
-        dwarf_layout_types = dwarf_layout_types_or_empty(
-            so_path,
-            elf_meta,
-            dwarf_meta,
-            dwarf_adv,
-            ast_result.is_clang,
-            symbols_only=symbols_only,
-            debug_presence_only=debug_presence_only,
-            debug_format=resolved_debug_format,
-            version=version,
-            language_profile=profile_hint,
-            session=dwarf_session,
+        # Host DWARF describes the host-compiled binary's own layout --
+        # meaningless for a SYCL/DPC++ device-target AST pass (a different
+        # architecture/ABI can have different sizes/offsets); backfilling
+        # by name would attach unrelated host data (Codex review).
+        _is_device_context = ast_result.frontend_context_kind == "device"
+        dwarf_layout_types = (
+            []
+            if _is_device_context
+            else dwarf_layout_types_or_empty(
+                so_path,
+                elf_meta,
+                dwarf_meta,
+                dwarf_adv,
+                ast_result.is_clang,
+                symbols_only=symbols_only,
+                debug_presence_only=debug_presence_only,
+                debug_format=resolved_debug_format,
+                version=version,
+                language_profile=profile_hint,
+                session=dwarf_session,
+            )
         )
     finally:
         for _sess in _dwarf_session_out:
@@ -1614,7 +1619,8 @@ def _dump_elf(
     )
     _dwarf_layout_coherence, _dwarf_layout_coherence_mismatches = (
         resolve_snapshot_layout_coherence(
-            is_clang_backend=ast_result.is_clang, coherence=_layout_coherence
+            is_clang_backend=ast_result.is_clang and not _is_device_context,
+            coherence=_layout_coherence,
         )
     )
 
@@ -1645,6 +1651,7 @@ def _dump_elf(
         ast_toolchain_unsupported_reasons=list(
             ast_result.ast_toolchain_unsupported_reasons
         ),
+        frontend_context_kind=ast_result.frontend_context_kind,
         platform="elf",
         language_profile=profile_hint,
         dwarf_layout_coherence=_dwarf_layout_coherence,
@@ -1677,6 +1684,7 @@ def _dump_macho(
     header_backend: str = "auto",
     extra_hash_dirs: tuple[Path, ...] = (),
     dump_manifest: DumpManifest | None = None,
+    frontend_context: str = "host",
 ) -> AbiSnapshot:
     """Mach-O dump: export table from macholib + header-AST analysis.
 
@@ -1795,6 +1803,7 @@ def _dump_macho(
         + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
         extra_hash_dirs=extra_hash_dirs,
+        frontend_context=frontend_context,
     )
 
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
@@ -1820,6 +1829,7 @@ def _dump_macho(
         ast_fallback_reason=_parser_ast_fallback_reason(parser),
         ast_toolchain_supported=_parser_ast_supported(parser),
         ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
+        frontend_context_kind=_parser_frontend_context_kind(parser),
         platform="macho",
         language_profile=profile_hint,
         **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot),
@@ -1845,6 +1855,7 @@ def _dump_pe(
     header_backend: str = "auto",
     extra_hash_dirs: tuple[Path, ...] = (),
     dump_manifest: DumpManifest | None = None,
+    frontend_context: str = "host",
 ) -> AbiSnapshot:
     """PE dump: export table from pefile + header-AST analysis.
 
@@ -1914,6 +1925,7 @@ def _dump_pe(
         + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
         extra_hash_dirs=extra_hash_dirs,
+        frontend_context=frontend_context,
     )
 
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
@@ -1939,6 +1951,7 @@ def _dump_pe(
         ast_fallback_reason=_parser_ast_fallback_reason(parser),
         ast_toolchain_supported=_parser_ast_supported(parser),
         ast_toolchain_unsupported_reasons=_parser_ast_unsupported_reasons(parser),
+        frontend_context_kind=_parser_frontend_context_kind(parser),
         platform="pe",
         language_profile=profile_hint,
         **_ast_compile_provenance(headers, gcc_options, gcc_option_tokens, sysroot),

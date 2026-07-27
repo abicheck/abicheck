@@ -118,6 +118,27 @@ def test_merge_fragments_allows_uniform_ast_producer():
     assert merged.ast_producer == "clang"
 
 
+def test_merge_fragments_raises_on_mixed_frontend_context_kind():
+    # CodeRabbit review: every TU is parsed under the manifest's one, uniform
+    # frontend_context request against one, uniform compiler binary, so this
+    # should be structurally unreachable in practice -- but blindly copying
+    # ordered[0]'s value would misrepresent the merged snapshot's provenance
+    # if it ever happened, exactly like an unguarded ast_producer copy would.
+    a = TuFragment(tu_name="a", ast_producer="clang", frontend_context_kind="host")
+    b = TuFragment(tu_name="b", ast_producer="clang", frontend_context_kind="device")
+    with pytest.raises(TuMergeError) as excinfo:
+        merge_fragments([a, b])
+    assert excinfo.value.code == HETEROGENEOUS_ABI_CONTEXT
+    assert excinfo.value.tu_names == ("a", "b")
+
+
+def test_merge_fragments_allows_uniform_frontend_context_kind():
+    a = TuFragment(tu_name="a", ast_producer="clang", frontend_context_kind="device")
+    b = TuFragment(tu_name="b", ast_producer="clang", frontend_context_kind="device")
+    merged = merge_fragments([a, b])
+    assert merged.frontend_context_kind == "device"
+
+
 # ---------------------------------------------------------------------------
 # Determinism: merge is independent of fragment processing order
 # ---------------------------------------------------------------------------
@@ -332,6 +353,7 @@ def test_merge_fragments_empty_returns_empty_result():
         ast_fallback_reason=None,
         ast_toolchain_supported=None,
         ast_toolchain_unsupported_reasons=(),
+        frontend_context_kind=None,
     )
 
 

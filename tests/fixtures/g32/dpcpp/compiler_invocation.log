@@ -1,0 +1,68 @@
+Intel(R) oneAPI DPC++/C++ Compiler 2026.1.0 (2026.1.0.20260617)
+Target: x86_64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /opt/intel/oneapi/compiler/2026.1/bin/compiler
+Configuration file: /opt/intel/oneapi/compiler/2026.1/bin/compiler/../icpx.cfg
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/13
+Selected GCC installation: /usr/lib/gcc/x86_64-linux-gnu/13
+Candidate multilib: .;@m64
+Selected multilib: .;@m64
+ "/opt/intel/oneapi/compiler/2026.1/bin/compiler/clang" -cc1 -triple spir64-unknown-unknown -O2 -aux-triple x86_64-unknown-linux-gnu -fsycl-is-device -fdeclare-spirv-builtins -fprofile-update=atomic -mllvm -sycl-opt -fenable-sycl-dae -Wno-sycl-strict -fsycl-int-header=/tmp/icpx-14ea605330/header-header-044ff5.h -fsycl-int-footer=/tmp/icpx-14ea605330/header-footer-3d09d5.h -sycl-std=2020 -ffine-grained-bitfield-accesses -fsycl-unique-prefix=uid204daec977468de3 -D__SYCL_ANY_DEVICE_HAS_ANY_ASPECT__=1 -Wspir-compat -fno-offload-use-alloca-addrspace-for-srets -fsyntax-only -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name header.h -mrelocation-model static -fveclib=SVML -faltmathlib=LibDeviceIMFAltMathLibrary -mframe-pointer=all -fapprox-func -funsafe-math-optimizations -fno-signed-zeros -mreassociate -freciprocal-math -fdenormal-fp-math=preserve-sign,preserve-sign -ffp-contract=fast-honor-pragmas -fno-rounding-math -complex-range=basic -fno-offload-fp32-prec-div -fno-offload-fp32-prec-sqrt -mconstructor-aliases -aux-target-cpu x86-64 -debugger-tuning=gdb -fdebug-compilation-dir=/home/user/abicheck/tests/fixtures/g32/dpcpp -v -fcoverage-compilation-dir=/home/user/abicheck/tests/fixtures/g32/dpcpp -fclang-abi-compat=22 -resource-dir /opt/intel/oneapi/compiler/2026.1/lib/clang/22 -internal-isystem /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include/sycl/stl_wrappers -internal-isystem /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include -internal-isystem /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include/sycl/stl_wrappers -internal-isystem /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include -internal-isystem /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../opt/compiler/include -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13 -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/x86_64-linux-gnu/c++/13 -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/backward -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13 -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/x86_64-linux-gnu/c++/13 -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/backward -internal-isystem /opt/intel/oneapi/compiler/2026.1/lib/clang/22/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/include -internal-externc-isystem /usr/include/x86_64-linux-gnu -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /opt/intel/oneapi/compiler/2026.1/lib/clang/22/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/include -internal-externc-isystem /usr/include/x86_64-linux-gnu -internal-externc-isystem /include -internal-externc-isystem /usr/include -std=c++17 -fdeprecated-macro -ferror-limit 19 -fgpu-rdc -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -vectorize-loops -vectorize-slp -ast-dump=json -mllvm -disable-hir-generate-mkl-call -mllvm -intel-abi-compatible=true -fdwarf2-cfi-asm -fintel-compatibility -fintel-compatibility-disable=FakeLoad -fintel-libirc-allowed -fintel-libimf-allowed -x c++ header.h
+clang -cc1 version 22.1.0 based upon LLVM 22.1.0 default target x86_64-unknown-linux-gnu
+ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/include"
+ignoring nonexistent directory "/include"
+ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/include"
+ignoring nonexistent directory "/include"
+ignoring duplicate directory "/opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include/sycl/stl_wrappers"
+ignoring duplicate directory "/opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include"
+ignoring duplicate directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13"
+ignoring duplicate directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/x86_64-linux-gnu/c++/13"
+ignoring duplicate directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/backward"
+ignoring duplicate directory "/opt/intel/oneapi/compiler/2026.1/lib/clang/22/include"
+ignoring duplicate directory "/usr/local/include"
+ignoring duplicate directory "/usr/include/x86_64-linux-gnu"
+ignoring duplicate directory "/usr/include"
+ignoring duplicate directory "/usr/local/include"
+ignoring duplicate directory "/opt/intel/oneapi/compiler/2026.1/lib/clang/22/include"
+ignoring duplicate directory "/usr/include"
+#include "..." search starts here:
+#include <...> search starts here:
+ /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include/sycl/stl_wrappers
+ /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include
+ /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../opt/compiler/include
+ /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13
+ /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/x86_64-linux-gnu/c++/13
+ /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/backward
+ /opt/intel/oneapi/compiler/2026.1/lib/clang/22/include
+ /usr/local/include
+ /usr/include/x86_64-linux-gnu
+ /usr/include
+End of search list.
+ "/opt/intel/oneapi/compiler/2026.1/bin/compiler/clang" -cc1 -triple x86_64-unknown-linux-gnu -O2 -fsycl-is-host -include-internal-header /tmp/icpx-14ea605330/header-header-044ff5.h -dependency-filter /tmp/icpx-14ea605330/header-header-044ff5.h -fsycl-enable-int-header-diags -include-internal-footer /tmp/icpx-14ea605330/header-footer-3d09d5.h -dependency-filter /tmp/icpx-14ea605330/header-footer-3d09d5.h -sycl-std=2020 -fsycl-unique-prefix=uid204daec977468de3 -D__SYCL_ANY_DEVICE_HAS_ANY_ASPECT__=1 -fsyntax-only -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name header.h -mrelocation-model static -fveclib=SVML -faltmathlib=SVMLAltMathLibrary -mframe-pointer=none -fapprox-func -funsafe-math-optimizations -fno-signed-zeros -mreassociate -freciprocal-math -fdenormal-fp-math=preserve-sign,preserve-sign -ffp-contract=fast-honor-pragmas -fno-rounding-math -complex-range=promoted -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -mllvm -x86-enable-unaligned-vector-move=true -tune-cpu generic --dependent-lib=sycl-devicelib-host -debugger-tuning=gdb -fdebug-compilation-dir=/home/user/abicheck/tests/fixtures/g32/dpcpp -v -fcoverage-compilation-dir=/home/user/abicheck/tests/fixtures/g32/dpcpp -fclang-abi-compat=22 -resource-dir /opt/intel/oneapi/compiler/2026.1/lib/clang/22 -internal-isystem /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include/sycl/stl_wrappers -internal-isystem /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include -internal-isystem /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include/sycl/stl_wrappers -internal-isystem /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include -internal-isystem /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../opt/compiler/include -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13 -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/x86_64-linux-gnu/c++/13 -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/backward -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13 -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/x86_64-linux-gnu/c++/13 -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/backward -internal-isystem /opt/intel/oneapi/compiler/2026.1/lib/clang/22/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/include -internal-externc-isystem /usr/include/x86_64-linux-gnu -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /opt/intel/oneapi/compiler/2026.1/lib/clang/22/include -internal-isystem /usr/local/include -internal-isystem /usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/include -internal-externc-isystem /usr/include/x86_64-linux-gnu -internal-externc-isystem /include -internal-externc-isystem /usr/include -std=c++17 -fdeprecated-macro -ferror-limit 19 -fgpu-rdc -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -vectorize-loops -vectorize-slp -ast-dump=json -mllvm -disable-hir-generate-mkl-call -mllvm -sycl-host -mllvm -loopopt=1 -floopopt-pipeline=light -mllvm -intel-abi-compatible=true -fsycl-targets=spir64-unknown-unknown -fdwarf2-cfi-asm -fintel-compatibility -fintel-libirc-allowed -fintel-libimf-allowed -x c++ header.h
+clang -cc1 version 22.1.0 based upon LLVM 22.1.0 default target x86_64-unknown-linux-gnu
+ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/include"
+ignoring nonexistent directory "/include"
+ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/include"
+ignoring nonexistent directory "/include"
+ignoring duplicate directory "/opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include/sycl/stl_wrappers"
+ignoring duplicate directory "/opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include"
+ignoring duplicate directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13"
+ignoring duplicate directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/x86_64-linux-gnu/c++/13"
+ignoring duplicate directory "/usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/backward"
+ignoring duplicate directory "/opt/intel/oneapi/compiler/2026.1/lib/clang/22/include"
+ignoring duplicate directory "/usr/local/include"
+ignoring duplicate directory "/usr/include/x86_64-linux-gnu"
+ignoring duplicate directory "/usr/include"
+#include "..." search starts here:
+#include <...> search starts here:
+ /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include/sycl/stl_wrappers
+ /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../include
+ /opt/intel/oneapi/compiler/2026.1/bin/compiler/../../opt/compiler/include
+ /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13
+ /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/x86_64-linux-gnu/c++/13
+ /usr/lib/gcc/x86_64-linux-gnu/13/../../../../include/c++/13/backward
+ /opt/intel/oneapi/compiler/2026.1/lib/clang/22/include
+ /usr/local/include
+ /usr/include/x86_64-linux-gnu
+ /usr/include
+End of search list.

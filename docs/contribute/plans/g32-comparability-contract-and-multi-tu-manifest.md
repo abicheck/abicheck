@@ -24,7 +24,7 @@ backlog).
 `abicheck/sycl_metadata.py`, `abicheck/buildsource/source_replay.py`, new
 top-level modules).
 **Effort:** Phase 0 — S. Phase A — M. Phase B — XL. Phase C — L. Phase D —
-L. Phase E — M. Total: XL, phased over multiple PRs.
+L. Phase E — M, done (see below). Total: XL, phased over multiple PRs.
 **Risk:** Phase 0 — low (fixtures only, no production code path changes).
 Phase A — low-medium (new gate at a well-defined entry point, additive
 fields; ships as a hard default per ADR-050 D2 from day one — risk is
@@ -2576,7 +2576,23 @@ verdict-producing comparison, so it doesn't fit the example catalog's
 
 ---
 
-## Phase D — SYCL/DPC++ host vs. device AST context selection
+## Phase D (done) — SYCL/DPC++ host vs. device AST context selection
+
+**Status: done.** All acceptance criteria below are implemented and tested:
+`sycl_context.py`'s decoder/selector (tested against Phase 0's real `icpx`
+capture, `tests/fixtures/g32/dpcpp/`); `dumper_clang._is_dpcpp_family_binary`
++ `dumper.py`'s `_clang_header_dump`/`_header_ast_parser` wiring (positive
+non-SYCL fallback-gating, non-`host`-on-plain-frontend hard fail); the
+resolved `kind` folded into `AbiSnapshot.frontend_context_kind` and
+`comparability.compute_extraction_contract`'s hashed `profile_fingerprint`
+(gated on non-`None`); Phase B's blanket `device` rejection lifted in
+`dump_manifest.py` and `cli_options.resolve_compile_context`, plus a fix to
+`merge_compile_config`'s silent `frontend_context` drop when folding a
+`.abicheck.yml` `compile:` block; `scan`/`dump`/`compare` all thread the
+resolved `CompileContext.frontend_context` through to `dumper.dump`. See
+`tests/test_sycl_context.py`, `tests/test_dumper_clang.py`'s DPC++ wiring
+tests, `tests/test_comparability.py`'s `frontend_context_kind` tests, and
+`tests/test_cli_frontend_context.py`.
 
 Implements ADR-050 D5. Independent of Phase C's merge work. **Depends on
 Phase 0, Phase A, *and* Phase B — not Phase 0 alone, and not a "soft"
@@ -2753,7 +2769,68 @@ is extraction-layer, not diff-layer; no new `ChangeKind`.
 
 ---
 
-## Phase E — Resource-aware frontend scheduling and cache-key extension
+## Phase E (done) — Resource-aware frontend scheduling and cache-key extension
+
+**Status: done**, with one correction to this section's own premise found
+while implementing it, recorded here rather than silently patched around
+(the same "verified against the actual code" discipline this plan's other
+phases already apply to themselves):
+
+- `abicheck/process_resources.py` (new leaf module) carries the RAM-probing/
+  pool-sizing primitives factored out of `buildsource/source_replay.py`'s L4
+  pool; `source_replay.py` keeps its own `ABICHECK_L4_*`-named wrapper
+  functions (unchanged behavior/log messages) delegating into it.
+  `dumper_manifest.py`'s per-TU loop (`run_tu_loop`/`_run_tu_fragments`) now
+  runs under its own RAM-aware pool (`ABICHECK_TU_JOBS`/
+  `ABICHECK_TU_JOB_MEM_GIB`), sized from the same module. A required TU's
+  failure still propagates (including a killed/timed-out castxml/clang
+  invocation, via the same descriptive `SnapshotError` the sequential path
+  always raised); an optional TU's failure still degrades to a diagnostic;
+  fragments are always collected in declared TU order, not completion order.
+- The cache-key half shipped, but needed a prerequisite fix this section
+  assumed was already in place: `comparability.compute_extraction_contract`'s
+  `scope_fingerprint` did **not**, in fact, hash a manifest's per-TU
+  name/ordered-includes/forced-includes/`required`/`contributes_to_abi`
+  fields before this phase — only the flat `roots`/public-header fields
+  (verified against the actual code: `SCOPE_FIELD_KEYS` was
+  `("headers", "public_header_dirs")`, and `dumper_contract.py`'s manifest
+  call site passed only `declared_headers=list(dump_manifest.roots)`, no
+  TU-level structure at all). Fixed as part of this phase (a new
+  `comparability.manifest_tu_scope_field` folded into `scope_fingerprint`'s
+  `"translation_units"` field) rather than deferred, since Phase E's own
+  cache-key work is unsound without it. `snapshot_cache._cache_key()` now
+  gets manifest-derived `(headers, includes)`-shaped path lists (for its
+  existing content-hash walk) plus this structural field as `extra` key
+  material, and `_dump_is_cacheable` no longer excludes `dump_manifest`.
+  Fixing this also surfaced and closed a dormant bug: `cached_run_dump`'s
+  live-dump call on a cache miss never threaded `dump_manifest` through at
+  all (harmless while every manifest dump was unconditionally uncacheable,
+  since that branch was unreachable — but would have silently produced a
+  legacy single-TU dump on every cold cache the moment manifest caching was
+  enabled).
+- **Correction to this section's own "double pool sizing" premise**: the
+  bullet below asserting `service.run_compare_request`'s
+  `ThreadPoolExecutor(max_workers=2)` can launch two concurrent
+  manifest-driven per-TU pools does not reproduce against the actual code.
+  `CompareRequest`/`InputSpec` (`api_types.py`) has no `dump_manifest` field
+  at all, and `run_compare_request`'s `_resolve_old_side`/`_resolve_new_side`
+  never pass one to `resolve_input` — that path cannot reach a
+  manifest-driven dump today, at all, let alone concurrently. The only
+  reachable manifest-driven `compare` path is the native CLI's
+  `cli_resolve._resolve_compare_snapshots` (what actually threads
+  `old_dump_manifest`/`new_dump_manifest` through), and it already resolves
+  old and new with two plain, sequential calls — no `ThreadPoolExecutor`
+  there at all. There is therefore no double-pool-sizing bug to fix on any
+  currently-reachable path; a regression test
+  (`test_resolve_compare_snapshots_resolves_old_and_new_sequentially` in
+  `tests/test_compare_dispatch.py`) guards the sequential behavior directly
+  so a future change reintroducing concurrency there (e.g. mirroring
+  `run_compare_request`'s own pattern) doesn't silently reopen this. Should
+  `CompareRequest` ever gain manifest support, `run_compare_request`'s
+  existing `ABICHECK_PARALLEL_EXTRACTION` sequential fallback is already the
+  right lever to route a manifest-driven pair through — that wiring is
+  unbuilt, deliberately, since there is no reachable call path needing it
+  yet (CLAUDE.md: no code for hypothetical requirements).
 
 Implements ADR-050 D6. The cache-key half targets the manifest's full
 computed `scope_fingerprint` (TU names, per-TU ordered includes/

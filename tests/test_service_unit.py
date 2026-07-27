@@ -1217,6 +1217,49 @@ class TestHeaderScopedInferredRoots:
                     "macho", tmp_path / "x.dylib", [umb], [], "1.0", "c++"
                 )
 
+    def test_explicit_device_context_failure_propagates_not_swallowed(
+        self, tmp_path
+    ):
+        # Codex review: AstContextMissingError/AstContextAmbiguousError only
+        # ever come from a NON-"host" --frontend-context request (ADR-050
+        # D5) -- there is no "device" default, so seeing either here always
+        # means the user's explicit device-context request failed. The
+        # broad `except Exception` below (which exists to fall back to
+        # export-table mode when a header backend is merely unavailable)
+        # must not also swallow this and silently succeed with --header/
+        # --include ignored, exactly the same reasoning as the
+        # DeadlineExceeded test above.
+        from abicheck.errors import AstContextMissingError
+        from abicheck.service import _try_header_scoped_dump
+        from abicheck.service_scan import CompileContext
+
+        _root, umb = self._umbrella(tmp_path)
+
+        def raises_ast_context_missing(
+            path, headers, extra_includes, version, compiler, **k
+        ):
+            raise AstContextMissingError("no AST context with kind='device'")
+
+        cc = CompileContext(frontend_context="device")
+
+        with patch("abicheck.dumper._dump_pe", raises_ast_context_missing):
+            with pytest.raises(AstContextMissingError):
+                _try_header_scoped_dump(
+                    "pe", tmp_path / "x.dll", [umb], [], "1.0", "c++", compile=cc
+                )
+
+        with patch("abicheck.dumper._dump_macho", raises_ast_context_missing):
+            with pytest.raises(AstContextMissingError):
+                _try_header_scoped_dump(
+                    "macho",
+                    tmp_path / "x.dylib",
+                    [umb],
+                    [],
+                    "1.0",
+                    "c++",
+                    compile=cc,
+                )
+
 
 class TestDumpPe:
     def test_no_machine_raises(self, tmp_path):
@@ -2279,7 +2322,7 @@ class TestRunDumpHeaderGraph:
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=ast) as mock_ast,
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)) as mock_ast,
         ):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
         mock_ast.assert_called_once()
@@ -2302,6 +2345,37 @@ class TestRunDumpHeaderGraph:
         l3 = result.build_source.manifest.coverage_for(DataLayer.L3_BUILD)
         assert l3 is not None
         assert l3.status == CoverageStatus.NOT_COLLECTED
+
+    def test_header_graph_uses_same_frontend_context_as_primary_snapshot(
+        self, tmp_path
+    ):
+        """ADR-050 D5 (Codex review): the internal semantic header graph
+        (G29 Phase A) must be built with the SAME frontend_context as the
+        primary snapshot -- a device-context dump's embedded graph built
+        from an unrequested host parse would combine device declarations
+        with host-only call/type/include edges, feeding crosschecks a graph
+        incoherent with what it's describing."""
+        from abicheck.service_scan import CompileContext
+
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(
+            library="lib",
+            version="1.0",
+            platform="pe",
+            functions=[Function(name="f", mangled="_Z1fv", return_type="void")],
+        )
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        cc = CompileContext(frontend_context="device")
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)) as mock_ast,
+        ):
+            run_dump(p, "pe", [header], [], "1.0", "c++", compile=cc)
+        mock_ast.assert_called_once()
+        assert mock_ast.call_args.kwargs["frontend_context"] == "device"
 
     def test_degrades_gracefully_when_clang_unavailable(self, tmp_path):
         p = tmp_path / "lib.dll"
@@ -2341,7 +2415,7 @@ class TestRunDumpHeaderGraph:
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=ast) as mock_ast,
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)) as mock_ast,
         ):
             result = run_dump(p, "pe", [hdr_dir], [], "1.0", "c++")
         mock_ast.assert_called_once()
@@ -2367,7 +2441,7 @@ class TestRunDumpHeaderGraph:
 
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=ast),
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
                 lambda _b: "/usr/bin/clang++",
@@ -2411,7 +2485,7 @@ class TestRunDumpHeaderGraph:
 
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=ast),
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
                 lambda _b: "/usr/bin/clang++",
@@ -2469,7 +2543,7 @@ class TestRunDumpHeaderGraph:
 
         with (
             patch("abicheck.service._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", return_value=ast),
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
                 lambda _b: "/usr/bin/clang++",
@@ -2682,6 +2756,92 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             run_dump(p, "macho", [header], [], "1.0", "c++", symbols_only=True)
 
         assert calls == [(False, False)]
+
+
+class TestAttachHeaderGraphDeviceContext:
+    """Codex review: ClangHeaderIncludeExtractor drives a plain `clang -M`
+    per header with no frontend_context/-fsycl concept at all (unlike the
+    AST pass in the same function, which threads frontend_context through
+    and is validated against a real DPC++ capture) -- for a device-context
+    request it would silently resolve `__SYCL_DEVICE_ONLY__`-style guards as
+    host and attach host-only include edges to a device snapshot's graph.
+    Must be skipped entirely, not just given the wrong flags, so the
+    include-graph pass stays honestly "not collected" rather than
+    confidently wrong."""
+
+    def test_device_context_skips_include_extractor(self, tmp_path):
+        from abicheck.service import _attach_header_graph
+        from abicheck.service_scan import CompileContext
+
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+        with patch(
+            "abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor"
+        ) as mock_extractor:
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=True,
+                headers=[header],
+                includes=[],
+                lang="c",
+                compile=CompileContext(frontend_context="device"),
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        mock_extractor.assert_not_called()
+
+    def test_host_context_still_uses_include_extractor(self, tmp_path):
+        from abicheck.service import _attach_header_graph
+        from abicheck.service_scan import CompileContext
+
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+        with patch(
+            "abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor"
+        ) as mock_extractor:
+            mock_extractor.return_value.extract.return_value = ({}, [])
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=True,
+                headers=[header],
+                includes=[],
+                lang="c",
+                compile=CompileContext(frontend_context="host"),
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        mock_extractor.return_value.extract.assert_called_once()
+
+    def test_no_compile_context_defaults_to_host_and_still_uses_extractor(
+        self, tmp_path
+    ):
+        """compile=None -- the default CompileContext() -- must behave the
+        same as an explicit host request, not be silently skipped."""
+        from abicheck.service import _attach_header_graph
+
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+        with patch(
+            "abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor"
+        ) as mock_extractor:
+            mock_extractor.return_value.extract.return_value = ({}, [])
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=True,
+                headers=[header],
+                includes=[],
+                lang="c",
+                compile=None,
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        mock_extractor.return_value.extract.assert_called_once()
 
 
 class TestCliNativeBinaryHeaderWiring:

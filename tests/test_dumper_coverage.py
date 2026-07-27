@@ -1397,6 +1397,76 @@ class TestDwarfLayoutCoherencePopulation:
         assert snap.dwarf_layout_coherence == "mismatch"
         assert snap.dwarf_layout_coherence_mismatches == ("Foo",)
 
+    def test_device_context_skips_host_dwarf_backfill_entirely(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #636: host DWARF describes the host-compiled
+        binary's own layout -- meaningless for declarations parsed from a
+        SYCL/DPC++ device-target AST pass, which can target a genuinely
+        different architecture/ABI (different sizes/alignment/offsets).
+        A device-context dump must never reach dwarf_layout_types_or_empty
+        at all (verified via a spy that must not be called), and its
+        dwarf_layout_coherence must read as "not applicable" (None), not
+        "unavailable" (which would wrongly imply DWARF was consulted and
+        simply absent).
+        """
+        from unittest.mock import MagicMock, patch
+
+        import abicheck.elf_metadata as _elfmod
+        from abicheck import dumper
+        from abicheck.dumper_clang import _ClangAstParser
+        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        so = tmp_path / "lib.so"
+        so.write_bytes(b"\x7fELF")
+
+        parser = MagicMock(spec=_ClangAstParser)
+        parser.parse_functions.return_value = []
+        parser.parse_variables.return_value = []
+        parser.parse_types.return_value = []
+        parser.parse_enums.return_value = []
+        parser.parse_typedefs.return_value = []
+        parser.parse_constants.return_value = []
+        parser._abicheck_frontend_context_kind = "device"
+
+        with (
+            patch.object(
+                dumper, "_pyelftools_exported_symbols", return_value=({"foo"}, set())
+            ),
+            patch.object(
+                _elfmod, "parse_elf_metadata", return_value=_elfmod.ElfMetadata()
+            ),
+            patch.object(
+                dumper,
+                "_elf_classify_symbols",
+                return_value=({"foo"}, {"foo"}, set(), set()),
+            ),
+            patch.object(
+                dumper,
+                "_resolve_debug_metadata",
+                return_value=(DwarfMetadata(), AdvancedDwarfMetadata()),
+            ),
+            patch.object(dumper, "_header_ast_parser", return_value=parser),
+            patch.object(
+                dumper, "dwarf_layout_types_or_empty"
+            ) as mock_dwarf_layout_types,
+            patch.object(dumper, "_populate_elf_visibility", lambda snap: None),
+        ):
+            snap = dumper._dump_elf(
+                so,
+                [tmp_path / "h.h"],
+                [],
+                "1.0",
+                "c++",
+                header_backend="clang",
+                frontend_context="device",
+            )
+        mock_dwarf_layout_types.assert_not_called()
+        assert snap.frontend_context_kind == "device"
+        assert snap.dwarf_layout_coherence is None
+        assert snap.dwarf_layout_coherence_mismatches == ()
+
 
 class TestFormatHandlerRegistry:
     """C3: the binary-format handler registry is the single source of truth for

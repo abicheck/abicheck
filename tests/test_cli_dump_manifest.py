@@ -288,6 +288,46 @@ def test_dry_run_manifest_two_manifests_same_surface_share_scope_fingerprint(
     assert _fingerprint(old_out.output) == _fingerprint(new_out.output)
 
 
+def test_dry_run_manifest_reflects_tu_includes_in_scope_fingerprint(tmp_path, runner):
+    """Codex/CodeRabbit review: compute_extraction_contract's manifest
+    branch previously omitted both manifest_tu_scope and declared_includes,
+    so the dry-run's printed scope_fingerprint fell back to the legacy field
+    set -- identical for any two manifests sharing the same roots, even
+    when their TU includes genuinely differed. A real (non-dry) manifest
+    dump DOES fold both into scope_fingerprint, so the dry-run preview was
+    silently unusable for previewing/troubleshooting the actual extraction
+    contract."""
+    a_dir = tmp_path / "a"
+    a_dir.mkdir()
+    b_dir = tmp_path / "b"
+    b_dir.mkdir()
+    for d in (a_dir, b_dir):
+        (d / "a.h").write_text("int f(void);\n")
+        (d / "vendor").mkdir()
+    (a_dir / "m.yaml").write_text(
+        "roots: [a.h]\ntranslation_units:\n  - name: main\n    forced_includes: [a.h]\n"
+    )
+    (b_dir / "m.yaml").write_text(
+        "roots: [a.h]\ntranslation_units:\n"
+        "  - name: main\n    forced_includes: [a.h]\n    includes: [vendor]\n"
+    )
+    out_a = runner.invoke(
+        main, ["dump", "--dump-manifest", str(a_dir / "m.yaml"), "--dry-run"]
+    )
+    out_b = runner.invoke(
+        main, ["dump", "--dump-manifest", str(b_dir / "m.yaml"), "--dry-run"]
+    )
+    assert out_a.exit_code == 0 and out_b.exit_code == 0
+
+    def _fingerprint(output: str) -> str:
+        for line in output.splitlines():
+            if "scope_fingerprint:" in line:
+                return line.split("scope_fingerprint:", 1)[1].strip()
+        raise AssertionError(f"no scope_fingerprint in output: {output!r}")
+
+    assert _fingerprint(out_a.output) != _fingerprint(out_b.output)
+
+
 def test_dry_run_manifest_never_invokes_a_compiler(tmp_path, runner):
     from unittest import mock
 

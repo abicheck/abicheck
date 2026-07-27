@@ -884,7 +884,14 @@ def _attach_header_graph(
             # inferred root would reuse a stale cached AST (Codex review;
             # mirrors _dump_elf's own deferred_dirs handling).
             deferred_dirs = tuple(deferred_token_dirs(deferred))
-        ast_root = _clang_header_dump(
+        # ADR-050 D5 (Codex review): this internal semantic header graph
+        # (G29 Phase A) must be built from the SAME frontend_context as the
+        # primary snapshot it's attached to -- a device-context dump's
+        # embedded graph built from a host parse would combine device
+        # declarations with host-only call/type/include edges, feeding
+        # crosschecks/diff_source_graph_findings a graph incoherent with
+        # what it's describing.
+        ast_root, _resolved_kind = _clang_header_dump(
             resolved_headers,
             eff_includes,
             compiler="cc" if lang == "c" else "c++",
@@ -896,6 +903,7 @@ def _attach_header_graph(
             nostdinc=cc.nostdinc,
             lang=lang,
             extra_hash_dirs=deferred_dirs,
+            frontend_context=cc.frontend_context,
         )
     except (SnapshotError, ValidationError):
         ast_root = None
@@ -906,7 +914,20 @@ def _attach_header_graph(
         public_dir_paths=[str(p) for p in (public_header_dirs or [])],
         header_paths=[str(p) for p in resolved_headers],
     )
-    if header_graph_includes and resolved_headers:
+    if header_graph_includes and resolved_headers and cc.frontend_context == "host":
+        # `ClangHeaderIncludeExtractor` drives a plain `clang -M` per header
+        # with no `-fsycl`/host-vs-device concept at all (unlike the AST pass
+        # just above, which threads `frontend_context` through and is
+        # validated against a real DPC++ capture, see sycl_context.py) --
+        # for a non-host request it would silently resolve `#ifdef
+        # __SYCL_DEVICE_ONLY__`-style guards as host and attach host-only
+        # include edges to a device snapshot's graph (Codex review). Skipping
+        # it entirely leaves the include-graph pass honestly "not collected"
+        # for this snapshot (`_include_graph_covered` false, since neither
+        # `extractor_passes` nor `degraded_passes` gets stamped) rather than
+        # confidently wrong -- the same host/device tradeoff already made for
+        # DWARF layout backfill (dumper._dump_elf) and the clang layout tool.
+        #
         # Resolve the same clang driver `_clang_header_dump` above used
         # (honoring `--gcc-path`/`--gcc-prefix`) rather than defaulting to
         # the bare "clang++" — otherwise a hermetic/cross toolchain selected
@@ -1238,6 +1259,7 @@ def _dump_elf(
             debug_info_path=debug_info_path,
             extra_include_labels=include_labels,
             dump_manifest=dump_manifest,
+            frontend_context=cc.frontend_context,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc

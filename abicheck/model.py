@@ -569,6 +569,17 @@ class AbiSnapshot:
         default_factory=list, kw_only=True
     )
 
+    # Resolved SYCL/DPC++ host-vs-device AST context (ADR-050 D5, G32 Phase
+    # D) -- "host"/"device" when the L2 header AST was produced by a
+    # DPC++-capable compiler (abicheck.sycl_context's selector), None for an
+    # ordinary clang/castxml dump, which has no host/device "kind" concept
+    # at all. Read by dumper_contract._attach_extraction_contract the same
+    # way it already reads ast_toolchain, and folded into
+    # compute_extraction_contract's profile_fingerprint only when non-None
+    # (never for an ordinary dump, to keep every pre-Phase-D fingerprint
+    # byte-for-byte unchanged).
+    frontend_context_kind: str | None = field(default=None, kw_only=True)
+
     # Structured compile-context provenance (schema v15, P1 toolchain-profile
     # audit). None/() on a pre-v15 snapshot and on any snapshot not built from
     # a header-AST parse (DWARF/symbols-only, PE/Mach-O without headers) — the

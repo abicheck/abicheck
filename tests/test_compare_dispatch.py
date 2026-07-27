@@ -76,6 +76,63 @@ class TestCompareHeaderMarksProvenance:
         assert new_call["public_headers"] == new_h
 
 
+def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_resolve_compare_snapshots`` (the native ``compare`` CLI's own
+    old/new resolution, including its ``--dump-manifest`` path) calls
+    ``_resolve_input`` for old, then new -- never concurrently.
+
+    This is the specific path ADR-050 D6/G32 Phase E's "a manifest-driven
+    compare can launch two full-sized per-TU pools at once" concern is
+    actually about for the native CLI: unlike ``service.run_compare_request``
+    (which does resolve old/new concurrently via a ``ThreadPoolExecutor``, but
+    has no ``dump_manifest`` field on ``CompareRequest``/``InputSpec`` at all,
+    so it can never reach a manifest-driven dump), ``_resolve_compare_snapshots``
+    is what actually threads ``old_dump_manifest``/``new_dump_manifest``
+    through to ``resolve_input`` -- and it already resolves both sides with
+    two plain, sequential calls, so a manifest-driven compare here can never
+    size two per-TU pools off the same ``MemAvailable`` reading at once. A
+    regression back to concurrent resolution here (e.g. mirroring
+    ``run_compare_request``'s own ``ThreadPoolExecutor``) would reintroduce
+    exactly that double-pool-sizing risk, so this guards against it directly.
+    """
+    import time
+
+    from abicheck import cli_resolve
+
+    calls: list[tuple[str, float, float]] = []
+
+    def fake_resolve_input(path, headers, includes, version, lang, **kwargs):
+        start = time.monotonic()
+        time.sleep(0.05)
+        end = time.monotonic()
+        calls.append((version, start, end))
+        return _snap(version=version)
+
+    monkeypatch.setattr(cli_resolve, "_resolve_input", fake_resolve_input)
+
+    old_h = [tmp_path / "old.h"]
+    new_h = [tmp_path / "new.h"]
+    cli_resolve._resolve_compare_snapshots(
+        tmp_path / "old.so", tmp_path / "new.so",
+        "elf", "elf",
+        old_h, new_h,
+        [], [],
+        "old", "new",
+        "c++",
+        None, None, None,
+        False, None, False, (), "",
+    )
+    assert len(calls) == 2
+    (old_version, _old_start, old_end), (new_version, new_start, _new_end) = calls
+    assert old_version == "old" and new_version == "new"
+    # The second call must not have started before the first one finished --
+    # true concurrency (a shared ThreadPoolExecutor) would let new_start fall
+    # inside [old_start, old_end).
+    assert new_start >= old_end
+
+
 def _snap(version: str = "1.0", funcs: list[Function] | None = None,
           library: str = "libfoo.so") -> AbiSnapshot:
     if funcs is None:

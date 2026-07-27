@@ -36,14 +36,17 @@ each self-skipping when clang/g++ are unavailable:
 
 from __future__ import annotations
 
+import os as dm_os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from abicheck import process_resources as dm_process_resources
 from abicheck.dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from abicheck.dumper import dump
 from abicheck.dumper_manifest import (
@@ -54,7 +57,12 @@ from abicheck.dumper_manifest import (
     run_tu_fragment,
     run_tu_loop,
 )
-from abicheck.errors import SnapshotError, TuMergeError, ValidationError
+from abicheck.errors import (
+    AstContextMissingError,
+    SnapshotError,
+    TuMergeError,
+    ValidationError,
+)
 from abicheck.model import EnumType, Function, Param, RecordType, TypeField, Variable
 
 
@@ -374,6 +382,44 @@ def test_run_tu_loop_calls_once_per_tu_with_shared_public_header_paths():
     assert {fn.name for fn in merged.functions} == {"a", "b"}
 
 
+def test_run_tu_loop_excludes_successful_non_contributing_tu_from_merged_abi():
+    """Codex review, PR #636: a ``contributes_to_abi: false`` TU that PARSES
+    SUCCESSFULLY must still have its declarations excluded from the merged
+    ABI surface -- the flag's whole point (a support-only TU that exists
+    purely to satisfy other TUs' compiles, e.g. a private header) is
+    undermined if its own functions/variables/etc. leak into the snapshot
+    just because parsing happened to succeed.
+
+    Existing coverage (``test_run_tu_loop_optional_tu_failure_is_skipped``)
+    only exercised the FAILURE half of ``contributes_to_abi``'s guarantee --
+    parse-time's own ``contributes_to_abi=True ⇒ required=True`` invariant
+    already ensures a non-contributing TU's dropped *failure* can never hide
+    a real removal. This is the separate, previously-missing SUCCESS half:
+    ``run_tu_loop``/``merge_tu_fragments`` never actually consulted the flag
+    at all, so a non-contributing TU that parsed fine still contributed its
+    declarations to the merged ABI exactly like any other TU.
+    """
+    calls: list = []
+    stub = _make_stub_header_ast_parser(calls)
+    tus = (
+        _tu("main", "main.h"),
+        _tu("support", "support.h", required=False, contributes=False),
+    )
+    merged = run_tu_loop(
+        tus,
+        header_ast_parser=stub,
+        roots=[Path("main.h")],
+        backend="auto",
+        compiler="c++",
+        exported_dynamic=set(),
+        exported_static=set(),
+    )
+    # Both TUs were actually parsed (this isn't the failure-skip path)...
+    assert len(calls) == 2
+    # ...but only the contributing TU's declarations reached the merge.
+    assert [fn.name for fn in merged.functions] == ["main"]
+
+
 def test_run_tu_loop_required_tu_failure_propagates():
     calls: list = []
     stub = _make_stub_header_ast_parser(calls, fail_for=frozenset({"a.h"}))
@@ -407,6 +453,384 @@ def test_run_tu_loop_optional_tu_failure_is_skipped():
         exported_static=set(),
     )
     assert {fn.name for fn in merged.functions} == {"b"}
+
+
+# ── per-TU pool (ADR-050 D6, G32 Phase E) ──────────────────────────────────
+
+
+def test_run_tu_loop_required_tu_failure_propagates_under_real_pool(monkeypatch):
+    # Force a real multi-worker pool (not the len(tus)<=1 sequential
+    # fast-path test_run_tu_loop_required_tu_failure_propagates already
+    # covers) so a required failure still propagates once several TUs are
+    # genuinely running concurrently.
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "4")
+    calls: list = []
+    stub = _make_stub_header_ast_parser(calls, fail_for=frozenset({"b.h"}))
+    tus = (_tu("a", "a.h"), _tu("b", "b.h", required=True), _tu("c", "c.h"))
+    with pytest.raises(SnapshotError, match="simulated extraction failure"):
+        run_tu_loop(
+            tus,
+            header_ast_parser=stub,
+            roots=[Path("a.h"), Path("b.h"), Path("c.h")],
+            backend="auto",
+            compiler="c++",
+            exported_dynamic=set(),
+            exported_static=set(),
+        )
+
+
+def test_run_tu_loop_optional_failure_does_not_cancel_siblings_under_pool(
+    monkeypatch,
+):
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "4")
+    calls: list = []
+    stub = _make_stub_header_ast_parser(calls, fail_for=frozenset({"b.h"}))
+    tus = (
+        _tu("a", "a.h"),
+        _tu("b", "b.h", required=False, contributes=False),
+        _tu("c", "c.h"),
+    )
+    merged = run_tu_loop(
+        tus,
+        header_ast_parser=stub,
+        roots=[Path("a.h"), Path("c.h")],
+        backend="auto",
+        compiler="c++",
+        exported_dynamic=set(),
+        exported_static=set(),
+    )
+    # Both non-failing TUs' declarations survive -- the optional failure
+    # must not have short-circuited or cancelled its siblings.
+    assert {fn.name for fn in merged.functions} == {"a", "c"}
+
+
+def test_run_tu_fragments_preserves_declared_order_despite_completion_order(
+    monkeypatch,
+):
+    """A later-declared TU that finishes FIRST must not reorder the
+    returned fragment list -- merge_tu_fragments treats TU order as
+    significant (which TU "wins" an ODR-compatible merge), so the pool must
+    collect results in submission order, not completion order."""
+    from abicheck.dumper_manifest import _run_tu_fragments
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+    order: list = []
+
+    def _stub(headers, extra_includes, **kwargs):
+        name = Path(headers[0]).stem
+        if name == "a":
+            # Let "b" (submitted second) finish first.
+            time.sleep(0.05)
+        order.append(name)
+        return _StubParser(functions=(_fn(name),))
+
+    tus = (_tu("a", "a.h"), _tu("b", "b.h"))
+    fragments = _run_tu_fragments(
+        tus,
+        header_ast_parser=_stub,
+        backend="auto",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        gcc_option_tokens=(),
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=["a.h", "b.h"],
+        public_dir_paths=[],
+        extra_hash_dirs=(),
+    )
+    # "b" really did finish executing before "a" (proves genuine concurrency,
+    # not an accidentally-serial pool)...
+    assert order == ["b", "a"]
+    # ...yet the returned fragment order still matches the manifest's own
+    # declared TU order, not completion order.
+    assert [f.tu_name for f in fragments] == ["a", "b"]
+
+
+def test_run_tu_fragments_cancels_pending_futures_promptly_on_required_failure(
+    monkeypatch,
+):
+    """Codex review, PR #636: a required TU's failure must be observed (and
+    its siblings' cancellation attempted) in COMPLETION order, not
+    submission order -- otherwise a fast-failing, later-submitted required
+    TU sits unnoticed behind an earlier-submitted, merely slow TU's future,
+    letting the pool keep queued heavyweight AST work starting during that
+    delay. Deterministic via a Future.cancel spy + a manually-held Event
+    (not wall-clock timing): cancellation must happen while "slow" is still
+    deliberately blocked, proving it wasn't gated behind waiting on "slow"'s
+    own future first.
+    """
+    import threading
+    from concurrent.futures import Future
+
+    from abicheck.dumper_manifest import _run_tu_fragments
+    from abicheck.errors import SnapshotError
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+    # _tu_jobs clamps an explicit ABICHECK_TU_JOBS override by available
+    # memory too -- without this, a memory-constrained runner would silently
+    # fall back to the sequential (jobs<=1) path, making this pool-specific
+    # cancellation test either vacuously pass or hang (CodeRabbit review).
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
+
+    cancel_called = threading.Event()
+    orig_cancel = Future.cancel
+
+    def _spy_cancel(self):
+        cancel_called.set()
+        return orig_cancel(self)
+
+    monkeypatch.setattr(Future, "cancel", _spy_cancel)
+
+    slow_release = threading.Event()
+
+    def _stub(headers, extra_includes, **kwargs):
+        name = Path(headers[0]).stem
+        if name == "slow":
+            slow_release.wait(timeout=5)
+            return _StubParser(functions=(_fn("slow"),))
+        if name == "bad":
+            return _StubParser(fail=True)
+        return _StubParser(functions=(_fn(name),))
+
+    tus = (_tu("slow", "slow.h"), _tu("bad", "bad.h", required=True))
+
+    def _run() -> None:
+        try:
+            _run_tu_fragments(
+                tus,
+                header_ast_parser=_stub,
+                backend="auto",
+                compiler="c++",
+                gcc_path=None,
+                gcc_prefix=None,
+                gcc_options=None,
+                gcc_option_tokens=(),
+                sysroot=None,
+                nostdinc=False,
+                lang=None,
+                exported_dynamic=set(),
+                exported_static=set(),
+                public_header_paths=[],
+                public_dir_paths=[],
+                extra_hash_dirs=(),
+            )
+        except SnapshotError:
+            pass
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    try:
+        cancelled_promptly = cancel_called.wait(timeout=5)
+    finally:
+        slow_release.set()
+        t.join(timeout=5)
+    assert cancelled_promptly
+
+
+def test_run_tu_fragments_raises_promptly_without_waiting_for_running_siblings(
+    monkeypatch,
+):
+    """Codex review, PR #636 follow-up: cancelling not-yet-started futures
+    promptly (the test above) is not enough on its own -- ``already-running``
+    futures can't be force-killed, and the pool code documents that they are
+    meant to be "left to finish" in the background rather than block the
+    required TU's failure from surfacing. But wrapping the pool in
+    ``with ThreadPoolExecutor(...) as pool:`` means the ``with``-block's own
+    ``__exit__`` calls ``shutdown(wait=True)`` when the failure propagates out
+    of it -- silently re-imposing exactly the block the pool was designed to
+    avoid, so a required failure sits behind a still-running (never
+    cancellable) sibling's full duration before the caller ever sees it.
+
+    Deterministic via a manually-held Event (not wall-clock timing): the
+    calling thread must observe the raised exception while "slow" is still
+    deliberately blocked, proving ``_run_tu_fragments`` did not wait on it.
+    """
+    import threading
+
+    from abicheck.dumper_manifest import _run_tu_fragments
+    from abicheck.errors import SnapshotError
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
+
+    slow_release = threading.Event()
+    raised = threading.Event()
+
+    def _stub(headers, extra_includes, **kwargs):
+        name = Path(headers[0]).stem
+        if name == "slow":
+            slow_release.wait(timeout=5)
+            return _StubParser(functions=(_fn("slow"),))
+        if name == "bad":
+            return _StubParser(fail=True)
+        return _StubParser(functions=(_fn(name),))
+
+    tus = (_tu("slow", "slow.h"), _tu("bad", "bad.h", required=True))
+
+    def _run() -> None:
+        try:
+            _run_tu_fragments(
+                tus,
+                header_ast_parser=_stub,
+                backend="auto",
+                compiler="c++",
+                gcc_path=None,
+                gcc_prefix=None,
+                gcc_options=None,
+                gcc_option_tokens=(),
+                sysroot=None,
+                nostdinc=False,
+                lang=None,
+                exported_dynamic=set(),
+                exported_static=set(),
+                public_header_paths=[],
+                public_dir_paths=[],
+                extra_hash_dirs=(),
+            )
+        except SnapshotError:
+            pass
+        finally:
+            raised.set()
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    try:
+        raised_promptly = raised.wait(timeout=5)
+        # The whole point: "slow" must still be blocked when the caller
+        # already saw the failure -- otherwise this would vacuously pass on
+        # the buggy with-block-blocks-on-exit code too, just slower.
+        still_blocked = not slow_release.is_set()
+    finally:
+        slow_release.set()
+        t.join(timeout=5)
+    assert raised_promptly
+    assert still_blocked
+
+
+def test_run_tu_fragments_propagates_active_deadline_into_pool_workers(monkeypatch):
+    """Codex review, PR #636: ``contextvars`` don't cross a
+    ``ThreadPoolExecutor`` boundary, so a worker submitted from inside an
+    active ``deadline.deadline_scope`` (e.g. a future ``scan --budget`` caller)
+    would otherwise see no deadline at all and silently fall back to each
+    TU's unbudgeted default timeout -- the same class of gap PR #591 already
+    closed for ``source_replay.py``'s L4 pool. Each stub "TU" records what
+    ``deadline.remaining()`` sees on its own (pool worker) thread; if the
+    deadline didn't propagate, that's ``None`` even though the submitting
+    thread had an active scope.
+    """
+    from abicheck import deadline
+    from abicheck.dumper_manifest import _run_tu_fragments
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+    # Same reasoning as the cancellation test above: without this, a
+    # memory-constrained runner would silently take the serial path, where
+    # deadline propagation is trivial (same thread) rather than genuinely
+    # exercising with_deadline_ts re-establishment across the pool boundary
+    # (CodeRabbit review).
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
+
+    seen_remaining: dict[str, float | None] = {}
+
+    def _stub(headers, extra_includes, **kwargs):
+        name = Path(headers[0]).stem
+        seen_remaining[name] = deadline.remaining()
+        return _StubParser(functions=(_fn(name),))
+
+    tus = (_tu("a", "a.h"), _tu("b", "b.h"))
+    with deadline.deadline_scope(60.0):
+        fragments = _run_tu_fragments(
+            tus,
+            header_ast_parser=_stub,
+            backend="auto",
+            compiler="c++",
+            gcc_path=None,
+            gcc_prefix=None,
+            gcc_options=None,
+            gcc_option_tokens=(),
+            sysroot=None,
+            nostdinc=False,
+            lang=None,
+            exported_dynamic=set(),
+            exported_static=set(),
+            public_header_paths=[],
+            public_dir_paths=[],
+            extra_hash_dirs=(),
+        )
+
+    assert [f.tu_name for f in fragments] == ["a", "b"]
+    assert seen_remaining["a"] is not None
+    assert seen_remaining["b"] is not None
+    # Each worker's remaining budget must be close to the 60s scope, not the
+    # unbounded "no deadline" None a dropped ContextVar would produce.
+    assert 0 < seen_remaining["a"] <= 60.0
+    assert 0 < seen_remaining["b"] <= 60.0
+
+
+def test_tu_jobs_env_override_forces_serial(monkeypatch):
+    from abicheck.dumper_manifest import _tu_jobs
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "1")
+    assert _tu_jobs(100) == 1
+
+
+def test_tu_jobs_auto_capped_at_cpu_and_eight(monkeypatch):
+    from abicheck.dumper_manifest import _tu_jobs
+
+    monkeypatch.delenv("ABICHECK_TU_JOBS", raising=False)
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
+    monkeypatch.setattr(dm_os, "cpu_count", lambda: 4)
+    assert _tu_jobs(1000) == 4  # min(units, cpu, 8)
+    assert _tu_jobs(2) == 2
+
+
+def test_tu_jobs_clamped_by_available_memory(monkeypatch):
+    from abicheck.dumper_manifest import _tu_jobs
+
+    monkeypatch.delenv("ABICHECK_TU_JOBS", raising=False)
+    monkeypatch.delenv("ABICHECK_TU_JOB_MEM_GIB", raising=False)
+    monkeypatch.setattr(dm_os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(dm_process_resources, "available_mem_gib", lambda: 6.0)
+    assert _tu_jobs(1000) == 2  # 6 GiB / 3.0 GiB-per-worker default == 2
+
+
+def test_tu_jobs_invalid_env_falls_back_to_serial(monkeypatch):
+    from abicheck.dumper_manifest import _tu_jobs
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "not-a-number")
+    assert _tu_jobs(100) == 1
+
+
+def test_tu_jobs_explicit_env_clamped_by_oversubscription_ceiling(monkeypatch, caplog):
+    import logging
+
+    from abicheck.dumper_manifest import _tu_jobs
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "64")
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
+    monkeypatch.setattr(dm_os, "cpu_count", lambda: 4)
+    with caplog.at_level(logging.WARNING):
+        jobs = _tu_jobs(100)
+    assert jobs == 8  # max(8, 2*4)
+    assert any("oversubscription" in r.message for r in caplog.records)
+
+
+def test_tu_jobs_explicit_env_clamped_by_available_memory(monkeypatch, caplog):
+    import logging
+
+    from abicheck.dumper_manifest import _tu_jobs
+
+    monkeypatch.setenv("ABICHECK_TU_JOBS", "8")
+    monkeypatch.delenv("ABICHECK_TU_JOB_MEM_GIB", raising=False)
+    monkeypatch.setattr(dm_process_resources, "available_mem_gib", lambda: 6.0)
+    with caplog.at_level(logging.WARNING):
+        jobs = _tu_jobs(100)
+    assert jobs == 2  # 6 GiB / 3.0 GiB-per-worker default == 2, below the ceiling
+    assert any("OOM" in r.message for r in caplog.records)
 
 
 def test_run_tu_loop_reconciles_identical_entity_across_tus():
@@ -721,6 +1145,26 @@ class TestDumpWithManifest:
                 compiler="cc",
                 header_backend="hybrid",
                 dump_manifest=self._manifest(tmp_path),
+            )
+
+    def test_dump_rejects_device_frontend_context_for_hybrid(self, tmp_path: Path):
+        """ADR-050 D5 (G32 Phase D, Codex review): `dump()`'s own hybrid
+        recursion (`run_hybrid_dump`, used by direct Python-API callers) does
+        not forward `frontend_context` to either of its two recursive
+        castxml/clang sub-dumps -- a `frontend_context="device"` request
+        would otherwise silently default both to "host" and hand back an
+        ordinary host snapshot the caller could mistake for device-derived.
+        Rejected before the hybrid dispatch, with no compiler needed since
+        the check fires before any subprocess/binary access."""
+        with pytest.raises(AstContextMissingError, match="hybrid"):
+            dump(
+                tmp_path / "nonexistent.so",
+                [],
+                [],
+                version="1.0",
+                compiler="c++",
+                header_backend="hybrid",
+                frontend_context="device",
             )
 
     def test_dump_manifest_merges_identical_redeclaration_across_tus(
