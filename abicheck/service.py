@@ -896,6 +896,13 @@ def _attach_header_graph(
     from .dumper import _clang_header_dump, _resolve_clang_bin
 
     cc = compile if compile is not None else CompileContext()
+    # Case-insensitive, None-safe: PE/Mach-O's own main pass
+    # (service_header_scoped._try_header_scoped_dump) treats an uppercase
+    # "C" the same as "c" for both compiler selection and the AST cache key;
+    # every C/C++ branch below must agree with that, or an explicit
+    # lang="C" request silently parses as C++ here and/or misses the memo
+    # the main pass wrote (CodeRabbit review, Codex review).
+    _is_c = (lang or "").lower() == "c"
     ast_root: dict[str, Any] | None = None
     resolved_headers: list[Path] = []
     eff_includes: list[Path] = list(includes)
@@ -941,7 +948,7 @@ def _attach_header_graph(
         ast_root, _resolved_kind = _clang_header_dump(
             resolved_headers,
             eff_includes,
-            compiler="cc" if lang == "c" else "c++",
+            compiler="cc" if _is_c else "c++",
             gcc_path=cc.gcc_path,
             gcc_prefix=cc.gcc_prefix,
             gcc_options=cc.gcc_options,
@@ -993,16 +1000,16 @@ def _attach_header_graph(
         # the dump (ADR-028 D3).
         try:
             include_clang_bin = _resolve_clang_bin(
-                "cc" if lang == "c" else "c++", cc.gcc_path, cc.gcc_prefix
+                "cc" if _is_c else "c++", cc.gcc_path, cc.gcc_prefix
             )
         except SnapshotError:
-            include_clang_bin = "clang++" if lang != "c" else "clang"
+            include_clang_bin = "clang" if _is_c else "clang++"
         include_map, include_diags = ClangHeaderIncludeExtractor(
             clang_bin=include_clang_bin
         ).extract(
             [str(p) for p in resolved_headers],
             [str(p) for p in eff_includes],
-            language="C" if lang == "c" else "CXX",
+            language="C" if _is_c else "CXX",
             sysroot=str(cc.sysroot) if cc.sysroot else None,
             nostdinc=cc.nostdinc,
             gcc_options=cc.gcc_options,
