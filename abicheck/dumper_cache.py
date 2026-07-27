@@ -38,15 +38,44 @@ _ast_memoize_scope: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "_ast_memoize_scope", default=False
 )
 
+#: Keys :func:`store_cached_ast` has written *during the current scope*
+#: (``None`` outside any scope) -- lets :func:`ast_memoize_scope` clean up
+#: after itself on an exceptional exit (Codex review): a primary dump that
+#: successfully parses and memoizes an AST but then fails *later* in the
+#: same call (e.g. snapshot construction raises after the AST parse
+#: succeeded) never reaches ``_attach_header_graph`` to pop that entry, so
+#: without this it would sit until evicted by the count bound -- up to
+#: :data:`_AST_MEMO_MAXSIZE` orphaned, potentially multi-GB trees in a
+#: long-lived process. A ``ContextVar`` (not a plain module list) so two
+#: concurrent scopes on different threads each only ever see and clean up
+#: their own writes, never each other's.
+_ast_memoize_scope_keys: contextvars.ContextVar[list[tuple[str, str]] | None] = (
+    contextvars.ContextVar("_ast_memoize_scope_keys", default=None)
+)
+
 
 @contextmanager
 def ast_memoize_scope() -> Iterator[None]:
-    """Mark the current thread's AST parses as worth memoizing in-process."""
-    token = _ast_memoize_scope.set(True)
+    """Mark the current thread's AST parses as worth memoizing in-process.
+
+    Cleans up any entry written during this scope if the scoped operation
+    raises, since a failure partway through means no downstream
+    ``_attach_header_graph`` will ever run to pop it (see
+    :data:`_ast_memoize_scope_keys`'s own docstring).
+    """
+    active_token = _ast_memoize_scope.set(True)
+    keys_token = _ast_memoize_scope_keys.set([])
     try:
         yield
+    except BaseException:
+        written = _ast_memoize_scope_keys.get() or []
+        with _AST_MEMO_LOCK:
+            for k in written:
+                _AST_MEMO.pop(k, None)
+        raise
     finally:
-        _ast_memoize_scope.reset(token)
+        _ast_memoize_scope.reset(active_token)
+        _ast_memoize_scope_keys.reset(keys_token)
 
 
 def ast_memoize_active() -> bool:
@@ -68,9 +97,11 @@ def ast_memoize_active() -> bool:
 #: potentially multi-GB tree strongly referenced (Codex/CodeRabbit review --
 #: bounding by entry count alone still let a long-lived process, e.g. the MCP
 #: server or ``scan`` over many libraries, accumulate several such trees at
-#: once). ``_AST_MEMO_MAXSIZE`` is only a last-resort safety net for an entry
-#: that is written but never consumed (header graph disabled, or an
-#: exception between the write and the would-be read) -- kept small since
+#: once). ``ast_memoize_scope`` cleans up its own writes on an exceptional
+#: exit (a later failure in the same scoped call, before
+#: ``_attach_header_graph`` would have popped it); ``_AST_MEMO_MAXSIZE`` is
+#: only the last-resort bound for whatever that can't cover -- a write with
+#: no active scope at all (header graph disabled) -- kept small since
 #: pop-on-read already handles the common single-handoff case.
 _AST_MEMO_LOCK = threading.Lock()
 _AST_MEMO: dict[tuple[str, str], Any] = {}
@@ -78,11 +109,19 @@ _AST_MEMO_MAXSIZE = 2
 
 
 def store_cached_ast(key: str, backend: str, root: Any) -> None:
-    """Memoize an already-parsed AST *root* for (*backend*, *key*) in-process."""
+    """Memoize an already-parsed AST *root* for (*backend*, *key*) in-process.
+
+    Registers the key with the calling thread's active
+    :func:`ast_memoize_scope`, if any, so it can be cleaned up on an
+    exceptional exit (see :data:`_ast_memoize_scope_keys`'s own docstring).
+    """
     with _AST_MEMO_LOCK:
         _AST_MEMO[(backend, key)] = root
         while len(_AST_MEMO) > _AST_MEMO_MAXSIZE:
             _AST_MEMO.pop(next(iter(_AST_MEMO)))
+    scope_keys = _ast_memoize_scope_keys.get()
+    if scope_keys is not None:
+        scope_keys.append((backend, key))
 
 
 def load_cached_ast(

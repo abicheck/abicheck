@@ -1994,6 +1994,50 @@ def test_clang_header_dump_memoizes_inside_ast_memoize_scope(
     assert dumper_cache._AST_MEMO
 
 
+def test_ast_memoize_scope_cleans_up_its_own_writes_on_exception(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review: a primary dump that successfully parses/memoizes an AST
+    but then fails *later* in the same scoped call (e.g. snapshot
+    construction raises after the AST parse succeeded) never reaches
+    _attach_header_graph to pop that entry -- ast_memoize_scope must clean
+    up whatever it wrote itself when the scoped operation raises, or the
+    entry sits until evicted by the count bound in a long-lived process."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+
+    with pytest.raises(RuntimeError, match="snapshot construction failed"):
+        with dumper_cache.ast_memoize_scope():
+            _clang_header_dump([header], [])
+            assert dumper_cache._AST_MEMO  # written while the scope is active
+            raise RuntimeError("snapshot construction failed")
+    assert not dumper_cache._AST_MEMO  # cleaned up on the way out
+
+
+def test_ast_memoize_scope_leaves_other_threads_writes_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A failing scope must only clean up the keys *it* wrote -- not an
+    unrelated entry already sitting in the memo from something else (e.g. a
+    concurrent scope on another thread; ContextVars are per-thread, so this
+    also verifies the tracking list itself doesn't leak across scopes)."""
+    dumper_cache.store_cached_ast("unrelated-key", "clang", {"kind": "Other"})
+    with pytest.raises(RuntimeError):
+        with dumper_cache.ast_memoize_scope():
+            raise RuntimeError("boom")
+    assert ("clang", "unrelated-key") in dumper_cache._AST_MEMO
+
+
 def test_clang_only_dump_does_not_require_gxx_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
