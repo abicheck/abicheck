@@ -16,6 +16,7 @@ Fold per-target ``compare``/``scan`` reports into one CI gate decision.
 | `expect` | `list[str] \| None` | no | `None` | Required target id(s) (mutually exclusive with manifest/run_plan). |
 | `optional` | `list[str] \| None` | no | `None` | Optional target id(s) — only meaningful together with expect. |
 | `discovered_only` | `bool` | no | `False` | Aggregate whatever reports are present with no coverage gate (mutually exclusive with the other four). |
+| `report_prefix` | `str` | no | `abi-report-` | Filename prefix stripped when deriving a target id from a report file that does not self-identify a ``target_id`` (e.g. ``"abi-report-linux.json"`` -> ``"linux"``). |
 | `on_missing_required` | `str` | no | `fail` | ``"fail"`` (default) or ``"warn"`` — how an unavailable required target affects the exit code. |
 | `on_unexpected_target` | `str` | no | `include` | ``"include"`` (default), ``"warn"``, ``"fail"``, or ``"ignore"`` — how a report for an unexpected target is handled. |
 
