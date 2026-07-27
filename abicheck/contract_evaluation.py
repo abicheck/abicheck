@@ -252,6 +252,32 @@ def evaluate_change_contract_relevance(
         return _all_mode_decision()
 
     # mode is ContractMode.PUBLIC from here on.
+    # A finding already demoted to the audit ledger by an earlier pipeline
+    # step (FilterNonPublicSurface / DemoteOffPythonSurface /
+    # DemoteUnreachableInternalChurn, post_processing.py) already carries
+    # that step's own authoritative `surface_exclusion_reason` -- consult it
+    # before falling through to a from-scratch `classify_change_surface`
+    # recomputation below, which can reach a *different*, weaker conclusion
+    # than the specialized detector that originally produced it. Concretely:
+    # a `DemoteOffPythonSurface` change necessarily has no C-header surface
+    # to scope against (that step's own precondition), so recomputing here
+    # would hit the unresolvable-surface branch and lose the fact that the
+    # off-Python-surface determination was already conclusive; a
+    # `DemoteUnreachableInternalChurn` change could be reachable under this
+    # module's own (different, coarser) reachability closure even though
+    # the specialized internal-leak check already proved no leak path
+    # exists, which would wrongly reclassify it IN_CONTRACT (Codex review).
+    if change.surface_exclusion_reason in _TERMINAL_SURFACE_REASONS:
+        return ContractEvaluationDecision(
+            relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
+            reason_code="terminal_authoritative_exclusion",
+            assurance=ContractAssurance.COMPLETE,
+        )
+    if change.surface_exclusion_reason in _WEAK_SURFACE_REASONS:
+        return _unresolved_decision(
+            "required_evidence_incomplete", ContractAssurance.PARTIAL
+        )
+
     if not (surf_old.resolvable and surf_new.resolvable):
         # No header-derived visibility on one or both sides: no confident
         # contract-relevance claim is possible for *any* entity finding,

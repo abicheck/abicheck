@@ -50,7 +50,13 @@ from abicheck.model import (
     ScopeOrigin,
     Visibility,
 )
-from abicheck.surface import PublicSurface, compute_public_surface
+from abicheck.surface import (
+    REASON_NO_PROVENANCE,
+    REASON_OFF_PYTHON_SURFACE,
+    REASON_PRIVATE_INTERNAL_UNREACHABLE,
+    PublicSurface,
+    compute_public_surface,
+)
 
 
 def _fn(name, ret="void", params=(), vis=Visibility.PUBLIC, origin=ScopeOrigin.UNKNOWN):
@@ -160,6 +166,102 @@ class TestPublicModeUnresolvedSurface:
         )
         assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
         assert decision.reason_code == "required_evidence_incomplete"
+
+
+class TestPublicModeAlreadyExcludedByPipeline:
+    """A finding already demoted to the audit ledger by an earlier pipeline
+    step (post_processing.py's DemoteOffPythonSurface/
+    DemoteUnreachableInternalChurn) carries that step's own authoritative
+    ``surface_exclusion_reason`` -- it must be consulted directly rather
+    than recomputed from scratch, since a from-scratch
+    classify_change_surface call can reach a different, weaker conclusion
+    (e.g. the unresolvable-surface branch for an off-Python-surface
+    finding, which by construction has no C-header surface at all)."""
+
+    def test_off_python_surface_reason_wins_even_with_unresolvable_surfaces(
+        self,
+    ) -> None:
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Foo",
+            description="",
+            surface_exclusion_reason=REASON_OFF_PYTHON_SURFACE,
+        )
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
+            reason_code="terminal_authoritative_exclusion",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_private_internal_unreachable_reason_wins_over_fresh_reclassification(
+        self,
+    ) -> None:
+        # Even with a resolvable, all-public surface that a from-scratch
+        # classify_change_surface call would happily call IN_CONTRACT, the
+        # already-recorded confirmed-private reason must win.
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="detail::Impl",
+            description="",
+            surface_exclusion_reason=REASON_PRIVATE_INTERNAL_UNREACHABLE,
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        assert decision.reason_code == "terminal_authoritative_exclusion"
+
+    def test_weak_pipeline_reason_downgrades_to_unresolved(self) -> None:
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Foo",
+            description="",
+            surface_exclusion_reason=REASON_NO_PROVENANCE,
+        )
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="required_evidence_incomplete",
+            assurance=ContractAssurance.PARTIAL,
+        )
+
+    def test_all_mode_ignores_pipeline_surface_exclusion_reason(self) -> None:
+        # ALL mode makes no surface-membership claim at all -- a pre-existing
+        # exclusion reason from public-surface scoping is irrelevant to it.
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Foo",
+            description="",
+            surface_exclusion_reason=REASON_OFF_PYTHON_SURFACE,
+        )
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.ALL
+        )
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+
+    def test_unrecognized_pipeline_reason_falls_through_to_normal_classification(
+        self,
+    ) -> None:
+        # A reason string this module doesn't recognize (e.g. the separate
+        # POST-manifest-surface feature's own custom reason) must not crash
+        # or be silently treated as either terminal or weak -- it falls
+        # through to ordinary resolvable/identity/classify_change_surface
+        # handling, same as if the field were unset.
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3apiv",
+            description="",
+            surface_exclusion_reason="not in POST manifest committed surface",
+        )
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        s = compute_public_surface(snap)
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
 
 
 class TestPublicModeIdentityAmbiguous:

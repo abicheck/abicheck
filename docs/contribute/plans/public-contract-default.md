@@ -941,6 +941,17 @@ deliberately narrower than the full phase:
 - The provider ledger this phase's gate calls for ("every shadow delta has
   evidence") is not built yet — a decision today is the relevance/reason/
   assurance triple only, with no persisted per-provider evidence record.
+- A finding a pipeline step has already demoted to the audit ledger
+  (`post_processing.py`'s `DemoteOffPythonSurface`/
+  `DemoteUnreachableInternalChurn`, ADR-024/ADR-028) carries that step's own
+  `Change.surface_exclusion_reason` — `evaluate_change_contract_relevance`
+  consults it directly before falling back to a from-scratch
+  `classify_change_surface` recomputation, since re-deriving from the raw
+  surface pair alone can disagree with the specialized detector that
+  produced it (an off-Python-surface finding has no C-header surface to
+  recompute against at all; an internal-namespace finding's own dedicated
+  leak check is a finer-grained, different reachability model than this
+  module's coarse public/private split).
 
 Not yet done: wiring this into `checker.compare`'s output (even as a
 non-authoritative shadow field), the provider-evidence ledger, the
