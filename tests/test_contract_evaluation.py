@@ -534,6 +534,197 @@ class TestPublicModeInSurface:
         )
 
 
+class TestPublicModeSideAuthority:
+    """ADR-049 D4: "Removal and modification of an existing obligation use
+    old-side evidence. Addition and a new commitment use new-side evidence
+    ... If the authoritative side is unresolved, evidence from the other
+    side cannot manufacture confidence." `_in_surface_result_is_confirmed`
+    previously checked the old-union-new `SurfaceUnions`, letting evidence
+    from the *wrong* side confirm or hide a finding (Codex review, fresh
+    evidence)."""
+
+    def test_modification_is_not_confirmed_by_new_side_alone(self) -> None:
+        # A private-header function whose return type changes while it
+        # simultaneously becomes public: the *old* side (a modification's
+        # authoritative side) never proves it was public, so the new
+        # side's own public membership must not manufacture confidence.
+        other_old = _fn("other", origin=ScopeOrigin.PUBLIC_HEADER)
+        fn_old = _fn(
+            "foo",
+            vis=Visibility.HIDDEN,
+            origin=ScopeOrigin.PRIVATE_HEADER,
+            mangled="_Z3foov",
+        )
+        other_new = _fn("other", origin=ScopeOrigin.PUBLIC_HEADER)
+        fn_new = _fn(
+            "foo",
+            ret="double",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+            mangled="_Z3foov",
+        )
+        surf_old = compute_public_surface(
+            AbiSnapshot(library="l", version="1", functions=[fn_old, other_old])
+        )
+        surf_new = compute_public_surface(
+            AbiSnapshot(library="l", version="1", functions=[fn_new, other_new])
+        )
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="_Z3foov", description=""
+        )
+        decision = evaluate_change_contract_relevance(
+            c, surf_old, surf_new, mode=ContractMode.PUBLIC
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
+
+    def test_removal_is_confirmed_by_old_side_despite_new_side_going_private(
+        self,
+    ) -> None:
+        # D4: "New headers cannot retroactively hide an old public
+        # obligation." A function public in old, then demoted to a private
+        # header in new, must still confirm via the old side alone.
+        fn_old = _fn("foo", origin=ScopeOrigin.PUBLIC_HEADER, mangled="_Z3foov")
+        fn_new = _fn(
+            "foo",
+            vis=Visibility.HIDDEN,
+            origin=ScopeOrigin.PRIVATE_HEADER,
+            mangled="_Z3foov",
+        )
+        surf_old = compute_public_surface(
+            AbiSnapshot(library="l", version="1", functions=[fn_old])
+        )
+        surf_new = compute_public_surface(
+            AbiSnapshot(library="l", version="1", functions=[fn_new])
+        )
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="")
+        decision = evaluate_change_contract_relevance(
+            c, surf_old, surf_new, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_addition_is_confirmed_by_new_side_alone(self) -> None:
+        snap_new = AbiSnapshot(
+            library="l", version="1", functions=[_fn("bar", mangled="_Z3barv")]
+        )
+        surf_new = compute_public_surface(snap_new)
+        c = Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_addition_is_not_confirmed_by_a_private_new_side(self) -> None:
+        snap_new = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn(
+                    "bar",
+                    vis=Visibility.HIDDEN,
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                    mangled="_Z3barv",
+                )
+            ],
+        )
+        surf_new = compute_public_surface(snap_new)
+        c = Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+    def test_addition_needs_the_new_side_resolvable_not_the_old_side(self) -> None:
+        # The old side being resolvable (but irrelevant to an addition) must
+        # not substitute for the new side's own resolvability.
+        snap_old = AbiSnapshot(library="l", version="1", functions=[_fn("other")])
+        surf_old = compute_public_surface(snap_old)
+        c = Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv", description="")
+        decision = evaluate_change_contract_relevance(
+            c, surf_old, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
+        assert decision.assurance is ContractAssurance.UNAVAILABLE
+
+    def test_removal_needs_the_old_side_resolvable_not_the_new_side(self) -> None:
+        snap_new = AbiSnapshot(library="l", version="1", functions=[_fn("other")])
+        surf_new = compute_public_surface(snap_new)
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
+        assert decision.assurance is ContractAssurance.UNAVAILABLE
+
+    def test_hidden_friend_added_is_judged_by_new_side_alone(self) -> None:
+        # hidden_friend_added is itself one of ADDITION_KINDS -- a new
+        # friend appearing, judged by the new side.
+        from abicheck.model import RecordType
+
+        owner_new = RecordType(
+            name="Foo", kind="class", size_bits=8, origin=ScopeOrigin.PUBLIC_HEADER
+        )
+        snap_new = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[owner_new],
+        )
+        surf_new = compute_public_surface(snap_new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol="operator==",
+            caused_by_type="Foo",
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
+        )
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+    def test_hidden_friend_removed_is_judged_by_old_side_alone(self) -> None:
+        from abicheck.model import RecordType
+
+        owner_old = RecordType(
+            name="Foo", kind="class", size_bits=8, origin=ScopeOrigin.PUBLIC_HEADER
+        )
+        owner_new = RecordType(
+            name="Foo", kind="class", size_bits=8, origin=ScopeOrigin.PRIVATE_HEADER
+        )
+        public_api = _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)
+        surf_old = compute_public_surface(
+            AbiSnapshot(
+                library="l", version="1", functions=[public_api], types=[owner_old]
+            )
+        )
+        surf_new = compute_public_surface(
+            AbiSnapshot(
+                library="l", version="1", functions=[public_api], types=[owner_new]
+            )
+        )
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="operator==",
+            caused_by_type="Foo",
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(
+            c, surf_old, surf_new, mode=ContractMode.PUBLIC
+        )
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+
 class TestPublicModeConservativeRetentionIsNotConfirmation:
     """``classify_change_surface`` returns ``(True, None)`` from several
     sources with very different confidence -- genuine public-root/closure
@@ -1071,6 +1262,36 @@ class TestPublicModeTerminalExclusion:
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
         assert decision.reason_code == "terminal_authoritative_exclusion"
+
+    def test_private_header_terminal_exclusion_is_a_known_d5_gap(self) -> None:
+        # Known, deliberately-deferred limitation against ADR-049 D5 (Codex
+        # review, fresh evidence): D5 requires "every selected provider
+        # capable of stronger-or-equal in-contract evidence completed for
+        # that entity/domain" before a terminal exclusion is genuinely
+        # complete -- private-header provenance alone is never terminal
+        # while such a provider is missing, failed, stale, or partial. This
+        # module has no persisted provider-completeness ledger to consult
+        # (see `_TERMINAL_SURFACE_REASONS`'s own comment and the module
+        # docstring's "provider ledger ... is not built yet"), so it cannot
+        # distinguish "no stronger provider is configured for this run" from
+        # "one is configured but hasn't completed yet" -- it currently
+        # assumes the former unconditionally. This test locks in today's
+        # (over-claiming, not merely conservative) behavior so that
+        # building the real provider ledger is a deliberate, visible change
+        # to this assertion, not a silent behavior drift.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("secret_impl", origin=ScopeOrigin.PRIVATE_HEADER)],
+        )
+        s = compute_public_surface(snap)
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="secret_impl", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
+            reason_code="terminal_authoritative_exclusion",
+            assurance=ContractAssurance.COMPLETE,
+        )
 
 
 class TestPublicModeWeakReason:

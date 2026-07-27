@@ -59,6 +59,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .checker_policy import ADDITION_KINDS
 from .checker_types import Change
 from .contract_relevance_types import (
     CONTRACT_REASON_CODES,
@@ -194,6 +195,32 @@ _REASON_POST_MANIFEST_NOT_COMMITTED = "not in POST manifest committed surface"
 # happens to be header-resolvable would fall through to a fresh
 # classify_change_surface recomputation and could be wrongly reclassified
 # IN_CONTRACT (Codex review).
+#
+# Known, deliberately-deferred gap against ADR-049 D5 (Codex review, fresh
+# evidence): D5's `out_of_contract_proof_complete` requires "every selected
+# provider capable of stronger-or-equal in-contract evidence completed for
+# that entity/domain" before a terminal exclusion is genuinely complete --
+# "Private-header provenance alone is never terminal while such a [stronger]
+# provider is missing, failed, stale, partial, or identity-ambiguous."
+# `REASON_PRIVATE_HEADER`/`REASON_SYSTEM_HEADER` are treated as
+# unconditionally terminal here regardless of whether some *other*,
+# stronger provider (an exact manifest beyond `--post-manifest`, a
+# required-symbol overlay beyond `force_public_symbols`, concrete
+# consumer-import evidence) was configured for this run and hasn't
+# completed -- because this module has no persisted provider-completeness
+# ledger to consult at all (see the module docstring's own "provider ledger
+# ... is not built yet"), not because the two known, wireable providers
+# this module *can* already see are ignored: `force_public_symbols` and
+# `--post-manifest` (`_REASON_POST_MANIFEST_NOT_COMMITTED`) are both
+# checked and, by construction, can never coexist with reaching this
+# terminal-reason branch for the same finding (each fully resolves the
+# finding itself, one way or the other, before this branch is reached).
+# The remaining risk is entirely providers this codebase does not yet wire
+# as an input anywhere (no caller anywhere constructs "an exact manifest
+# was configured and is still loading" data) -- building that ledger is
+# Phase 3's own gate item ("every shadow delta has evidence") and Phase 4/5
+# territory (`docs/contribute/plans/public-contract-default.md`), not a
+# narrow fix available with today's data model.
 _TERMINAL_SURFACE_REASONS: frozenset[str] = frozenset(
     {
         REASON_NON_PUBLIC_TYPE,
@@ -299,6 +326,41 @@ def _decision_for_surface_reason(reason: str) -> ContractEvaluationDecision:
     )
 
 
+def _authoritative_surface(
+    change: Change, surf_old: PublicSurface, surf_new: PublicSurface
+) -> PublicSurface:
+    """Which side's evidence is authoritative for *change* (ADR-049 D4).
+
+    "Removal and modification of an existing obligation use old-side
+    evidence. Addition and a new commitment use new-side evidence." --
+    checked via ``checker_policy.ADDITION_KINDS``, an already-curated,
+    per-kind registry classification of genuine new-entity/new-commitment
+    kinds (``func_added``, ``type_added``, ``enum_member_added``, ...),
+    rather than a naive ``kind.value.endswith("_added")`` string heuristic:
+    confirmed empirically that many kinds *ending* in ``"_added"`` are
+    themselves modifications of an already-existing obligation gaining a
+    new *property* -- e.g. ``func_noexcept_added``/``func_virtual_added``/
+    ``ctor_explicit_added``/``*_deprecated_added`` describe an existing
+    function/type acquiring a qualifier, not a new function/type
+    appearing -- so a suffix match would wrongly treat those as new-side
+    authoritative (Codex review, fresh evidence). ``ADDITION_KINDS`` is
+    deliberately narrower (17 members) than the ~40 ``"_added"``-suffixed
+    slugs for exactly this reason: it excludes exactly the "existing entity
+    gained a property" shape.
+
+    Without this, a symbol/type's public-root confirmation was checked
+    against the *union* of both sides regardless of the change's direction
+    -- so a `FUNC_RETURN_CHANGED` finding on a function that was private in
+    `surf_old` and became public in `surf_new` was wrongly confirmed
+    `IN_CONTRACT` via the new side's membership alone, even though a
+    *modification* of an *existing* obligation must be judged by what that
+    obligation *was* (the old side), not what it later became -- new public
+    evidence cannot retroactively manufacture confidence about an old,
+    unresolved/private commitment (Codex review, fresh evidence).
+    """
+    return surf_new if change.kind in ADDITION_KINDS else surf_old
+
+
 def _hidden_friend_confirmed_public(
     change: Change, surf_old: PublicSurface, surf_new: PublicSurface
 ) -> bool:
@@ -319,25 +381,34 @@ def _hidden_friend_confirmed_public(
     the way the generic path below does would systematically underconfirm
     this kind, which is exactly what a prior version of this function did
     (Codex review, ninth round).
+
+    Checks only :func:`_authoritative_surface`'s side (ADR-049 D4), not
+    "either side" -- ``hidden_friend_added`` is itself one of
+    ``ADDITION_KINDS`` (a new friend appearing), so it is judged by the new
+    side alone; ``hidden_friend_removed`` is judged by the old side alone,
+    the side on which the friend/owner actually needs to have been public
+    for its removal to be a real public-contract break (Codex review, fresh
+    evidence).
     """
+    auth = _authoritative_surface(change, surf_old, surf_new)
     owner = change.caused_by_type
     if owner:
         bare = owner.rsplit("::", 1)[-1] if "::" in owner else owner
-        eff_old = _hidden_friend_owner_effective_origin(surf_old, owner, bare)
-        eff_new = _hidden_friend_owner_effective_origin(surf_new, owner, bare)
-        if ScopeOrigin.PUBLIC_HEADER in (eff_old, eff_new):
+        if (
+            _hidden_friend_owner_effective_origin(auth, owner, bare)
+            == ScopeOrigin.PUBLIC_HEADER
+        ):
             return True
     sym = change.symbol or ""
-    eff_sym_old = _one_sided_key_origin(surf_old, sym, surf_old.all_symbols)
-    eff_sym_new = _one_sided_key_origin(surf_new, sym, surf_new.all_symbols)
-    return ScopeOrigin.PUBLIC_HEADER in (eff_sym_old, eff_sym_new)
+    return (
+        _one_sided_key_origin(auth, sym, auth.all_symbols) == ScopeOrigin.PUBLIC_HEADER
+    )
 
 
 def _in_surface_result_is_confirmed(
     change: Change,
     surf_old: PublicSurface,
     surf_new: PublicSurface,
-    unions: SurfaceUnions,
 ) -> bool:
     """Whether ``classify_change_surface``'s ``True`` verdict for *change*
     reflects genuine public-root/closure membership, not its anti-hiding
@@ -400,9 +471,10 @@ def _in_surface_result_is_confirmed(
     ``public_types`` entry (``"Foo"``).
 
     A type-candidate match is also rejected when every matching candidate is
-    ambiguous -- either the candidate itself is flagged in either side's
-    ``ambiguous_type_names`` (two distinct records/enums sharing one bare
-    tail, e.g. ``one::Point``/``two::Point`` both spelled bare ``Point``:
+    ambiguous -- either the candidate itself is flagged in the authoritative
+    side's own ``ambiguous_type_names`` (two distinct records/enums sharing
+    one bare tail, e.g. ``one::Point``/``two::Point`` both spelled bare
+    ``Point``:
     ``compute_public_surface`` deliberately keeps *both* records in
     ``public_types`` rather than silently dropping either, its own
     anti-hiding rule), or the candidate is a *qualified* name whose own
@@ -457,9 +529,26 @@ def _in_surface_result_is_confirmed(
     ``IN_CONTRACT``, only an occasional wrongly-``UNKNOWN_UNRESOLVED``) --
     the same direction every other unresolvable case in this function
     already defaults to.
+
+    **Checks only the authoritative side (ADR-049 D4), not the old∪new
+    union:** "Removal and modification of an existing obligation use
+    old-side evidence. Addition and a new commitment use new-side
+    evidence... If the authoritative side is unresolved, evidence from the
+    other side cannot manufacture confidence." Confirmed empirically that
+    checking the union let new-side evidence retroactively confirm an old,
+    private/unresolved obligation: a `FUNC_RETURN_CHANGED` finding on a
+    function that was private in `surf_old` and became public in
+    `surf_new` was wrongly confirmed `IN_CONTRACT` purely because the
+    *new* side's `public_symbols` happened to contain it, even though a
+    modification must be judged by what the obligation *was* (Codex
+    review, fresh evidence). Delegates to :func:`_authoritative_surface`
+    (``ADDITION_KINDS`` for new-side authority, old side otherwise) and
+    checks only that one side's ``public_symbols``/``public_types``/
+    ``ambiguous_type_names`` throughout.
     """
     if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
         return _hidden_friend_confirmed_public(change, surf_old, surf_new)
+    auth = _authoritative_surface(change, surf_old, surf_new)
     sym = change.symbol or ""
     # `classify_change_surface` never consults `public_symbols` for a
     # type-level kind at all (`_classify_symbol_level` is only called when
@@ -475,16 +564,16 @@ def _in_surface_result_is_confirmed(
     # confirmed via this check before gating it the same way (Codex
     # review).
     if change.kind.value not in _TYPE_LEVEL_KIND_NAMES:
-        if sym in unions.public_symbols:
+        if sym in auth.public_symbols:
             return True
-        if sym and "::" in sym and sym.rsplit("::", 1)[1] in unions.public_symbols:
+        if sym and "::" in sym and sym.rsplit("::", 1)[1] in auth.public_symbols:
             return True
     if change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES and sym and "::" in sym:
         candidates = {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
     else:
         candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
-    matched = candidates & unions.public_types
-    ambiguous = surf_old.ambiguous_type_names | surf_new.ambiguous_type_names
+    matched = candidates & auth.public_types
+    ambiguous = auth.ambiguous_type_names
     confirmed_matches = {
         m
         for m in matched
@@ -630,31 +719,19 @@ def evaluate_change_contract_relevance(
             assurance=ContractAssurance.COMPLETE,
         )
 
-    if not (surf_old.resolvable or surf_new.resolvable):
-        # Neither side has header-derived visibility at all: no confident
-        # contract-relevance claim is possible for any other C/C++ entity
-        # finding -- that rule is about not *hiding* a finding from a
-        # report, an entirely different question from "can this shadow
-        # evaluator confidently label it". (A `python_*`/never-filter/
-        # force-public finding never reaches this branch at all -- see the
-        # early returns above.)
-        #
-        # Deliberately `or`, not `and` (Codex review, fresh evidence): a
-        # *positive* public-root proof from whichever side is resolvable is
-        # sufficient on its own -- e.g. a `FUNC_REMOVED` finding is proven by
-        # the *old* side alone (the function existed and was public there;
-        # the new side's own header availability is irrelevant to that
-        # fact). Only a *negative* exclusion claim genuinely needs both
-        # sides' agreement, and `classify_change_surface`'s own internal
-        # gate (`if not (surf_old.resolvable and surf_new.resolvable):
-        # return True, None`) already guarantees `in_surface` is never
-        # confidently `False` whenever either side is unresolvable -- so
-        # falling through to the ordinary classify/confirm path below with
-        # only one side resolvable can still correctly reach `IN_CONTRACT`
-        # (confirmed via the resolvable side's real universe data, since
-        # `surface_unions` of a real surface and a bare/unresolvable one is
-        # just the real side's own sets) but can never wrongly reach
-        # `PROVEN_OUT_OF_CONTRACT`.
+    # ADR-049 D4: "If the authoritative side is unresolved, evidence from
+    # the other side cannot manufacture confidence." Checking the
+    # *authoritative* side specifically (not "either side" -- a prior
+    # version of this gate used `surf_old.resolvable or surf_new.resolvable`,
+    # which let an unrelated resolvable *non*-authoritative side substitute
+    # for the authoritative one) -- e.g. a `FUNC_REMOVED` finding is proven
+    # by the *old* side alone (the function existed and was public there;
+    # the new side's own header availability is irrelevant to that fact),
+    # so only the old side's resolvability matters for it; a `FUNC_ADDED`
+    # finding is the mirror image, judged by the new side alone (Codex
+    # review, fresh evidence).
+    auth = _authoritative_surface(change, surf_old, surf_new)
+    if not auth.resolvable:
         return _unresolved_decision(
             "required_evidence_incomplete", ContractAssurance.UNAVAILABLE
         )
@@ -669,7 +746,7 @@ def evaluate_change_contract_relevance(
         change, surf_old, surf_new, unions=unions
     )
     if in_surface:
-        if _in_surface_result_is_confirmed(change, surf_old, surf_new, unions):
+        if _in_surface_result_is_confirmed(change, surf_old, surf_new):
             return ContractEvaluationDecision(
                 relevance=ContractRelevance.IN_CONTRACT,
                 reason_code="public_root_membership",
@@ -682,9 +759,11 @@ def evaluate_change_contract_relevance(
     # `classify_change_surface` only returns `in_surface=False` (with a
     # reason drawn from `_ALL_SURFACE_REASONS`) when *both* sides are
     # resolvable -- its own internal gate returns `(True, None)` whenever
-    # either side isn't (see the `or`-gate comment above), so this branch is
-    # only reachable with full two-sided evidence even though the gate
-    # above only bails out when *neither* side is resolvable.
+    # either side isn't, so this branch is only reachable with full
+    # two-sided evidence even though the gate above only requires the
+    # *authoritative* side to be resolvable (the non-authoritative side can
+    # still be unresolvable and fall through to here, in which case
+    # `classify_change_surface`'s own gate keeps it at `in_surface=True`).
     assert reason in _ALL_SURFACE_REASONS, f"unrecognized surface reason: {reason!r}"
     return _decision_for_surface_reason(reason)
 
