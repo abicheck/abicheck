@@ -278,7 +278,7 @@ class TestPublicModeAlreadyExcludedByPipeline:
         # handling, same as if the field were unset.
         c = Change(
             kind=ChangeKind.FUNC_REMOVED,
-            symbol="_Z3apiv",
+            symbol="_Z3api",
             description="",
             surface_exclusion_reason="not in POST manifest committed surface",
         )
@@ -317,6 +317,93 @@ class TestPublicModeInSurface:
             reason_code="public_root_membership",
             assurance=ContractAssurance.COMPLETE,
         )
+
+
+class TestPublicModeConservativeRetentionIsNotConfirmation:
+    """``classify_change_surface`` returns ``(True, None)`` from several
+    sources with very different confidence -- genuine public-root/closure
+    membership, but also surface.py's own anti-hiding "cannot place this
+    finding, so keep it" fallback (an empty type-candidate set, or an
+    internal-namespace type deferred to the internal-leak detector).
+    Neither of the latter two is evidence of public membership, and must
+    not be silently upgraded to IN_CONTRACT (Codex review, eighth round)."""
+
+    def test_type_unknown_to_either_snapshot_is_unresolved_not_confirmed(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="TotallyUnknownType",
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="required_evidence_incomplete",
+            assurance=ContractAssurance.PARTIAL,
+        )
+
+    def test_internal_namespace_type_with_no_leak_finding_is_unresolved(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api")],
+            types=[_rec("detail::Impl")],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="detail::Impl", description=""
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
+
+    def test_constant_changed_stays_in_contract_despite_no_universe_evidence(
+        self,
+    ) -> None:
+        # constant_changed is a _NEVER_FILTER_KIND_NAMES kind -- public by
+        # construction (the dumper only extracts PUBLIC_HEADER constants),
+        # so it must stay trusted even though a constant name never
+        # appears in public_symbols/public_types at all.
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        s = compute_public_surface(snap)
+        c = Change(kind=ChangeKind.CONSTANT_CHANGED, symbol="MY_CONST", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+    def test_python_prefixed_kind_stays_in_contract_despite_no_universe_evidence(
+        self,
+    ) -> None:
+        # A python_* finding lives on a distinct evidence axis the
+        # header-surface universes don't cover at all.
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.PYTHON_ABI3_DROPPED,
+            symbol="some.python.name",
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+    def test_qualified_symbol_tail_confirms_via_public_symbols(self) -> None:
+        # A namespace-qualified symbol whose trailing ::-segment matches a
+        # public symbol is genuine confirmation, mirroring
+        # classify_change_surface's own qualified-tail handling.
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="ns::api", description=""
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
 
 
 class TestPublicModeTerminalExclusion:

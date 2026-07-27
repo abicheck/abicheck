@@ -69,6 +69,7 @@ from .contract_relevance_types import (
 )
 from .finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
 from .surface import (
+    _NEVER_FILTER_KIND_NAMES,
     REASON_NO_PROVENANCE,
     REASON_NON_PUBLIC_TYPE,
     REASON_NOT_EXPORTED,
@@ -78,6 +79,7 @@ from .surface import (
     REASON_SYSTEM_HEADER,
     PublicSurface,
     SurfaceUnions,
+    _type_identifiers,
     classify_change_surface,
     surface_unions,
 )
@@ -235,6 +237,51 @@ def _decision_for_surface_reason(reason: str) -> ContractEvaluationDecision:
     )
 
 
+def _in_surface_result_is_confirmed(change: Change, unions: SurfaceUnions) -> bool:
+    """Whether ``classify_change_surface``'s ``True`` verdict for *change*
+    reflects genuine public-root/closure membership, not its anti-hiding
+    "cannot place it, so keep it" fallback.
+
+    ``classify_change_surface`` returns ``(True, None)`` from several
+    distinct sources with very different confidence:
+
+    - ``_NEVER_FILTER_KIND_NAMES`` (a leak finding, or a ``constant_*``
+      finding -- public-contract by construction per the dumper's own
+      extraction rule, so it would never even appear in
+      ``public_symbols``/``public_types``) and ``python_*``-prefixed
+      findings (a distinct evidence axis the header-surface universes
+      don't cover at all) are unconditionally trustworthy by construction,
+      independent of any universe-membership check.
+    - Every other ``True`` comes from ``_classify_symbol_level``/
+      ``_classify_type_level``, where ``sym in public_symbols``/``known &
+      public_types`` is genuine confirmation -- but ``_classify_type_level``
+      also returns ``(True, None)`` when the implicated type is entirely
+      absent from the snapshot's own type universe (`known` empty, "we
+      cannot place this finding -- keep it") or is deferred to the
+      separate, more precise internal-leak detector (an internal-namespace
+      type). Neither of those two is evidence of public membership; both
+      are silently upgraded to ``IN_CONTRACT`` without this check
+      (Codex review, eighth round).
+
+    Uses ``_type_identifiers`` (mirroring, not reimplementing,
+    ``classify_change_surface``'s own candidate derivation) rather than a
+    naive raw-string comparison, since a raw ``caused_by_type`` spelling
+    (``"const Foo *"``) would never literal-match a bare ``all_types``/
+    ``public_types`` entry (``"Foo"``).
+    """
+    if change.kind.value in _NEVER_FILTER_KIND_NAMES or change.kind.value.startswith(
+        "python_"
+    ):
+        return True
+    sym = change.symbol or ""
+    if sym in unions.public_symbols:
+        return True
+    if sym and "::" in sym and sym.rsplit("::", 1)[1] in unions.public_symbols:
+        return True
+    candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
+    return bool(candidates & unions.public_types)
+
+
 def evaluate_change_contract_relevance(
     change: Change,
     surf_old: PublicSurface,
@@ -319,14 +366,20 @@ def evaluate_change_contract_relevance(
     if identity.tier == IDENTITY_TIER_REDUCED:
         return _unresolved_decision("identity_ambiguous", ContractAssurance.PARTIAL)
 
+    if unions is None:
+        unions = surface_unions(surf_old, surf_new)
     in_surface, reason = classify_change_surface(
         change, surf_old, surf_new, unions=unions
     )
     if in_surface:
-        return ContractEvaluationDecision(
-            relevance=ContractRelevance.IN_CONTRACT,
-            reason_code="public_root_membership",
-            assurance=ContractAssurance.COMPLETE,
+        if _in_surface_result_is_confirmed(change, unions):
+            return ContractEvaluationDecision(
+                relevance=ContractRelevance.IN_CONTRACT,
+                reason_code="public_root_membership",
+                assurance=ContractAssurance.COMPLETE,
+            )
+        return _unresolved_decision(
+            "required_evidence_incomplete", ContractAssurance.PARTIAL
         )
 
     # `classify_change_surface` only returns `in_surface=False` with a reason

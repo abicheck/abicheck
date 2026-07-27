@@ -952,6 +952,18 @@ deliberately narrower than the full phase:
   recompute against at all; an internal-namespace finding's own dedicated
   leak check is a finer-grained, different reachability model than this
   module's coarse public/private split).
+- `classify_change_surface`'s `True` verdict is not itself proof of
+  confirmed public-root/closure membership — it also covers `surface.py`'s
+  own anti-hiding "cannot place this finding, so keep it" fallback (an
+  implicated type absent from either snapshot's type universe entirely, or
+  an internal-namespace type deferred to the internal-leak detector).
+  `_in_surface_result_is_confirmed()` distinguishes the two via
+  `public_symbols`/`public_types` membership (mirroring, not
+  reimplementing, `classify_change_surface`'s own candidate derivation via
+  `_type_identifiers`), downgrading the conservative-retention case to
+  `UNKNOWN_UNRESOLVED` — while still trusting `_NEVER_FILTER_KIND_NAMES`/
+  `python_*` findings unconditionally, since those are public by
+  construction and would never appear in those sets at all.
 
 Not yet done: wiring this into `checker.compare`'s output (even as a
 non-authoritative shadow field), the provider-evidence ledger, the
