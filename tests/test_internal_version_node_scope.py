@@ -18,8 +18,8 @@
 Symbols a library binds to a ``*_INTERNAL_*`` / ``*PRIVATE*`` version node
 (glibc ``GLIBC_PRIVATE``, nettle ``HOGWEED_INTERNAL_6_1``) are exported but not
 public ABI. A real change to one is a deployment risk, not a break — exactly the
-real-world divergence root-caused as parity class A (nettle 3.6→3.7) in
-``validation/realworld-tracker-parity-2026-06.md``.
+real-world divergence root-caused as parity class A (nettle 3.6→3.7) in a
+real-world parity scan.
 
 These tests cover the pure classifier helpers in :mod:`abicheck.diff_versioning`
 and the end-to-end demotion through :func:`abicheck.checker.compare`.

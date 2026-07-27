@@ -6,6 +6,10 @@ misreports BREAKING)
 
 ## Verdict and consumer impact
 
+This case demonstrates ADR-039 (build-context reconciliation): a false positive
+that the `binary` and `headers` depths cannot avoid and that only **build**
+evidence resolves.
+
 Ground truth is `NO_CHANGE`: both v1 and v2 of `libconfig.so.1` are built
 with `-DCONFIG_KEEP_LEGACY` defined, so the shipped `Config` struct is
 identical (`{version, legacy}`, 8 bytes) on both sides — no consumer is

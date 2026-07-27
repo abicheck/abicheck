@@ -24,9 +24,11 @@ from abicheck.name_classification import (
     is_abi_surface_type_name,
     is_compiler_internal_type,
     is_cxx_runtime_library,
+    is_local_name_symbol,
     is_local_rtti_symbol,
     is_non_abi_surface_type,
     is_rtti_symbol,
+    is_stdlib_local_name_symbol,
     symbol_origin,
 )
 
@@ -53,6 +55,145 @@ def test_local_rtti_detected(name: str) -> None:
 
 def test_non_local_rtti_not_flagged_local() -> None:
     assert not is_local_rtti_symbol("_ZTI4Base")
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "_ZZ4mainE1x",
+        "_ZZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames",
+    ],
+)
+def test_is_local_name_symbol_true(name: str) -> None:
+    assert is_local_name_symbol(name)
+
+
+@pytest.mark.parametrize("name", ["_ZN3Foo3barEv", "_ZTIZ4mainEUlvE_", "main", ""])
+def test_is_local_name_symbol_false(name: str) -> None:
+    # A local-RTTI symbol (_ZTIZ...) is a distinct production (typeinfo of a
+    # local type), not the bare local-name production this checks for.
+    assert not is_local_name_symbol(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # Real symbol from a live pvxs binary (PR #641 validation): a const
+        # member function (_ZZNK...), std::__cxx11:: nested namespace.
+        "_ZZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames",
+        "_ZZNSt6vectorIiSaIiEE9push_backERKiE1x",  # plain (non-const) std:: member
+        "_ZZN9__gnu_cxx13new_allocatorIiE10deallocateEPim1E",
+        "_ZZN10__cxxabiv116__enum_type_infoD2Ev1x",
+        "_ZZSt4sortIN9__gnu_cxx17__normal_iteratorIPiSt6vectorIiSaIiEEEEEvT_S6_1x",
+        # CodeRabbit review, PR #641: a restrict-qualified ('r') stdlib
+        # member function's local name must also match -- an earlier version
+        # of the qualifier character class omitted 'r' entirely.
+        "_ZZNr10__cxxabiv116__enum_type_infoD2Ev1x",
+        # Codex review, PR #641: Itanium standard-substitution codes for
+        # common std:: templates (Sa/Sb/Ss/Si/So/Sd) occupy the exact
+        # grammar slot the bare `St` substitution does, and must match too.
+        "_ZZNKSaIiE1fEvE1x",  # std::allocator<int>
+        "_ZZNSbIcSt11char_traitsIcESaIcEE1fEvE1x",  # std::basic_string
+        "_ZZNKSs1fEvE1x",  # std::string
+        "_ZZNKSi1fEvE1x",  # std::istream
+        "_ZZNKSo1fEvE1x",  # std::ostream
+        "_ZZNKSd1fEvE1x",  # std::iostream
+        # Codex review, PR #641: libstdc++ debug mode's __gnu_debug::
+        # namespace is already a recognized stdlib/runtime implementation
+        # namespace elsewhere (_STDLIB_TYPE_NAMESPACE_PREFIXES); a local
+        # static in one of its functions must match here too.
+        "_ZZN11__gnu_debug6vectorIiSaIiEE9push_backERKiE1x",
+        # Codex review, PR #641: a recursively-nested <local-name> -- a
+        # static local to a lambda's own call operator, where the lambda is
+        # itself local to a stdlib function (std::outer()). Real GCC output.
+        "_ZZZSt5outervENKUlvE_clEvE1x",
+        # Codex review, PR #641 follow-up (sixth P2): a dynamically-
+        # initialized stdlib local static's companion one-time-init guard
+        # variable mangles as `GV` + the same local-name object (`_ZGVZ...`,
+        # not `_ZZ...`) -- must be recognized the same as the plain form.
+        "_ZGVZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames",
+    ],
+)
+def test_is_stdlib_local_name_symbol_true(name: str) -> None:
+    assert is_stdlib_local_name_symbol(name)
+
+
+def test_is_stdlib_local_name_symbol_nested_but_user_owned_false() -> None:
+    # Same recursive-nesting shape as the stdlib case above, but the
+    # outermost function belongs to the library under test (pvxs::foo), not
+    # the C++ runtime -- must NOT be classified as stdlib-owned even though
+    # it also carries multiple leading Zs.
+    assert not is_stdlib_local_name_symbol("_ZZZN4pvxs3fooEvENKUlvE_clEvE1x")
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # Codex review, PR #641: a user specialization of a standard
+        # customization-point template contains USER-AUTHORED code, so it
+        # must NOT be classified as stdlib-owned even though it nominally
+        # lives in namespace std. Real GCC output for an inline
+        # std::hash<MyType>::operator()'s local static.
+        "_ZZNKSt4hashI6MyTypeEclERKS0_E4salt",
+        "_ZZNKSt4lessI6MyTypeEclERKS0_S3_E1x",
+        "_ZZNKSt7greaterI6MyTypeEclERKS0_S3_E1x",
+        # Codex review, PR #641 follow-up: std::swap is a *function*
+        # template the standard explicitly permits specializing for a
+        # program-defined type (e.g. `template<> inline void
+        # std::swap<MyType>(...)`) -- the same user-authored-code-in-std
+        # shape as the class-template cases above, just a function.
+        "_ZZSt4swapI6MyTypeEvRT_S1_E1x",
+        # Codex review, PR #641 follow-up (second gap in the same round):
+        # std::tuple_size<MyType> is another standard customization-point
+        # class template a program can legally specialize for its own type.
+        "_ZZNSt10tuple_sizeI6MyTypeE1fEvE1x",
+        # Codex review, PR #641 follow-up (fourth instance of this same gap
+        # class): std::common_type<A, A>::f() -- a program-defined partial
+        # specialization of another standard customization-point template.
+        "_ZZNSt11common_typeIJ1AS0_EE1fEvE1x",
+        # Codex review, PR #641 follow-up (fifth round): under libc++, the
+        # entire standard library lives in a versioned inline namespace
+        # (`__1` in mainline libc++) between the `St` substitution and the
+        # actual class name -- a user specialization of std::hash<X> there
+        # mangles as `_ZZNKSt3__14hashI1XEclERKS1_E4salt` (`3__1` = the
+        # inline-namespace component), which the exclusion regex must still
+        # recognize even though it doesn't match the bare GCC shape.
+        "_ZZNKSt3__14hashI1XEclERKS1_E4salt",
+        # Codex review, PR #641 follow-up (sixth P2): the guard-variable
+        # wrapper applies to a user specialization's local static too --
+        # must still be excluded, same as the plain form above.
+        "_ZGVZNKSt4hashI6MyTypeEclERKS0_E4salt",
+    ],
+)
+def test_is_stdlib_local_name_symbol_user_specialized_customization_point_false(
+    name: str,
+) -> None:
+    assert not is_stdlib_local_name_symbol(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # A library-under-test's own public inline/template function's local
+        # static (Codex review, PR #641): must NOT be classified as
+        # stdlib-owned, since consumers can genuinely bind against it.
+        "_ZZN4pvxs6client6ConfigEvE5cache",
+        "_ZN3Foo3barEv",  # not a local-name symbol at all
+        # CodeRabbit review, PR #641: a truncated "10__cxxabiv" (9-character
+        # name after a length-10 prefix -- not a real, never-emitted
+        # spelling) followed by an arbitrary next character must NOT match;
+        # an earlier version's optional trailing "1" on __cxxabiv1 over-matched
+        # this.
+        "_ZZN10__cxxabivEv1x",
+        "",
+        # Codex review, PR #641 follow-up (sixth P2): the guard-variable
+        # wrapper on a library-owned local static must still fail to match,
+        # same as the plain form.
+        "_ZGVZN4pvxs6client6ConfigEvE5cache",
+    ],
+)
+def test_is_stdlib_local_name_symbol_false(name: str) -> None:
+    assert not is_stdlib_local_name_symbol(name)
 
 
 @pytest.mark.parametrize(

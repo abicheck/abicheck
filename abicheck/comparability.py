@@ -121,8 +121,29 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .comparability_json import _SCOPE_SINGLE_ENTRY_SENTINELS, _json_load_str_list
+from .comparability_sequences import (
+    _HEADER_SEQUENCE_FIELDS,
+    _INCLUDE_SEQUENCE_FIELDS,
+    _header_sequence_is_additive_reorder_free,
+    _include_sequence_is_additive_owned_growth,
+    _scope_newly_added_headers,
+)
 from .errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
 from .model import AbiSnapshot, ExtractionContract
+
+# A sentinel distinct from every valid profile_fields/scope_fields value
+# (Codex review, PR #641 follow-up, fifth P1) -- used as the `.get()`
+# fallback when checking whether an unrecognized field key differs between
+# two contracts. Using `""` as that fallback (as every other comparison in
+# this module does, where an absent recognized field really does mean "no
+# value") conflates "key absent entirely" with "key present with an empty
+# string value": a newer-schema field added on only one side with an empty
+# value (`{"future_scope": ""}` vs. no key at all) compares `"" == ""` and
+# is wrongly invisible to the unknown-field checks below, even though the
+# key's very presence is exactly the kind of schema drift they exist to
+# catch.
+_FIELD_ABSENT = object()
 
 # Named sub-components hashed into profile_fingerprint / scope_fingerprint,
 # also stored verbatim in ExtractionContract.profile_fields/scope_fields so a
@@ -238,6 +259,38 @@ def _sha256_of(*parts: str) -> str:
     return f"sha256:{h.hexdigest()}"
 
 
+def _fingerprint_matches_fields(
+    fingerprint: str, fields: dict[str, str], keys: tuple[str, ...]
+) -> bool:
+    """Whether *fingerprint* is exactly what :func:`compute_extraction_contract`
+    would produce from *fields* over *keys* (``SCOPE_FIELD_KEYS`` or
+    ``PROFILE_FIELD_KEYS``) -- i.e. whether this contract's stored fields
+    are actually what its own fingerprint was computed from (Codex review,
+    PR #641 follow-up, sixth P1).
+
+    Every carve-out above reasons entirely from ``scope_fields``/
+    ``profile_fields`` -- "this recognized field grew additively, so the
+    fingerprint mismatch is explained" -- but that reasoning only holds if
+    the stored fingerprint was genuinely computed from those exact fields.
+    For a snapshot dumped by this codebase's own
+    :func:`compute_extraction_contract`, that invariant always holds by
+    construction. It is NOT verified anywhere, though, so a deserialized or
+    externally constructed contract can carry a stale, fabricated, or
+    otherwise unrelated fingerprint alongside fields that merely *look*
+    additive: confirmed by direct repro before any fix -- two arbitrary,
+    unrelated fingerprint strings with ``headers`` genuinely growing from
+    ``["a.h", "b.h"]`` to ``["a.h", "b.h", "c.h"]`` made
+    :func:`check_contracts_comparable` return ``None`` (comparable) even
+    though neither fingerprint was ever verified to have anything to do
+    with those fields -- the true cause of the mismatch remains completely
+    unverified. Called on BOTH sides before any carve-out below is trusted;
+    a mismatch on either side means the fields can't be trusted to explain
+    that side's own fingerprint, so nothing reasoned from them is safe to
+    act on.
+    """
+    return fingerprint == _sha256_of(*[fields.get(k, "") for k in keys])
+
+
 def _classify_include_dirs(
     declared_headers: Sequence[Path],
     declared_includes: Sequence[IncludeDir],
@@ -255,7 +308,9 @@ def _classify_include_dirs(
     return owned
 
 
-def _header_identities(declared_headers: Sequence[Path]) -> dict[Path, str]:
+def _header_identities(
+    declared_headers: Sequence[Path], extra_root_paths: Sequence[Path] = ()
+) -> dict[Path, str]:
     """A stable, side-local identity string per declared header — its path
     relative to the common ancestor of every declared header's *parent*
     directory (the same normalization ``scope_fingerprint`` uses for its own
@@ -266,10 +321,28 @@ def _header_identities(declared_headers: Sequence[Path]) -> dict[Path, str]:
     ``generated/foo.h``) — both would otherwise collapse to token
     ``hdrs:foo.h``, silently losing the order-sensitivity a swapped
     ``-I include -I generated`` vs. ``-I generated -I include`` is supposed
-    to preserve."""
+    to preserve.
+
+    *extra_root_paths* (``public_header_paths`` — provenance-only headers
+    never fed to the L2 frontend, so never in *declared_headers* or the
+    returned dict) widens the root candidates the same way the scope
+    ``"headers"`` field's own root computation already does (Codex review,
+    PR #641 follow-up, sixteenth P2): without this, a ``public_header_paths``
+    entry outside every declared header's common root makes this function's
+    root narrower than the scope side's, so the SAME physical file gets two
+    different identity strings across the two fields (e.g. scope
+    ``"foo/c.h"`` vs. sequence ``"c.h"``) — and the header/include-sequence
+    carve-outs' specific-correspondence check (``_scope_newly_added_headers``)
+    compares these by exact string equality, so a genuinely safe, purely
+    additive header change spuriously hard-fails with ``ProfileMismatchError``
+    the moment any ``public_header_paths`` entry reaches outside that
+    narrower root. Widening the root here to match closes the mismatch
+    without changing what a declared header's identity actually disambiguates
+    (its path relative to a root is still unique per file — the root is
+    just wider than before when *extra_root_paths* is non-empty)."""
     if not declared_headers:
         return {}
-    parents = [str(_resolved(h).parent) for h in declared_headers]
+    parents = [str(_resolved(h).parent) for h in (*declared_headers, *extra_root_paths)]
     root = _common_root(parents)
     return {h: _side_local_identity(h, root) for h in declared_headers}
 
@@ -498,7 +571,7 @@ def compute_extraction_contract(
     profile_fields: dict[str, str] = {}
     if l2_frontend_ran:
         ownership = _classify_include_dirs(declared_headers, declared_includes)
-        header_identities = _header_identities(declared_headers)
+        header_identities = _header_identities(declared_headers, public_header_paths)
         # Whether the owned-slot token below is safe to collapse to a
         # constant placeholder instead of encoding the (rename-prone)
         # declared header's own name: true only when the WHOLE declared
@@ -836,6 +909,133 @@ def _binary_platform_components(snap: AbiSnapshot) -> dict[str, str] | None:
     return None
 
 
+def _scope_field_is_additive_superset(
+    old_value: str | None, new_value: str | None
+) -> bool:
+    """Whether *new_value* (one ``scope_fields[...]`` json-encoded sorted
+    identity list -- ``"headers"`` or ``"public_header_dirs"``) declares
+    everything *old_value* did, plus possibly more (PR #641 follow-up, the
+    pvxs full-version-matrix scan's F8: a released library adding one new
+    public header between versions -- e.g. epics-base/pvxs's
+    ``include/pvxs/json.h`` landing on ``master`` with no other header
+    added/removed/renamed -- is ordinary, common evolution, not the
+    "manifest/CLI-flag drift between two extraction runs" mistake this
+    fingerprint exists to catch, yet both symptoms fingerprint identically:
+    a differing declared-file set).
+
+    An unchanged field (``old_value == new_value``) is always ``True``, even
+    when both sides are the single-entry sentinel (Codex review, PR #641
+    follow-up): the caller checks *every* :data:`SCOPE_FIELD_KEYS` field,
+    not only the ones that actually differ (unlike the profile-fingerprint
+    carve-outs, which pre-filter to a ``differing`` set) -- the real F8
+    scenario declares headers via a single ``-H old=<dir> -H new=<dir>``
+    each side, so ``public_header_dirs`` collapses to the identical
+    ``"<single-header-dir>"`` sentinel on *both* sides even though old and
+    new point at different physical directories. Declining on the sentinel
+    unconditionally, before checking for equality, wrongly hard-failed a
+    field that never actually changed at all, before this carve-out could
+    ever reach a genuinely differing field like ``headers``.
+
+    Otherwise declines (returns False) whenever either side is ``None`` or
+    collapsed to a single-entry sentinel (:data:`_SCOPE_SINGLE_ENTRY_SENTINELS`)
+    with a genuinely *different* value on the other side -- with no real
+    per-file/per-dir identity to compare, "new looks like it might be
+    bigger" can't be told apart from "the one entry was simultaneously
+    renamed AND something else added", so there is nothing here to safely
+    verify a true superset against; the existing hard-fail is the correct,
+    conservative answer for that case, same as it always was.
+
+    Also declines whenever *old_list* or *new_list* contains a duplicate
+    identity (Codex review, PR #641 follow-up, fourteenth P2):
+    ``compute_extraction_contract`` always emits a sorted, deduplicated
+    identity list for these fields, so a duplicate is never genuine
+    evidence -- e.g. growing ``["a.h", "b.h"]`` to ``["a.h", "b.h", "c.h",
+    "c.h"]`` is malformed. The final ``set(new_list) >= set(old_list)``
+    comparison would otherwise collapse that duplicate away silently and
+    still authorize the carve-out, the same gap already closed for
+    ``header_sequence`` and the owned-header pair lists.
+    """
+    if old_value is None or new_value is None:
+        return False
+    if old_value == new_value:
+        return True
+    old_list = _json_load_str_list(old_value)
+    new_list = _json_load_str_list(new_value)
+    if old_list is None or new_list is None:
+        return False
+    if len(old_list) != len(set(old_list)) or len(new_list) != len(set(new_list)):
+        return False
+    if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
+        return False
+    if len(new_list) == 1 and new_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
+        return False
+    return set(new_list) >= set(old_list)
+
+
+def _scope_growth_corroborated(
+    old_contract: ExtractionContract, new_contract: ExtractionContract
+) -> bool:
+    """Whether the scope-level declared-surface check independently confirms
+    a genuine additive header-set change between *old_contract* and
+    *new_contract* — i.e. ``scope_fingerprint`` actually differs AND every
+    :data:`SCOPE_FIELD_KEYS` field is a verified superset growth (see
+    :func:`_scope_field_is_additive_superset`).
+
+    The header/include-sequence carve-outs below must not accept a
+    profile-level "sequence grew" shape on its own (Codex review, PR #641
+    follow-up): ``scope_fields["headers"]`` treats a file reaching it via
+    ``declared_headers`` (fed to the L2 frontend via ``-H``) and via
+    ``public_header_paths`` (bare ``--public-header`` provenance, never
+    actually parsed) as the *same* declared-surface membership — see
+    :func:`compute_extraction_contract`'s docstring — so a header already
+    declared identically on both sides via ``--public-header``, but fed to
+    the L2 frontend only on the new side, leaves ``scope_fingerprint``
+    completely UNCHANGED while ``profile_fields["header_sequence"]`` still
+    grows additively, purely from which mechanism happened to feed the
+    parser. That old snapshot then has NO parsed AST content for that header
+    at all, so a real removal made inside it between old and new is
+    invisible rather than reported — a silent false negative, not merely
+    extra noise. Requiring an independently-verified, genuinely differing
+    scope-level growth corroborates that the sequence growth corresponds to
+    content that is actually new to the declared surface, not merely
+    re-routed between the two provenance mechanisms "headers" treats as
+    equivalent.
+
+    Requiring ``scope_fingerprint`` to merely differ is not enough on its
+    own (Codex review, PR #641 follow-up, eighth P1): ``scope_fingerprint``
+    hashes ALL of :data:`SCOPE_FIELD_KEYS` together, including
+    ``public_header_dirs``, which is wholly unrelated to whether the
+    *declared header set* actually grew. An unrelated
+    ``public_header_dirs`` addition (e.g. a new ``-I`` search directory,
+    with the declared ``headers`` set completely unchanged) makes
+    ``scope_fingerprint`` differ and trivially satisfies the ``all(...)``
+    additive-superset check below (an unchanged ``headers`` field is a
+    same-value "superset" of itself), so it could corroborate a
+    ``header_sequence``/``include_sequence`` waiver for exactly the silent-
+    false-negative scenario this function exists to catch — the very
+    ``headers`` field the sequence carve-outs need evidence about never
+    moved at all. Requiring ``headers`` specifically to differ closes this:
+    a genuine header-set addition always changes ``headers``, so this adds
+    no new restriction for the real F8 scenario, only for the case where
+    the fingerprint moved for an unrelated reason.
+    """
+    if old_contract.scope_fingerprint is None or new_contract.scope_fingerprint is None:
+        return False
+    if old_contract.scope_fingerprint == new_contract.scope_fingerprint:
+        return False
+    if old_contract.scope_fields.get("headers") == new_contract.scope_fields.get(
+        "headers"
+    ):
+        return False
+    return all(
+        _scope_field_is_additive_superset(
+            old_contract.scope_fields.get(key),
+            new_contract.scope_fields.get(key),
+        )
+        for key in SCOPE_FIELD_KEYS
+    )
+
+
 def _build_context_corroborated(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     """Whether both *old* and *new* were actually parsed against real
     build-system evidence -- ``-p``/``--compile-db``/``--build-info``
@@ -898,6 +1098,176 @@ def check_contracts_comparable(
     cross-compiler flag set for only one side), not a legitimate
     cross-architecture compare, and still raises.
 
+    **Every carve-out below is preceded by a fingerprint-authenticity check
+    (Codex review, PR #641 follow-up, sixth P1):** each side's stored
+    ``scope_fingerprint``/``profile_fingerprint`` must actually equal what
+    :func:`compute_extraction_contract` would compute from that same
+    side's own ``scope_fields``/``profile_fields`` (see
+    :func:`_fingerprint_matches_fields`). Every carve-out below reasons
+    entirely from the *fields* ("this recognized field grew additively, so
+    the fingerprint mismatch is explained") — but that reasoning is only
+    sound if the fingerprint was genuinely computed from those fields in
+    the first place. For a snapshot this codebase's own
+    :func:`compute_extraction_contract` produced, that invariant always
+    holds; it is unenforced for a deserialized or externally constructed
+    contract, though, so a stale, fabricated, or otherwise unrelated
+    fingerprint could previously sit alongside fields that merely *look*
+    additive and still be waived through — confirmed by direct repro
+    before this fix: two arbitrary, unrelated fingerprint strings with
+    ``headers`` genuinely growing additively still made this function
+    return ``None`` (comparable). A mismatch on either side here is
+    unconditionally fatal, before any of the carve-outs that follow are
+    even reached.
+
+    **Additive-only header-set carve-out (PR #641 follow-up, pvxs scan F8):**
+    a ``scope_fingerprint`` mismatch does not raise when *every* differing
+    :data:`SCOPE_FIELD_KEYS` field on the new side is a superset of the old
+    side's (see :func:`_scope_field_is_additive_superset`) — an upstream
+    project adding a new public header (or a new declared public-header
+    directory) between two releases, with nothing removed or renamed, is
+    ordinary evolution the ordinary diff engine can correctly report as
+    additions, not the "manifest/CLI-flag drift between two extraction
+    runs" mistake this gate exists to catch. A single-entry side (collapsed
+    to a ``<single-header>``/``<single-header-dir>`` sentinel, since a lone
+    header/dir's own name is not itself load-bearing scope identity — see
+    :func:`compute_extraction_contract`) can never be verified this way and
+    still raises, same as any *non*-superset mismatch (a removal, a rename,
+    or a disjoint set) — this carve-out only ever *widens* what counts as
+    comparable, never narrows the cases the gate still correctly refuses.
+    Also rejects an **unknown** ``scope_fields`` key outside
+    :data:`SCOPE_FIELD_KEYS` that differs (Codex review, PR #641 follow-up,
+    third P1) — checked independently of and before this carve-out, the
+    same reasoning as the profile side's ``unknown_differing`` check below:
+    the ``all(...)`` here only ever examines :data:`SCOPE_FIELD_KEYS`, so a
+    contract carrying a field this build doesn't recognize was invisible to
+    it, and could be silently waived through if ``headers``/
+    ``public_header_dirs`` happened to be equal or additive. Also rejects an
+    **opaque** ``scope_fingerprint`` mismatch (Codex review, PR #641
+    follow-up, fourth P1) — the scope-side equivalent of the opaque
+    profile-fingerprint check below: the additive-superset check only ever
+    runs over the recognized :data:`SCOPE_FIELD_KEYS` fields that actually
+    *differ*, never the ones that happen to be identical (an identical
+    field trivially passes :func:`_scope_field_is_additive_superset`'s own
+    ``old_value == new_value`` branch without needing to be checked at
+    all), so if *no* recognized field differs at all, there is nothing here
+    to positively verify and this raises rather than treating the absence
+    of any explanation as one.
+
+    **Header-sequence-growth carve-out (PR #641 follow-up, third round):**
+    waiving the scope mismatch above is not sufficient on its own — adding a
+    header also changes ``profile_fields["header_sequence"]`` (declared-header
+    *order* is a genuine extraction-context fact, tracked separately from
+    scope's order-independent declared *set*; see
+    :func:`compute_extraction_contract`), so the exact same "pure addition"
+    case would otherwise still raise ``ProfileMismatchError`` immediately
+    after the scope carve-out waives it. A ``profile_fingerprint`` mismatch
+    confined to ``header_sequence`` does not raise when the new sequence is
+    the old sequence, byte-for-byte unchanged, with new entries appended
+    STRICTLY AFTER it (see :func:`_header_sequence_is_additive_reorder_free`)
+    — proving every *existing* header's own preprocessing context (the
+    headers parsed before it) is identical to before, not merely that
+    existing headers keep their relative order to each other. A new header
+    inserted before or between existing ones (Codex review, PR #641
+    follow-up, seventh P1) still raises even though it superficially looks
+    additive, since it changes what an existing header downstream of the
+    insertion point is parsed after — the same "reorder of existing headers"
+    risk this carve-out was always meant to exclude, just reached via
+    insertion rather than a literal swap. A reorder of existing headers
+    entangled with growth (the same genuine profile-relevant risk) still
+    raises too, same as any other profile drift this carve-out doesn't
+    cover. **Also requires
+    :func:`_scope_growth_corroborated` (Codex review, PR #641 follow-up,
+    P1):** an additive-shaped ``header_sequence`` on its own is not
+    sufficient — a header already declared identically on both sides via
+    ``--public-header``, but fed to the L2 frontend via ``-H`` only on the
+    new side, produces the identical shape with ``scope_fingerprint``
+    completely unchanged, even though the old snapshot never actually
+    parsed that header's content (a real removal inside it would then be
+    silently invisible, not reported). This carve-out therefore only fires
+    when the scope-level check *also* independently confirms a genuinely
+    differing, verified-additive growth.
+
+    **Include-sequence-owned-growth carve-out (PR #641 follow-up, fourth
+    round):** the real ``-H old=<dir> -H new=<dir>`` F8 invocation changes
+    ``profile_fields["include_sequence"]`` too, not just
+    ``header_sequence`` — the production dump path
+    (``resolve_inferred_header_roots``, ``cli_dump_helpers.py``) auto-adds
+    the header-owning directory as a declared include, and that slot's own
+    token encodes the declared-header set it owns
+    (:func:`_slot_token_for_ancestor`). A ``profile_fingerprint`` mismatch
+    confined to ``include_sequence`` does not raise when every differing
+    slot's owned ``"hdrs:..."`` token is itself a pure superset growth (see
+    :func:`_include_sequence_is_additive_owned_growth`) — an ``"ext:"``/
+    ``"label:"`` slot differing, a slot count change, or either side
+    collapsing to the ``<single-header>`` sentinel all still raise, the
+    same conservative defaults as the other carve-outs. Also requires
+    :func:`_scope_growth_corroborated`, for the identical reason as the
+    header-sequence carve-out above.
+
+    **Opaque profile-fingerprint mismatches are rejected, not silently
+    waived (Codex review, PR #641 follow-up, P1):** the four carve-outs
+    above narrow an ``unexplained`` working set that starts as ``differing``
+    — the set of :data:`PROFILE_FIELD_KEYS` that actually differ between
+    ``old_fields``/``new_fields``. If ``profile_fingerprint`` differs but
+    ``differing`` itself is *empty* — e.g. one or both sides' ``profile_fields``
+    were entirely absent/malformed on deserialization
+    (``_extraction_contract_from_dict`` substitutes ``{}``, so every field
+    trivially compares equal) — there is nothing here to positively verify
+    as safe, so this raises rather than treating the absence of an
+    explanation as one. Only a ``differing`` set that is non-empty and gets
+    fully narrowed to nothing by the carve-outs above counts as comparable.
+
+    **Unknown profile deltas are also rejected, checked independently of
+    and before any carve-out (Codex review, PR #641 follow-up, second P1):**
+    ``differing`` above only ever iterates :data:`PROFILE_FIELD_KEYS`, so a
+    contract carrying a field this build doesn't recognize at all (a newer
+    schema key) was invisible to it — if that unrecognized delta happened to
+    co-occur with an otherwise-legitimate, carve-out-waived delta (e.g.
+    additive ``header_sequence`` growth), the pair was wrongly reported
+    comparable once the recognized delta alone was waived, silently
+    ignoring the unrecognized one. ``unknown_differing`` separately computes
+    every key outside ``PROFILE_FIELD_KEYS`` (over the union of both sides'
+    field-dict keys) that actually differs; its presence is unconditionally
+    fatal, regardless of what the carve-outs above conclude about the
+    recognized fields, since no carve-out here understands an unrecognized
+    key's semantics well enough to vouch for it. Both ``unknown_differing``
+    here and ``scope_unknown_differing`` above compare each key via
+    ``.get(k, _FIELD_ABSENT)`` rather than ``.get(k, "")`` (Codex review, PR
+    #641 follow-up, fifth P1): the empty-string fallback would conflate "key
+    absent entirely" with "key present with an empty string value" — a
+    newer-schema field added on only one side with an empty value (e.g.
+    ``{"future_profile": ""}`` vs. no key at all) would otherwise compare
+    ``"" == ""`` and stay invisible to these checks even though the key's
+    very presence is exactly the schema drift they exist to catch.
+    :data:`_FIELD_ABSENT` is a sentinel object distinct from every valid
+    field value, so presence and absence are never conflated.
+
+    **Carve-outs compose (PR #641 follow-up, fourth round):** a release
+    combining two independently-sanctioned deltas — e.g. adding a header
+    *and* making a corroborated C++-standard raise — has a ``differing``
+    set that matches neither carve-out's static field-set on its own
+    (``{"header_sequence", "language_standard"}`` is a subset of neither
+    :data:`_HEADER_SEQUENCE_FIELDS` nor :data:`_BUILD_CONTEXT_FIELDS`
+    alone). Each carve-out therefore claims and verifies only the subset of
+    ``differing`` it understands, narrowing an ``unexplained`` working set;
+    the pair is comparable once nothing remains unexplained, not only when
+    one carve-out's field-set covers the whole mismatch by itself. The four
+    carve-outs' field-sets are mutually disjoint, so application order
+    never matters.
+
+    **Known, accepted limitation, not a correctness bug (PR #641
+    follow-up, fourth round):** a header added *outside* the old side's
+    common ancestor directory shifts the common root every remaining
+    ``headers`` identity is computed relative to (see
+    :func:`compute_extraction_contract`), so even the *existing* headers'
+    identity strings change shape (``"a.h"`` → ``"foo/a.h"``) and the
+    additive-superset check correctly declines — this still raises
+    ``ScopeMismatchError`` rather than silently producing a wrong verdict,
+    exactly the same safe default as every other case these carve-outs
+    don't cover. Out of scope for this round: the real F8 scenario adds a
+    header *within* the existing common directory, which this decline does
+    not affect (see the "real directory-based F8 scenario" regression test).
+
     ``diagnostic=True`` (ADR-050's ``--diagnostic-comparison`` escape hatch)
     downgrades a hard-fail into a :class:`ComparabilityMismatch` descriptor
     returned to the caller instead of raised — the one sanctioned way to
@@ -914,15 +1284,96 @@ def check_contracts_comparable(
         and new_contract.scope_fingerprint is not None
         and old_contract.scope_fingerprint != new_contract.scope_fingerprint
     ):
-        reason = (
-            "old and new snapshots do not cover the same declared surface "
-            "(scope_fingerprint mismatch) — the comparison is not "
-            "comparable. This commonly means a manifest/CLI-flag drift "
-            "between the two extraction runs, not a real API change."
-        )
-        if diagnostic:
-            return ComparabilityMismatch(kind="scope", reason=reason)
-        raise ScopeMismatchError(reason)
+        if not (
+            _fingerprint_matches_fields(
+                old_contract.scope_fingerprint,
+                old_contract.scope_fields,
+                SCOPE_FIELD_KEYS,
+            )
+            and _fingerprint_matches_fields(
+                new_contract.scope_fingerprint,
+                new_contract.scope_fields,
+                SCOPE_FIELD_KEYS,
+            )
+        ):
+            # Neither carve-out below may be trusted: at least one side's
+            # scope_fields don't actually produce that side's own
+            # scope_fingerprint, so nothing reasoned from those fields
+            # explains the real mismatch (Codex review, PR #641 follow-up,
+            # sixth P1) -- see _fingerprint_matches_fields's own docstring.
+            reason = (
+                "old and new snapshots do not cover the same declared "
+                "surface (scope_fingerprint mismatch), and at least one "
+                "side's scope_fields do not reproduce its own "
+                "scope_fingerprint — the comparison cannot be verified "
+                "safe."
+            )
+            if diagnostic:
+                return ComparabilityMismatch(kind="scope", reason=reason)
+            raise ScopeMismatchError(reason)
+        # A differing scope_fields key OUTSIDE SCOPE_FIELD_KEYS entirely --
+        # a newer schema field this build doesn't recognize -- must also
+        # block the additive-only carve-out below, for the identical reason
+        # as the profile side's unknown_differing check (Codex review, PR
+        # #641 follow-up, third P1): the carve-out's `all(...)` below only
+        # ever checks SCOPE_FIELD_KEYS, so an unrecognized field's delta was
+        # invisible to it -- if headers/public_header_dirs happened to be
+        # equal or additive, the whole scope mismatch was wrongly waived
+        # without ever examining the unrecognized field.
+        scope_unknown_differing = {
+            k
+            for k in set(old_contract.scope_fields) | set(new_contract.scope_fields)
+            if k not in SCOPE_FIELD_KEYS
+            and old_contract.scope_fields.get(k, _FIELD_ABSENT)
+            != new_contract.scope_fields.get(k, _FIELD_ABSENT)
+        }
+        # Which recognized SCOPE_FIELD_KEYS actually differ -- an entirely
+        # empty set here (Codex review, PR #641 follow-up, fourth P1) means
+        # NOTHING recognized explains the differing scope_fingerprint: a
+        # deserialized/externally-constructed contract can carry an opaque
+        # scope_fingerprint that doesn't match what this version would
+        # recompute from scope_fields, the scope-side equivalent of the
+        # opaque profile-fingerprint mismatch rejected below. Restricting
+        # the additive-superset check to only the fields that actually
+        # differ (rather than calling it for every SCOPE_FIELD_KEYS entry,
+        # where an unchanged field would trivially pass via
+        # _scope_field_is_additive_superset's old==new branch) makes an
+        # empty `scope_differing` impossible to satisfy silently.
+        scope_differing = {
+            key
+            for key in SCOPE_FIELD_KEYS
+            if old_contract.scope_fields.get(key, "")
+            != new_contract.scope_fields.get(key, "")
+        }
+        # Additive-only header-set carve-out (PR #641 follow-up, pvxs scan
+        # F8) -- see check_contracts_comparable's own docstring. Gated into
+        # the *condition* itself, not a `return None` inside the block
+        # (Codex review, PR #641 follow-up): waiving the scope mismatch
+        # must fall through to the profile check below, not skip it -- a
+        # release that both adds a header AND changes an unrelated
+        # extraction-profile field (compiler flags, macros, include order)
+        # must still be caught by that check, not silently waved through.
+        if (
+            scope_unknown_differing
+            or not scope_differing
+            or not all(
+                _scope_field_is_additive_superset(
+                    old_contract.scope_fields.get(key),
+                    new_contract.scope_fields.get(key),
+                )
+                for key in scope_differing
+            )
+        ):
+            reason = (
+                "old and new snapshots do not cover the same declared "
+                "surface (scope_fingerprint mismatch) — the comparison is "
+                "not comparable. This commonly means a manifest/CLI-flag "
+                "drift between the two extraction runs, not a real API "
+                "change."
+            )
+            if diagnostic:
+                return ComparabilityMismatch(kind="scope", reason=reason)
+            raise ScopeMismatchError(reason)
 
     if (
         old_contract is not None
@@ -933,15 +1384,71 @@ def check_contracts_comparable(
     ):
         old_fields = old_contract.profile_fields
         new_fields = new_contract.profile_fields
+        if not (
+            _fingerprint_matches_fields(
+                old_contract.profile_fingerprint, old_fields, PROFILE_FIELD_KEYS
+            )
+            and _fingerprint_matches_fields(
+                new_contract.profile_fingerprint, new_fields, PROFILE_FIELD_KEYS
+            )
+        ):
+            # Neither carve-out below may be trusted: at least one side's
+            # profile_fields don't actually produce that side's own
+            # profile_fingerprint (Codex review, PR #641 follow-up, sixth
+            # P1) -- see _fingerprint_matches_fields's own docstring, and
+            # the scope-side equivalent check above.
+            reason = (
+                "old and new snapshots were extracted under different "
+                "compile contexts (profile_fingerprint mismatch), and at "
+                "least one side's profile_fields do not reproduce its own "
+                "profile_fingerprint — the comparison cannot be verified "
+                "safe."
+            )
+            if diagnostic:
+                return ComparabilityMismatch(kind="profile", reason=reason)
+            raise ProfileMismatchError(reason)
         differing = {
             k
             for k in PROFILE_FIELD_KEYS
             if old_fields.get(k, "") != new_fields.get(k, "")
         }
-        if differing and differing <= _PLATFORM_IDENTITY_FIELDS:
+        # A differing key OUTSIDE PROFILE_FIELD_KEYS entirely -- a newer
+        # schema field this build doesn't recognize -- must also block the
+        # "comparable" outcome, checked independently of and before any
+        # carve-out (Codex review, PR #641 follow-up, P1): `differing` above
+        # only ever iterates PROFILE_FIELD_KEYS, so a contract carrying an
+        # extra field this version doesn't know how to interpret (mixed
+        # with an otherwise-legitimate, carve-out-waived delta like additive
+        # `header_sequence` growth) was invisible to `unexplained` and the
+        # pair was wrongly reported comparable once the recognized delta
+        # alone got waived. No carve-out here understands an unrecognized
+        # key's semantics, so its presence is unconditionally fatal
+        # regardless of what the recognized fields' carve-outs conclude.
+        unknown_differing = {
+            k
+            for k in set(old_fields) | set(new_fields)
+            if k not in PROFILE_FIELD_KEYS
+            and old_fields.get(k, _FIELD_ABSENT) != new_fields.get(k, _FIELD_ABSENT)
+        }
+        # Each carve-out below claims and verifies only the subset of
+        # `differing` it actually understands, removing exactly those
+        # fields from `unexplained` -- carve-outs COMPOSE (Codex review, PR
+        # #641 follow-up, fourth round): a release combining two
+        # independently-sanctioned deltas (e.g. a header addition AND a
+        # corroborated C++-standard raise) must not raise just because
+        # neither carve-out's static field-set covers `differing` in full
+        # on its own. The four carve-outs' field-sets
+        # (_PLATFORM_IDENTITY_FIELDS/_BUILD_CONTEXT_FIELDS/
+        # _HEADER_SEQUENCE_FIELDS/_INCLUDE_SEQUENCE_FIELDS) are mutually
+        # disjoint, so processing order never matters -- each only ever
+        # narrows `unexplained`, never re-adds to it.
+        unexplained = set(differing)
+
+        platform_candidate = unexplained & _PLATFORM_IDENTITY_FIELDS
+        if platform_candidate:
             old_components = _binary_platform_components(old)
             new_components = _binary_platform_components(new)
-            # Every field in `differing` must itself map to a binary-derived
+            # Every candidate field must itself map to a binary-derived
             # component present on BOTH sides AND genuinely differing on
             # that same field (Codex review, PR #624) -- not just "some"
             # component of the platform identity differs somewhere. A field
@@ -975,13 +1482,12 @@ def check_contracts_comparable(
                         return any_component_differs
                     return old_components[field] != new_components[field]
 
-                if all(_field_verified(field) for field in differing):
-                    return None  # genuine cross-architecture compare; diff_platform.py handles it
-        if (
-            differing
-            and differing <= _BUILD_CONTEXT_FIELDS
-            and _build_context_corroborated(old, new)
-        ):
+                if all(_field_verified(field) for field in platform_candidate):
+                    # genuine cross-architecture compare; diff_platform.py handles it
+                    unexplained -= platform_candidate
+
+        build_candidate = unexplained & _BUILD_CONTEXT_FIELDS
+        if build_candidate and _build_context_corroborated(old, new):
             # Build-context carve-out (Codex review, PR #624 follow-up --
             # examples/case98_cxx_standard_floor_raised's real CI failure):
             # a raised C++-standard floor or a build-derived macro delta
@@ -992,13 +1498,100 @@ def check_contracts_comparable(
             # gating it into a generic not_comparable first would only
             # discard that finding instead of letting the more specific
             # detector classify it correctly.
-            return None
-        reason = (
-            "old and new snapshots were extracted under different compile "
-            f"contexts (profile_fingerprint mismatch; differing fields: "
-            f"{', '.join(sorted(differing)) or 'unknown'}) — the comparison "
-            "is not comparable."
+            unexplained -= build_candidate
+
+        # Both sequence carve-outs below additionally require
+        # _scope_growth_corroborated (Codex review, PR #641 follow-up, P1):
+        # an additive-shaped header_sequence/include_sequence on its own is
+        # not sufficient evidence -- a header already declared identically
+        # on both sides via --public-header, but fed to the L2 frontend via
+        # -H only on the new side, produces the identical additive-growth
+        # SHAPE with scope_fingerprint completely UNCHANGED, even though the
+        # old snapshot never actually parsed that header's content at all
+        # (see _scope_growth_corroborated's own docstring for why that's
+        # unsafe to wave through). Requiring a genuinely differing,
+        # independently-verified scope-level growth corroborates that the
+        # sequence growth reflects real new declared content, not just a
+        # same-declared-surface extraction-mechanism difference.
+        scope_growth_corroborated = _scope_growth_corroborated(
+            old_contract, new_contract
         )
+        # The specific set of header identities the sequence carve-outs
+        # below are allowed to treat an appended/newly-owned entry as
+        # corresponding to (Codex review, PR #641 follow-up, ninth P1) --
+        # see _scope_newly_added_headers's own docstring for why
+        # scope_growth_corroborated alone (proving the scope grew by SOME
+        # header) isn't enough; the carve-outs must additionally verify
+        # they're waiving growth in the SAME header(s).
+        scope_new_headers = _scope_newly_added_headers(
+            old_contract.scope_fields.get("headers"),
+            new_contract.scope_fields.get("headers"),
+        )
+
+        header_seq_candidate = unexplained & _HEADER_SEQUENCE_FIELDS
+        if (
+            header_seq_candidate
+            and scope_growth_corroborated
+            and _header_sequence_is_additive_reorder_free(
+                old_fields.get("header_sequence"),
+                new_fields.get("header_sequence"),
+                scope_new_headers,
+            )
+        ):
+            # Header-sequence-growth carve-out (PR #641 follow-up, third
+            # round) -- see check_contracts_comparable's own docstring.
+            unexplained -= header_seq_candidate
+
+        include_seq_candidate = unexplained & _INCLUDE_SEQUENCE_FIELDS
+        if (
+            include_seq_candidate
+            and scope_growth_corroborated
+            and _include_sequence_is_additive_owned_growth(
+                old_fields.get("include_sequence"),
+                new_fields.get("include_sequence"),
+                scope_new_headers,
+            )
+        ):
+            # Include-sequence-owned-growth carve-out (PR #641 follow-up,
+            # fourth round) -- see check_contracts_comparable's own
+            # docstring.
+            unexplained -= include_seq_candidate
+
+        if unknown_differing:
+            reason = (
+                "old and new snapshots were extracted under different "
+                "compile contexts (profile_fingerprint mismatch), and "
+                f"differ on field(s) this version does not recognize: "
+                f"{', '.join(sorted(unknown_differing))} — the comparison "
+                "cannot be verified safe."
+            )
+        elif not differing:
+            # Codex review, PR #641 follow-up (P1): profile_fingerprint
+            # differs but NONE of the known PROFILE_FIELD_KEYS explain it --
+            # profile_fields was entirely absent/malformed on
+            # deserialization (_extraction_contract_from_dict substitutes
+            # {}, so every old_fields.get(k, "")/new_fields.get(k, "")
+            # compares "" == "" for every k). An empty `differing` must NOT
+            # be treated as "nothing to explain, therefore comparable" --
+            # that would silently bypass this fail-closed gate exactly when
+            # the granular field data needed to verify safety is missing or
+            # incomplete, which is the opposite of the gate's purpose.
+            reason = (
+                "old and new snapshots were extracted under different "
+                "compile contexts (profile_fingerprint mismatch), but no "
+                "recognized profile field explains the difference — "
+                "profile_fields may be absent/incomplete — so the "
+                "comparison cannot be verified safe."
+            )
+        elif not unexplained:
+            return None
+        else:
+            reason = (
+                "old and new snapshots were extracted under different compile "
+                f"contexts (profile_fingerprint mismatch; differing fields: "
+                f"{', '.join(sorted(unexplained))}) — the comparison "
+                "is not comparable."
+            )
         if diagnostic:
             return ComparabilityMismatch(kind="profile", reason=reason)
         raise ProfileMismatchError(reason)

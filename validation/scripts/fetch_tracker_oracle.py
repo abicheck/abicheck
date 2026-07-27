@@ -205,8 +205,7 @@ def derive_verdict(backward_compat: float | None, removed: int) -> str:
 
     A SONAME change is **not** treated as breaking here: abicheck's policy
     classifies a SONAME-only bump as ``COMPATIBLE_WITH_RISK`` (it is the correct
-    mitigation, not a break — see ``validation/realworld-scan-coverage-2026-06.md``),
-    which normalizes to COMPATIBLE. Forcing such pairs to BREAKING would flag
+    mitigation, not a break), which normalizes to COMPATIBLE. Forcing such pairs to BREAKING would flag
     every correctly-handled major bump as a false ``ABICHECK_WEAKER``. The SONAME
     change is still recorded in the pair metadata for context.
     """

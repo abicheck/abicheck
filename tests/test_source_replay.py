@@ -21,6 +21,7 @@ fast lane.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -993,3 +994,34 @@ def test_extract_cache_misses_installs_sigterm_cleanup_in_process_pool_workers(
     sr._extract_cache_misses(lambda cu: (None, None), units, jobs=2)
 
     assert captured.get("initializer") is deadline.install_sigterm_cleanup
+
+
+def test_extract_cache_misses_serial_path_stops_dispatching_once_budget_is_gone() -> (
+    None
+):
+    """PR #641 follow-up: real-world evidence from a large multi-TU library
+    (--budget 3m still running past 4.9GB RSS with no completion) showed the
+    serial fallback loop kept dispatching further TUs after the deadline had
+    already passed, relying entirely on each unit's own extractor-level
+    check to self-abort quickly *after* being dispatched. The serial path
+    (jobs=1, forcing _extract_cache_misses's non-pool branch) must instead
+    stop *before* dispatching a further unit once the scan-wide deadline is
+    already exhausted, so a hundred-TU miss list under a tiny budget costs
+    roughly one unit's worth of overhead, not a hundred."""
+    call_count = {"n": 0}
+
+    def _worker(cu):
+        call_count["n"] += 1
+        time.sleep(0.01)
+        return None, None
+
+    units = [_cu(f"cu://u{i}", f"src/u{i}.cpp") for i in range(200)]
+    with deadline.deadline_scope(0.03):
+        with pytest.raises(deadline.DeadlineExceeded):
+            _extract_cache_misses(_worker, units, jobs=1)
+
+    assert call_count["n"] < 20, (
+        f"serial extraction dispatched {call_count['n']}/200 units after the "
+        "budget was already exhausted -- expected it to stop within a few "
+        "iterations of the deadline passing, not run the whole miss list"
+    )

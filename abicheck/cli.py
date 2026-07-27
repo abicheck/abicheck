@@ -1313,7 +1313,10 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     if fmt not in _RELEASE_FORMATS:
         raise click.UsageError(
             f"--format {fmt} is not available when comparing directories or "
-            f"packages; choose one of: {', '.join(sorted(_RELEASE_FORMATS))}."
+            "packages: sarif/html/review require a single-pair (non-directory, "
+            "non-package) comparison. Choose one of: "
+            f"{', '.join(sorted(_RELEASE_FORMATS))}, or compare one library at "
+            f"a time (a single old/new .so pair) to use --format {fmt}."
         )
     from .cli_compare_release import compare_release_cmd
 

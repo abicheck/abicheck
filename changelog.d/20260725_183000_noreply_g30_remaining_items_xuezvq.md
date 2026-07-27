@@ -2,8 +2,7 @@
 
 - **`sycl_metadata.py` recognizes the current Unified Runtime (UR) adapter
   export shape.** Real, currently-shipping Intel oneAPI UR adapters (2026.1,
-  verified during the G30 pilot validation,
-  `validation/g30-pilot-validation-2026-07.md`) export only
+  verified during the G30 pilot validation) export only
   `urGet<Category>ProcAddrTable` function-pointer-table getters
   (`urGetAdapterProcAddrTable`, `urGetPlatformProcAddrTable`, ...) — never
   the older per-verb symbols (`urAdapterGet`, `urPlatformGet`, ...) this

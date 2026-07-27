@@ -9,8 +9,8 @@
 ## Context
 
 A false-positive/false-negative acceptance spike against the real `pvxs`
-C++ library (`validation/pvxs-abicheck-acceptance-2026-07-18.md`) traced one
-finding back to a structural gap: `diff_types.py`'s old/new `RecordType`
+C++ library traced one finding back to a structural gap:
+`diff_types.py`'s old/new `RecordType`
 matching keyed its comparison maps by the bare declaration name
 (`{t.name: t for t in old.types}`). Two distinct classes sharing a bare leaf
 name in different namespaces (or two unrelated `std::*::_Impl` template

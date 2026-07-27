@@ -646,8 +646,7 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
 def test_perform_elf_dump_folds_header_dir_into_scope_header_dirs(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """G30 pilot validation regression (validation/
-    g30-pilot-validation-2026-07.md): a directory passed via -H/--header must
+    """G30 pilot validation regression: a directory passed via -H/--header must
     be threaded through to dump()'s scope_header_dirs (via split_public_
     header_inputs, the same helper `compare` uses) -- not just its expanded
     per-file listing -- so the resulting contract's scope_fingerprint agrees

@@ -172,8 +172,8 @@ def demote_internal_version_node_findings(
 
     A symbol the library author bound to a ``*_INTERNAL_*`` / ``*PRIVATE*`` ELF
     version node is exported but is not public ABI (the
-    ``abi-compliance-checker`` header-scoped tracker correctly ignores it; see
-    ``validation/realworld-tracker-parity-2026-06.md`` class A — nettle 3.6→3.7).
+    ``abi-compliance-checker`` header-scoped tracker correctly ignores it;
+    seen in real-world parity scanning against nettle 3.6→3.7).
     abicheck's binary-strict default would otherwise score a real change to such a
     symbol (removal, signature change, internal data-table resize, or the rename
     of the internal node itself) as ``BREAKING``.

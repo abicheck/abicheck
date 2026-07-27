@@ -1550,6 +1550,527 @@ checked so far. `reporter.py`/`sarif.py`/`junit_report.py` surface it the
 same way they already surface `assurance` — a plain report field, not a
 finding.
 
+**Additive-only header-set carve-out (found live, PR #641: the pvxs
+full-version-matrix scan's F8).** A real-world scan through
+epics-base/pvxs's current `master` hit exactly the failure mode D2's
+"Context" section predicted in the abstract: comparing `1.5.2` against
+`master` raised `ScopeMismatchError` because `master` had added exactly one
+new public header, `include/pvxs/json.h`, with nothing else added, removed,
+or renamed. This is not the "manifest/CLI-flag drift between two extraction
+runs" mistake `scope_fingerprint` exists to catch — it is ordinary,
+unremarkable library evolution (a new feature getting its own header
+between minor releases), and every *other* tag-to-tag pair in pvxs's
+history keeps an identical header set and never triggers the gate, which is
+exactly why neither of two earlier, narrower validation passes against
+this same project surfaced it: it only shows up once a scan genuinely
+reaches a project's live tip rather than stopping at the last tagged
+release.
+
+The gate cannot, from the fingerprint alone, distinguish "upstream added a
+real header" from "the caller's CLI/manifest drifted between two
+extraction runs" — both symptoms are identical (a different declared
+header-file set). What *can* be distinguished, without any new evidence
+beyond what `ExtractionContract` already carries, is **direction**: a
+manifest/CLI-flag drift can shrink, grow, or entirely replace the declared
+set in an unprincipled way, but a library's own ordinary evolution between
+releases overwhelmingly shows up as the new side's declared surface being a
+strict superset of the old side's — nothing the old side named is missing,
+and if anything is newly present, the ordinary diff engine already knows
+how to classify a newly-declared symbol as an addition. So rather than
+requiring the two declared-file *sets* to be identical, the gate is
+relaxed to require only that neither `SCOPE_FIELD_KEYS` field (`"headers"`,
+`"public_header_dirs"`) ever *shrinks* — checked independently per field
+(`_scope_field_is_additive_superset`), so a genuine removal or rename
+hiding behind a co-occurring, unrelated addition still correctly hard-fails
+(a library that drops one public header while adding another is not "pure
+addition," and this carve-out must not paper over it).
+
+This is deliberately narrower than it might first appear, for the same
+reason the single-header collapse already built into `scope_fields`
+(`"<single-header>"`/`"<single-header-dir>"` — see
+`compute_extraction_contract`'s docstring) exists: with only one entry
+declared on a side, there is no real per-entry identity to verify a
+superset claim against at all — the one name isn't load-bearing scope
+identity, by the same design decision that already lets a lone header be
+renamed between releases without tripping the gate. Guessing "it's
+probably still additive" in that case would be exactly the kind of silent
+assumption D2 exists to refuse to make, so the carve-out explicitly
+declines (falls through to the existing hard-fail) whenever either side's
+value for a differing field is one of these sentinels, rather than treating
+"can't tell" as "assume yes."
+
+Like the platform-identity and build-context carve-outs above, this one
+only ever **widens** what the gate accepts as comparable — it introduces no
+new way to suppress a genuine mismatch the gate would otherwise correctly
+catch, and the confirmed workaround for the cases it still declines
+(`--diagnostic-comparison`, already documented above) remains available
+unchanged. Unlike those two carve-outs, this is the first one gating the
+**scope** branch rather than the **profile** branch — the platform-identity
+and build-context carve-outs both operate on `profile_fields`/`PROFILE_FIELD_KEYS`;
+this one is the first to give `check_contracts_comparable`'s scope check
+its own field-level (rather than opaque-hash-level) reasoning, following
+the same pattern the profile branch already established: keep the raw,
+attributable field values on `ExtractionContract` (not just the fingerprint
+hash) specifically so a later carve-out can reason about *what* changed,
+not merely *that* something did.
+
+**Correction (Codex review, PR #641 follow-up): the carve-out's original
+`return None` was placed inside the scope `if` block, exiting the whole
+function and silently skipping the profile check that follows.** A release
+that both adds a header (safely waived) *and* changes an unrelated,
+uncorroborated profile field (compiler flags, macros, include order —
+none of which any existing carve-out covers) would have been wrongly
+treated as fully comparable instead of correctly raising
+`ProfileMismatchError` for the second, genuine drift. Fixed by gating the
+carve-out into the scope condition's own boolean expression instead of an
+early return inside the block — waiving the scope mismatch now falls
+through to the profile check unconditionally, the same as an ordinary
+non-mismatching scope comparison always has.
+
+**Header-sequence-growth carve-out (Codex review, same follow-up round):
+that correction immediately exposed a second, deeper gap — the identical
+"pure addition" scenario now correctly reached the profile check, and
+promptly failed it anyway.** `profile_fields["header_sequence"]` tracks
+declared-header *order* as its own genuine extraction-context fact
+(`compute_extraction_contract`'s docstring: header order can change how a
+*later* header's macros/pragmas resolve, so it is deliberately not folded
+into scope's order-independent declared set) — and adding a header
+necessarily changes this sequence too, by construction. With only the
+scope-side carve-out, `check_contracts_comparable` still raised
+`ProfileMismatchError` on the unmodified real pvxs scenario (confirmed by
+direct repro: `declared_headers=[a,b]` → `[a,b,c]` with everything else
+held constant differed only on `header_sequence`, and still hard-failed).
+A second, symmetric carve-out closes this: a `profile_fingerprint`
+mismatch confined to `header_sequence` alone does not raise when the new
+sequence, with exactly the newly-added headers removed (preserving order),
+reconstructs the old sequence exactly
+(`_header_sequence_is_additive_reorder_free`) — proving no *existing*
+header was reordered relative to another, only new ones appended or
+inserted. A reorder of existing headers entangled with growth (e.g.
+`[a,b]` → `[b,a,c]`) still raises, since that genuinely could change what
+an earlier-declared header's parse sees. Verified end-to-end against the
+exact real pvxs F8 scenario (both carve-outs together): `check_contracts_comparable`
+now returns `None` — no exception of either kind — reproducing what the
+original F8 fix was supposed to achieve but, until this round, never
+actually did for a snapshot pair that also carries `profile_fingerprint`
+(i.e. ran the L2 frontend, the ordinary case for a real header-AST dump).
+
+**A fourth round (Codex review) found that the header-sequence fix above
+still didn't reach the real production invocation shape, plus a second,
+more general structural gap in how carve-outs compose.**
+
+The production `dump` path (`cli_dump_helpers.py`) calls
+`resolve_inferred_header_roots` to auto-add the header-owning directory as
+a declared include, so a real `-H old=<dir> -H new=<dir>` invocation
+changes `profile_fields["include_sequence"]` too — that auto-added slot's
+own token encodes the declared-header set it owns
+(`_slot_token_for_ancestor`). Confirmed by direct repro reproducing the
+*exact* production code path (calling `resolve_inferred_header_roots`
+itself, not just hand-building a contract that skips it): `differing =
+{"header_sequence", "include_sequence"}`, and the header-sequence carve-out
+alone — which only ever considered `differing <= _HEADER_SEQUENCE_FIELDS`
+— declined because `include_sequence` was also present, so
+`check_contracts_comparable` still raised `ProfileMismatchError` for the
+real F8 CLI shape even after the previous round's fix. A fourth carve-out,
+`_include_sequence_is_additive_owned_growth`, closes this the same way as
+`header_sequence`: a mismatch confined to `include_sequence` doesn't raise
+when every differing slot's owned `"hdrs:..."` token is itself a pure
+superset growth — an `"ext:"`/`"label:"` slot differing, a slot-count
+change, or a `<single-header>` sentinel on either side all still raise.
+
+The second, more general gap this round found: **carve-outs didn't
+compose.** Each carve-out required `differing <= its own static field-set`
+in full — so a release combining two *independently already-sanctioned*
+deltas (e.g. adding a header *and* making a corroborated C++-standard
+raise) produced `differing = {"header_sequence", "language_standard"}`, a
+set matching *neither* carve-out's field-set on its own, and still raised
+even though each half was individually fine. Confirmed by direct repro
+before any fix. Restructured the profile check from four independent
+"does `differing` match this exact field-set" tests into one composing
+loop: each carve-out claims and verifies only the subset of `differing` it
+understands, narrowing a shared `unexplained` working set; the pair is
+comparable once nothing remains unexplained. The four carve-outs' field-sets
+(`_PLATFORM_IDENTITY_FIELDS`/`_BUILD_CONTEXT_FIELDS`/`_HEADER_SEQUENCE_FIELDS`/
+`_INCLUDE_SEQUENCE_FIELDS`) are mutually disjoint, so this restructuring
+changes no single carve-out's own verification logic or safety
+invariants — it only widens *which combinations* of independently-safe
+deltas are recognized together, never weakens what counts as "safe" for
+any one field.
+
+**One further gap surfaced during this investigation, deliberately left as
+a documented limitation, not fixed:** a header added *outside* the old
+side's common ancestor directory (e.g. existing headers under
+`include/foo/`, a new one under a sibling `include/bar/`) shifts the common
+root every remaining `headers` identity is computed relative to
+(`compute_extraction_contract`), so even the *existing* headers' identity
+strings change shape (`"a.h"` → `"foo/a.h"`) and the additive-superset
+check correctly declines. This is the conservative, safe failure mode — a
+real hard-fail, never a silently wrong verdict — for a case genuinely
+outside the real pvxs F8 scenario, which adds its new header *within* the
+existing common directory. Closing it properly would mean re-deriving one
+side's header identities relative to a root chosen with knowledge of the
+*other* side (a cross-snapshot computation `compute_extraction_contract`'s
+current one-side-at-a-time design doesn't support), which is exactly the
+kind of `comparability.py`-internals redesign this file's own conventions
+flag as needing its own ADR treatment, not a fifth drive-by carve-out
+appended to an already four-deep list. `--diagnostic-comparison` remains
+the correct workaround.
+
+**A fifth review pass** (Codex, two P1s) found the sequence carve-outs and
+the composing-loop restructuring above each had one more gap:
+
+- **The header/include-sequence carve-outs accepted an additive *shape* on
+  their own, without corroborating it against an actual scope-level
+  change.** `scope_fields["headers"]` deliberately treats a file reaching it
+  via `declared_headers` (fed to the L2 frontend via `-H`) and via
+  `public_header_paths` (bare `--public-header` provenance, never actually
+  parsed) as the *same* declared-surface membership (see
+  `compute_extraction_contract`'s own docstring) — so a header already
+  declared identically on both sides via `--public-header`, but fed to the
+  L2 frontend only on the new side, leaves `scope_fingerprint` completely
+  unchanged while `profile_fields["header_sequence"]` (and, via
+  `resolve_inferred_header_roots`, `include_sequence` too) still grows
+  additively, purely because of which mechanism happened to feed the
+  parser. The old snapshot then has *no* parsed AST content for that header
+  at all, so a real removal made inside it between old and new would be
+  silently invisible rather than reported — a false negative, not merely
+  extra noise, and P1-severity for exactly that reason. Fixed with a new
+  helper, `_scope_growth_corroborated`, requiring `scope_fingerprint` to
+  genuinely differ *and* verify as additive (the same check the scope
+  carve-out itself uses) before either sequence carve-out is allowed to
+  fire. Confirmed by direct repro before any fix (both new regression tests
+  failed with "DID NOT RAISE ProfileMismatchError" without the corroboration
+  requirement), and re-verified the real F8/directory-based end-to-end
+  tests still pass afterward — the genuine pvxs scenario's scope-level
+  "headers" field really does grow when a wholly new header is added, so
+  requiring corroboration doesn't regress it.
+- **An opaque `profile_fingerprint` mismatch was silently accepted as
+  comparable.** The composing loop starts `unexplained = set(differing)`,
+  where `differing` is the subset of `PROFILE_FIELD_KEYS` that actually
+  differ between the two sides' `profile_fields`. If `profile_fields` was
+  entirely absent or malformed on deserialization (the serialization
+  layer's `_extraction_contract_from_dict` substitutes `{}` for a missing/
+  invalid field, rather than failing), every field trivially compares
+  `"" == ""`, so `differing` — and therefore `unexplained` — comes out
+  empty even though `profile_fingerprint` genuinely differs. `if not
+  unexplained: return None` then treated "nothing left to explain" as
+  "already explained," bypassing the fail-closed gate exactly when the
+  granular data needed to verify safety was missing. Fixed by
+  distinguishing an entirely-empty `differing` (nothing was positively
+  verified, so this raises unconditionally) from a non-empty `differing`
+  (still requires the carve-outs to explain everything before returning
+  comparable, exactly as before) — see the sixth review pass below for the
+  related, still-open gap this round's fix didn't yet close.
+
+Both fixes add regression tests proven to fail without them (`git stash`
+the fix, confirm the new test fails, restore). Full fast unit suite green,
+mypy/ruff clean. `tests/test_comparability.py` crossed the file-size hard
+cap once these tests landed; the `check_contracts_comparable`-focused
+tests (already about two-thirds of the file) were split into a sibling
+`tests/test_comparability_gate.py`, leaving the parent file scoped to
+`compute_extraction_contract`'s own fingerprint-computation tests, per this
+repo's usual large-file-split convention.
+
+**A sixth review pass** (Codex, one P1, one P2) found the fifth pass's own
+opaque-mismatch fix still had a gap, plus a defensive-coding gap shared by
+all four carve-out helpers:
+
+- **A differing field outside `PROFILE_FIELD_KEYS` entirely could still
+  hide behind a legitimate, waived delta.** The fifth pass's fix only
+  covered `differing` (over `PROFILE_FIELD_KEYS`) coming out completely
+  *empty* — it left unaddressed a contract carrying an extra field this
+  build doesn't recognize (a newer schema key) that also differs, mixed
+  with an otherwise-legitimate, carve-out-waived delta (e.g. additive
+  `header_sequence` growth corroborated by real scope growth). Since
+  `differing`'s computation only ever iterates `PROFILE_FIELD_KEYS`, the
+  unrecognized field's delta was structurally invisible to `unexplained` —
+  once the recognized delta was waived, `unexplained` came out empty and
+  the pair was wrongly reported comparable, silently ignoring the
+  unrecognized field entirely. Fixed with a new, independently-computed
+  `unknown_differing` set (every key outside `PROFILE_FIELD_KEYS`, over the
+  union of both sides' field-dict keys, that actually differs) — its
+  presence is now unconditionally fatal, checked before any carve-out
+  result is trusted, since no carve-out understands an unrecognized key's
+  semantics well enough to vouch for it.
+- **The carve-out helpers didn't handle malformed JSON.**
+  `_scope_field_is_additive_superset`,
+  `_header_sequence_is_additive_reorder_free`, and
+  `_include_sequence_is_additive_owned_growth` all call `json.loads` on
+  their `str` inputs unguarded — but a serialized or externally
+  constructed `ExtractionContract` can carry an arbitrary string there
+  (`_extraction_contract_from_dict` preserves field values without
+  validating their JSON encoding), so a malformed value (e.g.
+  `headers: "not-json"`) raised an unhandled `JSONDecodeError` that escaped
+  `check_contracts_comparable` as a raw traceback instead of the clean
+  `ScopeMismatchError`/`ProfileMismatchError` the gate exists to fail
+  closed with. Fixed with a shared `_json_load_list` helper (decodes to a
+  list or returns `None` on any decode failure or non-list result); every
+  carve-out now declines instead of crashing when either side fails to
+  decode. `_include_sequence_is_additive_owned_growth`'s inner per-slot
+  owned-pairs decode gets the same treatment, plus a guard against a
+  structurally-malformed-but-valid-JSON pair (`tuple(p)` on a non-sequence
+  element) declining instead of raising `TypeError`.
+
+New regression tests: two gate-level tests for the unknown-differing-key
+case (one alone, one mixed with a waived recognized delta — proven to fail
+without the fix), one direct unit test per carve-out helper pinning
+malformed-JSON decline (plus a non-list-JSON case for the scope helper),
+and one gate-level end-to-end test confirming a malformed scope field
+raises `ScopeMismatchError` rather than crashing. Full fast unit suite
+green, mypy/ruff clean.
+
+**A seventh review pass** (Codex, one P1, one P2) found the sixth pass's
+own fixes each had one more gap, symmetric to ones already closed:
+
+- **The scope-side carve-out had the identical unknown-field gap the
+  profile side's `unknown_differing` check had just closed.** The scope
+  carve-out's `all(...)` only ever checks `SCOPE_FIELD_KEYS`
+  (`headers`/`public_header_dirs`), so a contract carrying an extra
+  `scope_fields` key this build doesn't recognize (a newer schema field)
+  was invisible to it — if the two known fields happened to be equal or
+  additive, the whole `scope_fingerprint` mismatch was silently waived
+  without ever examining the unrecognized field. Confirmed by direct repro:
+  equal known fields plus `future_scope: "old"` → `"new"` returned `None`
+  (comparable). Fixed with a `scope_unknown_differing` set, computed the
+  same way as the profile side's `unknown_differing` and checked before
+  the additive-superset carve-out is trusted; its presence is
+  unconditionally fatal.
+- **The malformed-JSON fix from the sixth pass validated only the outer
+  list shape, not its elements.** `_json_load_list` (added last round)
+  correctly rejects non-JSON and non-list values, but a syntactically
+  valid list with non-scalar members (e.g. `scope_fields["headers"] =
+  "[{}]"`) decodes fine as `[{}]` — every caller then immediately does
+  something requiring hashable strings (`in
+  _SCOPE_SINGLE_ENTRY_SENTINELS`, `set(...)` membership/superset checks),
+  and a `dict` element there raises `TypeError: unhashable type: 'dict'`
+  instead of the clean decline the previous round's fix was meant to
+  guarantee. Fixed with a new `_json_load_str_list` helper (an
+  `_json_load_list` result additionally validated to be all-`str`), used
+  everywhere a plain string-identity list is expected
+  (`_scope_field_is_additive_superset`,
+  `_header_sequence_is_additive_reorder_free`, and
+  `_include_sequence_is_additive_owned_growth`'s outer per-slot decode —
+  which also let this round remove that function's now-redundant manual
+  `isinstance(..., str)` guard, added ad hoc in the sixth pass before this
+  shared helper existed). `include_sequence`'s inner owned-pairs decode
+  (a list of pairs, not plain strings) keeps using the generic
+  `_json_load_list`, since its `tuple(p)`/set-construction step already
+  had its own `try`/`except TypeError` guard from the sixth pass.
+
+New regression tests: two gate-level tests for the unknown-scope-delta
+case (equal known fields, and known fields growing additively — both
+proven to fail without the fix), one direct unit test per affected carve-out
+helper pinning the non-string-list-member decline, and one gate-level
+end-to-end test confirming a non-string scope field member declines
+cleanly rather than raising `TypeError`. Full fast unit suite green,
+mypy/ruff clean.
+
+**An eighth review pass** (Codex, one P1, one P2) found one more gap in
+the include-sequence carve-out's inner decode, plus the scope-side
+equivalent of a gap already closed on the profile side:
+
+- **`_include_sequence_is_additive_owned_growth`'s owned-pairs validation
+  still accepted malformed members that happened to look harmless.** The
+  sixth pass's `try`/`except TypeError` around `tuple(p)` doesn't catch a
+  bare string member like `"xx"`: strings are themselves iterable, so
+  `tuple("xx")` silently succeeds as `("x", "x")` instead of raising —
+  if that coincidentally matched an already-owned pair (or a wrong-arity
+  member sat alongside a genuinely new, valid one), the resulting set
+  comparison could look like real additive growth even though the
+  evidence was malformed, letting the gate fail open. Confirmed by direct
+  repro: `old_owned = {("x", "x")}` (a real pair) against
+  `new_owned = {tuple("xx")}` (the malformed member) satisfied
+  `new_owned >= old_owned` and the function wrongly returned `True`.
+  Fixed with a new `_is_owned_header_pair` validator (an exact two-element
+  `list`/`tuple` of `str`) checked for every member of both sides before
+  any `tuple(p)` conversion runs — the now-provably-unreachable
+  `try`/`except TypeError` around the set-comprehension is removed.
+- **The scope-side carve-out had the same opaque-mismatch gap the profile
+  side's `if not differing` check (fifth pass) already closed.**
+  `_scope_field_is_additive_superset` returns `True` on `old_value ==
+  new_value`, so calling it over *every* `SCOPE_FIELD_KEYS` entry (as the
+  carve-out did) means an entirely-*unchanged* set of known fields always
+  trivially satisfies `all(...)` — if a deserialized/externally-constructed
+  contract carries a `scope_fingerprint` that doesn't actually match what
+  this version would recompute from `scope_fields` (the same "opaque
+  hash" class of problem as the profile side), nothing recognized ever
+  explains the differing fingerprint, yet the carve-out still waived it.
+  Fixed by restricting the additive-superset check to a new
+  `scope_differing` set (only the `SCOPE_FIELD_KEYS` entries that actually
+  differ, mirroring the profile side's `differing`) and requiring it to be
+  non-empty before the carve-out can apply — an entirely-unchanged known
+  field set now correctly raises instead of being trivially "verified."
+
+New regression tests: two direct unit tests for the owned-pairs gap (a
+malformed member matching an existing pair, and a wrong-arity member
+alongside a genuinely new valid one — both proven to fail without the
+fix), and two gate-level tests for the opaque scope mismatch (raise mode
+and diagnostic mode, both proven to fail without the fix). Full fast unit
+suite green, mypy/ruff clean.
+
+**A ninth review pass** (Codex, one P1, one P2) found one more gap in the
+`unknown_differing`/`scope_unknown_differing` checks, plus an unrelated
+gap in the customization-point allowlist regex:
+
+- **`.get(k, "")` conflated "key absent" with "key present, empty
+  value."** Both unknown-field checks fall back to `""` for a missing
+  key, matching every other field-presence check in this module — but for
+  *these* checks specifically, that means a newer-schema field added on
+  only one side with an empty value (`{"future_scope": ""}` vs. no key at
+  all) compares `"" == ""` and stays invisible, even when combined with an
+  otherwise-legitimate, corroborated delta (additive `header_sequence`/
+  `headers` growth). Confirmed by direct repro before any fix: this exact
+  shape returned `None` (comparable) on both the profile and scope sides.
+  Fixed with a module-level `_FIELD_ABSENT = object()` sentinel, distinct
+  from every valid field value, used as the `.get()` fallback in both
+  checks instead of `""`.
+- **The customization-point allowlist regex didn't account for libc++'s
+  inline ABI namespace.** libc++ wraps its entire standard-library
+  implementation in a versioned inline namespace (`__1` in mainline
+  libc++, `__ndk1` on Android NDK) between the `St`/`3std` substitution
+  and the actual class name — so a user specialization of `std::hash<X>`
+  under libc++ mangles as `_ZZNKSt3__14hashI1XEclERKS1_E4salt` rather than
+  the bare GCC/libstdc++ shape `_USER_SPECIALIZABLE_STD_TEMPLATE_RE`
+  originally expected. `_STDLIB_LOCAL_NAME_RE` still matched the `St`
+  prefix (classifying the symbol as stdlib-owned) while the exclusion
+  regex missed it entirely, so a real user-owned regression under libc++
+  was wrongly suppressed. Fixed by inserting an optional, non-greedy
+  `(?:\d+__[A-Za-z0-9_]+?)?` between the substitution and the
+  customization-point alternation — non-greedy specifically, since a
+  greedy quantifier would consume into the customization-point name
+  itself (`3__1` followed directly by `4hash` reads as one contiguous
+  word-character run) and the engine needs to backtrack to the shortest
+  split that still matches. Verified this doesn't spuriously match
+  ordinary (non-customization-point) stdlib types under the same inline
+  namespace (`std::__1::vector<...>` still correctly classifies as
+  stdlib-owned, not excluded).
+
+New regression tests: one gate-level test per side for the empty-vs-absent
+gap (both proven to fail without the fix — the scope one specifically
+constructed with `headers` also growing additively, so the already-fixed
+opaque-scope-mismatch check from the previous pass doesn't coincidentally
+mask this one), one parametrized case for the libc++ example in
+`test_name_classification.py`, and the Hypothesis grammar suite
+(`test_name_classification_properties.py`) extended with an optional
+libc++ inline-namespace component so the property test covers this shape
+generatively, not just the one hand-picked example. Full fast unit suite
+green, mypy/ruff clean.
+
+**A tenth review pass** (Codex, one P1) found the deepest gap yet — not
+another carve-out corner case, but a soundness gap in the whole carve-out
+framework's founding assumption:
+
+- **No carve-out ever verified that a contract's stored fingerprint was
+  actually computed from its own stored fields.** Every carve-out above
+  reasons entirely from `scope_fields`/`profile_fields` — "this recognized
+  field grew additively, so the fingerprint mismatch is explained" — but
+  that reasoning is only sound if the fingerprint genuinely reflects those
+  fields. For a snapshot `compute_extraction_contract` produced, that
+  invariant always holds by construction (the fingerprint is a hash of the
+  exact fields stored alongside it), so this was never an issue in
+  practice for the real pvxs scenario this whole review chain is about.
+  It is completely unenforced, though — confirmed by direct repro before
+  any fix: two arbitrary, unrelated fingerprint strings (`"s-old"`/
+  `"s-new"`, not real hashes of anything) alongside `headers` genuinely
+  growing additively still made `check_contracts_comparable` return `None`
+  (comparable), on both the scope and profile sides independently. Every
+  prior round's carve-out narrowing (`unknown_differing`,
+  `scope_unknown_differing`, the opaque-mismatch checks, `_FIELD_ABSENT`)
+  made the *known-fields* reasoning progressively tighter, but none of them
+  actually tied the fingerprint itself back to the fields it's supposed to
+  attribute a mismatch to.
+  Fixed with `_fingerprint_matches_fields(fingerprint, fields, keys)` —
+  recomputes `_sha256_of(*[fields.get(k, "") for k in keys])` and compares
+  against the stored fingerprint, exactly mirroring
+  `compute_extraction_contract`'s own algorithm. Called on BOTH sides,
+  for BOTH scope and profile, as the very first check inside each
+  fingerprint-mismatch branch — before `unknown_differing`/
+  `scope_unknown_differing`, before `differing`/`scope_differing`, before
+  any carve-out. A mismatch on either side is unconditionally fatal: it
+  means the fields on that side cannot be trusted to explain that side's
+  own fingerprint, so nothing reasoned from them is safe to act on.
+  Verified this doesn't regress any real-world path: every existing test
+  that expects a carve-out to succeed builds its contracts via the real
+  `compute_extraction_contract` (which always satisfies this invariant by
+  construction) rather than hand-typed placeholder fingerprints, so only
+  two existing tests (both intentionally using placeholder scope
+  fingerprints to isolate an unrelated *profile*-side check) needed
+  updating to use a real, matching scope fingerprint so execution still
+  reaches the profile check those tests actually exercise.
+
+New regression tests: two direct unit tests for `_fingerprint_matches_fields`
+itself, and four gate-level tests (raise mode and diagnostic mode, for
+both scope and profile) reproducing arbitrary/unrelated fingerprints
+alongside genuinely additive-shaped fields — all six proven to fail
+without the fix. Full fast unit suite green, mypy/ruff clean.
+
+**An eleventh review pass** (Codex, one P1) found that the header-sequence
+carve-out's own definition of "additive" was too permissive:
+
+- **Mid-sequence or leading insertion was wrongly treated as safe as a
+  trailing append.** `_header_sequence_is_additive_reorder_free` originally
+  only checked that the *existing* headers kept their relative order to
+  each other (`[a.h, c.h]` -> `[a.h, b.h, c.h]` passed, since `a.h` still
+  precedes `c.h`). But the aggregate driver TU parses declared headers
+  sequentially, so inserting `b.h` between them means `c.h` is now parsed
+  with `b.h`'s macros/pragmas already in effect — a genuinely different
+  extraction context than before, even though the shape superficially
+  looks like a pure addition. The same risk applies to insertion *before*
+  all existing headers (`[b.h, c.h]` -> `[a.h, b.h, c.h]`): `b.h`'s own
+  parsing context changes even though the existing headers' relative order
+  to each other is untouched. Confirmed by direct repro before any fix:
+  both shapes returned `True`. Fixed by replacing the "existing headers
+  keep their relative order" check with a strictly stronger one: the new
+  sequence must be the old sequence, byte-for-byte unchanged, with new
+  entries appended *only* after it (`new_list[:len(old_list)] ==
+  old_list`) — proving every existing header's own preprocessing context
+  is identical to before, not merely that existing headers didn't swap
+  places. This is a narrower, more conservative definition of "additive"
+  than the carve-out originally used; only a strict trailing append is
+  waived now, matching the shape the real pvxs F8 scenario (and every
+  other test in this file building genuine `compute_extraction_contract`
+  end-to-end scenarios) already produces, so no real-world carve-out
+  outcome regresses — only one existing unit test, which had specifically
+  pinned the too-permissive mid-sequence-insertion behavior as `True`,
+  needed its expectation flipped to `False` (and renamed to match).
+
+New regression tests: the previously-passing mid-sequence-insertion test
+is now a `..._false_for_insertion_in_middle` case (flipped expectation,
+proven to fail against the pre-fix code), plus a new
+`..._false_for_insertion_before_all` case for the leading-insertion shape.
+Full fast unit suite green, mypy/ruff clean.
+
+**A twelfth review pass** (Codex, one P1) found a second gap left as a
+**documented limitation, not fixed** — the same category as the
+common-root-rebasing gap above, not a further carve-out round: an appended
+public header that itself pulls in a *new* dependency reachable only
+through a non-owned `-I` directory (an `"ext:"` slot, or the trailing
+`"sys:"` system bucket) changes that slot's digest alongside the owned
+`"hdrs:"` slot's legitimate growth. Confirmed by direct repro: `[a.h,
+b.h]` -> `[a.h, b.h, c.h]`, where `c.h` transitively includes a header
+resolved only via a separate external include directory, still raises
+`ProfileMismatchError` — the per-slot loop declines the instant a
+non-`"hdrs:"` slot differs at all, with no way to tell "this dependency is
+new, brought in solely by the accepted header addition" from "this
+external directory's contents genuinely drifted between the two
+extraction runs." Unlike the owned `"hdrs:"` slot (which stores an
+explicit, JSON-encoded list of `(identity, relative_path)` pairs precisely
+so superset growth can be verified), an `"ext:"`/`"sys:"` slot's token is
+a single opaque `_sha256_of` digest over that bucket's *entire* file set —
+by construction, there is no per-file identity recoverable from two hash
+strings to diff against each other, so "did this bucket grow strictly, or
+did an existing file's content change" is genuinely unanswerable from the
+stored data alone. Closing this safely would mean changing what an
+`"ext:"`/`"sys:"` slot stores — a JSON pairs list like `"hdrs:"` already
+uses, instead of a collapsed hash — which is a `profile_fingerprint`
+wire-format change (every existing fixture/test constructing an `"ext:"`/
+`"sys:"` token, and this file's own fingerprint-reproduction invariant,
+would need to change in lockstep), not a logic fix within the existing
+shape. That is exactly the kind of `comparability.py`-internals redesign
+this file's own conventions reserve for its own ADR treatment, the same
+bar the common-root-rebasing limitation was held to. `--diagnostic-comparison`
+remains the correct workaround for this specific scenario.
+
 ### D3. Manifest and real multi-TU dump
 
 New `abicheck/dump_manifest.py`: a strict YAML parser (unknown fields are

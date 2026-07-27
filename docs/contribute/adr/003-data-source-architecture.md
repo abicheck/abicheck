@@ -296,8 +296,8 @@ pairs when a `FUNC_LIKELY_RENAMED` exists for the same symbol pair.
 ## Extension: clang as an alternative L2 frontend (implemented)
 
 **Date:** 2026-06-15
-**Status:** Implemented — first slice landed. Surfaced by the UXL field run
-(`validation/uxl-scan-levels-timing-2026-06.md`, P1).
+**Status:** Implemented — first slice landed. Surfaced by a real-world UXL
+field run (P1 finding).
 
 ### Context
 

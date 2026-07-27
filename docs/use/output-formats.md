@@ -708,13 +708,16 @@ on: [pull_request]
 jobs:
   abi-check:
     runs-on: ubuntu-24.04
+    permissions:
+      security-events: write  # required by the upload-sarif step below
+      contents: read
     defaults:
       run:
         shell: bash -el {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
 
-      - uses: conda-incubator/setup-miniconda@v3
+      - uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167  # v3
         with:
           activate-environment: abicheck
 
@@ -742,10 +745,17 @@ jobs:
         continue-on-error: true
 
       - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a  # v4
         with:
           sarif_file: abi.sarif
 ```
+
+!!! warning "Pin every action in this job to a commit SHA"
+    This job grants `security-events: write` for the upload-sarif step, so
+    every `uses:` here runs with that permission's token — a repointed or
+    compromised mutable tag (`@v4`, `@v3`) would run with it too. Pin to a
+    full commit SHA, keeping the release tag in a trailing comment for
+    auditability (as above). See [Versioning](github-action.md#versioning).
 
 ### Severity mapping
 

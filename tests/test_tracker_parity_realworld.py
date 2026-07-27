@@ -15,9 +15,9 @@
 
 """Regression guards for the *interesting* cases of the live ABICC-oracle scan.
 
-These pin — offline, with the real finding shapes from the scan documented in
-``validation/realworld-tracker-parity-2026-06.md`` — how the parity harness
-classifies each non-matching pair, so a future change to the scoring engine
+These pin — offline, with the real finding shapes from a real-world parity
+scan — how the parity harness classifies each non-matching pair, so a
+future change to the scoring engine
 cannot silently reclassify a documented boundary (turning an expected,
 explained divergence into a hidden false positive/negative or vice-versa).
 

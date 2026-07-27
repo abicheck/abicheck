@@ -447,8 +447,7 @@ def _build_lib_in_dir(tmp_path: Path) -> tuple[Path, Path, Path]:
 def test_scope_header_dirs_matches_compare_style_public_header_dir_scope(
     tmp_path: Path,
 ) -> None:
-    """Regression pin (G30 pilot validation, ``validation/
-    g30-pilot-validation-2026-07.md``): a snapshot ``dump``-produced from a
+    """Regression pin (G30 pilot validation): a snapshot ``dump``-produced from a
     bare ``-H <dir>`` directory argument (the CLI now folds that raw
     directory into ``scope_header_dirs``, ``cli_dump_helpers.
     perform_elf_dump``) must agree on ``scope_fingerprint`` with a live

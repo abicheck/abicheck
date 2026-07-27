@@ -52,10 +52,13 @@ __all__ = [
     "ITANIUM_RTTI_PREFIXES",
     "RTTI_DATA_PREFIXES",
     "LOCAL_RTTI_PREFIXES",
+    "LOCAL_NAME_PREFIX",
     "STDLIB_RTTI_PREFIXES",
     "INTERNAL_NAMESPACE_COMPONENTS",
     "is_rtti_symbol",
     "is_local_rtti_symbol",
+    "is_local_name_symbol",
+    "is_stdlib_local_name_symbol",
     "has_internal_namespace_component",
     "symbol_origin",
     "COMPILER_INTERNAL_TYPES",
@@ -95,6 +98,181 @@ RTTI_DATA_PREFIXES: tuple[str, ...] = ("_ZTV", "_ZTI", "_ZTS")
 # named in a public header, so the presence/absence of its typeinfo is
 # build-dependent churn, not a public-ABI break.
 LOCAL_RTTI_PREFIXES: tuple[str, ...] = ("_ZTIZ", "_ZTSZ", "_ZTVZ", "_ZTTZ")
+
+# The generic Itanium ``<local-name>`` production for a *variable* (as
+# opposed to LOCAL_RTTI_PREFIXES, which is the same production applied to a
+# type's RTTI): ``Z <function encoding> E <entity name>``, e.g. a function-
+# local ``static`` object mangles as ``_ZZ4mainE1x``. Unlike LOCAL_RTTI_PREFIXES
+# (four specific ``_ZT[IVST]Z`` combinations), a bare local variable/entity has
+# no preceding special-name marker, so the production appears immediately
+# after the leading ``_Z``.
+#
+# NOT, by itself, a "never ABI-relevant" marker (Codex review, PR #641): a
+# PUBLIC inline/template function's function-local ``static`` is exactly what
+# the Itanium ``STB_GNU_UNIQUE``/weak-symbol mechanism exists to
+# cross-TU-deduplicate, so consumers genuinely can bind against it and rely on
+# its declared alignment -- a real regression there is a real hazard, not
+# noise. Only the runtime/standard-library-OWNED subset (see
+# :func:`is_stdlib_local_name_symbol`) is safe to treat as address-placement
+# noise; a local static declared in the library-under-test's own public
+# header is not covered by this constant alone.
+LOCAL_NAME_PREFIX = "_ZZ"
+
+# A LOCAL_NAME_PREFIX symbol whose *enclosing function* belongs to the C++
+# runtime/standard library (std::, __gnu_cxx::, __cxxabiv1::) rather than the
+# library under test -- the <CV-qualifiers> a const/volatile/restrict-
+# qualified member function's <encoding> may carry (``r``/``V``/``K``, in
+# that grammar order) plus an optional trailing ref-qualifier (``R``/``O``
+# for &/&&) appear between the ``_ZZN`` nested-name opener and the namespace
+# component itself (e.g. ``_ZZNKSt7__cxx11...`` for a const std::__cxx11::
+# member function), hence the ``[rVK]{0,3}[RO]?`` gap rather than a plain
+# fixed-prefix match -- ``[rVK]{0,3}`` for the 0-3 CV-qualifier letters
+# (loosely: real manglings never repeat one, but a whitelist doesn't need to
+# enforce that), then an independent, at-most-one ``[RO]?`` for the separate
+# ref-qualifier production, not folded into the same repeated class (Codex
+# review, PR #641: the qualifier class must include ``r`` -- omitted in an
+# earlier version, matching only ``K``/``V``/``R``/``O`` and silently
+# failing to recognize a restrict-qualified stdlib member function's local
+# name as stdlib-owned). ``__cxxabiv1`` is matched as the complete, exact
+# length-prefixed name (``10__cxxabiv1``, never with an optional trailing
+# digit -- an earlier version's ``10__cxxabiv1?`` could match a truncated,
+# never-actually-emitted ``10__cxxabiv`` + arbitrary next character, which
+# is not what any real compiler emits and is strictly more permissive than
+# the grammar warrants).
+#
+# Deliberately narrower than :func:`is_local_name_symbol`: a library's OWN
+# public inline function's local static (e.g. ``_ZZN4somelib...``) must NOT
+# match here, since its alignment genuinely matters to consumers (see
+# LOCAL_NAME_PREFIX's docstring above).
+#
+# The alternation also includes the Itanium ABI's *standard substitution*
+# codes for extremely common std:: templates -- ``Sa`` (std::allocator),
+# ``Sb`` (std::basic_string), ``Ss`` (std::string), ``Si``/``So``/``Sd``
+# (std::istream/ostream/iostream) -- not just the bare ``St`` (::std::)
+# substitution (CodeRabbit review, PR #641): a local static inside e.g.
+# ``std::allocator<int>::f() const`` mangles as ``_ZZNKSaIiE1fEvE1x``, where
+# ``Sa`` occupies the exact grammar position ``St`` would, so it was missed
+# entirely by the earlier version and left the alignment false positive live
+# for this common class of stdlib type. ``11__gnu_debug`` is included too
+# (Codex review, PR #641): libstdc++ debug mode (``_GLIBCXX_DEBUG``) wraps
+# containers in the ``__gnu_debug::`` namespace -- already recognized as a
+# stdlib/runtime implementation namespace elsewhere in this module (see
+# ``_STDLIB_TYPE_NAMESPACE_PREFIXES`` below) -- so a local static in one of
+# its functions must be recognized here too, the same way ``9__gnu_cxx`` is.
+#
+# ``Z*`` after the mandatory ``_ZZ`` handles *recursively nested*
+# <local-name> productions (Codex review, PR #641): a lambda or local class
+# defined inside a stdlib function is itself "local" to that function, so a
+# static local to the LAMBDA's own call operator mangles with one additional
+# leading ``Z`` per nesting level before the qualifiers/namespace -- e.g. GCC
+# emits ``std::outer()::{lambda()#1}::operator()() const::x`` as
+# ``_ZZZSt5outervENKUlvE_clEvE1x`` (three ``Z``s: the mandatory one plus one
+# for the lambda's own nested local-name). Stripping any number of extra
+# ``Z``s before checking for the namespace marker is safe: none of the
+# markers below start with ``Z``, so this can't spuriously swallow real
+# content, and a chain that bottoms out at a NON-stdlib function (e.g. a
+# lambda inside the library-under-test's own code) still correctly fails to
+# match afterward.
+#
+# The optional ``(?:GV)?`` right after the leading ``_Z`` recognizes the
+# Itanium *guard variable* wrapper (Codex review, PR #641 follow-up, sixth
+# P2): a dynamically-initialized function-local static also gets a
+# companion one-time-init guard object, mangled as ``GV`` + the same local-
+# name object name -- i.e. the local static's own ``_ZZ<encoding>E<name>``
+# becomes ``_ZGVZ<encoding>E<name>`` for its guard variable, not a fresh
+# production of its own. That companion is exported as an ordinary data
+# object (``STT_OBJECT``) with the same address-placement-only alignment
+# signal as the local static it guards -- no header ever declares it either
+# -- so without this, an alignment shift on e.g. the guard for a libstdc++
+# ``<regex>`` local static's own guard variable still produced the same
+# false positive this exemption exists to suppress. See
+# ``export_accounting.py``'s ``_ZGVZ``/``_ZGV`` handling for the same
+# mangled-shape fact used elsewhere in this codebase.
+_STDLIB_LOCAL_NAME_RE = re.compile(
+    r"^_Z(?:GV)?ZZ*N?[rVK]{0,3}[RO]?"
+    r"(?:St|Sa|Sb|Ss|Si|So|Sd|3std|9__gnu_cxx|11__gnu_debug|10__cxxabiv1|7__cxx11)"
+)
+
+# A small, deliberately non-exhaustive set of standard-library templates the
+# C++ standard explicitly permits *user code* to specialize for a
+# program-defined type (customization points) -- unlike an ordinary
+# instantiation such as std::vector<MyType> (100% stdlib-authored code, just
+# instantiated for MyType), a specialization of one of these contains
+# USER-AUTHORED code, so its ABI is the library-under-test's concern even
+# though the mangled name nominally lives in namespace std (Codex review,
+# PR #641: real GCC output for an inline `std::hash<MyType>::operator()`'s
+# local static is `_ZZNKSt4hashI6MyTypeEclERKS0_E4salt` -- the plain
+# namespace check above would otherwise wrongly treat this as toolchain
+# noise). Matching one of these ALWAYS excludes the symbol from the
+# stdlib-owned classification below, even for a stdlib-provided
+# specialization over a builtin type (e.g. std::hash<int>) -- deliberately
+# erring toward reporting a possibly-noisy finding rather than risking
+# hiding a real one, the same guiding principle as the rest of this
+# exemption. This list can never be complete (the standard permits
+# specializing effectively any library template this way), so it only
+# covers the templates most commonly specialized in practice. Includes
+# `4swap` alongside the class-template customization points (Codex review,
+# PR #641 follow-up): `std::swap` is a *function* template the standard
+# explicitly permits overloading/specializing for a program-defined type
+# (e.g. `template<> inline void std::swap<MyType>(...)`, mangling as
+# `_ZZSt4swapI6MyTypeE...`) -- the same "user-authored code nominally in
+# namespace std" shape as the class-template entries, just a function
+# rather than a class member. Also includes `10tuple_size` (Codex review,
+# PR #641 follow-up): `std::tuple_size<MyType>` is another standard
+# customization-point template class-templates a program can legally
+# specialize for its own type (e.g. to support structured bindings), the
+# same "user-authored code nominally in namespace std" shape as `std::hash`
+# -- real GCC output for such a specialization's local static mangles as
+# `_ZZNSt10tuple_sizeI6MyTypeE1fEvE1x`. Also includes `11common_type`
+# (Codex review, PR #641 follow-up): `std::common_type<A, A>` is yet
+# another standard customization-point class template a program can
+# legally specialize for its own type -- real GCC output for such a
+# specialization's local static mangles as
+# `_ZZNSt11common_typeIJ1AS0_EE1fEvE1x`. This is the fourth instance of the
+# exact same gap class (`hash`/`swap`/`tuple_size`/`common_type`) found
+# across successive review rounds -- an intrinsic limitation of
+# mangled-name string matching, not a bug being progressively fixed: the
+# C++ standard permits specializing dozens of library templates this way
+# (`tuple_element`, `pointer_traits`, `allocator_traits`,
+# `is_error_code_enum`, ...), so this allowlist can never be exhaustive by
+# construction, no matter how many more entries are added. Treated here as
+# an accepted, permanent limitation of this exemption (not a to-do list to
+# keep clearing) -- closing it fully needs a real demangler or type-graph
+# analysis, per this comment block's own opening paragraph.
+#
+# `(?:\d+__[A-Za-z0-9_]+?)?` between the `St`/`3std` substitution and the
+# customization-point name accepts libc++'s versioned inline ABI namespace
+# (Codex review, PR #641 follow-up, fifth P2): libc++ wraps its entire
+# standard-library implementation in an inline namespace -- `__1` in
+# mainline libc++, `__ndk1` on Android NDK, etc. -- so a user specialization
+# of e.g. `std::hash<X>` mangles as `_ZZNKSt3__14hashI1XEclERKS1_E4salt`
+# (`3__1` = the length-prefixed `__1` namespace component) rather than the
+# bare `_ZZNKSt4hashI...` this alternation originally expected. Without
+# this, `_STDLIB_LOCAL_NAME_RE` still matches the `St` prefix (classifying
+# the symbol as stdlib-owned) while this exclusion regex misses it entirely
+# (nothing after `St3__1` matched a listed customization point), so a real
+# user-owned regression under libc++ was wrongly suppressed. The inner
+# `+?` is non-greedy, not `+`: greedily consuming word characters would eat
+# into the customization-point name itself (e.g. `3__1` followed directly
+# by `4hash` reads as one contiguous word-character run), so the engine
+# must backtrack to the shortest inline-namespace match that still lets one
+# of the listed alternatives match immediately after.
+# The optional ``(?:GV)?`` right after the leading ``_Z`` mirrors
+# `_STDLIB_LOCAL_NAME_RE`'s own guard-variable handling above (Codex review,
+# PR #641 follow-up, sixth P2): a user specialization's local static can
+# just as well be dynamically-initialized, e.g. `_ZGVZNKSt4hashI6MyTypeEclE...`
+# for `std::hash<MyType>::operator()`'s guard, so this exclusion must
+# recognize the guard-wrapped form too -- otherwise `_STDLIB_LOCAL_NAME_RE`
+# would match the guard variable's `St4hash...` prefix and misclassify a
+# user-owned specialization's guard as stdlib-owned, the same failure mode
+# this regex exists to prevent for the plain local-static form.
+_USER_SPECIALIZABLE_STD_TEMPLATE_RE = re.compile(
+    r"^_Z(?:GV)?ZZ*N?[rVK]{0,3}[RO]?(?:St|3std)"
+    r"(?:\d+__[A-Za-z0-9_]+?)?"
+    r"(?:4hash|4less|7greater|8equal_to|12not_equal_to|10less_equal|"
+    r"13greater_equal|11char_traits|14numeric_limits|15iterator_traits|"
+    r"14default_delete|9formatter|4swap|10tuple_size|11common_type)I"
+)
 
 # Length-prefixed Itanium namespace components (``<len><name>``) for the
 # conventional internal namespaces. Matching the length prefix avoids false
@@ -163,6 +341,27 @@ def is_rtti_symbol(name: str) -> bool:
 def is_local_rtti_symbol(name: str) -> bool:
     """Return True if *name* is RTTI for a function-local (unnameable) type."""
     return name.startswith(LOCAL_RTTI_PREFIXES)
+
+
+def is_local_name_symbol(name: str) -> bool:
+    """Return True if *name* is the Itanium ``<local-name>`` production — an
+    entity (typically a variable) declared inside a function body, never
+    nameable by any header declaration. See :data:`LOCAL_NAME_PREFIX`."""
+    return name.startswith(LOCAL_NAME_PREFIX)
+
+
+def is_stdlib_local_name_symbol(name: str) -> bool:
+    """Return True if *name* is a local-name-production symbol (see
+    :func:`is_local_name_symbol`) whose enclosing function is owned by the
+    C++ runtime/standard library, not the library under test. See
+    :data:`_STDLIB_LOCAL_NAME_RE`.
+
+    Returns False for a specialization of a user-specializable customization
+    point (e.g. ``std::hash<MyType>``) even though it nominally lives in
+    namespace std -- see :data:`_USER_SPECIALIZABLE_STD_TEMPLATE_RE`."""
+    if _USER_SPECIALIZABLE_STD_TEMPLATE_RE.match(name):
+        return False
+    return bool(_STDLIB_LOCAL_NAME_RE.match(name))
 
 
 def has_internal_namespace_component(name: str) -> bool:

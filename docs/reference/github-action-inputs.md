@@ -19,7 +19,7 @@ Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../us
 | `include-private-dso` | no | false | Include private (non-public) shared objects from non-standard paths. compare mode, directory/package operands only. |
 | `keep-extracted` | no | false | Keep extracted temporary files for debugging. compare mode, directory/package operands only. |
 | `fail-on-removed-library` | no | false | Exit 8 when a library present in old is absent in new. compare mode, directory/package operands only. |
-| `header` | no | — | Public header file(s) applied to both sides (space-separated). Required when input is an ELF binary; ignored for JSON snapshots. |
+| `header` | no | — | Public header file(s) applied to both sides (space-separated). Required when input is an ELF binary; ignored for JSON snapshots. If old and new actually declare different header sets (e.g. a new release added a header), set `old-header`/`new-header` instead -- a bare `header` parses BOTH snapshots against the same files, which silently hides the removed/added declarations you're trying to check. |
 | `old-header` | no | — | Public header(s) for the old side only (overrides header for old). Space-separated. |
 | `new-header` | no | — | Public header(s) for the new side only (overrides header for new). Space-separated. |
 | `include` | no | — | Extra include directories for castxml, applied to both sides. Space-separated. |

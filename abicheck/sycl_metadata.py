@@ -30,8 +30,7 @@ Supports two plugin interface generations:
   exist and are both recognized here: an older generation exporting
   per-verb entry points directly (``urAdapterGet``, ``urPlatformGet``,
   ``urDeviceGet``, ...) and the current generation (verified against a
-  real Intel oneAPI 2026.1 install, G30 pilot validation —
-  ``validation/g30-pilot-validation-2026-07.md``) exporting only one
+  real Intel oneAPI 2026.1 install) exporting only one
   function-pointer-table getter per API category (``urGetAdapterProcAddrTable``,
   ``urGetPlatformProcAddrTable``, ``urGetDeviceProcAddrTable``, ...) —
   individual per-verb symbols are no longer exported at all in that shape,

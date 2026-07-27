@@ -91,7 +91,7 @@ from `action.yml`), see the
 
 | Input | Required | Description |
 |-------|----------|-------------|
-| `header` | no | Public header file(s) or directory(ies) for both sides (space-separated) |
+| `header` | no | Public header file(s) or directory(ies) for both sides (space-separated) — use `old-header`/`new-header` instead when old and new actually declare different headers |
 | `old-header` | no | Header file(s) or directory(ies) for old side only |
 | `new-header` | no | Header file(s) or directory(ies) for new side only |
 | `include` | no | Extra include dirs for castxml (both sides) |
@@ -385,6 +385,19 @@ is pre-1.0, pin an exact release tag (the examples in this guide use the latest,
 ```yaml
 uses: abicheck/abicheck@v0.5.0     # exact release tag (recommended, reproducible)
 uses: abicheck/abicheck@abc123def  # exact commit SHA (most secure)
+```
+
+**Pin to the commit SHA, not just the tag, whenever the job grants an
+elevated permission** — `security-events: write` (SARIF/Code Scanning
+upload), `contents: write`, `id-token: write` (OIDC/publishing), or
+similar. A mutable tag can be repointed to different code after you've
+reviewed it once; every `uses:` step in that job (not only
+`abicheck/abicheck` — `actions/checkout` and any upload step too) then runs
+with that permission's token, so the same rule applies to all of them. Keep
+the release tag in a trailing comment so the pin stays human-auditable:
+
+```yaml
+uses: abicheck/abicheck@<commit-sha>  # v0.5.0
 ```
 
 Released tags are listed on the

@@ -27,11 +27,10 @@ with `KEEP_B` undefined, so it sees `{a}` — and the comparison raises a
 `type_size_changed` / `type_field_removed` **false positive** for a field whose
 real presence never changed.
 
-This is exactly the class the per-depth false-positive analysis
-(`validation/false-positive-depth-analysis-2026-07.md`) identified as *only*
-clearable with evidence above the header layer: the `binary` depth is blind
-(both stripped binaries are identical), `headers` false-positives, and only
-`build` context (the real `-D` set) resolves it. It is the `header_build_context_mismatch`
+This is exactly the class of false positive that is only clearable with
+evidence above the header layer: the `binary` depth is blind (both stripped
+binaries are identical), `headers` false-positives, and only `build` context
+(the real `-D` set) resolves it. It is the `header_build_context_mismatch`
 (L3) situation, but here we want to *clear the finding*, not just flag the drift.
 
 ## Decision

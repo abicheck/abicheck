@@ -46,9 +46,13 @@ from abicheck.elf_metadata import (
 from abicheck.model import AbiSnapshot, Variable
 
 
-def _snap(elf: ElfMetadata, variables: list[Variable] | None = None) -> AbiSnapshot:
+def _snap(
+    elf: ElfMetadata,
+    variables: list[Variable] | None = None,
+    library: str = "libtest.so.1",
+) -> AbiSnapshot:
     return AbiSnapshot(
-        library="libtest.so.1",
+        library=library,
         version="1.0",
         functions=[],
         variables=variables or [],
@@ -440,6 +444,137 @@ class TestObjectAlignmentReduced:
         new = _elf(symbols=[_obj(rtti, alignment=32)])
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r), rtti
+
+    # Stdlib-owned Itanium <local-name>-production symbols (_ZZ... whose
+    # enclosing function is std::/__gnu_cxx::/__cxxabiv1::, not the library
+    # under test — see is_stdlib_local_name_symbol) denote an entity
+    # (typically a function-local `static`) declared inside a function body —
+    # never nameable by any header declaration. Their st_value-derived
+    # alignment is address-placement noise, same class of finding as the RTTI
+    # exemption above but a distinct mangling shape (observed live: a
+    # libstdc++ <regex> template instantiation's local static lookup table on
+    # a real pvxs binary, pvxs-main-scan-2026-07 validation). This is
+    # deliberately NOT every _ZZ-prefixed symbol — see
+    # test_library_owned_local_name_symbol_still_fires below.
+    def test_stdlib_local_name_symbol_is_exempt(self):
+        sym = "_ZZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames"
+        old = _elf(symbols=[_obj(sym, alignment=512)])
+        new = _elf(symbols=[_obj(sym, alignment=128)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
+
+    # Codex review, PR #641 follow-up (sixth P2): a dynamically-initialized
+    # stdlib local static's companion one-time-init guard variable mangles
+    # as `_ZGVZ...` (GV + the same local-name object), not `_ZZ...` -- the
+    # same address-placement-only alignment signal as the local static it
+    # guards, since no header declares it either.
+    def test_stdlib_local_name_guard_variable_is_exempt(self):
+        sym = "_ZGVZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames"
+        old = _elf(symbols=[_obj(sym, alignment=512)])
+        new = _elf(symbols=[_obj(sym, alignment=128)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
+
+    # Same guard-variable wrapper, but the enclosing function belongs to the
+    # library under test -- must still fire, same as the plain local-static
+    # form's own "still fires" case below.
+    def test_library_owned_local_name_guard_variable_still_fires(self):
+        sym = "_ZGVZN4pvxs6client8Config1_5cacheEvE5cache"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
+    # Codex review, PR #641: the exemption above must NOT cover a local-name
+    # symbol whose enclosing function belongs to the library under test, not
+    # the C++ runtime -- a PUBLIC inline/template function's function-local
+    # `static` is exactly what STB_GNU_UNIQUE/weak-symbol cross-TU dedup
+    # exists for, so consumers genuinely can rely on its declared alignment.
+    def test_library_owned_local_name_symbol_still_fires(self):
+        sym = "_ZZN4pvxs6client8Config1_5cacheEvE5cache"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
+    # Codex review, PR #641: the stdlib exemption must NOT apply when the
+    # snapshot under comparison IS the C++ runtime itself (libstdc++/libc++) —
+    # there a std:: local static is the library UNDER TEST's own ABI surface,
+    # not leaked toolchain noise, mirroring model.stdlib_namespaces_excluded's
+    # existing runtime-vs-leaked-dependency distinction used elsewhere.
+    def test_stdlib_local_name_symbol_still_fires_when_runtime_is_under_test(self):
+        sym = "_ZZNKSt7__cxx1112regex_traitsIcE16lookup_classnameIPKcEENS1_10_RegexMaskET_S6_bE12__classnames"
+        old = _elf(symbols=[_obj(sym, alignment=512)])
+        new = _elf(symbols=[_obj(sym, alignment=128)])
+        r = compare(
+            _snap(old, library="libstdc++.so.6"),
+            _snap(new, library="libstdc++.so.6"),
+        )
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
+    # CodeRabbit review, PR #641: the regex must also recognize the Itanium
+    # ABI's standard-substitution codes for common std:: templates -- a local
+    # static inside e.g. std::allocator<int>::f() const mangles via the `Sa`
+    # substitution (not the bare `St`), occupying the exact grammar slot `St`
+    # does.
+    @pytest.mark.parametrize(
+        "sym",
+        [
+            "_ZZNKSaIiE1fEvE1x",  # std::allocator<int>
+            "_ZZNSbIcSt11char_traitsIcESaIcEE1fEvE1x",  # std::basic_string
+            "_ZZNKSs1fEvE1x",  # std::string
+            "_ZZNKSi1fEvE1x",  # std::istream
+            "_ZZNKSo1fEvE1x",  # std::ostream
+            "_ZZNKSd1fEvE1x",  # std::iostream
+        ],
+    )
+    def test_stdlib_standard_substitution_local_name_is_exempt(self, sym):
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r), sym
+
+    # Codex review, PR #641: libstdc++ debug mode's __gnu_debug:: namespace
+    # is already recognized as a stdlib/runtime implementation namespace
+    # elsewhere (name_classification._STDLIB_TYPE_NAMESPACE_PREFIXES).
+    def test_gnu_debug_local_name_is_exempt(self):
+        sym = "_ZZN11__gnu_debug6vectorIiSaIiEE9push_backERKiE1x"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
+
+    # Codex review, PR #641: a recursively-nested <local-name> -- a static
+    # local to a lambda's own call operator, where the lambda is itself
+    # local to a stdlib function (real GCC output for
+    # std::outer()::{lambda()#1}::operator()() const::x).
+    def test_nested_stdlib_lambda_local_name_is_exempt(self):
+        sym = "_ZZZSt5outervENKUlvE_clEvE1x"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
+
+    # Same nesting shape, but the outer function belongs to the library
+    # under test, not the C++ runtime -- must still fire.
+    def test_nested_library_owned_lambda_local_name_still_fires(self):
+        sym = "_ZZZN4pvxs3fooEvENKUlvE_clEvE1x"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
+    # Codex review, PR #641: a USER specialization of a standard
+    # customization-point template (std::hash<MyType>) contains user-authored
+    # code, so it must still fire even though it nominally lives in std::.
+    # Real GCC output for an inline std::hash<MyType>::operator()'s local
+    # static.
+    def test_user_specialized_std_hash_local_name_still_fires(self):
+        sym = "_ZZNKSt4hashI6MyTypeEclERKS0_E4salt"
+        old = _elf(symbols=[_obj(sym, alignment=64)])
+        new = _elf(symbols=[_obj(sym, alignment=8)])
+        r = compare(_snap(old), _snap(new))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
 
     def test_real_mangled_data_object_still_fires(self):
         # The exemption is by RTTI prefix, not "looks mangled": a genuine

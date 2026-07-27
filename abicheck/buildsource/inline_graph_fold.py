@@ -168,8 +168,8 @@ def fold_call_graph(
     - *scoped_units* (an **unseeded** run) → the exact compile-unit set the L4
       replay used (``headers-only``). Without this the unseeded call-graph pass
       re-parsed the *whole* compile DB even though L4 was scoped to one TU — the
-      Gap-1 asymmetry (``validation/scan-level-scalability-2026-06.md``): the pass
-      scaled with the whole tree while its reported L4 coverage stayed at a
+      Gap-1 asymmetry: the pass scaled with the whole tree while its reported
+      L4 coverage stayed at a
       fraction. Aligning the two makes the L5 call-graph consistent with the L4
       surface (no phantom edges from TUs L4 never examined) and removes the
       seedless ``--depth source`` cost blow-up.
