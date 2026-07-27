@@ -179,6 +179,69 @@ class TestLoadPackManifestHappyPath:
                 assignments={"contract.overlays": {1, 2, 3}},
             )
 
+    def test_directly_constructed_policy_pack_coerces_raw_severity_string(
+        self,
+    ) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.POLICY,
+            assignments={"func_removed": "break"},
+        )
+        assert pack.assignments["func_removed"] is Verdict.BREAKING
+
+    def test_directly_constructed_policy_pack_accepts_a_real_verdict(self) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.POLICY,
+            assignments={"func_removed": Verdict.BREAKING},
+        )
+        assert pack.assignments["func_removed"] is Verdict.BREAKING
+
+    def test_directly_constructed_policy_pack_matches_manifest_loaded_equivalent(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): a raw severity string left uncoerced
+        # would compare unequal to a manifest-loaded pack's real Verdict
+        # value inside detect_pack_conflicts, raising a false conflict.
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        direct = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.POLICY,
+            assignments={"func_removed": "break"},
+        )
+        manifest_path = _write(
+            tmp_path,
+            "policy.yaml",
+            "id: p\nversion: 1\nkind: policy\nassignments:\n  func_removed: break\n",
+        )
+        loaded = load_pack_manifest(manifest_path)
+        assert direct.assignments == loaded.assignments
+
+    def test_directly_constructed_policy_pack_rejects_unknown_kind_slug(self) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        with pytest.raises(PackManifestError, match="unknown ChangeKind slugs"):
+            LoadedPack(
+                identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+                kind=PackKind.POLICY,
+                assignments={"not_a_real_kind": "break"},
+            )
+
+    def test_directly_constructed_policy_pack_rejects_unknown_severity(self) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        with pytest.raises(PackManifestError, match="invalid severity values"):
+            LoadedPack(
+                identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+                kind=PackKind.POLICY,
+                assignments={"func_removed": "not_a_severity"},
+            )
+
 
 class TestLoadPackManifestValidation:
     def test_missing_file_raises(self, tmp_path: Path) -> None:

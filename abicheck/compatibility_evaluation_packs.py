@@ -172,7 +172,14 @@ class LoadedPack:
     :func:`_to_hashable` here too, so a directly constructed pack gets the
     identical list-to-tuple deep-freeze (and the identical
     hashability/no-nested-mapping validation) the manifest-loading path
-    already gets (Codex review, second round).
+    already gets (Codex review, second round). A ``kind=POLICY`` pack's
+    assignments additionally go through :func:`_parse_policy_assignments`
+    instead of the generic freeze -- a directly constructed pack could
+    otherwise carry a raw severity string (``"break"``) rather than the
+    real ``Verdict`` member this class's own contract promises, which would
+    then compare unequal to an equivalent manifest-loaded pack's ``Verdict``
+    value inside ``detect_pack_conflicts`` and raise a false
+    ``PackConflictError`` (Codex review, third round).
     """
 
     identity: ImmutableIdentity
@@ -180,6 +187,14 @@ class LoadedPack:
     assignments: Mapping[str, Hashable]
 
     def __post_init__(self) -> None:
+        if self.kind is PackKind.POLICY:
+            coerced: dict[str, Hashable] = dict(
+                _parse_policy_assignments(
+                    self.assignments, source="LoadedPack(...) (direct construction)"
+                )
+            )
+            object.__setattr__(self, "assignments", MappingProxyType(coerced))
+            return
         frozen = {
             key: _to_hashable(value, where=f"assignments[{key!r}]")
             for key, value in self.assignments.items()
@@ -235,6 +250,15 @@ def _parse_policy_assignments(
             )
         if slug not in _VALID_CHANGE_KIND_SLUGS:
             unknown_kinds.append(slug)
+            continue
+        # A directly constructed `LoadedPack` (this class's own docstring)
+        # may already carry a real `Verdict` member rather than a raw
+        # severity spelling -- `parse_severity_value` only recognizes the
+        # four user-facing spellings ("break"/"warn"/...), not a `Verdict`
+        # member's own str value, so it would otherwise reject exactly the
+        # documented-correct direct-construction input (Codex review).
+        if isinstance(severity, Verdict):
+            result[slug] = severity
             continue
         verdict = parse_severity_value(severity)
         if verdict is None:
