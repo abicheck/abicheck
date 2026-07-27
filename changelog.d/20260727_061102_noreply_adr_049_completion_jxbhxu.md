@@ -10,8 +10,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `kind: contract|policy|gate`/`assignments`) into a `LoadedPack` —
   content-digested `ImmutableIdentity` plus the pack's own resolved
   `field name -> value` assignments — and `assignments_for_conflict_check()`
-  to feed a list of loaded packs straight into
-  `compatibility_evaluation_resolver.detect_pack_conflicts()`. A
+  to group loaded packs by `PackKind` into the shape
+  `compatibility_evaluation_resolver.detect_pack_conflicts()` accepts,
+  called once per returned kind group. A
   `kind: policy` manifest's `ChangeKind` slug -> severity assignments go
   through `policy_file.py`'s newly-public `parse_severity_value()` (shared
   rather than re-declared), with the identical unknown-slug hard load error
