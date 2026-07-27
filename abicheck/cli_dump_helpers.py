@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import click
 
+from . import dumper_cache
 from .dumper import dump
 from .errors import AbicheckError
 
@@ -1458,40 +1459,47 @@ def perform_elf_dump(
         allow_inferred_build_query=collect_mode != "off",
     )
     try:
-        snap = dump(
-            so_path=so_path,
-            headers=resolved_headers,
-            extra_includes=eff_includes + inc_extra,
-            version=version,
-            compiler=compiler,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=effective_gcc_options,
-            gcc_option_tokens=tuple(gcc_option_tokens) + tuple(deferred),
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang if lang == "c" else None,
-            dwarf_only=dwarf_only,
-            debug_format=effective_debug_format,
-            public_headers=list(public_headers),
-            public_header_dirs=list(public_header_dirs),
-            header_backend=header_backend,
-            extra_hash_dirs=deferred_dirs,
-            scope_header_dirs=scope_header_dirs,
-            debug_info_path=debug_info_path,
-            dump_manifest=dump_manifest,
-            extra_include_labels=include_labels,
-            # This call bypasses service.run_dump (which already threads
-            # compile.frontend_context into dumper.dump for the scan/compare/
-            # PE/Mach-O paths) -- without this, `dump --frontend-context
-            # device` silently fell back to dumper.dump's own "host" default
-            # instead of forwarding the request (Codex review, PR #636).
-            frontend_context=(
-                compile_context.frontend_context
-                if compile_context is not None
-                else "host"
-            ),
-        )
+        # Scoped so a clang primary parse is handed off in-process to the
+        # `_attach_header_graph` pass below (G31 Phase C) -- this ELF `dump`
+        # CLI path reaches `dumper.dump` directly, not `service.run_dump`,
+        # so without its own scope here the primary parse is never memoized
+        # and the graph pass re-reads/re-parses the disk cache instead
+        # (Codex review).
+        with dumper_cache.ast_memoize_scope():
+            snap = dump(
+                so_path=so_path,
+                headers=resolved_headers,
+                extra_includes=eff_includes + inc_extra,
+                version=version,
+                compiler=compiler,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
+                gcc_options=effective_gcc_options,
+                gcc_option_tokens=tuple(gcc_option_tokens) + tuple(deferred),
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                lang=lang if lang == "c" else None,
+                dwarf_only=dwarf_only,
+                debug_format=effective_debug_format,
+                public_headers=list(public_headers),
+                public_header_dirs=list(public_header_dirs),
+                header_backend=header_backend,
+                extra_hash_dirs=deferred_dirs,
+                scope_header_dirs=scope_header_dirs,
+                debug_info_path=debug_info_path,
+                dump_manifest=dump_manifest,
+                extra_include_labels=include_labels,
+                # This call bypasses service.run_dump (which already threads
+                # compile.frontend_context into dumper.dump for the scan/compare/
+                # PE/Mach-O paths) -- without this, `dump --frontend-context
+                # device` silently fell back to dumper.dump's own "host" default
+                # instead of forwarding the request (Codex review, PR #636).
+                frontend_context=(
+                    compile_context.frontend_context
+                    if compile_context is not None
+                    else "host"
+                ),
+            )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         # The header parse itself failed -- nothing downstream (including a
         # requested --header-graph pass) will run, so the seeded temp build
