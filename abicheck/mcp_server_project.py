@@ -368,23 +368,25 @@ def abi_aggregate(
         )
         from .cli_aggregate import _resolve_expected
 
-        manifest_path = (
-            _safe_read_path(manifest, label="manifest") if manifest else None
-        )
-        run_plan_path = (
-            _safe_read_path(run_plan, label="run_plan") if run_plan else None
-        )
-
         def _do_aggregate() -> AggregateResult:
-            # reports_dir path resolution (a symlink-following .resolve()
-            # call), the exists()/is_dir() type check, report-directory
-            # discovery (an unbounded glob+stat over every *.json entry),
-            # the manifest/run-plan size probes, and expected-set parsing
-            # all run inside the same bounded worker as aggregate_reports_dir
-            # (ADR-021b D2): a stalled NFS/FUSE mount blocking any one of
-            # these filesystem calls must count against --timeout too, not
-            # just the aggregate call that follows them (Codex review).
+            # reports_dir/manifest/run_plan path resolution (each a
+            # symlink-following .resolve() call), the exists()/is_dir() type
+            # check, report-directory discovery (an unbounded glob+stat over
+            # every *.json entry), the manifest/run-plan size probes, and
+            # expected-set parsing all run inside the same bounded worker as
+            # aggregate_reports_dir (ADR-021b D2): a stalled NFS/FUSE mount
+            # blocking any one of these filesystem calls must count against
+            # --timeout too, not just the aggregate call that follows them
+            # (Codex review -- manifest/run_plan resolution originally ran
+            # before this closure started, same gap already closed for
+            # reports_dir/config/toolchain_bindings elsewhere).
             reports_path = _safe_read_path(reports_dir, label="reports_dir")
+            manifest_path = (
+                _safe_read_path(manifest, label="manifest") if manifest else None
+            )
+            run_plan_path = (
+                _safe_read_path(run_plan, label="run_plan") if run_plan else None
+            )
             # A *missing* reports_dir is deliberately not an error here --
             # aggregate.collect_reports treats it as zero reports so a full
             # build-matrix outage still produces a structured required-coverage
@@ -450,10 +452,18 @@ def abi_aggregate(
                 redact_args.append(_safe_read_path(reports_dir, label="reports_dir"))
             except ValueError:
                 pass
-            if manifest_path is not None:
-                redact_args.append(manifest_path)
-            if run_plan_path is not None:
-                redact_args.append(run_plan_path)
+            if manifest is not None:
+                redact_args.append(Path(manifest))
+                try:
+                    redact_args.append(_safe_read_path(manifest, label="manifest"))
+                except ValueError:
+                    pass
+            if run_plan is not None:
+                redact_args.append(Path(run_plan))
+                try:
+                    redact_args.append(_safe_read_path(run_plan, label="run_plan"))
+                except ValueError:
+                    pass
             return json.dumps(
                 {"status": "error", "error": _redact_paths(str(exc), *redact_args)}
             )

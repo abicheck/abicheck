@@ -46,6 +46,7 @@ if "mcp" not in sys.modules or not isinstance(sys.modules["mcp"], MagicMock):
     _mock_fastmcp.return_value = _mock_mcp_instance
 
 from abicheck import (
+    mcp_server_project,  # noqa: E402
     mcp_shared,  # noqa: E402
 )
 from abicheck.mcp_server import (  # noqa: E402
@@ -452,6 +453,40 @@ class TestAbiAggregate:
             return None
 
         monkeypatch.setattr("abicheck.mcp_server_project._check_file_size", _slow)
+        raw = abi_aggregate(str(tmp_path), manifest=str(manifest))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
+
+    def test_timeout_includes_manifest_path_resolution(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # ADR-021b D2: manifest_path/run_plan_path's own _safe_read_path
+        # resolution (a symlink-following .resolve() call) originally ran
+        # before _call_with_timeout started, so a stalled NFS/FUSE mount
+        # there could not return the advertised structured timeout (Codex
+        # review). Now resolved inside _do_aggregate alongside reports_dir.
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "aggregate_manifest_version": "1.0",
+                    "targets": [{"id": "linux-x86_64", "required": True}],
+                }
+            )
+        )
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        real_safe_read_path = mcp_server_project._safe_read_path
+
+        def _slow(path, *, label="input"):
+            if label == "manifest":
+                time.sleep(1.0)
+                raise AssertionError("should have timed out first")
+            return real_safe_read_path(path, label=label)
+
+        monkeypatch.setattr("abicheck.mcp_server_project._safe_read_path", _slow)
         raw = abi_aggregate(str(tmp_path), manifest=str(manifest))
         payload = json.loads(raw)
         assert payload["status"] == "error"

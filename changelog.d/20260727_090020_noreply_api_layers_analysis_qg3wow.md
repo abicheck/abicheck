@@ -234,6 +234,14 @@
   `_ToolPreflightError` handler in all four tools returned its structured
   error without logging the attempt, leaving preflight rejections (missing
   file, bad format, oversized input) invisible to the audit trail.
+- **`abi_aggregate` now counts `manifest`'s and `run_plan`'s own path
+  resolution against `--timeout` too** — `_safe_read_path`'s
+  symlink-following `.resolve()` call for both paths ran before
+  `_call_with_timeout` started; a stalled NFS/FUSE mount or a blocking
+  symlink lookup could block on either with no chance of the advertised
+  structured timeout, even though the size check and expected-set parsing
+  right after them were already bounded. Both moved inside `_do_aggregate`,
+  alongside `reports_dir`'s existing resolution.
 - **`_redact_paths` no longer leaves a nested path partially redacted** —
   it substituted paths in caller-supplied order; when one resolved path was
   a literal prefix of another (e.g. a bindings file nested under a config
