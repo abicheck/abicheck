@@ -215,6 +215,19 @@ class TestLoadPackManifestValidation:
         with pytest.raises(PackManifestError, match="'kind'"):
             load_pack_manifest(path)
 
+    def test_unhashable_kind_raises_pack_manifest_error_not_type_error(
+        self, tmp_path: Path
+    ) -> None:
+        # `kind_raw not in _VALID_PACK_KINDS` hashes kind_raw internally
+        # (frozenset membership) -- an unhashable decoded value (a YAML list)
+        # must still surface the documented PackManifestError, not a raw
+        # TypeError (Codex review).
+        path = _write(
+            tmp_path, "k.yaml", "id: p\nversion: 1\nkind: [gate]\nassignments: {}\n"
+        )
+        with pytest.raises(PackManifestError, match="'kind'"):
+            load_pack_manifest(path)
+
     def test_non_mapping_assignments_raises(self, tmp_path: Path) -> None:
         path = _write(
             tmp_path, "a.yaml", "id: p\nversion: 1\nkind: gate\nassignments: [1, 2]\n"

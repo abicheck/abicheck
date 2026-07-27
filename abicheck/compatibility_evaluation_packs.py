@@ -303,7 +303,11 @@ def load_pack_manifest(path: str | Path) -> LoadedPack:
         )
 
     kind_raw = document.get("kind")
-    if kind_raw not in _VALID_PACK_KINDS:
+    # isinstance check first: `kind_raw not in _VALID_PACK_KINDS` calls
+    # hash(kind_raw) internally (frozenset membership), so an unhashable
+    # value (e.g. `kind: [gate]` decoding to a list) previously raised a raw
+    # TypeError instead of the documented PackManifestError (Codex review).
+    if not isinstance(kind_raw, str) or kind_raw not in _VALID_PACK_KINDS:
         raise PackManifestError(
             f"{manifest_path}: 'kind' must be one of "
             f"{sorted(_VALID_PACK_KINDS)}, got {kind_raw!r}"
