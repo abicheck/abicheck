@@ -80,3 +80,12 @@
   mcp_shared` (etc.) could resolve to a stale mocked module without
   re-importing at all. Fixed in both `tests/test_mcp_reference.py`'s
   isolation fixture and `tests/test_cov95_misc.py`'s import helper.
+- **A relative `search_paths` entry is no longer wrongly rebased under
+  `sysroot`** — same root cause as the `binary_path` fix above:
+  `resolver._build_search_order` joins a relative search path directly
+  onto `sysroot` (`<sysroot>/lib`), but `abi_deps` had already
+  absolutized every entry via `_safe_read_path`, so that join produced
+  `<sysroot>/<absolutized-cwd>/lib` instead — silently making a search
+  path that resolves fine through `deps tree` report as unresolved
+  through `abi_deps`. Each entry's relative-vs-absolute form is now
+  preserved the same way `binary_path`'s is.

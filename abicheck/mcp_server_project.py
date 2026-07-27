@@ -176,8 +176,18 @@ def abi_deps(
                 }
             )
         _check_file_size(effective_path, label="binary_path")
+        # Same relative/absolute preservation as binary_path above: resolver.
+        # _build_search_order joins a relative search_path directly onto
+        # sysroot (`<sysroot>/lib`), but only after _safe_read_path has
+        # already absolutized it does joining it onto sysroot instead produce
+        # `<sysroot>/<cwd>/lib` (Codex review) -- validate each entry through
+        # _safe_read_path for its safety checks, but keep the original
+        # relative Path when the caller's own input was relative.
         sp_paths = [
-            _safe_read_path(p, label="search_path") for p in (search_paths or [])
+            _safe_read_path(p, label="search_path")
+            if Path(p).is_absolute()
+            else Path(p)
+            for p in (search_paths or [])
         ]
 
         try:

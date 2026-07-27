@@ -201,6 +201,35 @@ class TestAbiDeps:
         assert payload["status"] == "error"
         assert received == [Path("app")]
 
+    def test_relative_search_path_is_not_rebased_under_sysroot(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Same class of bug as the relative binary_path case above, but for
+        # search_paths entries: resolver._build_search_order joins a relative
+        # entry directly onto sysroot ("<sysroot>/lib"), matching the CLI's
+        # Click-based (non-resolving) handling -- _safe_read_path
+        # absolutizing a relative entry first would make that join produce
+        # "<sysroot>/<cwd>/lib" instead (Codex review).
+        monkeypatch.chdir(tmp_path)
+        binary = tmp_path / "app"
+        binary.write_bytes(b"\x7fELF")
+        sysroot_dir = tmp_path / "sysroot"
+        sysroot_dir.mkdir()
+
+        received: dict[str, object] = {}
+
+        def _spy(binary_arg, **kwargs):
+            received.update(kwargs)
+            raise RuntimeError("stop after capturing args")
+
+        monkeypatch.setattr("abicheck.stack_checker.check_single_env", _spy)
+        raw = abi_deps(
+            "app", sysroot=str(sysroot_dir), search_paths=["lib", "/abs/lib"]
+        )
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert received["search_paths"] == [Path("lib"), Path("/abs/lib").resolve()]
+
 
 class TestResolveSysrootPath:
     def test_no_sysroot_returns_binary_unchanged(self):
