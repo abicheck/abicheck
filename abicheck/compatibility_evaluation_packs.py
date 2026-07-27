@@ -254,6 +254,57 @@ _HASHABLE_SCALAR_TYPES: tuple[type, ...] = (
 )
 
 
+def _canonicalize_scalar(value: Any) -> Hashable:
+    """Reconstruct *value* as a plain instance of its exact allowed base
+    type, discarding any subclass-added state.
+
+    ``isinstance(value, _HASHABLE_SCALAR_TYPES)`` alone still accepts a
+    *mutable subclass* of an allowed type (``str``/``float``/etc.) whose
+    overridden ``__eq__``/``__hash__`` reads mutable instance state --
+    the allowlist check closed the "arbitrary unrelated object" hole, but
+    not this narrower one: the original aliased subclass instance would
+    stay in ``pack.assignments``, and mutating it later could flip
+    ``detect_pack_conflicts()`` between agreement and conflict while
+    ``identity.sha256`` stayed unchanged (Codex review, seventh round).
+    Calling each allowed type's own constructor on the value reliably
+    produces a genuinely plain instance -- confirmed empirically
+    (``str(subclass_instance)`` returns a new plain ``str``, not the
+    subclass instance or its identity). ``bool`` is passed through
+    unchanged since CPython disallows subclassing it at all (``type
+    'bool' is not an acceptable base type``), so ``isinstance(value,
+    bool)`` already guarantees ``type(value) is bool``; it is checked
+    before ``int`` since ``bool`` is itself an ``int`` subclass, and
+    ``datetime.datetime`` is checked before ``datetime.date`` for the
+    identical reason.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return str(value)
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return float(value)
+    if isinstance(value, bytes):
+        return bytes(value)
+    if isinstance(value, datetime.datetime):
+        return datetime.datetime(
+            value.year,
+            value.month,
+            value.day,
+            value.hour,
+            value.minute,
+            value.second,
+            value.microsecond,
+            value.tzinfo,
+        )
+    if isinstance(value, datetime.date):
+        return datetime.date(value.year, value.month, value.day)
+    raise AssertionError(  # pragma: no cover - every _HASHABLE_SCALAR_TYPES member is handled above
+        f"unreachable: {value!r} already passed the _HASHABLE_SCALAR_TYPES check"
+    )
+
+
 def _to_hashable(value: Any, *, where: str) -> Hashable:
     """Convert a decoded YAML scalar/list into a hashable value.
 
@@ -292,7 +343,7 @@ def _to_hashable(value: Any, *, where: str) -> Hashable:
             f"{type(value).__name__} (not hashable-and-immutable) -- must be "
             f"one of {type_names}, or a list of these"
         )
-    return value
+    return _canonicalize_scalar(value)
 
 
 def _parse_policy_assignments(

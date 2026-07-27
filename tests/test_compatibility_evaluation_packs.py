@@ -218,6 +218,95 @@ class TestLoadPackManifestHappyPath:
         )
         assert pack.assignments["field"] == datetime.date(2026, 1, 1)
 
+    def test_directly_constructed_pack_canonicalizes_a_mutable_str_subclass(
+        self,
+    ) -> None:
+        # Regression (Codex review, seventh round): isinstance() alone still
+        # accepted a *subclass* of an allowed type (str, float, ...) whose
+        # overridden __eq__/__hash__ reads mutable instance state -- the
+        # original aliased subclass instance stayed in pack.assignments, so
+        # mutating it later could flip detect_pack_conflicts() between
+        # agreement and conflict while identity.sha256 stayed unchanged.
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        class EvilStr(str):
+            def __new__(cls, s: str) -> EvilStr:
+                obj = super().__new__(cls, s)
+                obj.mutable_state = 1  # type: ignore[attr-defined]
+                return obj
+
+            def __eq__(self, other: object) -> bool:
+                return self.mutable_state == getattr(  # type: ignore[attr-defined]
+                    other, "mutable_state", object()
+                )
+
+            def __hash__(self) -> int:
+                return 42
+
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.CONTRACT,
+            assignments={"field": EvilStr("hello")},
+        )
+        value = pack.assignments["field"]
+        assert type(value) is str
+        assert value == "hello"
+
+    def test_directly_constructed_pack_canonicalizes_a_mutable_float_subclass(
+        self,
+    ) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        class EvilFloat(float):
+            pass
+
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.CONTRACT,
+            assignments={"field": EvilFloat(1.5)},
+        )
+        assert type(pack.assignments["field"]) is float
+
+    @pytest.mark.parametrize(
+        ("value", "expected_type"),
+        [
+            (True, bool),
+            (7, int),
+            (b"raw", bytes),
+        ],
+    )
+    def test_directly_constructed_pack_accepts_plain_scalar_types(
+        self, value: object, expected_type: type
+    ) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.CONTRACT,
+            assignments={"field": value},
+        )
+        assert pack.assignments["field"] == value
+        assert type(pack.assignments["field"]) is expected_type
+
+    def test_directly_constructed_pack_accepts_a_datetime_value(self) -> None:
+        # datetime.datetime is a datetime.date subclass -- must canonicalize
+        # to a plain datetime.datetime (not collapse to a bare date), and a
+        # tzinfo must survive the reconstruction.
+        import datetime
+
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        dt = datetime.datetime(2026, 1, 1, 12, 30, 45, 123456, datetime.timezone.utc)
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.CONTRACT,
+            assignments={"field": dt},
+        )
+        value = pack.assignments["field"]
+        assert type(value) is datetime.datetime
+        assert value == dt
+        assert value.tzinfo == datetime.timezone.utc
+
     def test_directly_constructed_policy_pack_coerces_raw_severity_string(
         self,
     ) -> None:
