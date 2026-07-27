@@ -49,6 +49,7 @@ from abicheck.dumper_clang import (
     _is_intel_sycl_driver,
     _pointer_depth,
     _return_type,
+    _user_explicitly_disabled_sycl,
 )
 from abicheck.dumper_clang_errors import _parse_clang_ast_result
 from abicheck.errors import SnapshotError
@@ -851,6 +852,59 @@ def test_needs_sycl_host_only(cc_bin: str, tokens: list[str], expected: bool) ->
 )
 def test_dpcpp_defaults_sycl_on(cc_bin: str, expected: bool) -> None:
     assert _dpcpp_defaults_sycl_on(cc_bin) is expected
+
+
+@pytest.mark.parametrize(
+    "tokens,expected",
+    [
+        ([], False),
+        (["-fsycl"], False),
+        (["-fno-sycl"], True),
+        (["-fsycl", "-fno-sycl"], True),
+        # Last-flag-wins: a later -fsycl re-enables it (Codex review, P2).
+        (["-fno-sycl", "-fsycl"], False),
+        (["-fsycl", "-fno-sycl", "-fsycl"], False),
+        (["-DFOO=1"], False),
+    ],
+)
+def test_user_explicitly_disabled_sycl(tokens: list[str], expected: bool) -> None:
+    assert _user_explicitly_disabled_sycl(tokens) is expected
+
+
+@pytest.mark.parametrize(
+    "clang_bin,frontend_context,tokens,expected",
+    [
+        ("icpx", "host", [], True),
+        ("icpx", "host", ["-fno-sycl"], False),
+        ("clang++", "host", [], False),
+        ("icpx", "device", [], True),
+    ],
+)
+def test_resolve_dpcpp_multi_context(
+    clang_bin: str, frontend_context: str, tokens: list[str], expected: bool
+) -> None:
+    assert (
+        dumper_clang._resolve_dpcpp_multi_context(
+            clang_bin, frontend_context, None, tuple(tokens)
+        )
+        is expected
+    )
+
+
+def test_resolve_dpcpp_multi_context_device_on_plain_clang_raises() -> None:
+    from abicheck.errors import AstContextMissingError
+
+    with pytest.raises(AstContextMissingError, match="DPC\\+\\+-capable"):
+        dumper_clang._resolve_dpcpp_multi_context("clang++", "device", None, ())
+
+
+def test_resolve_dpcpp_multi_context_device_with_fno_sycl_raises() -> None:
+    from abicheck.errors import AstContextMissingError
+
+    with pytest.raises(AstContextMissingError, match="-fno-sycl"):
+        dumper_clang._resolve_dpcpp_multi_context(
+            "icpx", "device", None, ("-fno-sycl",)
+        )
 
 
 def test_build_clang_header_command_dpcpp_defaults_sycl_on(tmp_path: Path) -> None:

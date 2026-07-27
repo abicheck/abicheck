@@ -1266,6 +1266,8 @@ def dump(
             The CLI's ``dump`` command passes its own raw ``-H``/``--header``
             directory arguments here (``cli_dump_helpers.perform_elf_dump``).
             Mutually exclusive with *dump_manifest*, same as *headers*.
+        frontend_context: "host"/"device" (ADR-050 D5) DPC++/SYCL AST pass;
+            "device" on a non-DPC++-capable frontend raises ``AstContextMissingError``.
 
     Returns:
         AbiSnapshot with functions, variables, and types populated.

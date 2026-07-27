@@ -515,6 +515,17 @@ def test_from_path_rejects_truncated_document_with_tiny_chunk_size(
         )
 
 
+def test_from_path_rejects_non_utf8_bytes_as_snapshot_error(tmp_path: Path) -> None:
+    """CodeRabbit review: non-UTF-8 bytes in *ast_path* used to raise a bare
+    ``UnicodeDecodeError`` straight out of ``open(...).read()``, inconsistent
+    with every other decode failure in this module being normalized to
+    ``SnapshotError``."""
+    ast_path = tmp_path / "ast_dump.json"
+    ast_path.write_bytes(b'{"kind": "TranslationUnitDecl", "inner": [\xff\xfe')
+    with pytest.raises(SnapshotError, match="not valid UTF-8"):
+        decode_and_select_frontend_context_from_path(ast_path, "", "host")
+
+
 def test_from_path_large_document_parses_json_exactly_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

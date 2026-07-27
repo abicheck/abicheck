@@ -218,7 +218,15 @@ def job_mem_budget_gib(env_var: str, default_gib: float) -> float:
 
 def mem_cap(budget_gib: float) -> int | None:
     """Max concurrent workers that fit in available RAM at *budget_gib* each,
-    or ``None`` when RAM can't be read (the memory clamp is then skipped)."""
+    or ``None`` when RAM can't be read (the memory clamp is then skipped).
+
+    *budget_gib* is expected positive (:func:`job_mem_budget_gib` floors it at
+    0.25) -- a non-positive value would otherwise raise ``ZeroDivisionError``
+    or invert the clamp's meaning, so it is treated the same as "can't be
+    read" here rather than trusted unconditionally (CodeRabbit review).
+    """
+    if budget_gib <= 0:
+        return None
     avail = available_mem_gib()
     if avail is None:
         return None

@@ -296,3 +296,21 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   combined with an explicit `-fno-sycl` now fails fast with
   `AstContextMissingError` instead of silently resolving the contradiction
   either way (Codex review).
+- `sycl_context.decode_and_select_frontend_context_from_path` raised a bare
+  `UnicodeDecodeError` straight out of its own `open(...).read()` call on
+  non-UTF-8 bytes, inconsistent with every other decode failure in this
+  module being normalized to `SnapshotError` (CodeRabbit review).
+- `dumper_manifest._tu_jobs` silently fell back to 1 (serial) worker on an
+  unparsable `ABICHECK_TU_JOBS` value with no diagnostic explaining why the
+  requested parallelism was ignored. Now logs a warning naming the bad
+  value (CodeRabbit review).
+- `dumper_manifest.run_tu_loop`'s `_handle_failure` used a bare `raise`
+  (Ruff `PLE0704`, "misplaced bare raise" — the statement's own lexical
+  scope is a nested function, not directly inside the `except` block that
+  calls it) to re-propagate a required TU's failure. Now takes the caught
+  exception explicitly and re-raises it by reference (CodeRabbit review).
+- `process_resources.mem_cap` divided by its `budget_gib` argument
+  unconditionally, so a zero (or negative) budget raised `ZeroDivisionError`
+  instead of being treated like "can't be read" — latent today since its
+  only caller floors the budget at 0.25, but the function had no guard of
+  its own (CodeRabbit review).
