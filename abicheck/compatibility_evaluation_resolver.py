@@ -120,7 +120,23 @@ def _value_identity_key(value: Hashable) -> tuple[type, Hashable]:
     evidence). Including ``type(value)`` in the key makes candidates that
     are merely ``==``-equal but differ in runtime type collide as a
     genuine conflict instead of silently picking one arbitrarily.
+
+    Recurses into a ``tuple`` (the canonical collection shape every list
+    assignment is converted to by ``compatibility_evaluation_packs.py``'s
+    ``_to_hashable``) rather than embedding it as-is in the key: without
+    this, ``(type(value), value)`` still only type-tags the *outer*
+    container -- ``(tuple, (True,))`` and ``(tuple, (1,))`` compare and
+    hash equal, since tuple equality/hashing recurses into elements with
+    plain ``==``/``hash()``, the exact same blind spot this function exists
+    to close for a bare scalar, just one level down. Confirmed empirically
+    that two packs assigning ``x: [true]`` and ``x: [1]`` to the same field
+    previously produced identical identity keys and were silently treated
+    as agreeing (Codex review, fresh evidence). Recursing makes each
+    element carry its own type tag, so ``[True]`` and ``[1]`` now produce
+    distinct keys the same way a bare ``True``/``1`` already did.
     """
+    if isinstance(value, tuple):
+        return (type(value), tuple(_value_identity_key(v) for v in value))
     return (type(value), value)
 
 

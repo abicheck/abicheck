@@ -408,6 +408,61 @@ class TestPublicModeIdentityAmbiguous:
         assert decision.reason_code == "public_root_membership"
 
 
+class TestPublicModeSourceAbiKindsTrustedByConstruction:
+    """L4/L5 source-derived kinds in ``post_processing._PUBLIC_SOURCE_ABI_KINDS``
+    are built only from an already-proven-public entity -- their ``symbol``
+    (a macro/inline-function/typedef/etc. name) is never a real C/C++
+    header-surface function/variable/type ``classify_change_surface`` can
+    place, so it always fell through to that function's "cannot place it --
+    keep it" conservative fallback, which ``_in_surface_result_is_confirmed``
+    correctly refuses to treat as genuine confirmation -- wrongly downgrading
+    every one of these definitively-public findings to
+    ``UNKNOWN_UNRESOLVED`` even with fully resolvable surfaces on both sides
+    (Codex review, fresh evidence)."""
+
+    def test_public_macro_removed_is_in_contract_despite_no_universe_evidence(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.PUBLIC_MACRO_REMOVED, symbol="MY_MACRO", description=""
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_inline_function_removed_bypasses_unresolvable_surface_too(self) -> None:
+        # Same bypass ordering as _NEVER_FILTER_KIND_NAMES/python_*: this
+        # must not require a resolvable surface at all.
+        c = Change(
+            kind=ChangeKind.INLINE_FUNCTION_REMOVED,
+            symbol="my_inline_fn",
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+    def test_public_typedef_removed_bypasses_the_identity_ambiguous_downgrade(
+        self,
+    ) -> None:
+        # An empty symbol would otherwise resolve to finding_identity's
+        # REDUCED tier (see TestPublicModeIdentityAmbiguous) -- confirms the
+        # bypass happens before the identity-ambiguity gate too.
+        c = Change(kind=ChangeKind.PUBLIC_TYPEDEF_REMOVED, symbol="", description="")
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        s = compute_public_surface(snap)
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+
 class TestPublicModeInSurface:
     def test_public_function_is_in_contract(self) -> None:
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])

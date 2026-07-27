@@ -364,6 +364,49 @@ class TestLoadPackManifestHappyPath:
         )
         assert pack.assignments["field"].fold == 1
 
+    def test_directly_constructed_policy_pack_flattens_a_changekind_slug_key(
+        self,
+    ) -> None:
+        # Codex review, fresh evidence: ChangeKind is a (str, Enum) mixin, so
+        # a real ChangeKind member passes `isinstance(slug, str)` and the
+        # `slug in _VALID_CHANGE_KIND_SLUGS` membership check (both via
+        # str equality/hash) -- but `str(ChangeKind.FUNC_REMOVED)` is
+        # "ChangeKind.FUNC_REMOVED", not "func_removed" (Enum's own
+        # __str__ override, not the member's string payload). A directly
+        # constructed policy pack keying its assignment on the real enum
+        # member must still store the plain slug, or it silently stops
+        # matching/conflicting with an equivalent manifest-loaded pack's
+        # plain-str key.
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.POLICY,
+            assignments={ChangeKind.FUNC_REMOVED: "break"},
+        )
+        assert list(pack.assignments.keys()) == ["func_removed"]
+        assert pack.assignments["func_removed"] is Verdict.BREAKING
+
+    def test_directly_constructed_contract_pack_flattens_a_str_enum_value(
+        self,
+    ) -> None:
+        # Same flattening bug, but for a CONTRACT/GATE pack's *value* rather
+        # than a POLICY pack's key: ContractMode is also a (str, Enum)
+        # mixin, so str(ContractMode.PUBLIC) is "ContractMode.PUBLIC", not
+        # "public" -- a directly constructed pack assigning the real enum
+        # member as a field value must still store its plain payload.
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+        from abicheck.contract_relevance_types import ContractMode
+
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.CONTRACT,
+            assignments={"contract.mode": ContractMode.PUBLIC},
+        )
+        assert pack.assignments["contract.mode"] == "public"
+        assert type(pack.assignments["contract.mode"]) is str
+
     def test_directly_constructed_policy_pack_coerces_raw_severity_string(
         self,
     ) -> None:

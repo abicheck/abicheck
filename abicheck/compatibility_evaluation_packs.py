@@ -257,6 +257,32 @@ _HASHABLE_SCALAR_TYPES: tuple[type, ...] = (
 )
 
 
+def _plain_str(value: str) -> str:
+    """Reconstruct *value* as a genuinely plain ``str``, using an
+    ``Enum`` member's own ``.value`` payload rather than ``str()``'s
+    default representation of it.
+
+    ``str(x)`` reliably strips subclass-added state for an *ordinary* str
+    subclass (confirmed empirically: it returns a new plain ``str`` sharing
+    only the character data). But a ``(str, Enum)`` member -- e.g.
+    ``ChangeKind.FUNC_REMOVED``/``ContractMode.PUBLIC``, both of which a
+    directly constructed :class:`LoadedPack` (this module's own documented
+    escape hatch) can plausibly carry as a policy slug or field value,
+    since both pass ``isinstance(value, str)`` and compare/hash equal to
+    their own ``.value`` -- overrides ``__str__`` to return
+    ``"ChangeKind.FUNC_REMOVED"``, not the member's actual string payload
+    ``"func_removed"``. Confirmed empirically. Checking ``.value`` first
+    (itself always the plain-``str`` payload for these mixin enums) avoids
+    silently corrupting such a value into a spelling that no longer
+    matches, conflicts with, or composes with the equivalent
+    manifest-loaded (plain ``str``) assignment (Codex review, fresh
+    evidence).
+    """
+    if isinstance(value, Enum):
+        return str(value.value)
+    return str(value)
+
+
 def _canonicalize_scalar(value: Any, *, where: str) -> Hashable:
     """Reconstruct *value* as a plain instance of its exact allowed base
     type, discarding any subclass-added state.
@@ -304,7 +330,7 @@ def _canonicalize_scalar(value: Any, *, where: str) -> Hashable:
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
-        return str(value)
+        return _plain_str(value)
     if isinstance(value, int):
         return int(value)
     if isinstance(value, float):
@@ -394,8 +420,15 @@ def _parse_policy_assignments(
         # Reconstruct as a plain str (see _parse_field_assignments' identical
         # fix): a directly constructed LoadedPack could otherwise carry a
         # mutable str subclass as the dict key, aliasing the caller's object
-        # (Codex review).
-        slug_key = str(slug)
+        # (Codex review). Uses _plain_str, not a bare str(...): a directly
+        # constructed pack's slug can plausibly be a real `ChangeKind`
+        # member (it already passes the `slug in _VALID_CHANGE_KIND_SLUGS`
+        # check above via str equality/hash) -- `str(ChangeKind.FUNC_REMOVED)`
+        # is `"ChangeKind.FUNC_REMOVED"`, not `"func_removed"`, which would
+        # silently store the wrong key and stop matching/conflicting with
+        # an equivalent manifest-loaded pack's plain-str slug (Codex review,
+        # fresh evidence).
+        slug_key = _plain_str(slug)
         # A directly constructed `LoadedPack` (this class's own docstring)
         # may already carry a real `Verdict` member rather than a raw
         # severity spelling -- `parse_severity_value` only recognizes the
@@ -491,8 +524,13 @@ def _parse_field_assignments(
         # carry a mutable str subclass as the dict key itself, aliasing the
         # caller's object -- mutating it later (if its __eq__/__hash__ read
         # mutable state) would change the field identity detect_pack_conflicts
-        # consumes without changing identity.sha256 (Codex review).
-        result[str(field_name)] = _canonicalize_order_insensitive_field(
+        # consumes without changing identity.sha256 (Codex review). Uses
+        # _plain_str, not a bare str(...), for the identical reason
+        # _parse_policy_assignments' slug key does: a str-mixin Enum field
+        # name would otherwise flatten to its qualified member spelling
+        # instead of its actual string payload (Codex review, fresh
+        # evidence).
+        result[_plain_str(field_name)] = _canonicalize_order_insensitive_field(
             field_name, hashable_value, source=field_source
         )
     return result

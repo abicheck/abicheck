@@ -69,6 +69,7 @@ from .contract_relevance_types import (
 )
 from .finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
 from .model import ScopeOrigin
+from .post_processing import _PUBLIC_SOURCE_ABI_KINDS
 from .surface import (
     _HIDDEN_FRIEND_KIND_NAMES,
     _MEMBER_LEVEL_TYPE_KIND_NAMES,
@@ -146,6 +147,26 @@ _NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
 
 _SUPPORTED_MODES: frozenset[ContractMode] = frozenset(
     {ContractMode.PUBLIC, ContractMode.ALL}
+)
+
+# post_processing.MarkReachability's own set of L4/L5 source-derived kinds
+# that are public-contract *by construction* -- each is built only from an
+# already-proven-public entity (see that set's own docstring), never a bare
+# namespace-name heuristic. Their `symbol` is a macro/inline-function/
+# typedef/etc. name, never a real C/C++ header-surface function/variable/
+# type -- `classify_change_surface` cannot place it in either the symbol or
+# type universe, so it falls through to the "cannot place it -- keep it"
+# conservative fallback, which `_in_surface_result_is_confirmed` correctly
+# refuses to treat as genuine confirmation. Without this early-return, every
+# one of these definitively-public findings was wrongly downgraded to
+# `UNKNOWN_UNRESOLVED` even with fully resolvable surfaces on both sides --
+# confirmed empirically for `PUBLIC_MACRO_REMOVED` (Codex review, fresh
+# evidence). Imported directly (not duplicated as a literal, unlike
+# `_REASON_POST_MANIFEST_NOT_COMMITTED` below): this is an *import* of an
+# already-existing symbol, not a new declaration added to `post_processing.py`,
+# so it does not trip that module's line-count hard cap.
+_PUBLIC_SOURCE_ABI_KIND_SLUGS: frozenset[str] = frozenset(
+    k.value for k in _PUBLIC_SOURCE_ABI_KINDS
 )
 
 # post_processing.FilterNonPublicSurface._run_allowlist's own
@@ -562,8 +583,22 @@ def evaluate_change_contract_relevance(
     # resolvability or on this module's own identity-ambiguity tiering would
     # downgrade a definitive event (`PYTHON_API_FUNCTION_REMOVED`,
     # `VISIBILITY_LEAK`) purely because of an unrelated evidence gap.
-    if change.kind.value.startswith("python_") or change.kind.value in (
-        _NEVER_FILTER_KIND_NAMES
+    # `_PUBLIC_SOURCE_ABI_KIND_SLUGS` (post_processing.py's own
+    # `_PUBLIC_SOURCE_ABI_KINDS`) is the identical "trusted by construction"
+    # shape for the L4/L5 source-derived evidence axis: each of these kinds
+    # is built only from an already-proven-public entity, so its `symbol`
+    # (a macro/inline-function/typedef/template/etc. name) is never a real
+    # C/C++ header-surface function/variable/type `classify_change_surface`
+    # can place -- checked here, at the same early point as `python_*`/
+    # `_NEVER_FILTER_KIND_NAMES`, for the identical reason: gating it on
+    # C/C++ header surface resolvability or on this module's own
+    # identity-ambiguity tiering would downgrade a definitive
+    # `PUBLIC_MACRO_REMOVED`/`INLINE_FUNCTION_REMOVED`/etc. event purely
+    # because of an unrelated evidence gap (Codex review, fresh evidence).
+    if (
+        change.kind.value.startswith("python_")
+        or change.kind.value in _NEVER_FILTER_KIND_NAMES
+        or change.kind.value in _PUBLIC_SOURCE_ABI_KIND_SLUGS
     ):
         return ContractEvaluationDecision(
             relevance=ContractRelevance.IN_CONTRACT,

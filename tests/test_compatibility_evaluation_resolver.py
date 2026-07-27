@@ -26,6 +26,7 @@ from abicheck.compatibility_evaluation_resolver import (
     FieldCandidate,
     LegacyAliasConflictError,
     PackConflictError,
+    _value_identity_key,
     detect_pack_conflicts,
     resolve_field,
 )
@@ -406,6 +407,37 @@ class TestUnknownSelectorLayer:
             resolve_field("contract.mode", [bad_candidate], default=_default())
 
 
+class TestValueIdentityKey:
+    """Direct unit coverage for `_value_identity_key`'s runtime-type
+    tagging, including the nested-tuple recursion (Codex review, fresh
+    evidence)."""
+
+    def test_bool_and_int_scalars_produce_distinct_keys(self) -> None:
+        assert _value_identity_key(True) != _value_identity_key(1)
+
+    def test_bool_and_int_nested_in_a_tuple_produce_distinct_keys(self) -> None:
+        # Without recursion, (type(value), value) still embeds the nested
+        # tuple as-is: (tuple, (True,)) == (tuple, (1,)) since tuple
+        # equality/hashing recurses with plain ==/hash().
+        assert _value_identity_key((True,)) != _value_identity_key((1,))
+
+    def test_bool_and_int_nested_two_levels_deep_produce_distinct_keys(self) -> None:
+        assert _value_identity_key(((True,),)) != _value_identity_key(((1,),))
+
+    def test_str_enum_and_raw_str_produce_distinct_keys(self) -> None:
+        # ContractMode.PUBLIC == "public" and hash equal (ContractMode
+        # subclasses str), but `type(value)` still distinguishes them -- the
+        # exact case this type-tagging exists to catch, so a genuine
+        # pack-vs-pack disagreement between a normalized enum and a raw,
+        # unnormalized spelling still raises instead of silently agreeing.
+        assert _value_identity_key(ContractMode.PUBLIC) != _value_identity_key("public")
+
+    def test_equal_tuples_of_the_same_element_types_still_collide(self) -> None:
+        # The recursion must not turn genuinely-equal values into a false
+        # conflict.
+        assert _value_identity_key((1, "a")) == _value_identity_key((1, "a"))
+
+
 class TestDetectPackConflicts:
     # ADR-049 D8: "Two selected packs that assign incompatible values to the
     # same field or ChangeKind are a usage error until an explicit final
@@ -460,6 +492,24 @@ class TestDetectPackConflicts:
                 ]
             )
         assert exc_info.value.field_name == "contract.mode"
+
+    def test_equal_but_differently_typed_nested_list_values_raise(self):
+        # Codex review, fresh evidence: the type-tagging fix above only
+        # covered the *outer* value -- `(type(value), value)` still embeds a
+        # nested tuple as-is, and tuple equality/hashing recurses into
+        # elements with plain ==/hash(), the exact same True-vs-1 blind spot
+        # one level down. `[true]`/`[1]` both canonicalize to a tuple
+        # (`_to_hashable`), so `(True,)` and `(1,)` previously compared and
+        # hashed equal as a whole, silently treating two packs that assign
+        # different list values to the same field as agreeing.
+        with pytest.raises(PackConflictError) as exc_info:
+            detect_pack_conflicts(
+                [
+                    (_pack("security_hardening"), {"flags": (True,)}),
+                    (_pack("release_governance"), {"flags": (1,)}),
+                ]
+            )
+        assert exc_info.value.field_name == "flags"
 
     def test_conflict_report_is_order_independent(self):
         # "Pack order never decides semantics" -- forward and reversed input
