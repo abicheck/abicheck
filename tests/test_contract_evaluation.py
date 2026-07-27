@@ -301,21 +301,52 @@ class TestPublicModeAlreadyExcludedByPipeline:
     def test_unrecognized_pipeline_reason_falls_through_to_normal_classification(
         self,
     ) -> None:
-        # A reason string this module doesn't recognize (e.g. the separate
-        # POST-manifest-surface feature's own custom reason) must not crash
-        # or be silently treated as either terminal or weak -- it falls
-        # through to ordinary resolvable/identity/classify_change_surface
+        # A reason string this module genuinely does not recognize must not
+        # crash or be silently treated as either terminal or weak -- it
+        # falls through to ordinary resolvable/identity/classify_change_surface
         # handling, same as if the field were unset.
         c = Change(
             kind=ChangeKind.FUNC_REMOVED,
             symbol="_Z3api",
             description="",
-            surface_exclusion_reason="not in POST manifest committed surface",
+            surface_exclusion_reason="some future pipeline stage's own custom reason",
         )
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
         s = compute_public_surface(snap)
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.IN_CONTRACT
+
+    def test_post_manifest_not_committed_reason_is_terminal(self) -> None:
+        # Regression (Codex review, twelfth round): `compare --post-manifest`
+        # (post_processing.py's FilterNonPublicSurface._run_allowlist) demotes
+        # a concrete export absent from the committed allowlist with its own
+        # "not in POST manifest committed surface" reason -- a confident,
+        # terminal exclusion (ADR-049 D2's "exact manifests" evidence
+        # provider), not an unrecognized string. Previously fell through to a
+        # fresh classify_change_surface recomputation, which could reclassify
+        # it IN_CONTRACT purely because the symbol also happens to be
+        # header-resolvable, even though the exact-manifest domain already
+        # excluded it. Uses the same literal `contract_evaluation`'s own
+        # `_REASON_POST_MANIFEST_NOT_COMMITTED` holds (not a shared import --
+        # post_processing.py is at the repo's 2000-line hard cap and cannot
+        # export a constant without a separate splitting effort) rather than
+        # post_processing.py's private module internals.
+        import abicheck.contract_evaluation as mod
+
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3api",
+            description="",
+            surface_exclusion_reason=mod._REASON_POST_MANIFEST_NOT_COMMITTED,
+        )
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        s = compute_public_surface(snap)
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
+            reason_code="terminal_authoritative_exclusion",
+            assurance=ContractAssurance.COMPLETE,
+        )
 
 
 class TestPublicModeIdentityAmbiguous:
@@ -578,6 +609,79 @@ class TestPublicModeAmbiguousTypeRoot:
         assert "Point" in s.ambiguous_type_names
         assert "Clear" not in s.ambiguous_type_names
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Clear", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+    def test_qualified_candidate_reached_only_via_ambiguous_bare_tail_is_unresolved(
+        self,
+    ) -> None:
+        # Regression (Codex review, twelfth round): ns1::Mode/ns2::Mode share
+        # the bare tail "Mode". A public signature referencing only bare
+        # "Mode" makes _walk_type_closure add *both* qualified names to
+        # public_types (walking each ambiguous match, per its own anti-hiding
+        # rule) -- but ambiguous_type_names only ever records the bare tail
+        # "Mode", never the qualified names themselves. A member-level
+        # finding owner-stripped to the qualified "ns1::Mode" therefore
+        # matched public_types directly and was wrongly confirmed, even
+        # though the public signature never disambiguated which of the two
+        # enums it actually reaches.
+        from abicheck.model import EnumMember, EnumType
+
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="void", params=["Mode"])],
+            enums=[
+                EnumType(
+                    name="ns1::Mode",
+                    members=[EnumMember(name="X", value=0)],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+                EnumType(
+                    name="ns2::Mode",
+                    members=[EnumMember(name="Y", value=0)],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert "Mode" in s.ambiguous_type_names
+        assert {"ns1::Mode", "ns2::Mode"} <= s.public_types
+        c = Change(
+            kind=ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+            symbol="ns1::Mode::X",
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
+
+    def test_qualified_candidate_with_unambiguous_bare_tail_still_confirms(
+        self,
+    ) -> None:
+        # The propagated ambiguity check must not overreject: a qualified
+        # candidate whose own bare tail is genuinely unambiguous still
+        # confirms normally.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="ns::Widget")],
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="struct",
+                    size_bits=64,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    qualified_name="ns::Widget",
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert "Widget" not in s.ambiguous_type_names
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="ns::Widget", description=""
+        )
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "public_root_membership"

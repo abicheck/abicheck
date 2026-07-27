@@ -147,13 +147,31 @@ _SUPPORTED_MODES: frozenset[ContractMode] = frozenset(
     {ContractMode.PUBLIC, ContractMode.ALL}
 )
 
+# post_processing.FilterNonPublicSurface._run_allowlist's own
+# Change.surface_exclusion_reason for a `--post-manifest` demotion -- a
+# distinct pipeline's authoritative exclusion, not one of surface.py's
+# REASON_* codes. Not imported from post_processing.py: that module sits at
+# the repo's 2000-line hard cap (AI-readiness gate), so no shared constant
+# can be added there without a separate splitting effort -- duplicated here
+# as a literal instead, accepting the (documented) drift risk if that
+# module's message text ever changes.
+_REASON_POST_MANIFEST_NOT_COMMITTED = "not in POST manifest committed surface"
+
 # Surface-exclusion reasons treated as an authoritative, terminal exclusion
 # (ADR-049's "terminal_authoritative_exclusion"): each is either a confident
 # linkage/reachability fact (non-public-type), a provenance demotion that
 # `surface._origin_reason` only applies when *both* snapshot sides agree on
-# it (private-header, system-header), or a detector-confirmed
+# it (private-header, system-header), a detector-confirmed
 # unreachability/off-surface determination (private-internal-unreachable,
-# off-python-surface). None of these is a "we simply couldn't tell" case.
+# off-python-surface), or an exact-manifest closed-domain exclusion
+# (post-manifest-not-committed, ADR-049 D2's "exact manifests" evidence
+# provider -- `--post-manifest` only ever demotes a *concrete* export absent
+# from the committed allowlist, never an ambiguous case). None of these is a
+# "we simply couldn't tell" case. Recognizing the post-manifest reason here
+# matters: without it, a POST-manifest-demoted finding whose symbol also
+# happens to be header-resolvable would fall through to a fresh
+# classify_change_surface recomputation and could be wrongly reclassified
+# IN_CONTRACT (Codex review).
 _TERMINAL_SURFACE_REASONS: frozenset[str] = frozenset(
     {
         REASON_NON_PUBLIC_TYPE,
@@ -161,6 +179,7 @@ _TERMINAL_SURFACE_REASONS: frozenset[str] = frozenset(
         REASON_SYSTEM_HEADER,
         REASON_PRIVATE_INTERNAL_UNREACHABLE,
         REASON_OFF_PYTHON_SURFACE,
+        _REASON_POST_MANIFEST_NOT_COMMITTED,
     }
 )
 
@@ -351,13 +370,21 @@ def _in_surface_result_is_confirmed(
     ``public_types`` entry (``"Foo"``).
 
     A type-candidate match is also rejected when every matching candidate is
-    flagged in either side's ``ambiguous_type_names`` (two distinct
-    records/enums sharing one bare tail, e.g. ``one::Point``/``two::Point``
-    both spelled bare ``Point``): ``compute_public_surface`` deliberately
-    keeps *both* records in ``public_types`` rather than silently dropping
-    either (its own anti-hiding rule), so intersection membership alone does
-    not establish which record -- or whether either -- this finding's root
-    actually resolves to (Codex review, eleventh round).
+    ambiguous -- either the candidate itself is flagged in either side's
+    ``ambiguous_type_names`` (two distinct records/enums sharing one bare
+    tail, e.g. ``one::Point``/``two::Point`` both spelled bare ``Point``:
+    ``compute_public_surface`` deliberately keeps *both* records in
+    ``public_types`` rather than silently dropping either, its own
+    anti-hiding rule), or the candidate is a *qualified* name whose own
+    trailing tail is ambiguous (``ns1::Mode``/``ns2::Mode`` sharing bare tail
+    ``Mode``): ``_walk_type_closure`` reaches an ambiguous bare tail from a
+    public signature by adding *every* matching record/enum's full qualified
+    name to ``public_types`` (walking each one, so a real dependency of
+    either isn't hidden) -- so a qualified candidate's presence in
+    ``public_types`` does not by itself prove *that* candidate, rather than
+    its ambiguous sibling, is what the public signature actually reaches
+    (Codex review, twelfth round). Neither case establishes which record --
+    or whether either -- this finding's root actually resolves to.
     """
     if change.kind.value in _NEVER_FILTER_KIND_NAMES:
         return True
@@ -374,7 +401,12 @@ def _in_surface_result_is_confirmed(
         candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
     matched = candidates & unions.public_types
     ambiguous = surf_old.ambiguous_type_names | surf_new.ambiguous_type_names
-    return bool(matched - ambiguous)
+    confirmed_matches = {
+        m
+        for m in matched
+        if m not in ambiguous and not ("::" in m and m.rsplit("::", 1)[1] in ambiguous)
+    }
+    return bool(confirmed_matches)
 
 
 def evaluate_change_contract_relevance(
