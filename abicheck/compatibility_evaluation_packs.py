@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import math
 from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -254,7 +255,7 @@ _HASHABLE_SCALAR_TYPES: tuple[type, ...] = (
 )
 
 
-def _canonicalize_scalar(value: Any) -> Hashable:
+def _canonicalize_scalar(value: Any, *, where: str) -> Hashable:
     """Reconstruct *value* as a plain instance of its exact allowed base
     type, discarding any subclass-added state.
 
@@ -276,6 +277,27 @@ def _canonicalize_scalar(value: Any) -> Hashable:
     before ``int`` since ``bool`` is itself an ``int`` subclass, and
     ``datetime.datetime`` is checked before ``datetime.date`` for the
     identical reason.
+
+    A non-finite float (``nan``/``inf``/``-inf``) is rejected outright
+    rather than passed through: IEEE 754 defines ``nan != nan``, so two
+    packs both assigning a YAML ``.nan`` to the same field would each be
+    kept as a *distinct* ``float('nan')`` object -- confirmed empirically
+    that ``{(float, float('nan')), (float, float('nan'))}`` has length 2,
+    since ``_value_identity_key``'s tuple equality falls through to the
+    same ``!=`` -- so ``detect_pack_conflicts()`` would raise a spurious
+    ``PackConflictError`` for what a manifest author clearly intended as
+    the identical value (Codex review). There is no stable
+    equality-preserving representation of ``nan`` to canonicalize to
+    either, since collapsing it to a sentinel would then make it silently
+    *agree* with a genuinely different pack's own unrelated ``nan``
+    assignment -- rejecting is consistent with this module's existing
+    "reject rather than silently produce an ambiguous value" handling of
+    ``None`` and nested mappings elsewhere in this file. ``inf``/``-inf``
+    are rejected alongside it: both compare and hash consistently, so
+    they don't share the ``nan`` conflict-detection bug, but a pack field
+    meaningfully assigned an unbounded value is exotic enough that
+    rejecting it too avoids having to reason about how it should behave
+    downstream in size/threshold comparisons that assume a finite value.
     """
     if isinstance(value, bool):
         return value
@@ -284,6 +306,11 @@ def _canonicalize_scalar(value: Any) -> Hashable:
     if isinstance(value, int):
         return int(value)
     if isinstance(value, float):
+        if not math.isfinite(value):
+            raise PackManifestError(
+                f"{where}: assignment value {value!r} must be a finite "
+                "number -- NaN and +/-infinity are not supported"
+            )
         return float(value)
     if isinstance(value, bytes):
         return bytes(value)
@@ -343,7 +370,7 @@ def _to_hashable(value: Any, *, where: str) -> Hashable:
             f"{type(value).__name__} (not hashable-and-immutable) -- must be "
             f"one of {type_names}, or a list of these"
         )
-    return _canonicalize_scalar(value)
+    return _canonicalize_scalar(value, where=where)
 
 
 def _parse_policy_assignments(

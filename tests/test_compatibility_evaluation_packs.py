@@ -267,6 +267,38 @@ class TestLoadPackManifestHappyPath:
         )
         assert type(pack.assignments["field"]) is float
 
+    def test_directly_constructed_pack_rejects_nan_value(self) -> None:
+        # Regression (Codex review): float('nan') != float('nan') (IEEE
+        # 754), so two packs both assigning a YAML `.nan` to the same
+        # field would each keep a *distinct* nan object, and
+        # detect_pack_conflicts()'s equality-based comparison would raise
+        # a spurious PackConflictError for what a manifest author clearly
+        # intended as the identical value. Confirmed empirically that
+        # {(float, float('nan')), (float, float('nan'))} has length 2.
+        # Rejecting the value outright (there is no equality-preserving
+        # canonical form for nan) closes this before it can happen.
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        with pytest.raises(PackManifestError, match="finite"):
+            LoadedPack(
+                identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+                kind=PackKind.CONTRACT,
+                assignments={"field": float("nan")},
+            )
+
+    @pytest.mark.parametrize("value", [float("inf"), float("-inf")])
+    def test_directly_constructed_pack_rejects_infinite_value(
+        self, value: float
+    ) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        with pytest.raises(PackManifestError, match="finite"):
+            LoadedPack(
+                identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+                kind=PackKind.CONTRACT,
+                assignments={"field": value},
+            )
+
     @pytest.mark.parametrize(
         ("value", "expected_type"),
         [
@@ -586,6 +618,34 @@ class TestLoadPackManifestValidation:
             "assignments: {contract.mode: {nested: true}}\n",
         )
         with pytest.raises(PackManifestError, match="nested mappings"):
+            load_pack_manifest(path)
+
+    def test_nan_assignment_value_raises(self, tmp_path: Path) -> None:
+        # Regression (Codex review): a YAML `.nan` scalar decodes to
+        # float('nan'), which is unequal to itself -- two manifests both
+        # assigning it to the same field would otherwise make
+        # detect_pack_conflicts() raise a spurious PackConflictError over
+        # what a manifest author intended as the same value. Rejected at
+        # load time instead, matching the null/nested-mapping treatment
+        # immediately above.
+        path = _write(
+            tmp_path,
+            "p.yaml",
+            "id: p\nversion: 1\nkind: contract\nassignments: {some.field: .nan}\n",
+        )
+        with pytest.raises(PackManifestError, match="finite"):
+            load_pack_manifest(path)
+
+    @pytest.mark.parametrize("literal", [".inf", "-.inf"])
+    def test_infinite_assignment_value_raises(
+        self, tmp_path: Path, literal: str
+    ) -> None:
+        path = _write(
+            tmp_path,
+            "p.yaml",
+            f"id: p\nversion: 1\nkind: contract\nassignments: {{some.field: {literal}}}\n",
+        )
+        with pytest.raises(PackManifestError, match="finite"):
             load_pack_manifest(path)
 
     def test_non_utf8_file_raises(self, tmp_path: Path) -> None:
