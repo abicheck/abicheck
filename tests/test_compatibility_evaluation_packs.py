@@ -135,6 +135,28 @@ class TestLoadPackManifestHappyPath:
             != load_pack_manifest(p2).identity.sha256
         )
 
+    def test_assignments_are_immutable(self, tmp_path: Path) -> None:
+        path = _write(
+            tmp_path,
+            "p.yaml",
+            "id: p\nversion: 1\nkind: gate\nassignments: {exit_code_scheme: severity}\n",
+        )
+        pack = load_pack_manifest(path)
+        with pytest.raises(TypeError):
+            pack.assignments["exit_code_scheme"] = "legacy"  # type: ignore[index]
+
+    def test_directly_constructed_pack_freezes_a_mutable_dict(self) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        mutable = {"exit_code_scheme": "severity"}
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.GATE,
+            assignments=mutable,
+        )
+        mutable["exit_code_scheme"] = "legacy"
+        assert pack.assignments["exit_code_scheme"] == "severity"
+
 
 class TestLoadPackManifestValidation:
     def test_missing_file_raises(self, tmp_path: Path) -> None:
@@ -264,6 +286,33 @@ class TestLoadPackManifestValidation:
         path = tmp_path / "bad_encoding.yaml"
         path.write_bytes(b"id: \xff\xfe bad bytes\n")
         with pytest.raises(PackManifestError, match="not valid UTF-8"):
+            load_pack_manifest(path)
+
+    def test_duplicate_top_level_key_raises(self, tmp_path: Path) -> None:
+        # yaml.safe_load alone silently keeps last-value-wins for a repeated
+        # mapping key -- a hard-load-error manifest format must not let a
+        # duplicated `id`/`kind`/etc. silently pick one value over the other.
+        path = _write(
+            tmp_path,
+            "dup_top.yaml",
+            "id: p\nid: q\nversion: 1\nkind: gate\nassignments: {}\n",
+        )
+        with pytest.raises(PackManifestError, match="duplicate key 'id'"):
+            load_pack_manifest(path)
+
+    def test_duplicate_assignment_key_in_policy_pack_raises(
+        self, tmp_path: Path
+    ) -> None:
+        # A repeated ChangeKind slug with contradictory severities must not
+        # silently resolve to whichever one YAML happened to parse last --
+        # that would silently weaken (or strengthen) the pack's real intent.
+        path = _write(
+            tmp_path,
+            "dup_assignment.yaml",
+            "id: p\nversion: 1\nkind: policy\n"
+            "assignments:\n  func_removed: break\n  func_removed: ignore\n",
+        )
+        with pytest.raises(PackManifestError, match="duplicate key 'func_removed'"):
             load_pack_manifest(path)
 
 

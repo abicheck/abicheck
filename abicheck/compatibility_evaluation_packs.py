@@ -65,6 +65,7 @@ from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, cast
 
 import yaml
@@ -88,6 +89,43 @@ _VALID_PACK_KINDS: frozenset[str] = frozenset(k.value for k in PackKind)
 _VALID_CHANGE_KIND_SLUGS: frozenset[str] = frozenset(k.value for k in ChangeKind)
 
 
+class _StrictLoader(yaml.SafeLoader):
+    """A ``SafeLoader`` that rejects a duplicate key in the same mapping.
+
+    ``yaml.safe_load`` alone silently accepts ``{func_removed: break,
+    func_removed: ignore}`` with last-value-wins semantics (PyYAML's
+    ``SafeConstructor.construct_mapping`` never checks for a repeat) -- for a
+    hard-load-error manifest format, that would silently drop the earlier,
+    contradictory assignment instead of raising (Codex review). Mirrors
+    ``dump_manifest.py``'s own ``_StrictLoader``/``_construct_mapping`` for
+    the identical ADR-050 D3 gap; kept as a second, independent copy rather
+    than a shared import since that one is private to its own module and this
+    manifest format has no other coupling to ``dump_manifest.py``.
+    """
+
+
+def _construct_strict_mapping(
+    loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
+) -> dict[Any, Any]:
+    seen: set[Any] = set()
+    mapping: dict[Any, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=True)
+        if key in seen:
+            raise PackManifestError(
+                f"duplicate key {key!r} in the same mapping "
+                f"(line {key_node.start_mark.line + 1})"
+            )
+        seen.add(key)
+        mapping[key] = loader.construct_object(value_node, deep=True)
+    return mapping
+
+
+_StrictLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_strict_mapping
+)
+
+
 @dataclass(frozen=True)
 class LoadedPack:
     """One pack manifest's identity and resolved field assignments.
@@ -97,11 +135,24 @@ class LoadedPack:
     members (never a raw severity string), matching what
     :class:`~abicheck.compatibility_evaluation_config.CompatibilityPolicyConfig.overrides`
     itself requires.
+
+    ``assignments`` is frozen into a ``MappingProxyType`` in ``__post_init__``
+    (mirroring ``compatibility_evaluation_config.py``'s ``_frozen_mapping``
+    pattern for every other config dataclass here): although ``LoadedPack``
+    itself is a frozen dataclass, a plain ``dict`` passed for ``assignments``
+    would otherwise stay directly mutable by the caller after construction,
+    letting `identity.sha256` (digested over the manifest's original bytes)
+    silently stop matching the actual assignments a later
+    ``detect_pack_conflicts``/config-composition call observes -- defeating
+    ADR-049 D6's exact-replay guarantee (Codex review).
     """
 
     identity: ImmutableIdentity
     kind: PackKind
     assignments: Mapping[str, Hashable]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "assignments", MappingProxyType(dict(self.assignments)))
 
 
 def _to_hashable(value: Any, *, where: str) -> Hashable:
@@ -227,7 +278,9 @@ def load_pack_manifest(path: str | Path) -> LoadedPack:
         ) from exc
 
     try:
-        document: Any = yaml.safe_load(raw_text)
+        document: Any = yaml.load(raw_text, Loader=_StrictLoader)
+    except PackManifestError as exc:
+        raise PackManifestError(f"{manifest_path}: {exc}") from exc
     except yaml.YAMLError as exc:
         raise PackManifestError(f"{manifest_path}: invalid YAML ({exc})") from exc
 
