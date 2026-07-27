@@ -560,8 +560,28 @@ def run_dump(
             f"dump_manifest is not yet supported for {binary_fmt.upper()} "
             "binaries (ADR-050 D3); use a single-header dump for this format."
         )
+    from . import dumper_cache
+
     _headers = headers or []
     _includes = includes or []
+    # Every format's own main pass normalizes `lang` to only ever force a
+    # language explicitly requested, letting auto-detection run otherwise
+    # (including for the default "c++") -- `_cache_key` hashes the raw
+    # `lang` value, so `_attach_header_graph`'s own _clang_header_dump call
+    # must pass this identical normalized value, or it hashes a different
+    # key than the main pass just used, permanently missing the AST memo
+    # for the default (non-explicit-"c") workload (Codex review). ELF does
+    # this in `_dump_elf` below (case-sensitive `lang == "c"`); PE/Mach-O do
+    # it in `service_header_scoped._try_header_scoped_dump` -- reached
+    # whenever headers are given, the only case this graph attach does
+    # anything at all -- with a case-*insensitive* `lang.lower() == "c"`,
+    # so the two branches deliberately differ (Codex review, twice: the
+    # first pass wrongly assumed PE/Mach-O never normalized `lang` at all).
+    _header_graph_lang = (
+        (lang if lang == "c" else None)
+        if binary_fmt == "elf"
+        else (lang if lang.lower() == "c" else None)
+    )
     # An explicit --ast-frontend on the compile context wins over the bare
     # header_backend arg (the latter is the compare-path default carrier).
     eff_backend = (
@@ -622,20 +642,25 @@ def run_dump(
             include_labels=include_labels,
             dump_manifest=dump_manifest,
         )
-        castxml_snap = run_dump(
-            path,
-            binary_fmt,
-            header_backend="castxml",
-            compile=_forced_compile("castxml"),
-            **common_kwargs,
-        )
-        clang_snap = run_dump(
-            path,
-            binary_fmt,
-            header_backend="clang",
-            compile=_forced_compile("clang"),
-            **common_kwargs,
-        )
+        # In-process AST memoization (G31 Phase C) is only worthwhile inside
+        # this scope: the _attach_header_graph call below is a real
+        # downstream consumer, unlike a direct dumper.dump() caller with no
+        # such follow-up (Codex review) -- see dumper_cache.ast_memoize_scope.
+        with dumper_cache.ast_memoize_scope():
+            castxml_snap = run_dump(
+                path,
+                binary_fmt,
+                header_backend="castxml",
+                compile=_forced_compile("castxml"),
+                **common_kwargs,
+            )
+            clang_snap = run_dump(
+                path,
+                binary_fmt,
+                header_backend="clang",
+                compile=_forced_compile("clang"),
+                **common_kwargs,
+            )
         merged = merge_snapshots(castxml_snap, clang_snap)
         # No attach_clang_layout call here: clang_snap's own recursive
         # run_dump(header_backend="clang") call above already got it (this
@@ -651,34 +676,37 @@ def run_dump(
             _HEADER_GRAPH_INCLUDES_ENABLED and not dwarf_only and not symbols_only,
             _headers,
             _includes,
-            lang,
+            _header_graph_lang,
             compile,
             public_headers,
             public_header_dirs,
         )
 
     if binary_fmt == "elf":
-        snap = _dump_elf(
-            path,
-            _headers,
-            _includes,
-            version,
-            lang,
-            dwarf_only=dwarf_only,
-            debug_roots=debug_roots,
-            enable_debuginfod=enable_debuginfod,
-            debuginfod_url=debuginfod_url,
-            debug_format=debug_format,
-            symbols_only=symbols_only,
-            debug_presence_only=debug_presence_only,
-            header_backend=eff_backend,
-            compile=compile,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
-            notify=notify,
-            include_labels=include_labels,
-            dump_manifest=dump_manifest,
-        )
+        # See the hybrid-path scope above: _attach_header_graph below is a
+        # real downstream consumer of this primary pass's AST.
+        with dumper_cache.ast_memoize_scope():
+            snap = _dump_elf(
+                path,
+                _headers,
+                _includes,
+                version,
+                lang,
+                dwarf_only=dwarf_only,
+                debug_roots=debug_roots,
+                enable_debuginfod=enable_debuginfod,
+                debuginfod_url=debuginfod_url,
+                debug_format=debug_format,
+                symbols_only=symbols_only,
+                debug_presence_only=debug_presence_only,
+                header_backend=eff_backend,
+                compile=compile,
+                public_headers=public_headers,
+                public_header_dirs=public_header_dirs,
+                notify=notify,
+                include_labels=include_labels,
+                dump_manifest=dump_manifest,
+            )
         _try_attach_sycl_metadata(snap, path)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
@@ -704,7 +732,7 @@ def run_dump(
             and not symbols_only,
             _headers,
             _includes,
-            lang,
+            _header_graph_lang,
             compile,
             public_headers,
             public_header_dirs,
@@ -713,19 +741,20 @@ def run_dump(
             snap, _headers, _includes, lang=lang, compile=compile
         )
     if binary_fmt == "pe":
-        snap = _dump_pe(
-            path,
-            version,
-            headers=_headers,
-            includes=_includes,
-            lang=lang,
-            pdb_path=pdb_path,
-            header_backend=eff_backend,
-            compile=compile,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
-            include_labels=include_labels,
-        )
+        with dumper_cache.ast_memoize_scope():
+            snap = _dump_pe(
+                path,
+                version,
+                headers=_headers,
+                includes=_includes,
+                lang=lang,
+                pdb_path=pdb_path,
+                header_backend=eff_backend,
+                compile=compile,
+                public_headers=public_headers,
+                public_header_dirs=public_header_dirs,
+                include_labels=include_labels,
+            )
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
@@ -740,7 +769,7 @@ def run_dump(
             and not symbols_only,
             _headers,
             _includes,
-            lang,
+            _header_graph_lang,
             compile,
             public_headers,
             public_header_dirs,
@@ -749,18 +778,19 @@ def run_dump(
             snap, _headers, _includes, lang=lang, compile=compile
         )
     if binary_fmt == "macho":
-        snap = _dump_macho(
-            path,
-            version,
-            headers=_headers,
-            includes=_includes,
-            header_backend=eff_backend,
-            lang=lang,
-            compile=compile,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
-            include_labels=include_labels,
-        )
+        with dumper_cache.ast_memoize_scope():
+            snap = _dump_macho(
+                path,
+                version,
+                headers=_headers,
+                includes=_includes,
+                header_backend=eff_backend,
+                lang=lang,
+                compile=compile,
+                public_headers=public_headers,
+                public_header_dirs=public_header_dirs,
+                include_labels=include_labels,
+            )
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
@@ -775,7 +805,7 @@ def run_dump(
             and not symbols_only,
             _headers,
             _includes,
-            lang,
+            _header_graph_lang,
             compile,
             public_headers,
             public_header_dirs,
@@ -808,7 +838,7 @@ def _attach_header_graph(
     header_graph_includes: bool,
     headers: list[Path],
     includes: list[Path],
-    lang: str,
+    lang: str | None,
     compile: CompileContext | None,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
@@ -816,12 +846,18 @@ def _attach_header_graph(
     """Build and embed the header-only (L2) semantic graph (ADR-041 addendum).
 
     A no-op when ``header_graph`` was not requested or no headers were parsed.
-    Runs a second, independent ``clang -ast-dump=json`` pass over the same
-    header aggregate ``dumper._clang_header_dump`` already knows how to build —
-    reused directly (private only by convention; ``dumper.py`` sits at its
-    2000-line hard cap, so a public wrapper is not added there) rather than
-    threading the parser's already-consumed AST back out through three
-    format-specific builders. Mirrors ``_dump_elf``'s own header-expansion
+    Calls the same ``dumper._clang_header_dump`` the main clang-frontend
+    snapshot pass already used — reused directly (private only by
+    convention; ``dumper.py`` sits at its 2000-line hard cap, so a public
+    wrapper is not added there) rather than threading the parser's
+    already-consumed AST back out through three format-specific builders.
+    When the main snapshot pass ran under ``--ast-frontend clang`` with the
+    identical resolved headers/includes, this is no longer a second
+    *independent* parse: ``dumper_cache``'s in-process AST memo (G31 Phase C)
+    returns the already-parsed dict straight away, skipping a second disk
+    read/JSON re-parse. It stays a genuine second ``clang`` invocation only
+    when the main pass used ``castxml`` (the default backend), which never
+    calls ``_clang_header_dump`` at all. Mirrors ``_dump_elf``'s own header-expansion
     (``expand_header_inputs`` — a ``headers`` entry may be a directory) and
     inferred-include-root derivation (``resolve_inferred_header_roots`` — an
     umbrella header's relative ``#include``s need the same auto-added ``-I``/
@@ -860,6 +896,13 @@ def _attach_header_graph(
     from .dumper import _clang_header_dump, _resolve_clang_bin
 
     cc = compile if compile is not None else CompileContext()
+    # Case-insensitive, None-safe: PE/Mach-O's own main pass
+    # (service_header_scoped._try_header_scoped_dump) treats an uppercase
+    # "C" the same as "c" for both compiler selection and the AST cache key;
+    # every C/C++ branch below must agree with that, or an explicit
+    # lang="C" request silently parses as C++ here and/or misses the memo
+    # the main pass wrote (CodeRabbit review, Codex review).
+    _is_c = (lang or "").lower() == "c"
     ast_root: dict[str, Any] | None = None
     resolved_headers: list[Path] = []
     eff_includes: list[Path] = list(includes)
@@ -868,8 +911,19 @@ def _attach_header_graph(
     try:
         resolved_headers = expand_header_inputs(headers)
         if resolved_headers:
+            # Root inference reads the RAW `headers` (matching `_dump_elf`'s
+            # own `resolve_inferred_header_roots(headers, ...)` call), not
+            # `resolved_headers` -- `_implicit_header_includes` treats a
+            # directory input as a single root but a directory *expanded*
+            # into its individual nested files as one root per subdirectory,
+            # so using the expanded list here diverged from the main pass
+            # for any directory `-H` input with nested subdirectories,
+            # producing a different eff_includes/eff_tokens and therefore a
+            # different `_clang_header_dump` cache key -- silently missing
+            # the in-process AST memo in exactly the large-header-tree case
+            # this reuse targets (Codex review).
             inc_extra, deferred = resolve_inferred_header_roots(
-                resolved_headers,
+                headers,
                 list(includes),
                 gcc_options=cc.gcc_options,
                 gcc_option_tokens=cc.gcc_option_tokens,
@@ -894,7 +948,7 @@ def _attach_header_graph(
         ast_root, _resolved_kind = _clang_header_dump(
             resolved_headers,
             eff_includes,
-            compiler="cc" if lang == "c" else "c++",
+            compiler="cc" if _is_c else "c++",
             gcc_path=cc.gcc_path,
             gcc_prefix=cc.gcc_prefix,
             gcc_options=cc.gcc_options,
@@ -904,6 +958,12 @@ def _attach_header_graph(
             lang=lang,
             extra_hash_dirs=deferred_dirs,
             frontend_context=cc.frontend_context,
+            # This is the *final* consumer of this AST -- writing it into
+            # the in-process memo here would have no further same-process
+            # reader to hand off to (Codex review). A memo entry the
+            # primary snapshot pass already wrote is still read (and
+            # popped) above; only the write-back on a miss is suppressed.
+            memoize=False,
         )
     except (SnapshotError, ValidationError):
         ast_root = None
@@ -940,16 +1000,16 @@ def _attach_header_graph(
         # the dump (ADR-028 D3).
         try:
             include_clang_bin = _resolve_clang_bin(
-                "cc" if lang == "c" else "c++", cc.gcc_path, cc.gcc_prefix
+                "cc" if _is_c else "c++", cc.gcc_path, cc.gcc_prefix
             )
         except SnapshotError:
-            include_clang_bin = "clang++" if lang != "c" else "clang"
+            include_clang_bin = "clang" if _is_c else "clang++"
         include_map, include_diags = ClangHeaderIncludeExtractor(
             clang_bin=include_clang_bin
         ).extract(
             [str(p) for p in resolved_headers],
             [str(p) for p in eff_includes],
-            language="C" if lang == "c" else "CXX",
+            language="C" if _is_c else "CXX",
             sysroot=str(cc.sysroot) if cc.sysroot else None,
             nostdinc=cc.nostdinc,
             gcc_options=cc.gcc_options,

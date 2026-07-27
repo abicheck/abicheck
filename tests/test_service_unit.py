@@ -216,6 +216,91 @@ class TestResolveInput:
         assert "header_graph" not in kwargs
         assert "header_graph_includes" not in kwargs
 
+    def test_header_graph_lang_matches_elf_main_pass_normalization(self, tmp_path):
+        """Codex review: ``_dump_elf`` normalizes ``lang`` to only ever force
+        "c" explicitly (letting auto-detection run for the default "c++"),
+        before calling ``dumper.dump()`` -- ``_attach_header_graph``'s own
+        ``_clang_header_dump`` call must be given that identical normalized
+        value, or it hashes a different cache key than the main pass just
+        used and permanently misses the new AST reuse memo for the default,
+        by far the most common, ELF dump shape."""
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service._dump_elf", return_value=snap),
+            patch(
+                "abicheck.service._attach_header_graph", return_value=snap
+            ) as mock_attach,
+        ):
+            run_dump(p, "elf", headers=[header], includes=[], lang="c++")
+        args, _ = mock_attach.call_args
+        assert args[5] is None  # not the raw "c++" default
+
+    def test_header_graph_lang_forces_c_like_elf_main_pass(self, tmp_path):
+        """The other half of the normalization: an explicit ``lang="c"``
+        request must still reach ``_attach_header_graph`` as "c", matching
+        what ``_dump_elf`` itself forwards to ``dumper.dump()`` for that
+        explicit case."""
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n")
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service._dump_elf", return_value=snap),
+            patch(
+                "abicheck.service._attach_header_graph", return_value=snap
+            ) as mock_attach,
+        ):
+            run_dump(p, "elf", headers=[header], includes=[], lang="c")
+        args, _ = mock_attach.call_args
+        assert args[5] == "c"
+
+    def test_header_graph_lang_matches_pe_main_pass_normalization(self, tmp_path):
+        """Codex review (second pass): PE/Mach-O's own main pass, reached via
+        ``service_header_scoped._try_header_scoped_dump`` whenever headers
+        are given (the only case ``_attach_header_graph`` does anything at
+        all), normalizes ``lang`` the same way ELF's ``_dump_elf`` does
+        (case-insensitively) -- the earlier assumption that PE/Mach-O never
+        normalize was wrong; ``_attach_header_graph`` must match that
+        normalized value too, not the raw default "c++"."""
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch(
+                "abicheck.service._attach_header_graph", return_value=snap
+            ) as mock_attach,
+        ):
+            run_dump(p, "pe", headers=[header], includes=[], lang="c++")
+        args, _ = mock_attach.call_args
+        assert args[5] is None  # not the raw "c++" default
+
+    def test_header_graph_lang_forces_c_for_pe(self, tmp_path):
+        """The other half: an explicit (case-insensitive) ``lang="C"``
+        request must still reach ``_attach_header_graph`` as "C", matching
+        what ``_try_header_scoped_dump`` forwards for that explicit case."""
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n")
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch(
+                "abicheck.service._attach_header_graph", return_value=snap
+            ) as mock_attach,
+        ):
+            run_dump(p, "pe", headers=[header], includes=[], lang="C")
+        args, _ = mock_attach.call_args
+        assert args[5] == "C"
+
     def test_binary_detection_elf(self, tmp_path):
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -2926,6 +3011,101 @@ class TestAttachHeaderGraphDeviceContext:
                 public_header_dirs=None,
             )
         mock_extractor.return_value.extract.assert_called_once()
+
+
+class TestAttachHeaderGraphCompilerSelection:
+    """Codex review (P2): _attach_header_graph's own compiler selection for
+    its _clang_header_dump call must match whichever main pass it's paired
+    with -- case-insensitively, since PE/Mach-O's own main pass
+    (service_header_scoped._try_header_scoped_dump) treats "C" the same as
+    "c". The compiler string is part of the AST cache key, so a mismatch
+    here silently misses the memo on top of picking the wrong driver."""
+
+    def test_uppercase_c_selects_cc_compiler(self, tmp_path: Path):
+        from abicheck.service import _attach_header_graph
+
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        with patch(
+            "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+        ) as mock_ast:
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=False,
+                headers=[header],
+                includes=[],
+                lang="C",
+                compile=None,
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        assert mock_ast.call_args.kwargs["compiler"] == "cc"
+
+    def test_lang_none_selects_cpp_compiler(self, tmp_path: Path):
+        from abicheck.service import _attach_header_graph
+
+        header = tmp_path / "pub.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        with patch(
+            "abicheck.dumper._clang_header_dump", return_value=(ast, None)
+        ) as mock_ast:
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=False,
+                headers=[header],
+                includes=[],
+                lang=None,
+                compile=None,
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        assert mock_ast.call_args.kwargs["compiler"] == "c++"
+
+    def test_uppercase_c_selects_c_include_extractor_driver_and_language(
+        self, tmp_path: Path
+    ):
+        """CodeRabbit review: the same case-insensitive normalization must
+        also apply to the include-graph pass's own driver resolution
+        (_resolve_clang_bin/fallback) and its `language=` argument -- these
+        three were fixed alongside the compiler selection above but are
+        independent code paths, each capable of drifting back to "C++" on
+        its own."""
+        from abicheck.service import _attach_header_graph
+
+        header = tmp_path / "pub.h"
+        header.write_text("int f(void);\n")
+        snap = AbiSnapshot(library="lib", version="1.0")
+        ast = {"kind": "TranslationUnitDecl", "inner": []}
+        with (
+            patch("abicheck.dumper._clang_header_dump", return_value=(ast, None)),
+            patch(
+                "abicheck.dumper._resolve_clang_bin", return_value="/opt/llvm/clang"
+            ) as mock_resolve,
+            patch(
+                "abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor"
+            ) as mock_extractor,
+        ):
+            mock_extractor.return_value.extract.return_value = ({}, [])
+            _attach_header_graph(
+                snap,
+                header_graph=True,
+                header_graph_includes=True,
+                headers=[header],
+                includes=[],
+                lang="C",
+                compile=None,
+                public_headers=None,
+                public_header_dirs=None,
+            )
+        assert mock_resolve.call_args.args[0] == "cc"
+        mock_extractor.assert_called_once_with(clang_bin="/opt/llvm/clang")
+        assert mock_extractor.return_value.extract.call_args.kwargs["language"] == "C"
 
 
 class TestCliNativeBinaryHeaderWiring:

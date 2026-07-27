@@ -142,28 +142,47 @@ building a second identity-resolution mechanism from scratch.
    G28's Phase 1 CastXML schema-completeness audit did for the flat
    snapshot. The header-only graph inherits whatever the underlying
    snapshot parse already knows, so this is a prerequisite for the graph
-   to reason about those facts at all.
-2. **Backend duplication.** The direct-clang backend currently runs a
-   *second*, independent `clang -ast-dump=json` pass specifically to build
-   the header-only graph (`service._attach_header_graph` →
-   `header_graph`'s own AST walk), separate from the pass
-   `dumper_clang.py` already ran to build the flat snapshot. This is
-   exactly the gap flagged by Phase A's `# TODO(header-graph-phase-D)`
-   comment: since the graph is now unconditional, every `--ast-frontend
-   clang` dump pays a full second AST parse it didn't pay when the graph
-   was opt-in and rare. Unifying the two passes — reusing one clang AST
-   for both snapshot normalization and graph construction — removes that
-   duplicated cost structurally, rather than caching around it.
+   to reason about those facts at all. **Not started.**
+2. **Backend duplication (done — AST reuse, not backend unification).**
+   The direct-clang backend used to run a *second*, independent
+   `clang -ast-dump=json` pass specifically to build the header-only graph
+   (`service._attach_header_graph` → `header_graph`'s own AST walk),
+   separate from the pass `dumper_clang.py` already ran to build the flat
+   snapshot — exactly the gap Phase A's `# TODO(header-graph-phase-D)`
+   comment flagged: since the graph is unconditional, every `--ast-frontend
+   clang` dump paid a full second AST parse it didn't pay when the graph
+   was opt-in and rare. **Fixed via in-process memoization, not AST
+   threading**: `dumper._clang_header_dump`'s content-addressed cache key
+   is now backed by an in-process memo (`dumper_cache.load_cached_ast`/
+   `store_cached_ast`, bounded to 4 entries) in addition to the existing
+   on-disk cache — `_attach_header_graph`'s call with the identical
+   resolved headers/includes/toolchain now hits that memo and reuses the
+   already-parsed dict instead of a second disk read + JSON re-parse (or a
+   second subprocess, on a cold cache). This closes the *duplicated-cost*
+   problem the TODO named without the deeper "thread the AST object itself
+   through service.py/ElfHeaderAstResult/dumper_manifest.py across
+   ELF/PE/Mach-O" plumbing a literal reuse would have needed — the memo is
+   keyed the same way the disk cache already was, so it generalizes to all
+   three formats and the hybrid-merge path for free, with no new
+   parameters threaded through any of those call chains. The remaining,
+   deliberately out-of-scope piece of "backend unification" below (a
+   *single* AST object shared end-to-end, rather than a second read of an
+   equivalent one) is still open — see its own bullet.
 
 **Scope.**
 - CastXML schema audit for the facts listed above, following G28 Phase 1's
   discipline (verify against real CastXML XML output before claiming a
   fact is extractable — some may turn out infeasible the way `_Atomic`
-  inner-type recovery and comment-text extraction did there).
-- Single-AST reuse for the direct-clang backend: thread the already-parsed
-  AST (or its JSON) from `dumper_clang.py`'s snapshot pass into
-  `header_graph.py`'s graph-construction pass instead of re-invoking
-  `clang -ast-dump=json`.
+  inner-type recovery and comment-text extraction did there). **Not
+  started.**
+- ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
+  via in-process memoization of `_clang_header_dump`'s result, not by
+  threading the parser's already-consumed AST object through
+  `service.py`/`ElfHeaderAstResult`/`dumper_manifest.py`. A literal
+  single-object reuse (no second `json.loads` of the *cache file*, but also
+  no second dict *construction* from disk at all, and no dependence on the
+  cache key matching) is still open if the memoization's residual cost
+  (cache-key recomputation, one dict lookup) ever turns out to matter.
 - Hybrid-backend provenance-tagged merging: extend G28 Phase 3's
   `--ast-frontend hybrid` per-field provenance model to graph nodes/edges,
   not just snapshot facts.
@@ -251,12 +270,15 @@ discipline G28 Phase 5 used when deferring concepts/`requires` handling to
 
 ## Sequencing note
 
-Phase C's backend AST-reuse is a prerequisite for making Phase D's
-perf-regression gate meaningful. Until Phase C lands, the always-on header
-graph structurally pays the "second AST pass" cost identified in Phase A's
-`# TODO(header-graph-phase-D)` comment on every `--ast-frontend clang` dump
-— a perf gate added before that fix would just be baselining a known,
-already-diagnosed inefficiency rather than catching a new one. Phase B
+Phase C's AST-reuse fix (in-process memoization, see above) has landed, so
+Phase D's perf-regression gate is now meaningful to add: the always-on
+header graph no longer structurally pays a second disk read/JSON re-parse
+(or a second subprocess) on every `--ast-frontend clang` dump the way Phase
+A's `# TODO(header-graph-phase-D)` comment originally flagged. A gate added
+before this fix would just have baselined that known, already-diagnosed
+inefficiency rather than catching a new one; that's no longer the case.
+Phase C's *other* half (the CastXML fact-completeness audit) remains
+unstarted and is not a blocker for Phase D's perf gate. Phase B
 (canonical identity) is largely independent of Phase C and can proceed in
 parallel, but Phase D's new `ChangeKind`s depend on Phase B's identity
 resolution being in place first (a rename-detection finding needs the

@@ -3,15 +3,153 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
 import shutil
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
+
+from . import deadline
 
 log = logging.getLogger(__name__)
+
+#: Whether the calling thread is inside a scope where writing to the AST
+#: memo is actually worthwhile (mirrors ``deadline.py``'s own
+#: ``contextvars.ContextVar`` propagation pattern). Default ``False``: a
+#: direct :func:`abicheck.dumper.dump` caller with no downstream
+#: ``service._attach_header_graph`` consumer (``appcompat.
+#: check_app_compatibility``, a direct Python-API/MCP caller selecting the
+#: clang backend) would otherwise memoize an AST nothing will ever pop,
+#: holding a potentially multi-GB tree indefinitely for no benefit (Codex
+#: review). ``service.run_dump`` activates this around its own primary
+#: ELF/PE/Mach-O dump call, since that is the one shape where
+#: ``_attach_header_graph`` really does follow and consume the memo.
+_ast_memoize_scope: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_ast_memoize_scope", default=False
+)
+
+#: The single pending AST handoff for the *current thread*, or ``None``.
+#: ``(backend, key, root)`` -- a plain per-thread slot (``contextvars``),
+#: never a shared dict keyed only by content hash (Codex review, fresh
+#: evidence): ``service.compare``'s default worker pool
+#: (``ABICHECK_PARALLEL_EXTRACTION``) dumps the old and new sides
+#: *concurrently* in separate threads, and the AST cache key has no
+#: binary/side component -- comparing two versions against the *same*
+#: ``-H`` header set (the common case) makes both sides' primary passes
+#: compute the identical key. A shared dict would let one side's
+#: single-consumption pop steal the other side's entry (or one side's
+#: fresh write silently clobber the other's, mid-flight), so one graph
+#: pass falls back to a full disk re-read/re-parse regardless -- the exact
+#: regression this reuse exists to remove, on top of a plausible
+#: wrong-AST hazard if the two sides' headers ever do differ. A per-thread
+#: slot sidesteps the whole class of bug structurally: each worker thread
+#: only ever sees its own write, never another thread's, no matter what
+#: the two computed keys happen to be. Does not cross a
+#: ``ThreadPoolExecutor`` boundary on its own (same caveat as
+#: ``deadline``'s own ContextVar) -- that's exactly the point here, not a
+#: gap: each pooled worker thread gets its own independent slot.
+_ast_memo_slot: contextvars.ContextVar[tuple[str, str, Any] | None] = (
+    contextvars.ContextVar("_ast_memo_slot", default=None)
+)
+
+
+@contextmanager
+def ast_memoize_scope() -> Iterator[None]:
+    """Mark the current thread's AST parses as worth memoizing in-process.
+
+    Clears this thread's pending slot if the scoped operation raises, since
+    a failure partway through (e.g. snapshot construction fails after the
+    header AST parse itself succeeded) means no downstream
+    ``_attach_header_graph`` will ever run to consume it -- leaving it set
+    would hold a potentially multi-GB tree in this thread for however long
+    the thread itself lives afterward (Codex review).
+    """
+    active_token = _ast_memoize_scope.set(True)
+    try:
+        yield
+    except BaseException:
+        _ast_memo_slot.set(None)
+        raise
+    finally:
+        _ast_memoize_scope.reset(active_token)
+
+
+def ast_memoize_active() -> bool:
+    """Whether :func:`ast_memoize_scope` is active on the calling thread."""
+    return _ast_memoize_scope.get()
+
+
+def store_cached_ast(key: str, backend: str, root: Any) -> None:
+    """Memoize an already-parsed AST *root* for (*backend*, *key*) in the
+    calling thread's own pending slot (see :data:`_ast_memo_slot`'s own
+    docstring) -- overwrites whatever this thread's slot already held, if
+    anything (there is at most one legitimate pending handoff at a time)."""
+    _ast_memo_slot.set((backend, key, root))
+
+
+def load_cached_ast(
+    key: str, backend: str, cache_path: Path, *, memoize: bool = True
+) -> Any | None:
+    """Return a previously-parsed AST for (*backend*, *key*), or ``None``.
+
+    *cache_path* is the caller's own already-resolved :func:`_cache_path`
+    result, not recomputed here -- callers that patch ``_cache_path`` in
+    their own module namespace (as several tests do) must have that
+    override actually govern the disk path this function reads, which a
+    second, independent ``_cache_path`` call from this module could not see.
+
+    *memoize* -- ``False`` for a caller that is itself the *final* consumer
+    of this AST (the header-graph attach step, when the primary snapshot
+    pass used ``castxml`` and never wrote a memo entry of its own): a disk
+    hit there has no further same-thread reader to hand off to, so setting
+    this thread's slot would just hold a potentially multi-GB tree for no
+    benefit (Codex review). The primary snapshot pass's own call keeps the
+    default ``True`` -- that write *is* the intended handoff
+    :func:`store_cached_ast`'s docstring describes.
+
+    Checks this thread's own pending slot first (see :data:`_ast_memo_slot`'s
+    own docstring) -- consuming it only when its ``(backend, key)`` matches
+    the request (a mismatch means this thread's slot holds something
+    unrelated, e.g. a stale leftover from an earlier, differently-shaped
+    call in a reused worker thread; left alone rather than guessed at) --
+    falling back to the on-disk cache, deadline-checked the same way the
+    original inline disk-cache read was (once before the parse, so an
+    already-exceeded deadline skips it, and once after, since parsing a
+    huge cached AST can itself eat the rest of the budget). A
+    corrupt/unreadable cache file is evicted, same as before. Never a
+    staleness risk: this only ever returns a value this same thread already
+    validated (from disk or a fresh parse) under this identical
+    content-addressed key.
+
+    A slot hit is itself deadline-checked too, even though it does no real
+    work -- a caller relying on ``--budget``/``deadline.deadline_scope`` to
+    bound the whole scan must see a consistently-enforced deadline on every
+    path back out of this function, not just the ones that happen to be
+    expensive (mirrors the disk-cache-hit contract PR #591 established).
+    """
+    slot = _ast_memo_slot.get()
+    if slot is not None and slot[0] == backend and slot[1] == key:
+        _ast_memo_slot.set(None)
+        deadline.check()
+        return slot[2]
+    if not cache_path.exists():
+        return None
+    deadline.check()
+    try:
+        root = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        cache_path.unlink(missing_ok=True)
+        return None
+    deadline.check()  # loading a huge cached AST can eat the rest of the budget
+    if memoize:
+        store_cached_ast(key, backend, root)
+    return root
 
 
 def _atomic_copy(src: Path, dst: Path) -> None:

@@ -643,6 +643,72 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
     assert "populated" not in events  # follow_deps was False
 
 
+def test_perform_elf_dump_scopes_primary_dump_for_ast_memo_reuse(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """G31 Phase C / Codex review: perform_elf_dump's own primary ``dump()``
+    call must run inside ``dumper_cache.ast_memoize_scope()`` so a clang
+    primary parse is handed off in-process to the later
+    ``_attach_header_graph`` pass -- this ELF ``dump`` CLI path reaches
+    ``dumper.dump`` directly, not ``service.run_dump``, so without its own
+    scope here the memo is never populated and the graph pass re-reads/
+    re-parses the disk cache instead."""
+    from abicheck import dumper_cache
+
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "config.h"
+    hdr.write_text("struct Config { int v; };", encoding="utf-8")
+
+    seen_active: dict[str, bool] = {}
+
+    def _dump_stub(**_kw):  # noqa: ANN003
+        seen_active["active"] = dumper_cache.ast_memoize_active()
+        return AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", _dump_stub)
+
+    _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so,
+        (hdr,),
+        (),
+        "1.0",
+        "c",
+        None,
+        None,
+        None,
+        (),  # gcc_path/prefix/options/option_tokens
+        None,
+        True,  # sysroot, nostdinc
+        False,
+        None,  # dwarf_only, effective_debug_format
+        (),
+        (),  # public_headers, public_header_dirs
+        None,  # effective_compile_db
+        False,
+        (),
+        "",  # follow_deps, search_paths, ld_library_path
+        None,
+        None,
+        False,  # git_tag, build_id, no_git
+        None,
+        None,
+        None,
+        None,
+        False,
+        "off",  # output..collect_mode
+        _expand,
+        _populate,
+        _stamp,
+        _write,
+        compile_db_context_matched=False,
+    )
+
+    assert seen_active["active"] is True
+    assert dumper_cache.ast_memoize_active() is False
+
+
 def test_perform_elf_dump_folds_header_dir_into_scope_header_dirs(
     tmp_path: Path, monkeypatch
 ) -> None:

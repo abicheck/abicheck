@@ -25,10 +25,11 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from abicheck import dumper, dumper_clang, dumper_clang_errors
+from abicheck import dumper, dumper_cache, dumper_clang, dumper_clang_errors
 from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
@@ -1770,6 +1771,302 @@ def test_clang_header_dump_success_and_cache(
     assert calls["n"] == 1
 
 
+def test_header_graph_attach_reuses_primary_snapshot_ast(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """G31 Phase C: the always-on header-only graph's own AST pass
+    (``service._attach_header_graph``) must reuse the identical clang AST the
+    main ``--ast-frontend clang`` snapshot pass already parsed for the same
+    resolved headers/includes -- not a second, independent
+    ``clang -ast-dump=json`` invocation. This is the fix for the perf
+    regression G31 Phase A introduced by making the graph unconditional
+    (docs/contribute/plans/g31-header-graph-default-on-followup.md): before
+    this fix, every ``--ast-frontend clang`` dump paid a full second
+    disk-read/JSON-reparse (or a second subprocess, on a cold cache) purely
+    to build the graph.
+    """
+    from abicheck.model import AbiSnapshot
+    from abicheck.service import _attach_header_graph
+
+    header = tmp_path / "api.h"
+    header.write_text("int f(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    calls = {"n": 0}
+
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
+        calls["n"] += 1
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+
+    # Step 1: the main snapshot pass's own parser construction (mirrors
+    # dumper._header_ast_parser's `_run_clang()` inner call for
+    # `--ast-frontend clang`) -- the exact path a real ELF/PE/Mach-O
+    # clang-frontend dump takes. Wrapped in ast_memoize_scope() -- the same
+    # scope service.run_dump's own format branches open around their
+    # primary dump call -- since without it _clang_header_dump's memoize
+    # resolves to False and step 2 below would only prove disk-cache reuse
+    # (pre-existing behaviour), not the new in-process AST memo this test
+    # is meant to guard (CodeRabbit review).
+    with dumper_cache.ast_memoize_scope():
+        parser = dumper._header_ast_parser(
+            [header],
+            [],
+            backend="clang",
+            compiler="c++",
+            gcc_path=None,
+            gcc_prefix=None,
+            gcc_options=None,
+            gcc_option_tokens=(),
+            sysroot=None,
+            nostdinc=False,
+            lang="c",
+            exported_dynamic=set(),
+            exported_static=set(),
+            public_header_paths=[],
+            public_dir_paths=[],
+        )
+        # The memo slot now holds the parsed AST, primed for step 2's pop --
+        # proving this test actually exercises the memo handoff, not just
+        # the pre-existing disk-cache dedup.
+        assert dumper_cache._ast_memo_slot.get() is not None
+    assert calls["n"] == 1
+
+    # Step 2: the post-dump header-graph attach step, over the identical
+    # resolved header/includes -- must not invoke the clang pass again.
+    snap = AbiSnapshot(
+        library="lib", version="1.0", functions=list(parser.parse_functions())
+    )
+    _attach_header_graph(
+        snap,
+        header_graph=True,
+        header_graph_includes=False,
+        headers=[header],
+        includes=[],
+        lang="c",
+        compile=None,
+        public_headers=None,
+        public_header_dirs=None,
+    )
+    assert calls["n"] == 1  # unchanged: reused the in-process AST memo
+
+
+def test_clang_header_dump_skips_memo_write_on_toolchain_change(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CodeRabbit review: a compiler-identity change mid-parse already skips
+    the on-disk cache write (``cache_write=identities_stable``) -- the
+    in-process memo write must honor the same safeguard, or a result
+    produced by the replacement toolchain could be served back under the
+    original tool's cache key on a later same-process call."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    # First call (frontend_identity) returns "v1"; every later call (the
+    # post-parse identities_stable check, plus this same probe on the second
+    # _clang_header_dump call below) returns "v2" -- simulating the
+    # toolchain changing under us mid-execution.
+    identities = iter(["v1"])
+    monkeypatch.setattr(
+        dumper, "_tool_identity", lambda *a, **k: next(identities, "v2")
+    )
+    calls = {"n": 0}
+
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
+        calls["n"] += 1
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+
+    _clang_header_dump([header], [])
+    assert not cache.exists()  # disk write skipped, as before this PR
+
+    # A second call must NOT hit the memo either -- it should re-invoke the
+    # subprocess rather than serve the unstable-toolchain result back.
+    _clang_header_dump([header], [])
+    assert calls["n"] == 2
+
+
+def test_clang_header_dump_memoize_false_never_writes_the_memo(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review: ``_attach_header_graph`` is the *final* consumer of its
+    own ``_clang_header_dump`` call when the primary snapshot pass used
+    castxml (never wrote a memo entry of its own) -- passing
+    ``memoize=False`` there must mean neither a disk-cache hit nor a fresh
+    parse populates the in-process memo, since no further same-process
+    reader will ever pop it. Otherwise a long-lived process (the MCP
+    server, ``scan`` over many libraries) accumulates dead, potentially
+    multi-GB entries with no consumer."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+
+    # Fresh-parse path: memoize=False must leave this thread's slot unset.
+    _clang_header_dump([header], [], memoize=False)
+    assert cache.exists()  # the disk cache is still populated, as always
+    assert dumper_cache._ast_memo_slot.get() is None
+
+    # Disk-cache-hit path: a second memoize=False call reads the file this
+    # test just warmed on disk, and must still leave the slot unset.
+    _clang_header_dump([header], [], memoize=False)
+    assert dumper_cache._ast_memo_slot.get() is None
+
+
+def test_ast_memo_slot_overwrites_previous_pending_value() -> None:
+    """CodeRabbit/Codex review: the memo is a single-consumption, per-thread
+    handoff, not a general keyed cache -- there is at most one legitimate
+    pending AST at a time, so a second write before the first is consumed
+    simply replaces it (nothing to "evict" across distinct keys, unlike the
+    old shared-dict design this superseded)."""
+    dumper_cache.store_cached_ast("k1", "clang", {"n": 1})
+    dumper_cache.store_cached_ast("k2", "clang", {"n": 2})
+    assert dumper_cache._ast_memo_slot.get() == ("clang", "k2", {"n": 2})
+
+
+def test_clang_header_dump_direct_caller_never_memoizes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review: a direct ``_clang_header_dump`` caller with no
+    ``service.run_dump``-style downstream ``_attach_header_graph`` consumer
+    (``appcompat.check_app_compatibility``, a direct Python-API/MCP caller
+    selecting the clang backend) must not populate the in-process memo at
+    all -- outside ``dumper_cache.ast_memoize_scope()``, ``memoize=None``
+    (the default every such caller uses) resolves to ``False``, so the
+    entry is dead weight nothing will ever pop."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+
+    assert not dumper_cache.ast_memoize_active()
+    _clang_header_dump([header], [])  # no ast_memoize_scope() active
+    assert cache.exists()  # the disk cache is still populated, as always
+    assert dumper_cache._ast_memo_slot.get() is None
+
+
+def test_clang_header_dump_memoizes_inside_ast_memoize_scope(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The other half: a caller inside ``service.run_dump``'s
+    ``ast_memoize_scope()`` (its primary-dump call) does get the memo
+    write, exactly the handoff ``_attach_header_graph`` then consumes."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+
+    with dumper_cache.ast_memoize_scope():
+        _clang_header_dump([header], [])
+        assert dumper_cache._ast_memo_slot.get() is not None  # written
+    # The scope exiting doesn't itself clear the slot -- only a subsequent
+    # pop (the header-graph attach step) does; still present right after.
+    assert dumper_cache._ast_memo_slot.get() is not None
+
+
+def test_ast_memoize_scope_cleans_up_its_own_writes_on_exception(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review: a primary dump that successfully parses/memoizes an AST
+    but then fails *later* in the same scoped call (e.g. snapshot
+    construction raises after the AST parse succeeded) never reaches
+    _attach_header_graph to pop that entry -- ast_memoize_scope must clear
+    this thread's slot when the scoped operation raises, or it sits set
+    for however long this thread lives afterward in a long-lived process."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+
+    with pytest.raises(RuntimeError, match="snapshot construction failed"):
+        with dumper_cache.ast_memoize_scope():
+            _clang_header_dump([header], [])
+            assert dumper_cache._ast_memo_slot.get() is not None  # written
+            raise RuntimeError("snapshot construction failed")
+    assert dumper_cache._ast_memo_slot.get() is None  # cleaned up on the way out
+
+
+def test_ast_memo_slot_is_per_thread_not_shared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, fresh evidence: ``service.compare``'s default worker
+    pool dumps the old/new sides *concurrently* in separate threads, and
+    the AST cache key has no side/binary component -- comparing against
+    the same ``-H`` header set (the common case) makes both sides compute
+    the identical key. A shared dict would let one side's single-
+    consumption pop steal (or clobber) the other side's pending AST. Prove
+    the per-thread slot design structurally can't: a background thread's
+    own write must be invisible to (and unaffected by) the main thread's
+    slot, even when both use the exact same (backend, key)."""
+    import threading
+
+    dumper_cache.store_cached_ast("shared-key", "clang", {"side": "main"})
+
+    other_saw: dict[str, object] = {}
+
+    def _other_thread() -> None:
+        # A fresh thread starts with an empty slot regardless of what the
+        # main thread just stored under the identical key.
+        other_saw["before"] = dumper_cache._ast_memo_slot.get()
+        dumper_cache.store_cached_ast("shared-key", "clang", {"side": "other"})
+        other_saw["after"] = dumper_cache._ast_memo_slot.get()
+
+    t = threading.Thread(target=_other_thread)
+    t.start()
+    t.join()
+
+    assert other_saw["before"] is None
+    assert other_saw["after"] == ("clang", "shared-key", {"side": "other"})
+    # The main thread's own slot is untouched by the other thread's write
+    # under the identical key.
+    assert dumper_cache._ast_memo_slot.get() == (
+        "clang",
+        "shared-key",
+        {"side": "main"},
+    )
+
+
 def test_clang_only_dump_does_not_require_gxx_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1845,14 +2142,22 @@ def test_clang_header_dump_rechecks_deadline_after_cache_load(
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
     _clang_header_dump([header], [])  # warms the cache
     assert cache.exists()
+    # Force the second call past the in-process AST memo (G31 Phase C reuse)
+    # onto the on-disk read this test is actually about -- a memo hit would
+    # skip json.loads (and the slow-patched cost below) entirely, which is
+    # exactly the intended optimization but not what this test exercises.
+    dumper_cache._ast_memo_slot.set(None)
 
-    real_json_loads = dumper.json.loads
+    # The disk-cache read (json.loads) now lives in dumper_cache.py, not
+    # dumper.py itself (G31 Phase C AST reuse split the read into
+    # dumper_cache.load_cached_ast) -- patch the module that actually calls it.
+    real_json_loads = dumper_cache.json.loads
 
-    def _slow_loads(text):
+    def _slow_loads(text: str) -> Any:
         time.sleep(0.05)
         return real_json_loads(text)
 
-    monkeypatch.setattr(dumper.json, "loads", _slow_loads)
+    monkeypatch.setattr(dumper_cache.json, "loads", _slow_loads)
     with dumper.deadline.deadline_scope(0.03):
         with pytest.raises(dumper.deadline.DeadlineExceeded):
             _clang_header_dump([header], [])
