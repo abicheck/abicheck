@@ -5,11 +5,14 @@
 implemented (`abicheck/contract_relevance_types.py`,
 `abicheck/compatibility_evaluation_config.py`,
 `abicheck/compatibility_evaluation_resolver.py`,
-`abicheck/compatibility_evaluation_packs.py`), and Phase 2's identity
-primitive (`abicheck/finding_identity.py`) plus its property-test suite are
-implemented; see `docs/contribute/plans/public-contract-default.md`'s "Work
-breakdown" for current per-phase progress. Nothing here is wired into
-detection, policy, the CLI, or reports yet.
+`abicheck/compatibility_evaluation_packs.py`). Phase 2's identity primitive
+(`abicheck/finding_identity.py`) is implemented and its first live call site
+is wired: `diff_filtering.py`'s cross-detector dedup key now uses
+`resolve_change_identity`. `diff_symbols.py`'s own old/new matching engine
+remains unwired (deliberately deferred, see the plan's Phase 2 section).
+Nothing here is wired into the CLI, contract/compatibility policy, or
+reports yet — see `docs/contribute/plans/public-contract-default.md`'s
+"Work breakdown" for current per-phase progress.
 **Decision maker:** napetrov
 
 ## Context

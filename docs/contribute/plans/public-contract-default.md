@@ -849,34 +849,55 @@ extern-C fallback already hand-rolled in `diff_symbols._diff_functions`
 into one documented canonical/normalized/reduced-tier primitive, following
 the same principle ADR-045 established for flat type matching
 (`diff_helpers.TypeMap`) and ADR-048 for L5 source-graph nodes
-(`buildsource/entity_identity.py`). Deliberately not wired into any live
-comparison path yet — `diff_symbols.py`'s old/new function and variable
-matching and `diff_filtering.py`'s `_deduplicate_cross_detector` dedup key
-are unchanged.
+(`buildsource/entity_identity.py`).
+
+A first live call site is now wired: `diff_filtering.py`'s
+`_deduplicate_cross_detector` uses `resolve_change_identity(c).primary_id`
+as its cross-detector dedup key, replacing the hand-rolled
+`(change_category, symbol)` tuple it used before —
+`resolve_change_identity`'s own `_EQUIVALENT_CHANGE_CATEGORIES` table
+already mirrors that function's `_DEDUP_CATEGORIES` exactly (rich-vs-L0
+function/variable add/remove, symbol-version-node pairs), so the swap is
+behavior-preserving for every kind that stage collapses — verified both by
+a dedicated unit suite
+(`tests/test_diff_filtering_cross_detector_identity.py`: same-category/
+same-symbol collapses, same-category/different-symbol and
+different-category/same-symbol do not, first occurrence wins, the
+pre-existing symbol-version-alias special case is unaffected) and by the
+full existing FP-rate-gate/tier-accuracy-gate/golden/detector-oracle/
+detector-property test suites, all of which exercise this stage indirectly
+through `checker.compare` and all passed unchanged after the wiring.
+
+Still **not** wired: `diff_symbols.py`'s own old/new function and variable
+*matching* (`_diff_functions`/`_match_old_function`/`_diff_variables`) —
+deliberately deferred. That matching engine interleaves elf-only-mode/
+unconfirmed-parameter/LLP64 threading, the extern-C ambiguity-resolution
+fallback (unique-candidate-only), and interactions with
+virtual-method-addition, inline-transition, and hidden-friend detection in
+one function; replacing its core join with an identity-primitive lookup is
+a substantially larger, higher-risk refactor against that hand-tuned logic
+and its extensive golden/FP-rate/tier-accuracy test coverage than the
+dedup-key swap above, and does not fit a single well-scoped, independently
+verifiable change — it needs its own dedicated pass.
 
 A Hypothesis property suite for the identity primitive itself
 (`tests/test_finding_identity_properties.py`, `slow`) is also done, covering
-the invariants a real reconciliation call site will need to hold for D9's
-fact-conservation rule to be checkable once wired in: determinism (the same
-declaration always resolves to the same identity), that two independently-
-built but content-identical declarations (modeling an unchanged entity on
-the old and new side of a comparison) resolve to the *same* primary id
-(never a spurious removal+addition pair), that two declarations with
-genuinely distinct verified mangled names never collide onto the same
-CANONICAL-tier primary id (never masking a real removal), and that a
-batch-shaped finding's identity is invariant under which arbitrary export
-happened to be sampled into it. This tests the primitive in isolation, not
-`diff_symbols.py`/`diff_filtering.py`/`checker.compare` — it is not the
-end-to-end "no old-side symbol silently vanishes" property over an actual
-comparison run, which needs a real call site to exist first.
+determinism (the same declaration always resolves to the same identity),
+that two independently-built but content-identical declarations (modeling
+an unchanged entity on the old and new side of a comparison) resolve to the
+*same* primary id (never a spurious removal+addition pair), that two
+declarations with genuinely distinct verified mangled names never collide
+onto the same CANONICAL-tier primary id (never masking a real removal), and
+that a batch-shaped finding's identity is invariant under which arbitrary
+export happened to be sampled into it.
 
-Still remaining: wiring a call site to actually consult this identity (a
-real refactor against the existing hand-tuned matching logic and its
-extensive golden/FP-rate/tier-accuracy test coverage, not a drive-by
-change), and — once that wiring exists — an end-to-end fact-conservation
-property test over `checker.compare` itself (old-side symbol sets always
-resolve to either a matched new-side counterpart or an emitted removal
-finding, never neither).
+The end-to-end fact-conservation property test over `checker.compare`
+itself is also done (`tests/test_fact_conservation_properties.py`, `slow`):
+for randomized old/new public function and variable sets, every removed
+symbol always surfaces as a `FUNC_REMOVED`/`FUNC_REMOVED_ELF_ONLY`/
+`VAR_REMOVED` finding referencing it, and every retained symbol never does
+— exercised through the real, now-partially-wired pipeline (matching +
+detection + the identity-based dedup stage above), not a mock.
 
 ### Phase 3 — shadow contract evaluator
 
