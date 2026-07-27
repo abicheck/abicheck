@@ -172,6 +172,60 @@ def _dpcpp_defaults_sycl_on(cc_bin: str) -> bool:
     return Path(cc_bin).stem.lower() in _SYCL_DEFAULT_ON_DRIVER_NAMES
 
 
+def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
+    """True if *tokens* enable SYCL on a driver that needs a pinned single pass.
+
+    A bare ``-fsycl`` makes Intel's oneAPI DPC++/C++ driver (icx/icpx/dpcpp[-cl],
+    :func:`_is_intel_sycl_driver`) run *two* separate ``-cc1`` passes for one
+    compile -- a device-side pass and a host-side pass, each with its own
+    ``-Xclang -ast-dump=json``, writing a complete JSON document to the same
+    stdout stream back-to-back with no separator. ``json.load()`` in
+    :func:`abicheck.dumper_clang_errors._parse_clang_ast_result` parses only
+    the first document and raises on the leftover bytes ("Extra data"). The
+    device-side AST is also the wrong evidence even if it parsed: it
+    describes SPIR-V kernel code that never becomes part of a host ``.so``'s
+    exported symbols. ``-fsycl-host-only`` collapses the compile back to a
+    single host-side pass, which is what actually links into the scanned
+    binary. Skipped when the caller already pinned a single pass explicitly
+    (``-fsycl-host-only``/``-fsycl-device-only``). Also skipped by the one
+    caller (:func:`abicheck.dumper._build_clang_header_command`) when an
+    explicit multi-context request (``dpcpp_multi_context``, ADR-050 D5) is
+    in play -- that request must never be silently collapsed back to a
+    single pass by this function's own default-case behavior.
+
+    Gated on *cc_bin* being specifically an Intel oneAPI driver, not any
+    clang-family binary: stock upstream clang accepts a bare ``-fsycl`` but
+    does not split into two passes and hard-rejects both
+    ``-fsycl-host-only``/``-fsycl-device-only`` as "unknown argument"
+    (Codex review, PR #643) -- appending the flag unconditionally would
+    turn a working ``--gcc-path clang`` + ``-fsycl`` parse into a failure.
+
+    A plain ``"-fsycl" in tokens`` membership check is not enough: the
+    driver applies ``-fsycl``/``-fno-sycl`` last-flag-wins (confirmed with
+    ``clang++ -fsycl -fno-sycl -###``, one ordinary host ``-cc1``, no
+    device pass), so ``--gcc-options "-fsycl -fno-sycl"`` has SYCL
+    disabled overall and must not get the flag appended either (Codex
+    review, PR #643, round 5) -- the *last* occurrence of either flag
+    decides the effective state, scanned below.
+
+    The initial state is not always "off": Intel's legacy "dpcpp"/
+    "dpcpp-cl" driver names imply SYCL is already on with no ``-fsycl``
+    token at all (:func:`_dpcpp_defaults_sycl_on`, Codex review, PR #643,
+    round 8) -- an explicit ``-fno-sycl`` still overrides that default.
+    """
+    if not _is_intel_sycl_driver(cc_bin):
+        return False
+    if "-fsycl-host-only" in tokens or "-fsycl-device-only" in tokens:
+        return False
+    sycl_enabled = _dpcpp_defaults_sycl_on(cc_bin)
+    for tok in tokens:
+        if tok == "-fsycl":
+            sycl_enabled = True
+        elif tok == "-fno-sycl":
+            sycl_enabled = False
+    return sycl_enabled
+
+
 def _resolve_clang_bin(
     compiler: str,
     gcc_path: str | None,

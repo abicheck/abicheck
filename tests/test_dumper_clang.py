@@ -33,7 +33,6 @@ from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
     _clang_header_dump,
-    _dpcpp_defaults_sycl_on,
     _header_ast_parser,
     _needs_sycl_host_only,
     _parse_gnu_include_search_dirs,
@@ -44,6 +43,7 @@ from abicheck.dumper import (
 from abicheck.dumper_clang import (
     _ClangAstParser,
     _Decl,
+    _dpcpp_defaults_sycl_on,
     _function_qualifiers,
     _is_clang_family_binary,
     _is_intel_sycl_driver,
@@ -861,6 +861,24 @@ def test_build_clang_header_command_dpcpp_defaults_sycl_on(tmp_path: Path) -> No
     agg = tmp_path / "agg.hpp"
     cmd = _build_clang_header_command("dpcpp", "gnu", [], agg, force_cpp=True)
     assert "-fsycl-host-only" in cmd
+
+
+def test_build_clang_header_command_dpcpp_multi_context_skips_host_only(
+    tmp_path: Path,
+) -> None:
+    """PR #643 / ADR-050 D5 interaction: a legacy "dpcpp" driver name defaults
+    to SYCL-on (test_build_clang_header_command_dpcpp_defaults_sycl_on above),
+    so _needs_sycl_host_only would normally pin -fsycl-host-only -- but an
+    explicit dpcpp_multi_context request (Phase D host/device selection)
+    wants BOTH passes and must never have that collapsed back to one by
+    this default-case behavior."""
+    agg = tmp_path / "agg.hpp"
+    cmd = _build_clang_header_command(
+        "dpcpp", "gnu", [], agg, force_cpp=True, dpcpp_multi_context=True
+    )
+    assert "-fsycl-host-only" not in cmd
+    assert "-fsycl" in cmd
+    assert "-v" in cmd
 
 
 def test_build_clang_header_command_dpcpp_explicit_fno_sycl_overrides_default(

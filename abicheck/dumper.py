@@ -65,9 +65,8 @@ from .dumper_castxml_probe import (
 from .dumper_clang import (
     _clang_available as _clang_available,
     _ClangAstParser as _ClangAstParser,
-    _dpcpp_defaults_sycl_on,
     _is_dpcpp_family_binary as _is_dpcpp_family_binary,
-    _is_intel_sycl_driver,
+    _needs_sycl_host_only,
     _resolve_clang_bin as _resolve_clang_bin,
 )
 from .dumper_clang_errors import (
@@ -190,64 +189,6 @@ def _resolve_header_backend(backend: str | None) -> str:
     return "castxml"
 
 
-def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
-    """True if *tokens* enable SYCL on a driver that needs a pinned single pass.
-
-    A bare ``-fsycl`` makes Intel's oneAPI DPC++/C++ driver (icx/icpx/dpcpp[-cl],
-    :func:`abicheck.dumper_clang._is_intel_sycl_driver`) run *two* separate
-    ``-cc1`` passes for one compile — a device-side pass (``-fsycl-is-device``,
-    ``-triple spir64-unknown-unknown``) and a host-side pass
-    (``-fsycl-is-host``) — each with its own ``-Xclang -ast-dump=json``, both
-    writing a complete JSON document to the same stdout stream abicheck
-    captures, back-to-back with no separator. ``json.load()`` in
-    :func:`abicheck.dumper_clang_errors._parse_clang_ast_result` parses only
-    the first document and raises on the leftover bytes ("Extra data").
-
-    The device-side AST is also the wrong evidence even if it parsed: it
-    describes SPIR-V kernel code that never becomes part of a host ``.so``'s
-    exported symbols or public header surface. ``-fsycl-host-only`` collapses
-    the compile back to a single ``-cc1`` pass over the host-side AST, which
-    is what actually links into the scanned binary. Skipped when the caller
-    already pinned a single pass explicitly (``-fsycl-host-only`` or
-    ``-fsycl-device-only``) so an explicit choice is never second-guessed.
-
-    Gated on *cc_bin* being specifically an Intel oneAPI driver, not any
-    clang-family binary: stock upstream clang also accepts a bare ``-fsycl``,
-    but does not split into two passes and does not recognize
-    ``-fsycl-host-only``/``-fsycl-device-only`` at all — it hard-rejects
-    either with "unknown argument" (Codex review, PR #643: verified against a
-    real clang 17/18 install). Appending the flag unconditionally would turn
-    a working ``--gcc-path clang`` + ``-fsycl`` parse into a hard failure.
-
-    A plain ``"-fsycl" in tokens`` membership check is not enough: the clang
-    driver applies ``-fsycl``/``-fno-sycl`` last-flag-wins, like any other
-    toggle flag (confirmed with ``clang++ -fsycl -fno-sycl -###``, which
-    emits one ordinary host ``-cc1`` invocation, no device pass). A caller
-    passing ``-fsycl -fno-sycl`` through ``--gcc-options`` has SYCL
-    *disabled* overall, so appending ``-fsycl-host-only`` would tack a
-    SYCL-only selector onto a non-SYCL compile — at best a no-op, at worst
-    rejected by the driver as contradictory (Codex review, PR #643, round
-    5). The *last* occurrence of either flag decides the effective state.
-
-    The initial state before scanning is not always "off": Intel's legacy
-    "dpcpp"/"dpcpp-cl" driver names imply SYCL is already on even with no
-    ``-fsycl`` token at all (:func:`_dpcpp_defaults_sycl_on`, Codex review,
-    PR #643, round 8) — an explicit ``-fno-sycl`` still overrides that
-    default via the same last-flag-wins scan.
-    """
-    if not _is_intel_sycl_driver(cc_bin):
-        return False
-    if "-fsycl-host-only" in tokens or "-fsycl-device-only" in tokens:
-        return False
-    sycl_enabled = _dpcpp_defaults_sycl_on(cc_bin)
-    for tok in tokens:
-        if tok == "-fsycl":
-            sycl_enabled = True
-        elif tok == "-fno-sycl":
-            sycl_enabled = False
-    return sycl_enabled
-
-
 def _build_clang_header_command(
     cc_bin: str,
     cc_id: str,
@@ -267,40 +208,27 @@ def _build_clang_header_command(
 
     Mirrors :func:`_build_castxml_command`'s flag handling (includes, sysroot,
     ``-nostdinc``, pass-through options, C-vs-C++ language mode and the C++20
-    bump) so the clang backend parses the same TU under the same context — it is
-    just a different frontend over the identical inputs. ``-fsyntax-only`` (no
-    codegen) with ``-ferror-limit=0`` keeps parsing past recoverable errors so a
-    single bad decl does not blank the whole dump.
+    bump) so the clang backend parses the same TU under the same context.
+    ``-fsyntax-only``/``-ferror-limit=0`` keeps parsing past recoverable
+    errors so a single bad decl does not blank the whole dump.
 
     ``system_includes`` are host-compiler-probed system dirs (see
-    :func:`_probe_gnu_system_includes`) injected as ``-isystem`` so clang finds
-    the same libstdc++/libc headers castxml gets via ``--castxml-cc-gnu`` — the
-    castxml↔clang capability-parity fix. They are emitted **last** (after the
-    user's ``-I`` *and* the pass-through ``--gcc-options``/``--gcc-option``) so
-    auto-detection stays a genuine fallback: a user-supplied ``-isystem`` for a
-    cross/hermetic SDK is searched first and wins. Skipped under ``-nostdinc``.
+    :func:`_probe_gnu_system_includes`) injected as ``-isystem`` so clang
+    finds the same libstdc++/libc headers castxml gets via
+    ``--castxml-cc-gnu``. Emitted **last** (after the user's ``-I`` and
+    pass-through ``--gcc-options``/``--gcc-option``) so a user-supplied
+    ``-isystem`` for a cross/hermetic SDK wins. Skipped under ``-nostdinc``.
 
-    On an Intel oneAPI driver (``cc_bin`` one of icx/icpx/dpcpp[-cl]), a bare
-    ``-fsycl`` in ``gcc_options``/``gcc_option_tokens`` gets
-    ``-fsycl-host-only`` appended (see :func:`_needs_sycl_host_only`) so the
-    compile stays a single ``-cc1``/AST-dump pass instead of splitting into a
-    SYCL device pass and a host pass that both write JSON to the same
-    stdout stream. Left alone on stock clang, which does not recognize
-    either ``-fsycl-host-only`` or ``-fsycl-device-only``. Skipped entirely
-    when ``dpcpp_multi_context`` is set (below) -- an explicit multi-context
-    request must never be silently collapsed back to a single pass by this
-    default-case behavior, regardless of what a legacy driver name's default
-    SYCL state would otherwise imply (PR #643 / ADR-050 D5 interaction).
+    On an Intel oneAPI driver, ``-fsycl-host-only`` is appended per
+    :func:`_needs_sycl_host_only` (PR #643) -- skipped when
+    ``dpcpp_multi_context`` is set, since that request wants both passes.
 
-    ``dpcpp_multi_context`` (ADR-050 D5, G32 Phase D) adds ``-fsycl -v`` when
-    *cc_bin* resolved to a DPC++-capable compiler
-    (:func:`_is_dpcpp_family_binary`) — ``-fsycl`` is what makes the driver
-    split into a host + one-or-more-device compilation passes (confirmed
-    against a real capture: a plain, kernel-free header still gets the split
-    once ``-fsycl`` is present), and ``-v`` is what emits the ``-cc1 ...
-    -triple <T> ... -fsycl-is-(host|device)`` lines
-    :mod:`abicheck.sycl_context` needs on stderr to correlate each stdout
-    document back to a host/device ``kind``.
+    ``dpcpp_multi_context`` (ADR-050 D5, G32 Phase D) adds ``-fsycl -v``
+    when *cc_bin* is DPC++-capable (:func:`_is_dpcpp_family_binary`) --
+    ``-fsycl`` splits the driver into a host + one-or-more-device
+    compilation passes, and ``-v`` emits the ``-cc1 ... -triple <T> ...
+    -fsycl-is-(host|device)`` stderr lines :mod:`abicheck.sycl_context`
+    needs to correlate each stdout document back to a host/device ``kind``.
     """
     cmd = [cc_bin]
     for inc in extra_includes:
@@ -316,8 +244,7 @@ def _build_clang_header_command(
     if not dpcpp_multi_context and _needs_sycl_host_only(cc_bin, cmd):
         cmd.append("-fsycl-host-only")
     # Auto-probed host system dirs go *after* the user's pass-through flags, so a
-    # user-supplied -isystem (cross/hermetic SDK) keeps higher search priority
-    # (Codex review). Auto-detection is a fallback, never an override.
+    # user-supplied -isystem (cross/hermetic SDK) keeps higher priority (Codex review).
     for sysinc in system_includes:
         cmd += ["-isystem", sysinc]
     explicit_std = has_explicit_std(gcc_options, gcc_option_tokens)
@@ -444,12 +371,9 @@ def _clang_header_dump(
 
     ``frontend_context`` (ADR-050 D5, G32 Phase D) is ``"host"``/``"device"``.
     ``resolved_kind`` is *frontend_context* itself when *clang_bin* is
-    DPC++-capable (:func:`abicheck.dumper_clang._is_dpcpp_family_binary`) --
-    :mod:`abicheck.sycl_context`'s selector only ever returns a context
-    whose ``kind`` matches what was requested, or raises -- and ``None``
-    otherwise. A non-``"host"`` request against a non-DPC++-capable
-    *clang_bin* fails immediately with
-    :class:`abicheck.errors.AstContextMissingError`.
+    DPC++-capable (:func:`_is_dpcpp_family_binary`), else ``None``. A
+    non-``"host"`` request against a non-DPC++-capable *clang_bin* fails
+    immediately with :class:`abicheck.errors.AstContextMissingError`.
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
     is_dpcpp = _is_dpcpp_family_binary(clang_bin)
@@ -669,8 +593,7 @@ def _header_ast_parser(
             '"hybrid" AST frontend has no single parser here '
             "(see dumper_hybrid.run_hybrid_dump)."
         )
-    # `resolved` alone can't distinguish explicit/env-pinned/defaulted castxml;
-    # an env pin counts as explicit too (environment.md: "honoured verbatim").
+    # `resolved` alone can't tell explicit/env-pinned/defaulted castxml apart; an env pin counts as explicit (environment.md: "honoured verbatim").
     _env_pinned_castxml = (backend or "auto").lower() == "auto" and (
         os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower() == "castxml"
     )
@@ -1115,8 +1038,7 @@ def _castxml_dump(
             except OSError as exc:
                 log.warning("Could not write castxml AST cache %s: %s", cached, exc)
         # Re-reading/caching a huge fresh tree can itself consume real time;
-        # re-check before returning, mirroring _validate_castxml_output's
-        # pre-cache-write check (Codex review).
+        # re-check before returning (mirrors _validate_castxml_output's pre-cache-write check, Codex review).
         deadline.check()
         return root
     finally:
