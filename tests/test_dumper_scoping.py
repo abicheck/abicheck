@@ -363,3 +363,103 @@ class TestDwarfAdvancedScoping:
             _diff_struct_packing(old_scoped.dwarf_advanced, new_scoped.dwarf_advanced)
             == []
         )
+
+
+class TestHiddenFriendScoping:
+    """Regression coverage for the Codex-review finding: an inline-defined
+    hidden friend (Visibility.HIDDEN, no exported symbol) of a *reachable
+    public* class was unconditionally dropped by the flat Visibility.PUBLIC
+    filter, silently breaking HIDDEN_FRIEND_ADDED/REMOVED detection between
+    two --public-surface-only snapshots for a class that IS in scope."""
+
+    def test_hidden_friend_of_public_class_is_kept(self):
+        friend = _fn(
+            "operator<<",
+            vis=Visibility.HIDDEN,
+            mangled="_ZlsRKN6PublicE",
+        )
+        friend.is_hidden_friend = True
+        friend.hidden_friend_owner = "Public"
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Public *",)), friend],
+            types=[_rec("Public")],
+        )
+        scoped = scope_snapshot_to_public_surface(snap)
+        assert friend.mangled in {f.mangled for f in scoped.functions}
+
+    def test_hidden_friend_of_private_class_is_dropped(self):
+        friend = _fn(
+            "operator<<",
+            vis=Visibility.HIDDEN,
+            mangled="_ZlsRKN7PrivateE",
+        )
+        friend.is_hidden_friend = True
+        friend.hidden_friend_owner = "Private"
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("int",)), friend],
+            types=[_rec("Private")],
+        )
+        scoped = scope_snapshot_to_public_surface(snap)
+        assert friend.mangled not in {f.mangled for f in scoped.functions}
+
+    def test_ordinary_hidden_function_still_dropped(self):
+        """A plain hidden function (not a friend) must not be swept in just
+        because is_hidden_friend/hidden_friend_owner happen to be unset."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[
+                _fn("run", params=("int",)),
+                _fn("internal_helper", vis=Visibility.HIDDEN, mangled="_Z8internal"),
+            ],
+            types=[],
+        )
+        scoped = scope_snapshot_to_public_surface(snap)
+        assert [f.name for f in scoped.functions] == ["run"]
+
+    def test_hidden_friend_addition_still_detected_end_to_end(self):
+        """A hidden friend added to a reachable public class must still be
+        observable by diff_inline_hidden_friends after scoping both sides."""
+        from abicheck.diff_hidden_friends import diff_inline_hidden_friends
+
+        friend = _fn("operator<<", vis=Visibility.HIDDEN, mangled="_ZlsRKN6PublicE")
+        friend.is_hidden_friend = True
+        friend.hidden_friend_owner = "Public"
+
+        old_snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Public *",))],
+            types=[_rec("Public")],
+        )
+        new_snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Public *",)), friend],
+            types=[_rec("Public")],
+        )
+        old_scoped = scope_snapshot_to_public_surface(old_snap)
+        new_scoped = scope_snapshot_to_public_surface(new_snap)
+        old_all = {f.mangled: f for f in old_scoped.functions}
+        new_all = {f.mangled: f for f in new_scoped.functions}
+        old_public = {
+            f.mangled: f
+            for f in old_scoped.functions
+            if f.visibility == Visibility.PUBLIC
+        }
+        new_public = {
+            f.mangled: f
+            for f in new_scoped.functions
+            if f.visibility == Visibility.PUBLIC
+        }
+        changes = diff_inline_hidden_friends(old_all, new_all, old_public, new_public)
+        assert any(c.symbol == friend.mangled for c in changes)

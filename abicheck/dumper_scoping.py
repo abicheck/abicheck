@@ -52,14 +52,15 @@ import dataclasses
 from .dwarf_advanced import AdvancedDwarfMetadata
 from .dwarf_metadata import DwarfMetadata
 from .errors import ValidationError
-from .model import AbiSnapshot, Visibility
+from .model import AbiSnapshot, Function, Visibility
 from .surface import PublicSurface, compute_public_surface
 
 
-def _keep_dwarf_name(name: str, public_types: set[str]) -> bool:
-    # Mirrors diff_platform._diff_dwarf's own _allow_name: a DWARF struct/enum
-    # key may be namespace-qualified while surface.public_types also carries
-    # the bare tail (surface._index_surface_types indexes both).
+def _name_in_public_types(name: str, public_types: set[str]) -> bool:
+    # Mirrors diff_platform._diff_dwarf's own _allow_name: a type-keyed name
+    # (a DWARF struct/enum key, or a hidden friend's owning class) may be
+    # namespace-qualified while surface.public_types also carries the bare
+    # tail (surface._index_surface_types indexes both).
     return name in public_types or name.split("::")[-1] in public_types
 
 
@@ -87,12 +88,12 @@ def _scoped_dwarf(
         structs={
             k: v
             for k, v in dwarf.structs.items()
-            if _keep_dwarf_name(k, surface.public_types)
+            if _name_in_public_types(k, surface.public_types)
         },
         enums={
             k: v
             for k, v in dwarf.enums.items()
-            if _keep_dwarf_name(k, surface.public_types)
+            if _name_in_public_types(k, surface.public_types)
         },
     )
 
@@ -113,7 +114,7 @@ def _scoped_dwarf_advanced(
     (or a private function's calling-convention drift) still produces a
     breaking finding between two ``--public-surface-only`` snapshots,
     regardless of what the flat lists were scoped to. Type-keyed collections
-    filter via :func:`_keep_dwarf_name` (``surface.public_types``);
+    filter via :func:`_name_in_public_types` (``surface.public_types``);
     function-keyed collections (keyed by mangled ``linkage_name``) filter via
     ``surface.public_symbols``, which already carries every public function's
     mangled name (``surface._symbol_keys``).
@@ -137,10 +138,10 @@ def _scoped_dwarf_advanced(
             k for k in adv.return_memory_classified if k in public_symbols
         },
         packed_structs={
-            k for k in adv.packed_structs if _keep_dwarf_name(k, public_types)
+            k for k in adv.packed_structs if _name_in_public_types(k, public_types)
         },
         all_struct_names={
-            k for k in adv.all_struct_names if _keep_dwarf_name(k, public_types)
+            k for k in adv.all_struct_names if _name_in_public_types(k, public_types)
         },
         frame_registers={
             k: v for k, v in adv.frame_registers.items() if k in public_symbols
@@ -148,6 +149,31 @@ def _scoped_dwarf_advanced(
         callee_saved_regs={
             k: v for k, v in adv.callee_saved_regs.items() if k in public_symbols
         },
+    )
+
+
+def _is_reachable_hidden_friend(fn: Function, surface: PublicSurface) -> bool:
+    """True when *fn* is an in-class ``friend`` declaration whose owning class
+    is part of the public surface (Codex review, third finding on this
+    module).
+
+    An inline-defined hidden friend never gets an exported symbol (the
+    compiler emits it ``linkonce_odr``, usually inlined at every call site),
+    so the header parser records it with ``Visibility.HIDDEN`` even though it
+    genuinely belongs to a public class's ABI/API surface -- the flat
+    ``Visibility.PUBLIC`` filter above would otherwise drop it unconditionally.
+    ``diff_hidden_friends.diff_inline_hidden_friends`` deliberately scans the
+    *full* function map specifically to catch this shape (the public-symbol
+    diff never sees it at all), so dropping it here would silently make
+    ``HIDDEN_FRIEND_ADDED``/``HIDDEN_FRIEND_REMOVED`` unobservable between two
+    ``--public-surface-only`` snapshots for a class that IS in scope. A hidden
+    friend of a private/unreachable class is still dropped, same as any other
+    private declaration.
+    """
+    return bool(
+        fn.is_hidden_friend
+        and fn.hidden_friend_owner
+        and _name_in_public_types(fn.hidden_friend_owner, surface.public_types)
     )
 
 
@@ -160,7 +186,12 @@ class PublicSurfaceScopingError(ValidationError):
 def scope_snapshot_to_public_surface(snap: AbiSnapshot) -> AbiSnapshot:
     """Return a copy of *snap* containing only its public ABI surface.
 
-    Keeps: functions/variables with :data:`Visibility.PUBLIC`, and every
+    Keeps: functions/variables with :data:`Visibility.PUBLIC`, plus any
+    ``Visibility.HIDDEN`` function that is an in-class ``friend`` declaration
+    whose owning class is itself in the public closure (see
+    :func:`_is_reachable_hidden_friend` — otherwise
+    ``HIDDEN_FRIEND_ADDED``/``HIDDEN_FRIEND_REMOVED`` detection would
+    silently break for two scoped snapshots, Codex review), and every
     record/enum/typedef in the transitive closure reachable from their
     signatures (per :func:`surface.compute_public_surface`). Drops
     unreferenced dependency internals (unused stdlib/SYCL/etc. declarations)
@@ -203,7 +234,11 @@ def scope_snapshot_to_public_surface(snap: AbiSnapshot) -> AbiSnapshot:
         )
     return dataclasses.replace(
         snap,
-        functions=[f for f in snap.functions if f.visibility == Visibility.PUBLIC],
+        functions=[
+            f
+            for f in snap.functions
+            if f.visibility == Visibility.PUBLIC or _is_reachable_hidden_friend(f, surface)
+        ],
         variables=[v for v in snap.variables if v.visibility == Visibility.PUBLIC],
         types=[t for t in snap.types if t.name in surface.public_types],
         enums=[e for e in snap.enums if e.name in surface.public_types],

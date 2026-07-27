@@ -2260,6 +2260,29 @@ def test_dump_source_only_public_surface_only_rejected_in_dry_run_too(tmp_path):
     assert result.exit_code != 0
 
 
+def test_dump_public_surface_only_depth_binary_rejected_in_dry_run_too(tmp_path):
+    """`dump LIB -H api.h --public-surface-only --depth binary --dry-run` must
+    be rejected too (Codex review, third finding on this signal): --depth
+    binary clears the supplied -H list before the real header parse runs, so
+    the real command always hits scope_snapshot_to_public_surface's "nothing
+    to scope from" error -- the static preflight must see the *resolved*
+    (post-clearing) headers, not the raw -H input, or a --depth binary
+    invocation with -H on the command line would slip through dry-run.
+    """
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "api.h"
+    so.write_bytes(b"")
+    hdr.write_text("", encoding="utf-8")
+    result = CliRunner().invoke(
+        main,
+        [
+            "dump", str(so), "-H", str(hdr),
+            "--public-surface-only", "--depth", "binary", "--dry-run",
+        ],
+    )
+    assert result.exit_code != 0
+
+
 def test_dump_with_no_binary_and_no_inputs_errors():
     """A bare `dump` (no SO_PATH, no --sources/--build-info) errors clearly."""
     result = CliRunner().invoke(main, ["dump"])

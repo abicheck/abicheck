@@ -659,11 +659,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
 
-    from .cli_dump_helpers import reject_statically_headerless_public_surface_only
-    reject_statically_headerless_public_surface_only(
-        so_path, headers, dump_manifest_path, public_surface_only
-    )
-
     # ADR-050 D3: parsed before the collect/compile-context resolution below so
     # a bad manifest fails fast, and validated against the *raw* CLI values
     # (headers/public_headers/public_header_dirs haven't been reassigned yet).
@@ -693,6 +688,18 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     collect_mode, headers, compile_db_path, compile_db_path_alt = resolve_dump_collect_context(
         depth, _resolved_collect_mode, sources, build_info,
         headers, compile_db_path, compile_db_path_alt,
+    )
+
+    # Checked against the *resolved* headers (post --depth binary clearing, which
+    # runs just above), not the raw -H input -- otherwise `-H api.h
+    # --public-surface-only --depth binary --dry-run` would pass this preflight
+    # (raw headers non-empty) even though --depth binary always clears them
+    # before the real header parse runs, so the real command always fails the
+    # same "nothing to scope from" check later (Codex review, third finding on
+    # this signal).
+    from .cli_dump_helpers import reject_statically_headerless_public_surface_only
+    reject_statically_headerless_public_surface_only(
+        so_path, headers, dump_manifest_path, public_surface_only
     )
 
     # Fold the project's .abicheck.yml compile: block into the L2 compile context
