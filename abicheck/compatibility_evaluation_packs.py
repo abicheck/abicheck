@@ -383,17 +383,27 @@ def load_pack_manifest(path: str | Path) -> LoadedPack:
 
 def assignments_for_conflict_check(
     packs: Sequence[LoadedPack],
-) -> list[tuple[ImmutableIdentity, Mapping[str, Hashable]]]:
-    """Project *packs* into the ``(identity, assignments)`` pairs
+) -> dict[PackKind, list[tuple[ImmutableIdentity, Mapping[str, Hashable]]]]:
+    """Project *packs*, grouped by :attr:`LoadedPack.kind`, into the
+    ``(identity, assignments)`` pairs
     :func:`~abicheck.compatibility_evaluation_resolver.detect_pack_conflicts`
-    accepts directly.
+    accepts directly -- call ``detect_pack_conflicts`` once per returned
+    group, e.g. ``detect_pack_conflicts(grouped[PackKind.POLICY])``.
 
-    Deliberately does not filter or group by :attr:`LoadedPack.kind` -- D8's
-    conflict rule is "the same field or ``ChangeKind``" regardless of which
-    namespace assigned it, and a policy pack's ``ChangeKind`` slugs and a
-    contract/gate pack's own field names do not collide in practice (see
-    ``detect_pack_conflicts``'s own docstring, which treats both uniformly
-    for the identical reason). A caller that must isolate one namespace can
-    filter *packs* by ``.kind`` before calling this.
+    Grouped by kind, not flattened: D8's conflict rule ("the same field or
+    ``ChangeKind``") is scoped to comparing packs *within* one of D8's three
+    namespaces (contract/language packs, compatibility/policy packs, gate
+    packs) against each other, not across them -- a policy pack's
+    ``ChangeKind`` slug (e.g. ``func_removed``) and a contract/gate pack's
+    own field name are unrelated even when the strings happen to coincide.
+    A flat, ungrouped projection previously let exactly that string
+    coincidence raise a spurious cross-namespace ``PackConflictError``
+    between, say, a policy pack's ``func_removed: break`` and an unrelated
+    gate pack's own ``func_removed`` field (Codex review, fresh evidence).
     """
-    return [(pack.identity, pack.assignments) for pack in packs]
+    grouped: dict[PackKind, list[tuple[ImmutableIdentity, Mapping[str, Hashable]]]] = {
+        kind: [] for kind in PackKind
+    }
+    for pack in packs:
+        grouped[pack.kind].append((pack.identity, pack.assignments))
+    return grouped

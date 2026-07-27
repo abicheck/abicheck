@@ -811,9 +811,14 @@ Pack *content* loading has also landed: `abicheck/compatibility_evaluation_packs
 (`id`/`version`/`kind: contract|policy|gate`/`assignments`) into a
 `LoadedPack` (an `ImmutableIdentity` content-digested over the manifest's raw
 bytes, paired with the pack's resolved `field name -> value` assignments),
-and `assignments_for_conflict_check` projects a list of `LoadedPack`s
-straight into the `(ImmutableIdentity, Mapping[str, Hashable])` pairs
-`detect_pack_conflicts` already accepts. A `kind: policy` manifest's
+and `assignments_for_conflict_check` projects a list of `LoadedPack`s,
+grouped by `PackKind`, into the `(ImmutableIdentity, Mapping[str, Hashable])`
+pairs `detect_pack_conflicts` already accepts -- callers run
+`detect_pack_conflicts` once per returned kind group, since D8's conflict
+rule is scoped to comparing packs *within* one namespace, not across them
+(a flat, ungrouped projection previously let a policy pack's `ChangeKind`
+slug and an unrelated gate pack's own field name collide by string
+coincidence alone). A `kind: policy` manifest's
 assignments are `ChangeKind` slug -> severity spelling, converted through
 `policy_file.py`'s now-public `parse_severity_value` (extracted from
 `_parse_overrides` so the two loaders share one severity vocabulary instead

@@ -403,7 +403,8 @@ class TestAssignmentsForConflictCheck:
             "id: b\nversion: 1\nkind: policy\nassignments: {func_removed: break}\n",
         )
         packs = [load_pack_manifest(agree_a), load_pack_manifest(agree_b)]
-        assert detect_pack_conflicts(assignments_for_conflict_check(packs)) is None
+        grouped = assignments_for_conflict_check(packs)
+        assert detect_pack_conflicts(grouped[PackKind.POLICY]) is None
 
     def test_disagreeing_packs_raise_pack_conflict_error(self, tmp_path: Path) -> None:
         pack_a = _write(
@@ -417,12 +418,14 @@ class TestAssignmentsForConflictCheck:
             "id: b\nversion: 1\nkind: policy\nassignments: {func_removed: ignore}\n",
         )
         packs = [load_pack_manifest(pack_a), load_pack_manifest(pack_b)]
+        grouped = assignments_for_conflict_check(packs)
         with pytest.raises(PackConflictError) as exc_info:
-            detect_pack_conflicts(assignments_for_conflict_check(packs))
+            detect_pack_conflicts(grouped[PackKind.POLICY])
         assert exc_info.value.field_name == "func_removed"
 
-    def test_empty_pack_list_returns_empty(self) -> None:
-        assert assignments_for_conflict_check([]) == []
+    def test_empty_pack_list_returns_empty_groups(self) -> None:
+        grouped = assignments_for_conflict_check([])
+        assert grouped == {kind: [] for kind in PackKind}
 
     def test_projects_identity_and_assignments_only(self) -> None:
         from abicheck.compatibility_evaluation_config import ImmutableIdentity
@@ -432,6 +435,30 @@ class TestAssignmentsForConflictCheck:
             kind=PackKind.GATE,
             assignments={"exit_code_scheme": "severity"},
         )
-        assert assignments_for_conflict_check([pack]) == [
-            (pack.identity, pack.assignments)
-        ]
+        grouped = assignments_for_conflict_check([pack])
+        assert grouped[PackKind.GATE] == [(pack.identity, pack.assignments)]
+        assert grouped[PackKind.CONTRACT] == []
+        assert grouped[PackKind.POLICY] == []
+
+    def test_policy_and_gate_packs_with_same_field_name_do_not_collide(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence: a flat, ungrouped projection let a
+        # policy pack's ChangeKind slug and an unrelated gate pack's own
+        # field name collide by string coincidence alone, raising a
+        # spurious cross-namespace PackConflictError even though D8 scopes
+        # conflict detection to comparing packs within one namespace.
+        policy_pack = _write(
+            tmp_path,
+            "policy.yaml",
+            "id: p\nversion: 1\nkind: policy\nassignments: {func_removed: break}\n",
+        )
+        gate_pack = _write(
+            tmp_path,
+            "gate.yaml",
+            "id: g\nversion: 1\nkind: gate\nassignments: {func_removed: something_else}\n",
+        )
+        packs = [load_pack_manifest(policy_pack), load_pack_manifest(gate_pack)]
+        grouped = assignments_for_conflict_check(packs)
+        for pairs in grouped.values():
+            assert detect_pack_conflicts(pairs) is None
