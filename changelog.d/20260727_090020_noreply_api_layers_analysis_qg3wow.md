@@ -89,3 +89,24 @@
   path that resolves fine through `deps tree` report as unresolved
   through `abi_deps`. Each entry's relative-vs-absolute form is now
   preserved the same way `binary_path`'s is.
+- **`abi_aggregate` now counts expected-set parsing against `--timeout`
+  too** — `_resolve_expected` (manifest/run-plan reading) previously ran
+  unbounded before the timeout-wrapped `aggregate_reports_dir` call, so a
+  slow manifest/run-plan read could stall past the advertised
+  per-invocation deadline. Both now run inside the same bounded worker.
+- **A missing `reports_dir` no longer turns a full build-matrix outage
+  into a generic tool error** — `aggregate.collect_reports` deliberately
+  treats a nonexistent reports directory as zero reports, so
+  `aggregate_reports_dir` can still return a structured
+  required-coverage failure (exit code 1) instead of a hard error. The
+  MCP wrapper's own directory check now only rejects a path that
+  *exists* but isn't a directory, matching that contract.
+- **`abi_deps`'s sysroot rebasing no longer treats a sibling directory as
+  already-under-sysroot** — both `_resolve_sysroot_path` (the MCP
+  pre-check mirror) and `resolver._seed_root` itself used a raw string
+  prefix check (`str(binary).startswith(str(sysroot))`), so an absolute
+  binary under `<sysroot>-other/...` was wrongly treated as already
+  rebased and left unrebased, letting the pre-check and the actual parse
+  validate a path outside the sysroot the caller configured. Both now use
+  `Path.is_relative_to()`, matching them to each other and closing the
+  false-negative.

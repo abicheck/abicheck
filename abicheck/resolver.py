@@ -313,7 +313,7 @@ def _seed_root(
     up under the sysroot.
     """
     # When a sysroot is active, resolve the binary under it.
-    if prefix and binary.is_absolute() and not str(binary).startswith(prefix):
+    if prefix and binary.is_absolute() and not binary.is_relative_to(Path(prefix)):
         root_path = Path(prefix) / str(binary).lstrip("/")
     else:
         root_path = binary

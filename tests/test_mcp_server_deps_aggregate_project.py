@@ -215,6 +215,7 @@ class TestAbiDeps:
         binary.write_bytes(b"\x7fELF")
         sysroot_dir = tmp_path / "sysroot"
         sysroot_dir.mkdir()
+        absolute_search_path = tmp_path / "abs-lib"
 
         received: dict[str, object] = {}
 
@@ -224,11 +225,16 @@ class TestAbiDeps:
 
         monkeypatch.setattr("abicheck.stack_checker.check_single_env", _spy)
         raw = abi_deps(
-            "app", sysroot=str(sysroot_dir), search_paths=["lib", "/abs/lib"]
+            "app",
+            sysroot=str(sysroot_dir),
+            search_paths=["lib", str(absolute_search_path)],
         )
         payload = json.loads(raw)
         assert payload["status"] == "error"
-        assert received["search_paths"] == [Path("lib"), Path("/abs/lib").resolve()]
+        assert received["search_paths"] == [
+            Path("lib"),
+            absolute_search_path.resolve(),
+        ]
 
 
 class TestResolveSysrootPath:
@@ -250,6 +256,18 @@ class TestResolveSysrootPath:
     def test_binary_already_under_sysroot_is_unchanged(self, tmp_path: Path):
         binary = tmp_path / "usr" / "lib" / "libfoo.so"
         assert _resolve_sysroot_path(binary, tmp_path) == binary
+
+    def test_sibling_path_sharing_sysroot_prefix_is_still_rebased(self, tmp_path: Path):
+        # A sibling directory whose name happens to start with the sysroot's
+        # name (e.g. "<tmp>/sysroot-other") is not "already under" the
+        # sysroot ("<tmp>/sysroot") -- a raw string-prefix check would
+        # wrongly treat it as such and skip rebasing (CodeRabbit).
+        sysroot = tmp_path / "sysroot"
+        binary = tmp_path / "sysroot-other" / "lib.so"
+        assert (
+            _resolve_sysroot_path(binary, sysroot)
+            == (sysroot / str(binary).lstrip("/")).resolve()
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +310,36 @@ class TestAbiAggregate:
         payload = json.loads(raw)
         assert payload["status"] == "error"
         assert "directory" in payload["error"].lower()
+
+    def test_missing_reports_dir_produces_coverage_result(self, tmp_path: Path):
+        # aggregate.collect_reports deliberately treats a missing directory
+        # as zero reports, so a full build-matrix outage still produces a
+        # structured required-coverage failure (exit 1) rather than a
+        # generic tool error (Codex review).
+        missing = tmp_path / "does-not-exist"
+        raw = abi_aggregate(str(missing), expect=["linux-x86_64"])
+        payload = json.loads(raw)
+        assert payload["status"] == "ok"
+        assert payload["exit_code"] == 1
+
+    def test_timeout_includes_expected_set_resolution(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # ADR-021b D2: a slow manifest/run-plan read must count against
+        # --timeout too, not just the aggregate_reports_dir call that
+        # follows it (Codex review).
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(1.0)
+            raise AssertionError("should have timed out first")
+
+        monkeypatch.setattr("abicheck.cli_aggregate._resolve_expected", _slow)
+        raw = abi_aggregate(str(tmp_path), expect=["linux-x86_64"])
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
 
     def test_no_expected_target_source_is_a_usage_error(self, tmp_path: Path):
         _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")

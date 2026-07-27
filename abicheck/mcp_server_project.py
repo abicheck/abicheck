@@ -79,7 +79,7 @@ def _resolve_sysroot_path(binary: Path, sysroot: Path | None) -> Path:
     if (
         sysroot is not None
         and binary.is_absolute()
-        and not str(binary).startswith(str(sysroot))
+        and not binary.is_relative_to(sysroot)
     ):
         return (sysroot / str(binary).lstrip("/")).resolve()
     return binary
@@ -262,6 +262,7 @@ def abi_aggregate(
 
         from .aggregate import (
             AggregateError,
+            AggregateResult,
             OnMissingRequired,
             OnUnexpectedTarget,
             aggregate_reports_dir,
@@ -269,7 +270,12 @@ def abi_aggregate(
         from .cli_aggregate import _resolve_expected
 
         reports_path = _safe_read_path(reports_dir, label="reports_dir")
-        if not reports_path.is_dir():
+        # A *missing* reports_dir is deliberately not an error here --
+        # aggregate.collect_reports treats it as zero reports so a full
+        # build-matrix outage still produces a structured required-coverage
+        # failure (exit code 1) instead of a generic tool error; only reject
+        # a path that exists but isn't a directory (Codex review).
+        if reports_path.exists() and not reports_path.is_dir():
             return json.dumps(
                 {
                     "status": "error",
@@ -288,7 +294,11 @@ def abi_aggregate(
         if run_plan_path is not None:
             _check_file_size(run_plan_path, label="run_plan")
 
-        try:
+        def _do_aggregate() -> AggregateResult:
+            # Expected-set parsing runs inside the same bounded worker as
+            # aggregate_reports_dir (ADR-021b D2): a slow manifest/run-plan
+            # read must count against --timeout too, not just the aggregate
+            # call that follows it (Codex review).
             expected = _resolve_expected(
                 manifest_path,
                 run_plan_path,
@@ -296,18 +306,16 @@ def abi_aggregate(
                 tuple(optional or ()),
                 discovered_only,
             )
-        except (click.UsageError, AggregateError) as exc:
-            return json.dumps({"status": "error", "error": str(exc)})
-
-        try:
-            result = _call_with_timeout(
-                aggregate_reports_dir,
+            return aggregate_reports_dir(
                 reports_path,
                 expected=expected,
                 discovered_only=discovered_only,
                 on_missing_required=OnMissingRequired(on_missing_required),
                 on_unexpected_target=OnUnexpectedTarget(on_unexpected_target),
             )
+
+        try:
+            result = _call_with_timeout(_do_aggregate)
         except _futures.TimeoutError:
             elapsed = _time.monotonic() - t0
             _audit_log(
@@ -319,7 +327,7 @@ def abi_aggregate(
                     "error": f"abi_aggregate timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
             )
-        except (AggregateError, ValueError) as exc:
+        except (click.UsageError, AggregateError, ValueError) as exc:
             return json.dumps({"status": "error", "error": str(exc)})
 
         elapsed = _time.monotonic() - t0
