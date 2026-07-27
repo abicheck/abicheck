@@ -33,3 +33,22 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   directly when `REASON_NOT_EXPORTED` is reached, resolving to
   `IN_CONTRACT` when it's confidently `PUBLIC_HEADER` and falling back to
   the weak default only when it's genuinely unknown.
+
+- **ADR-049 Phase 3 shadow evaluator: breaking-addition kinds now use
+  new-side authority, and DT_NEEDED loader dependency changes are now
+  `NOT_APPLICABLE`** (`contract_evaluation.py`; no behavior change outside
+  this still-unwired shadow module): `_authoritative_surface`'s ADR-049 D4
+  temporal-direction check used `checker_policy.ADDITION_KINDS`, which is
+  scoped to *compatible* additions only (17 members) -- so a genuinely
+  new-entity-shaped addition that defaults to a breaking/risky verdict
+  (`type_field_added`, `virtual_method_added`) was wrongly checked against
+  the *old* side instead of the new one, understating confirmation for a
+  finding a header-resolvable new side had already proven public. Fixed by
+  unioning `ADDITION_KINDS` with a new, narrowly-curated
+  `_BREAKING_ADDITION_SHAPE_KINDS` set covering exactly these two kinds.
+  Separately, `needed_added`/`needed_removed` (DT_NEEDED loader dependency
+  changes from `diff_platform.py`) were missing from
+  `_NOT_APPLICABLE_KIND_SLUGS` -- neither describes a function, variable,
+  or type a consumer's code references, so both now short-circuit to
+  `NOT_APPLICABLE` instead of falling through to header-surface
+  classification.

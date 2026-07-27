@@ -116,6 +116,29 @@ class TestNotApplicableKinds:
         )
         assert decision.relevance is not ContractRelevance.NOT_APPLICABLE
 
+    @pytest.mark.parametrize(
+        "kind", [ChangeKind.NEEDED_ADDED, ChangeKind.NEEDED_REMOVED]
+    )
+    def test_needed_dependency_changes_are_not_applicable(
+        self, kind: ChangeKind
+    ) -> None:
+        # Regression (Codex review, fresh evidence): DT_NEEDED loader
+        # dependency changes describe which *other* shared libraries this
+        # one requires, never a function/variable/type an importing
+        # consumer's code references -- without this, they fell through to
+        # ordinary header-surface classification and came back
+        # UNKNOWN_UNRESOLVED (PUBLIC mode, no headers) or IN_CONTRACT (ALL
+        # mode), neither of which is the right ADR-049 "non-entity" verdict.
+        c = Change(kind=kind, symbol="", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.NOT_APPLICABLE,
+            reason_code="non_entity_finding",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
 
 class TestUnsupportedMode:
     @pytest.mark.parametrize("mode", [ContractMode.EXPORTS, "exports"])
@@ -768,6 +791,94 @@ class TestPublicModeSideAuthority:
         )
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "public_root_membership"
+
+    def test_breaking_type_field_addition_is_confirmed_by_new_side_alone(
+        self,
+    ) -> None:
+        # Regression (Codex review, fresh evidence): type_field_added is the
+        # breaking sibling of type_field_added_compatible (itself one of
+        # ADDITION_KINDS) -- the same "a new field appears" shape, just
+        # breaking when the class isn't guaranteed final. Before this fix,
+        # ADDITION_KINDS' compatible-only scoping made _authoritative_surface
+        # wrongly pick the old (unresolvable) side, so a new-side-confirmed
+        # addition came back UNKNOWN_UNRESOLVED instead of IN_CONTRACT.
+        snap_new = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Point", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                RecordType(
+                    name="Point",
+                    kind="struct",
+                    size_bits=64,
+                    fields=[TypeField(name="x", type="int")],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+        )
+        surf_new = compute_public_surface(snap_new)
+        c = Change(kind=ChangeKind.TYPE_FIELD_ADDED, symbol="Point", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_virtual_method_addition_is_confirmed_by_new_side_alone(self) -> None:
+        # Regression (Codex review, fresh evidence): same ADDITION_KINDS
+        # compatible-only scoping gap as type_field_added above, for the
+        # other kind Codex's finding named -- a new virtual method is a
+        # genuine new-entity addition despite defaulting to BREAKING.
+        snap_new = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("bar", mangled="_Z3barv", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        surf_new = compute_public_surface(snap_new)
+        c = Change(
+            kind=ChangeKind.VIRTUAL_METHOD_ADDED, symbol="_Z3barv", description=""
+        )
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_func_virtual_added_stays_a_modification_judged_by_old_side(
+        self,
+    ) -> None:
+        # Boundary check: func_virtual_added ("an existing function became
+        # virtual") is the shape _authoritative_surface's docstring warns
+        # against -- it must NOT be swept into the new
+        # _BREAKING_ADDITION_SHAPE_KINDS set alongside type_field_added/
+        # virtual_method_added, since it modifies an existing obligation
+        # rather than adding a new one. A private old side must still leave
+        # this UNKNOWN_UNRESOLVED even though the new side alone is public.
+        fn_old = _fn(
+            "foo",
+            vis=Visibility.HIDDEN,
+            origin=ScopeOrigin.PRIVATE_HEADER,
+            mangled="_Z3foov",
+        )
+        fn_new = _fn("foo", origin=ScopeOrigin.PUBLIC_HEADER, mangled="_Z3foov")
+        surf_old = compute_public_surface(
+            AbiSnapshot(library="l", version="1", functions=[fn_old])
+        )
+        surf_new = compute_public_surface(
+            AbiSnapshot(library="l", version="1", functions=[fn_new])
+        )
+        c = Change(kind=ChangeKind.FUNC_VIRTUAL_ADDED, symbol="_Z3foov", description="")
+        decision = evaluate_change_contract_relevance(
+            c, surf_old, surf_new, mode=ContractMode.PUBLIC
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
 
 
 class TestPublicModeConservativeRetentionIsNotConfirmation:
