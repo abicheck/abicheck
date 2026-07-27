@@ -327,15 +327,18 @@ def _in_surface_result_is_confirmed(
     - ``_NEVER_FILTER_KIND_NAMES`` (a leak finding, or a ``constant_*``
       finding -- public-contract by construction per the dumper's own
       extraction rule, so it would never even appear in
-      ``public_symbols``/``public_types``) is unconditionally trustworthy
-      by construction, independent of any universe-membership check.
-      (``python_*``-prefixed findings are the same distinct-evidence-axis
-      shape, but are handled earlier in
-      :func:`evaluate_change_contract_relevance` itself -- before the
-      resolvable-surface gate, not here -- since that gate would otherwise
-      downgrade them whenever the C/C++ header surface happens to be
-      unresolvable, an entirely unrelated evidence domain for this kind
-      (Codex review, eleventh round).)
+      ``public_symbols``/``public_types``) and ``python_*``-prefixed
+      findings are both unconditionally trustworthy by construction,
+      independent of any universe-membership check -- but both are handled
+      earlier in :func:`evaluate_change_contract_relevance` itself, before
+      the resolvable-surface gate *and* the identity-ambiguity gate, not
+      here: gating either on C/C++ header surface resolvability or on
+      identity tiering would downgrade a definitive event whenever an
+      unrelated evidence gap exists (e.g. `VISIBILITY_LEAK`'s
+      `symbol="<visibility>"` sentinel resolves to `finding_identity`'s
+      reduced tier, a batch finding with no real per-entity symbol --
+      confirmed empirically -- so this function is never even reached for
+      it now) (Codex review, eleventh and thirteenth rounds).
     - ``_HIDDEN_FRIEND_KIND_NAMES`` findings go through
       ``surface._classify_hidden_friend_surface`` instead of the ordinary
       symbol/type path -- delegated to :func:`_hidden_friend_confirmed_public`
@@ -386,8 +389,6 @@ def _in_surface_result_is_confirmed(
     (Codex review, twelfth round). Neither case establishes which record --
     or whether either -- this finding's root actually resolves to.
     """
-    if change.kind.value in _NEVER_FILTER_KIND_NAMES:
-        return True
     if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
         return _hidden_friend_confirmed_public(change, surf_old, surf_new)
     sym = change.symbol or ""
@@ -482,14 +483,26 @@ def evaluate_change_contract_relevance(
     # API/stub surface) the C/C++ header-surface universes below don't cover
     # at all -- public by construction, exactly like
     # `classify_change_surface`'s own unconditional trust for this prefix.
-    # Checked *before* the resolvable-surface gate immediately below (unlike
-    # `_NEVER_FILTER_KIND_NAMES`, which genuinely is a C-header-surface fact
-    # and stays gated): gating a Python-axis finding on C/C++ header surface
-    # resolvability would downgrade a definitive event like
-    # `PYTHON_API_FUNCTION_REMOVED` to `UNKNOWN_UNRESOLVED` whenever the
-    # unrelated C header surface happens to be unresolvable (Codex review,
-    # eleventh round).
-    if change.kind.value.startswith("python_"):
+    # `_NEVER_FILTER_KIND_NAMES` (a leak finding, or a `constant_*` finding)
+    # is the identical "trusted by construction, independent of any
+    # universe/identity evidence" shape -- both checked here, before the
+    # resolvable-surface gate *and* the identity-ambiguity gate immediately
+    # below, rather than only inside `_in_surface_result_is_confirmed`
+    # (reachable only after both those gates already passed). Concretely: a
+    # `VISIBILITY_LEAK` finding's `symbol="<visibility>"` sentinel resolves
+    # to `finding_identity`'s reduced tier (a batch finding with no real
+    # per-entity symbol) -- confirmed empirically -- so the identity check
+    # below downgraded every visibility-leak finding to
+    # `UNKNOWN_UNRESOLVED`/`identity_ambiguous` before this module's own
+    # unconditional-trust rule for `_NEVER_FILTER_KIND_NAMES` ever got a
+    # chance to apply (Codex review, thirteenth round). Gating a
+    # Python-axis or never-filter finding on C/C++ header surface
+    # resolvability or on this module's own identity-ambiguity tiering would
+    # downgrade a definitive event (`PYTHON_API_FUNCTION_REMOVED`,
+    # `VISIBILITY_LEAK`) purely because of an unrelated evidence gap.
+    if change.kind.value.startswith("python_") or change.kind.value in (
+        _NEVER_FILTER_KIND_NAMES
+    ):
         return ContractEvaluationDecision(
             relevance=ContractRelevance.IN_CONTRACT,
             reason_code="public_root_membership",
@@ -498,13 +511,12 @@ def evaluate_change_contract_relevance(
 
     if not (surf_old.resolvable and surf_new.resolvable):
         # No header-derived visibility on one or both sides: no confident
-        # contract-relevance claim is possible for *any* C/C++ entity
-        # finding, including one whose kind `surface.py` itself would always
-        # keep in-surface (a leak finding) -- that rule is about not
-        # *hiding* a finding from a report, an entirely different question
-        # from "can this shadow evaluator confidently label it". (A
-        # `python_*` finding never reaches this branch at all -- see the
-        # early return above.)
+        # contract-relevance claim is possible for any other C/C++ entity
+        # finding -- that rule is about not *hiding* a finding from a
+        # report, an entirely different question from "can this shadow
+        # evaluator confidently label it". (A `python_*`/never-filter
+        # finding never reaches this branch at all -- see the early return
+        # above.)
         return _unresolved_decision(
             "required_evidence_incomplete", ContractAssurance.UNAVAILABLE
         )

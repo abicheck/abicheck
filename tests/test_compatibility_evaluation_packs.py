@@ -487,76 +487,83 @@ class TestLoadPackManifestHappyPath:
             )
 
 
-class TestContractOverlaysCanonicalization:
-    """Regression (Codex review): ``contract.overlays`` is an unordered
-    selection (mirroring ``ContractConfig.overlays``'s own sort+dedupe), not
-    an ordered sequence -- two contract packs assigning the same overlay set
-    in a different order must resolve to an equal, conflict-free value."""
+@pytest.mark.parametrize("field", ["contract.overlays", "surface.internal_namespaces"])
+class TestOrderInsensitiveFieldCanonicalization:
+    """Regression (Codex review): every field listed in
+    ``_ORDER_INSENSITIVE_LIST_FIELDS`` is an unordered selection (mirroring
+    the corresponding ``compatibility_evaluation_config.py`` field's own
+    ``_canonical_tuple`` sort+dedupe -- ``ContractConfig.overlays`` and
+    ``SurfaceConfig.internal_namespaces``), not an ordered sequence -- two
+    packs assigning the same set in a different order must resolve to an
+    equal, conflict-free value. ``surface.internal_namespaces`` was added in
+    a second round after ``contract.overlays`` shipped without it (fresh
+    Codex evidence: the two-packs no-conflict repro reproduced identically
+    for this field)."""
 
-    def test_overlays_are_sorted_at_load_time(self, tmp_path: Path) -> None:
+    def test_field_is_sorted_at_load_time(self, tmp_path: Path, field: str) -> None:
         path = _write(
             tmp_path,
             "p.yaml",
-            "id: p\nversion: 1\nkind: contract\n"
-            "assignments: {contract.overlays: [zeta, alpha]}\n",
+            f"id: p\nversion: 1\nkind: contract\nassignments: {{{field}: [zeta, alpha]}}\n",
         )
         pack = load_pack_manifest(path)
-        assert pack.assignments["contract.overlays"] == ("alpha", "zeta")
+        assert pack.assignments[field] == ("alpha", "zeta")
 
-    def test_overlays_are_deduped_at_load_time(self, tmp_path: Path) -> None:
+    def test_field_is_deduped_at_load_time(self, tmp_path: Path, field: str) -> None:
         path = _write(
             tmp_path,
             "p.yaml",
-            "id: p\nversion: 1\nkind: contract\n"
-            "assignments: {contract.overlays: [a, b, a]}\n",
+            f"id: p\nversion: 1\nkind: contract\nassignments: {{{field}: [a, b, a]}}\n",
         )
         pack = load_pack_manifest(path)
-        assert pack.assignments["contract.overlays"] == ("a", "b")
+        assert pack.assignments[field] == ("a", "b")
 
-    def test_differently_ordered_overlays_do_not_conflict(self, tmp_path: Path) -> None:
+    def test_differently_ordered_values_do_not_conflict(
+        self, tmp_path: Path, field: str
+    ) -> None:
         p1_path = _write(
             tmp_path,
             "p1.yaml",
-            "id: p1\nversion: 1\nkind: contract\n"
-            "assignments: {contract.overlays: [a, b]}\n",
+            f"id: p1\nversion: 1\nkind: contract\nassignments: {{{field}: [a, b]}}\n",
         )
         p2_path = _write(
             tmp_path,
             "p2.yaml",
-            "id: p2\nversion: 1\nkind: contract\n"
-            "assignments: {contract.overlays: [b, a]}\n",
+            f"id: p2\nversion: 1\nkind: contract\nassignments: {{{field}: [b, a]}}\n",
         )
         p1 = load_pack_manifest(p1_path)
         p2 = load_pack_manifest(p2_path)
         grouped = assignments_for_conflict_check([p1, p2])
         detect_pack_conflicts(grouped[PackKind.CONTRACT])  # must not raise
 
-    def test_non_str_overlay_element_raises(self, tmp_path: Path) -> None:
+    def test_non_str_element_raises(self, tmp_path: Path, field: str) -> None:
         path = _write(
             tmp_path,
             "p.yaml",
-            "id: p\nversion: 1\nkind: contract\n"
-            "assignments: {contract.overlays: [a, 1]}\n",
+            f"id: p\nversion: 1\nkind: contract\nassignments: {{{field}: [a, 1]}}\n",
         )
         with pytest.raises(PackManifestError, match="must be a list of str"):
             load_pack_manifest(path)
 
     def test_directly_constructed_pack_gets_the_same_canonicalization(
-        self,
+        self, field: str
     ) -> None:
         from abicheck.compatibility_evaluation_config import ImmutableIdentity
 
         pack = LoadedPack(
             identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
             kind=PackKind.CONTRACT,
-            assignments={"contract.overlays": ["zeta", "alpha", "alpha"]},
+            assignments={field: ["zeta", "alpha", "alpha"]},
         )
-        assert pack.assignments["contract.overlays"] == ("alpha", "zeta")
+        assert pack.assignments[field] == ("alpha", "zeta")
 
-    def test_unrelated_field_order_is_preserved(self, tmp_path: Path) -> None:
-        # Only the reserved "contract.overlays" field name is canonicalized
-        # -- this module has no closed field vocabulary (its own docstring),
-        # so an arbitrary field name must keep insertion order.
+    def test_unrelated_field_order_is_preserved(
+        self, tmp_path: Path, field: str
+    ) -> None:
+        # Only a reserved field name is canonicalized -- this module has no
+        # closed field vocabulary (its own docstring), so an arbitrary field
+        # name must keep insertion order regardless of which reserved field
+        # is being parametrized over in this test class.
         path = _write(
             tmp_path,
             "p.yaml",

@@ -366,6 +366,47 @@ class TestPublicModeIdentityAmbiguous:
             assurance=ContractAssurance.PARTIAL,
         )
 
+    def test_never_filter_kind_bypasses_the_identity_ambiguous_downgrade(
+        self,
+    ) -> None:
+        # Regression (Codex review, thirteenth round): VISIBILITY_LEAK's
+        # sole producer emits a batch-shaped finding with symbol="<visibility>"
+        # (a synthetic spokesperson, never a real entity) -- finding_identity
+        # deliberately resolves this to the REDUCED tier (confirmed
+        # empirically). Since _NEVER_FILTER_KIND_NAMES findings are trusted
+        # unconditionally by construction (the same as python_* findings),
+        # they must bypass the identity-ambiguity gate entirely rather than
+        # being downgraded to UNKNOWN_UNRESOLVED purely because their
+        # symbol isn't a resolvable per-entity identity.
+        c = Change(
+            kind=ChangeKind.VISIBILITY_LEAK,
+            symbol="<visibility>",
+            description="leaked: foo, bar",
+        )
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        s = compute_public_surface(snap)
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_never_filter_kind_bypasses_unresolvable_surface_too(self) -> None:
+        # Same finding, but with fully unresolvable surfaces -- confirms the
+        # bypass happens before the resolvable-surface gate as well, not
+        # just before the identity-ambiguity gate.
+        c = Change(
+            kind=ChangeKind.VISIBILITY_LEAK,
+            symbol="<visibility>",
+            description="leaked: foo, bar",
+        )
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
 
 class TestPublicModeInSurface:
     def test_public_function_is_in_contract(self) -> None:

@@ -427,21 +427,24 @@ def _parse_policy_assignments(
 
 
 #: Pack-assignment fields whose value is an *unordered selection*, not an
-#: ordered sequence -- mirrors ``compatibility_evaluation_config.py``'s own
-#: ``ContractConfig.overlays`` field 1:1 (this module's docstring already
-#: shows ``contract.mode`` as the well-known ADR-049 D8 field-naming
-#: convention for the ``contract`` pack namespace; ``contract.overlays`` is
-#: that namespace's other established field). Two contract packs assigning
-#: the same overlay set in a different order (``[a, b]`` vs ``[b, a]``) are
-#: semantically identical -- ``ContractConfig.__post_init__`` already
-#: canonicalizes ``overlays`` by sorting+deduping for exactly this reason
-#: (D7: "equivalent semantic inputs must resolve to an equivalent object")
-#: -- but a pack's own ``assignments`` mapping is compared directly by
-#: ``detect_pack_conflicts()`` long before it ever reaches ``ContractConfig``,
-#: so without the identical canonicalization here, two packs assigning an
-#: equivalent overlay set in a different order raised a spurious
-#: ``PackConflictError`` (Codex review).
-_ORDER_INSENSITIVE_LIST_FIELDS: frozenset[str] = frozenset({"contract.overlays"})
+#: ordered sequence -- mirrors every ``compatibility_evaluation_config.py``
+#: field that field's own ``__post_init__`` canonicalizes via
+#: ``_canonical_tuple`` (sorted+deduped): ``ContractConfig.overlays`` and
+#: ``SurfaceConfig.internal_namespaces`` (Codex review -- the latter added
+#: after the former shipped without it, confirmed via the same two-packs
+#: no-conflict repro). Two packs assigning the same set in a different
+#: order (``[a, b]`` vs ``[b, a]``) are semantically identical -- the real
+#: config field already canonicalizes for exactly this reason (D7:
+#: "equivalent semantic inputs must resolve to an equivalent object") -- but
+#: a pack's own ``assignments`` mapping is compared directly by
+#: ``detect_pack_conflicts()`` long before it ever reaches that config
+#: object, so without the identical canonicalization here, two packs
+#: assigning an equivalent set in a different order raised a spurious
+#: ``PackConflictError``. Add any future ``_canonical_tuple``-canonicalized
+#: config field's pack-namespace equivalent here too.
+_ORDER_INSENSITIVE_LIST_FIELDS: frozenset[str] = frozenset(
+    {"contract.overlays", "surface.internal_namespaces"}
+)
 
 
 def _canonicalize_order_insensitive_field(
