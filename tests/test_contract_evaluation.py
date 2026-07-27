@@ -192,18 +192,36 @@ class TestNotApplicableKinds:
             ChangeKind.BIND_NOW_DISABLED,
             ChangeKind.DYNAMIC_LOADING_FLAGS_CHANGED,
             ChangeKind.ELF_INIT_FINI_CHANGED,
+            ChangeKind.SYMBOLIC_BINDING_MODE_CHANGED,
         ],
     )
     def test_elf_loader_control_changes_are_not_applicable(
         self, kind: ChangeKind
     ) -> None:
-        # Regression (Codex review, fresh evidence): _diff_dynamic_contract's
-        # own PT_INTERP/DT_* loader-control state (program interpreter path,
-        # eager/lazy symbol binding, dlopen/dlclose flags, init/fini array
-        # presence) is binary-wide loader-contract identity, the same
-        # synthetic-subject shape as the DT_NEEDED findings above -- but was
-        # missing from this set.
+        # Regression (Codex review, fresh evidence): PT_INTERP/DT_* loader-
+        # control state (program interpreter path, eager/lazy symbol
+        # binding, dlopen/dlclose flags, init/fini array presence,
+        # DT_SYMBOLIC/DF_SYMBOLIC) is binary-wide loader-contract identity,
+        # the same synthetic-subject shape as the DT_NEEDED findings above
+        # -- but was missing from this set.
         c = Change(kind=kind, symbol="", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.NOT_APPLICABLE,
+            reason_code="non_entity_finding",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_macho_compat_version_change_is_not_applicable(self) -> None:
+        # Regression (Codex review, fresh evidence): compat_version_changed
+        # (LC_ID_DYLIB compat_version) is a binary-wide loader-contract
+        # property with its own synthetic symbol="compat_version" subject
+        # (diff_platform._diff_macho_compat_version), the Mach-O counterpart
+        # of the ELF loader-state findings above -- but was missing from
+        # this set.
+        c = Change(kind=ChangeKind.COMPAT_VERSION_CHANGED, symbol="", description="")
         decision = evaluate_change_contract_relevance(
             c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
         )

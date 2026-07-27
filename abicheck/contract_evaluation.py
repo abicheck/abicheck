@@ -140,6 +140,18 @@ _NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
         "bind_now_disabled",
         "dynamic_loading_flags_changed",
         "elf_init_fini_changed",
+        # DT_SYMBOLIC/DF_SYMBOLIC toggle (ELF) -- the same synthetic-subject
+        # loader-control shape as the PT_INTERP/DT_* findings immediately
+        # above (`diff_platform_elf_dynamic.py`'s own `symbol="DT_SYMBOLIC"`
+        # construction), never a specific function/variable/type (Codex
+        # review, fresh evidence).
+        "symbolic_binding_mode_changed",
+        # LC_ID_DYLIB compat_version (Mach-O) -- a binary-wide loader
+        # contract property with its own synthetic `symbol="compat_version"`
+        # subject (`diff_platform._diff_macho_compat_version`), the Mach-O
+        # counterpart of the ELF loader-state findings above (Codex review,
+        # fresh evidence).
+        "compat_version_changed",
         # Architecture / file-format identity.
         "pe_machine_changed",
         "wheel_tag_architecture_mismatch",
